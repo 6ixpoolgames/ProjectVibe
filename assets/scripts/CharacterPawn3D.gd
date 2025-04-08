@@ -42,14 +42,15 @@ func _ready():
 func _physics_process(delta: float) -> void:
 	#if isReadyTrigger == true:
 		
-	printFuncRationalizer(90)
+	printFuncRationalizer(50)
 	yaw_to_facing(delta)
 	apply_gravity(delta)
 	move_in_direction(moveDirection, delta)
 	move_and_slide()
 	is_stuck(delta)
 	unstucker()
-	
+	if goPrint:
+		print(velocity," ",is_on_floor())
 	
 ## apply velocity for movement in a target direction of vector3.
 ## param moveDir: vector3 direction
@@ -156,7 +157,7 @@ func _on_terrain_col_gen(terCol):
 
 
 @onready var lastPos = global_position
-var stuckTimer:float = 1.2 #seconds stuck before being considered stuck
+var stuckTimer:float = 0 #seconds stuck before being considered stuck
 var stuckTime = stuckTimer
 var isStuck = false
 ##function to check if pawn has not moved despite being issued a movement command
@@ -165,32 +166,25 @@ func is_stuck(delta)->void:
 		stuckTime -= delta
 	else:
 		stuckTime = stuckTimer
-	if lastPos == global_position and isCommandedMovement and stuckTime <=0 and not is_on_floor():
+	if lastPos == global_position and isCommandedMovement and stuckTime <0:
 		isStuck = true
 		print("stuck!")
+		stuckTime = stuckTimer
 	else:
 		lastPos = global_position
 		isStuck = false
 		
+#to be run each frame/physics frame to check for collisions and ensure that the colliders don't overlap
 func unstucker()->void:
 	if isStuck:
-		for col in get_slide_collision_count() -1:
-			if not get_slide_collision(col) == terColRef:
-				var collision = get_slide_collision(col)
-				var normal = collision.get_normal()	
+		var colCount = get_slide_collision_count() 
+		if colCount == 0: #only runs rest of code if there are collisions
+			return
+		for col in get_slide_collision_count(): #loops through all collisions 
+			var collision = get_slide_collision(col)
+			var normal = collision.get_normal()	
+			var depth = collision.get_depth()
 		# Nudge slightly away from the collision
-				position += normal * 0.01  # Small push to unstick
-				print("nudge ", collision)
-	"""
-	var horizontalVelocity = Vector2(velocity.x, velocity.z)
-	if horizontalVelocity.length() > 0 and get_slide_collision_count() > 0 and isCommandedMovement:
-		for col in get_slide_collision_count() -1:
-			if not get_slide_collision(col) == terColRef:
-				var collision = get_slide_collision(col)
-				var normal = collision.get_normal()	
-		# Nudge slightly away from the collision
-				position += normal * 0.01  # Small push to unstick
-				print("nudge ", normal)
-		move_and_slide()  # Retry movement
-		#print("unstuck! [vel =",velocity,"]")
-	"""
+			position += normal * depth  # Small push to unstick
+			print("nudge ", collision.get_collider(), " d ", depth, " n ", normal)
+	
