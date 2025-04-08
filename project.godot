@@ -68,6 +68,11 @@ move_sprint={
 ]
 }
 
+[physics]
+
+jolt_physics_3d/simulation/penetration_slop=0.04
+jolt_physics_3d/queries/use_enhanced_internal_edge_removal=true
+
 [rendering]
 
 lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3

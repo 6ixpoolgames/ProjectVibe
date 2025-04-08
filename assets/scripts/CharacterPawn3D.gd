@@ -19,6 +19,9 @@ var moveDirection = Vector3.ZERO
 
 
 #model rotation variables
+@onready var currentYaw: float = self.rotation.y
+@onready var currentPitch: float = self.rotation.x
+@onready var currentTilt: float = self.rotation.z
 var targetYaw: float = 0
 var targetPitch: float = 0
 var targetTilt: float = 0
@@ -26,18 +29,26 @@ var lastInputRotationYaw: float = targetYaw
 var lastInputRotationPitch: float = targetPitch
 var lastInputRotationTilt: float = targetTilt
 
+var isReadyTrigger = false
 var activeCamera: Camera3D
 func _ready():
 	activeCamera = get_viewport().get_camera_3d()
 	activeCamera.connect("possession_event", _on_possession_event)
-	print(activeCamera)
+	var terrainCollision = $"../NavigationRegion3D/ProcGenTile/TerrainMesh"
+	terrainCollision.connect("terrain_collision_generated", _on_terrain_col_gen)
+	print("cam: ",activeCamera,"tC: ", terrainCollision)
+	
 	
 func _physics_process(delta: float) -> void:
+	#if isReadyTrigger == true:
+		
 	printFuncRationalizer(90)
 	yaw_to_facing(delta)
 	apply_gravity(delta)
 	move_in_direction(moveDirection, delta)
 	move_and_slide()
+	is_stuck(delta)
+	unstucker()
 	
 	
 ## apply velocity for movement in a target direction of vector3.
@@ -73,7 +84,8 @@ func give_move_command(inputDir:Vector3)-> void:
 
 ##apply gravity every tick, with coyote time code. Possibly refactor this
 func apply_gravity(delta:float):
-	velocity.y -= gravity * gravity_multiplier * delta		
+	if not is_on_floor():
+		velocity.y -= gravity * gravity_multiplier * delta		
 		
 ##gets a reference to the pawn's springArm3D. If null for some reason, returns a reference to self
 func get_camera_attachment_point():
@@ -86,7 +98,7 @@ func get_camera_attachment_point():
 
 ##rotates character model to target facing with yaw
 func yaw_to_facing(delta: float)->void:
-	var currRot = CharacterModel.rotation.y
+	var currRot = currentYaw
 	lastInputRotationYaw = currRot
 	#target is movement direction if commanded, else is last input
 	if isCommandedMovement: 
@@ -97,6 +109,7 @@ func yaw_to_facing(delta: float)->void:
 	var dist = abs(wrapf(targetYaw - currRot, -PI, PI)) #wrap around angles
 	var wt = clamp((deg_to_rad(turn_speed_yaw) * delta) / dist, 0.0, 1.0) if dist > 0.001 else 1.0 # if statement to stop turn locking
 	#apply rotation
+	currentYaw = lerp_angle(currRot, targetYaw, wt)
 	CharacterModel.rotation.y = lerp_angle(currRot, targetYaw, wt)
 
 
@@ -120,7 +133,7 @@ func _on_possession_event(emitter)->void:
 			for sub2Child in sub2Children.size():
 				if sub2Children[sub2Child] == activeCamera:
 					isPossessed = true
-	print("signal recieved ", isPossessed)
+	print("posses signal recieved ", isPossessed)
 
 
 var printTimer: int = -1
@@ -134,3 +147,50 @@ func printFuncRationalizer(printTime: int):
 	else:
 		printTimer = printTime
 		goPrint = true
+
+var terColRef: CollisionShape3D
+func _on_terrain_col_gen(terCol):
+	terColRef = terCol
+	print("TCG signal recieved", terCol)
+	return terCol
+
+
+@onready var lastPos = global_position
+var stuckTimer:float = 1.2 #seconds stuck before being considered stuck
+var stuckTime = stuckTimer
+var isStuck = false
+##function to check if pawn has not moved despite being issued a movement command
+func is_stuck(delta)->void:
+	if isCommandedMovement:
+		stuckTime -= delta
+	else:
+		stuckTime = stuckTimer
+	if lastPos == global_position and isCommandedMovement and stuckTime <=0 and not is_on_floor():
+		isStuck = true
+		print("stuck!")
+	else:
+		lastPos = global_position
+		isStuck = false
+		
+func unstucker()->void:
+	if isStuck:
+		for col in get_slide_collision_count() -1:
+			if not get_slide_collision(col) == terColRef:
+				var collision = get_slide_collision(col)
+				var normal = collision.get_normal()	
+		# Nudge slightly away from the collision
+				position += normal * 0.01  # Small push to unstick
+				print("nudge ", collision)
+	"""
+	var horizontalVelocity = Vector2(velocity.x, velocity.z)
+	if horizontalVelocity.length() > 0 and get_slide_collision_count() > 0 and isCommandedMovement:
+		for col in get_slide_collision_count() -1:
+			if not get_slide_collision(col) == terColRef:
+				var collision = get_slide_collision(col)
+				var normal = collision.get_normal()	
+		# Nudge slightly away from the collision
+				position += normal * 0.01  # Small push to unstick
+				print("nudge ", normal)
+		move_and_slide()  # Retry movement
+		#print("unstuck! [vel =",velocity,"]")
+	"""

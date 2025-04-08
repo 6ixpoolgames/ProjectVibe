@@ -1,6 +1,6 @@
 [gd_scene load_steps=17 format=4 uid="uid://bpx47c6hqjaem"]
 
-[ext_resource type="PackedScene" uid="uid://dwarpfauxvus8" path="res://assets/3d/miniDungeon/Models/GLB format/barrel.glb" id="3_28aoi"]
+[ext_resource type="PackedScene" uid="uid://clxiossnpdmrx" path="res://assets/3d/miniDungeon/Models/GLB format/barrel.glb" id="3_28aoi"]
 [ext_resource type="PackedScene" uid="uid://baj2kb4ahgm8e" path="res://column_2.tscn" id="4_28aoi"]
 [ext_resource type="PackedScene" uid="uid://dqetdldbv7aa8" path="res://assets/scenes/character_pawn_3d.tscn" id="4_jnlp7"]
 [ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://proc_gen_tile.tscn" id="5_jnlp7"]
@@ -67,6 +67,15 @@ directional_shadow_max_distance = 50.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_vvh5c")
+
+[node name="CharacterPawn3D" parent="." instance=ExtResource("4_jnlp7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
+script = ExtResource("5_vyht1")
+sprint_multiplier = 2.5
+jump_deceleration_multiplier = 0.4
+jump_cooldown = 0.3334
+coyote_time = 0.1125
+metadata/_edit_group_ = true
 
 [node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36.4764, 0.15818, -41.9288)
@@ -143,19 +152,10 @@ shape = SubResource("CylinderShape3D_pyidc")
 [node name="Column2" parent="NavigationRegion3D" instance=ExtResource("4_28aoi")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -25.2795, -2.25471, -10.9616)
 
-[node name="CharacterPawn3D" parent="." instance=ExtResource("4_jnlp7")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
-script = ExtResource("5_vyht1")
-sprint_multiplier = 2.5
-jump_deceleration_multiplier = 0.4
-jump_cooldown = 0.3334
-coyote_time = 0.1125
-metadata/_edit_group_ = true
-
 [node name="PlayerCamera3D" parent="." instance=ExtResource("6_l8v81")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 4, 10)
 script = ExtResource("7_vyht1")
 speed = 10.0
 
-[editable path="NavigationRegion3D/ProcGenTile"]
 [editable path="CharacterPawn3D"]
+[editable path="NavigationRegion3D/ProcGenTile"]

@@ -59,6 +59,7 @@ func jump_handler(delta)->void:
 	#print("canJump?: ", canJump, " cTmr: ", coyoteTimer, " jTmr: ", jumpTimer)
 	if Input.is_action_just_pressed("move_jump") and canJump:
 		velocity.y += jump_velocity 
+		
 		coyoteTimer = 0
 		jumpTimer = jump_cooldown
 		print("jump!")
@@ -75,8 +76,8 @@ func iDir_cam_yaw_adjustment(iDir)->Vector3:
 	if isPossessed and isCommandedMovement:
 		var cameraYawRotRads = springArmRef.rotation.y
 		newIDir = inputDirection.rotated(Vector3.UP,cameraYawRotRads)
-		if goPrint:
-			print("rotAdd: ", rad_to_deg(cameraYawRotRads), " mDir: ", moveDirection)
+		#if goPrint:
+			#print("rotAdd: ", rad_to_deg(cameraYawRotRads), " mDir: ", moveDirection)
 	else:
 		newIDir = iDir
 	return newIDir

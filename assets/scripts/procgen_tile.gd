@@ -1,6 +1,8 @@
 @tool
 extends MeshInstance3D
 
+signal terrain_collision_generated(terrainCollision)
+
 @export var generate: bool = false:
 	set(value):
 		generate = true
@@ -37,6 +39,7 @@ var heightMap: Array = []
 var genMesh:ArrayMesh
 var isThereTerrain: bool = false
 
+var isReadyTrigger = false
 func _ready():
 	#if isThereTerrain == false:
 	#	generate_terrain()
@@ -58,6 +61,9 @@ func apply_collision_shape():
 	terrainCollision.shape = collisionShape
 	print(terrainCollision)
 	print(collisionShape)
+	emit_signal("terrain_collision_generated", terrainCollision)
+	print("TCG signal emitted")
+	
 
 func generate_noise():
 	# Apply exported noise settings
