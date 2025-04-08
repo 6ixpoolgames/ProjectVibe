@@ -12,4 +12,4 @@ func _physics_process(delta: float) -> void:
 	#inputDirection.y = Input.get_action_strength("move_upward") - Input.get_action_strength("move_downward")
 	inputDirection.normalized()
 	
-	#this is a test part dos
+	#this is a test part dos, tres
