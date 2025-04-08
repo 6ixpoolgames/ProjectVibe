@@ -1,4 +1,4 @@
-[gd_scene load_steps=16 format=4 uid="uid://bpx47c6hqjaem"]
+[gd_scene load_steps=17 format=4 uid="uid://bpx47c6hqjaem"]
 
 [ext_resource type="PackedScene" uid="uid://clxiossnpdmrx" path="res://assets/3d/miniDungeon/Models/GLB format/barrel.glb" id="3_28aoi"]
 [ext_resource type="PackedScene" uid="uid://baj2kb4ahgm8e" path="res://column_2.tscn" id="4_28aoi"]
@@ -6,6 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://proc_gen_tile.tscn" id="5_jnlp7"]
 [ext_resource type="Script" uid="uid://dyrmto7kb0q0q" path="res://assets/scripts/PlayerMovementController.gd" id="5_vyht1"]
 [ext_resource type="PackedScene" uid="uid://cqcud82va720e" path="res://assets/scenes/player_camera_3d.tscn" id="6_l8v81"]
+[ext_resource type="Script" uid="uid://fq5sx40suwlv" path="res://assets/scripts/FreeFloatingCameraController.gd" id="7_vyht1"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_pq8q7"]
 sky_horizon_color = Color(0.662243, 0.671743, 0.686743, 1)
@@ -150,6 +151,8 @@ metadata/_edit_group_ = true
 
 [node name="PlayerCamera3D" parent="." instance=ExtResource("6_l8v81")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 4, 10)
+script = ExtResource("7_vyht1")
+speed = 10.0
 
 [editable path="NavigationRegion3D/ProcGenTile"]
 [editable path="CharacterPawn3D"]
