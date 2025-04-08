@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://cqcud82va720e"]
+
+[ext_resource type="Script" uid="uid://c4fluuylnuit3" path="res://assets/scripts/PlayerCamera3D.gd" id="1_ovxxu"]
+
+[node name="PlayerCamera3D" type="Camera3D"]
+script = ExtResource("1_ovxxu")
+metadata/_custom_type_script = "uid://c4fluuylnuit3"
+
+[node name="RayCast3D" type="RayCast3D" parent="."]

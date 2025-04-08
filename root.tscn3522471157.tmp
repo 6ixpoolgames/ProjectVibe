@@ -1,0 +1,134 @@
+[gd_scene load_steps=13 format=3 uid="uid://bpx47c6hqjaem"]
+
+[ext_resource type="Texture2D" uid="uid://dc2rb3k8iqgv1" path="res://assets/2d/grass.jpg" id="1_28aoi"]
+[ext_resource type="PackedScene" uid="uid://4x2jtpw4rt7q" path="res://playerCharacterPawn.tscn" id="1_pq8q7"]
+[ext_resource type="ArrayMesh" uid="uid://c4y5r8r5quhx4" path="res://assets/3d/miniDungeon/Models/OBJ format/barrel.obj" id="3_28aoi"]
+[ext_resource type="PackedScene" uid="uid://cfxhkagpd50ru" path="res://assets/3d/miniDungeon/Models/GLB format/character-orc.glb" id="4_jnlp7"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_pq8q7"]
+sky_horizon_color = Color(0.662243, 0.671743, 0.686743, 1)
+ground_horizon_color = Color(0.662243, 0.671743, 0.686743, 1)
+
+[sub_resource type="Sky" id="Sky_pyidc"]
+sky_material = SubResource("ProceduralSkyMaterial_pq8q7")
+
+[sub_resource type="Environment" id="Environment_vvh5c"]
+background_mode = 2
+sky = SubResource("Sky_pyidc")
+sdfgi_enabled = true
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_jnlp7"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_vvh5c"]
+albedo_color = Color(1, 1, 1, 0)
+albedo_texture = ExtResource("1_28aoi")
+uv1_scale = Vector3(10, 10, 1)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_28aoi"]
+material = SubResource("StandardMaterial3D_vvh5c")
+size = Vector2(10, 10)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_pq8q7"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_pyidc"]
+
+[node name="root" type="Node3D"]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_vvh5c")
+
+[node name="OmniLight3D" type="OmniLight3D" parent="."]
+transform = Transform3D(0.994236, 0, -0.107219, 0, 1, 0, 0.107219, 0, 0.994236, 6.13754, 15.8996, 5.57687)
+light_color = Color(0.97751, 0.888736, 0.725812, 1)
+light_energy = 0.7
+shadow_enabled = true
+omni_range = 242.514
+omni_attenuation = 0.0
+metadata/_edit_lock_ = true
+
+[node name="floor" type="StaticBody3D" parent="."]
+transform = Transform3D(10, 0, 0, 0, 10, 0, 0, 0, 10, 0, 0, 0)
+disable_mode = 1
+metadata/_edit_lock_ = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="floor"]
+shape = SubResource("WorldBoundaryShape3D_jnlp7")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="floor"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.049545, 0.0359199, -0.0315563)
+mesh = SubResource("PlaneMesh_28aoi")
+
+[node name="CharacterBody3D" parent="." instance=ExtResource("1_pq8q7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.47939, 1.35398, -8.2357)
+
+[node name="RigidBody3D" type="RigidBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.234903, 0)
+mass = 50.0
+metadata/_edit_group_ = true
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="RigidBody3D"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_pq8q7")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RigidBody3D"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+shape = SubResource("CylinderShape3D_pyidc")
+
+[node name="RigidBody3D3" type="RigidBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 12.5994)
+mass = 50.0
+metadata/_edit_group_ = true
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="RigidBody3D3"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_pq8q7")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RigidBody3D3"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+shape = SubResource("CylinderShape3D_pyidc")
+
+[node name="RigidBody3D4" type="RigidBody3D" parent="."]
+transform = Transform3D(0.999194, 0.0401492, 0, -0.0401492, 0.999194, 0, 0, 0, 1, 11.8572, 0, 12.5994)
+mass = 50.0
+metadata/_edit_group_ = true
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="RigidBody3D4"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_pq8q7")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RigidBody3D4"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+shape = SubResource("CylinderShape3D_pyidc")
+
+[node name="RigidBody3D5" type="RigidBody3D" parent="."]
+transform = Transform3D(0.999194, 0.0401492, 0, -0.0401492, 0.999194, 0, 0, 0, 1, 8.6994, 2.39443, -2.51111)
+mass = 50.0
+metadata/_edit_group_ = true
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="RigidBody3D5"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_pq8q7")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RigidBody3D5"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+shape = SubResource("CylinderShape3D_pyidc")
+
+[node name="RigidBody3D2" type="RigidBody3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8.12515, 0, 0)
+mass = 50.0
+metadata/_edit_group_ = true
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="RigidBody3D2"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_pq8q7")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="RigidBody3D2"]
+transform = Transform3D(1, 0, 0, 0, 0.345, 0, 0, 0, 1, 0, 0, 0)
+shape = SubResource("CylinderShape3D_pyidc")
+
+[node name="Barrel" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5.47939, 0.606819, -8.2357)
+mesh = ExtResource("3_28aoi")
+
+[node name="character-orc2" parent="." instance=ExtResource("4_jnlp7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6.68692, 0.829426, -3.43736)
