@@ -1,0 +1,9 @@
+# Enforce CRLF for GDScript and scene files on Windows
+*.gd text eol=crlf
+*.tscn text eol=crlf
+# Treat binary files as binary (no line-ending conversion)
+*.png binary
+*.jpg binary
+*.fbx binary
+*.glb binary
+*.obj binary
