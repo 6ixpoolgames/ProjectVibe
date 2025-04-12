@@ -59,5 +59,5 @@ func _physics_process(delta: float) -> void:
 	#clamp rotation
 	self.rotation.x = clampf(self.rotation.x, deg_to_rad(cameraPitchMin), deg_to_rad(cameraPitchMax))
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	mousePosition = get_viewport().get_mouse_position() #set mousePosition every frame

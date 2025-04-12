@@ -25,7 +25,7 @@ func set_input_direction():
 	#get horizontal input direciton and normalize
 	inputDirection.x = Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
 	inputDirection.z = Input.get_action_strength("move_backward") - Input.get_action_strength("move_forward")
-	inputDirection.normalized()
+	inputDirection = inputDirection.normalized()
 
 
 ##jump checker logic using coyote time and jump cooldown
@@ -62,12 +62,12 @@ func jump_handler(delta)->void:
 		
 		coyoteTimer = 0
 		jumpTimer = jump_cooldown
-		print("jump!")
+		#print("jump!")
 	if Input.is_action_just_released("move_jump"):
 		var wtt = (jump_cooldown-jumpTimer)/jump_cooldown
 		wtt = clampf(wtt,0,1)
 		velocity.y *= lerpf(jump_deceleration_multiplier,1,wtt)
-		print(wtt)
+		#print(wtt)
 
 @onready var springArmRef = $SpringArm3D
 ##returns vector to add to input direction based on the camera's rotation by yaw 

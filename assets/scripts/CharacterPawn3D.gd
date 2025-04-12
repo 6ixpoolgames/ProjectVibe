@@ -51,10 +51,10 @@ func _physics_process(delta: float) -> void:
 	
 	
 ## apply velocity for movement in a target direction of vector3.
-## param moveDir: vector3 direction
-## param delta: the time delta, either from _physics_process, or _process
+##@param moveDir [Vector3] "vector3 direction"
+##@param delta [float] "the time delta, either from _physics_process, or _process"
 func move_in_direction(moveDir: Vector3, delta: float) -> void:
-	moveDir.normalized()
+	moveDir = moveDir.normalized()
 	var airCont = 1.0 if is_on_floor() else air_control #Apply aircontrol modifier when not on the ground
 	if is_floating:     #does not exclude Y axis for floating pawns
 		if isCommandedMovement == true:
@@ -72,7 +72,7 @@ func move_in_direction(moveDir: Vector3, delta: float) -> void:
 	
 	
 ##function to set the move direction, designed to be called from the controller script or elsewhere every (physics)frame
-##@param inputDirection direction of desired movement
+## @param inputDirection [Vector3] direction of desired movement
 func give_move_command(inputDir:Vector3)-> void:
 	if inputDir != Vector3.ZERO: #if with inputs
 		moveDirection = inputDir
@@ -133,7 +133,7 @@ func _on_possession_event(_emitter)->void:
 				if sub2Children[sub2Child] == activeCamera:
 					isPossessed = true
 	print("posses signal recieved ", isPossessed)
-
+ 
 
 var printTimer: int = -1
 var goPrint: bool = false

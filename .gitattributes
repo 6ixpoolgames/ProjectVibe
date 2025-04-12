@@ -1,9 +1,23 @@
-# Enforce CRLF for GDScript and scene files on Windows
-*.gd text eol=crlf
-*.tscn text eol=crlf
-# Treat binary files as binary (no line-ending conversion)
+# Normalize EOL for all files that Git considers text files
+* text=auto eol=lf
+
+# Explicitly declare text files you want to always be normalized and converted
+# to native line endings on checkout.
+*.gd text
+*.tscn text
+*.tres text
+*.cfg text
+*.godot text
+
+# Make sure PNG and binary files aren't modified
 *.png binary
 *.jpg binary
+*.webp binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
 *.fbx binary
 *.glb binary
+*.gltf binary
 *.obj binary
+*.blend binary

@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=3 uid="uid://baj2kb4ahgm8e"]
 
-[ext_resource type="PackedScene" uid="uid://moctgwjxqk6k" path="res://assets/3d/miniDungeon/Models/GLB format/column.glb" id="1_kxvr8"]
+[ext_resource type="PackedScene" path="res://assets/3d/miniDungeon/Models/GLB format/column.glb" id="1_kxvr8"]
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_pq8q7"]
 

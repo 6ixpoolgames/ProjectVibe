@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c40mjfm1fysey"
-path="res://.godot/imported/floor-detail.png-898e21b3932584c922d0fe400891f944.ctex"
+uid="uid://cohks5pa0x07t"
+path="res://.godot/imported/colormap.png-1bbd50a90478e653a7577bf2b36fd479.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/3d/miniDungeon/Previews/floor-detail.png"
-dest_files=["res://.godot/imported/floor-detail.png-898e21b3932584c922d0fe400891f944.ctex"]
+source_file="res://assets/3d/miniDungeon/Models/FBX format/Textures/colormap.png"
+dest_files=["res://.godot/imported/colormap.png-1bbd50a90478e653a7577bf2b36fd479.ctex"]
 
 [params]
 

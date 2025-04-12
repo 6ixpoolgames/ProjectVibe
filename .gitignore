@@ -1,7 +1,31 @@
-# Godot-specific ignores
+# Godot 4+ specific ignores
 .godot/
-#*.import
-*.log
-*.mono
-*.tmp
-/export_presets.cfg
+.godot/editor
+exports/
+export_presets.cfg
+.import/
+*.translation
+
+# Imported translations (automatically generated from CSV files)
+*.translation
+
+# Mono-specific ignores
+.mono/
+data_*/
+mono_crash.*.json
+
+# System/tool-specific ignores
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+ehthumbs.db
+Thumbs.db
+.directory
+*~
+
+# Imported assets
+*.import
+*.md5
+*.stex

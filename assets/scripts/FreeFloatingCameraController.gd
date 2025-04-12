@@ -4,12 +4,33 @@ extends PlayerCamera3D
 
 @onready var inputDirection = Vector3.ZERO
 
+func _ready() -> void:
+	is_child_of_pawn()
+	super()
 
 func _physics_process(delta: float) -> void:
-	#get horizontal direciton and normalize
+	is_child_of_pawn() #should probably hook this up to the pawn possession event signal but I'm too lazy right now lol
+	if isFreeFloating == true and Input.is_action_pressed("right_click"): #checks if is owned by pawn, if not and rightclick is held down, freefloat around lol
+		set_position_on_input_direction(delta)
+		
+func _process(delta: float) -> void:
+	#get direciton and normalize
 	inputDirection.x = Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
 	inputDirection.z = Input.get_action_strength("move_backward") - Input.get_action_strength("move_forward")
-	#inputDirection.y = Input.get_action_strength("move_upward") - Input.get_action_strength("move_downward")
-	inputDirection.normalized()
-	
-	#this is a test part infinidades
+	inputDirection.y = Input.get_action_strength("move_upward") - Input.get_action_strength("move_downward")
+	inputDirection = inputDirection.normalized()
+	super(delta)
+		
+func set_position_on_input_direction(delta: float) -> void:
+	position.x += inputDirection.x * delta * speed
+	position.y += inputDirection.y * delta * speed
+	position.z += inputDirection.z * delta * speed
+
+
+var isFreeFloating: bool = true #default is that camera is freefloating.
+func is_child_of_pawn() -> void:
+	var thisParent = get_parent_node_3d()
+	if thisParent is SpringArm3D or thisParent is CharacterPawn3D:
+		isFreeFloating = false
+	else:
+		isFreeFloating = true
