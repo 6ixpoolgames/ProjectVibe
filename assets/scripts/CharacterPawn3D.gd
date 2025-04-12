@@ -114,8 +114,8 @@ func yaw_to_facing(delta: float)->void:
 
 
 var isPossessed = false
-##sets isPossessed to TRUE if 
-func _on_possession_event(emitter)->void:
+##sets isPossessed to TRUE if the main camera is a child. For refactoring once possession manager is in, but might keep it as a validation mechanism
+func _on_possession_event(_emitter)->void:
 	var children = get_children()
 	activeCamera = get_viewport().get_camera_3d()
 	isPossessed = false
