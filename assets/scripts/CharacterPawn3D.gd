@@ -41,7 +41,6 @@ func _ready():
 	
 func _physics_process(delta: float) -> void:
 	#if isReadyTrigger == true:
-		
 	printFuncRationalizer(50)
 	yaw_to_facing(delta)
 	apply_gravity(delta)
@@ -49,8 +48,7 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	is_stuck(delta)
 	unstucker()
-	if goPrint:
-		print(velocity," ",is_on_floor())
+	
 	
 ## apply velocity for movement in a target direction of vector3.
 ## param moveDir: vector3 direction
@@ -111,12 +109,12 @@ func yaw_to_facing(delta: float)->void:
 	var wt = clamp((deg_to_rad(turn_speed_yaw) * delta) / dist, 0.0, 1.0) if dist > 0.001 else 1.0 # if statement to stop turn locking
 	#apply rotation
 	currentYaw = lerp_angle(currRot, targetYaw, wt)
-	CharacterModel.rotation.y = lerp_angle(currRot, targetYaw, wt)
+	CharacterModel.rotation.y = currentYaw
 
 
 
 var isPossessed = false
-#sets isPossessed to TRUE if 
+##sets isPossessed to TRUE if 
 func _on_possession_event(emitter)->void:
 	var children = get_children()
 	activeCamera = get_viewport().get_camera_3d()
@@ -174,7 +172,7 @@ func is_stuck(delta)->void:
 		lastPos = global_position
 		isStuck = false
 		
-#to be run each frame/physics frame to check for collisions and ensure that the colliders don't overlap
+##to be run each frame/physics frame to check for collisions and ensure that the colliders don't overlap
 func unstucker()->void:
 	if isStuck:
 		var colCount = get_slide_collision_count() 

@@ -14,19 +14,19 @@ var baseAcl: float = acceleration
 
 #physics process extension
 func _physics_process(delta: float) -> void:
-	#get horizontal direciton and normalize
-	
+	is_sprinting(Input.is_action_pressed("move_sprint"))
+	set_input_direction()
+	give_move_command(input_camera_yaw_adjustment(inputDirection)) #apply movement inputs 
+	jump_handler(delta) #apply all jump logic
+	super._physics_process(delta) #run movement code in CharacterPawn3D physics process code
+
+##get inputs to set the input direction and normalize it
+func set_input_direction():
+	#get horizontal input direciton and normalize
 	inputDirection.x = Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
 	inputDirection.z = Input.get_action_strength("move_backward") - Input.get_action_strength("move_forward")
 	inputDirection.normalized()
-	
-	#apply sprint if pressed
-	is_sprinting(Input.is_action_pressed("move_sprint"))
-		
-	#apply functions
-	give_move_command(iDir_cam_yaw_adjustment(inputDirection)) #apply movement inputs 
-	jump_handler(delta) #apply all jump logic
-	super._physics_process(delta) #run movement code in CharacterPawn3D physics process code
+
 
 ##jump checker logic using coyote time and jump cooldown
 ##@param delta needed to decrement timers
@@ -71,7 +71,7 @@ func jump_handler(delta)->void:
 
 @onready var springArmRef = $SpringArm3D
 ##returns vector to add to input direction based on the camera's rotation by yaw 
-func iDir_cam_yaw_adjustment(iDir)->Vector3:
+func input_camera_yaw_adjustment(iDir)->Vector3:
 	var newIDir = Vector3.ZERO
 	if isPossessed and isCommandedMovement:
 		var cameraYawRotRads = springArmRef.rotation.y
