@@ -1,15 +1,18 @@
 extends SpringArm3D
+class_name PawnCameraController
 
 @export var cameraDistMin: float = 1
 @export var cameraDistMax: float = 20
 @export var cameraDistDefault: float = 7
 @export var cameraZoomSpeed: float = .5
+@export var initial_camera_pitch: float = -50 #in degrees
 @export var cameraRotSpeedX: float = 260     #in degrees
 @export var cameraRotSpeedY: float = 205     #in degrees
 @export var cameraPitchMax: float = -20      #in degrees
 @export var cameraPitchMin: float = -60      #in degrees
 @export var deadSpace: float = 0.125
 @export var dampingFactor: float = 0.008
+
 
 var mousePosition = Vector2.ZERO
 
@@ -20,6 +23,9 @@ var mousePosition = Vector2.ZERO
 @onready var viewportX: float = get_viewport().size.x
 @onready var viewportY: float = get_viewport().size.y
 
+
+func _ready() -> void:
+	self.spring_length = cameraDistDefault
 
 ##yaws camera towards the mouse position. With a smooth step function to ease camera rotation when at the deadspace (percentage as percentage of screen space)
 func rotateCameraYawBy():

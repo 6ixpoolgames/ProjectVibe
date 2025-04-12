@@ -1,4 +1,5 @@
-extends CharacterPawn3D
+extends MovementControllerComponent
+class_name PlayerMovementController
 
 @onready var inputDirection = Vector3.ZERO
 
@@ -9,25 +10,41 @@ extends CharacterPawn3D
 var canJump = false
 var coyoteTimer: float = coyote_time #current coyote time
 var jumpTimer: float = jump_cooldown
-var baseSpd: float = speed
-var baseAcl: float = acceleration
+var baseSpd: float
+var baseAcl: float
 
+
+var pawn: CharacterPawn3D
+func _ready() -> void:
+	pawn = get_parent_node_3d()
+	if pawn == null or not pawn is CharacterPawn3D:
+		print("PlayerMovementController failed to initialize!")
+	baseSpd = pawn.speed
+	baseAcl = pawn.acceleration
+	print("pawn is: ", pawn)
+
+var toggleOnce = false
 #physics process extension
 func _physics_process(delta: float) -> void:
+	
 	is_sprinting(Input.is_action_pressed("move_sprint"))
 	set_input_direction()
-	give_move_command(input_camera_yaw_adjustment(inputDirection)) #apply movement inputs 
+	pawn.give_move_command(input_camera_yaw_adjustment(inputDirection)) #apply movement inputs 
 	jump_handler(delta) #apply all jump logic
-	super._physics_process(delta) #run movement code in CharacterPawn3D physics process code
-
+	#super._physics_process(delta) #run movement code in CharacterPawn3D physics process code
+	if pawn.goPrint:
+		print(pawn.isCommandedMovement, pawn.moveDirection)
+	if not toggleOnce:
+		toggleOnce = true
+		print("------------ all is set ----------------")
+		
 ##get inputs to set the input direction and normalize it
 func set_input_direction():
 	#get horizontal input direciton and normalize
 	inputDirection.x = Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
 	inputDirection.z = Input.get_action_strength("move_backward") - Input.get_action_strength("move_forward")
 	inputDirection = inputDirection.normalized()
-
-
+	
 ##jump checker logic using coyote time and jump cooldown
 ##@param delta needed to decrement timers
 func can_jump(delta) -> bool: 
@@ -38,43 +55,41 @@ func can_jump(delta) -> bool:
 	clampf(coyoteTimer, 0.0, coyote_time)
 	clampf(jumpTimer, 0.0 , jump_cooldown)
 	 
-	if is_on_floor(): #reset coyote time if on floor
+	if pawn.is_on_floor(): #reset coyote time if on floor
 		coyoteTimer = coyote_time
 	
-	if not is_on_floor() and coyoteTimer > 0 and jumpTimer <= 0: 
+	if not pawn.is_on_floor() and coyoteTimer > 0 and jumpTimer <= 0: 
 		canJump = true #can only jump if (1)not on floor, w/ coyote time, AND jump off cooldown 
-	elif is_on_floor() and jumpTimer <= 0: 
+	elif pawn.is_on_floor() and jumpTimer <= 0: 
 		canJump = true	#(2) on floor AND jump off cooldown
 	return canJump
 
 func is_sprinting(isSprinting: bool)->void:
-	speed = baseSpd
-	acceleration = baseAcl
+	pawn.speed = baseSpd
+	pawn.acceleration = baseAcl
 	if isSprinting:
-		speed *= sprint_multiplier
-		acceleration *= sprint_multiplier
+		pawn.speed *= sprint_multiplier
+		pawn.acceleration *= sprint_multiplier
 	
 func jump_handler(delta)->void:
 	can_jump(delta) #check if can jump
 	#print("canJump?: ", canJump, " cTmr: ", coyoteTimer, " jTmr: ", jumpTimer)
 	if Input.is_action_just_pressed("move_jump") and canJump:
-		velocity.y += jump_velocity 
-		
+		pawn.velocity.y += pawn.jump_velocity 
 		coyoteTimer = 0
 		jumpTimer = jump_cooldown
 		#print("jump!")
 	if Input.is_action_just_released("move_jump"):
 		var wtt = (jump_cooldown-jumpTimer)/jump_cooldown
 		wtt = clampf(wtt,0,1)
-		velocity.y *= lerpf(jump_deceleration_multiplier,1,wtt)
+		pawn.velocity.y *= lerpf(jump_deceleration_multiplier,1,wtt)
 		#print(wtt)
 
-@onready var springArmRef = $SpringArm3D
 ##returns vector to add to input direction based on the camera's rotation by yaw 
 func input_camera_yaw_adjustment(iDir)->Vector3:
 	var newIDir = Vector3.ZERO
-	if isPossessed and isCommandedMovement:
-		var cameraYawRotRads = springArmRef.rotation.y
+	if pawn.isPossessed and pawn.isCommandedMovement:
+		var cameraYawRotRads = pawn.springArmRef.rotation.y
 		newIDir = inputDirection.rotated(Vector3.UP,cameraYawRotRads)
 		#if goPrint:
 			#print("rotAdd: ", rad_to_deg(cameraYawRotRads), " mDir: ", moveDirection)

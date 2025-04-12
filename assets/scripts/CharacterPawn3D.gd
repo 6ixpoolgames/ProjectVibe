@@ -15,7 +15,7 @@ extends CharacterBody3D
 @export var is_floating: bool = false
 var isCommandedMovement: bool = false
 var gravity: float  = ProjectSettings.get_setting("physics/3d/default_gravity")
-var moveDirection = Vector3.ZERO
+var moveDirection = Vector3.ZERO ##direction character will move in
 
 
 #model rotation variables
@@ -31,14 +31,58 @@ var lastInputRotationTilt: float = targetTilt
 
 var isReadyTrigger = false
 var activeCamera: Camera3D
+var allChildren: Array
 func _ready():
+	allChildren = get_all_descendants(self)
+	init_active_camera()
+	init_terrain_collision()
+	init_movement_controller()
+	init_camera_spring_arm()
+
+func get_all_descendants(node: Node, descendants: Array = []) -> Array:
+	for child in node.get_children():
+		descendants.append(child)
+		get_all_descendants(child, descendants)
+	return descendants
+
+var hasMovementControllerScript: bool = false
+func init_movement_controller()->void:
+	for c in allChildren:
+		if c is MovementControllerComponent:
+			print(self, " already has movement controller component")
+			return
+	var movementController = MovementControllerComponent.new()
+	movementController.name = "MovementControllerComponent"
+	self.add_child(movementController)
+	print("added movementControllerComponent: ", movementController)
+	movementController._ready()
+
+var springArmRef: SpringArm3D
+func init_camera_spring_arm()->void:
+	var unitHalfHeight: float = 0
+	for c in allChildren:
+		if c is SpringArm3D:
+			print(self, " already has springarm")
+			return
+		elif c is CollisionShape3D:
+			unitHalfHeight = c.shape.height/2
+	var cameraController = PawnCameraController.new()
+	cameraController.name = "SpringArm3D"
+	self.add_child(cameraController)
+	cameraController.position = Vector3(0,unitHalfHeight,0)
+	cameraController.rotation.x = deg_to_rad(cameraController.initial_camera_pitch)
+	springArmRef = cameraController
+	print("added PawnCameraController3D: ", cameraController)
+		
+func init_active_camera()-> void:
 	activeCamera = get_viewport().get_camera_3d()
 	activeCamera.connect("possession_event", _on_possession_event)
+
+func init_terrain_collision() -> void:
 	var terrainCollision = $"../NavigationRegion3D/ProcGenTile/TerrainMesh"
 	terrainCollision.connect("terrain_collision_generated", _on_terrain_col_gen)
 	print("cam: ",activeCamera,"tC: ", terrainCollision)
-	
-	
+		
 func _physics_process(delta: float) -> void:
 	#if isReadyTrigger == true:
 	printFuncRationalizer(50)
@@ -69,7 +113,6 @@ func move_in_direction(moveDir: Vector3, delta: float) -> void:
 			velocity.x = move_toward(velocity.x, 0, deceleration * delta * airCont)
 			velocity.z = move_toward(velocity.z, 0, deceleration * delta * airCont)
 	#print("movDir: ", moveDir, " vel: ", velocity)
-	
 	
 ##function to set the move direction, designed to be called from the controller script or elsewhere every (physics)frame
 ## @param inputDirection [Vector3] direction of desired movement
