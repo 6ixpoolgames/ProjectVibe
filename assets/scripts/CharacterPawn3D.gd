@@ -92,8 +92,8 @@ func _physics_process(delta: float) -> void:
 	move_and_slide()
 	is_stuck(delta)
 	unstucker()
-	if goPrint:
-		print(isCommandedMovement, moveDirection)
+	#if goPrint:
+	#	print(isCommandedMovement, moveDirection)
 	
 ## apply velocity for movement in a target direction of vector3.
 ##[param moveDir] vector3 direction

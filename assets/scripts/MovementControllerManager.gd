@@ -67,15 +67,15 @@ func assess_request_priority()->int:
 		i += 1
 	return priorityControllerIndex
 
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
 	var commandIndex = assess_request_priority()
 	if assess_request_priority() == -1: #if no controllers giving inputs, give no input commands (zero iDir is treated as no commands by the pawn)
 		pawn.give_move_command(Vector3.ZERO)
 	elif not commandIndex < 0 and pawn is CharacterPawn3D and pawn != null:
 		playerInputOverride(commandIndex)
 		pawn.give_move_command(iDirBuffer[commandIndex])
-		if pawn.goPrint:
-			print("commanded movement by ", conBuffer[commandIndex], )
+		#if pawn.goPrint:
+			#print("commanded movement by ", conBuffer[commandIndex], )
 	clear_move_requests()
 
 ##overrides click to move navigation if a playercontroller provides an input

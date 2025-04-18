@@ -5,7 +5,8 @@ func _ready():
 	super()
 	if not pawn is CharacterPawn3D or pawn == null:
 		printerr("pawn is not a pawn ", self)
-	set_active_camera() #initial active camera setting
+	var placeholderArg: PlayerCamera3D = null
+	set_active_camera(placeholderArg) #initial active camera setting
 	if activeCamera == null:
 		printerr("camera is not a camera: ", activeCamera)
 	#connects signals
@@ -38,14 +39,14 @@ func on_cursor_click(cursorPos):
 	
 var activeCamera: PlayerCamera3D
 ##sets the current viewport camera as the active camera. Needs refactoring later on once camera transitions are implemented
-func set_active_camera()-> void:
+func set_active_camera(_emitter)-> void:
 	activeCamera = get_viewport().get_camera_3d()
 
 
 var destination = Vector3.ZERO
 var local_destination = Vector3.ZERO
 var aiDirection = Vector3.ZERO
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
 	if navigationToggle == true: #only update variables if actively navigating. Not sure if it'll break stuff later, but works for now
 		destination = navAgent.get_next_path_position()
 		local_destination = destination - pawn.global_position #turns out where you're going minus where you are equals the vector towards there in vector math
@@ -59,8 +60,8 @@ func _physics_process(delta: float) -> void:
 	elif navigationToggle == true:
 		controllerManager.request_move_command(hAiDirection, self)
 		
-	if pawn.goPrint:
-		print("nTog: ", navigationToggle)
+	#if pawn.goPrint:
+	#	print("nTog: ", navigationToggle)
 	
 func reset_navigation()->void:
 	navigationToggle = false #toggle navigation off

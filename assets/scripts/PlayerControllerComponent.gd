@@ -3,7 +3,12 @@ class_name PlayerControllerComponent
 
 @onready var inputDirection = Vector3.ZERO
 
+
 @export var sprint_multiplier: float = 2.5 ##multiplier to speed and acceleration when spriting
+@export var apex_velocity: float = .2
+@export var apex_gravity_multiplier: float = 0.675
+@export var fall_gravity_multiplier: float = 1.35
+@export var max_fall_time: float = 5 ##the maximum number of seconds fall gravity is applied to the pawn
 @export var jump_deceleration_multiplier: float = .4 ##set upward velocity by this factor after releasing jump button
 @export var jump_cooldown: float = .3334 ##cooldown in seconds
 @export var coyote_time: float = .1125 ##grace period to jump after falling
@@ -12,6 +17,7 @@ var coyoteTimer: float = coyote_time #current coyote time
 var jumpTimer: float = jump_cooldown
 var baseSpd: float
 var baseAcl: float
+var baseGrav: float 
 
 func _ready() -> void:
 	super()
@@ -21,6 +27,7 @@ func _ready() -> void:
 		print("PlayerMovementController failed to initialize!")
 	baseSpd = pawn.speed
 	baseAcl = pawn.acceleration
+	baseGrav = pawn.gravity
 
 var toggleOnce = false
 #physics process extension
@@ -33,11 +40,14 @@ func _physics_process(delta: float) -> void:
 	else:
 		controllerManager.request_move_command(Vector3.ZERO, self)
 	jump_handler(delta) #apply all jump logic
-
+	jump_variable_gravity(true)
 	#debug trace to check if physics process is properly running
 	if not toggleOnce:
 		toggleOnce = true
 		print("------------ all is set ----------------")
+		
+	#if pawn.goPrint:
+	#print("isJumping: ", isJumping)
 		
 ##get inputs to set the input direction and normalize it
 func set_input_direction():
@@ -71,21 +81,25 @@ func is_sprinting(isSprinting: bool)->void:
 	if isSprinting:
 		pawn.speed *= sprint_multiplier
 		pawn.acceleration *= sprint_multiplier
-	
+
+var isJumping: bool = false
 func jump_handler(delta)->void:
 	can_jump(delta) #check if can jump
 	#print("canJump?: ", canJump, " cTmr: ", coyoteTimer, " jTmr: ", jumpTimer)
+	if isJumping and pawn.is_on_floor():
+		isJumping = false
 	if Input.is_action_just_pressed("move_jump") and canJump:
-		pawn.velocity.y += pawn.jump_velocity 
+		pawn.velocity.y += pawn.jump_velocity
+		isJumping = true 
 		coyoteTimer = 0
 		jumpTimer = jump_cooldown
-		#print("jump!")
 	if Input.is_action_just_released("move_jump"):
 		var wtt = (jump_cooldown-jumpTimer)/jump_cooldown
 		wtt = clampf(wtt,0,1)
 		pawn.velocity.y *= lerpf(jump_deceleration_multiplier,1,wtt)
 		#print(wtt)
-
+	
+	
 ##returns vector to add to input direction based on the camera's rotation by yaw 
 func input_camera_yaw_adjustment(iDir)->Vector3:
 	var newIDir = Vector3.ZERO
@@ -95,3 +109,14 @@ func input_camera_yaw_adjustment(iDir)->Vector3:
 	else:
 		newIDir = iDir
 	return newIDir
+
+func jump_variable_gravity(toggle:bool):
+	if toggle:
+		if pawn.velocity.y < apex_velocity and pawn.velocity.y >= 0 and isJumping:
+			pawn.gravity = baseGrav * apex_gravity_multiplier
+		elif pawn.velocity.y < 0 and isJumping:
+			pawn.gravity = baseGrav * fall_gravity_multiplier
+		else:
+			pawn.gravity = baseGrav
+		if pawn.velocity.y < baseGrav * max_fall_time * -1:
+			pawn.velocity.y = baseGrav * max_fall_time * -1

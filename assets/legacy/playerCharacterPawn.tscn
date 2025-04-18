@@ -1,7 +1,6 @@
-[gd_scene load_steps=6 format=3 uid="uid://4x2jtpw4rt7q"]
+[gd_scene load_steps=5 format=3 uid="uid://4x2jtpw4rt7q"]
 
-[ext_resource type="Script" uid="uid://b0khpikwygkqt" path="res://assets/legacy/playerController.gd" id="1_v5yq0"]
-[ext_resource type="PackedScene" uid="uid://bdksa1qjsyli2" path="res://assets/3d/miniDungeon/Models/GLB format/character-orc.glb" id="2_plabj"]
+[ext_resource type="PackedScene" uid="uid://bf17yvy1p87ki" path="res://assets/3d/miniDungeon/Models/GLB format/character-orc.glb" id="2_plabj"]
 [ext_resource type="Script" uid="uid://budi0yve0qh6f" path="res://assets/legacy/modelDynamicRotator.gd" id="3_v5yq0"]
 [ext_resource type="Script" uid="uid://numo2halpvmu" path="res://assets/legacy/playerCamera.gd" id="4_0lxw0"]
 
@@ -14,8 +13,6 @@ metadata/_edit_group_ = true
 
 [node name="MovementController" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 1.42109e-14, 0, 1, 0, -1.42109e-14, 0, 1, 0, 0, 0)
-script = ExtResource("1_v5yq0")
-controllerScript = ExtResource("1_v5yq0")
 metadata/_custom_type_script = "uid://85awbu8ar5fe"
 
 [node name="model" parent="." instance=ExtResource("2_plabj")]
