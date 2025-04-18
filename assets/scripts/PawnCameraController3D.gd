@@ -26,6 +26,8 @@ var mousePosition = Vector2.ZERO
 
 func _ready() -> void:
 	self.spring_length = cameraDistDefault
+	get_viewport().size_changed.connect(viewport_size_changed)
+
 
 ##yaws camera towards the mouse position. With a smooth step function to ease camera rotation when at the deadspace (percentage as percentage of screen space)
 func rotateCameraYawBy():
@@ -47,6 +49,10 @@ func rotateCameraPitchBy():
 	var rotateYBy = deg_to_rad((cursorY - lastCursorY )/get_viewport().size.y * cameraRotSpeedY)
 	lastCursorY = cursorY
 	return -rotateYBy
+	
+func viewport_size_changed()->void:
+	viewportX = get_viewport().size.x
+	viewportY = get_viewport().size.y
 	
 func _physics_process(delta: float) -> void:
 	#camera zoom adjustment

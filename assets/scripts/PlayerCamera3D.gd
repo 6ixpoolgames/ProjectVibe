@@ -1,7 +1,12 @@
 extends Camera3D
 class_name PlayerCamera3D
 
+##emitted when possession changes
+## [param emitter] is a referrence to tge camera that did the possessing
 signal possession_event(emitter)
+##emitted when a click is registerd. Should probably refactor lol
+## [param cursorPosition] returns cursor position during the click
+signal emit_3D_cursor_position(cursorPosition)
 
 var togglePossession = true
 @onready var lastTransform = global_transform
@@ -39,6 +44,14 @@ func _input(event):
 			#print(get_parent())
 
 func _process(_delta: float) -> void:
+	move_3D_cursor()	
+	#click to emit signal that returns cursor world position
+	if Input.is_action_just_pressed("left_click"):
+		emit_signal("emit_3D_cursor_position", dSpherePos)
+		print("click signal emitted")
+
+#apply every frame to move the 3D cursor around
+func move_3D_cursor()->void:
 	#3D mouse cursor logic
 	var mPos = get_viewport().get_mouse_position()
 	var rOrg = project_ray_origin(mPos)
@@ -63,7 +76,8 @@ func _process(_delta: float) -> void:
 		else:
 			create_debug_sphere()
 			debugSphere.global_position = dSpherePos
-		
+
+
 #debug sphere representation for 3d cursor. Temporary placeholder. Replace with actual 3D cursor selector at a later time
 var debugSphere = MeshInstance3D.new()
 var debugSphereIsInit: bool = false

@@ -9,7 +9,6 @@ signal terrain_collision_generated(terrainCollision)
 		xSize = grid_size
 		zSize = grid_size
 		if Engine.is_editor_hint():
-			print(atan2(1,1))
 			generate_terrain_final()
 			generate = false
 @export var tile_size: float = 1.0
@@ -20,12 +19,37 @@ var zSize: int = grid_size
 @export var zScale: float = 1.0 #depth Scale
 @export var yScale: float = 1.0 #height Scale
 @export var noise_seed: int = 250
+##Options: 0 (Perlin), 1 (Simplex), 2 (Cellular), 3 (Value).
+##	Effect:
+##		[param Perlin]: Produces smooth, organic noise—ideal for gentle hills.
+##		[param Simplex]: Smoother and faster than Perlin, great for natural landscapes.
+##		[param Cellular]: Creates cell-like patterns—useful for rocky or fractured terrain.
+##		[param Value]: Simpler, less smooth noise—can appear blocky or artificial.
 @export_enum("Value", "Perlin", "Simplex", "Cellular") var noise_type: int = 2  # Noise algorithm to use
+##frequency: float
+##	Range: 0.001 to 1.0.
+##	Effect: Controls the base scale of noise features. Lower values (e.g., 0.05) create broad, expansive hills; higher values (e.g., 0.2) produce smaller, more frequent bumps.
 @export_range(0.001, 0.5, 0.001) var frequency: float = 0.1  # Base frequency of noise (lower = broader features, higher = more detail)
-@export_range(1, 8, 1) var fractal_octaves: int = 3  # Number of noise layers (higher = more detailed, rugged terrain)
-@export_range(0.0, 2.0, 0.1) var fractal_gain: float = 0.5  # Amplitude multiplier per octave (higher = sharper contrasts)
+##fractal_octaves: int
+##	Range: 1 to 8.
+##	Effect: Sets the number of noise layers stacked together. Increasing this (e.g., 5) adds finer details, making the terrain more rugged and complex; fewer octaves (e.g., 2) keep it smoother.
+@export_range(1, 12, 1) var fractal_octaves: int = 3  # Number of noise layers (higher = more detailed, rugged terrain)
+##[param fractal_gain]: float
+##	Range: 0.1 to 2.0.
+##	Effect: Adjusts the strength (amplitude) of each octave. Lower values (e.g., 0.3) reduce the impact of higher-frequency details, smoothing the terrain; high
+@export_range(0.0, 2.0, 0.05) var fractal_gain: float = 0.5  # Amplitude multiplier per octave (higher = sharper contrasts)
+##fractal_lacunarity: float
+##	Range: 0.1 to 4.0.
+##	Effect: Determines how much the frequency increases with each octave. Higher values (e.g., 3.0) make successive layers have smaller, tighter features, enhancing detail; lower values (e.g., 1.5) keep features more uniform.
 @export_range(0.0, 2.0, 0.1) var fractal_lacunarity: float = 2.0  # Frequency multiplier per octave (higher = finer details per layer)
+##fractal_type: int
+##	Options: 0 (FBM), 1 (Billow), 2 (Rigid).
+##	Effect:
+##		FBM (Fractional Brownian Motion): Standard layering for smooth, natural hills.
+##		Billow: Produces rounded, cloud-like peaks—good for softer terrain.
+##		Rigid: Inverts noise for sharp ridges and canyons—ideal for mountains.
 @export_enum("FBM", "Billow", "Rigid") var fractal_type: int = 0
+##max height diff before applying smoothing to normals
 @export var slope_smoothing: float = 0.3 #max height diff to apply normals smoothing
 @export var uv_scale: float = 1
 @export var chunk_x: int
@@ -136,54 +160,3 @@ func generate_mesh():
 	genMesh = surfTool.commit()
 	collisionShape = genMesh.create_trimesh_shape()
 	self.mesh = genMesh
-
-
-
-func documentation() ->void:
-	print("look inside")
-#just some documentation on noise manipulation
-
-"""
-	noise_seed: int
-		Description: Sets the random seed for the noise pattern.
-		Effect: Changing the seed generates a completely different terrain layout. Use the same seed for consistent results (e.g., 42), or randomize it with randi() for variety.
-	
-	noise_type: int
-		Options: 0 (Perlin), 1 (Simplex), 2 (Cellular), 3 (Value).
-		Effect:
-			Perlin: Produces smooth, organic noise—ideal for gentle hills.
-			Simplex: Smoother and faster than Perlin, great for natural landscapes.
-			Cellular: Creates cell-like patterns—useful for rocky or fractured terrain.
-			Value: Simpler, less smooth noise—can appear blocky or artificial.
-	
-	frequency: float
-		Range: 0.001 to 1.0.
-		Effect: Controls the base scale of noise features. Lower values (e.g., 0.05) create broad, expansive hills; higher values (e.g., 0.2) produce smaller, more frequent bumps.
-	
-	fractal_octaves: int
-		Range: 1 to 8.
-		Effect: Sets the number of noise layers stacked together. Increasing this (e.g., 5) adds finer details, making the terrain more rugged and complex; fewer octaves (e.g., 2) keep it smoother.
-	
-	fractal_lacunarity: float
-		Range: 0.1 to 4.0.
-		Effect: Determines how much the frequency increases with each octave. Higher values (e.g., 3.0) make successive layers have smaller, tighter features, enhancing detail; lower values (e.g., 1.5) keep features more uniform.
-	
-	fractal_gain: float
-		Range: 0.1 to 2.0.
-		Effect: Adjusts the strength (amplitude) of each octave. Lower values (e.g., 0.3) reduce the impact of higher-frequency details, smoothing the terrain; higher values (e.g., 0.8) emphasize details, making it rougher.
-	
-	fractal_type: int
-		Options: 0 (FBM), 1 (Billow), 2 (Rigid).
-		Effect:
-			FBM (Fractional Brownian Motion): Standard layering for smooth, natural hills.
-			Billow: Produces rounded, cloud-like peaks—good for softer terrain.
-			Rigid: Inverts noise for sharp ridges and canyons—ideal for mountains.
-
-Additional Parameters
-
-	noise_scale: float
-		Effect: Scales the input coordinates before sampling noise. Higher values (e.g., 2.0) “zoom out,” making features larger; lower values (e.g., 0.5) “zoom in,” making them smaller and more detailed.
-	
-	height_scale: float
-		Effect: Multiplies the noise output to control terrain height. Increase (e.g., 10.0) for taller peaks and deeper valleys; decrease (e.g., 2.0) for flatter terrain.
-"""

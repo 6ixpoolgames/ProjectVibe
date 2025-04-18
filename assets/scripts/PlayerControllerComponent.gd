@@ -1,5 +1,5 @@
-extends MovementControllerComponent
-class_name PlayerMovementController
+extends ControllerComponentBase
+class_name PlayerControllerComponent
 
 @onready var inputDirection = Vector3.ZERO
 
@@ -13,15 +13,14 @@ var jumpTimer: float = jump_cooldown
 var baseSpd: float
 var baseAcl: float
 
-
-var pawn: CharacterPawn3D
 func _ready() -> void:
-	pawn = get_parent_node_3d()
+	super()
+	inputPriority = 0 #sets input priority to highest
+	print("playercontroller ready")
 	if pawn == null or not pawn is CharacterPawn3D:
 		print("PlayerMovementController failed to initialize!")
 	baseSpd = pawn.speed
 	baseAcl = pawn.acceleration
-	print("pawn is: ", pawn)
 
 var toggleOnce = false
 #physics process extension
@@ -29,11 +28,13 @@ func _physics_process(delta: float) -> void:
 	
 	is_sprinting(Input.is_action_pressed("move_sprint"))
 	set_input_direction()
-	pawn.give_move_command(input_camera_yaw_adjustment(inputDirection)) #apply movement inputs 
+	if not inputDirection.is_zero_approx(): #if there are inputs
+		controllerManager.request_move_command(input_camera_yaw_adjustment(inputDirection), self) #apply movement inputs 
+	else:
+		controllerManager.request_move_command(Vector3.ZERO, self)
 	jump_handler(delta) #apply all jump logic
-	#super._physics_process(delta) #run movement code in CharacterPawn3D physics process code
-	if pawn.goPrint:
-		print(pawn.isCommandedMovement, pawn.moveDirection)
+
+	#debug trace to check if physics process is properly running
 	if not toggleOnce:
 		toggleOnce = true
 		print("------------ all is set ----------------")
@@ -46,7 +47,7 @@ func set_input_direction():
 	inputDirection = inputDirection.normalized()
 	
 ##jump checker logic using coyote time and jump cooldown
-##@param delta needed to decrement timers
+##[param delta] needed to decrement timers
 func can_jump(delta) -> bool: 
 	canJump = false #can't jump by default
 	#decrement timers and clamp
@@ -91,8 +92,6 @@ func input_camera_yaw_adjustment(iDir)->Vector3:
 	if pawn.isPossessed and pawn.isCommandedMovement:
 		var cameraYawRotRads = pawn.springArmRef.rotation.y
 		newIDir = inputDirection.rotated(Vector3.UP,cameraYawRotRads)
-		#if goPrint:
-			#print("rotAdd: ", rad_to_deg(cameraYawRotRads), " mDir: ", moveDirection)
 	else:
 		newIDir = iDir
 	return newIDir

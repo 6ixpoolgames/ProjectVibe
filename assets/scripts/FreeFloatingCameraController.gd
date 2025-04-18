@@ -21,6 +21,7 @@ func _process(delta: float) -> void:
 	inputDirection = inputDirection.normalized()
 	super(delta)
 		
+##moves the camera around by setting its position
 func set_position_on_input_direction(delta: float) -> void:
 	position.x += inputDirection.x * delta * speed
 	position.y += inputDirection.y * delta * speed
@@ -28,6 +29,7 @@ func set_position_on_input_direction(delta: float) -> void:
 
 
 var isFreeFloating: bool = true #default is that camera is freefloating.
+##checks if the camera is attached (possessing) a pawn
 func is_child_of_pawn() -> void:
 	var thisParent = get_parent_node_3d()
 	if thisParent is SpringArm3D or thisParent is CharacterPawn3D:
