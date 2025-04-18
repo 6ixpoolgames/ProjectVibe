@@ -83,4 +83,4 @@ func playerInputOverride(cmdIdx):
 	if conBuffer[cmdIdx] is PlayerControllerComponent:
 		for c in controllersAttached:
 			if c is ClickToMoveComponent:
-				c.reset_navigation()
+				c.stop_navigation()

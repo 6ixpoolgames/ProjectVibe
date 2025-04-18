@@ -116,7 +116,8 @@ func move_in_direction(moveDir: Vector3, delta: float) -> void:
 	#print("movDir: ", moveDir, " vel: ", velocity)
 	
 ##function to set the move direction, designed to be called from the controller script or elsewhere every (physics)frame
-## [param inputDirection] direction of desired movement
+## [param inputDir] direction of desired movement
+##if inputDir is a zero vector, treats it as no input commands given and sets isCommandedMovement flag to false
 func give_move_command(inputDir:Vector3)-> void:
 	if not inputDir.is_zero_approx(): #if with inputs
 		moveDirection = inputDir
