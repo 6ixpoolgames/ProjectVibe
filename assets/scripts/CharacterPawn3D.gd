@@ -1,8 +1,6 @@
 class_name CharacterPawn3D
 extends CharacterBody3D
 
-@onready var CharacterModel: MeshInstance3D = $CharacterModel
-
 @export var speed: float = 5 #max speed
 @export var acceleration: float = 20 #accel on move input
 @export var deceleration: float = 50 #decel when input released
@@ -17,7 +15,6 @@ var isCommandedMovement: bool = false
 var gravity: float  = ProjectSettings.get_setting("physics/3d/default_gravity")
 var moveDirection = Vector3.ZERO ##direction character will move in
 
-
 #model rotation variables
 @onready var currentYaw: float = self.rotation.y
 @onready var currentPitch: float = self.rotation.x
@@ -29,6 +26,7 @@ var lastInputRotationYaw: float = targetYaw
 var lastInputRotationPitch: float = targetPitch
 var lastInputRotationTilt: float = targetTilt
 
+#ready variables
 var isReadyTrigger = false
 var activeCamera: Camera3D
 var allChildren: Array
@@ -36,16 +34,28 @@ func _ready():
 	allChildren = get_all_descendants(self)
 	init_active_camera()
 	#init_terrain_collision()
+	set_references_hard()
 	init_movement_controller()
 	init_camera_spring_arm()
 
+##returns array of all descendant nodes. Currently used for possesion logic. Can be offloaded to global tools singleton
 func get_all_descendants(node: Node, descendants: Array = []) -> Array:
 	for child in node.get_children():
 		descendants.append(child)
 		get_all_descendants(child, descendants)
 	return descendants
 
-var hasMovementControllerScript: bool = false
+#node reference variables
+var CharacterModel: MeshInstance3D
+var CollisionCapsule: CollisionShape3D
+var ControllerManager: MovementControllerManager
+##janky hard coded reference setter. Relies on node structure from character_pawn_3d.tscn
+func set_references_hard():
+	CharacterModel = $CharacterModel
+	CollisionCapsule = $CollisionShape3D
+	ControllerManager = $MovementControllerManager
+
+##checks if controller manager is already added. If not, creates a new one. Part of functions to overhaul during refactor
 func init_movement_controller()->void:
 	for c in allChildren:
 		if c is MovementControllerManager:
@@ -57,32 +67,32 @@ func init_movement_controller()->void:
 	print("added movementControllerComponent: ", movementController)
 	movementController._ready()
 
+
 var springArmRef: SpringArm3D
+var unitHalfHeight: float = 0
+##Creates a PawnCameraController3D (spring arm) if there isn't one. Candidate for refactor. Code kinda messy, but functional
 func init_camera_spring_arm()->void:
-	var unitHalfHeight: float = 0
 	for c in allChildren:
-		if c is SpringArm3D:
-			print(self, " already has springarm")
+		if c is PawnCameraController:
+			print(self, " already has camera controller")
 			return
-		elif c is CollisionShape3D:
+		elif c is CollisionShape3D and c.shape is CapsuleShape3D:
 			unitHalfHeight = c.shape.height/2
 	var cameraController = PawnCameraController.new()
-	cameraController.name = "SpringArm3D"
+	cameraController.name = "SpringArm3D" #refactor with the spring arm reference code bullshit
 	self.add_child(cameraController)
 	cameraController.position = Vector3(0,unitHalfHeight,0)
 	cameraController.rotation.x = deg_to_rad(cameraController.initial_camera_pitch)
 	springArmRef = cameraController
 	print("added PawnCameraController3D: ", cameraController)
 		
+##sets the current viewport camera to the active camera. Can be combined with a larger initializer function on refactor. 
+##Also should code for checking if its a PlayerCamera3D in situations where there's more than 1 active viewport
 func init_active_camera()-> void:
 	activeCamera = get_viewport().get_camera_3d()
 	activeCamera.connect("possession_event", _on_possession_event)
 
-func init_terrain_collision() -> void:
-	var terrainCollision = $"../NavigationRegion3D/ProcGenTile/TerrainMesh"
-	terrainCollision.connect("terrain_collision_generated", _on_terrain_col_gen)
-	print("cam: ",activeCamera,"tC: ", terrainCollision)
-		
+
 func _physics_process(delta: float) -> void:
 	#if isReadyTrigger == true:
 	printFuncRationalizer(50)
@@ -132,8 +142,8 @@ func apply_gravity(delta:float):
 		velocity.y -= gravity * gravity_multiplier * delta		
 		
 ##gets a reference to the pawn's springArm3D. If null for some reason, returns a reference to self
-func get_camera_attachment_point():
-	var attachTo
+func get_camera_attachment_point()->Node3D:
+	var attachTo: Node3D
 	if $SpringArm3D != null:
 		attachTo = $SpringArm3D
 	else:
@@ -178,19 +188,6 @@ func _on_possession_event(_emitter)->void:
 					isPossessed = true
 	print("posses signal recieved ", isPossessed)
  
-
-var printTimer: int = -1
-var goPrint: bool = false
-##counts down printTime number of frames before setting "goPrint" to true, sets it to false every other frame. To apply, just add "if goPrint:" before calling a debug print output to 'rationalize' it
-## [param printTime] is number of frames before setting goPrint to true.
-func printFuncRationalizer(printTime: int):
-	if printTimer > 0:
-		printTimer -= 1
-		goPrint = false
-	else:
-		printTimer = printTime
-		goPrint = true
-
 @onready var lastPos = global_position
 var stuckTimer:float = 0 #seconds stuck before being considered stuck
 var stuckTime = stuckTimer
@@ -225,6 +222,20 @@ func unstucker()->void:
 	
 
 #########################################
+
+#consider moving to a global tools singleton
+var printTimer: int = -1
+var goPrint: bool = false
+##counts down printTime number of frames before setting "goPrint" to true, sets it to false every other frame. To apply, just add "if goPrint:" before calling a debug print output to 'rationalize' it
+## [param printTime] is number of frames before setting goPrint to true.
+func printFuncRationalizer(printTime: int):
+	if printTimer > 0:
+		printTimer -= 1
+		goPrint = false
+	else:
+		printTimer = printTime
+		goPrint = true
+
 #not used anymore. for cleanup
 var terColRef: CollisionShape3D
 func _on_terrain_col_gen(terCol):
@@ -232,3 +243,9 @@ func _on_terrain_col_gen(terCol):
 	print("TCG signal recieved", terCol)
 	return terCol
 #not used anymore. for cleanup
+
+##vestigial code. Consider for cleanup
+func init_terrain_collision() -> void:
+	var terrainCollision = $"../NavigationRegion3D/ProcGenTile/TerrainMesh"
+	terrainCollision.connect("terrain_collision_generated", _on_terrain_col_gen)
+	print("cam: ",activeCamera,"tC: ", terrainCollision)

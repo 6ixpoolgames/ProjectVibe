@@ -7,6 +7,7 @@ var isInit: bool = false
 @export var hasPlayerController = false
 @export var hasClickController = false
 @export var hasAIController = false
+@export var spawnDebugControllers = false
 
 func _ready():
 	#check if properly attached
@@ -16,7 +17,8 @@ func _ready():
 		print("Movement controller initialization error! ", self, " p: " , pawn)
 	else: #if properly attached
 		isInit = true
-		create_and_attach_player_controllers() # yes the long name means its a test function lol
+		if spawnDebugControllers:
+			create_and_attach_player_controllers() # yes the long name means its a test function lol
 	get_controllers_attached()
 
 var controllersAttached: Array[ControllerComponentBase]

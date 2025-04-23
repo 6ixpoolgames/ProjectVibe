@@ -10,7 +10,7 @@ signal emit_3D_cursor_position(cursorPosition)
 
 var togglePossession = true
 @onready var lastTransform = global_transform
-@onready var pawn:CharacterPawn3D = $"../CharacterPawn3D"
+@onready var pawn:CharacterPawn3D = $"../HeroPawn"
 
 func _ready() -> void:
 	raycast = create_raycaster()
