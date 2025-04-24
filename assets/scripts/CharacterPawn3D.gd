@@ -38,7 +38,7 @@ func _ready():
 	init_movement_controller()
 	init_camera_spring_arm()
 
-##returns array of all descendant nodes. Currently used for possesion logic. Can be offloaded to global tools singleton
+##returns array of all descendant nodes. Can be offloaded to global tools singleton probably
 func get_all_descendants(node: Node, descendants: Array = []) -> Array:
 	for child in node.get_children():
 		descendants.append(child)
@@ -141,12 +141,15 @@ func apply_gravity(delta:float):
 	if not is_on_floor():
 		velocity.y -= gravity * gravity_multiplier * delta		
 		
-##gets a reference to the pawn's springArm3D. If null for some reason, returns a reference to self
+##gets a reference to the pawn's camera controller (spring arm). If null for some reason, returns a reference to self
 func get_camera_attachment_point()->Node3D:
 	var attachTo: Node3D
-	if $SpringArm3D != null:
-		attachTo = $SpringArm3D
-	else:
+	allChildren = get_all_descendants(self)
+	for c in allChildren:
+		if c is PawnCameraController:
+			attachTo = c
+			springArmRef = c #additional bit of code to ensure springArmRef always points to the camera attachment. SpringArmRef might need a refactor actually
+	if attachTo == null:
 		attachTo = self
 	return attachTo
 

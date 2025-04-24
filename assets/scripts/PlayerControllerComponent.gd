@@ -29,28 +29,21 @@ func _ready() -> void:
 	baseAcl = pawn.acceleration
 	baseGrav = pawn.gravity
 
-var toggleOnce = false
+
 #physics process extension
 func _physics_process(delta: float) -> void:
-	
-	is_sprinting(Input.is_action_pressed("move_sprint"))
-	set_input_direction()
+	is_sprinting(Input.is_action_pressed("move_sprint")) #sprint code
+	poll_input_direction() # gets horizontal directional movement inputs and sets it to the input direction variable
 	if not inputDirection.is_zero_approx(): #if there are inputs
-		controllerManager.request_move_command(input_camera_yaw_adjustment(inputDirection), self) #apply movement inputs 
+		controllerManager.request_move_command(input_camera_yaw_adjustment(inputDirection), self) #sends request for movement to controller manager with saved input directions
 	else:
-		controllerManager.request_move_command(Vector3.ZERO, self)
+		controllerManager.request_move_command(Vector3.ZERO, self) #sends request for NO movemet input if inputs given are near ZERO. Just an extra error checking step
 	jump_handler(delta) #apply all jump logic
 	jump_variable_gravity(true)
-	#debug trace to check if physics process is properly running
-	if not toggleOnce:
-		toggleOnce = true
-		print("------------ all is set ----------------")
-		
-	#if pawn.goPrint:
-	#print("isJumping: ", isJumping)
-		
+	
+
 ##get inputs to set the input direction and normalize it
-func set_input_direction():
+func poll_input_direction():
 	#get horizontal input direciton and normalize
 	inputDirection.x = Input.get_action_strength("move_right") - Input.get_action_strength("move_left")
 	inputDirection.z = Input.get_action_strength("move_backward") - Input.get_action_strength("move_forward")
@@ -75,14 +68,16 @@ func can_jump(delta) -> bool:
 		canJump = true	#(2) on floor AND jump off cooldown
 	return canJump
 
+##sprinting code. Might need a refactor but works as implemented for now
 func is_sprinting(isSprinting: bool)->void:
 	pawn.speed = baseSpd
 	pawn.acceleration = baseAcl
 	if isSprinting:
-		pawn.speed *= sprint_multiplier
-		pawn.acceleration *= sprint_multiplier
+		pawn.speed *= sprint_multiplier #increase max speed of pawn by the multiplier. Does not hard reset momentum when sprint is deactivated
+		pawn.acceleration *= sprint_multiplier #increased acceleration rate of pawn by the multiplier.
 
-var isJumping: bool = false
+var isJumping: bool = false #bool utilized in variable jump gravity code. Differentiates between simple falling and jumping
+##jump logic code for jump validity, cooldown, coyote time, and input handling. Takes [param delta] as its meant to run during _physics_process()
 func jump_handler(delta)->void:
 	can_jump(delta) #check if can jump
 	#print("canJump?: ", canJump, " cTmr: ", coyoteTimer, " jTmr: ", jumpTimer)
@@ -96,7 +91,7 @@ func jump_handler(delta)->void:
 	if Input.is_action_just_released("move_jump"):
 		var wtt = (jump_cooldown-jumpTimer)/jump_cooldown
 		wtt = clampf(wtt,0,1)
-		pawn.velocity.y *= lerpf(jump_deceleration_multiplier,1,wtt)
+		#pawn.velocity.y *= lerpf(jump_deceleration_multiplier,1,wtt)
 		#print(wtt)
 	
 	

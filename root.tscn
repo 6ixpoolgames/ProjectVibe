@@ -20,6 +20,25 @@ background_mode = 2
 sky = SubResource("Sky_pyidc")
 sdfgi_enabled = true
 
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_huihk"]
+render_priority = 0
+shader = ExtResource("6_l8v81")
+shader_parameter/noise_scale = 50.0
+shader_parameter/speed = 0.16
+shader_parameter/darkness_amount = 9.155
+shader_parameter/detail = 1.0
+shader_parameter/concentration = 0.0
+shader_parameter/amount = 0.12
+shader_parameter/bloom = 10.0
+shader_parameter/alpha = 20.0
+shader_parameter/cloud_tint = Color(0.237539, 0.237539, 0.237539, 1)
+shader_parameter/edge_fade = -0.28
+shader_parameter/rotation_matrix = Transform2D(1.6, -1.2, 1.2, 1.6, 0, 0)
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_tw3kd"]
+material = SubResource("ShaderMaterial_huihk")
+size = Vector2(500, 500)
+
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_bf3um"]
 
 [sub_resource type="CapsuleMesh" id="CapsuleMesh_huihk"]
@@ -57,26 +76,8 @@ height = 1.0
 
 [sub_resource type="CylinderMesh" id="CylinderMesh_pq8q7"]
 
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_huihk"]
-render_priority = 0
-shader = ExtResource("6_l8v81")
-shader_parameter/noise_scale = 50.0
-shader_parameter/speed = 0.16
-shader_parameter/darkness_amount = 9.155
-shader_parameter/detail = 1.0
-shader_parameter/concentration = 0.0
-shader_parameter/amount = 0.12
-shader_parameter/bloom = 10.0
-shader_parameter/alpha = 20.0
-shader_parameter/cloud_tint = Color(0.237539, 0.237539, 0.237539, 1)
-shader_parameter/edge_fade = -0.28
-shader_parameter/rotation_matrix = Transform2D(1.6, -1.2, 1.2, 1.6, 0, 0)
-
-[sub_resource type="PlaneMesh" id="PlaneMesh_tw3kd"]
-material = SubResource("ShaderMaterial_huihk")
-size = Vector2(500, 500)
-
 [node name="root" type="Node3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 48.8885, 0)
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-0.219444, 0.963707, 0.152032, 0.945771, 0.171876, 0.275637, 0.239503, 0.204274, -0.949163, 22.0506, 10.3766, -3.87294)
@@ -93,6 +94,10 @@ directional_shadow_max_distance = 50.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_vvh5c")
+
+[node name="CloudPlane" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24.8696, 37.2942, 0)
+mesh = SubResource("PlaneMesh_tw3kd")
 
 [node name="CharacterBody3D" type="CharacterBody3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -36.4764, -0.523534, -41.9288)
@@ -186,25 +191,21 @@ shape = SubResource("CylinderShape3D_pyidc")
 [node name="Column2" parent="NavigationRegion3D" instance=ExtResource("4_28aoi")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12.3151, -15.9227, 46.0846)
 
-[node name="PlayerCamera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.642788, 0.766044, 0, -0.766044, 0.642788, 0, 0, 0)
+[node name="HeroCamera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.642788, 0.766044, 0, -0.766044, 0.642788, 0, 6.04179, 9.17798)
 script = ExtResource("7_vyht1")
 metadata/_custom_type_script = "uid://c4fluuylnuit3"
 
 [node name="HeroPawn" parent="." instance=ExtResource("4_jnlp7")]
 
 [node name="MovementControllerManager" parent="HeroPawn" index="2"]
-hasPlayerController = true
-hasClickController = true
+addPlayerController = true
+addClickController = true
 spawnDebugControllers = true
 
 [node name="AISensingComponent" type="Node3D" parent="HeroPawn"]
 script = ExtResource("6_vyht1")
 metadata/_custom_type_script = "uid://6sbyftt8pnl8"
-
-[node name="CloudPlane" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24.8696, 19.636, 0)
-mesh = SubResource("PlaneMesh_tw3kd")
 
 [node name="testPawn1" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24.0699, -7.8516, 9.15864)
