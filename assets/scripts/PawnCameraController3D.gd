@@ -50,19 +50,21 @@ func rotateCameraPitchBy():
 	lastCursorY = cursorY
 	return -rotateYBy
 	
+#sets the viewport size variables whenever viewport size changed signal is emitted
 func viewport_size_changed()->void:
 	viewportX = get_viewport().size.x
 	viewportY = get_viewport().size.y
+	print("viewport sized changed! x: ", viewportX, " y: ", viewportY)
 	
 func _physics_process(delta: float) -> void:
 	#camera zoom adjustment
-	if Input.is_action_just_pressed("scrollWheel_up"):
+	if Input.is_action_just_pressed("scrollWheel_up"): #zoom in
 		self.spring_length -= cameraZoomSpeed
-	if Input.is_action_just_pressed("scrollWheel_down"):
+	if Input.is_action_just_pressed("scrollWheel_down"): #zoom out
 		self.spring_length += cameraZoomSpeed
-	if Input.is_action_just_pressed("middleMouse_button"):
+	if Input.is_action_just_pressed("middleMouse_button"): #reset zoom
 		self.spring_length = cameraDistDefault
-	self.spring_length = clampf(self.spring_length, cameraDistMin, cameraDistMax)
+	self.spring_length = clampf(self.spring_length, cameraDistMin, cameraDistMax) #clamps to min max spring lenght
 
 	#camera rotation
 	self.rotation.y += clamp(rotateCameraYawBy(), deg_to_rad(-cameraRotSpeedX*delta), deg_to_rad(cameraRotSpeedX*delta))

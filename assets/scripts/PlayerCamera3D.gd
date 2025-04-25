@@ -10,31 +10,26 @@ signal emit_3D_cursor_position(cursorPosition)
 
 var togglePossession = true
 @onready var lastTransform = global_transform
-@onready var pawn:CharacterPawn3D = $"../CharacterPawn3D"
+@onready var testPawn:CharacterPawn3D = $"../HeroPawn"
 
 func _ready() -> void:
 	raycast = create_raycaster()
 
-##Despite the name, actually reparents this camera to the pawn's SPRINGARM if available
-##@param pawn CharacterPawn3D to attach to
+##Despite the name, actually reparents this camera to the [param pwn]'s SPRINGARM if available.
 func attach_to_pawn(pwn:CharacterPawn3D):
 	togglePossession = false
 	lastTransform = global_transform
-	#print("world rot: ", rotation_degrees)
 	rotation = Vector3.ZERO  # Reset local rotation to align with SpringArm3D
 	reparent(pwn.get_camera_attachment_point())
-	#print("loc cam rot: ", rotation_degrees)
 	rotation_degrees = pwn.rotation_degrees
-	#print("arm rot: ", pwn.get_camera_attachment_point().rotation_degrees, " newCamRot: ", rotation_degrees, pwn.get_camera_attachment_point().get_lenght())
 	make_current()
 		
-
+##debug function for testing. Press ` to possess and unposses the pawn in the demo scene. To be replaced by actual possession input code at a later time
 func _input(event):	
-	#debug function for testing. Press Q to possess and unposses the pawn in the demo scene. To be replaced by actual possession input code at a later time
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_QUOTELEFT:
 			if togglePossession:
-				attach_to_pawn(pawn)
+				attach_to_pawn(testPawn)
 				togglePossession = false
 			else:
 				reparent(get_tree().root)

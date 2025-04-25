@@ -9,7 +9,7 @@ func _ready() -> void:
 	create_nav_agent(true)
 	return
 
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
 	pawn_navigation()
 
 	
@@ -57,6 +57,6 @@ func stop_navigation()->void:
 	navAgent.set_target_position(pawn.global_position) #reset target position to ensure stoppage
 	
 	
-func run_to(destination: Vector3)->void:
+func run_to(dest: Vector3)->void:
 	print("run_to() function currently empty")
 	return
