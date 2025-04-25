@@ -210,6 +210,12 @@ metadata/_custom_type_script = "uid://cwxtrbi3gjvc6"
 [node name="testPawn1" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24.0699, -7.8516, 9.15864)
 
+[node name="testPawn3" parent="." instance=ExtResource("4_jnlp7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.94547, -2.41002, -21.7933)
+
+[node name="testPawn4" parent="." instance=ExtResource("4_jnlp7")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.12411, -4.3399, -17.2718)
+
 [node name="testPawn2" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14.5989, -7.66872, 14.0209)
 

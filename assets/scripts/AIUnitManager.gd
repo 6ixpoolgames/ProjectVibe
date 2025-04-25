@@ -45,7 +45,7 @@ func polling_outofbounds_reassignment()->void:
 		polling_group = randi_range(1, polling_freq_frame_count) #randomizes polling group if less than 1 or greater than polling frequency
 		#print("polling group outbounds. randomly reassigned to: ", polling_group, " of ", polling_freq_frame_count)
 	
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
 	should_poll_group()
 	
 func _ready() -> void:

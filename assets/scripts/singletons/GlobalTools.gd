@@ -31,6 +31,115 @@ func printFuncRationalizer(printTime: int):
 		printTimer = printTime
 		go_print = true
 		
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
 	printFuncRationalizer(60)
+
+func _process(delta: float) -> void:
+	final_cleanup(delta)
+
+var default_persist_ms:= 0.5
+func line(pos1: Vector3, pos2: Vector3, color = Color.DARK_RED, persist_ms:float = default_persist_ms):
+	var mesh_instance := MeshInstance3D.new()
+	var immediate_mesh := ImmediateMesh.new()
+	var material := ORMMaterial3D.new()
+
+	mesh_instance.mesh = immediate_mesh
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+
+	immediate_mesh.surface_begin(Mesh.PRIMITIVE_LINES, material)
+	immediate_mesh.surface_add_vertex(pos1)
+	immediate_mesh.surface_add_vertex(pos2)
+	immediate_mesh.surface_end()
+
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = color
+
+	get_tree().get_root().add_child(mesh_instance)
+	if debug_mesh_buffer.size() > 1000: # Arbitrary limit
+		print("Warning: Debug mesh buffer overflow, clearing oldest")
+		if is_instance_valid(debug_mesh_buffer[0]):
+			debug_mesh_buffer[0].queue_free()
+		debug_mesh_buffer.remove_at(0)
+		debug_mesh_timer.remove_at(0)
+	debug_mesh_buffer.append(mesh_instance)
+	debug_mesh_timer.append(persist_ms)
+	return
+
+func point(pos: Vector3, radius:float = 0.05, color = Color.RED, persist_ms:float = default_persist_ms):
+	var mesh_instance := MeshInstance3D.new()
+	var sphere_mesh := SphereMesh.new()
+	var material := ORMMaterial3D.new()
+
+	mesh_instance.mesh = sphere_mesh
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mesh_instance.position = pos
+
+	sphere_mesh.radius = radius
+	sphere_mesh.height = radius*2
+	sphere_mesh.material = material
+
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = color
+
+	get_tree().get_root().add_child(mesh_instance)
+	if debug_mesh_buffer.size() > 1000: # Arbitrary limit
+		print("Warning: Debug mesh buffer overflow, clearing oldest")
+		if is_instance_valid(debug_mesh_buffer[0]):
+			debug_mesh_buffer[0].queue_free()
+		debug_mesh_buffer.remove_at(0)
+		debug_mesh_timer.remove_at(0)
+	debug_mesh_buffer.append(mesh_instance)
+	debug_mesh_timer.append(persist_ms)
+	return
+
+func square(pos: Vector3, size: Vector2, color = Color.RED, persist_ms:float = default_persist_ms):
+	var mesh_instance := MeshInstance3D.new()
+	var box_mesh := BoxMesh.new()
+	var material := ORMMaterial3D.new()
+
+	mesh_instance.mesh = box_mesh
+	mesh_instance.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mesh_instance.position = pos
+
+	box_mesh.size = Vector3(size.x, size.y, 1)
+	box_mesh.material = material
+
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = color
+	
+	get_tree().get_root().add_child(mesh_instance)
+	if debug_mesh_buffer.size() > 100: # Arbitrary limit
+		print("Warning: Debug mesh buffer overflow, clearing oldest")
+		if is_instance_valid(debug_mesh_buffer[0]):
+			debug_mesh_buffer[0].queue_free()
+		debug_mesh_buffer.remove_at(0)
+		debug_mesh_timer.remove_at(0)
+	debug_mesh_buffer.append(mesh_instance)
+	debug_mesh_timer.append(persist_ms)
+	return
+
+## 1 -> Lasts ONLY for current physics frame
+## >1 -> Lasts X time duration.
+## <1 -> Stays indefinitely
+var debug_mesh_buffer: Array[MeshInstance3D]
+var debug_mesh_timer: Array[float]
+func final_cleanup(delta:float):
+	var bufferM: Array[MeshInstance3D]
+	var bufferT: Array[float]
+	for i in range(debug_mesh_timer.size()):
+		debug_mesh_timer[i] -= delta
+		if debug_mesh_timer[i] > 0:
+			bufferM.append(debug_mesh_buffer[i])
+			bufferT.append(debug_mesh_timer[i])
+		else:
+			debug_mesh_buffer[i].queue_free()
+	debug_mesh_buffer.clear()
+	debug_mesh_timer.clear()
+	debug_mesh_buffer = bufferM
+	debug_mesh_timer = bufferT
+	
+func lines_with_points(from:Vector3, to:Vector3, color:Color, persist_ms:float):
+	line(from,to,color,persist_ms)
+	point(from,0.05,Color.RED,persist_ms)
+	point(to,0.05,Color.RED,persist_ms)
 	

@@ -1,18 +1,15 @@
 extends Node3D
 class_name AISensingComponent
 
-#pawn reference
+#node reference
 var pawn: CharacterPawn3D
-
-#AI sense polling frequency
-@export var polling_freq_frame_count: int = 3 ##number of physics frames between polling calls
-@export var polling_group: int = 0 ##which frame this component polls. Set between 1 and polling_freq_frame_count Otherwise, assigns random grouping
+var AIManager: AIUnitManager
 
 #AI sense variables
 @export var sense_radius: float = 20 ##detection radius for AI sensing
 @export var forward_sense_bias: bool = true
 @export var sense_forward_offset: float = 5 ##note: offset increases sense range by this much
-@export var forward_vision_angle: float = 120 ##in degrees.
+@export var forward_vision_angle: float = 160 ##in degrees.
 
 #array of sensed entities
 var allSensedEntities: Array[CharacterPawn3D]
@@ -25,8 +22,6 @@ var sensingCollisionShape3D: CollisionShape3D
 
 #facing direction buffer var
 var facingDirection: Vector3
-
-var AIManager: AIUnitManager
 
 func _ready() -> void:
 	init()
@@ -45,22 +40,13 @@ func init()->void:
 		printerr("not attached to unit manager! - ", self)
 	#exclude = get_all_colliders_in_pawn()
 	initialize_sensing()
-	
 
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
 	update_facing_direction_vector()
 	update_sensing_area_offset()
-	if AIManager.pollingGroupActive == polling_group:
+	if AIManager.pollingGroupActive == AIManager.polling_group:
 		update_entity_in_detection_angle()
 		update_entities_in_LOS()
-
-##checks if polling group is valid and reassigns a random valid group if not
-func polling_outofbounds_reassignment()->void:
-	if polling_freq_frame_count < 1:
-		polling_freq_frame_count = 3 # defaults polling frequency to 20hz if not set properly
-	if polling_group < 1 or polling_group > polling_freq_frame_count:
-		polling_group = randi_range(1, polling_freq_frame_count)
-		print("polling group outbounds. randomly reassigned to: ", polling_group, " of ", polling_freq_frame_count)
 
 #var capsuleHalfHeight: float
 ##creates sensing areas and connects signals
@@ -136,12 +122,13 @@ func remove_sensed_entity(body: Node3D)->void:
 		#print("exited ",body, " is not a pawn")	
 		return
 		
+var visRad = cos(deg_to_rad(forward_vision_angle/2))
 ##uses dot product vs forward angle to check if within the target forward angle
 func is_in_detection_angle(entity: CharacterPawn3D)->bool:
 	var forwards = facingDirection
 	var targetDirection = (entity.global_position - global_position).normalized()
 	var dotProduct = forwards.dot(targetDirection)
-	if dotProduct > cos(deg_to_rad(forward_vision_angle/2)): #forward angle halved because that's how math works to get the proper result apparently
+	if dotProduct > visRad: #forward angle halved because that's how math works to get the proper result apparently
 		return true
 	else:
 		return false
@@ -153,8 +140,10 @@ func update_entity_in_detection_angle()->void:
 		if is_in_detection_angle(e):
 			entitiesInDetectionAngle.append(e)
 
+var debugFlag = false
 var collisionMask: int = 3 #collision layers 1 and 2
 var exclude: Array #exclusion array for space query. Currently not working
+##does a raycast towards [param entity] from pawn with a ground offset = unitHalfHeight
 func is_in_LOS(entity: CharacterPawn3D)->bool:
 	#setup a space state query on specifically pawns with capsule colliders with a half height offset
 	var space_state = get_world_3d().direct_space_state
@@ -168,6 +157,8 @@ func is_in_LOS(entity: CharacterPawn3D)->bool:
 	var to = Vector3(entPos.x, (entPos.y + entYOffset), entPos.z)
 	var query = PhysicsRayQueryParameters3D.create(from, to, collisionMask, exclude)	
 	var result = space_state.intersect_ray(query)
+	
+	GlobalTools.lines_with_points(from, to)
 	
 	#return succes
 	if result and result.collider == entity:
@@ -196,5 +187,5 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_TAB:
 			print("all entities: ", allSensedEntities)
-			print("within front angle: ", entitiesInDetectionAngle, " angle: ", forward_vision_angle)
+			print("within front angle: ", entitiesInDetectionAngle, " angle: ", forward_vision_angle, " dot: ", visRad )
 			print("with LOS: ", entitiesInLOS)
