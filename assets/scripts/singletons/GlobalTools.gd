@@ -55,8 +55,8 @@ func line(pos1: Vector3, pos2: Vector3, color = Color.DARK_RED, persist_ms:float
 	material.albedo_color = color
 
 	get_tree().get_root().add_child(mesh_instance)
-	if debug_mesh_buffer.size() > 1000: # Arbitrary limit
-		print("Warning: Debug mesh buffer overflow, clearing oldest")
+	if debug_mesh_buffer.size() > 100: # Arbitrary limit
+		#wprint("Warning: Debug mesh buffer overflow, clearing oldest ", debug_mesh_buffer.size())
 		if is_instance_valid(debug_mesh_buffer[0]):
 			debug_mesh_buffer[0].queue_free()
 		debug_mesh_buffer.remove_at(0)

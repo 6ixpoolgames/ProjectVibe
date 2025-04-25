@@ -104,14 +104,14 @@ func create_debug_sphere():
 	material.albedo_color = Color.RED
 	debugSphere.set_surface_override_material(0, material)
 	#debug text
-	print("success ", $debugSphere)
+	#print("success ", $debugSphere)
 
 var raycast: RayCast3D
 ##creates a raycast3D node as a child of this camera. called on ready
 func create_raycaster() -> RayCast3D:
 	var rc = RayCast3D.new()
 	self.add_child(rc)
-	print("raycaster created. Parent  = ", rc.get_parent_node_3d())
+	#print("raycaster created. Parent  = ", rc.get_parent_node_3d())
 	return rc
 
 func lineBreak():

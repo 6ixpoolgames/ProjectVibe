@@ -37,13 +37,13 @@ func create_and_attach_player_controllers()->void:
 		var controller = PlayerControllerComponent.new()
 		controller.name = "PlayerControllerComponent"
 		add_child(controller)
-		print("controller attached: ", controller)
+		#print("controller attached: ", controller)
 	#also a hardcoded attachment of click to move controller
 	if addClickController:
 		var controller2 = ClickToMoveComponent.new()
 		controller2.name = "ClickToMoveComponent"
 		add_child(controller2)
-		print("controller2 attached: ", controller2)
+		#print("controller2 attached: ", controller2)
 
 var iDirBuffer: Array[Vector3] = []
 var conBuffer: Array[ControllerComponentBase] = []

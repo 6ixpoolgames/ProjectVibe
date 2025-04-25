@@ -22,7 +22,7 @@ var baseGrav: float
 func _ready() -> void:
 	super()
 	inputPriority = 0 #sets input priority to highest
-	print("playercontroller ready")
+	#print("playercontroller ready")
 	if pawn == null or not pawn is CharacterPawn3D:
 		print("PlayerMovementController failed to initialize!")
 	baseSpd = pawn.speed

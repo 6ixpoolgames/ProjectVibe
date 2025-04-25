@@ -13,7 +13,7 @@ func _ready():
 		print("Not a valid MovementControllerManager!")
 	if not pawn is CharacterPawn3D or pawn == null:
 		print("Not a valid pawn!")
-	print("ControllerBase ready super", pawn, " ", controllerManager, " inputPriority ", inputPriority)
+	#print("ControllerBase ready super", pawn, " ", controllerManager, " inputPriority ", inputPriority)
 	
 func set_input_priority(prio:int)->void:
 	inputPriority = prio

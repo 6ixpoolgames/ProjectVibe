@@ -43,7 +43,7 @@ var lastTargetPosition = Vector3.ZERO
 func on_cursor_click(cursorPos):
 	lastTargetPosition = cursorPos
 	move_to(cursorPos)
-	print("click signal recieved")
+	#print("click signal recieved")
 	
 var navigationToggle = false
 func move_to(dest: Vector3)->void:

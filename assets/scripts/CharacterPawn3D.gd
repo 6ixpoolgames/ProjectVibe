@@ -57,7 +57,7 @@ func init_movement_controller()->void:
 	var movementController = MovementControllerManager.new()
 	movementController.name = "MovementControllerManager"
 	self.add_child(movementController)
-	print("added movementControllerComponent: ", movementController)
+	#print("added movementControllerComponent: ", movementController)
 	movementController._ready()
 
 
@@ -77,7 +77,7 @@ func init_camera_spring_arm()->void:
 	cameraController.position = Vector3(0,unitHalfHeight,0)
 	cameraController.rotation.x = deg_to_rad(cameraController.initial_camera_pitch)
 	springArmRef = cameraController
-	print("added PawnCameraController3D: ", cameraController)
+	#print("added PawnCameraController3D: ", cameraController)
 		
 ##sets the current viewport camera to the active camera. Can be combined with a larger initializer function on refactor. 
 ##Also should code for checking if its a PlayerCamera3D in situations where there's more than 1 active viewport
@@ -223,7 +223,7 @@ func unstucker()->void:
 var terColRef: CollisionShape3D
 func _on_terrain_col_gen(terCol):
 	terColRef = terCol
-	print("TCG signal recieved", terCol)
+	#print("TCG signal recieved", terCol)
 	return terCol
 #not used anymore. for cleanup
 
@@ -231,4 +231,4 @@ func _on_terrain_col_gen(terCol):
 func init_terrain_collision() -> void:
 	var terrainCollision = $"../NavigationRegion3D/ProcGenTile/TerrainMesh"
 	terrainCollision.connect("terrain_collision_generated", _on_terrain_col_gen)
-	print("cam: ",activeCamera,"tC: ", terrainCollision)
+	#print("cam: ",activeCamera,"tC: ", terrainCollision)
