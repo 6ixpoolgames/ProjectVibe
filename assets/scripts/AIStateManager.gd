@@ -2,7 +2,7 @@ extends Node3D
 
 class_name AIStateManagerComponent
 
-enum AIState {Idle, Alerted, Aggressive, Stunned}
+enum AIState {Idle, Alerted, Aggressive, Incapacitated, Routed}
 
 #node reference
 var pawn: CharacterPawn3D

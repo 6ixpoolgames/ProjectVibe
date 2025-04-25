@@ -51,8 +51,6 @@ func _physics_process(_delta: float) -> void:
 	if AIManager.pollingGroupActive == AIManager.polling_group:
 		update_entity_in_detection_angle()
 		update_entities_in_LOS()
-	
-	print("Polling Active: ", AIManager.pollingGroupActive," group: ", AIManager.polling_group )
 
 #var capsuleHalfHeight: float
 ##creates sensing areas and connects signals
@@ -112,9 +110,9 @@ func update_sensing_area_offset()->void:
 func add_sensed_entity(body: Node3D)->void:
 	if body is CharacterPawn3D and not allSensedEntities.has(body) and not body == pawn:
 		allSensedEntities.append(body)
-		print("entered ", body, " is now tracked")
+		#print("entered ", body, " is now tracked")
 	else:
-		print("entered ", body, " is not a pawn")
+		#print("entered ", body, " is not a pawn")
 		return
 
 ##listens to body_exited signal and removes it from buffer
@@ -123,42 +121,28 @@ func remove_sensed_entity(body: Node3D)->void:
 		var at = allSensedEntities.find(body)
 		if at != -1:
 			allSensedEntities.remove_at(at)
-			print("exited ",body, " is untracked")	
+			#print("exited ",body, " is untracked")	
 	else:
-		print("exited ",body, " is not a pawn")	
+		#print("exited ",body, " is not a pawn")	
 		return
 		
 var visRad = cos(deg_to_rad(forward_vision_angle/2))
 ##uses dot product vs forward angle to check if within the target forward angle
 func is_in_detection_angle(entity: CharacterPawn3D)->bool:
-	if GlobalTools.go_print:
-		print("running detection angle code ", entity)
 	var forwards = facingDirection
 	var targetDirection = (entity.global_position - global_position).normalized()
 	var dotProduct = forwards.dot(targetDirection)
 	if dotProduct > visRad: #forward angle halved because that's how math works to get the proper result apparently
-		if GlobalTools.go_print:
-			print("entity in front: ", entity)
 		return true
 	else:
 		return false
 
 ##checks if within vision "cone" and appends to the buffer. called each AI polling updated
 func update_entity_in_detection_angle()->void:
-	if GlobalTools.go_print:
-		print("updated entitiy in detection BEFORE clear")
 	entitiesInDetectionAngle.clear()
-	if GlobalTools.go_print:
-		print("updated entitiy in detection AFTER clear")
 	for e in allSensedEntities:
-		if GlobalTools.go_print:
-			print("in for loop")
 		if is_in_detection_angle(e):
-			if GlobalTools.go_print:
-				print("BEFORE append")
 			entitiesInDetectionAngle.append(e)
-			if GlobalTools.go_print:
-				print("AFTER append")
 
 var debugFlag = false
 var collisionMask: int = 3 #collision layers 1 and 2
