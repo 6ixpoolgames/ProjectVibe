@@ -31,19 +31,12 @@ var isReadyTrigger = false
 var activeCamera: Camera3D
 var allChildren: Array
 func _ready():
-	allChildren = get_all_descendants(self)
+	allChildren = GlobalTools.get_all_descendants(self)
 	init_active_camera()
 	#init_terrain_collision()
 	set_references_hard()
 	init_movement_controller()
 	init_camera_spring_arm()
-
-##returns array of all descendant nodes. Can be offloaded to global tools singleton probably
-func get_all_descendants(node: Node, descendants: Array = []) -> Array:
-	for child in node.get_children():
-		descendants.append(child)
-		get_all_descendants(child, descendants)
-	return descendants
 
 #node reference variables
 var CharacterModel: MeshInstance3D
@@ -95,7 +88,7 @@ func init_active_camera()-> void:
 
 func _physics_process(delta: float) -> void:
 	#if isReadyTrigger == true:
-	printFuncRationalizer(50)
+	GlobalTools.printFuncRationalizer(50)
 	yaw_to_facing(delta)
 	apply_gravity(delta)
 	move_in_direction(moveDirection, delta)
@@ -144,7 +137,7 @@ func apply_gravity(delta:float):
 ##gets a reference to the pawn's camera controller (spring arm). If null for some reason, returns a reference to self
 func get_camera_attachment_point()->Node3D:
 	var attachTo: Node3D
-	allChildren = get_all_descendants(self)
+	allChildren = GlobalTools.get_all_descendants(self)
 	for c in allChildren:
 		if c is PawnCameraController:
 			attachTo = c
@@ -225,19 +218,6 @@ func unstucker()->void:
 	
 
 #########################################
-
-#consider moving to a global tools singleton
-var printTimer: int = -1
-var goPrint: bool = false
-##counts down printTime number of frames before setting "goPrint" to true, sets it to false every other frame. To apply, just add "if goPrint:" before calling a debug print output to 'rationalize' it
-## [param printTime] is number of frames before setting goPrint to true.
-func printFuncRationalizer(printTime: int):
-	if printTimer > 0:
-		printTimer -= 1
-		goPrint = false
-	else:
-		printTimer = printTime
-		goPrint = true
 
 #not used anymore. for cleanup
 var terColRef: CollisionShape3D

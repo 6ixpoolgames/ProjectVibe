@@ -5,7 +5,7 @@
 [ext_resource type="PackedScene" uid="uid://dqetdldbv7aa8" path="res://assets/scenes/character_pawn_3d.tscn" id="4_jnlp7"]
 [ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://assets/legacy/proc_gen_tile.tscn" id="5_jnlp7"]
 [ext_resource type="Shader" uid="uid://dcautap0qmayt" path="res://assets/shaders/stylized_spatial_clouds.gdshader" id="6_l8v81"]
-[ext_resource type="Script" uid="uid://6sbyftt8pnl8" path="res://assets/scripts/AISensingComponent.gd" id="6_vyht1"]
+[ext_resource type="Script" uid="uid://cwxtrbi3gjvc6" path="res://assets/scripts/AIUnitManager.gd" id="7_bf3um"]
 [ext_resource type="Script" uid="uid://fq5sx40suwlv" path="res://assets/scripts/FreeFloatingCameraController.gd" id="7_vyht1"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_pq8q7"]
@@ -203,9 +203,9 @@ addPlayerController = true
 addClickController = true
 spawnDebugControllers = true
 
-[node name="AISensingComponent" type="Node3D" parent="HeroPawn"]
-script = ExtResource("6_vyht1")
-metadata/_custom_type_script = "uid://6sbyftt8pnl8"
+[node name="AIUnitManager" type="Node3D" parent="HeroPawn"]
+script = ExtResource("7_bf3um")
+metadata/_custom_type_script = "uid://cwxtrbi3gjvc6"
 
 [node name="testPawn1" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24.0699, -7.8516, 9.15864)

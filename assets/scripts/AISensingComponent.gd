@@ -26,29 +26,38 @@ var sensingCollisionShape3D: CollisionShape3D
 #facing direction buffer var
 var facingDirection: Vector3
 
+var AIManager: AIUnitManager
+
 func _ready() -> void:
 	init()
 
 #initializes variables and creates sensing area
 func init()->void:
-	if get_parent_node_3d() is CharacterPawn3D:
-		pawn = get_parent_node_3d()
-	else:
+	var ascendants = GlobalTools.get_all_ascendants(self)
+	for a in ascendants:
+		if a is CharacterPawn3D and pawn == null:
+			pawn = a
+		if a is AIUnitManager and AIManager == null:
+			AIManager = a
+	if pawn == null:
 		printerr("not attached to pawn! - ", self)
+	if AIManager == null: 
+		printerr("not attached to unit manager! - ", self)
 	#exclude = get_all_colliders_in_pawn()
 	initialize_sensing()
-	polling_outofbounds_reassignment()
+	
 
 func _physics_process(delta: float) -> void:
 	update_facing_direction_vector()
 	update_sensing_area_offset()
-	should_poll()
-	if goPoll:
+	if AIManager.pollingGroupActive == polling_group:
 		update_entity_in_detection_angle()
 		update_entities_in_LOS()
 
 ##checks if polling group is valid and reassigns a random valid group if not
 func polling_outofbounds_reassignment()->void:
+	if polling_freq_frame_count < 1:
+		polling_freq_frame_count = 3 # defaults polling frequency to 20hz if not set properly
 	if polling_group < 1 or polling_group > polling_freq_frame_count:
 		polling_group = randi_range(1, polling_freq_frame_count)
 		print("polling group outbounds. randomly reassigned to: ", polling_group, " of ", polling_freq_frame_count)
@@ -64,10 +73,11 @@ func initialize_sensing()->void:
 var debugMarker: MeshInstance3D
 ##creates area 3D, collision for it, and a offset visualizer (debug marker)
 func create_sensing_area()->void:
-	if sensingArea3D != null:
+	if sensingArea3D:
+		sensingArea3D.queue_free()
 		sensingArea3D = null 
 	sensingArea3D = Area3D.new()
-	if sensingCollisionShape3D != null:
+	if sensingCollisionShape3D:
 		sensingCollisionShape3D = null
 	sensingCollisionShape3D = CollisionShape3D.new()
 	var sphereShape = SphereShape3D.new()
@@ -180,20 +190,6 @@ func get_all_colliders_in_pawn()->Array:
 		if c is CollisionShape3D:
 			colArr.append(c)
 	return colArr
-
-#setup variables for staggered AI polling
-var frameCount: int = 0
-var goPoll = false
-##count through frames and check if this AI Sensing Component needs to poll
-func should_poll():
-	goPoll = false
-	frameCount += 1
-	if frameCount == polling_group:
-		goPoll = true
-	if frameCount >= polling_freq_frame_count:
-		frameCount = 0
-		#print("framecount reset")
-	
 
 ##debug function, prints all sensing buffers for validation
 func _input(event: InputEvent) -> void:
