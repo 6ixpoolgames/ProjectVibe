@@ -4,6 +4,7 @@ class_name StatComponentBase
 signal stat_changed(current: float, change: float)
 signal limit_changed(newMin: float, newLimit: float)
 
+@export var statName: String ##sets name to string
 @export var maxValue:float = 10 ##base MAX value of the stat
 @export var currValue:float ##CURRENT value of the stat
 @export var baseRegen: float = 0 ##base regeneration rate of the stat per second. if negative, constantly damages
@@ -11,12 +12,21 @@ var regenValue: float
 var limitValue:float ##the current max value of the stat. For handling buffs/debuffs 
 var minValue: float = 0
 
+var statManager: StatManagerComponent
+
 func _ready():
+	name = statName
 	limitValue = maxValue
 	regenValue = baseRegen
 	set_physics_process(regenValue != 0)
 	if currValue == null:
 		currValue = limitValue
+	if statManager == null:
+		if get_parent() is StatManagerComponent:
+			statManager = get_parent() #kinda relies on proper node heirarchy on declaration so be sure to make it so
+			statManager.request_add_stat_to_manager(self)
+		else:
+			printerr("StatComponent not child of StatManagerComponent")
 	
 func _physics_process(delta: float) -> void:
 	delta_stat(regenValue, delta)
@@ -57,6 +67,10 @@ func delta_stat(value:float, delta:float):
 	currValue += value * delta
 	currValue = clampf(currValue,minValue,limitValue)
 	stat_changed.emit(currValue, value)
+
+func set_stat_name(newName: String)-> void:
+	#statName = newName
+	name = newName
 
 ## Getters for external access
 func get_current_value() -> float:

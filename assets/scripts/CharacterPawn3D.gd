@@ -33,7 +33,6 @@ var allChildren: Array
 func _ready():
 	allChildren = GlobalTools.get_all_descendants(self)
 	init_active_camera()
-	#init_terrain_collision()
 	set_references_hard()
 	init_movement_controller()
 	init_camera_spring_arm()
@@ -42,11 +41,14 @@ func _ready():
 var CharacterModel: MeshInstance3D
 var CollisionCapsule: CollisionShape3D
 var ControllerManager: MovementControllerManager
+var StatManager: StatManagerComponent
 ##janky hard coded reference setter. Relies on node structure from character_pawn_3d.tscn
 func set_references_hard():
 	CharacterModel = $CharacterModel
 	CollisionCapsule = $CollisionShape3D
 	ControllerManager = $MovementControllerManager
+	StatManager = $StatManagerComponent
+	print(self, " has set references (HARD)")
 
 ##checks if controller manager is already added. If not, creates a new one. Part of functions to overhaul during refactor
 func init_movement_controller()->void:

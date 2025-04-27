@@ -32,7 +32,7 @@ func printFuncRationalizer(printTime: int):
 		go_print = true
 		
 func _physics_process(_delta: float) -> void:
-	printFuncRationalizer(60)
+	printFuncRationalizer(90)
 
 func _process(delta: float) -> void:
 	final_cleanup(delta)

@@ -43,6 +43,11 @@ func should_poll_group()->int:
 		pollingGroupActive = 1
 	return pollingGroupActive
 	
+func poll_now()->bool:
+	if pollingGroupActive == polling_group:
+		return true
+	else:
+		return false
 ##checks if polling group is valid and reassigns a random valid group if not
 func polling_outofbounds_reassignment()->void:
 	if polling_freq_frame_count < 1:
