@@ -93,3 +93,7 @@ func request_get_regen_rate(statName: String) -> float:
 	else:
 		var result := allStats[index].get_regen_rate()
 		return result
+
+func get_stat_with_name(stat_name:String) -> StatComponentBase:
+	var index = statNames.find(stat_name)
+	return allStats[index]
