@@ -207,8 +207,6 @@ spawnDebugControllers = true
 
 [node name="AIUnitManager" type="Node3D" parent="HeroPawn"]
 script = ExtResource("7_bf3um")
-polling_freq_frame_count = null
-polling_group = null
 metadata/_custom_type_script = "uid://cwxtrbi3gjvc6"
 
 [node name="StatManagerComponent" type="Node" parent="HeroPawn"]

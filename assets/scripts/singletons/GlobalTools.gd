@@ -12,7 +12,7 @@ func get_all_ascendants(target:Node) -> Array[Node]:
 	return ascendants
 
 ##returns array of all descendant nodes. Can be offloaded to global tools singleton probably
-func get_all_descendants(node: Node, descendants: Array = []) -> Array:
+func get_all_descendants(node: Node, descendants: Array[Node] = []) -> Array[Node]:
 	for child in node.get_children():
 		descendants.append(child)
 		get_all_descendants(child, descendants)

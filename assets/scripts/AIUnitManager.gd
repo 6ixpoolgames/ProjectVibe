@@ -122,6 +122,7 @@ var StatManager: StatManagerComponent
 var CameraControllerArm: PawnCameraController
 var AIManager: AIUnitManager
 var SensingComponent: AISensingComponent
+var StateManager: AIStateManagerComponent
 func set_references(references:Array[Node])->void:
 	for r in references:
 		if r is CharacterPawn3D:
