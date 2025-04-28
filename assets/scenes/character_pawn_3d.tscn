@@ -13,7 +13,7 @@
 script = ExtResource("1_mqp35")
 metadata/_custom_type_script = "uid://m21ym7goa67x"
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+[node name="CollisionCapsule" type="CollisionShape3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 shape = SubResource("CapsuleShape3D_uw0gs")
 

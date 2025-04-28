@@ -23,7 +23,11 @@ var mousePosition = Vector2.ZERO
 @onready var viewportX: float = get_viewport().size.x
 @onready var viewportY: float = get_viewport().size.y
 
+#var Pawn:CharacterPawn3D
+#func set_references(references:Array[Node])->void:
+#	Pawn = references[references.find(CharacterPawn3D)]
 
+	
 func _ready() -> void:
 	self.spring_length = cameraDistDefault
 	get_viewport().size_changed.connect(viewport_size_changed)

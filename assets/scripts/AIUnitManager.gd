@@ -6,9 +6,9 @@ class_name AIUnitManager
 @export var polling_group: int = 0 ##which frame this component polls. Choose 0 for random assignment.
 
 #references and ready checks
-var pawn: CharacterPawn3D
-var stateManagerComponent: AIStateManagerComponent
-var sensingComponent: AISensingComponent
+#var pawn: CharacterPawn3D
+#var stateManagerComponent: AIStateManagerComponent
+#var sensingComponent: AISensingComponent
 var stateManagerReady:= false
 var sensingComponentReady:= false
 
@@ -18,23 +18,39 @@ var pollingGroupActive:int = 0
 func initialize()->void:
 	polling_outofbounds_reassignment()
 	clear_subcomponents()
-	sensingComponent = AISensingComponent.new()
-	stateManagerComponent = AIStateManagerComponent.new()
-	sensingComponent.name = "AISensingComponent"
-	stateManagerComponent.name = "AIStatemanagerComponent"
+	SensingComponent = AISensingComponent.new()
+	StateManager = AIStateManagerComponent.new()
+	SensingComponent.name = "AISensingComponent"
+	StateManager.name = "AIStatemanagerComponent"
 	if get_parent_node_3d() is CharacterPawn3D:
-		pawn = get_parent_node_3d()
-	self.add_child(sensingComponent)
-	self.add_child(stateManagerComponent)
+		Pawn = get_parent_node_3d()
+	self.add_child(SensingComponent)
+	self.add_child(StateManager)
 	
+func _enter_tree() -> void:
+	init_sensing_component()
+	init_state_manager_component()
 
+
+func init_sensing_component():
+	if !SensingComponent:
+		SensingComponent = AISensingComponent.new()
+		SensingComponent.name = "AISensingComponent"
+		self.add_child(SensingComponent)
+
+func init_state_manager_component():
+	if !StateManager:
+		StateManager = AIStateManagerComponent.new()
+		StateManager.name = "AIStatemanagerComponent"
+		self.add_child(StateManager)
+	
 func clear_subcomponents():
-	if sensingComponent:
-		sensingComponent.queue_free()
-		sensingComponent = null
-	if stateManagerComponent:
-		stateManagerComponent.queue_free()
-		stateManagerComponent = null
+	if SensingComponent:
+		SensingComponent.queue_free()
+		SensingComponent = null
+	if StateManager:
+		StateManager.queue_free()
+		StateManager = null
 
 ##count through frames and set which polling group should fire
 func should_poll_group()->int:
@@ -57,16 +73,18 @@ func polling_outofbounds_reassignment()->void:
 		#print("polling group outbounds. randomly reassigned to: ", polling_group, " of ", polling_freq_frame_count)
 	
 func _physics_process(_delta: float) -> void:
-	pass_down_references()
-	if !allComponentsReady:
-		is_all_components_ready()
-	if allComponentsReady:
-		pass_down_references()
+	#pass_down_references()
+	#if !allComponentsReady:
+	#	is_all_components_ready()
+	#if allComponentsReady:
+	#	pass_down_references()
 		should_poll_group()
 	
 func _ready() -> void:
-	initialize()
-
+	#initialize()
+	polling_outofbounds_reassignment()
+	
+	
 var componentsReady: Array[Node]
 func component_has_intialized(component: Node):
 	if component is AISensingComponent and !sensingComponentReady:
@@ -84,12 +102,42 @@ func is_all_components_ready():
 
 var stopOnOne:=false
 func pass_down_references():
-	if !stopOnOne and allComponentsReady and pawn:
+	if !stopOnOne and allComponentsReady and Pawn:
 		for c in componentsReady:
-			c.pawn = pawn
+			c.Pawn = Pawn
 			if c is AISensingComponent:
-				c.stateManagerComponent = stateManagerComponent
+				c.StateManager = StateManager
 			if c is AIStateManagerComponent:
-				c.sensingComponent = sensingComponent
+				c.SensingComponent = SensingComponent
 		stopOnOne = true
 		print(">>>Manager.polling_group = ", polling_group)
+
+#node references
+var isReferenceSet:= false
+var Pawn: CharacterPawn3D
+var CharacterModel: MeshInstance3D
+var CollisionCapsule: CollisionShape3D
+var ControllerManager: MovementControllerManager
+var StatManager: StatManagerComponent
+var CameraControllerArm: PawnCameraController
+var AIManager: AIUnitManager
+var SensingComponent: AISensingComponent
+func set_references(references:Array[Node])->void:
+	for r in references:
+		if r is CharacterPawn3D:
+			Pawn = r
+		if r.name == "CharacterModel":
+			CharacterModel = r
+		if r.name == "CollisionCapsule":
+			CollisionCapsule = r
+		if r is MovementControllerManager:
+			ControllerManager = r
+		if r is StatManagerComponent:
+			StatManager = r
+		if r is PawnCameraController:
+			CameraControllerArm = r
+		if r is AIUnitManager:
+			AIManager = r
+		if r is AISensingComponent:
+			SensingComponent = r
+	isReferenceSet = true

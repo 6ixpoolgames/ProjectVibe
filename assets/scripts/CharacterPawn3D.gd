@@ -29,19 +29,28 @@ var lastInputRotationTilt: float = targetTilt
 #ready variables
 var isReadyTrigger = false
 var activeCamera: Camera3D
-var allChildren: Array
+var allChildren: Array[Node]
 func _ready():
-	allChildren = GlobalTools.get_all_descendants(self)
-	init_active_camera()
-	set_references_hard()
-	init_movement_controller()
-	init_camera_spring_arm()
+	#allChildren = GlobalTools.get_all_descendants(self)
+	ready_active_camera()
+	pass_down_references()
+	#set_references_hard()
+	#init_controller_manager()
+	#init_camera_spring_arm()
+
+func _enter_tree() -> void:
+	init_camera_controller_arm()
+	init_controller_manager()
+	init_stat_manager()
 
 #node reference variables
 var CharacterModel: MeshInstance3D
 var CollisionCapsule: CollisionShape3D
 var ControllerManager: MovementControllerManager
 var StatManager: StatManagerComponent
+var cameraControllerArm: PawnCameraController
+var AIManager: AIUnitManager
+var SensingComponent: AISensingComponent
 ##janky hard coded reference setter. Relies on node structure from character_pawn_3d.tscn
 func set_references_hard():
 	CharacterModel = $CharacterModel
@@ -50,44 +59,87 @@ func set_references_hard():
 	StatManager = $StatManagerComponent
 	print(self, " has set references (HARD)")
 
-##checks if controller manager is already added. If not, creates a new one. Part of functions to overhaul during refactor
-func init_movement_controller()->void:
+func pass_down_references():
+	allChildren.clear()
+	allChildren = GlobalTools.get_all_descendants(self)
+	var references: Array[Node]
+	var pwn: CharacterPawn3D = self
+	references.append(pwn)
 	for c in allChildren:
+		if c.name == "CharacterModel":
+			CharacterModel = c
+			references.append(c)
+		if c.name == "CollisionCapsule":
+			CollisionCapsule = c
+			references.append(c)
 		if c is MovementControllerManager:
-			print(self, " already has movement controller component")
-			return
-	var movementController = MovementControllerManager.new()
-	movementController.name = "MovementControllerManager"
-	self.add_child(movementController)
+			ControllerManager = c
+			references.append(c)
+		if c is StatManagerComponent:
+			StatManager = c
+			references.append(c)
+		if c is PawnCameraController:
+			cameraControllerArm = c
+			references.append(c)
+		if c is AIUnitManager:
+			AIManager = c
+			references.append(c)
+		if c is AISensingComponent:
+			SensingComponent = c
+			references.append(c)
+	for r in allChildren:
+		if r.has_method("set_references"):
+			r.set_references(references)
+	print(self, " references passed")
+
+##checks if controller manager is already added. If not, creates a new one. Part of functions to overhaul during refactor
+func init_controller_manager()->void:
+	if ControllerManager:
+		print(self, " already has movement controller manager component")
+		return
+	ControllerManager = MovementControllerManager.new()
+	ControllerManager.name = "MovementControllerManager"
+	self.add_child(ControllerManager)
 	#print("added movementControllerComponent: ", movementController)
-	movementController._ready()
 
 
-var springArmRef: SpringArm3D
 var unitHalfHeight: float = 0
 ##Creates a PawnCameraController3D (spring arm) if there isn't one. Candidate for refactor. Code kinda messy, but functional
-func init_camera_spring_arm()->void:
-	for c in allChildren:
-		if c is PawnCameraController:
-			print(self, " already has camera controller")
-			return
-		elif c is CollisionShape3D and c.shape is CapsuleShape3D:
-			unitHalfHeight = c.shape.height/2
-	var cameraController = PawnCameraController.new()
-	cameraController.name = "SpringArm3D" #refactor with the spring arm reference code bullshit
-	self.add_child(cameraController)
-	cameraController.position = Vector3(0,unitHalfHeight,0)
-	cameraController.rotation.x = deg_to_rad(cameraController.initial_camera_pitch)
-	springArmRef = cameraController
-	#print("added PawnCameraController3D: ", cameraController)
+func init_camera_controller_arm()->void:
+	if cameraControllerArm:
+		print(self, " already has camera controller")
+		return
+	if CollisionCapsule:
+			unitHalfHeight = CollisionCapsule.shape.height/2
+	cameraControllerArm = PawnCameraController.new()
+	cameraControllerArm.name = "PawnCameraController" #refactor with the spring arm reference code bullshit
+	self.add_child(cameraControllerArm)
+	cameraControllerArm.position = Vector3(0,unitHalfHeight,0)
+	cameraControllerArm.rotation.x = deg_to_rad(cameraControllerArm.initial_camera_pitch)
+	#print("added PawnCameraController3D: ", cameraControllerArm)
 		
 ##sets the current viewport camera to the active camera. Can be combined with a larger initializer function on refactor. 
 ##Also should code for checking if its a PlayerCamera3D in situations where there's more than 1 active viewport
-func init_active_camera()-> void:
+func ready_active_camera()-> void:
 	activeCamera = get_viewport().get_camera_3d()
 	activeCamera.connect("possession_event", _on_possession_event)
 
+func init_stat_manager()->void:
+	if StatManager:
+		print("already has stat manager component")
+		return
+	StatManager = StatManagerComponent.new()
+	StatManager.name = "StatManagerComponent"
+	self.add_child(StatManager)
+	
 
+func init_AI_manager()->void:
+	if AIManager:
+		print(self, " already has AI unit manager")
+		return
+	AIManager = AIUnitManager.new()
+	AIManager.name = "AIUnitManager"
+	self.add_child(AIManager)
 func _physics_process(delta: float) -> void:
 	#if isReadyTrigger == true:
 	GlobalTools.printFuncRationalizer(50)
@@ -139,12 +191,9 @@ func apply_gravity(delta:float):
 ##gets a reference to the pawn's camera controller (spring arm). If null for some reason, returns a reference to self
 func get_camera_attachment_point()->Node3D:
 	var attachTo: Node3D
-	allChildren = GlobalTools.get_all_descendants(self)
-	for c in allChildren:
-		if c is PawnCameraController:
-			attachTo = c
-			springArmRef = c #additional bit of code to ensure springArmRef always points to the camera attachment. SpringArmRef might need a refactor actually
-	if attachTo == null:
+	if cameraControllerArm:
+		attachTo = cameraControllerArm
+	else:
 		attachTo = self
 	return attachTo
 

@@ -8,16 +8,16 @@ var currState:= AIState.Idle
 
 #node reference
 var pawn: CharacterPawn3D
-var AIManager: AIUnitManager
+#var AIManager: AIUnitManager
 var sensingComponent: AISensingComponent
 
 var referencesUpdated:= false
 
 func _ready() -> void:
 	initialize()
-	if get_parent_node_3d() is AIUnitManager:
-		AIManager = get_parent_node_3d()
-		AIManager.component_has_intialized(self)
+	#if get_parent_node_3d() is AIUnitManager:
+	#	AIManager = get_parent_node_3d()
+	#	AIManager.component_has_intialized(self)
 
 func initialize():
 	pass
@@ -81,3 +81,30 @@ func check_incapacited()->void:
 			currState = AIState.Incapacitated
 			if GlobalTools.go_print:
 				print("set to incapacitated")
+
+#node references
+var isReferenceSet:= false
+var Pawn: CharacterPawn3D
+var CharacterModel: MeshInstance3D
+var CollisionCapsule: CollisionShape3D
+var ControllerManager: MovementControllerManager
+var StatManager: StatManagerComponent
+var CameraControllerArm: PawnCameraController
+var AIManager: AIUnitManager
+func set_references(references:Array[Node])->void:
+	for r in references:
+		if r is CharacterPawn3D:
+			Pawn = r
+		if r.name == "CharacterModel":
+			CharacterModel = r
+		if r.name == "CollisionCapsule":
+			CollisionCapsule = r
+		if r is MovementControllerManager:
+			ControllerManager = r
+		if r is StatManagerComponent:
+			StatManager = r
+		if r is PawnCameraController:
+			CameraControllerArm = r
+		if r is AIUnitManager:
+			AIManager = r
+	isReferenceSet = true
