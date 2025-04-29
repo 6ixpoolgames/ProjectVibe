@@ -1,7 +1,7 @@
-extends Node3D
+extends Node
 class_name MovementControllerManager
 
-var pawn: CharacterPawn3D
+var Pawn: CharacterPawn3D
 var isInit: bool = false
 
 @export var addPlayerController = false ##debug function for creating and attaching player controllers to the pawn at ready
@@ -9,12 +9,18 @@ var isInit: bool = false
 @export var hasAIController = false
 @export var spawnDebugControllers = false
 
+func _init(addPlayerCon:bool = false, addClickCon:bool = false, hasAICon:bool = false, spawnDebugCon: bool = true ) -> void:
+	addPlayerController = addPlayerCon
+	addClickController = addClickCon
+	hasAIController = hasAICon
+	spawnDebugControllers = spawnDebugCon
+	
 func _ready():
 	#check if properly attached
-	pawn = self.get_parent()
-	if pawn == null or not pawn is CharacterPawn3D: #improper if NULL or parent NOT CharacterPawn3D
+	if !Pawn or not Pawn is CharacterPawn3D: #improper if NULL or parent NOT CharacterPawn3D
+		Pawn = get_parent()
 		isInit = false
-		print("Movement controller initialization error! ", self, " p: " , pawn)
+		#print("Movement controller initialization error! ", self, " p: " , Pawn)
 	else: #if properly attached
 		isInit = true
 		if spawnDebugControllers:
@@ -31,15 +37,15 @@ func get_controllers_attached()->void:
 			controllersAttached.append(c)
 		
 ##test function that creates player controllers for the movement controller
-func create_and_attach_player_controllers()->void:
+func create_and_attach_player_controllers(addPC:bool = addPlayerController, addCC:bool = addClickController)->void:
 	#currently hardcoded to attach a player controller by default. Will modify later to accept a controller programatically
-	if addPlayerController:
+	if addPC:
 		var controller = PlayerControllerComponent.new()
 		controller.name = "PlayerControllerComponent"
 		add_child(controller)
 		#print("controller attached: ", controller)
 	#also a hardcoded attachment of click to move controller
-	if addClickController:
+	if addCC:
 		var controller2 = ClickToMoveComponent.new()
 		controller2.name = "ClickToMoveComponent"
 		add_child(controller2)
@@ -73,10 +79,10 @@ func assess_request_priority()->int:
 func _physics_process(_delta: float) -> void:
 	var commandIndex = assess_request_priority()
 	if assess_request_priority() == -1: #if no controllers giving inputs, give no input commands 
-		pawn.give_move_command(Vector3.ZERO) #(zero iDir is treated as no commands by the pawn)
-	elif not commandIndex < 0 and pawn is CharacterPawn3D and pawn != null: #if has command queued up, AND manager is attached to a pawn (checked 2 ways)
+		Pawn.give_move_command(Vector3.ZERO) #(zero iDir is treated as no commands by the pawn)
+	elif not commandIndex < 0 and Pawn: #if has command queued up, AND manager is attached to a pawn (checked 2 ways)
 		playerInputOverride(commandIndex) #checks to see if controller giving command is manual player controller -> will abort Nav Agent based movement
-		pawn.give_move_command(iDirBuffer[commandIndex]) 
+		Pawn.give_move_command(iDirBuffer[commandIndex]) 
 	clear_move_requests()
 
 ##overrides click to move navigation if a playercontroller provides an input

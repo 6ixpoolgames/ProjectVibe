@@ -5,9 +5,9 @@
 [ext_resource type="PackedScene" uid="uid://dqetdldbv7aa8" path="res://assets/scenes/character_pawn_3d.tscn" id="4_jnlp7"]
 [ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://assets/legacy/proc_gen_tile.tscn" id="5_jnlp7"]
 [ext_resource type="Shader" uid="uid://dcautap0qmayt" path="res://assets/shaders/stylized_spatial_clouds.gdshader" id="6_l8v81"]
-[ext_resource type="Script" uid="uid://cwxtrbi3gjvc6" path="res://assets/scripts/AICoreComponent.gd" id="7_bf3um"]
 [ext_resource type="Script" uid="uid://fq5sx40suwlv" path="res://assets/scripts/FreeFloatingCameraController.gd" id="7_vyht1"]
 [ext_resource type="Script" uid="uid://d4ioo33u80vet" path="res://assets/scripts/CharacterStatManager.gd" id="8_huihk"]
+[ext_resource type="Script" uid="uid://dywqacbh7on7i" path="res://assets/scripts/PawnInitializerComponent.gd" id="9_huihk"]
 [ext_resource type="Script" uid="uid://bmdvdh2484dx6" path="res://assets/scripts/StatComponentBase.gd" id="9_tw3kd"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_pq8q7"]
@@ -198,15 +198,12 @@ script = ExtResource("7_vyht1")
 metadata/_custom_type_script = "uid://c4fluuylnuit3"
 
 [node name="HeroPawn" parent="." instance=ExtResource("4_jnlp7")]
+hasInitializer = true
 
 [node name="MovementControllerManager" parent="HeroPawn" index="2"]
 addPlayerController = true
 addClickController = true
 spawnDebugControllers = true
-
-[node name="AIUnitManager" type="Node3D" parent="HeroPawn"]
-script = ExtResource("7_bf3um")
-metadata/_custom_type_script = "uid://cwxtrbi3gjvc6"
 
 [node name="CharacterStatManager" type="Node" parent="HeroPawn"]
 script = ExtResource("8_huihk")
@@ -226,21 +223,24 @@ currValue = 50.0
 baseRegen = 0.5
 metadata/_custom_type_script = "uid://bmdvdh2484dx6"
 
+[node name="PawnInitializerComponent" type="Node" parent="HeroPawn"]
+script = ExtResource("9_huihk")
+spawnPlayerControllers = true
+spawnStatManager = true
+spawnAllAICoreComponents = true
+metadata/_custom_type_script = "uid://dywqacbh7on7i"
+
 [node name="testPawn1" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24.0699, -7.8516, 9.15864)
-shouldInitialize = false
 
 [node name="testPawn3" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.94547, -2.41002, -21.7933)
-shouldInitialize = false
 
 [node name="testPawn4" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.12411, -4.3399, -17.2718)
-shouldInitialize = false
 
 [node name="testPawn2" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -14.5989, -7.66872, 14.0209)
-shouldInitialize = false
 
 [editable path="NavigationRegion3D/ProcGenTile"]
 [editable path="HeroPawn"]

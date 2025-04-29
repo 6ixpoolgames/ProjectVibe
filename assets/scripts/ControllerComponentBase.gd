@@ -1,4 +1,4 @@
-extends Node3D
+extends Node
 class_name ControllerComponentBase
 
 @export var isPriorityController = false
@@ -7,7 +7,7 @@ var pawn: CharacterPawn3D
 var controllerManager: MovementControllerManager
 
 func _ready():
-	controllerManager = get_parent_node_3d()
+	controllerManager = get_parent()
 	pawn = controllerManager.pawn
 	if not controllerManager is MovementControllerManager or controllerManager == null:
 		print("Not a valid MovementControllerManager!")

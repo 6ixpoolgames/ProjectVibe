@@ -1,0 +1,95 @@
+Pawn			 			(CharacterPawn3D)
+=	CharacterModel 				-(MeshInstance3D)
+=	CollisionCapsule 			-(CollisionShape3D)
+=	MovementController			-(MovementControllerManager)
+=		ControllerComponent1		--(ControllerComponentBase)
+=		ControllerComponent2		--(ControllerComponentBase)
+=		ControllerComponent3		--(ControllerComponentBase)
+		...
+!	*CombatFrameworkComponent
+!		*CombatController1
+!		*CombatController1
+		...
+!		*CombatActionManager
+!			*CombatAction1
+!			*CombatAction2
+!			*CombatAction3
+		...
+=	AICoreComponment 			-(AICoreComponent)
+=		AISensingComponent 		--(AISensingComponent)
+=		AIStateManager			--(AIStateManager)
+=			AIStateComponent1 	---(AIStateComponentBase)
+=			AIStateComponent2 	---(AIStateComponentBase)
+=			AIStateComponent3 	---(AIStateComponentBase)
+			...
+!		*AIBehaivourManager
+!			*AIActionComponent1
+!			*AIActionComponent2
+!			*AIActionComponent3
+			...
+=	CharacterStatManager			-(CharacterStatManager)
+=		StatComponent1			--(StatComponentBase)
+=		StatComponent2			--(StatComponentBase)
+=		StatComponent3			--(StatComponentBase)
+		...
+=	PawnCameraController3D			-(PawnCameraController3D)
+=		PlayerCamera3D			-(PlayerCamera3D)
+
+
+
+Pawn
+CharacteraBody3D class that handles basic movement and physics functionality
+
+CharacterModel
+Mesh for the pawn character
+
+CollisionCapsule
+Collision shape for the pawn
+
+MovementController
+Manages inputs from various controllers. arbitrates input handling and passess it to the Pawn for application of movement commands
+
+ControllerComponentBase
+Base class for various movement controllers. Currently with manual player controller (keyboard/mouse/controller), click to move (click on navigable terrain to move there using NavigationAgent3D), and AI movement (same as click to move, but inputs come from AICoreComponent)
+
+CombatFrameWorkManager
+Central coordinator for combat related logic. Things like STATS (aspd, dmg, etc), damage handling (coordinating with CharacterStatManager), hit detection, and status effects will be orchastrated via this component.
+
+*CombatController 
+Planned to be similar to movement controller with subcomponent for player and AI input handling. Will arbitrate combat related inputs coming from potentially multiple AI subcomenetns
+
+*CombatActionManager
+Will manage combat related actions like attacks, abilities, spellcasting, adjudicating CombatAction calls based on validity (cooldown, mana, range, ammo, etc)
+
+*CombatAction component
+Planned to be attachable to the CombatController and will contain specific attack and spell effect logic that is passed up to the combat framework manager for handling.
+
+AICoreComponent
+Orchastrator class for AI behaviour, state management, and sensing. 
+
+AISensingComponent
+Handles AI sensing and memory. Only vision is currently implemented, but will expand to other responsibilities like stealth detection, friend/foe detection, etc.
+
+AIStateManager
+Arbitrates which state the AI is in depending on sensing and other variables. Applies the valid state with the highest priority. Planned to have dynamic utility score based moderation of state priorities.
+
+AIStateComponentBase
+Contains logic for state validity and priority. Responsible for checking and setting its own
+
+AIBehaviourManager
+Orchastrator for AI actions to perform depending on state. Reads AI state, sensing, and other variables to decide which of the attached AIAction scripts to execute using dynamic utility score like weighting (possibly some RNG as well).
+
+AIActionComponentBase
+Contains logic for actions / series of actions ("plans) to execute. Calls built in methods in AIMovementController, CombatFrameWorkComponent, etc as building blocks. (ex. FleeAction: if State.Routed: move_to(randomLocationAwayFromPlayer)
+
+CharacterStatManager
+Manages stats such as HP, Mana, Stamina, Exp, etc with specific functions to modify the stats in various ways. Called by other components like CombatFrameworkManager to apply damage, consume resources, etc.
+
+StatComponentBase
+Stores values, maintains, and modifies, player stats (HP, Mana, etc). Currently a glorified resoure object but might expand to other responsibilities later if a need arises. Would rather not though.
+
+PawnCameraController3D
+SpringArm3D object that handles third person camera controlls for the pawn during player control. Has logic for springArm transformations to facilitate thrid person perspective gaming.
+
+PlayerCamera3D
+The active viewport that is dynamically transformed during transition from topdown view to thirdperson, etc. Currently contains 3D cursor logic for handling player mouse interactions with the world but will probably need to migrate that stuff to a singleton at a later time. Also currently has "pawn possession" logic. Will need to migrate that later as well. Extended with a FreeFloatingCameraController script for top down perspective controls.

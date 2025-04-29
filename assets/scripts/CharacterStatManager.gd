@@ -28,7 +28,7 @@ func request_add_stat_to_manager(stat: StatComponentBase)->void:
 		statNames.append(stat.name)
 		GlobalTools.print_sequence_counter(self, "request_add_stat_to_manager")
 		print(self, " stat added: ", stat.name)
-		print(allStats, " ", statNames)
+		print("&&& all stats",allStats, " ", statNames)
 
 ##check statNames array for stat component with [param statName] and calls its increase_stat() method w/ [param value]. Returns true/false for success/failure to find and modify stat.
 func request_increase_stat(statName: String, value: float) -> bool:

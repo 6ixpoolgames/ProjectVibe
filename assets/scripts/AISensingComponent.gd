@@ -27,27 +27,14 @@ var sensingCollisionShape3D: CollisionShape3D
 var facingDirection: Vector3
 
 func _ready() -> void:
-	init()
-#	if get_parent_node_3d() is AICoreComponent:
-#		AICore = get_parent_node_3d()
-#		AICore.component_has_intialized(self)
 	GlobalTools.print_sequence_counter(self, "_ready")
 
 ##initializes variables and creates sensing area
-func init()->void:
-#	var ascendants = GlobalTools.get_all_ascendants(self)
-#	for a in ascendants:
-#		if a is CharacterPawn3D and pawn == null:
-#			pawn = a
-#		if a is AICoreComponent and AICore == null:
-#			AICore = a
-#	if pawn == null:
-#		printerr("not attached to pawn! - ", self)
-#	if AICore == null: 
-#		printerr("not attached to unit manager! - ", self)
-#	#exclude = get_all_colliders_in_pawn()
-#	initialize_sensing()
-	pass
+func _init(radius: float = sense_radius, forward_bias:bool = forward_sense_bias, bias_offset:float=sense_forward_offset, vision_angle: float=forward_vision_angle)->void:
+	sense_radius = radius
+	forward_sense_bias = forward_bias
+	sense_forward_offset = bias_offset
+	forward_vision_angle = vision_angle
 	
 func _enter_tree() -> void:
 	initialize_sensing()
@@ -55,7 +42,7 @@ func _enter_tree() -> void:
 func _physics_process(_delta: float) -> void:
 	update_facing_direction_vector()
 	update_sensing_area_offset()
-	if AICore.poll_now():
+	if AICore and AICore.poll_now():
 		update_entity_in_detection_angle()
 		update_entities_in_LOS()
 
@@ -98,7 +85,9 @@ func create_sensing_area()->void:
 
 ##updates the direction vector for the facing direction. Run every physics/frame
 func update_facing_direction_vector()->void:
-	var currYaw = Pawn.currentYaw
+	var currYaw:float
+	if Pawn:
+		currYaw = Pawn.currentYaw
 	facingDirection = Vector3(-sin(currYaw), 0, -cos(currYaw)).normalized() #don't ask me why this math works @_@
 	
 ##offsets area3D sensing sphere [param sense_forward_offset] units forward. Gives sensing directionality. 
@@ -198,34 +187,38 @@ func _input(event: InputEvent) -> void:
 			print("within front angle: ", entitiesInDetectionAngle, " angle: ", forward_vision_angle, " dot: ", visRad )
 			print("with LOS: ", entitiesInLOS)
 
+
 #node references
 var isReferenceSet:= false
 var Pawn: CharacterPawn3D
-var CharacterModel: MeshInstance3D
-var CollisionCapsule: CollisionShape3D
-var ControllerManager: MovementControllerManager
-var StatManager: CharacterStatManager
-var CameraControllerArm: PawnCameraController
+#var CharacterModel: MeshInstance3D
+#var CollisionCapsule: CollisionShape3D
+#var ControllerManager: MovementControllerManager
+#var StatManager: CharacterStatManager
+#var CameraControllerArm: PawnCameraController
 var AICore: AICoreComponent
-var SensingComponent: AISensingComponent
-var StateManager: AIStateManagerComponent
+#var SensingComponent: AISensingComponent
+#var StateManager: AIStateManagerComponent
 func set_references(references:Array[Node])->void:
 	for r in references:
 		if r is CharacterPawn3D:
 			Pawn = r
-		if r.name == "CharacterModel":
-			CharacterModel = r
-		if r.name == "CollisionCapsule":
-			CollisionCapsule = r
-		if r is MovementControllerManager:
-			ControllerManager = r
-		if r is CharacterStatManager:
-			StatManager = r
-		if r is PawnCameraController:
-			CameraControllerArm = r
+#		if r.name == "CharacterModel":
+#			CharacterModel = r
+#		if r.name == "CollisionCapsule":
+#			CollisionCapsule = r
+#		if r is MovementControllerManager:
+#			ControllerManager = r
+#		if r is CharacterStatManager:
+#			StatManager = r
+#		if r is PawnCameraController:
+#			CameraControllerArm = r
 		if r is AICoreComponent:
 			AICore = r
-		if r is AISensingComponent:
-			SensingComponent = r
+#		if r is AISensingComponent:
+#			SensingComponent = r
+#		if r is AIBehaviourManagerComponent:
+#			AIBehaviourManager = r
 	isReferenceSet = true
-	print(self, " references_set called")
+	print(">>>references", references)
+	GlobalTools.print_sequence_counter(self, "set_references")

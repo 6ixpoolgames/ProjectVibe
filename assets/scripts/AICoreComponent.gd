@@ -1,4 +1,4 @@
-extends Node3D
+extends Node
 class_name AICoreComponent
 
 #AI sense polling frequency
@@ -9,48 +9,52 @@ class_name AICoreComponent
 #var pawn: CharacterPawn3D
 #var stateManagerComponent: AIStateManagerComponent
 #var sensingComponent: AISensingComponent
-var stateManagerReady:= false
-var sensingComponentReady:= false
+var addAISensingComponentOnSpawn:= true
+var addAIStateManagerOnSpawn:= true
+var addAIBehaviourManagerOnSpawn:= true
 
 #public variable accessed by subcomponents for when to poll
 var pollingGroupActive:int = 0
-
-func initialize()->void:
-	polling_outofbounds_reassignment()
-	clear_subcomponents()
-	SensingComponent = AISensingComponent.new()
-	AIStateManager = AIStateManagerComponent.new()
-	SensingComponent.name = "AISensingComponent"
-	AIStateManager.name = "AIStatemanagerComponent"
-	if get_parent_node_3d() is CharacterPawn3D:
-		Pawn = get_parent_node_3d()
-	self.add_child(SensingComponent)
-	self.add_child(AIStateManager)
 	
+func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAIStateManagerOnSpawn, addBehave:bool = addAIBehaviourManagerOnSpawn, pollFreq: int = polling_freq_frame_count, pollGrp: int = polling_group)-> void:
+	addAISensingComponentOnSpawn = addSense
+	addAIStateManagerOnSpawn = addState
+	addAIBehaviourManagerOnSpawn = addBehave
+	polling_freq_frame_count = pollFreq
+	polling_group = pollGrp
+	
+		
 func _enter_tree() -> void:
 	init_sensing_component()
 	init_state_manager_component()
+	init_behaviour_manager_component()
 
+func _ready() -> void:
+	polling_outofbounds_reassignment()
+	GlobalTools.print_sequence_counter(self, "_ready")
 
 func init_sensing_component():
 	if !SensingComponent:
-		SensingComponent = AISensingComponent.new()
-		SensingComponent.name = "AISensingComponent"
-		self.add_child(SensingComponent)
+		if addAISensingComponentOnSpawn:
+			SensingComponent = AISensingComponent.new()
+			SensingComponent.name = "AISensingComponent"
+			self.add_child(SensingComponent)
 
 func init_state_manager_component():
 	if !AIStateManager:
-		AIStateManager = AIStateManagerComponent.new()
-		AIStateManager.name = "AIStatemanagerComponent"
-		self.add_child(AIStateManager)
+		if addAIStateManagerOnSpawn:
+			AIStateManager = AIStateManagerComponent.new()
+			AIStateManager.name = "AIStatemanager"
+			self.add_child(AIStateManager)
 	
-func clear_subcomponents():
-	if SensingComponent:
-		SensingComponent.queue_free()
-		SensingComponent = null
-	if AIStateManager:
-		AIStateManager.queue_free()
-		AIStateManager = null
+
+func init_behaviour_manager_component():
+	if !AIBehaviourManager:
+		if addAIBehaviourManagerOnSpawn:
+		#	AIBehaviourManager = AIBehaviourManager.new()
+		#	AIBehaviourManager.name = "AIBehaviourManager"
+		#	self.add_child(AIBehaviourManager)
+			print(Pawn, " hypothetically added behaviour manager. Get on it ya lazy bum!")
 
 ##count through frames and set which polling group should fire
 func should_poll_group()->int:
@@ -80,10 +84,7 @@ func _physics_process(_delta: float) -> void:
 	#	pass_down_references()
 		should_poll_group()
 	
-func _ready() -> void:
-	#initialize()
-	polling_outofbounds_reassignment()
-	GlobalTools.print_sequence_counter(self, "_ready")
+
 	
 """
 var componentsReady: Array[Node]
@@ -118,33 +119,41 @@ func pass_down_references():
 		print(">>>Manager.polling_group = ", polling_group)
 """
 
+
 #node references
 var isReferenceSet:= false
 var Pawn: CharacterPawn3D
-var CharacterModel: MeshInstance3D
-var CollisionCapsule: CollisionShape3D
-var ControllerManager: MovementControllerManager
-var StatManager: CharacterStatManager
-var CameraControllerArm: PawnCameraController
-var AICore: AICoreComponent
+#var CharacterModel: MeshInstance3D
+#var CollisionCapsule: CollisionShape3D
+#var ControllerManager: MovementControllerManager
+#var StatManager: CharacterStatManager
+#var CameraControllerArm: PawnCameraController
+#var AICore: AICoreComponent
 var SensingComponent: AISensingComponent
 var AIStateManager: AIStateManagerComponent
+var AIBehaviourManager = null
 func set_references(references:Array[Node])->void:
 	for r in references:
 		if r is CharacterPawn3D:
 			Pawn = r
-		if r.name == "CharacterModel":
-			CharacterModel = r
-		if r.name == "CollisionCapsule":
-			CollisionCapsule = r
-		if r is MovementControllerManager:
-			ControllerManager = r
-		if r is CharacterStatManager:
-			StatManager = r
-		if r is PawnCameraController:
-			CameraControllerArm = r
-		if r is AICoreComponent:
-			AICore = r
+#		if r.name == "CharacterModel":
+#			CharacterModel = r
+#		if r.name == "CollisionCapsule":
+#			CollisionCapsule = r
+#		if r is MovementControllerManager:
+#			ControllerManager = r
+#		if r is CharacterStatManager:
+#			StatManager = r
+#		if r is PawnCameraController:
+#			CameraControllerArm = r
+#		if r is AICoreComponent:
+#			AICore = r
 		if r is AISensingComponent:
 			SensingComponent = r
+		if r is AIStateManagerComponent:
+			AIStateManager = r
+#		if r is AIBehaviourManagerComponent:
+#			AIBehaviourManager = r
 	isReferenceSet = true
+	print(">>>references", references)
+	GlobalTools.print_sequence_counter(self, "set_references")

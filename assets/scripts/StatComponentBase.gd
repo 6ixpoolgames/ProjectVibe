@@ -6,7 +6,7 @@ signal limit_changed(newMin: float, newLimit: float)
 
 @export var statName: String ##sets name to string
 @export var maxValue:float = 10 ##base MAX value of the stat
-@export var currValue:float ##CURRENT value of the stat
+@export var currValue:float = maxValue ##CURRENT value of the stat. Set to maxValue if < 0.
 @export var baseRegen: float = 0 ##base regeneration rate of the stat per second. if negative, constantly damages
 var regenValue: float
 var limitValue:float ##the current max value of the stat. For handling buffs/debuffs 
@@ -14,15 +14,14 @@ var minValue: float = 0
 
 var StatManager: CharacterStatManager
 
+func _init(statBlock:StatBlockRes = null)->void:
+	if statBlock == null:
+		return
+	set_all_values(statBlock)
+
 func _ready():
-#	pass
-	
-#func _enter_tree() -> void:
-	name = statName
-	limitValue = maxValue
-	regenValue = baseRegen
 	set_physics_process(regenValue != 0)
-	if currValue == null:
+	if currValue < 0 or currValue > maxValue:
 		currValue = limitValue
 	if !StatManager:
 		if get_parent() is CharacterStatManager:
@@ -31,6 +30,13 @@ func _ready():
 			print("requested ", StatManager, " to add ", self)
 		else:
 			printerr("StatComponent not child of CharacterStatManager")
+	
+func _enter_tree() -> void:
+	if statName != "":
+		name = statName
+	limitValue = maxValue
+	regenValue = baseRegen
+	
 	
 func _physics_process(delta: float) -> void:
 	delta_stat(regenValue, delta)
@@ -75,6 +81,12 @@ func delta_stat(value:float, delta:float):
 func set_stat_name(newName: String)-> void:
 	#statName = newName
 	name = newName
+
+func set_all_values(statBlock:StatBlockRes)->void:
+	name = statBlock.statName
+	maxValue = statBlock.maxValue
+	currValue = clampf(statBlock.currValue,minValue,maxValue)
+	baseRegen = statBlock.baseRegen
 
 ## Getters for external access
 func get_current_value() -> float:

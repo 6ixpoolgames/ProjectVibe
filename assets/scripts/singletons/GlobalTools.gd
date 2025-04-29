@@ -1,5 +1,14 @@
 extends Node
 
+
+func _physics_process(delta: float) -> void:
+	print_on_physics_frame(delta, .5)
+	printFuncRationalizer(90)
+
+func _process(delta: float) -> void:
+	print_on_process_frame(delta, .2)
+	final_cleanup(delta)
+
 ## Returns an array of all ascendant nodes (parent, grandparent, etc.) up to the root.
 ## If the node has no parent, returns an empty array.
 ##should probably move to a global tools singleton
@@ -31,15 +40,47 @@ func printFuncRationalizer(printTime: int):
 		printTimer = printTime
 		go_print = true
 		
-func _physics_process(delta: float) -> void:
-	if physicsFrame < 50:
-		print_on_physics_frame(delta)
-	printFuncRationalizer(90)
+	
+func lines_with_points(from:Vector3, to:Vector3, color:Color, persist_ms:float):
+	line(from,to,color,persist_ms)
+	point(from,0.05,Color.RED,persist_ms)
+	point(to,0.05,Color.RED,persist_ms)
+	
+var printSeq:int = -1
+func print_sequence_counter(node:Node, method_name:String)->int:
+	printSeq += 1
+	print("    #####-[ ", printSeq, " ]-####     -->>   NODE   = -[[ ",node," ]]")
+	print("                         -->>   METHOD = -{{    '", method_name,"'    }}")
+	return printSeq
 
-func _process(delta: float) -> void:
-	if processFrame < 50:
-		print_on_process_frame(delta)
-	final_cleanup(delta)
+var processFrame: int = -1
+var procTimer: float = 0
+var inBetFr_pro: int = -1
+func print_on_process_frame(delta:float, seconds_to_run, frames_btw_prnt:int = 0)-> int:
+	procTimer += delta
+	if procTimer > seconds_to_run:
+		return processFrame
+	processFrame += 1
+	inBetFr_pro += 1
+	if inBetFr_pro == frames_btw_prnt and frames_btw_prnt > -1:
+		inBetFr_pro = -1
+		print("------------PROCess-Frame----------------------------------------[   ",processFrame,"   ]----------------------------------------------------",delta)
+	return processFrame
+	
+	
+var physicsFrame: int = -1
+var physTimer: float = 0
+var inBetFr_phy: int = -1
+func print_on_physics_frame(delta:float, seconds_to_run:float, frames_btw_prnt:int = 0)-> int:
+	physTimer += delta
+	if physTimer > seconds_to_run:
+		return physicsFrame
+	physicsFrame += 1
+	inBetFr_phy += 1
+	if inBetFr_phy == frames_btw_prnt and frames_btw_prnt > -1:
+		inBetFr_phy = -1
+		print("------------PHYSics-Frame----------------------------------------[  .",physicsFrame,"   ]----------------------------------------------------",delta,"*")
+	return physicsFrame
 
 var default_persist_ms:= 0.5
 func line(pos1: Vector3, pos2: Vector3, color = Color.DARK_RED, persist_ms:float = default_persist_ms):
@@ -141,27 +182,3 @@ func final_cleanup(delta:float):
 	debug_mesh_timer.clear()
 	debug_mesh_buffer = bufferM
 	debug_mesh_timer = bufferT
-	
-func lines_with_points(from:Vector3, to:Vector3, color:Color, persist_ms:float):
-	line(from,to,color,persist_ms)
-	point(from,0.05,Color.RED,persist_ms)
-	point(to,0.05,Color.RED,persist_ms)
-	
-var printSeq:int = -1
-func print_sequence_counter(node:Node, method_name:String)->int:
-	printSeq += 1
-	print("######[ ", printSeq, " ]##### ----node: ---",node,"--- : ____method: ***",method_name,"***   ########")
-	return printSeq
-
-var processFrame: int = -1
-func print_on_process_frame(delta:float)-> int:
-	processFrame += 1
-	print("------------PROCess-Frame----------------------------------------[   ",processFrame,"   ]----------------------------------------------------",delta)
-	return processFrame
-	
-	
-var physicsFrame: int = -1
-func print_on_physics_frame(delta:float)-> int:
-	physicsFrame += 1
-	print("------------PHYSics-Frame----------------------------------------[   ",physicsFrame,"   ]----------------------------------------------------",delta)
-	return physicsFrame

@@ -20,9 +20,17 @@ func attach_to_pawn(pwn:CharacterPawn3D):
 	togglePossession = false
 	lastTransform = global_transform
 	rotation = Vector3.ZERO  # Reset local rotation to align with SpringArm3D
-	reparent(pwn.get_camera_attachment_point())
+	reparent(get_pawn_camera_attachment_point(pwn))
 	rotation_degrees = pwn.rotation_degrees
 	make_current()
+	
+##gets camera attachment point for a pawn to be possessed. Consider moving to Possession manager singleton
+func get_pawn_camera_attachment_point(pawn: CharacterPawn3D) -> Node3D:
+	var attachTo: Node3D = pawn
+	var index: int = pawn.allChildren.find(PawnCameraController)
+	if index != -1:
+		attachTo = pawn.allChildren[index]
+	return attachTo
 		
 ##debug function for testing. Press ` to possess and unposses the pawn in the demo scene. To be replaced by actual possession input code at a later time
 func _input(event):	
@@ -105,7 +113,7 @@ func create_debug_sphere():
 	debugSphere.set_surface_override_material(0, material)
 	#debug text
 	#print("success ", $debugSphere)
-
+			
 var raycast: RayCast3D
 ##creates a raycast3D node as a child of this camera. called on ready
 func create_raycaster() -> RayCast3D:
@@ -114,10 +122,10 @@ func create_raycaster() -> RayCast3D:
 	#print("raycaster created. Parent  = ", rc.get_parent_node_3d())
 	return rc
 
-func lineBreak():
+
 	
 #space state physics ray query implementation
-	"""
+"""
 	var rEnd = rOrg + rDir*rLen
 	var spaceState = get_world_3d().direct_space_state
 	var params = PhysicsRayQueryParameters3D.new()
@@ -135,4 +143,4 @@ func lineBreak():
 			create_debug_sphere()
 			$debugSphere.global_position = intersection.position
 			print($debugSphere)
-	"""
+"""
