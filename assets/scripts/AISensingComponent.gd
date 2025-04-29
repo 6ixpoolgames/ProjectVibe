@@ -2,9 +2,9 @@ extends Node3D
 class_name AISensingComponent
 
 #node reference
-var pawn: CharacterPawn3D
-var AIManager: AIUnitManager
-var stateManagerComponent: AIStateManagerComponent
+#var pawn: CharacterPawn3D
+#var AICore: AICoreComponent
+#var stateManagerComponent: AIStateManagerComponent
 
 var referencesUpdated:= false
 
@@ -28,29 +28,34 @@ var facingDirection: Vector3
 
 func _ready() -> void:
 	init()
-	if get_parent_node_3d() is AIUnitManager:
-		AIManager = get_parent_node_3d()
-		AIManager.component_has_intialized(self)
+#	if get_parent_node_3d() is AICoreComponent:
+#		AICore = get_parent_node_3d()
+#		AICore.component_has_intialized(self)
+	GlobalTools.print_sequence_counter(self, "_ready")
 
-#initializes variables and creates sensing area
+##initializes variables and creates sensing area
 func init()->void:
-	var ascendants = GlobalTools.get_all_ascendants(self)
-	for a in ascendants:
-		if a is CharacterPawn3D and pawn == null:
-			pawn = a
-		if a is AIUnitManager and AIManager == null:
-			AIManager = a
-	if pawn == null:
-		printerr("not attached to pawn! - ", self)
-	if AIManager == null: 
-		printerr("not attached to unit manager! - ", self)
-	#exclude = get_all_colliders_in_pawn()
+#	var ascendants = GlobalTools.get_all_ascendants(self)
+#	for a in ascendants:
+#		if a is CharacterPawn3D and pawn == null:
+#			pawn = a
+#		if a is AICoreComponent and AICore == null:
+#			AICore = a
+#	if pawn == null:
+#		printerr("not attached to pawn! - ", self)
+#	if AICore == null: 
+#		printerr("not attached to unit manager! - ", self)
+#	#exclude = get_all_colliders_in_pawn()
+#	initialize_sensing()
+	pass
+	
+func _enter_tree() -> void:
 	initialize_sensing()
 
 func _physics_process(_delta: float) -> void:
 	update_facing_direction_vector()
 	update_sensing_area_offset()
-	if AIManager.poll_now():
+	if AICore.poll_now():
 		update_entity_in_detection_angle()
 		update_entities_in_LOS()
 
@@ -93,7 +98,7 @@ func create_sensing_area()->void:
 
 ##updates the direction vector for the facing direction. Run every physics/frame
 func update_facing_direction_vector()->void:
-	var currYaw = pawn.currentYaw
+	var currYaw = Pawn.currentYaw
 	facingDirection = Vector3(-sin(currYaw), 0, -cos(currYaw)).normalized() #don't ask me why this math works @_@
 	
 ##offsets area3D sensing sphere [param sense_forward_offset] units forward. Gives sensing directionality. 
@@ -110,7 +115,7 @@ func update_sensing_area_offset()->void:
 
 ##listens to body_entered signal and adds it if is character pawn. Probably want to include other types in a later refactor
 func add_sensed_entity(body: Node3D)->void:
-	if body is CharacterPawn3D and not allSensedEntities.has(body) and not body == pawn:
+	if body is CharacterPawn3D and not allSensedEntities.has(body) and not body == Pawn:
 		allSensedEntities.append(body)
 		#print("entered ", body, " is now tracked")
 	else:
@@ -123,9 +128,7 @@ func remove_sensed_entity(body: Node3D)->void:
 		var at = allSensedEntities.find(body)
 		if at != -1:
 			allSensedEntities.remove_at(at)
-			#print("exited ",body, " is untracked")	
 	else:
-		#print("exited ",body, " is not a pawn")	
 		return
 		
 var visRad = cos(deg_to_rad(forward_vision_angle/2))
@@ -155,7 +158,7 @@ func is_in_LOS(entity: CharacterPawn3D)->bool:
 	var space_state = get_world_3d().direct_space_state
 	var pwnPos = global_transform.origin
 	var entPos = entity.global_transform.origin
-	var pwnYOffset = pawn.unitHalfHeight
+	var pwnYOffset = Pawn.unitHalfHeight
 	var entYOffset = entity.unitHalfHeight
 	
 	#do the fuckin query
@@ -182,8 +185,7 @@ func update_entities_in_LOS() -> void:
 ##gets all colliders in the parent pawn, supposedly for raycast exclusion purposes.
 func get_all_colliders_in_pawn()->Array:
 	var colArr: Array
-	var descArr = pawn.get_all_descendants(pawn)
-	for c in descArr:
+	for c in Pawn.allChildren:
 		if c is CollisionShape3D:
 			colArr.append(c)
 	return colArr
@@ -195,3 +197,35 @@ func _input(event: InputEvent) -> void:
 			print("all entities: ", allSensedEntities)
 			print("within front angle: ", entitiesInDetectionAngle, " angle: ", forward_vision_angle, " dot: ", visRad )
 			print("with LOS: ", entitiesInLOS)
+
+#node references
+var isReferenceSet:= false
+var Pawn: CharacterPawn3D
+var CharacterModel: MeshInstance3D
+var CollisionCapsule: CollisionShape3D
+var ControllerManager: MovementControllerManager
+var StatManager: CharacterStatManager
+var CameraControllerArm: PawnCameraController
+var AICore: AICoreComponent
+var SensingComponent: AISensingComponent
+var StateManager: AIStateManagerComponent
+func set_references(references:Array[Node])->void:
+	for r in references:
+		if r is CharacterPawn3D:
+			Pawn = r
+		if r.name == "CharacterModel":
+			CharacterModel = r
+		if r.name == "CollisionCapsule":
+			CollisionCapsule = r
+		if r is MovementControllerManager:
+			ControllerManager = r
+		if r is CharacterStatManager:
+			StatManager = r
+		if r is PawnCameraController:
+			CameraControllerArm = r
+		if r is AICoreComponent:
+			AICore = r
+		if r is AISensingComponent:
+			SensingComponent = r
+	isReferenceSet = true
+	print(self, " references_set called")

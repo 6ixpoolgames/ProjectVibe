@@ -57,6 +57,6 @@ func stop_navigation()->void:
 	navAgent.set_target_position(pawn.global_position) #reset target position to ensure stoppage
 	
 	
-func run_to(dest: Vector3)->void:
+func run_to(_dest: Vector3)->void:
 	print("run_to() function currently empty")
 	return

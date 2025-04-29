@@ -12,21 +12,25 @@ var regenValue: float
 var limitValue:float ##the current max value of the stat. For handling buffs/debuffs 
 var minValue: float = 0
 
-var statManager: StatManagerComponent
+var StatManager: CharacterStatManager
 
 func _ready():
+#	pass
+	
+#func _enter_tree() -> void:
 	name = statName
 	limitValue = maxValue
 	regenValue = baseRegen
 	set_physics_process(regenValue != 0)
 	if currValue == null:
 		currValue = limitValue
-	if statManager == null:
-		if get_parent() is StatManagerComponent:
-			statManager = get_parent() #kinda relies on proper node heirarchy on declaration so be sure to make it so
-			statManager.request_add_stat_to_manager(self)
+	if !StatManager:
+		if get_parent() is CharacterStatManager:
+			StatManager = get_parent() #kinda relies on proper node heirarchy on declaration so be sure to make it so
+			StatManager.request_add_stat_to_manager(self)
+			print("requested ", StatManager, " to add ", self)
 		else:
-			printerr("StatComponent not child of StatManagerComponent")
+			printerr("StatComponent not child of CharacterStatManager")
 	
 func _physics_process(delta: float) -> void:
 	delta_stat(regenValue, delta)

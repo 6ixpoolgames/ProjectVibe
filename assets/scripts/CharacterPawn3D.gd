@@ -31,36 +31,32 @@ var isReadyTrigger = false
 var activeCamera: Camera3D
 var allChildren: Array[Node]
 func _ready():
-	#allChildren = GlobalTools.get_all_descendants(self)
-	ready_active_camera()
-	pass_down_references()
+		allChildren = GlobalTools.get_all_descendants(self)
+		init_stat_manager()
+	#if shouldInitialize:
+		ready_active_camera()
+		pass_down_references()
+		pawn_is_ready()
 	#set_references_hard()
 	#init_controller_manager()
 	#init_camera_spring_arm()
 
 func _enter_tree() -> void:
-	init_camera_controller_arm()
-	init_controller_manager()
-	init_stat_manager()
+	if shouldInitialize:
+		init_camera_controller_arm()
+		init_controller_manager()
+		#init_stat_manager()
 
 #node reference variables
 var CharacterModel: MeshInstance3D
 var CollisionCapsule: CollisionShape3D
 var ControllerManager: MovementControllerManager
-var StatManager: StatManagerComponent
+var StatManager: CharacterStatManager
 var cameraControllerArm: PawnCameraController
-var AIManager: AIUnitManager
+var AICore: AICoreComponent
 var SensingComponent: AISensingComponent
-##janky hard coded reference setter. Relies on node structure from character_pawn_3d.tscn
-func set_references_hard():
-	CharacterModel = $CharacterModel
-	CollisionCapsule = $CollisionShape3D
-	ControllerManager = $MovementControllerManager
-	StatManager = $StatManagerComponent
-	print(self, " has set references (HARD)")
-
+var AIStateManager: AIStateManagerComponent
 func pass_down_references():
-	allChildren.clear()
 	allChildren = GlobalTools.get_all_descendants(self)
 	var references: Array[Node]
 	var pwn: CharacterPawn3D = self
@@ -75,23 +71,33 @@ func pass_down_references():
 		if c is MovementControllerManager:
 			ControllerManager = c
 			references.append(c)
-		if c is StatManagerComponent:
+		if c is CharacterStatManager:
 			StatManager = c
 			references.append(c)
 		if c is PawnCameraController:
 			cameraControllerArm = c
 			references.append(c)
-		if c is AIUnitManager:
-			AIManager = c
+		if c is AICoreComponent:
+			AICore = c
 			references.append(c)
 		if c is AISensingComponent:
 			SensingComponent = c
 			references.append(c)
+		if c is AIStateManagerComponent:
+			AIStateManager = c
+			references.append(c)
 	for r in allChildren:
 		if r.has_method("set_references"):
 			r.set_references(references)
+			print(r, " set_references called")
 	print(self, " references passed")
-
+	
+func pawn_is_ready()->void:
+	allChildren = GlobalTools.get_all_descendants(self)
+	for c in allChildren:
+		if c.has_method("pawn_ready"):
+			c.pawn_ready()
+			
 ##checks if controller manager is already added. If not, creates a new one. Part of functions to overhaul during refactor
 func init_controller_manager()->void:
 	if ControllerManager:
@@ -103,7 +109,7 @@ func init_controller_manager()->void:
 	#print("added movementControllerComponent: ", movementController)
 
 
-var unitHalfHeight: float = 0
+var unitHalfHeight: float = 1
 ##Creates a PawnCameraController3D (spring arm) if there isn't one. Candidate for refactor. Code kinda messy, but functional
 func init_camera_controller_arm()->void:
 	if cameraControllerArm:
@@ -125,21 +131,23 @@ func ready_active_camera()-> void:
 	activeCamera.connect("possession_event", _on_possession_event)
 
 func init_stat_manager()->void:
-	if StatManager:
-		print("already has stat manager component")
+	if StatManager or $CharacterStatManager:
+		print("-------------already has stat manager component")
 		return
-	StatManager = StatManagerComponent.new()
+	StatManager = CharacterStatManager.new()
 	StatManager.name = "StatManagerComponent"
 	self.add_child(StatManager)
+	GlobalTools.print_sequence_counter(self, "init_stat_manager")
+	print(self, "statManager initialized ", StatManager)
 	
 
-func init_AI_manager()->void:
-	if AIManager:
+func init_AI_core_component()->void:
+	if AICore:
 		print(self, " already has AI unit manager")
 		return
-	AIManager = AIUnitManager.new()
-	AIManager.name = "AIUnitManager"
-	self.add_child(AIManager)
+	AICore = AICoreComponent.new()
+	AICore.name = "AICoreComponent"
+	self.add_child(AICore)
 func _physics_process(delta: float) -> void:
 	#if isReadyTrigger == true:
 	GlobalTools.printFuncRationalizer(50)
@@ -188,14 +196,14 @@ func apply_gravity(delta:float):
 	if not is_on_floor():
 		velocity.y -= gravity * gravity_multiplier * delta		
 		
+var camAttachmentPoint: Node3D
 ##gets a reference to the pawn's camera controller (spring arm). If null for some reason, returns a reference to self
 func get_camera_attachment_point()->Node3D:
-	var attachTo: Node3D
 	if cameraControllerArm:
-		attachTo = cameraControllerArm
+		camAttachmentPoint = cameraControllerArm
 	else:
-		attachTo = self
-	return attachTo
+		camAttachmentPoint = self
+	return camAttachmentPoint
 
 ##rotates character model to target facing with yaw
 func yaw_to_facing(delta: float)->void:
@@ -217,22 +225,26 @@ func yaw_to_facing(delta: float)->void:
 var isPossessed = false
 ##sets isPossessed to TRUE if the main camera is a child. For refactoring once possession manager is in, but might keep it as a validation mechanism
 func _on_possession_event(_emitter)->void:
-	var children = get_children()
 	activeCamera = get_viewport().get_camera_3d()
-	isPossessed = false
-	for child in children.size():
-		if children[child] == activeCamera:
-			isPossessed = true
-		#print(child," child: ", children[child], " camera ", activeCamera," isPossessed ", isPossessed)
-		var subChildren = children[child].get_children()
-		for subChild in subChildren.size():
-			if subChildren[subChild] == activeCamera:
-				isPossessed = true
-			#print(subChild, "subC: ", subChildren[subChild]," camera ", activeCamera," isPossessed ", isPossessed)
-			var sub2Children = subChildren[subChild].get_children()
-			for sub2Child in sub2Children.size():
-				if sub2Children[sub2Child] == activeCamera:
-					isPossessed = true
+	allChildren = GlobalTools.get_all_descendants(self)
+	if allChildren.has(activeCamera):
+		isPossessed = true
+	
+#	var children = get_children()
+#	isPossessed = false
+#	for child in children.size():
+#		if children[child] == activeCamera:
+#			isPossessed = true
+#		#print(child," child: ", children[child], " camera ", activeCamera," isPossessed ", isPossessed)
+#		var subChildren = children[child].get_children()
+#		for subChild in subChildren.size():
+#			if subChildren[subChild] == activeCamera:
+#				isPossessed = true
+#			#print(subChild, "subC: ", subChildren[subChild]," camera ", activeCamera," isPossessed ", isPossessed)
+#			var sub2Children = subChildren[subChild].get_children()
+#			for sub2Child in sub2Children.size():
+#				if sub2Children[sub2Child] == activeCamera:
+#					isPossessed = true
 	print("posses signal recieved ", isPossessed)
  
 @onready var lastPos = global_position
@@ -283,3 +295,7 @@ func init_terrain_collision() -> void:
 	var terrainCollision = $"../NavigationRegion3D/ProcGenTile/TerrainMesh"
 	terrainCollision.connect("terrain_collision_generated", _on_terrain_col_gen)
 	#print("cam: ",activeCamera,"tC: ", terrainCollision)
+
+
+#debug
+@export var shouldInitialize:= true

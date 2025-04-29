@@ -94,12 +94,12 @@ func jump_handler(delta)->void:
 		#pawn.velocity.y *= lerpf(jump_deceleration_multiplier,1,wtt)
 		#print(wtt)
 	
-	
+
 ##returns vector to add to input direction based on the camera's rotation by yaw 
 func input_camera_yaw_adjustment(iDir)->Vector3:
 	var newIDir = Vector3.ZERO
 	if pawn.isPossessed and pawn.isCommandedMovement:
-		var cameraYawRotRads = pawn.springArmRef.rotation.y
+		var cameraYawRotRads = pawn.cameraControllerArm.rotation.y
 		newIDir = inputDirection.rotated(Vector3.UP,cameraYawRotRads)
 	else:
 		newIDir = iDir

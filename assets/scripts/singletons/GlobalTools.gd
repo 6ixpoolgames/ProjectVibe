@@ -31,10 +31,14 @@ func printFuncRationalizer(printTime: int):
 		printTimer = printTime
 		go_print = true
 		
-func _physics_process(_delta: float) -> void:
+func _physics_process(delta: float) -> void:
+	if physicsFrame < 50:
+		print_on_physics_frame(delta)
 	printFuncRationalizer(90)
 
 func _process(delta: float) -> void:
+	if processFrame < 50:
+		print_on_process_frame(delta)
 	final_cleanup(delta)
 
 var default_persist_ms:= 0.5
@@ -143,3 +147,21 @@ func lines_with_points(from:Vector3, to:Vector3, color:Color, persist_ms:float):
 	point(from,0.05,Color.RED,persist_ms)
 	point(to,0.05,Color.RED,persist_ms)
 	
+var printSeq:int = -1
+func print_sequence_counter(node:Node, method_name:String)->int:
+	printSeq += 1
+	print("######[ ", printSeq, " ]##### ----node: ---",node,"--- : ____method: ***",method_name,"***   ########")
+	return printSeq
+
+var processFrame: int = -1
+func print_on_process_frame(delta:float)-> int:
+	processFrame += 1
+	print("------------PROCess-Frame----------------------------------------[   ",processFrame,"   ]----------------------------------------------------",delta)
+	return processFrame
+	
+	
+var physicsFrame: int = -1
+func print_on_physics_frame(delta:float)-> int:
+	physicsFrame += 1
+	print("------------PHYSics-Frame----------------------------------------[   ",physicsFrame,"   ]----------------------------------------------------",delta)
+	return physicsFrame
