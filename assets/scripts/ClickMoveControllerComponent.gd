@@ -4,8 +4,10 @@ class_name ClickToMoveComponent
 var activeCamera: PlayerCamera3D
 var readySet:bool = false
 
-#func _enter_tree() -> void:
-	
+func _enter_tree() -> void:
+	#creates nav agent
+	create_nav_agent(true)
+	readySet = true
 	
 
 func _ready():
@@ -19,9 +21,7 @@ func _ready():
 	#connects signals
 	activeCamera.emit_3D_cursor_position.connect(on_cursor_click)
 	activeCamera.possession_event.connect(set_active_camera)
-	#creates nav agent
-	create_nav_agent(true)
-	readySet = true
+	
 
 func _physics_process(_delta: float) -> void:
 	if readySet:
@@ -48,16 +48,17 @@ func set_active_camera(_emitter)-> void:
 
 var lastTargetPosition = Vector3.ZERO
 ##test function signal reciever for setting the clicked position to the movement target of the pawn. Needs to be expanded later to include checks for if the pawn is actively selected and which command is being given to it (other than movement).
-##[param cursorPos] the world position of the 3D cursor passed from the emitted signal.
-func on_cursor_click(cursorPos):
-	lastTargetPosition = cursorPos
-	move_to(cursorPos)
-	print("click signal recieved", Pawn)
+##[param cursor3DPos] the world position of the 3D cursor passed from the emitted signal.
+func on_cursor_click(cursor3DPos):
+	lastTargetPosition = cursor3DPos
+	move_to(cursor3DPos)
+	print("click signal recieved", Pawn, " dest:",cursor3DPos)
 	
 var navigationToggle = false
 func move_to(dest: Vector3)->void:
 	navAgent.set_target_position(dest)
 	navigationToggle = true
+	print("--- Target pos:", dest, " pawn: ", Pawn)
 	
 var destination = Vector3.ZERO
 var local_destination = Vector3.ZERO

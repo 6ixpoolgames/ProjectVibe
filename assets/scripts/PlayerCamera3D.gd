@@ -20,15 +20,17 @@ func attach_to_pawn(pwn:CharacterPawn3D):
 	togglePossession = false
 	lastTransform = global_transform
 	rotation = Vector3.ZERO  # Reset local rotation to align with SpringArm3D
-	reparent(get_pawn_camera_attachment_point(pwn))
+	var attachment: Node3D = get_pawn_camera_attachment_point(pwn)
+	reparent(attachment, false)
 	rotation_degrees = pwn.rotation_degrees
 	make_current()
+	print("+++attachment: ",attachment)
 	
 ##gets camera attachment point for a pawn to be possessed. Consider moving to Possession manager singleton
 func get_pawn_camera_attachment_point(pawn: CharacterPawn3D) -> Node3D:
 	var attachTo: Node3D = pawn
-	var index: int = -1
-	for c in pawn.allChildren:
+	var allPawnChildren: Array[Node] = pawn.request_update_all_pawn_children()
+	for c in allPawnChildren:
 		if c is PawnCameraController:
 			attachTo = c
 	return attachTo

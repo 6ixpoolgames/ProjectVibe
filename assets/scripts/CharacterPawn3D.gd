@@ -59,6 +59,11 @@ func spawn_initializer(spawn:bool):
 func ready_active_player_camera()-> void:
 	activePlayerCamera = get_viewport().get_camera_3d()
 	activePlayerCamera.connect("possession_event", _on_possession_event)
+	
+func request_update_all_pawn_children()-> Array[Node]:
+	allChildren.clear()
+	allChildren = GlobalTools.get_all_descendants(self)
+	return allChildren
 
 func _physics_process(delta: float) -> void:
 	yaw_to_facing(delta)
@@ -127,7 +132,7 @@ var isPossessed = false
 ##sets isPossessed to TRUE if the main camera is a child. For refactoring once possession manager is in, but might keep it as a validation mechanism
 func _on_possession_event(_emitter)->void:
 	activePlayerCamera = get_viewport().get_camera_3d()
-	allChildren = GlobalTools.get_all_descendants(self)
+	allChildren = request_update_all_pawn_children()
 	if allChildren.find(activePlayerCamera) != -1:
 		isPossessed = true
 	print(self, " posses signal recieved ", isPossessed)
