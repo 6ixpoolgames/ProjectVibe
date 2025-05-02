@@ -1,3 +1,4 @@
+##singleton class that houses globally available debug methods
 extends Node
 
 
@@ -49,8 +50,7 @@ func lines_with_points(from:Vector3, to:Vector3, color:Color, persist_ms:float):
 var printSeq:int = -1
 func print_sequence_counter(node:Node, method_name:String)->int:
 	printSeq += 1
-	print("    #####-[ ", printSeq, " ]-####     -->>   NODE   = -[[ ",node," ]]")
-	print("                         -->>   METHOD = -{{    '", method_name,"'    }}")
+	print("--####-[ ", printSeq, " ]-####||  NODE=[[ ",node," ]]   ||########|| ->   METHOD=[['", method_name,"']]   ||#################")
 	return printSeq
 
 var processFrame: int = -1

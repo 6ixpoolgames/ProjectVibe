@@ -151,7 +151,7 @@ func init_AI_core_component(add_AIsensing:=true, add_AIStateManager:=true, add_A
 	AICore = AICoreComponent.new(add_AIsensing,add_AIStateManager,add_AIBehaviourManager)
 	AICore.name = "AICoreComponent"
 	Pawn.add_child(AICore)
-	AICore.position = Pawn.position
+	#AICore.global_position = Pawn.global_position
 	GlobalTools.print_sequence_counter(self, "init_AI_core_component()")
 
 

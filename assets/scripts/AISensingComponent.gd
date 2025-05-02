@@ -37,15 +37,16 @@ func _init(radius: float = sense_radius, forward_bias:bool = forward_sense_bias,
 	forward_vision_angle = vision_angle
 	
 func _enter_tree() -> void:
-	pull_component_references()
+	#pull_component_references()
 	initialize_sensing()
 
 func _physics_process(_delta: float) -> void:
-	update_facing_direction_vector()
-	update_sensing_area_offset()
-	if AICore and AICore.poll_now():
-		update_entity_in_detection_angle()
-		update_entities_in_LOS()
+	if Pawn:
+		update_facing_direction_vector()
+		update_sensing_area_offset()
+		if AICore and AICore.poll_now():
+			update_entity_in_detection_angle()
+			update_entities_in_LOS()
 
 #var capsuleHalfHeight: float
 ##creates sensing areas and connects signals
@@ -224,6 +225,7 @@ func set_references(references:Array[Node])->void:
 	print(">>>references", references)
 	GlobalTools.print_sequence_counter(self, "set_references")
 
-func pull_component_references():
-	AICore = get_parent()
+func pull_component_references(core:AICoreComponent):
+	AICore = core
 	Pawn = AICore.Pawn
+	print(self, "AI sensing references set: ", AICore, " ", Pawn)

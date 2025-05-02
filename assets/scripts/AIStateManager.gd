@@ -14,12 +14,21 @@ var currState:= AIState.Idle
 var referencesUpdated:= false
 
 func _ready() -> void:
+	
 	#initialize()
 	#if get_parent_node_3d() is AIUnitManager:
 	#	AIManager = get_parent_node_3d()
 	#	AIManager.component_has_intialized(self)
 	#GlobalTools.print_sequence_counter(self, "_ready")
 	pass
+	
+func _enter_tree() -> void:
+	pass
+	
+func pull_component_references(core:AICoreComponent,sense:AISensingComponent):
+	AICore = core
+	Pawn = AICore.Pawn
+	SensingComponent = sense
 
 func _physics_process(_delta: float) -> void:	
 	if Pawn and isReferenceSet:
