@@ -12,8 +12,8 @@ func _init(Name: String = "", maxStat:float = 10, curr:float = maxStat, regen:fl
 	currValue = curr
 	baseRegen = regen
 
-func set_initial_values(Name: String, max:float, curr:float = max, regen:float = 0)->void:
+func set_initial_values(Name: String, maxV:float, curr:float = maxV, regen:float = 0)->void:
 	statName = Name
-	maxValue = max
+	maxValue = maxV
 	currValue = curr
 	baseRegen = regen

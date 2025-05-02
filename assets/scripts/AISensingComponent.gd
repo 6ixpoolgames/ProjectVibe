@@ -37,6 +37,7 @@ func _init(radius: float = sense_radius, forward_bias:bool = forward_sense_bias,
 	forward_vision_angle = vision_angle
 	
 func _enter_tree() -> void:
+	pull_component_references()
 	initialize_sensing()
 
 func _physics_process(_delta: float) -> void:
@@ -222,3 +223,7 @@ func set_references(references:Array[Node])->void:
 	isReferenceSet = true
 	print(">>>references", references)
 	GlobalTools.print_sequence_counter(self, "set_references")
+
+func pull_component_references():
+	AICore = get_parent()
+	Pawn = AICore.Pawn

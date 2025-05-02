@@ -2,29 +2,26 @@ extends Node
 class_name MovementControllerManager
 
 var Pawn: CharacterPawn3D
-var isInit: bool = false
 
-@export var addPlayerController = false ##debug function for creating and attaching player controllers to the pawn at ready
-@export var addClickController = false ##debug function for creating and attaching click to move controller to the pawn at ready
-@export var hasAIController = false
-@export var spawnDebugControllers = false
+@export var addPlayerController:= false ##debug function for creating and attaching player controllers to the pawn at ready
+@export var addClickController:= false ##debug function for creating and attaching click to move controller to the pawn at ready
+@export var hasAIController:= false
+@export var spawnDebugControllers:= false
 
-func _init(addPlayerCon:bool = false, addClickCon:bool = false, hasAICon:bool = false, spawnDebugCon: bool = true ) -> void:
+func _init(addPlayerCon:= addPlayerController, addClickCon:= addClickController, hasAICon:=hasAIController, spawnDebugCon:= spawnDebugControllers ) -> void:
 	addPlayerController = addPlayerCon
 	addClickController = addClickCon
 	hasAIController = hasAICon
 	spawnDebugControllers = spawnDebugCon
 	
+func _enter_tree() -> void:
+	if !Pawn or is_instance_valid(Pawn): #improper if NULL or parent NOT CharacterPawn3D
+		Pawn = get_parent()
+	#if spawnDebugControllers:
+	init_controllers(addPlayerController, addClickController, hasAIController) 
+	
 func _ready():
 	#check if properly attached
-	if !Pawn or not Pawn is CharacterPawn3D: #improper if NULL or parent NOT CharacterPawn3D
-		Pawn = get_parent()
-		isInit = false
-		#print("Movement controller initialization error! ", self, " p: " , Pawn)
-	else: #if properly attached
-		isInit = true
-		if spawnDebugControllers:
-			create_and_attach_player_controllers() # yes the long name means its a test function lol
 	get_controllers_attached()
 
 var controllersAttached: Array[ControllerComponentBase]
@@ -35,21 +32,23 @@ func get_controllers_attached()->void:
 	for c in children:
 		if c is ControllerComponentBase:
 			controllersAttached.append(c)
-		
+	GlobalTools.print_sequence_counter(Pawn, "get_controllers_attached")
+	print(controllersAttached)
+	
 ##test function that creates player controllers for the movement controller
-func create_and_attach_player_controllers(addPC:bool = addPlayerController, addCC:bool = addClickController)->void:
-	#currently hardcoded to attach a player controller by default. Will modify later to accept a controller programatically
+func init_controllers(addPC:bool = addPlayerController, addCC:bool = addClickController, addAI: = hasAIController)->void:
 	if addPC:
 		var controller = PlayerControllerComponent.new()
 		controller.name = "PlayerControllerComponent"
 		add_child(controller)
-		#print("controller attached: ", controller)
-	#also a hardcoded attachment of click to move controller
 	if addCC:
 		var controller2 = ClickToMoveComponent.new()
 		controller2.name = "ClickToMoveComponent"
 		add_child(controller2)
-		#print("controller2 attached: ", controller2)
+	if addAI:
+		var controller3 = AIControllerBase.new()
+		controller3.name = "AIControllerComponent"
+		add_child(controller3)
 
 var iDirBuffer: Array[Vector3] = []
 var conBuffer: Array[ControllerComponentBase] = []

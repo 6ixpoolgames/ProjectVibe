@@ -16,9 +16,9 @@ var gravity: float  = ProjectSettings.get_setting("physics/3d/default_gravity")
 var moveDirection = Vector3.ZERO ##direction character will move in
 
 #model rotation variables
-@onready var currentYaw: float = self.rotation.y
-@onready var currentPitch: float = self.rotation.x
-@onready var currentTilt: float = self.rotation.z
+@onready var currentYaw: float = rotation.y
+@onready var currentPitch: float = rotation.x
+@onready var currentTilt: float = rotation.z
 var targetYaw: float = 0
 var targetPitch: float = 0
 var targetTilt: float = 0
@@ -31,48 +31,28 @@ var CharacterModel: MeshInstance3D
 var activePlayerCamera: Camera3D
 var allChildren: Array[Node]
 var pawnInitializer: PawnInitializerComponent
+var cameraControllerArm: PawnCameraController
 
 #Pawn characteristics variables
 var unitHalfHeight: float = 1
 
 #debug
 @export var hasInitializer:= false
+var initializerEntered:= false
 
-func spawn_initializer(spawn:bool):
-	var children: Array[Node] = self.get_children()
-	var check:bool = false
-	for c in children:
-		if c is PawnInitializerComponent:
-			check = true
-	if spawn and !check:
-		pawnInitializer = PawnInitializerComponent.new()
-		pawnInitializer.name = "PawnInitializerComponent"
-		add_child(pawnInitializer)
-		print ("spawned pawn initializer on ", self)
-	else:
-		pawnInitializer = null
-		print(self, " initializer is ", pawnInitializer)
 
 func _ready():
-	if pawnInitializer:
-		pawnInitializer.pass_down_references()
-		#allChildren = GlobalTools.get_all_descendants(self)
-		#init_stat_manager()
-	#if shouldInitialize:
-		#ready_active_camera()
-		#pass_down_references()
-		#pawn_is_ready()
-	#set_references_hard()
-	#init_controller_manager()
-	#init_camera_spring_arm()
-	
-
-func _enter_tree() -> void:
-	#if shouldInitialize:
-		#init_camera_controller_arm()
-		#init_controller_manager()
-		#init_stat_manager()
 	spawn_initializer(hasInitializer)
+	if initializerEntered and pawnInitializer:
+		pawnInitializer.pawn_ready_set()
+	ready_active_player_camera()
+
+func spawn_initializer(spawn:bool):
+	if spawn and !initializerEntered:
+		pawnInitializer = PawnInitializerComponent.new()
+		add_child(pawnInitializer)
+		pawnInitializer.global_position = self.global_position
+
 
 ##sets the current viewport camera to the active camera. Can be combined with a larger initializer function on refactor. 
 ##Also should code for checking if its a PlayerCamera3D in situations where there's more than 1 active viewport
@@ -81,7 +61,6 @@ func ready_active_player_camera()-> void:
 	activePlayerCamera.connect("possession_event", _on_possession_event)
 
 func _physics_process(delta: float) -> void:
-	GlobalTools.printFuncRationalizer(50)
 	yaw_to_facing(delta)
 	apply_gravity(delta)
 	move_in_direction(moveDirection, delta)
@@ -149,9 +128,9 @@ var isPossessed = false
 func _on_possession_event(_emitter)->void:
 	activePlayerCamera = get_viewport().get_camera_3d()
 	allChildren = GlobalTools.get_all_descendants(self)
-	if allChildren.has(activePlayerCamera):
+	if allChildren.find(activePlayerCamera) != -1:
 		isPossessed = true
-	print("posses signal recieved ", isPossessed)
+	print(self, " posses signal recieved ", isPossessed)
  
 @onready var lastPos = global_position
 var stuckTimer:float = 0 #seconds stuck before being considered stuck

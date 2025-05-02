@@ -17,7 +17,7 @@ Pawn			 			(CharacterPawn3D)
 		...
 =	AICoreComponment 			-(AICoreComponent)
 =		AISensingComponent 		--(AISensingComponent)
-=		AIStateManager			--(AIStateManager)
+=		AIStateManager			--(AIStateManagerComponent)
 =			AIStateComponent1 	---(AIStateComponentBase)
 =			AIStateComponent2 	---(AIStateComponentBase)
 =			AIStateComponent3 	---(AIStateComponentBase)

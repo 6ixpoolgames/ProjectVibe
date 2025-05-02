@@ -3,15 +3,15 @@ class_name ControllerComponentBase
 
 @export var isPriorityController = false
 @export var inputPriority:int = 255
-var pawn: CharacterPawn3D
+var Pawn: CharacterPawn3D
 var controllerManager: MovementControllerManager
 
 func _ready():
 	controllerManager = get_parent()
-	pawn = controllerManager.pawn
+	Pawn = controllerManager.Pawn
 	if not controllerManager is MovementControllerManager or controllerManager == null:
 		print("Not a valid MovementControllerManager!")
-	if not pawn is CharacterPawn3D or pawn == null:
+	if not Pawn is CharacterPawn3D or Pawn == null:
 		print("Not a valid pawn!")
 	#print("ControllerBase ready super", pawn, " ", controllerManager, " inputPriority ", inputPriority)
 	

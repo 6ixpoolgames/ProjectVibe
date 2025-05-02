@@ -1,4 +1,4 @@
-extends Node
+extends Node3D
 class_name AICoreComponent
 
 #AI sense polling frequency
@@ -25,6 +25,7 @@ func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAISt
 	
 		
 func _enter_tree() -> void:
+	pull_component_references()
 	init_sensing_component()
 	init_state_manager_component()
 	init_behaviour_manager_component()
@@ -39,6 +40,7 @@ func init_sensing_component():
 			SensingComponent = AISensingComponent.new()
 			SensingComponent.name = "AISensingComponent"
 			self.add_child(SensingComponent)
+			SensingComponent.position = Pawn.position
 
 func init_state_manager_component():
 	if !AIStateManager:
@@ -77,47 +79,17 @@ func polling_outofbounds_reassignment()->void:
 		#print("polling group outbounds. randomly reassigned to: ", polling_group, " of ", polling_freq_frame_count)
 	
 func _physics_process(_delta: float) -> void:
-	#pass_down_references()
-	#if !allComponentsReady:
-	#	is_all_components_ready()
-	#if allComponentsReady:
-	#	pass_down_references()
-		should_poll_group()
+	should_poll_group()
 	
+func get_sensing_component()->AISensingComponent:
+	return SensingComponent
 
+func get_state_manager()->AIStateManagerComponent:
+	return AIStateManager
 	
-"""
-var componentsReady: Array[Node]
-func component_has_intialized(component: Node):
-	if component is AISensingComponent and !sensingComponentReady:
-		componentsReady.append(component)
-		sensingComponentReady = true
-	if component is AIStateManagerComponent and !stateManagerReady:
-		componentsReady.append(component)
-		stateManagerReady = true
-"""
+#func get_behaviour_component()->AIBehaviourManagerComponent:         #not yet implemented
+#	return AIBehaviourManager
 
-"""""
-var allComponentsReady:= false
-func is_all_components_ready():
-	if sensingComponentReady and stateManagerReady:
-		allComponentsReady = true
-		print("all components ready")
-"""
-
-"""""
-var stopOnOne:=false
-func pass_down_references():
-	if !stopOnOne and allComponentsReady and Pawn:
-		for c in componentsReady:
-			c.Pawn = Pawn
-			if c is AISensingComponent:
-				c.StateManager = StateManager
-			if c is AIStateManagerComponent:
-				c.SensingComponent = SensingComponent
-		stopOnOne = true
-		print(">>>Manager.polling_group = ", polling_group)
-"""
 
 
 #node references
@@ -157,3 +129,7 @@ func set_references(references:Array[Node])->void:
 	isReferenceSet = true
 	print(">>>references", references)
 	GlobalTools.print_sequence_counter(self, "set_references")
+
+func pull_component_references():
+	if get_parent() is CharacterPawn3D:
+		Pawn = get_parent()

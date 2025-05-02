@@ -27,9 +27,10 @@ func attach_to_pawn(pwn:CharacterPawn3D):
 ##gets camera attachment point for a pawn to be possessed. Consider moving to Possession manager singleton
 func get_pawn_camera_attachment_point(pawn: CharacterPawn3D) -> Node3D:
 	var attachTo: Node3D = pawn
-	var index: int = pawn.allChildren.find(PawnCameraController)
-	if index != -1:
-		attachTo = pawn.allChildren[index]
+	var index: int = -1
+	for c in pawn.allChildren:
+		if c is PawnCameraController:
+			attachTo = c
 	return attachTo
 		
 ##debug function for testing. Press ` to possess and unposses the pawn in the demo scene. To be replaced by actual possession input code at a later time
