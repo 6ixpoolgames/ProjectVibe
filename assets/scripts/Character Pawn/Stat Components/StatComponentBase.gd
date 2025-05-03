@@ -26,7 +26,7 @@ func _ready():
 	if !StatManager:
 		if get_parent() is CharacterStatManager:
 			StatManager = get_parent() #kinda relies on proper node heirarchy on declaration so be sure to make it so
-			StatManager.request_add_stat_to_manager(self)
+			StatManager.request_register_stat_to_manager(self)
 			print("requested ", StatManager, " to add ", self)
 		else:
 			printerr("StatComponent not child of CharacterStatManager")

@@ -1,6 +1,6 @@
 [gd_scene load_steps=4 format=4 uid="uid://dtrfwocnyoman"]
 
-[ext_resource type="Script" uid="uid://b7tygbywnnxdt" path="res://assets/scripts/procgen_tile.gd" id="1_e2tij"]
+[ext_resource type="Script" uid="uid://b7tygbywnnxdt" path="res://assets/scripts/Procedural Terrain/procgen_tile.gd" id="1_e2tij"]
 
 [sub_resource type="ArrayMesh" id="ArrayMesh_e2tij"]
 _surfaces = [{

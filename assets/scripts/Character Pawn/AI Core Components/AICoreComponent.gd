@@ -42,7 +42,8 @@ func init_sensing_component(chldr:Array[Node]):
 			if c is AISensingComponent:
 				SensingComponent = c
 	if !SensingComponent or addAISensingComponentOnSpawn:
-		SensingComponent.queue_free()
+		if is_instance_valid(SensingComponent):
+			SensingComponent.queue_free()
 		SensingComponent = AISensingComponent.new()
 		SensingComponent.name = "AISensingComponent"
 		self.add_child(SensingComponent)
@@ -54,7 +55,8 @@ func init_state_manager_component(chldr:Array[Node]):
 			if c is AIStateManagerComponent:
 				AIStateManager = c
 	if !AIStateManager or addAIStateManagerOnSpawn:
-		AIStateManager.queue_free()
+		if is_instance_valid(AIStateManager):
+			AIStateManager.queue_free()
 		AIStateManager = AIStateManagerComponent.new()
 		AIStateManager.name = "AIStatemanager"
 		self.add_child(AIStateManager)
@@ -89,8 +91,17 @@ func polling_outofbounds_reassignment()->void:
 		polling_group = randi_range(1, polling_freq_frame_count) #randomizes polling group if less than 1 or greater than polling frequency
 		#print("polling group outbounds. randomly reassigned to: ", polling_group, " of ", polling_freq_frame_count)
 	
+var doOnce:= false
 func _physics_process(_delta: float) -> void:
 	should_poll_group()
+	if Pawn:
+		if Pawn.statManager and !doOnce:
+			print("||||", Pawn, " statmanager: ", Pawn.statManager)
+			StatManager = Pawn.statManager
+			pass_subcomponent_references()
+			SensingComponent.set_is_sensing_active(true)
+			AIStateManager.set_is_state_manager_active(true)
+			doOnce = true
 	
 func get_sensing_component()->AISensingComponent:
 	return SensingComponent
@@ -100,7 +111,6 @@ func get_state_manager()->AIStateManagerComponent:
 	
 #func get_behaviour_component()->AIBehaviourManagerComponent:         #not yet implemented
 #	return AIBehaviourManager
-
 
 
 #node references
@@ -145,8 +155,9 @@ func pull_component_references()->void:
 	if get_parent() is CharacterPawn3D and !Pawn:
 		Pawn = get_parent()
 	if !StatManager and Pawn:
-		StatManager = Pawn.StatManager
+		if !Pawn.statManager:
+			StatManager = Pawn.statManager
 		
 func pass_subcomponent_references()->void:
 	SensingComponent.pull_component_references(self)
-	AIStateManager.pull_component_references(self, SensingComponent)
+	AIStateManager.pull_component_references(self, SensingComponent, StatManager)

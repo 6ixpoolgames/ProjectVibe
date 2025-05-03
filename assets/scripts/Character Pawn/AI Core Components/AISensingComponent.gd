@@ -7,6 +7,7 @@ class_name AISensingComponent
 #var stateManagerComponent: AIStateManagerComponent
 
 var referencesUpdated:= false
+var isActive:= false
 
 #AI sense variables
 @export var sense_radius: float = 20 ##detection radius for AI sensing
@@ -44,9 +45,13 @@ func _physics_process(_delta: float) -> void:
 	if Pawn:
 		update_facing_direction_vector()
 		update_sensing_area_offset()
-		if AICore and AICore.poll_now():
-			update_entity_in_detection_angle()
-			update_entities_in_LOS()
+		if isActive:
+			if AICore and AICore.poll_now():
+				update_entity_in_detection_angle()
+				update_entities_in_LOS()
+
+func set_is_sensing_active(active:bool)->void:
+	isActive = active
 
 #var capsuleHalfHeight: float
 ##creates sensing areas and connects signals

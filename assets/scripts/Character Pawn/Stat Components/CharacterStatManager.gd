@@ -4,15 +4,17 @@ class_name CharacterStatManager
 var allStats: Array[StatComponentBase]
 var statNames: Array[String]
 
-#var pawn: CharacterPawn3D
+var Pawn: CharacterPawn3D
+ 
 
 
 ##consider adding a check if all children that are statComponents have been added to the manager to set a flag that manager is fully "ready". Not seeing a need for such a flag though quite yet.
-func _ready() -> void:
-	#if get_parent() is CharacterPawn3D:
-		#pawn = get_parent()
-	#readySet = true
+func _enter_tree() -> void:
+	if get_parent() is CharacterPawn3D:
+		Pawn = get_parent()
+		Pawn.statManager = self
 	GlobalTools.print_sequence_counter(self, "_ready")
+	print("|||", Pawn, " stat manager set!", self)
 	pass
 
 var readySet:= false
@@ -22,7 +24,7 @@ func pawn_ready()->void:
 	readySet = true
 
 ##called by statComponent base to add itself to the manager's arrays
-func request_add_stat_to_manager(stat: StatComponentBase)->void:
+func request_register_stat_to_manager(stat: StatComponentBase)->void:
 	if not allStats.has(stat):
 		allStats.append(stat)
 		statNames.append(stat.name)
@@ -107,7 +109,7 @@ func request_get_regen_rate(statName: String) -> float:
 		return result
 
 func get_stat_with_name(stat_name:String) -> StatComponentBase:
-	print(statNames, " " ,  self.get_parent())
+	#print(statNames, " " ,  self.get_parent())
 	if !statNames.is_empty():
 		var index = statNames.find(stat_name)
 	#if index >= 0:
@@ -115,3 +117,9 @@ func get_stat_with_name(stat_name:String) -> StatComponentBase:
 	else:
 		print(self, " returned NULL")
 		return null
+
+func get_all_stat_components_registered()->Array[StatComponentBase]:
+	return allStats
+	
+func get_all_stat_names_registered()->Array[String]:
+	return statNames

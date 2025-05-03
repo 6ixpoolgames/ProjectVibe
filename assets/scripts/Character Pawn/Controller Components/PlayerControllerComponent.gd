@@ -20,7 +20,6 @@ var baseAcl: float
 var baseGrav: float 
 
 func _ready() -> void:
-	super()
 	inputPriority = 0 #sets input priority to highest
 	#print("playercontroller ready")
 	if !Pawn:
@@ -29,7 +28,7 @@ func _ready() -> void:
 	baseSpd = Pawn.speed
 	baseAcl = Pawn.acceleration
 	baseGrav = Pawn.gravity
-
+	
 
 #physics process extension
 func _physics_process(delta: float) -> void:
@@ -105,6 +104,10 @@ func input_camera_yaw_adjustment(iDir)->Vector3:
 			newIDir = inputDirection.rotated(Vector3.UP,cameraYawRotRads)
 		else:
 			if GlobalTools.go_print: print("control arm invalid ", Pawn.cameraControllerArm)
+	elif not Pawn.isPossessed and Pawn.isCommandedMovement:
+		var cameraYawRotRads = Pawn.activePlayerCamera.rotation.y
+		newIDir = inputDirection.rotated(Vector3.UP,cameraYawRotRads)
+
 	else:
 		newIDir = iDir
 	return newIDir

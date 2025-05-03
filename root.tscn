@@ -1,15 +1,17 @@
-[gd_scene load_steps=26 format=4 uid="uid://bpx47c6hqjaem"]
+[gd_scene load_steps=28 format=4 uid="uid://bpx47c6hqjaem"]
 
-[ext_resource type="PackedScene" uid="uid://fyrukvbs7iys" path="res://assets/3d/miniDungeon/Models/GLB format/barrel.glb" id="3_28aoi"]
+[ext_resource type="PackedScene" uid="uid://d2ofax42j1pqs" path="res://assets/3d/miniDungeon/Models/GLB format/barrel.glb" id="3_28aoi"]
 [ext_resource type="PackedScene" uid="uid://baj2kb4ahgm8e" path="res://column_2.tscn" id="4_28aoi"]
 [ext_resource type="PackedScene" uid="uid://dqetdldbv7aa8" path="res://assets/scenes/character_pawn_3d.tscn" id="4_jnlp7"]
 [ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://assets/legacy/proc_gen_tile.tscn" id="5_jnlp7"]
 [ext_resource type="Shader" uid="uid://dcautap0qmayt" path="res://assets/shaders/stylized_spatial_clouds.gdshader" id="6_l8v81"]
-[ext_resource type="Script" uid="uid://fq5sx40suwlv" path="res://assets/scripts/FreeFloatingCameraController.gd" id="7_vyht1"]
-[ext_resource type="Script" uid="uid://d4ioo33u80vet" path="res://assets/scripts/CharacterStatManager.gd" id="8_huihk"]
-[ext_resource type="Script" uid="uid://dywqacbh7on7i" path="res://assets/scripts/PawnInitializerComponent.gd" id="9_huihk"]
-[ext_resource type="Script" uid="uid://bmdvdh2484dx6" path="res://assets/scripts/StatComponentBase.gd" id="9_tw3kd"]
-[ext_resource type="Script" uid="uid://dtmq3hf7dgjx3" path="res://SpawnControllerSelector_resource.gd" id="10_tw3kd"]
+[ext_resource type="Script" uid="uid://fq5sx40suwlv" path="res://assets/scripts/Dynamic Camera/FreeFloatingCameraController.gd" id="7_vyht1"]
+[ext_resource type="Script" uid="uid://d4ioo33u80vet" path="res://assets/scripts/Character Pawn/Stat Components/CharacterStatManager.gd" id="8_huihk"]
+[ext_resource type="Script" uid="uid://dywqacbh7on7i" path="res://assets/scripts/Character Pawn/PawnInitializerComponent.gd" id="9_huihk"]
+[ext_resource type="Script" uid="uid://bmdvdh2484dx6" path="res://assets/scripts/Character Pawn/Stat Components/StatComponentBase.gd" id="9_tw3kd"]
+[ext_resource type="Script" uid="uid://dtmq3hf7dgjx3" path="res://assets/scripts/resources/SpawnControllerSelector_resource.gd" id="10_tw3kd"]
+[ext_resource type="Script" uid="uid://di5rv3hfw4edn" path="res://assets/scripts/Character Pawn/AI Core Components/AIBehaviourManagerComponent.gd" id="11_qw60f"]
+[ext_resource type="Script" uid="uid://4w4q17v07sq3" path="res://assets/scripts/Character Pawn/AI Core Components/AIBehaviourComponentBase.gd" id="12_eji0w"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_pq8q7"]
 sky_horizon_color = Color(0.662243, 0.671743, 0.686743, 1)
@@ -235,11 +237,48 @@ metadata/_custom_type_script = "uid://bmdvdh2484dx6"
 [node name="PawnInitializerComponent" type="Node" parent="HeroPawn"]
 script = ExtResource("9_huihk")
 spawnTheseControllers = SubResource("Resource_tw3kd")
-spawnAllAICoreComponents = true
+spawnAISensing = null
+spawnAIStateManager = null
+spawnAIBehaviourManager = null
 metadata/_custom_type_script = "uid://dywqacbh7on7i"
 
 [node name="testPawn1" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -24.0699, -7.8516, 9.15864)
+
+[node name="AIBehaviourManagerComponent" type="Node" parent="testPawn1"]
+script = ExtResource("11_qw60f")
+metadata/_custom_type_script = "uid://di5rv3hfw4edn"
+
+[node name="random walk" type="Node" parent="testPawn1/AIBehaviourManagerComponent"]
+script = ExtResource("12_eji0w")
+stateName = &"Idle"
+metadata/_custom_type_script = "uid://4w4q17v07sq3"
+
+[node name="AIBehaviourComponentBase2" type="Node" parent="testPawn1/AIBehaviourManagerComponent"]
+script = ExtResource("12_eji0w")
+behaviourID = &"pause"
+stateName = &"Idle"
+metadata/_custom_type_script = "uid://4w4q17v07sq3"
+
+[node name="pause" type="Node" parent="testPawn1/AIBehaviourManagerComponent"]
+script = ExtResource("12_eji0w")
+stateName = &"Idle"
+metadata/_custom_type_script = "uid://4w4q17v07sq3"
+
+[node name="RIP" type="Node" parent="testPawn1/AIBehaviourManagerComponent"]
+script = ExtResource("12_eji0w")
+stateName = &"Dead"
+metadata/_custom_type_script = "uid://4w4q17v07sq3"
+
+[node name="Attaack" type="Node" parent="testPawn1/AIBehaviourManagerComponent"]
+script = ExtResource("12_eji0w")
+stateName = &"Aggro"
+metadata/_custom_type_script = "uid://4w4q17v07sq3"
+
+[node name="AIBehaviourComponentBase6" type="Node" parent="testPawn1/AIBehaviourManagerComponent"]
+script = ExtResource("12_eji0w")
+behaviourID = &"test all"
+metadata/_custom_type_script = "uid://4w4q17v07sq3"
 
 [node name="testPawn3" parent="." instance=ExtResource("4_jnlp7")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -9.94547, -2.41002, -21.7933)

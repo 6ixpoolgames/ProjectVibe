@@ -32,6 +32,9 @@ var activePlayerCamera: Camera3D
 var allChildren: Array[Node]
 var pawnInitializer: PawnInitializerComponent
 var cameraControllerArm: PawnCameraController
+var statManager: CharacterStatManager
+var AICore: AICoreComponent
+#var CombatManager: CombatManagerComponent 
 
 #Pawn characteristics variables
 var unitHalfHeight: float = 1
@@ -42,10 +45,11 @@ var initializerEntered:= false
 
 
 func _ready():
-	spawn_initializer(hasInitializer)
-	if initializerEntered and pawnInitializer:
+	spawn_initializer(hasInitializer) #spawns an initializer if export var set to TRUE
+	if initializerEntered and pawnInitializer: #checks that initializer exists and has _entered_tree() with a valid reference set
 		pawnInitializer.pawn_ready_set()
 	ready_active_player_camera()
+	GlobalTools.print_sequence_counter(self, "_ready()")
 
 func spawn_initializer(spawn:bool):
 	if spawn and !initializerEntered:
@@ -64,6 +68,9 @@ func request_update_all_pawn_children()-> Array[Node]:
 	allChildren.clear()
 	allChildren = GlobalTools.get_all_descendants(self)
 	return allChildren
+	
+	
+#func 
 
 func _physics_process(delta: float) -> void:
 	yaw_to_facing(delta)

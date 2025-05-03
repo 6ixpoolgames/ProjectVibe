@@ -5,13 +5,12 @@ var activeCamera: PlayerCamera3D
 var readySet:bool = false
 
 func _enter_tree() -> void:
-	#creates nav agent
+	super()
 	create_nav_agent(true)
 	readySet = true
 	
 
-func _ready():
-	super()
+func _ready()->void:
 	if not Pawn is CharacterPawn3D or !Pawn: #must be controlled by a pawn
 		printerr("pawn is not a pawn ", self)
 		set_physics_process(false)

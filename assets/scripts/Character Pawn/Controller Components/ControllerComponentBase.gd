@@ -6,9 +6,10 @@ class_name ControllerComponentBase
 var Pawn: CharacterPawn3D
 var controllerManager: MovementControllerManager
 
-func _ready():
+func _enter_tree() -> void:
 	controllerManager = get_parent()
 	Pawn = controllerManager.Pawn
+	print(self, Pawn)
 	if not controllerManager is MovementControllerManager or controllerManager == null:
 		print("Not a valid MovementControllerManager!")
 	if not Pawn is CharacterPawn3D or Pawn == null:

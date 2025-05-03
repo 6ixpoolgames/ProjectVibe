@@ -17,9 +17,9 @@ func _init(addPlayerCon:= addPlayerController, addClickCon:= addClickController,
 func _enter_tree() -> void:
 	if !Pawn or is_instance_valid(Pawn): #improper if NULL or parent NOT CharacterPawn3D
 		Pawn = get_parent()
-	#if spawnDebugControllers:
 	init_controllers(addPlayerController, addClickController, hasAIController) 
-	
+	print(self," ", Pawn, " has entered: ", addPlayerController, addClickController, hasAIController)
+
 func _ready():
 	#check if properly attached
 	get_controllers_attached()
@@ -32,8 +32,7 @@ func get_controllers_attached()->void:
 	for c in children:
 		if c is ControllerComponentBase:
 			controllersAttached.append(c)
-	GlobalTools.print_sequence_counter(Pawn, "get_controllers_attached")
-	print(controllersAttached)
+	#print(controllersAttached)
 	
 ##test function that creates player controllers for the movement controller
 func init_controllers(addPC:bool = addPlayerController, addCC:bool = addClickController, addAI: = hasAIController)->void:
@@ -49,6 +48,7 @@ func init_controllers(addPC:bool = addPlayerController, addCC:bool = addClickCon
 		var controller3 = AIControllerBase.new()
 		controller3.name = "AIControllerComponent"
 		add_child(controller3)
+	
 
 var iDirBuffer: Array[Vector3] = []
 var conBuffer: Array[ControllerComponentBase] = []

@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3 uid="uid://dqetdldbv7aa8"]
 
-[ext_resource type="Script" uid="uid://m21ym7goa67x" path="res://assets/scripts/CharacterPawn3D.gd" id="1_mqp35"]
-[ext_resource type="Script" uid="uid://dthqocmiybu3q" path="res://assets/scripts/MovementControllerManager.gd" id="2_sqr0i"]
+[ext_resource type="Script" uid="uid://m21ym7goa67x" path="res://assets/scripts/Character Pawn/CharacterPawn3D.gd" id="1_mqp35"]
+[ext_resource type="Script" uid="uid://dthqocmiybu3q" path="res://assets/scripts/Character Pawn/Controller Components/MovementControllerManager.gd" id="2_sqr0i"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_uw0gs"]
 

@@ -6,7 +6,6 @@ func _enter_tree() -> void:
 	create_nav_agent(true)
 
 func _ready() -> void:
-	super()
 	if !Pawn:
 		set_physics_process(false)
 
@@ -17,7 +16,7 @@ func _physics_process(_delta: float) -> void:
 var navAgent: NavigationAgent3D
 ##creates a new navigation agent 3D for the click to move controller.
 ## [param overwrite] if overwrite is true, deletes all other NavAgent3Ds attached to the controller
-func create_nav_agent(overwrite:bool):
+func create_nav_agent(overwrite:bool)->void:
 	if overwrite: #checks all child
 		var children = self.get_children()
 		for c in children:
@@ -38,7 +37,7 @@ var destination = Vector3.ZERO
 var local_destination = Vector3.ZERO
 var aiDirection = Vector3.ZERO
 ##called each frame to handle navAgent movement. Runs if navigationToggle flag is TRUE. If is_navigation_finished() is TRUE, calls stop_navigation() automatically	
-func pawn_navigation():
+func pawn_navigation()->void:
 	var hAiDirection = Vector3.ZERO
 	if navigationToggle == true: #only get_next_path_position() if actively navigating. Not sure if it'll break stuff later, but works for now
 		destination = navAgent.get_next_path_position()
