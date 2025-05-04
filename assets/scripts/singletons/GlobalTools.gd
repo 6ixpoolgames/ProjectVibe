@@ -82,8 +82,8 @@ func print_on_physics_frame(delta:float, seconds_to_run:float, frames_btw_prnt:i
 		print("			------------PHYSics-Frame-------------------------------------_[	",physicsFrame,"	]----------------------------------------------------",delta,"*")
 	return physicsFrame
 
-var default_persist_ms:= 0.5
-func line(pos1: Vector3, pos2: Vector3, color = Color.DARK_RED, persist_ms:float = default_persist_ms):
+var default_persist_sec:= 0.5
+func line(pos1: Vector3, pos2: Vector3, color = Color.DARK_RED, persist_sec:float = default_persist_sec):
 	var mesh_instance := MeshInstance3D.new()
 	var immediate_mesh := ImmediateMesh.new()
 	var material := ORMMaterial3D.new()
@@ -107,10 +107,10 @@ func line(pos1: Vector3, pos2: Vector3, color = Color.DARK_RED, persist_ms:float
 		debug_mesh_buffer.remove_at(0)
 		debug_mesh_timer.remove_at(0)
 	debug_mesh_buffer.append(mesh_instance)
-	debug_mesh_timer.append(persist_ms)
+	debug_mesh_timer.append(persist_sec)
 	return
 
-func point(pos: Vector3, radius:float = 0.05, color = Color.RED, persist_ms:float = default_persist_ms):
+func point(pos: Vector3, radius:float = 0.05, color = Color.RED, persist_sec:float = default_persist_sec):
 	var mesh_instance := MeshInstance3D.new()
 	var sphere_mesh := SphereMesh.new()
 	var material := ORMMaterial3D.new()
@@ -134,10 +134,10 @@ func point(pos: Vector3, radius:float = 0.05, color = Color.RED, persist_ms:floa
 		debug_mesh_buffer.remove_at(0)
 		debug_mesh_timer.remove_at(0)
 	debug_mesh_buffer.append(mesh_instance)
-	debug_mesh_timer.append(persist_ms)
+	debug_mesh_timer.append(persist_sec)
 	return
 
-func square(pos: Vector3, size: Vector2, color = Color.RED, persist_ms:float = default_persist_ms):
+func square(pos: Vector3, size: Vector2, color = Color.RED, persist_sec:float = default_persist_sec):
 	var mesh_instance := MeshInstance3D.new()
 	var box_mesh := BoxMesh.new()
 	var material := ORMMaterial3D.new()
@@ -160,7 +160,7 @@ func square(pos: Vector3, size: Vector2, color = Color.RED, persist_ms:float = d
 		debug_mesh_buffer.remove_at(0)
 		debug_mesh_timer.remove_at(0)
 	debug_mesh_buffer.append(mesh_instance)
-	debug_mesh_timer.append(persist_ms)
+	debug_mesh_timer.append(persist_sec)
 	return
 
 ## 1 -> Lasts ONLY for current physics frame
@@ -183,3 +183,15 @@ func final_cleanup(delta:float):
 	debug_mesh_buffer = bufferM
 	debug_mesh_timer = bufferT
 	
+##returns raycast result
+@onready var space_state = get_tree().root.get_world_3d().direct_space_state
+@onready var query = PhysicsRayQueryParameters3D.new()
+func global_raycast_intersection_col(from: Vector3, to: Vector3, persist_sec:float = default_persist_sec, color: Color= Color.RED, mask:int = 31)->Dictionary:
+	if !space_state:
+		push_error("no valid space state")
+		return {}
+	query.from = from
+	query.to = to
+	query.collision_mask = mask
+	lines_with_points(from, to, color, persist_sec)
+	return space_state.intersect_ray(query) 

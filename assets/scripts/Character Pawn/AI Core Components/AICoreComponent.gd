@@ -25,11 +25,13 @@ func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAISt
 	
 		
 func _enter_tree() -> void:
-	pull_component_references()
+	update_component_references()
 	var children:Array[Node] = get_children()
 	init_sensing_component(children)
 	init_state_manager_component(children)
 	init_behaviour_manager_component(children)
+
+	
 
 func _ready() -> void:
 	polling_outofbounds_reassignment()
@@ -151,9 +153,10 @@ func set_references(references:Array[Node])->void:
 	print(">>>references", references)
 	GlobalTools.print_sequence_counter(self, "set_references")
 
-func pull_component_references()->void:
+func update_component_references()->void:
 	if get_parent() is CharacterPawn3D and !Pawn:
 		Pawn = get_parent()
+		Pawn.AICore = self
 	if !StatManager and Pawn:
 		if !Pawn.statManager:
 			StatManager = Pawn.statManager
