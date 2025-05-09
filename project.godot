@@ -18,6 +18,7 @@ config/icon="res://assets/2d/icon.svg"
 [autoload]
 
 GlobalTools="*res://assets/scripts/singletons/GlobalTools.gd"
+GlobalAICoordinator="*res://assets/scripts/singletons/GlobalAICoordinator.gd"
 
 [input]
 

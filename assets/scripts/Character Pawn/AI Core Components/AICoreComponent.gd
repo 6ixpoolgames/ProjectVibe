@@ -2,8 +2,9 @@ extends Node3D
 class_name AICoreComponent
 
 #AI sense polling frequency
-@export var polling_freq_frame_count: int = 3 ##number of physics frames between polling calls
+@onready var polling_freq_frame_count: int = 3 ##number of physics frames between polling calls
 @export var polling_group: int = 0 ##which frame this component polls. Choose 0 for random assignment.
+
 
 #references and ready checks
 #var pawn: CharacterPawn3D
@@ -12,6 +13,9 @@ class_name AICoreComponent
 @export var addAISensingComponentOnSpawn:= true
 @export var addAIStateManagerOnSpawn:= true
 @export var addAIBehaviourManagerOnSpawn:= true
+
+#Global AI coordinater  variables
+@export var useGlobalPollingFrame:= true ##if true, polls using global AI coordinator polling frame. FALSE uses internal polling counts
 
 #public variable accessed by subcomponents for when to poll
 var pollingGroupActive:int = 0
@@ -73,6 +77,10 @@ func init_behaviour_manager_component(chldr:Array[Node]):
 
 ##count through frames and set which polling group should fire
 func should_poll_group()->int:
+	if useGlobalPollingFrame:
+		pollingGroupActive = GlobalAICoordinator.get_polling_frame()
+		print("[AI Core polling] polling frame is: ", pollingGroupActive)
+		return pollingGroupActive
 	pollingGroupActive += 1
 	if pollingGroupActive > polling_freq_frame_count:
 		pollingGroupActive = 1
@@ -95,6 +103,7 @@ var doOnce:= false
 func _physics_process(_delta: float) -> void:
 	should_poll_group()
 	if Pawn:
+		#janky ASF way of passing along CharStatManager reference to AIStateManager need to noodle on a better implementation
 		if Pawn.statManager and !doOnce:
 			print("||||", Pawn, " statmanager: ", Pawn.statManager)
 			StatManager = Pawn.statManager

@@ -40,8 +40,8 @@ var AICore: AICoreComponent
 var unitHalfHeight: float = 1
 
 #debug
-@export var hasInitializer:= false
-var initializerEntered:= false
+@export var hasInitializer:bool= false
+var initializerEntered:bool= false
 
 
 func _ready():

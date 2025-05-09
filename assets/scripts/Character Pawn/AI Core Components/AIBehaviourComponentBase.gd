@@ -9,8 +9,8 @@ var BehaviourManager: AIBehaviourManagerComponent
 func _enter_tree() -> void:
 	if behaviourID == &"":
 		behaviourID = StringName(self.name)
-	#else:
-	#	self.name = behaviourID
+	else:
+		self.name = behaviourID
 	if !BehaviourManager and get_parent() is AIBehaviourManagerComponent:
 		BehaviourManager = get_parent()
 	else:

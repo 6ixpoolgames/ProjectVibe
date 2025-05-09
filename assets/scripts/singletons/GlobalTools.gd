@@ -1,6 +1,6 @@
 ##singleton class that houses globally available debug methods
 extends Node
-
+class_name GlobalToolsSingleton
 
 func _physics_process(_delta: float) -> void:
 	#print_on_physics_frame(delta, .5)
