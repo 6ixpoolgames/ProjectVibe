@@ -2,6 +2,9 @@ extends Node
 class_name MovementControllerManager
 
 var Pawn: CharacterPawn3D
+var playerController: PlayerControllerComponent
+var clickMoveController: ClickToMoveComponent
+var AIController: AIControllerBase
 
 @export var addPlayerController:= false ##debug function for creating and attaching player controllers to the pawn at ready
 @export var addClickController:= false ##debug function for creating and attaching click to move controller to the pawn at ready

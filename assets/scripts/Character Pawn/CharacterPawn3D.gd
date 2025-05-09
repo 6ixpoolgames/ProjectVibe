@@ -34,15 +34,19 @@ var pawnInitializer: PawnInitializerComponent
 var cameraControllerArm: PawnCameraController
 var statManager: CharacterStatManager
 var AICore: AICoreComponent
+var controllerManager: MovementControllerManager
 #var CombatManager: CombatManagerComponent 
 
 #Pawn characteristics variables
 var unitHalfHeight: float = 1
+var pawnRID:RID
 
 #debug
 @export var hasInitializer:bool= false
 var initializerEntered:bool= false
 
+func _on_enter()->void:
+	pawnRID = get_rid()
 
 func _ready():
 	spawn_initializer(hasInitializer) #spawns an initializer if export var set to TRUE

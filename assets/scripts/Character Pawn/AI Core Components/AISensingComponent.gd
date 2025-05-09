@@ -52,6 +52,8 @@ func _physics_process(_delta: float) -> void:
 
 func set_is_sensing_active(active:bool)->void:
 	isActive = active
+	pawnRID = Pawn.get_rid()
+	exclude.append(pawnRID)
 
 #var capsuleHalfHeight: float
 ##creates sensing areas and connects signals
@@ -146,12 +148,15 @@ func update_entity_in_detection_angle()->void:
 			entitiesInDetectionAngle.append(e)
 
 var debugFlag = false
-var collisionMask: int = 3 #collision layers 1 and 2
-var exclude: Array #exclusion array for space query. Currently not working
+@export var collisionMask: int = 3 #collision layers 1 and 2
+var exclude: Array[RID] #exclusion array for space query. Currently not working
+@onready var space_state = get_world_3d().direct_space_state
+@onready var query = PhysicsRayQueryParameters3D.new()
+var pawnRID: RID
 ##does a raycast towards [param entity] from pawn with a ground offset = unitHalfHeight
 func is_in_LOS(entity: CharacterPawn3D)->bool:
 	#setup a space state query on specifically pawns with capsule colliders with a half height offset
-	var space_state = get_world_3d().direct_space_state
+	
 	var pwnPos = global_transform.origin
 	var entPos = entity.global_transform.origin
 	var pwnYOffset = Pawn.unitHalfHeight
@@ -160,15 +165,18 @@ func is_in_LOS(entity: CharacterPawn3D)->bool:
 	#do the fuckin query
 	var from = Vector3(pwnPos.x,(pwnPos.y + pwnYOffset),pwnPos.z)
 	var to = Vector3(entPos.x, (entPos.y + entYOffset), entPos.z)
-	var query = PhysicsRayQueryParameters3D.create(from, to, collisionMask, exclude)	
+	query.from = from
+	query.to = to
+	query.collision_mask = collisionMask
+	query.exclude = exclude
 	var result = space_state.intersect_ray(query)
-	
-	GlobalTools.lines_with_points(from, to, Color.DARK_RED,1)
 	
 	#return succes
 	if result and result.collider == entity:
+		GlobalTools.lines_with_points(from, to, Color.DARK_RED,1)
 		return true
 	else:
+		GlobalTools.lines_with_points(from, to, Color.YELLOW,1)
 		return false
 
 ##checks all entities within detection angle for LOS and adds them to that array
