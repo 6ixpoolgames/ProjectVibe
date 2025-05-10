@@ -2,18 +2,21 @@ extends Node3D
 class_name AISensingComponent
 
 #node reference
-#var pawn: CharacterPawn3D
-#var AICore: AICoreComponent
+#var Pawn: CharacterPawn3D
+#var Nexus: PawnNexusComponent
+var AICore: AICoreComponent
 #var stateManagerComponent: AIStateManagerComponent
 
 var referencesUpdated:= false
 var isActive:= false
 
 #AI sense variables
-@export var sense_radius: float = 20 ##detection radius for AI sensing
-@export var forward_sense_bias: bool = true
-@export var sense_forward_offset: float = 5 ##note: offset increases sense range by this much
-@export var forward_vision_angle: float = 160 ##in degrees.
+var sense_radius: float = 20 ##detection radius for AI sensing
+var forward_sense_bias: bool = true
+var sense_forward_offset: float = 5 ##note: offset increases sense range by this much
+var forward_vision_angle: float = 160 ##in degrees.
+
+@export var sense_init_res:= AISensingInitializerBaseRes.new(sense_radius, forward_sense_bias, sense_forward_offset, forward_vision_angle)
 
 #array of sensed entities
 var allSensedEntities: Array[CharacterPawn3D]
@@ -27,15 +30,19 @@ var sensingCollisionShape3D: CollisionShape3D
 #facing direction buffer var
 var facingDirection: Vector3
 
+func _enter_tree() -> void:
+	AICore = get_parent()
+	AICore.SensingComponent = self
+
 func _ready() -> void:
 	GlobalTools.print_sequence_counter(self, "_ready")
 
 ##initializes variables and creates sensing area
-func _init(radius: float = sense_radius, forward_bias:bool = forward_sense_bias, bias_offset:float=sense_forward_offset, vision_angle: float=forward_vision_angle)->void:
-	sense_radius = radius
-	forward_sense_bias = forward_bias
-	sense_forward_offset = bias_offset
-	forward_vision_angle = vision_angle
+func _init(senseRes:=sense_init_res)->void:
+	sense_radius = senseRes.sense_radius
+	forward_sense_bias = senseRes.forward_sense_bias
+	sense_forward_offset = senseRes.sense_forward_offset
+	forward_vision_angle = senseRes.forward_vision_angle
 	
 func _enter_tree() -> void:
 	#pull_component_references()
