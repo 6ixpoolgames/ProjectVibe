@@ -1,0 +1,69 @@
+[gd_scene load_steps=13 format=3 uid="uid://cla16t20anuss"]
+
+[ext_resource type="Script" uid="uid://fq5sx40suwlv" path="res://assets/scripts/Dynamic Camera/FreeFloatingCameraController.gd" id="1_gy7eo"]
+[ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://assets/legacy/proc_gen_tile.tscn" id="2_gy7eo"]
+[ext_resource type="Script" uid="uid://m21ym7goa67x" path="res://assets/scripts/Character Pawn/CharacterPawn3D.gd" id="3_5av4d"]
+[ext_resource type="Script" uid="uid://ch7e1kmli36w8" path="res://assets/scripts/Character Pawn/PawnNexusComponent.gd" id="4_6bchc"]
+[ext_resource type="Script" uid="uid://cwxtrbi3gjvc6" path="res://assets/scripts/Character Pawn/AI Core Components/AICoreComponent.gd" id="5_tv77q"]
+[ext_resource type="Script" uid="uid://6sbyftt8pnl8" path="res://assets/scripts/Character Pawn/AI Core Components/AISensingComponent.gd" id="6_ltd8p"]
+
+[sub_resource type="Environment" id="Environment_gy7eo"]
+
+[sub_resource type="CameraAttributesPhysical" id="CameraAttributesPhysical_tiep7"]
+
+[sub_resource type="Compositor" id="Compositor_5av4d"]
+
+[sub_resource type="NavigationMesh" id="NavigationMesh_5av4d"]
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_kr2gd"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_tv77q"]
+
+[node name="Node3D" type="Node3D"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.994449, 0.105223, 0, -0.105223, 0.994449, 0, 4.49465, 0)
+light_energy = 1.61
+light_volumetric_fog_energy = 2.524
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_gy7eo")
+camera_attributes = SubResource("CameraAttributesPhysical_tiep7")
+compositor = SubResource("Compositor_5av4d")
+
+[node name="PlayerCamera3D" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.79653, 0.604599, 0, -0.604599, 0.79653, -0.185351, 2.56276, 6.58004)
+script = ExtResource("1_gy7eo")
+metadata/_custom_type_script = "uid://c4fluuylnuit3"
+
+[node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -32.549, 1.85589, -26.5851)
+navigation_mesh = SubResource("NavigationMesh_5av4d")
+
+[node name="ProcGenTile" parent="NavigationRegion3D" instance=ExtResource("2_gy7eo")]
+
+[node name="HeroPawn" type="CharacterBody3D" parent="."]
+script = ExtResource("3_5av4d")
+metadata/_custom_type_script = "uid://m21ym7goa67x"
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="HeroPawn"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+mesh = SubResource("CapsuleMesh_kr2gd")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HeroPawn"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+shape = SubResource("CapsuleShape3D_tv77q")
+
+[node name="PawnNexusComponent" type="Node3D" parent="HeroPawn"]
+script = ExtResource("4_6bchc")
+metadata/_custom_type_script = "uid://ch7e1kmli36w8"
+
+[node name="AICoreComponent" type="Node3D" parent="HeroPawn/PawnNexusComponent"]
+script = ExtResource("5_tv77q")
+metadata/_custom_type_script = "uid://cwxtrbi3gjvc6"
+
+[node name="AISensingComponent" type="Node3D" parent="HeroPawn/PawnNexusComponent/AICoreComponent"]
+script = ExtResource("6_ltd8p")
+metadata/_custom_type_script = "uid://6sbyftt8pnl8"
+
+[editable path="NavigationRegion3D/ProcGenTile"]

@@ -14,6 +14,11 @@ class_name AICoreComponent
 @export var addAIStateManagerOnSpawn:= true
 @export var addAIBehaviourManagerOnSpawn:= true
 
+#initalization resources
+@export var sensingInitRes:AISensingInitializerBaseRes  ##initializer resource for sensing component of type AISensingInitializerBaseRes
+@export var stateInitRes = null
+@export var behaviourInitRes = null
+
 #Global AI coordinater  variables
 @export var useGlobalPollingFrame:= true ##if true, polls using global AI coordinator polling frame. FALSE uses internal polling counts
 
@@ -50,10 +55,11 @@ func init_sensing_component(chldr:Array[Node]):
 	if !SensingComponent or addAISensingComponentOnSpawn:
 		if is_instance_valid(SensingComponent):
 			SensingComponent.queue_free()
-		SensingComponent = AISensingComponent.new()
+		if !sensingInitRes:
+			sensingInitRes = AISensingInitializerBaseRes.new()
+		SensingComponent = AISensingComponent.new(sensingInitRes)
 		SensingComponent.name = "AISensingComponent"
 		self.add_child(SensingComponent)
-	
 
 func init_state_manager_component(chldr:Array[Node]):
 	if !chldr.is_empty():
@@ -76,6 +82,12 @@ func init_behaviour_manager_component(chldr:Array[Node]):
 		#	AIBehaviourManager.name = "AIBehaviourManager"
 		#	self.add_child(AIBehaviourManager)
 			print(Pawn, " hypothetically added behaviour manager. Get on it ya lazy bum!")
+
+func nullify_init_resources(nullify:bool=true):
+	if nullify:
+		sensingInitRes = null
+		stateInitRes = null
+		behaviourInitRes = null
 
 ##count through frames and set which polling group should fire
 func should_poll_group()->int:

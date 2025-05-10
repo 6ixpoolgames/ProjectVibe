@@ -1,5 +1,6 @@
 extends MeshInstance3D
 
+
 @export var size: int = 32
 @export var tile_size: float = 1.0
 @export var height_scale: float = 5.0

@@ -1,5 +1,6 @@
 @tool
 extends MeshInstance3D
+class_name proceduralTerrainTile
 
 signal terrain_collision_generated(terrainCollision)
 

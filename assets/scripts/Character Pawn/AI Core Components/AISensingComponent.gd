@@ -4,19 +4,19 @@ class_name AISensingComponent
 #node reference
 #var Pawn: CharacterPawn3D
 #var Nexus: PawnNexusComponent
-var AICore: AICoreComponent
+#var AICore: AICoreComponent
 #var stateManagerComponent: AIStateManagerComponent
 
 var referencesUpdated:= false
 var isActive:= false
 
-#AI sense variables
-var sense_radius: float = 20 ##detection radius for AI sensing
-var forward_sense_bias: bool = true
-var sense_forward_offset: float = 5 ##note: offset increases sense range by this much
-var forward_vision_angle: float = 160 ##in degrees.
+##default AI sense variables
+@export var sense_radius: float = 20 ##detection radius for AI sensing
+@export var forward_sense_bias: bool = true
+@export var sense_forward_offset: float = 5 ##note: offset increases sense range by this much
+@export var forward_vision_angle: float = 160 ##in degrees.
 
-@export var sense_init_res:= AISensingInitializerBaseRes.new(sense_radius, forward_sense_bias, sense_forward_offset, forward_vision_angle)
+@export var sense_init_res: AISensingInitializerBaseRes #= AISensingInitializerBaseRes.new(sense_radius, forward_sense_bias, sense_forward_offset, forward_vision_angle)
 
 #array of sensed entities
 var allSensedEntities: Array[CharacterPawn3D]
@@ -30,10 +30,6 @@ var sensingCollisionShape3D: CollisionShape3D
 #facing direction buffer var
 var facingDirection: Vector3
 
-func _enter_tree() -> void:
-	AICore = get_parent()
-	AICore.SensingComponent = self
-
 func _ready() -> void:
 	GlobalTools.print_sequence_counter(self, "_ready")
 
@@ -46,6 +42,8 @@ func _init(senseRes:=sense_init_res)->void:
 	
 func _enter_tree() -> void:
 	#pull_component_references()
+	AICore = get_parent()
+	AICore.SensingComponent = self
 	initialize_sensing()
 
 func _physics_process(_delta: float) -> void:
@@ -60,7 +58,8 @@ func _physics_process(_delta: float) -> void:
 func set_is_sensing_active(active:bool)->void:
 	isActive = active
 	pawnRID = Pawn.get_rid()
-	exclude.append(pawnRID)
+	if exclude.find(pawnRID) > -1:
+		exclude.append(pawnRID)
 
 #var capsuleHalfHeight: float
 ##creates sensing areas and connects signals
