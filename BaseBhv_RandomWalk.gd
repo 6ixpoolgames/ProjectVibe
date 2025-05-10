@@ -27,11 +27,16 @@ func _physics_process(delta: float) -> void:
 				isWandering = false
 				pause_random_duration()
 func enter_state()->void:
+	print(Pawn," entered random walk behavior")
 	if !Pawn:
 		Pawn = BehaviourManager.AICore.Pawn
-	set_physics_process(true)
+	if Pawn.controllerManager:
+		print("has controller manager")
+		if Pawn.controllerManager.AIController:
+			print("has AI controller")
+			set_physics_process(true)
 	#BehaviourManager.isRunningBehaviour = true
-	print(Pawn," entered random walk behavior")
+	
 
 func exit_state()->void:
 	if Pawn.controllerManager.AIController:
@@ -63,9 +68,9 @@ func pick_random_location(radius:float = wanderRadius, y_offset:float= y_offset_
 var isPausing:bool = false
 @export var minPauseDurr: float = 5
 @export var maxPauseDurr: float = 15
-func pause_random_duration(min:float = minPauseDurr, max:float = maxPauseDurr)->bool:
+func pause_random_duration(minDurr:float = minPauseDurr, maxDurr:float = maxPauseDurr)->bool:
 	if !timerDone and !timerDoneName == &"pauseRandom":
-		var pauseTime = randf_range(min,max)
+		var pauseTime = randf_range(minDurr,maxDurr)
 		timer_start(pauseTime,&"pauseRandom")
 		isPausing = true
 		return isPausing
@@ -83,14 +88,14 @@ func timer_start(duration:float, method: StringName):
 var timerDone: bool = false
 var timerDoneName: StringName = &""
 func timer_finished(method:StringName = methodName):
-	if methodName == &"pauseRandom":
+	if method == &"pauseRandom":
 		pause_random_duration()
-	print("timer finished! ", methodName)
+	print("timer finished! ", method)
 	methodName = &""
 
 
 var timerActive:= false
-var timerDurr:= -1
+var timerDurr:float = -1
 func delta_timer(delta:float):
 	if timerActive and methodName != &"":
 		timerDurr -= delta

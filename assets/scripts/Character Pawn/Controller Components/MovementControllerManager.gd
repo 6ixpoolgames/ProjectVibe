@@ -35,7 +35,7 @@ func get_controllers_attached()->void:
 	for c in children:
 		if c is ControllerComponentBase:
 			controllersAttached.append(c)
-	#print(controllersAttached)
+	print(Pawn, " &&&& ",controllersAttached)
 	
 ##test function that creates player controllers for the movement controller
 func init_controllers(addPC:bool = addPlayerController, addCC:bool = addClickController, addAI: = hasAIController)->void:

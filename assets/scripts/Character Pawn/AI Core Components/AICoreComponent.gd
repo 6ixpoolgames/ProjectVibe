@@ -81,7 +81,7 @@ func init_behaviour_manager_component(chldr:Array[Node]):
 func should_poll_group()->int:
 	if useGlobalPollingFrame:
 		pollingGroupActive = GlobalAICoordinator.get_polling_frame()
-		print("[AI Core polling] polling frame is: ", pollingGroupActive)
+		print("[AI Core polling] polling frame is: ", pollingGroupActive, " ", Pawn)
 		return pollingGroupActive
 	pollingGroupActive += 1
 	if pollingGroupActive > polling_freq_frame_count:

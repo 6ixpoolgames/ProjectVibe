@@ -4,6 +4,8 @@ class_name AIControllerBase
 
 func _enter_tree() -> void:
 	super()
+	if controllerManager.AIController != null:
+		controllerManager.AIController = self
 	create_nav_agent(true)
 
 func _ready() -> void:
