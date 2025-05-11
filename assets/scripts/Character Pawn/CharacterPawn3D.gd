@@ -72,9 +72,6 @@ func request_update_all_pawn_children()-> Array[Node]:
 	allChildren.clear()
 	allChildren = GlobalTools.get_all_descendants(self)
 	return allChildren
-	
-	
-#func 
 
 func _physics_process(delta: float) -> void:
 	yaw_to_facing(delta)
@@ -103,23 +100,22 @@ func move_in_direction(moveDir: Vector3, delta: float) -> void:
 			velocity.x = move_toward(velocity.x, 0, deceleration * delta * airCont)
 			velocity.z = move_toward(velocity.z, 0, deceleration * delta * airCont)
 	#print("movDir: ", moveDir, " vel: ", velocity)
-	
+
 ##function to set the move direction, designed to be called from the controller script or elsewhere every (physics)frame
 ## [param inputDir] direction of desired movement
 ##if inputDir is a zero vector, treats it as no input commands given and sets isCommandedMovement flag to false
 func give_move_command(inputDir:Vector3)-> void:
-	if not inputDir.is_zero_approx(): #if with inputs
-		moveDirection = inputDir
-		isCommandedMovement = true
-	else:
+	if inputDir.is_zero_approx(): 
 		moveDirection = Vector3.ZERO
 		isCommandedMovement = false
+	else:   #if with inputs
+		moveDirection = inputDir
+		isCommandedMovement = true
 
 ##apply gravity every tick, with coyote time code. Possibly refactor this
 func apply_gravity(delta:float):
 	if not is_on_floor():
 		velocity.y -= gravity * gravity_multiplier * delta		
-		
 
 ##rotates character model to target facing with yaw
 func yaw_to_facing(delta: float)->void:
@@ -137,7 +133,6 @@ func yaw_to_facing(delta: float)->void:
 	currentYaw = lerp_angle(currRot, targetYaw, wt)
 	if CharacterModel:
 		CharacterModel.rotation.y = currentYaw
-
 
 var isPossessed = false
 ##sets isPossessed to TRUE if the main camera is a child. For refactoring once possession manager is in, but might keep it as a validation mechanism
@@ -179,4 +174,3 @@ func unstucker()->void:
 		# Nudge slightly away from the collision
 			position += normal * depth  # Small push to unstick
 			print("nudge ", collision.get_collider(), " d ", depth, " n ", normal)
-	

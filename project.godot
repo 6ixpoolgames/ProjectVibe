@@ -19,6 +19,7 @@ config/icon="res://assets/2d/icon.svg"
 
 GlobalTools="*res://assets/scripts/singletons/GlobalTools.gd"
 GlobalAICoordinator="*res://assets/scripts/singletons/GlobalAICoordinator.gd"
+ResourcePreloadManager="*res://assets/scripts/singletons/ResourcePreloadSingleton.gd"
 
 [input]
 

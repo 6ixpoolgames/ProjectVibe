@@ -4,8 +4,8 @@ class_name AIBehaviourComponentBase
 @export var behaviourID:StringName = &""
 @export var stateName: StringName
 
-var BehaviourManager: AIBehaviourManagerComponent
-var Pawn: CharacterPawn3D
+var behaviourManager: AIBehaviourManagerComponent
+var pawn: CharacterPawn3D
 var AICore: AICoreComponent
 var pawnRID: RID
 
@@ -14,18 +14,18 @@ func _enter_tree() -> void:
 		behaviourID = StringName(self.name)
 	else:
 		self.name = behaviourID
-	if !BehaviourManager and get_parent() is AIBehaviourManagerComponent:
-		BehaviourManager = get_parent()
+	if !behaviourManager and get_parent() is AIBehaviourManagerComponent:
+		behaviourManager = get_parent()
 	else:
-		printerr("error getting parent reference", get_parent(), BehaviourManager)
+		printerr("error getting parent reference", get_parent(), behaviourManager)
 
 func _ready() -> void:
-	BehaviourManager.request_register_behaviour_component(self)
+	behaviourManager.request_register_behaviour_component(self)
 
 func on_enter_state()->void:
 	pass
 
 func pull_down_references(core:AICoreComponent, pwn:CharacterPawn3D):
 	AICore = core
-	Pawn = pwn
-	pawnRID = Pawn.pawnRID
+	pawn = pwn
+	pawnRID = pawn.pawnRID

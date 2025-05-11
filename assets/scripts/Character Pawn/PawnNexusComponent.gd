@@ -2,16 +2,16 @@ extends Node3D
 class_name PawnNexusComponent
 
 #unique subcomponent node reference variables
-var Pawn: CharacterPawn3D
-var CharacterModel: MeshInstance3D
-var CharacterCollision: CollisionShape3D
-var ControllerManager: MovementControllerManager
-var StatManager: CharacterStatManager
+var pawn: CharacterPawn3D
+var characterModel: MeshInstance3D
+var characterCollision: CollisionShape3D
+var controllerManager: MovementControllerManager
+var statManager: CharacterStatManager
 var cameraControllerArm: PawnCameraController
 var AICore: AICoreComponent
-var SensingComponent: AISensingComponent
+var sensingComponent: AISensingComponent
 var AIStateManager: AIStateManagerComponent
-#var AIBehaviourManager: AIBehaviourManagerComponent	#still pending implementation
+var AIBehaviourManager: AIBehaviourManagerComponent
 #var CombatManager: CombatManagerComponent				#still pending implementation
 
 @export var allow_overwrites = {
@@ -30,4 +30,4 @@ var AIStateManager: AIStateManagerComponent
 func _enter_tree() -> void:
 	var node = get_parent()
 	if node and is_instance_valid(node) and node is CharacterPawn3D:
-		Pawn = node
+		pawn = node

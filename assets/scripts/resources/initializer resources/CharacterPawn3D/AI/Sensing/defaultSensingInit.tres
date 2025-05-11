@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="AISensingInitializerBaseRes" load_steps=2 format=3 uid="uid://qaqtkvqcygtw"]
+
+[ext_resource type="Script" uid="uid://dsf82brnd8eo6" path="res://assets/scripts/resources/initializer resources/CharacterPawn3D/AI/Sensing/SensingInitializerBaseRes.gd" id="1_j30dl"]
+
+[resource]
+script = ExtResource("1_j30dl")
+sense_radius = 20.0
+forward_sense_bias = true
+sense_forward_offset = 5.0
+forward_vision_angle = 160.0
+metadata/_custom_type_script = "uid://dsf82brnd8eo6"

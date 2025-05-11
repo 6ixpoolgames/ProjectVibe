@@ -1,7 +1,8 @@
 extends Node
 class_name MovementControllerManager
 
-var Pawn: CharacterPawn3D
+var pawn: CharacterPawn3D
+var nexus: PawnNexusComponent
 var playerController: PlayerControllerComponent
 var clickMoveController: ClickToMoveComponent
 var AIController: AIControllerBase
@@ -18,10 +19,10 @@ func _init(addPlayerCon:= addPlayerController, addClickCon:= addClickController,
 	spawnDebugControllers = spawnDebugCon
 	
 func _enter_tree() -> void:
-	if !Pawn or is_instance_valid(Pawn): #improper if NULL or parent NOT CharacterPawn3D
-		Pawn = get_parent()
+	if !pawn or is_instance_valid(pawn): #improper if NULL or parent NOT CharacterPawn3D
+		pawn = get_parent()
 	init_controllers(addPlayerController, addClickController, hasAIController) 
-	print(self," ", Pawn, " has entered: ", addPlayerController, addClickController, hasAIController)
+	print(self," ", pawn, " has entered: ", addPlayerController, addClickController, hasAIController)
 
 func _ready():
 	#check if properly attached
@@ -35,7 +36,7 @@ func get_controllers_attached()->void:
 	for c in children:
 		if c is ControllerComponentBase:
 			controllersAttached.append(c)
-	print(Pawn, " &&&& ",controllersAttached)
+	print(pawn, " &&&& ",controllersAttached)
 	
 ##test function that creates player controllers for the movement controller
 func init_controllers(addPC:bool = addPlayerController, addCC:bool = addClickController, addAI: = hasAIController)->void:
@@ -81,10 +82,10 @@ func assess_request_priority()->int:
 func _physics_process(_delta: float) -> void:
 	var commandIndex = assess_request_priority()
 	if assess_request_priority() == -1: #if no controllers giving inputs, give no input commands 
-		Pawn.give_move_command(Vector3.ZERO) #(zero iDir is treated as no commands by the pawn)
-	elif not commandIndex < 0 and Pawn: #if has command queued up, AND manager is attached to a pawn (checked 2 ways)
+		pawn.give_move_command(Vector3.ZERO) #(zero iDir is treated as no commands by the pawn)
+	elif not commandIndex < 0 and pawn: #if has command queued up, AND manager is attached to a pawn (checked 2 ways)
 		playerInputOverride(commandIndex) #checks to see if controller giving command is manual player controller -> will abort Nav Agent based movement
-		Pawn.give_move_command(iDirBuffer[commandIndex]) 
+		pawn.give_move_command(iDirBuffer[commandIndex]) 
 	clear_move_requests()
 
 ##overrides click to move navigation if a playercontroller provides an input

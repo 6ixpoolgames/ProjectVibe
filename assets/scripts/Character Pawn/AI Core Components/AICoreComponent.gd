@@ -5,6 +5,21 @@ class_name AICoreComponent
 @onready var polling_freq_frame_count: int = 3 ##number of physics frames between polling calls
 @export var polling_group: int = 0 ##which frame this component polls. Choose 0 for random assignment.
 
+#node references
+var isReferenceSet:= false
+var pawn: CharacterPawn3D
+var nexus: PawnNexusComponent
+#var CharacterModel: MeshInstance3D
+#var CollisionCapsule: CollisionShape3D
+#var ControllerManager: MovementControllerManager
+var statManager: CharacterStatManager
+#var CameraControllerArm: PawnCameraController
+#var AICore: AICoreComponent
+var sensingComponent: AISensingComponent
+#var AIStateManager: AIStateManagerComponent
+var AIStateManager: AIStateManagerComponent
+var AIBehaviourManager: AIBehaviourManagerComponent
+
 
 #references and ready checks
 #var pawn: CharacterPawn3D
@@ -15,7 +30,7 @@ class_name AICoreComponent
 @export var addAIBehaviourManagerOnSpawn:= true
 
 #initalization resources
-@export var sensingInitRes:AISensingInitializerBaseRes  ##initializer resource for sensing component of type AISensingInitializerBaseRes
+@export var sensingInitRes:AISensingInitializerBaseRes = ResourcePreloadManager.SenseInitRes_default ##initializer resource for sensing component of type AISensingInitializerBaseRes
 @export var stateInitRes = null
 @export var behaviourInitRes = null
 
@@ -32,40 +47,29 @@ func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAISt
 	polling_freq_frame_count = pollFreq
 	polling_group = pollGrp
 	
-		
+#var children:Array[Node]		
 func _enter_tree() -> void:
 	update_component_references()
-	var children:Array[Node] = get_children()
-	init_sensing_component(children)
-	init_state_manager_component(children)
-	init_behaviour_manager_component(children)
-
-	
+	#children = get_children()
+	init_sensing_component(sensingInitRes)
+	init_state_manager_component()
+#	init_behaviour_manager_component(children)
 
 func _ready() -> void:
 	polling_outofbounds_reassignment()
 	pass_subcomponent_references()
+	sensingComponent.set_is_sensing_active(true)
 	GlobalTools.print_sequence_counter(self, "_ready")
 
-func init_sensing_component(chldr:Array[Node]):
-	if !chldr.is_empty():
-		for c in chldr:
-			if c is AISensingComponent:
-				SensingComponent = c
-	if !SensingComponent or addAISensingComponentOnSpawn:
-		if is_instance_valid(SensingComponent):
-			SensingComponent.queue_free()
-		if !sensingInitRes:
-			sensingInitRes = AISensingInitializerBaseRes.new()
-		SensingComponent = AISensingComponent.new(sensingInitRes)
-		SensingComponent.name = "AISensingComponent"
-		self.add_child(SensingComponent)
+func init_sensing_component(senseRes: AISensingInitializerBaseRes = sensingInitRes)->void:
+	if !sensingComponent or addAISensingComponentOnSpawn:
+		if is_instance_valid(sensingComponent):
+			sensingComponent.queue_free()
+		sensingComponent = AISensingComponent.new(senseRes)
+		sensingComponent.name = "AISensingComponent"
+		self.add_child(sensingComponent)
 
-func init_state_manager_component(chldr:Array[Node]):
-	if !chldr.is_empty():
-		for c in chldr:
-			if c is AIStateManagerComponent:
-				AIStateManager = c
+func init_state_manager_component():
 	if !AIStateManager or addAIStateManagerOnSpawn:
 		if is_instance_valid(AIStateManager):
 			AIStateManager.queue_free()
@@ -78,10 +82,10 @@ func init_behaviour_manager_component(chldr:Array[Node]):
 	if chldr.is_empty(): pass
 	if !AIBehaviourManager:
 		if addAIBehaviourManagerOnSpawn:
-		#	AIBehaviourManager = AIBehaviourManager.new()
-		#	AIBehaviourManager.name = "AIBehaviourManager"
-		#	self.add_child(AIBehaviourManager)
-			print(Pawn, " hypothetically added behaviour manager. Get on it ya lazy bum!")
+			AIBehaviourManager = AIBehaviourManager.new()
+			AIBehaviourManager.name = "AIBehaviourManager"
+			self.add_child(AIBehaviourManager)
+
 
 func nullify_init_resources(nullify:bool=true):
 	if nullify:
@@ -93,7 +97,7 @@ func nullify_init_resources(nullify:bool=true):
 func should_poll_group()->int:
 	if useGlobalPollingFrame:
 		pollingGroupActive = GlobalAICoordinator.get_polling_frame()
-		print("[AI Core polling] polling frame is: ", pollingGroupActive, " ", Pawn)
+		print("[AI Core polling] polling frame is: ", pollingGroupActive, " ", pawn)
 		return pollingGroupActive
 	pollingGroupActive += 1
 	if pollingGroupActive > polling_freq_frame_count:
@@ -114,20 +118,20 @@ func polling_outofbounds_reassignment()->void:
 		#print("polling group outbounds. randomly reassigned to: ", polling_group, " of ", polling_freq_frame_count)
 	
 var doOnce:= false
-func _physics_process(_delta: float) -> void:
+func _physics_process(_delta: float) -> void:  
 	should_poll_group()
-	if Pawn:
+	if pawn: #WARNING refactor this
 		#janky ASF way of passing along CharStatManager reference to AIStateManager need to noodle on a better implementation
-		if Pawn.statManager and !doOnce:
-			print("||||", Pawn, " statmanager: ", Pawn.statManager)
-			StatManager = Pawn.statManager
+		if pawn.statManager and !doOnce:
+			print("||||", pawn, " statmanager: ", pawn.statManager)
+			statManager = pawn.statManager
 			pass_subcomponent_references()
-			SensingComponent.set_is_sensing_active(true)
+			sensingComponent.set_is_sensing_active(true)
 			AIStateManager.set_is_state_manager_active(true)
 			doOnce = true
 	
 func get_sensing_component()->AISensingComponent:
-	return SensingComponent
+	return sensingComponent
 
 func get_state_manager()->AIStateManagerComponent:
 	return AIStateManager
@@ -136,52 +140,21 @@ func get_state_manager()->AIStateManagerComponent:
 #	return AIBehaviourManager
 
 
-#node references
-var isReferenceSet:= false
-var Pawn: CharacterPawn3D
-#var CharacterModel: MeshInstance3D
-#var CollisionCapsule: CollisionShape3D
-#var ControllerManager: MovementControllerManager
-var StatManager: CharacterStatManager
-#var CameraControllerArm: PawnCameraController
-#var AICore: AICoreComponent
-var SensingComponent: AISensingComponent
-var AIStateManager: AIStateManagerComponent
-var AIBehaviourManager = null
-func set_references(references:Array[Node])->void:
-	for r in references:
-		if r is CharacterPawn3D:
-			Pawn = r
-#		if r.name == "CharacterModel":
-#			CharacterModel = r
-#		if r.name == "CollisionCapsule":
-#			CollisionCapsule = r
-#		if r is MovementControllerManager:
-#			ControllerManager = r
-#		if r is CharacterStatManager:
-#			StatManager = r
-#		if r is PawnCameraController:
-#			CameraControllerArm = r
-#		if r is AICoreComponent:
-#			AICore = r
-		if r is AISensingComponent:
-			SensingComponent = r
-		if r is AIStateManagerComponent:
-			AIStateManager = r
-#		if r is AIBehaviourManagerComponent:
-#			AIBehaviourManager = r
-	isReferenceSet = true
-	print(">>>references", references)
-	GlobalTools.print_sequence_counter(self, "set_references")
 
 func update_component_references()->void:
-	if get_parent() is CharacterPawn3D and !Pawn:
-		Pawn = get_parent()
-		Pawn.AICore = self
-	if !StatManager and Pawn:
-		if !Pawn.statManager:
-			StatManager = Pawn.statManager
+	if !nexus and get_parent() is PawnNexusComponent:
+		nexus = get_parent()
+		pawn = nexus.pawn
+		nexus.AICore = self
+		
+#	if get_parent() is CharacterPawn3D and !Pawn:
+#		Pawn.AICore = self
+#	if !StatManager and Pawn:
+#		if !Pawn.statManager:
+#			StatManager = Pawn.statManager
 		
 func pass_subcomponent_references()->void:
-	SensingComponent.pull_component_references(self)
-	AIStateManager.pull_component_references(self, SensingComponent, StatManager)
+	sensingComponent.set_references(nexus)
+	AIStateManager.set_references(nexus)
+	#AIStateManager.pull_component_references(self, sensingComponent, statManager)
+	#sensingComponent.pull_component_references(self)

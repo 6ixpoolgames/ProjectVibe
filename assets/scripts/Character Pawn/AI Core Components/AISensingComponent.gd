@@ -7,6 +7,20 @@ class_name AISensingComponent
 #var AICore: AICoreComponent
 #var stateManagerComponent: AIStateManagerComponent
 
+#node references
+var isReferenceSet:= false
+var pawn: CharacterPawn3D
+var nexus: PawnNexusComponent
+#var characterModel: MeshInstance3D
+#var collisionCapsule: CollisionShape3D
+#var controllerManager: MovementControllerManager
+#var statManager: CharacterStatManager
+#var cameraControllerArm: PawnCameraController
+var AICore: AICoreComponent
+#var sensingComponent: AISensingComponent
+#var stateManager: AIStateManagerComponent
+
+
 var referencesUpdated:= false
 var isActive:= false
 
@@ -16,7 +30,7 @@ var isActive:= false
 @export var sense_forward_offset: float = 5 ##note: offset increases sense range by this much
 @export var forward_vision_angle: float = 160 ##in degrees.
 
-@export var sense_init_res: AISensingInitializerBaseRes #= AISensingInitializerBaseRes.new(sense_radius, forward_sense_bias, sense_forward_offset, forward_vision_angle)
+@export var sense_init_res: AISensingInitializerBaseRes = AISensingInitializerBaseRes.new(sense_radius, forward_sense_bias,sense_forward_offset, forward_vision_angle)
 
 #array of sensed entities
 var allSensedEntities: Array[CharacterPawn3D]
@@ -39,15 +53,17 @@ func _init(senseRes:=sense_init_res)->void:
 	forward_sense_bias = senseRes.forward_sense_bias
 	sense_forward_offset = senseRes.sense_forward_offset
 	forward_vision_angle = senseRes.forward_vision_angle
+	print("initialized sense ", self, " ",sense_radius,",",forward_sense_bias,",",sense_forward_offset,",",forward_vision_angle)
+	print("test ", senseRes.sense_radius, senseRes.forward_sense_bias,senseRes.forward_sense_bias,senseRes.forward_vision_angle)
 	
 func _enter_tree() -> void:
 	#pull_component_references()
 	AICore = get_parent()
-	AICore.SensingComponent = self
+	AICore.sensingComponent = self
 	initialize_sensing()
 
 func _physics_process(_delta: float) -> void:
-	if Pawn:
+	if pawn:
 		update_facing_direction_vector()
 		update_sensing_area_offset()
 		if isActive:
@@ -57,7 +73,7 @@ func _physics_process(_delta: float) -> void:
 
 func set_is_sensing_active(active:bool)->void:
 	isActive = active
-	pawnRID = Pawn.get_rid()
+	pawnRID = pawn.get_rid()
 	if exclude.find(pawnRID) > -1:
 		exclude.append(pawnRID)
 
@@ -101,8 +117,8 @@ func create_sensing_area()->void:
 ##updates the direction vector for the facing direction. Run every physics/frame
 func update_facing_direction_vector()->void:
 	var currYaw:float
-	if Pawn:
-		currYaw = Pawn.currentYaw
+	if pawn:
+		currYaw = pawn.currentYaw
 	facingDirection = Vector3(-sin(currYaw), 0, -cos(currYaw)).normalized() #don't ask me why this math works @_@
 	
 ##offsets area3D sensing sphere [param sense_forward_offset] units forward. Gives sensing directionality. 
@@ -119,7 +135,7 @@ func update_sensing_area_offset()->void:
 
 ##listens to body_entered signal and adds it if is character pawn. Probably want to include other types in a later refactor
 func add_sensed_entity(body: Node3D)->void:
-	if body is CharacterPawn3D and not allSensedEntities.has(body) and not body == Pawn:
+	if body is CharacterPawn3D and not allSensedEntities.has(body) and not body == pawn:
 		allSensedEntities.append(body)
 		#print("entered ", body, " is now tracked")
 	else:
@@ -165,7 +181,7 @@ func is_in_LOS(entity: CharacterPawn3D)->bool:
 	
 	var pwnPos = global_transform.origin
 	var entPos = entity.global_transform.origin
-	var pwnYOffset = Pawn.unitHalfHeight
+	var pwnYOffset = pawn.unitHalfHeight #refactor halfheight to be contained in nexus
 	var entYOffset = entity.unitHalfHeight
 	
 	#do the fuckin query
@@ -195,7 +211,7 @@ func update_entities_in_LOS() -> void:
 ##gets all colliders in the parent pawn, supposedly for raycast exclusion purposes.
 func get_all_colliders_in_pawn()->Array:
 	var colArr: Array
-	for c in Pawn.allChildren:
+	for c in pawn.allChildren:
 		if c is CollisionShape3D:
 			colArr.append(c)
 	return colArr
@@ -208,43 +224,12 @@ func _input(event: InputEvent) -> void:
 			print("within front angle: ", entitiesInDetectionAngle, " angle: ", forward_vision_angle, " dot: ", visRad )
 			print("with LOS: ", entitiesInLOS)
 
-
-#node references
-var isReferenceSet:= false
-var Pawn: CharacterPawn3D
-#var CharacterModel: MeshInstance3D
-#var CollisionCapsule: CollisionShape3D
-#var ControllerManager: MovementControllerManager
-#var StatManager: CharacterStatManager
-#var CameraControllerArm: PawnCameraController
-var AICore: AICoreComponent
-#var SensingComponent: AISensingComponent
-#var StateManager: AIStateManagerComponent
-func set_references(references:Array[Node])->void:
-	for r in references:
-		if r is CharacterPawn3D:
-			Pawn = r
-#		if r.name == "CharacterModel":
-#			CharacterModel = r
-#		if r.name == "CollisionCapsule":
-#			CollisionCapsule = r
-#		if r is MovementControllerManager:
-#			ControllerManager = r
-#		if r is CharacterStatManager:
-#			StatManager = r
-#		if r is PawnCameraController:
-#			CameraControllerArm = r
-		if r is AICoreComponent:
-			AICore = r
-#		if r is AISensingComponent:
-#			SensingComponent = r
-#		if r is AIBehaviourManagerComponent:
-#			AIBehaviourManager = r
-	isReferenceSet = true
-	print(">>>references", references)
-	GlobalTools.print_sequence_counter(self, "set_references")
-
 func pull_component_references(core:AICoreComponent):
 	AICore = core
-	Pawn = AICore.Pawn
-	print(self, "AI sensing references set: ", AICore, " ", Pawn)
+	pawn = AICore.pawn
+	print(self, "AI sensing references set: ", AICore, " ", pawn)
+	
+func set_references(nexusRef: PawnNexusComponent)->void:
+	nexus = nexusRef
+	pawn = nexus.pawn
+	

@@ -7,12 +7,14 @@ var allBehaviours: Array[AIBehaviourComponentBase] = []
 var allBehaviourNames: Array[StringName] = []
 
 var AICore: AICoreComponent
-var Pawn: CharacterPawn3D
+var pawn: CharacterPawn3D
+var nexus: PawnNexusComponent
 
 func _enter_tree()->void:
 	if get_parent() is AICoreComponent:
 		AICore = get_parent()
-		Pawn = AICore.Pawn
+		pawn = AICore.pawn
+		nexus = AICore.nexus
 		AICore.AIBehaviourManager = self
 	#else:
 	#	Pawn = get_parent() #debug feature. refactor later!
@@ -22,7 +24,7 @@ func _ready()->void:
 	var children = self.get_children()
 	for c in children:
 		if c.has_method("pull_down_references"):
-			c.pull_down_references(AICore, Pawn)
+			c.pull_down_references(AICore, pawn)
 
 func request_register_behaviour_component(behaviour: AIBehaviourComponentBase):
 	var behaviourIndex = allBehaviours.find(behaviour)
