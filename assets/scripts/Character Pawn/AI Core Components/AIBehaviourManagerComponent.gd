@@ -13,7 +13,6 @@ var nexus: PawnNexusComponent
 func _enter_tree()->void:
 	if get_parent() is AICoreComponent:
 		AICore = get_parent()
-		pawn = AICore.pawn
 		nexus = AICore.nexus
 		AICore.AIBehaviourManager = self
 	#else:

@@ -25,7 +25,7 @@ func _ready() -> void:
 func on_enter_state()->void:
 	pass
 
-func pull_down_references(core:AICoreComponent, pwn:CharacterPawn3D):
+func set_references(core:AICoreComponent, pwn:CharacterPawn3D):
 	AICore = core
 	pawn = pwn
 	pawnRID = pawn.pawnRID

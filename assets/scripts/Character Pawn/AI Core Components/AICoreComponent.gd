@@ -41,104 +41,111 @@ var AIBehaviourManager: AIBehaviourManagerComponent
 var pollingGroupActive:int = 0
 	
 func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAIStateManagerOnSpawn, addBehave:bool = addAIBehaviourManagerOnSpawn, pollFreq: int = polling_freq_frame_count, pollGrp: int = polling_group)-> void:
+#region initialize variables
 	addAISensingComponentOnSpawn = addSense
 	addAIStateManagerOnSpawn = addState
 	addAIBehaviourManagerOnSpawn = addBehave
 	polling_freq_frame_count = pollFreq
 	polling_group = pollGrp
+#endregion
 	
 #var children:Array[Node]		
 func _enter_tree() -> void:
 	update_component_references()
-	#children = get_children()
-	init_sensing_component(sensingInitRes)
-	init_state_manager_component()
-#	init_behaviour_manager_component(children)
+	_init_sensing_component(sensingInitRes)
+	_init_state_manager_component()
+#	_init_behaviour_manager_component(children)
 
 func _ready() -> void:
-	polling_outofbounds_reassignment()
-	pass_subcomponent_references()
+	_polling_outofbounds_reassignment()
+	#pass_subcomponent_references()
 	sensingComponent.set_is_sensing_active(true)
-	GlobalTools.print_sequence_counter(self, "_ready")
+	_nullify_init_resources(true)
+	#GlobalTools.print_sequence_counter(self, "_ready")
 
-func init_sensing_component(senseRes: AISensingInitializerBaseRes = sensingInitRes)->void:
-	if !sensingComponent or addAISensingComponentOnSpawn:
-		if is_instance_valid(sensingComponent):
-			sensingComponent.queue_free()
+
+func _init_sensing_component(senseRes: AISensingInitializerBaseRes = sensingInitRes)->void:
+	if addAISensingComponentOnSpawn:
 		sensingComponent = AISensingComponent.new(senseRes)
 		sensingComponent.name = "AISensingComponent"
 		self.add_child(sensingComponent)
 
-func init_state_manager_component():
-	if !AIStateManager or addAIStateManagerOnSpawn:
-		if is_instance_valid(AIStateManager):
-			AIStateManager.queue_free()
+
+func _init_state_manager_component():
+	if addAIStateManagerOnSpawn:
 		AIStateManager = AIStateManagerComponent.new()
 		AIStateManager.name = "AIStatemanager"
 		self.add_child(AIStateManager)
-	
-
-func init_behaviour_manager_component(chldr:Array[Node]):
-	if chldr.is_empty(): pass
-	if !AIBehaviourManager:
-		if addAIBehaviourManagerOnSpawn:
-			AIBehaviourManager = AIBehaviourManager.new()
-			AIBehaviourManager.name = "AIBehaviourManager"
-			self.add_child(AIBehaviourManager)
 
 
-func nullify_init_resources(nullify:bool=true):
+func _init_behaviour_manager_component(chldr:Array[Node]):
+	if addAIBehaviourManagerOnSpawn:
+		AIBehaviourManager = AIBehaviourManager.new()
+		AIBehaviourManager.name = "AIBehaviourManager"
+		self.add_child(AIBehaviourManager)
+
+
+func _nullify_init_resources(nullify:bool=true):
 	if nullify:
 		sensingInitRes = null
 		stateInitRes = null
 		behaviourInitRes = null
 
-##count through frames and set which polling group should fire
+
+##count through frames and set which polling group should fire. Can use either globlAIcoordinator or self for timing
 func should_poll_group()->int:
 	if useGlobalPollingFrame:
+		#print("[AI Core polling] polling frame is: ", pollingGroupActive, " ", pawn)
 		pollingGroupActive = GlobalAICoordinator.get_polling_frame()
-		print("[AI Core polling] polling frame is: ", pollingGroupActive, " ", pawn)
 		return pollingGroupActive
+	#region self timing (legacy functionality)
 	pollingGroupActive += 1
 	if pollingGroupActive > polling_freq_frame_count:
 		pollingGroupActive = 1
 	return pollingGroupActive
-	
+	#endregion
+
+
 func poll_now()->bool:
 	if pollingGroupActive == polling_group:
 		return true
 	else:
 		return false
+
+
 ##checks if polling group is valid and reassigns a random valid group if not
-func polling_outofbounds_reassignment()->void:
+func _polling_outofbounds_reassignment()->void:
 	if polling_freq_frame_count < 1:
 		polling_freq_frame_count = 3 # defaults polling frequency to 20hz if not set properly
 	if polling_group < 1 or polling_group > polling_freq_frame_count:
 		polling_group = randi_range(1, polling_freq_frame_count) #randomizes polling group if less than 1 or greater than polling frequency
 		#print("polling group outbounds. randomly reassigned to: ", polling_group, " of ", polling_freq_frame_count)
-	
+
+
 var doOnce:= false
 func _physics_process(_delta: float) -> void:  
 	should_poll_group()
 	if pawn: #WARNING refactor this
 		#janky ASF way of passing along CharStatManager reference to AIStateManager need to noodle on a better implementation
-		if pawn.statManager and !doOnce:
+		if nexus.statManager and !doOnce:
 			print("||||", pawn, " statmanager: ", pawn.statManager)
 			statManager = pawn.statManager
 			pass_subcomponent_references()
 			sensingComponent.set_is_sensing_active(true)
 			AIStateManager.set_is_state_manager_active(true)
 			doOnce = true
-	
+
+
 func get_sensing_component()->AISensingComponent:
 	return sensingComponent
 
+
 func get_state_manager()->AIStateManagerComponent:
 	return AIStateManager
-	
-#func get_behaviour_component()->AIBehaviourManagerComponent:         #not yet implemented
-#	return AIBehaviourManager
 
+
+func get_behaviour_component()->AIBehaviourManagerComponent:         #not yet implemented
+	return AIBehaviourManager
 
 
 func update_component_references()->void:
@@ -146,15 +153,13 @@ func update_component_references()->void:
 		nexus = get_parent()
 		pawn = nexus.pawn
 		nexus.AICore = self
-		
-#	if get_parent() is CharacterPawn3D and !Pawn:
-#		Pawn.AICore = self
-#	if !StatManager and Pawn:
-#		if !Pawn.statManager:
-#			StatManager = Pawn.statManager
-		
+
+
+##mostly depracated
 func pass_subcomponent_references()->void:
-	sensingComponent.set_references(nexus)
-	AIStateManager.set_references(nexus)
+	if sensingComponent: sensingComponent.set_references(nexus)
+	else: printerr("sense component NULL ",nexus.pawn)
+	if AIStateManager: AIStateManager.set_references(nexus) 
+	else: printerr("state manager NULL ",nexus.pawn)
 	#AIStateManager.pull_component_references(self, sensingComponent, statManager)
 	#sensingComponent.pull_component_references(self)

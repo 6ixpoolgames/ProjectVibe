@@ -16,33 +16,33 @@ func _ready()->void:
 		
 func _physics_process(delta: float) -> void:
 	delta_timer(delta)
-	if Pawn.controllerManager.AIController:
+	if pawn.controllerManager.AIController:
 		#if !isWandering:
 		#	pause_random_duration()
 		if !isPausing:
-			if !Pawn.controllerManager.AIController.navigationToggle:
-				Pawn.controllerManager.AIController.move_to(pick_random_location().position)
+			if !pawn.controllerManager.AIController.navigationToggle:
+				pawn.controllerManager.AIController.move_to(pick_random_location().position)
 				isWandering = true 
-			if Pawn.controllerManager.AIController.navAgent.is_navigation_finished():
+			if pawn.controllerManager.AIController.navAgent.is_navigation_finished():
 				isWandering = false
 				pause_random_duration()
 func enter_state()->void:
-	print(Pawn," entered random walk behavior")
-	if !Pawn:
-		Pawn = BehaviourManager.AICore.Pawn
-	if Pawn.controllerManager:
+	print(pawn," entered random walk behavior")
+	if !pawn:
+		pawn = behaviourManager.AICore.pawn
+	if pawn.controllerManager:
 		print("has controller manager")
-		if Pawn.controllerManager.AIController:
+		if pawn.controllerManager.AIController:
 			print("has AI controller")
 			set_physics_process(true)
 	#BehaviourManager.isRunningBehaviour = true
 	
 
 func exit_state()->void:
-	if Pawn.controllerManager.AIController:
-		Pawn.controllerManager.AIController.stop_navigation()
+	if pawn.controllerManager.AIController:
+		pawn.controllerManager.AIController.stop_navigation()
 	set_physics_process(false)
-	print(Pawn," left random walk behavior")
+	print(pawn," left random walk behavior")
 	
 	
 @onready var spaceState = get_tree().root.get_world_3d().direct_space_state
@@ -53,7 +53,7 @@ func exit_state()->void:
 @export var excludeRID: Array[RID] = []
 var isWandering:= false
 func pick_random_location(radius:float = wanderRadius, y_offset:float= y_offset_default, mask:int= collisionMask, exclude:Array[RID] = excludeRID) -> Dictionary:
-	var pos = Pawn.global_position
+	var pos = pawn.global_position
 	var randX = randf_range(-radius,radius)
 	var randZ = randf_range(-radius,radius)
 	var from = Vector3( randX, (pos + y_offset),randZ)

@@ -5,6 +5,8 @@ class_name AIStateManagerComponent
 var AICore: AICoreComponent
 var nexus:PawnNexusComponent
 
+@export var isPremade:= false
+
 var allStates: Array[Dictionary] =[]
 var stateEntryTemplate = {
 	"name":"",
@@ -13,8 +15,30 @@ var stateEntryTemplate = {
 
 func _enter_tree() -> void:
 	AICore = get_parent()
-	if !AICore.AIStateManager:
-		AICore.AIStateManager = self
+	nexus = AICore.nexus
+	nexus.AIStateManager = self
+	check_overwrite_premade()
+
+
+func check_overwrite_premade()->void:
+	#region check if should overwrite and cleanup extra nodes
+	if nexus.allow_overwrites.AIStateManager:
+		if AICore.AIStateManager != self:
+			if isPremade:
+				self.queue_free()
+				return
+			else:
+				AICore.AIStateManager.queue_free()
+	else:
+		if AICore.AIStateManager != self:
+			if isPremade:
+				AICore.AIStateManager.queue_free()
+			else:
+				self.queue_free()
+				return
+	#endregion
+	AICore.AIStateManager = self
+	
 
 func request_register_state(state: AIStateComponentBase)->void:
 	for dict in allStates:
