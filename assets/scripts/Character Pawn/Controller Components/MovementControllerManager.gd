@@ -5,7 +5,7 @@ var pawn: CharacterPawn3D
 var nexus: PawnNexusComponent
 var playerController: PlayerControllerComponent
 var clickMoveController: ClickToMoveComponent
-var AIController: AIControllerBase
+var aiController: AIControllerBase
 
 @export var addPlayerController:= false ##debug function for creating and attaching player controllers to the pawn at ready
 @export var addClickController:= false ##debug function for creating and attaching click to move controller to the pawn at ready
@@ -19,18 +19,20 @@ func _init(addPlayerCon:= addPlayerController, addClickCon:= addClickController,
 	spawnDebugControllers = spawnDebugCon
 	
 func _enter_tree() -> void:
-	if !pawn or is_instance_valid(pawn): #improper if NULL or parent NOT CharacterPawn3D
-		pawn = get_parent()
-	init_controllers(addPlayerController, addClickController, hasAIController) 
+	assert(get_parent() is PawnNexusComponent, "not parented to Nexus component!")
+	nexus = get_parent()
+	pawn = nexus.pawn
+	_init_controllers(addPlayerController, addClickController, hasAIController) 
 	print(self," ", pawn, " has entered: ", addPlayerController, addClickController, hasAIController)
 
 func _ready():
 	#check if properly attached
-	get_controllers_attached()
+	_get_controllers_attached()
+
 
 var controllersAttached: Array[ControllerComponentBase]
 ##gets an array of attached controllers to the manager
-func get_controllers_attached()->void:
+func _get_controllers_attached()->void:
 	controllersAttached.clear()
 	var children = get_children()
 	for c in children:
@@ -39,7 +41,7 @@ func get_controllers_attached()->void:
 	print(pawn, " &&&& ",controllersAttached)
 	
 ##test function that creates player controllers for the movement controller
-func init_controllers(addPC:bool = addPlayerController, addCC:bool = addClickController, addAI: = hasAIController)->void:
+func _init_controllers(addPC:bool = addPlayerController, addCC:bool = addClickController, addAI: = hasAIController)->void:
 	if addPC:
 		var controller = PlayerControllerComponent.new()
 		controller.name = "PlayerControllerComponent"
@@ -68,7 +70,7 @@ func clear_move_requests():
 	conBuffer = []
 	
 ##returns index for iDirBuffer of the controller that should be followed. if no inputs given / are in buffer, returns -1
-func assess_request_priority()->int:
+func _assess_request_priority()->int:
 	var lastPriority:int = 255 #default lowest priority
 	var priorityControllerIndex:int = -1
 	var i = 0
@@ -80,16 +82,16 @@ func assess_request_priority()->int:
 	return priorityControllerIndex
 
 func _physics_process(_delta: float) -> void:
-	var commandIndex = assess_request_priority()
-	if assess_request_priority() == -1: #if no controllers giving inputs, give no input commands 
+	var commandIndex = _assess_request_priority()
+	if _assess_request_priority() == -1: #if no controllers giving inputs, give no input commands 
 		pawn.give_move_command(Vector3.ZERO) #(zero iDir is treated as no commands by the pawn)
 	elif not commandIndex < 0 and pawn: #if has command queued up, AND manager is attached to a pawn (checked 2 ways)
-		playerInputOverride(commandIndex) #checks to see if controller giving command is manual player controller -> will abort Nav Agent based movement
+		_playerInputOverride(commandIndex) #checks to see if controller giving command is manual player controller -> will abort Nav Agent based movement
 		pawn.give_move_command(iDirBuffer[commandIndex]) 
 	clear_move_requests()
 
 ##overrides click to move navigation if a playercontroller provides an input
-func playerInputOverride(cmdIdx):
+func _playerInputOverride(cmdIdx):
 	if conBuffer[cmdIdx] is PlayerControllerComponent: #if greatest priority controller is a manual player controller
 		for c in controllersAttached:
 			if c is ClickToMoveComponent:

@@ -2,7 +2,7 @@ extends Node
 class_name AIStateManagerComponent
 
 #node referrences
-var AICore: AICoreComponent
+var aiCore: AICoreComponent
 var nexus:PawnNexusComponent
 
 @export var isPremade:= false
@@ -13,32 +13,33 @@ var stateEntryTemplate = {
 	"reference":AIStateComponentBase,
 }
 
+
 func _enter_tree() -> void:
-	AICore = get_parent()
-	nexus = AICore.nexus
-	nexus.AIStateManager = self
-	check_overwrite_premade()
+	aiCore = get_parent()
+	nexus = aiCore.nexus
+	_check_overwrite_premade()
+	nexus.aiStateManager = self
 
 
-func check_overwrite_premade()->void:
+func _check_overwrite_premade()->void:
 	#region check if should overwrite and cleanup extra nodes
 	if nexus.allow_overwrites.AIStateManager:
-		if AICore.AIStateManager != self:
+		if aiCore.aiStateManager != self:
 			if isPremade:
 				self.queue_free()
 				return
 			else:
-				AICore.AIStateManager.queue_free()
+				aiCore.aiStateManager.queue_free()
 	else:
-		if AICore.AIStateManager != self:
+		if aiCore.aiStateManager != self:
 			if isPremade:
-				AICore.AIStateManager.queue_free()
+				aiCore.aiStateManager.queue_free()
 			else:
 				self.queue_free()
 				return
 	#endregion
-	AICore.AIStateManager = self
-	
+	aiCore.aiStateManager = self
+
 
 func request_register_state(state: AIStateComponentBase)->void:
 	for dict in allStates:
@@ -50,8 +51,9 @@ func request_register_state(state: AIStateComponentBase)->void:
 			stateDict.reference = state
 			allStates.append(stateDict)
 			state.set_references(nexus)
-			
-func check_valid_state()->AIStateComponentBase:
+
+
+func _check_valid_state()->AIStateComponentBase:
 	var validState:AIStateComponentBase
 	var mostPriority:int = 256
 	for dict in allStates:
@@ -59,6 +61,7 @@ func check_valid_state()->AIStateComponentBase:
 			if dict.reference.get_state_priority() < mostPriority:
 				validState = dict.reference
 	return validState
+
 
 func set_references(nexusRef:PawnNexusComponent)->void:
 	nexus = nexusRef

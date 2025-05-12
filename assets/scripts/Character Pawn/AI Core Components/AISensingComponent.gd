@@ -16,7 +16,7 @@ var nexus: PawnNexusComponent
 #var controllerManager: MovementControllerManager
 #var statManager: CharacterStatManager
 #var cameraControllerArm: PawnCameraController
-var AICore: AICoreComponent
+var aiCore: AICoreComponent
 #var sensingComponent: AISensingComponent
 #var stateManager: AIStateManagerComponent
 
@@ -44,9 +44,6 @@ var sensingCollisionShape3D: CollisionShape3D
 #facing direction buffer var
 var facingDirection: Vector3
 
-func _ready() -> void:
-	GlobalTools.print_sequence_counter(self, "_ready")
-
 
 ##initializes variables and creates sensing area
 func _init(senseRes:=sense_init_res)->void:
@@ -58,36 +55,45 @@ func _init(senseRes:=sense_init_res)->void:
 	#endregion
 	#print("initialized sense ", self, " ",sense_radius,",",forward_sense_bias,",",sense_forward_offset,",",forward_vision_angle)
 	#print("test ", senseRes.sense_radius, senseRes.forward_sense_bias,senseRes.forward_sense_bias,senseRes.forward_vision_angle)
-	
+
+
 func _enter_tree() -> void:
 	#pull_component_references()
-	AICore = get_parent()
-	nexus = AICore.nexus
+	aiCore = get_parent()
+	nexus = aiCore.nexus
+	pawn = nexus.pawn
+	_check_overwrite_premade()
 	nexus.sensingComponent = self
 	name = "premadeSense" if isPremade else "instanceSense" 
-	_check_overwrite_premade()
+	
 	_initialize_sensing()
+
+
+func _ready() -> void:
+	if !nexus:
+		printerr("Nexus component reference not available ", self)
+	GlobalTools.print_sequence_counter(self, "_ready")
 
 
 func _check_overwrite_premade()->void:	
 	#region check if should overwrite and cleanup extra nodes
 	if nexus.allow_overwrites.AISensingComponent:
-		if AICore.sensingComponent != self:
+		if aiCore.sensingComponent != self:
 			if isPremade:
 				self.queue_free() #free SELF if overwrites, ref NOT self, and is premade (instance should apply)
 				return
 			else:
-				AICore.sensingComponent.queue_free() #free REF if overwrites, ref NOT self, and not premade (instance should apply)
+				aiCore.sensingComponent.queue_free() #free REF if overwrites, ref NOT self, and not premade (instance should apply)
 	else:
-		if AICore.sensingComponent != self:
+		if aiCore.sensingComponent != self:
 			if isPremade:
-				AICore.sensingComponent.queue_free() #free REF if no overwrites, ref NOT self, and is premade (premade should apply)
+				aiCore.sensingComponent.queue_free() #free REF if no overwrites, ref NOT self, and is premade (premade should apply)
 			else: 
 				self.queue_free() #free SELF if no overwrites, ref NOT self, and NOT premade (premade should apply)
 				return
 	#endregion
 	#prints(nexus.pawn, "premade:",isPremade, "overwrites:", AICore.nexus.allow_overwrites.AISensingComponent, "ref is self:", AICore.sensingComponent != self)
-	AICore.sensingComponent = self
+	aiCore.sensingComponent = self
 
 
 func _physics_process(_delta: float) -> void:
@@ -95,16 +101,18 @@ func _physics_process(_delta: float) -> void:
 		_update_facing_direction_vector()
 		_update_sensing_area_offset()
 		if isActive:
-			if AICore and AICore.poll_now():
+			if aiCore and aiCore.poll_now():
 				_update_entity_in_detection_angle()
 				_update_entities_in_LOS()
 		if GlobalTools.go_print: print(self, " is present ", nexus.pawn)
-	
+
+
 func set_is_sensing_active(active:bool)->void:
 	isActive = active
 	pawnRID = pawn.get_rid()
 	if exclude.find(pawnRID) > -1:
 		exclude.append(pawnRID)
+
 
 #var capsuleHalfHeight: float
 ##creates sensing areas and connects signals
@@ -206,6 +214,7 @@ func _update_entity_in_detection_angle()->void:
 		if _is_in_detection_angle(e):
 			entitiesInDetectionAngle.append(e)
 
+
 #region raycast variables
 var debugFlag = false
 @export var collisionMask: int = 3 #collision layers 1 and 2
@@ -268,9 +277,9 @@ func _input(event: InputEvent) -> void:
 
 
 func pull_component_references(core:AICoreComponent):
-	AICore = core
-	pawn = AICore.pawn
-	print(self, "AI sensing references set: ", AICore, " ", pawn)
+	aiCore = core
+	pawn = aiCore.pawn
+	print(self, "AI sensing references set: ", aiCore, " ", pawn)
 
 
 func set_references(nexusRef: PawnNexusComponent)->void:

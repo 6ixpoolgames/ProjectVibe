@@ -4,17 +4,17 @@ class_name CharacterStatManager
 var allStats: Array[StatComponentBase]
 var statNames: Array[String]
 
-var Pawn: CharacterPawn3D
+var pawn: CharacterPawn3D
  
 
 
 ##consider adding a check if all children that are statComponents have been added to the manager to set a flag that manager is fully "ready". Not seeing a need for such a flag though quite yet.
 func _enter_tree() -> void:
 	if get_parent() is CharacterPawn3D:
-		Pawn = get_parent()
-		Pawn.statManager = self
+		pawn = get_parent()
+		pawn.statManager = self
 	GlobalTools.print_sequence_counter(self, "_ready")
-	print("|||", Pawn, " stat manager set!", self)
+	print("|||", pawn, " stat manager set!", self)
 	pass
 
 var readySet:= false

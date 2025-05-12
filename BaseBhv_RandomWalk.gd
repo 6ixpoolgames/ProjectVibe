@@ -5,15 +5,18 @@ class_name BaseRandomWalkBehaviour
 @export var stateOverwrite: StringName ##overwrites stateName. Leave blank to keep default statename
 @export var behaviourIdOverwrite: StringName ##overwrites stateName. Leave blank to keep default statename
 
+
 func _enter_tree() -> void:
 	set_physics_process(false)
+
 
 func _ready()->void:
 	if stateOverwrite != &"":
 		stateName = stateOverwrite
 	if behaviourIdOverwrite != &"":
 		behaviourID = behaviourIdOverwrite
-		
+
+
 func _physics_process(delta: float) -> void:
 	delta_timer(delta)
 	if pawn.controllerManager.AIController:
@@ -26,6 +29,8 @@ func _physics_process(delta: float) -> void:
 			if pawn.controllerManager.AIController.navAgent.is_navigation_finished():
 				isWandering = false
 				pause_random_duration()
+
+
 func enter_state()->void:
 	print(pawn," entered random walk behavior")
 	if !pawn:

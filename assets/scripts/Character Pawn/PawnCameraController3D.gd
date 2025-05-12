@@ -23,20 +23,20 @@ var mousePosition = Vector2.ZERO
 @onready var viewportX: float = get_viewport().size.x
 @onready var viewportY: float = get_viewport().size.y
 
-var Pawn:CharacterPawn3D
+var pawn:CharacterPawn3D
 
 func _enter_tree() -> void:
-	Pawn = get_parent()
-	Pawn.cameraControllerArm = self
+	pawn = get_parent()
+	pawn.cameraControllerArm = self
 	
 	
 func _ready() -> void:
 	self.spring_length = cameraDistDefault
-	get_viewport().size_changed.connect(viewport_size_changed)
+	get_viewport().size_changed.connect(_viewport_size_changed)
 
 
 ##yaws camera towards the mouse position. With a smooth step function to ease camera rotation when at the deadspace (percentage as percentage of screen space)
-func rotateCameraYawBy():
+func _rotateCameraYawBy():
 	var rotateXBy: float = 0
 	cursorX =  mousePosition.x
 	if cursorX > (viewportX - (viewportX * deadSpace)): 
@@ -49,19 +49,22 @@ func rotateCameraYawBy():
 		lastCursorX = cursorX
 	return rotateXBy
 
+
 ##pitches camera based on mouse position. NO deadspace or smoothing built in yet
-func rotateCameraPitchBy():
+func _rotateCameraPitchBy():
 	cursorY = mousePosition.y
 	var rotateYBy = deg_to_rad((cursorY - lastCursorY )/get_viewport().size.y * cameraRotSpeedY)
 	lastCursorY = cursorY
 	return -rotateYBy
-	
+
+
 #sets the viewport size variables whenever viewport size changed signal is emitted
-func viewport_size_changed()->void:
+func _viewport_size_changed()->void:
 	viewportX = get_viewport().size.x
 	viewportY = get_viewport().size.y
 	print("viewport sized changed! x: ", viewportX, " y: ", viewportY)
-	
+
+
 func _physics_process(delta: float) -> void:
 	#camera zoom adjustment
 	if Input.is_action_just_pressed("scrollWheel_up"): #zoom in
@@ -73,8 +76,8 @@ func _physics_process(delta: float) -> void:
 	self.spring_length = clampf(self.spring_length, cameraDistMin, cameraDistMax) #clamps to min max spring lenght
 
 	#camera rotation
-	self.rotation.y += clamp(rotateCameraYawBy(), deg_to_rad(-cameraRotSpeedX*delta), deg_to_rad(cameraRotSpeedX*delta))
-	self.rotation.x += rotateCameraPitchBy()
+	self.rotation.y += clamp(_rotateCameraYawBy(), deg_to_rad(-cameraRotSpeedX*delta), deg_to_rad(cameraRotSpeedX*delta))
+	self.rotation.x += _rotateCameraPitchBy()
 
 	#clamp rotation
 	self.rotation.x = clampf(self.rotation.x, deg_to_rad(cameraPitchMin), deg_to_rad(cameraPitchMax))

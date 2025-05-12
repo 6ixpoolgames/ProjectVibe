@@ -6,12 +6,14 @@ var pawn: CharacterPawn3D
 var characterModel: MeshInstance3D
 var characterCollision: CollisionShape3D
 var controllerManager: MovementControllerManager
+var controllerNavAgent3D: NavigationAgent3D
 var statManager: CharacterStatManager
 var cameraControllerArm: PawnCameraController
-var AICore: AICoreComponent
+var aiCore: AICoreComponent
 var sensingComponent: AISensingComponent
-var AIStateManager: AIStateManagerComponent
-var AIBehaviourManager: AIBehaviourManagerComponent
+var aiStateManager: AIStateManagerComponent
+var aiBehaviourManager: AIBehaviourManagerComponent
+
 #var CombatManager: CombatManagerComponent				#still pending implementation
 
 @export var allow_overwrites = {

@@ -6,7 +6,7 @@ class_name AIBehaviourComponentBase
 
 var behaviourManager: AIBehaviourManagerComponent
 var pawn: CharacterPawn3D
-var AICore: AICoreComponent
+var aiCore: AICoreComponent
 var pawnRID: RID
 
 func _enter_tree() -> void:
@@ -26,6 +26,6 @@ func on_enter_state()->void:
 	pass
 
 func set_references(core:AICoreComponent, pwn:CharacterPawn3D):
-	AICore = core
+	aiCore = core
 	pawn = pwn
 	pawnRID = pawn.pawnRID

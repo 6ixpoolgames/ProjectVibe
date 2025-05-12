@@ -6,24 +6,48 @@ var stateBehaviour2DArr:Array = []
 var allBehaviours: Array[AIBehaviourComponentBase] = []
 var allBehaviourNames: Array[StringName] = []
 
-var AICore: AICoreComponent
+var aiCore: AICoreComponent
 var pawn: CharacterPawn3D
 var nexus: PawnNexusComponent
 
+@export var isPremade:=false
+
 func _enter_tree()->void:
 	if get_parent() is AICoreComponent:
-		AICore = get_parent()
-		nexus = AICore.nexus
-		AICore.AIBehaviourManager = self
+		aiCore = get_parent()
+		nexus = aiCore.nexus
+		pawn = nexus.pawn
+		aiCore.aiBehaviourManager = self
+	_check_overwrite_premade()
 	#else:
 	#	Pawn = get_parent() #debug feature. refactor later!
 	#	print("not attached to AI Core! ", Pawn)
+
+
+func _check_overwrite_premade()->void:
+	#region check if should overwrite and cleanup extra nodes
+	if nexus.allow_overwrites.AIBehaviourManager:
+		if aiCore.aiBehaviourManager != self:
+			if isPremade:
+				self.queue_free()
+				return
+			else:
+				aiCore.aiBehaviourManager.queue_free()
+	else:
+		if aiCore.aiBehaviourManager != self:
+			if isPremade:
+				aiCore.aiBehaviourManager.queue_free()
+			else:
+				self.queue_free()
+				return
+	#endregion
+	aiCore.aiBehaviourManager = self
 
 func _ready()->void:
 	var children = self.get_children()
 	for c in children:
 		if c.has_method("pull_down_references"):
-			c.pull_down_references(AICore, pawn)
+			c.pull_down_references(aiCore, pawn)
 
 func request_register_behaviour_component(behaviour: AIBehaviourComponentBase):
 	var behaviourIndex = allBehaviours.find(behaviour)

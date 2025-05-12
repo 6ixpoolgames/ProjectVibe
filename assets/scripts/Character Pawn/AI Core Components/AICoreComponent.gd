@@ -17,8 +17,8 @@ var statManager: CharacterStatManager
 #var AICore: AICoreComponent
 var sensingComponent: AISensingComponent
 #var AIStateManager: AIStateManagerComponent
-var AIStateManager: AIStateManagerComponent
-var AIBehaviourManager: AIBehaviourManagerComponent
+var aiStateManager: AIStateManagerComponent
+var aiBehaviourManager: AIBehaviourManagerComponent
 
 
 #references and ready checks
@@ -48,18 +48,19 @@ func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAISt
 	polling_freq_frame_count = pollFreq
 	polling_group = pollGrp
 #endregion
-	
+
+
 #var children:Array[Node]		
 func _enter_tree() -> void:
-	update_component_references()
+	_update_component_references()
 	_init_sensing_component(sensingInitRes)
 	_init_state_manager_component()
-#	_init_behaviour_manager_component(children)
+	_init_behaviour_manager_component()
 
 func _ready() -> void:
 	_polling_outofbounds_reassignment()
 	#pass_subcomponent_references()
-	sensingComponent.set_is_sensing_active(true)
+	sensingComponent.set_is_sensing_active(true) #probably need to move this to the nexus component
 	_nullify_init_resources(true)
 	#GlobalTools.print_sequence_counter(self, "_ready")
 
@@ -73,16 +74,16 @@ func _init_sensing_component(senseRes: AISensingInitializerBaseRes = sensingInit
 
 func _init_state_manager_component():
 	if addAIStateManagerOnSpawn:
-		AIStateManager = AIStateManagerComponent.new()
-		AIStateManager.name = "AIStatemanager"
-		self.add_child(AIStateManager)
+		aiStateManager = AIStateManagerComponent.new()
+		aiStateManager.name = "AIStatemanager"
+		self.add_child(aiStateManager)
 
 
-func _init_behaviour_manager_component(chldr:Array[Node]):
+func _init_behaviour_manager_component():
 	if addAIBehaviourManagerOnSpawn:
-		AIBehaviourManager = AIBehaviourManager.new()
-		AIBehaviourManager.name = "AIBehaviourManager"
-		self.add_child(AIBehaviourManager)
+		aiBehaviourManager = AIBehaviourManagerComponent.new()
+		aiBehaviourManager.name = "AIBehaviourManager"
+		self.add_child(aiBehaviourManager)
 
 
 func _nullify_init_resources(nullify:bool=true):
@@ -132,7 +133,7 @@ func _physics_process(_delta: float) -> void:
 			statManager = pawn.statManager
 			pass_subcomponent_references()
 			sensingComponent.set_is_sensing_active(true)
-			AIStateManager.set_is_state_manager_active(true)
+			aiStateManager.set_is_state_manager_active(true)
 			doOnce = true
 
 
@@ -141,25 +142,29 @@ func get_sensing_component()->AISensingComponent:
 
 
 func get_state_manager()->AIStateManagerComponent:
-	return AIStateManager
+	return aiStateManager
 
 
-func get_behaviour_component()->AIBehaviourManagerComponent:         #not yet implemented
-	return AIBehaviourManager
+func get_behaviour_component()->AIBehaviourManagerComponent:         #WARNING not yet implemented
+	return aiBehaviourManager
 
 
-func update_component_references()->void:
+func _update_component_references()->void:
 	if !nexus and get_parent() is PawnNexusComponent:
 		nexus = get_parent()
 		pawn = nexus.pawn
-		nexus.AICore = self
+		nexus.aiCore = self
+
+
+func set_references()->void:
+	statManager = nexus.statManager
 
 
 ##mostly depracated
 func pass_subcomponent_references()->void:
 	if sensingComponent: sensingComponent.set_references(nexus)
 	else: printerr("sense component NULL ",nexus.pawn)
-	if AIStateManager: AIStateManager.set_references(nexus) 
+	if aiStateManager: aiStateManager.set_references(nexus) 
 	else: printerr("state manager NULL ",nexus.pawn)
 	#AIStateManager.pull_component_references(self, sensingComponent, statManager)
 	#sensingComponent.pull_component_references(self)

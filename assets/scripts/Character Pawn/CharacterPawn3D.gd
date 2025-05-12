@@ -27,13 +27,13 @@ var lastInputRotationPitch: float = targetPitch
 var lastInputRotationTilt: float = targetTilt
 
 #node reference variables
-var CharacterModel: MeshInstance3D
+var characterModel: MeshInstance3D
 var activePlayerCamera: Camera3D
 var allChildren: Array[Node]
 var pawnInitializer: PawnInitializerComponent
 var cameraControllerArm: PawnCameraController
 var statManager: CharacterStatManager
-var AICore: AICoreComponent
+var aiCore: AICoreComponent
 var controllerManager: MovementControllerManager
 #var CombatManager: CombatManagerComponent 
 
@@ -131,8 +131,8 @@ func yaw_to_facing(delta: float)->void:
 	var wt = clamp((deg_to_rad(turn_speed_yaw) * delta) / dist, 0.0, 1.0) if dist > 0.001 else 1.0 # if statement to stop turn locking
 	#apply rotation
 	currentYaw = lerp_angle(currRot, targetYaw, wt)
-	if CharacterModel:
-		CharacterModel.rotation.y = currentYaw
+	if characterModel:
+		characterModel.rotation.y = currentYaw
 
 var isPossessed = false
 ##sets isPossessed to TRUE if the main camera is a child. For refactoring once possession manager is in, but might keep it as a validation mechanism
