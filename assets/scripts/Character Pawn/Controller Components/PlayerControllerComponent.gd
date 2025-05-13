@@ -3,7 +3,6 @@ class_name PlayerControllerComponent
 
 @onready var inputDirection = Vector3.ZERO
 
-
 @export var sprint_multiplier: float = 2.5 ##multiplier to speed and acceleration when spriting
 @export var apex_velocity: float = .2
 @export var apex_gravity_multiplier: float = 0.675
@@ -18,6 +17,12 @@ var jumpTimer: float = jump_cooldown
 var baseSpd: float
 var baseAcl: float
 var baseGrav: float 
+
+
+func _enter_tree() -> void:
+	super()
+	controllerManager.playerController = self
+
 
 func _ready() -> void:
 	inputPriority = 0 #sets input priority to highest
@@ -108,7 +113,6 @@ func input_camera_yaw_adjustment(iDir)->Vector3:
 	elif not pawn.isPossessed and pawn.isCommandedMovement:
 		var cameraYawRotRads = pawn.activePlayerCamera.rotation.y
 		newIDir = inputDirection.rotated(Vector3.UP,cameraYawRotRads)
-
 	else:
 		newIDir = iDir
 	return newIDir

@@ -4,39 +4,20 @@ class_name AIControllerBase
 
 func _enter_tree() -> void:
 	super()
-	if controllerManager.aiController != null:
-		controllerManager.aiController = self
-	
+	controllerManager.aiController = self #need to add dupe checking here.
 
 func _ready() -> void:
 	_create_nav_agent(true)
 	if !pawn:
 		set_physics_process(false)
+	else:
+		isReady = true
+
 
 func _physics_process(_delta: float) -> void:
 	if isReady:
 		_pawn_navigation()
 
-"""
-var navAgent: NavigationAgent3D
-##creates a new navigation agent 3D for the click to move controller.
-## [param overwrite] if overwrite is true, deletes all other NavAgent3Ds attached to the controller
-func _create_nav_agent(overwrite:bool)->void:
-	if overwrite: #checks all child
-		var children = self.get_children()
-		for c in children:
-			if c is NavigationAgent3D:
-				c.queue_free()
-	navAgent = NavigationAgent3D.new() #WARNING need to add a check of duplicate nav agents exist
-	navAgent.name = "playerNavAgent"
-	add_child(navAgent)
-	navAgent.debug_enabled = true
-"""
-	
-var navigationToggle = false
-func move_to(dest: Vector3)->void:
-	nexus.controllerNavAgent3D.set_target_position(dest)
-	navigationToggle = true
 
 var destination = Vector3.ZERO
 var local_destination = Vector3.ZERO
@@ -56,12 +37,19 @@ func _pawn_navigation()->void:
 	elif navigationToggle == true:
 		controllerManager.request_move_command(hAiDirection, self)
 
+
+var navigationToggle = false
+func move_to(dest: Vector3)->void:
+	nexus.controllerNavAgent3D.set_target_position(dest)
+	navigationToggle = true
+
+
 ##stops navigation by setting navigationToggle flag to FALSE and setting the nav target position to pawn's current position		
 func stop_navigation()->void:
 	navigationToggle = false #toggle navigation off
 	nexus.controllerNavAgent3D.set_target_position(pawn.global_position) #reset target position to ensure stoppage
-	
-	
+
+
 func run_to(_dest: Vector3)->void:
 	print("run_to() function currently empty")
 	return
