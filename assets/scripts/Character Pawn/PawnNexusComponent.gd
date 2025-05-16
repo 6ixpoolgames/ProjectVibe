@@ -13,7 +13,6 @@ var aiCore: AICoreComponent
 var sensingComponent: AISensingComponent
 var aiStateManager: AIStateManagerComponent
 var aiBehaviourManager: AIBehaviourManagerComponent
-
 #var CombatManager: CombatManagerComponent				#still pending implementation
 
 @export var allow_overwrites = {
@@ -24,12 +23,22 @@ var aiBehaviourManager: AIBehaviourManagerComponent
 	"StatManager":false,
 	"cameraControllerArm":false,
 	"AICore":false,
-	"AISensingComponent":true,
+	"AISensingComponent":false,
 	"AIStateManager":false,
 	"AIBehaviourManager":false
+#	"combatManager":false
 }
 
 func _enter_tree() -> void:
+	print_stack()
 	var node = get_parent()
 	if node and is_instance_valid(node) and node is CharacterPawn3D:
 		pawn = node
+
+
+func _ready() -> void:
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	print_tree_pretty()

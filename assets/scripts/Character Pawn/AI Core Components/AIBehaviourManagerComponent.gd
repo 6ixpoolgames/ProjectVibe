@@ -13,22 +13,25 @@ var nexus: PawnNexusComponent
 @export var isPremade:=false
 
 func _enter_tree()->void:
+	print_stack()
 	if get_parent() is AICoreComponent:
 		aiCore = get_parent()
 		nexus = aiCore.nexus
 		pawn = nexus.pawn
-		aiCore.aiBehaviourManager = self
-	_check_overwrite_premade()
+		_check_overwrite_premade()
+		if not isForDeletion:
+			aiCore.aiBehaviourManager = self
 	#else:
 	#	Pawn = get_parent() #debug feature. refactor later!
 	#	print("not attached to AI Core! ", Pawn)
 
-
+var isForDeletion:= false
 func _check_overwrite_premade()->void:
 	#region check if should overwrite and cleanup extra nodes
 	if nexus.allow_overwrites.AIBehaviourManager:
 		if aiCore.aiBehaviourManager != self:
 			if isPremade:
+				isForDeletion = true
 				self.queue_free()
 				return
 			else:
@@ -38,6 +41,7 @@ func _check_overwrite_premade()->void:
 			if isPremade:
 				aiCore.aiBehaviourManager.queue_free()
 			else:
+				isForDeletion = true
 				self.queue_free()
 				return
 	#endregion

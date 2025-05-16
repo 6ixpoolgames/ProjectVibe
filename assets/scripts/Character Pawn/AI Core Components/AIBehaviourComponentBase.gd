@@ -10,6 +10,7 @@ var aiCore: AICoreComponent
 var pawnRID: RID
 
 func _enter_tree() -> void:
+	print_stack()
 	if behaviourID == &"":
 		behaviourID = StringName(self.name)
 	else:

@@ -58,15 +58,15 @@ func _init(senseRes:=sense_init_res)->void:
 
 
 func _enter_tree() -> void:
-	#pull_component_references()
+	print_stack()
 	aiCore = get_parent()
 	nexus = aiCore.nexus
 	pawn = nexus.pawn
 	_check_overwrite_premade()
-	nexus.sensingComponent = self
-	name = "premadeSense" if isPremade else "instanceSense" 
-	
-	_initialize_sensing()
+	if not isForDeletion:
+		nexus.sensingComponent = self
+		name = "premadeSense" if isPremade else "instanceSense" 
+		_initialize_sensing()
 
 
 func _ready() -> void:
@@ -74,12 +74,13 @@ func _ready() -> void:
 		printerr("Nexus component reference not available ", self)
 	GlobalTools.print_sequence_counter(self, "_ready")
 
-
+var isForDeletion:= false
 func _check_overwrite_premade()->void:	
 	#region check if should overwrite and cleanup extra nodes
 	if nexus.allow_overwrites.AISensingComponent:
 		if aiCore.sensingComponent != self:
 			if isPremade:
+				isForDeletion = true
 				self.queue_free() #free SELF if overwrites, ref NOT self, and is premade (instance should apply)
 				return
 			else:
@@ -89,6 +90,7 @@ func _check_overwrite_premade()->void:
 			if isPremade:
 				aiCore.sensingComponent.queue_free() #free REF if no overwrites, ref NOT self, and is premade (premade should apply)
 			else: 
+				isForDeletion = true
 				self.queue_free() #free SELF if no overwrites, ref NOT self, and NOT premade (premade should apply)
 				return
 	#endregion

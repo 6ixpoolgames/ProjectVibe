@@ -13,7 +13,7 @@ var togglePossession = true
 @onready var testPawn:CharacterPawn3D = $"../HeroPawn"
 
 func _ready() -> void:
-	raycast = create_raycaster()
+	_create_raycaster()
 
 ##Despite the name, actually reparents this camera to the [param pwn]'s SPRINGARM if available.
 func attach_to_pawn(pwn:CharacterPawn3D):
@@ -119,11 +119,12 @@ func create_debug_sphere():
 			
 var raycast: RayCast3D
 ##creates a raycast3D node as a child of this camera. called on ready
-func create_raycaster() -> RayCast3D:
-	var rc = RayCast3D.new()
-	self.add_child(rc)
+func _create_raycaster() -> void:
+	if raycast:
+		raycast.queue_free()
+	raycast = RayCast3D.new()
+	self.add_child(raycast)
 	#print("raycaster created. Parent  = ", rc.get_parent_node_3d())
-	return rc
 
 
 	

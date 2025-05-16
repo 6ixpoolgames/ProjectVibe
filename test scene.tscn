@@ -83,18 +83,6 @@ shape = SubResource("CapsuleShape3D_tv77q")
 
 [node name="PawnNexusComponent" type="Node3D" parent="HeroPawn"]
 script = ExtResource("4_6bchc")
-allow_overwrites = {
-"AIBehaviourManager": false,
-"AICore": false,
-"AISensingComponent": false,
-"AIStateManager": false,
-"CharacterCollision": true,
-"CharacterModel": true,
-"ControllerManager": false,
-"Pawn": false,
-"StatManager": false,
-"cameraControllerArm": false
-}
 metadata/_custom_type_script = "uid://ch7e1kmli36w8"
 
 [node name="AICoreComponent" type="Node3D" parent="HeroPawn/PawnNexusComponent"]

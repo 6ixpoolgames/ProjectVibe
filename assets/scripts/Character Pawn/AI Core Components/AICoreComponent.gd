@@ -52,6 +52,7 @@ func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAISt
 
 #var children:Array[Node]		
 func _enter_tree() -> void:
+	print_stack()
 	_update_component_references()
 	_init_sensing_component(sensingInitRes)
 	_init_state_manager_component()

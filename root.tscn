@@ -1,6 +1,6 @@
 [gd_scene load_steps=36 format=4 uid="uid://bpx47c6hqjaem"]
 
-[ext_resource type="PackedScene" uid="uid://fyrukvbs7iys" path="res://assets/3d/miniDungeon/Models/GLB format/barrel.glb" id="3_28aoi"]
+[ext_resource type="PackedScene" uid="uid://d2ofax42j1pqs" path="res://assets/3d/miniDungeon/Models/GLB format/barrel.glb" id="3_28aoi"]
 [ext_resource type="PackedScene" uid="uid://baj2kb4ahgm8e" path="res://column_2.tscn" id="4_28aoi"]
 [ext_resource type="PackedScene" uid="uid://dqetdldbv7aa8" path="res://assets/scenes/character_pawn_3d.tscn" id="4_jnlp7"]
 [ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://assets/legacy/proc_gen_tile.tscn" id="5_jnlp7"]

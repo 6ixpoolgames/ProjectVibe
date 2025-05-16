@@ -15,17 +15,20 @@ var stateEntryTemplate = {
 
 
 func _enter_tree() -> void:
+	print_stack()
 	aiCore = get_parent()
 	nexus = aiCore.nexus
 	_check_overwrite_premade()
-	nexus.aiStateManager = self
+	if not isForDeletion:
+		nexus.aiStateManager = self
 
-
+var isForDeletion:= false
 func _check_overwrite_premade()->void:
 	#region check if should overwrite and cleanup extra nodes
 	if nexus.allow_overwrites.AIStateManager:
 		if aiCore.aiStateManager != self:
 			if isPremade:
+				isForDeletion = true
 				self.queue_free()
 				return
 			else:
@@ -35,6 +38,7 @@ func _check_overwrite_premade()->void:
 			if isPremade:
 				aiCore.aiStateManager.queue_free()
 			else:
+				isForDeletion = true
 				self.queue_free()
 				return
 	#endregion
