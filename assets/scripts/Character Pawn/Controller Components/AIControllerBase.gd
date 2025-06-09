@@ -6,6 +6,7 @@ func _enter_tree() -> void:
 	super()
 	controllerManager.aiController = self #need to add dupe checking here.
 
+
 func _ready() -> void:
 	_create_nav_agent(true)
 	if !pawn:
