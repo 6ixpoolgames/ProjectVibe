@@ -87,6 +87,7 @@ func _init_behaviour_manager_component():
 		self.add_child(aiBehaviourManager)
 
 
+#nulls initialization resource references to remove them from memory
 func _nullify_init_resources(nullify:bool=true):
 	if nullify:
 		sensingInitRes = null
