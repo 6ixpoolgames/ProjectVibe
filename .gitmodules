@@ -1,0 +1,6 @@
+[submodule "native/thirdparty/godot-cpp"]
+	path = native/thirdparty/godot-cpp
+	url = https://github.com/godotengine/godot-cpp
+[submodule "native/thirdparty/recastnavigation"]
+	path = native/thirdparty/recastnavigation
+	url = https://github.com/recastnavigation/recastnavigation

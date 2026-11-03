@@ -30,3 +30,13 @@ Thumbs.db
 *.import
 *.md5
 *.stex
+# Claude 2026-11-03: native (GDExtension) build artifacts. The built DLL in bin/ is kept on purpose,
+# so machines without a compiler can still run the project.
+*.obj
+*.o
+*.os
+*.exp
+*.lib
+*.pdb
+*.ilk
+.sconsign*.dblite

@@ -1,0 +1,14 @@
+; Written by Claude (claude-opus-5-5), 2026-11-03: tells Godot where the navcore library is. Built from native/ (see native/SConstruct).
+[configuration]
+
+entry_symbol = "navcore_library_init"
+compatibility_minimum = "4.4"
+; Worker threads make hot-reloading unsafe; restart the editor after rebuilding.
+reloadable = false
+
+[libraries]
+
+windows.debug.x86_64 = "res://bin/navcore.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "res://bin/navcore.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://bin/libnavcore.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "res://bin/libnavcore.linux.template_release.x86_64.so"

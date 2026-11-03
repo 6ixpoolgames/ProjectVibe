@@ -1,0 +1,22 @@
+#!/usr/bin/env python
+# Written by Claude (claude-opus-5-5), 2026-11-03: builds the navcore GDExtension (godot-cpp + Recast/Detour + src/).
+# Usage, from this folder:   python -m SCons            (debug build, used by the editor)
+#                            python -m SCons target=template_release
+# Output goes to ../bin/, next to navcore.gdextension.
+
+env = SConscript("thirdparty/godot-cpp/SConstruct")
+env = env.Clone()  # don't leak our settings into the godot-cpp library build
+
+recast = "thirdparty/recastnavigation/"
+env.Append(CPPPATH=["src/", recast + "Recast/Include", recast + "Detour/Include"])
+# 64-bit poly refs: room for many tiles and polys, and salt bits that make stale refs detectable.
+# Must be defined for Detour's own sources AND ours, so it goes on the whole environment.
+env.Append(CPPDEFINES=["DT_POLYREF64"])
+
+sources = Glob("src/*.cpp") + Glob(recast + "Recast/Source/*.cpp") + Glob(recast + "Detour/Source/*.cpp")
+
+library = env.SharedLibrary(
+    "../bin/navcore{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),
+    source=sources,
+)
+Default(library)
