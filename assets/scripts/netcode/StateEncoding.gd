@@ -92,6 +92,21 @@ static func _as_float32(value: float) -> float:
 	return Vector2(value, 0.0).x
 
 
+## Claude 2026-11-04: a value part way between two others, for drawing between snapshots. Things that can't blend, like
+## bools, stay at the first value until the second arrives.
+static func blend(a: Variant, b: Variant, weight: float, encoding: StringName) -> Variant:
+	if typeof(a) != typeof(b):
+		return a
+	match typeof(a):
+		TYPE_VECTOR3, TYPE_VECTOR2:
+			return a.lerp(b, weight)
+		TYPE_FLOAT:
+			if encoding == ANGLE_U16 or encoding == ANGLE_BYTE:
+				return lerp_angle(a, b, weight)
+			return lerpf(a, b, weight)
+	return a
+
+
 ## A copy of the value that shares nothing with the original. Arrays, Dictionaries and packed arrays are held by
 ## reference in GDScript, so saving one without copying would leave every history slot pointing at the same live object.
 static func copy_value(value: Variant) -> Variant:

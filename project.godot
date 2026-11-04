@@ -21,6 +21,7 @@ GlobalTools="*res://assets/scripts/singletons/GlobalTools.gd"
 GlobalAICoordinator="*res://assets/scripts/singletons/GlobalAICoordinator.gd"
 ResourcePreloadManager="*res://assets/scripts/singletons/ResourcePreloadSingleton.gd"
 NetworkTime="*res://assets/scripts/singletons/NetworkTime.gd"
+NetworkSession="*res://assets/scripts/singletons/NetworkSession.gd"
 
 [input]
 

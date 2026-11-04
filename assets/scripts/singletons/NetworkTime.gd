@@ -47,9 +47,13 @@
 ##   - While replaying: is_resimulating() is true (cosmetic effects must check it), NetworkTime.tick reads as the tick
 ##     being replayed, and the tick_rng() rolls repeat exactly. Input phases don't run; saved inputs are restored instead.
 ##   - Everything not predicted stays where it is during the replay, the standard accepted inaccuracy. The exception is
-##     an entity whose TickStateComponent is in FOLLOW_SERVER mode: it stands on server data, estimates past it on its velocity,
-##     then returns to where it was.
+##     an entity in FOLLOW_SERVER mode with follows_during_rollback on: it stands on server data, extrapolates past it on its
+##     velocity, then returns to where it was.
 ##   - Each replaying participant's optional _rollback_finished() runs once the replay is over, before after_rollback.
+##   - Loading happens in stages (Claude 2026-11-04): resimulated participants load first. If none could, nothing happens and
+##     it returns false, because a replay would have nothing to do. Following ones then join if they want to and are near one
+##     of those (wants_to_join_rollback). Then collision positions sync, then each one's optional _rollback_after_load(tick) runs, so
+##     a floor check there sees everyone else in place. is_resimulating() is true through all of this and the finish step.
 ##   - When two or more participants replay, each one's optional _sync_collision() runs after loading and after each
 ##     replayed tick, so physics bodies collide with each other's replayed positions rather than their final ones.
 ##   - Allowed between ticks or from before_tick (where the netcode will apply snapshots). During the phases, or
@@ -211,6 +215,16 @@ func ticks_to_seconds(ticks: int) -> float:
 	return ticks * get_tick_dt()
 
 
+## Claude 2026-11-04: jumps to a tick number. For a client setting its clock from the server's; use nothing else to change
+## tick. Not allowed during a tick. Saved history stays valid, because each slot remembers which tick it holds.
+func set_tick(new_tick: int) -> void:
+	if _in_tick or _resimulating:
+		push_warning("[NetworkTime] set_tick(%d) ignored: not allowed during a tick or a replay" % new_tick)
+		return
+	tick = new_tick
+	_accumulator = 0.0
+
+
 ## True while a rollback is replaying ticks. Cosmetic effects (sounds, particles) should not fire then.
 func is_resimulating() -> bool:
 	return _resimulating
@@ -236,11 +250,12 @@ func rollback(from_tick: int) -> bool:
 		return false
 	if _dirty:
 		_rebuild_phases()
-	var loaded: Array = []
-	for p in _predicted:
-		if is_instance_valid(p) and p._rollback_load(from_tick):
-			loaded.append(p)
+	# Claude 2026-11-04: on from here, so load hooks count as part of the replay: they can't start another, and effects
+	# they guard with is_resimulating() stay quiet.
+	_resimulating = true
+	var loaded := _load_for_rollback(from_tick)
 	if loaded.is_empty():
+		_resimulating = false
 		return false
 	# Claude 2026-11-04: bodies replaying together must see each other's replayed positions. One body alone never hits
 	# itself, so the usual client replay of just its own pawn skips this and pays nothing.
@@ -249,11 +264,9 @@ func rollback(from_tick: int) -> bool:
 		to_sync = loaded.filter(func(p): return p.has_method(&"_sync_collision"))
 	for p in to_sync:
 		p._sync_collision()
-	# Claude 2026-11-04: known issue, left for later (owner's call after review). This flag is only true from here until
-	# the replay ends, so it's still false during the load above and _rollback_finished below. That means a rollback() from
-	# a load hook isn't refused and could nest, and effects in load hooks guarded by is_resimulating() would still fire.
-	# Fix: set it before the load loop and clear it after the finish loop, including on the early return above.
-	_resimulating = true
+	for p in loaded:
+		if is_instance_valid(p) and p.has_method(&"_rollback_after_load"):
+			p._rollback_after_load(from_tick)
 	var dt := get_tick_dt()
 	for t in range(from_tick + 1, last_finished + 1):
 		tick = t
@@ -270,13 +283,41 @@ func rollback(from_tick: int) -> bool:
 			if is_instance_valid(p):
 				p._sync_collision()
 	tick = real_tick
-	_resimulating = false
 	# Claude 2026-11-04: lets following entities go back to what they had before the replay.
 	for p in loaded:
 		if is_instance_valid(p) and p.has_method(&"_rollback_finished"):
 			p._rollback_finished()
+	_resimulating = false
 	after_rollback.emit(from_tick, last_finished)
 	return true
+
+
+## Claude 2026-11-04: loads resimulated participants, then the following ones near them. Far-away following entities are
+## skipped, which is what keeps a large swarm affordable. Empty if no resimulated participant could load.
+func _load_for_rollback(from_tick: int) -> Array:
+	var loaded: Array = []
+	var following: Array = []
+	for p in _predicted:
+		if not is_instance_valid(p):
+			continue
+		if p.has_method(&"is_following_server") and p.is_following_server():
+			following.append(p)
+		elif p._rollback_load(from_tick):
+			loaded.append(p)
+	if loaded.is_empty():
+		return loaded
+	var centres: Array = []
+	for p in loaded:
+		if p.has_method(&"get_rollback_centre"):
+			var centre: Variant = p.get_rollback_centre()
+			if centre != null:
+				centres.append(centre)
+	var joined: Array = []
+	for p in following:
+		if p.wants_to_join_rollback(centres) and p._rollback_load(from_tick):
+			joined.append(p)
+	# Following ones go first in each replayed tick, so a resimulated entity reading their properties sees that tick's values.
+	return joined + loaded
 
 
 ## Claude 2026-11-04: one body alone never collides with itself, so this only does anything for two or more.
@@ -286,7 +327,9 @@ func _sync_collision_world() -> void:
 	if _syncing.size() < 2:
 		return
 	for p in _syncing:
-		if is_instance_valid(p):
+		# Claude 2026-11-04: following entities don't move during a tick's simulation, and this runs when the machine is already
+		# behind, so a large swarm mustn't add to it.
+		if is_instance_valid(p) and not (p.has_method(&"is_following_server") and p.is_following_server()):
 			p._sync_collision()
 
 

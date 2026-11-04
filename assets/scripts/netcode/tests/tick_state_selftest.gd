@@ -113,6 +113,19 @@ class MotorPart extends Node:
 	var velocity := Vector3.ZERO
 
 
+## Claude 2026-11-04: notes what its load hook could see: whether the replay flag was on, and another entity's value.
+class LoadHookEntity extends Node:
+	var value := 0
+	var other: LoadHookEntity = null
+	var flag_during_load := false
+	var other_value_during_load := -1
+
+	func _on_state_loaded(_t: int) -> void:
+		flag_during_load = (get_node("/root/NetworkTime") as NetworkTimeSingleton).is_resimulating()
+		if other:
+			other_value_during_load = other.value
+
+
 ## Claude 2026-11-04: predicted, and notes where another entity is whenever it simulates.
 class Watcher extends Node:
 	var target: Node
@@ -685,7 +698,7 @@ func _test_follow_server() -> void:
 	nt.register(watcher)
 	_check(state._states.size() == 2 and state._position_index == 0 and state._velocity_index == 1, "follow server with nothing listed uses position, and velocity if the parent has one")
 	_check(state.get_schema().is_empty(), "follow server: that default isn't added to the list the handshake compares")
-	state.estimate_cap_seconds = 0.05 # 3 ticks
+	state.extrapolation_cap_seconds = 0.05 # 3 ticks
 
 	var first := nt.tick + 1
 	for i in 12:
@@ -696,8 +709,8 @@ func _test_follow_server() -> void:
 	_check(_saw(watcher, first + 3, Vector3(99, 0, 0)), "follow server: with no server data, it stays where it is")
 
 	# 60 m/s is 1 m per tick at 60 ticks/s, so the estimates are easy to read.
-	state.receive_server_state(first + 2, {"position": Vector3(1, 0, 0), "velocity": Vector3(60, 60, 0), "not_listed": true})
-	state.receive_server_state(first + 3, {"position": Vector3(5, 0, 0), "velocity": Vector3(60, 60, 0)})
+	state.receive_authoritative_state(first + 2, {"position": Vector3(1, 0, 0), "velocity": Vector3(60, 60, 0), "not_listed": true})
+	state.receive_authoritative_state(first + 3, {"position": Vector3(5, 0, 0), "velocity": Vector3(60, 60, 0)})
 	follower.simulate_calls = 0
 	nt.rollback(first + 1)
 	_check(_saw(watcher, first + 2, Vector3(1, 0, 0)) and _saw(watcher, first + 3, Vector3(5, 0, 0)), "follow server: on ticks the server sent, it stands exactly there")
@@ -710,30 +723,30 @@ func _test_follow_server() -> void:
 	nt.rollback(first + 5)
 	_check(_saw(watcher, first + 6, Vector3(8, 0, 0)), "follow server: a replay starting past the newest server data estimates from it straight away")
 
-	state.clear_server_state()
-	state.receive_server_state(first + 2, {"position": Vector3(1, 0, 0), "velocity": Vector3(60, 0, 0)})
-	state.receive_server_state(first + 4, {"position": Vector3(20, 0, 0), "velocity": Vector3(60, 0, 0)})
+	state.clear_authoritative_state()
+	state.receive_authoritative_state(first + 2, {"position": Vector3(1, 0, 0), "velocity": Vector3(60, 0, 0)})
+	state.receive_authoritative_state(first + 4, {"position": Vector3(20, 0, 0), "velocity": Vector3(60, 0, 0)})
 	nt.rollback(first + 1)
 	_check(_saw(watcher, first + 3, Vector3(2, 0, 0)) and _saw(watcher, first + 4, Vector3(20, 0, 0)), "follow server: between server ticks it estimates, then snaps to the next one")
 
-	state.clear_server_state()
+	state.clear_authoritative_state()
 	nt.rollback(first + 1)
-	_check(_saw(watcher, first + 3, Vector3(99, 0, 0)), "follow server: clear_server_state forgets what it was told")
+	_check(_saw(watcher, first + 3, Vector3(99, 0, 0)), "follow server: clear_authoritative_state forgets what it was told")
 
-	state.estimate_vertical = true
-	state.receive_server_state(first + 2, {"position": Vector3(1, 0, 0), "velocity": Vector3(60, 60, 0)})
+	state.extrapolate_vertical = true
+	state.receive_authoritative_state(first + 2, {"position": Vector3(1, 0, 0), "velocity": Vector3(60, 60, 0)})
 	nt.rollback(first + 2)
-	_check(_saw(watcher, first + 3, Vector3(2, 1, 0)), "follow server: estimate_vertical also moves it up and down")
-	state.estimate_vertical = false
+	_check(_saw(watcher, first + 3, Vector3(2, 1, 0)), "follow server: extrapolate_vertical also moves it up and down")
+	state.extrapolate_vertical = false
 
-	state.estimate_cap_seconds = 0.0
+	state.extrapolation_cap_seconds = 0.0
 	nt.rollback(first + 2)
 	_check(_saw(watcher, first + 3, Vector3(1, 0, 0)), "follow server: a cap of 0 just holds at the newest server data")
-	state.estimate_cap_seconds = 0.05
+	state.extrapolation_cap_seconds = 0.05
 
-	state.clear_server_state()
-	state.receive_server_state(first + 2 + state.history_size, {"position": Vector3(1, 0, 0)})
-	state.receive_server_state(first + 2, {"position": Vector3(50, 0, 0)})
+	state.clear_authoritative_state()
+	state.receive_authoritative_state(first + 2 + state.history_size, {"position": Vector3(1, 0, 0)})
+	state.receive_authoritative_state(first + 2, {"position": Vector3(50, 0, 0)})
 	nt.rollback(first + 1)
 	_check(_saw(watcher, first + 2, Vector3(99, 0, 0)), "follow server: a late packet doesn't replace newer data in its slot")
 
@@ -741,7 +754,7 @@ func _test_follow_server() -> void:
 	var door_state := _follow_server_state(door)
 	door.position = Vector3(7, 0, 0)
 	_check(door_state._states.size() == 1, "follow server: with no velocity on the parent, it only uses position")
-	door_state.receive_server_state(first + 2, {"position": Vector3(3, 0, 0)})
+	door_state.receive_authoritative_state(first + 2, {"position": Vector3(3, 0, 0)})
 	watcher.target = door
 	nt.rollback(first + 2)
 	_check(_saw(watcher, first + 5, Vector3(3, 0, 0)), "follow server: with no velocity, it holds at the newest server data")
@@ -750,7 +763,7 @@ func _test_follow_server() -> void:
 	var sprite := MovingFollower2D.new()
 	var sprite_state := _follow_server_state(sprite)
 	sprite.position = Vector2(4, 4)
-	sprite_state.receive_server_state(first + 2, {"position": Vector2(1, 1), "velocity": Vector2(60, 60)})
+	sprite_state.receive_authoritative_state(first + 2, {"position": Vector2(1, 1), "velocity": Vector2(60, 60)})
 	watcher.target = sprite
 	nt.unregister(watcher_state) # to the back of the order, so it looks after the newer entity has moved this tick
 	nt.register(watcher_state)
@@ -762,25 +775,97 @@ func _test_follow_server() -> void:
 	motor.name = "Motor"
 	motored.add_child(motor)
 	var motored_state := TickStateComponent.new()
-	motored_state.replay_mode = TickStateComponent.ReplayMode.FOLLOW_SERVER
+	motored_state.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER
+	motored_state.follows_during_rollback = true
 	motored_state.state_properties = ["global_position", "Motor:velocity"]
 	motored.add_child(motored_state)
 	add_child(motored)
-	motored_state.receive_server_state(first + 2, {"global_position": Vector3(1, 0, 0), "Motor:velocity": Vector3(60, 0, 0)})
+	motored_state.receive_authoritative_state(first + 2, {"global_position": Vector3(1, 0, 0), "Motor:velocity": Vector3(60, 0, 0)})
 	watcher.target = motored
 	nt.unregister(watcher_state)
 	nt.register(watcher_state)
 	nt.rollback(first + 2)
 	_check(_saw(watcher, first + 3, Vector3(2, 0, 0)), "follow server: a velocity on a part below the parent, and global_position, still estimate")
 
-	for node: Node in [follower, door, sprite, motored, watcher]:
+	# The distance cutoff: the watcher has no position, so give it one by replaying a moved entity next to the follower.
+	var near_state := _follow_server_state(MovingFollower.new())
+	var far_state := _follow_server_state(MovingFollower.new())
+	var near: Node3D = near_state.get_parent()
+	var far: Node3D = far_state.get_parent()
+	near.position = Vector3(5, 0, 0)
+	far.position = Vector3(500, 0, 0)
+	near_state.receive_authoritative_state(first + 2, {"position": Vector3(6, 0, 0)})
+	far_state.receive_authoritative_state(first + 2, {"position": Vector3(600, 0, 0)})
+	var centre := Node3D.new()
+	var centre_state := TickStateComponent.new()
+	centre_state.state_properties = ["position"]
+	centre.add_child(centre_state)
+	add_child(centre)
+	var from := nt.tick + 1
+	nt.step()
+	nt.step()
+	near_state.receive_authoritative_state(from, {"position": Vector3(7, 0, 0)})
+	far_state.receive_authoritative_state(from, {"position": Vector3(700, 0, 0)})
+	_check(near_state.is_near_any([Vector3.ZERO]) and not far_state.is_near_any([Vector3.ZERO]), "distance cutoff: near is in, far is out")
+	far_state.follow_server_radius = 0.0
+	_check(far_state.is_near_any([Vector3.ZERO]), "distance cutoff: a radius of 0 means no limit")
+	far_state.follow_server_radius = 10.0
+	var far_loads_before: Vector3 = far.position
+	nt.rollback(from)
+	_check(far.position == far_loads_before and far_state._live_values.is_empty(), "distance cutoff: a far entity doesn't join the rollback at all")
+
+	# By default a following entity stays where it's drawn during a rollback, the standard behaviour.
+	var stays_state := TickStateComponent.new()
+	stays_state.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER
+	var stays := MovingFollower.new()
+	stays.position = Vector3(1, 0, 0)
+	stays.add_child(stays_state)
+	add_child(stays)
+	stays_state.receive_authoritative_state(from, {"position": Vector3(3, 0, 0)})
+	stays_state._live_values = []
+	nt.rollback(from)
+	_check(not stays_state.wants_to_join_rollback([]) and stays_state._live_values.is_empty(), "follow server: by default it doesn't join a rollback")
+	_check(stays.position == Vector3(1, 0, 0), "follow server: and stays where it's drawn")
+	nt.unregister(stays_state)
+	stays.free()
+
+	# With nothing resimulated, a rollback has nothing to do.
+	for node: Node in [watcher, centre]:
+		nt.unregister(node.get_child(-1))
+	near_state.receive_authoritative_state(nt.tick, {"position": Vector3(8, 0, 0)})
+	var near_before: Vector3 = near.position
+	_check(not nt.rollback(nt.tick), "a rollback with only following entities does nothing and returns false")
+	_check(near.position == near_before, "...and doesn't move them")
+
+	for node: Node in [follower, door, sprite, motored, watcher, near, far, centre]:
 		nt.unregister(node)
 		node.free()
+
+	# Load hooks run with the replay flag on, once everything is loaded.
+	var first_hook := LoadHookEntity.new()
+	var second_hook := LoadHookEntity.new()
+	first_hook.other = second_hook
+	for hook in [first_hook, second_hook]:
+		var hook_state := TickStateComponent.new()
+		hook_state.state_properties = ["value"]
+		hook.add_child(hook_state)
+		add_child(hook)
+	second_hook.value = 42
+	var hook_tick := nt.tick + 1
+	nt.step()
+	second_hook.value = 1
+	nt.step()
+	nt.rollback(hook_tick)
+	_check(first_hook.flag_during_load, "load hooks run with is_resimulating on")
+	_check(first_hook.other_value_during_load == 42, "load hooks run after every entity is loaded, so they see the others put back")
+	first_hook.free()
+	second_hook.free()
 
 
 func _follow_server_state(entity: Node) -> TickStateComponent:
 	var state := TickStateComponent.new()
-	state.replay_mode = TickStateComponent.ReplayMode.FOLLOW_SERVER
+	state.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER
+	state.follows_during_rollback = true
 	entity.add_child(state)
 	add_child(entity)
 	return state
@@ -849,9 +934,10 @@ func _two_bodies_only_a_predicted() -> void:
 	var now := nt.tick
 	var expected_a := _saved_states(state_a, now - 40, now)
 	var expected_b := _saved_states(state_b, now - 40, now)
-	state_b.replay_mode = TickStateComponent.ReplayMode.FOLLOW_SERVER
+	state_b.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER
+	state_b.follows_during_rollback = true
 
-	state_b.receive_server_state(now - 40, expected_b[now - 40])
+	state_b.receive_authoritative_state(now - 40, expected_b[now - 40])
 	state_a.correct_state(now - 40, expected_a[now - 40])
 	var position_before := b.position
 	var velocity_before := b.velocity
@@ -863,6 +949,7 @@ func _two_bodies_only_a_predicted() -> void:
 	_check(b._curr_xform == model_before, "follow server, real body: its visible model isn't disturbed")
 	_check(PhysicsServer3D.body_get_mode(b.get_rid()) == PhysicsServer3D.BODY_MODE_KINEMATIC, "follow server, real body: its mode is restored")
 	b.position = Vector3(20, 0, 0)
+	state_b.follow_server_radius = 0.0 # moved far away on purpose; the cutoff has its own test
 	nt.rollback(now - 40)
 	var query := PhysicsPointQueryParameters3D.new()
 	query.position = Vector3(20, 0.9, 0)
@@ -897,20 +984,21 @@ func _measure_estimates(paths: Array, extra_ticks: Array, caps: Array, window: i
 			var oldest := now - window
 			var expected_a := _saved_states(state_a, oldest, now)
 			var expected_b := _saved_states(state_b, oldest - 6, now)
-			state_b.replay_mode = TickStateComponent.ReplayMode.FOLLOW_SERVER
+			state_b.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER
+			state_b.follows_during_rollback = true
 			for option_name: String in names:
 				if option_name == "drawn":
 					nt.unregister(state_b)
 				else:
 					nt.register(state_b)
-					state_b.estimate_cap_seconds = float(option_name.trim_prefix("cap "))
+					state_b.extrapolation_cap_seconds = float(option_name.trim_prefix("cap "))
 				for from in range(oldest, now):
 					if option_name == "drawn":
 						b.position = expected_b[from - 6]["position"]
 						state_b._sync_collision()
 					else:
-						state_b.clear_server_state()
-						state_b.receive_server_state(from, expected_b[from])
+						state_b.clear_authoritative_state()
+						state_b.receive_authoritative_state(from, expected_b[from])
 					state_a.correct_state(from, expected_a[from])
 					var started := Time.get_ticks_usec()
 					nt.rollback(from)

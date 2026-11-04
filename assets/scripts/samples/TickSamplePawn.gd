@@ -12,10 +12,12 @@
 ##   - timers in ticks, seconds only in the inspector
 ##   - latching a key press between rendered frames and ticks, so a press is never lost or doubled
 ##   - smoothing the visible model between ticks with the interpolation fraction
+##   - multiplayer, with a NetworkEntity child: the _network and _on_network methods near the end. Offline, none of them run # Claude 2026-11-04
 extends CharacterBody3D
 class_name TickSamplePawn
 
-enum Brain { PLAYER, WANDER, IDLE }
+# Claude 2026-11-04: NETWORK means the input comes from somewhere else: the network code writes it.
+enum Brain { PLAYER, WANDER, IDLE, NETWORK }
 
 @export var brain: Brain = Brain.WANDER
 @export var body_color: Color = Color(0.85, 0.3, 0.3)
@@ -61,6 +63,7 @@ var _model_offset := Transform3D.IDENTITY
 var _prev_xform := Transform3D.IDENTITY # body transform before and after the last tick, for smoothing
 var _curr_xform := Transform3D.IDENTITY
 var _gravity: float = 9.8
+var _correction_offset := Vector3.ZERO # Claude 2026-11-04: the visible model's leftover from a correction, fading to nothing
 
 
 func _enter_tree() -> void:
@@ -123,6 +126,8 @@ func _tick_input(_dt: float, tick: int) -> void:
 			move_dir = Vector3.ZERO
 			wants_sprint = false
 			wants_jump = false
+		Brain.NETWORK:
+			pass # already written by NetworkEntity, or held from last time
 
 
 # --- Phase 2: simulate ----------------------------------------------------------------------------
@@ -195,11 +200,55 @@ func _process(_delta: float) -> void:
 	if brain == Brain.PLAYER and Input.is_action_just_pressed(&"move_jump"):
 		_jump_latched = true
 
+	# Claude 2026-11-04: a correction moves the body at once. The model keeps the difference and fades it over about 100 ms,
+	# so the player sees a quick slide rather than a jump (netcode spec section 6.2).
+	_correction_offset = _correction_offset.lerp(Vector3.ZERO, 1.0 - exp(-_delta / 0.04))
 	if _model:
 		var f: float = 1.0
 		if smooth_visuals and _driver:
 			f = _driver.get_interpolation_fraction()
-		_model.global_transform = _prev_xform.interpolate_with(_curr_xform, f) * _model_offset
+		var placed := _prev_xform.interpolate_with(_curr_xform, f) * _model_offset
+		placed.origin += _correction_offset
+		_model.global_transform = placed
+
+
+# --- Multiplayer --------------------------------------------------------------------------------
+# Claude 2026-11-04: all optional hooks from NetworkEntity. A real pawn would have the same ones.
+
+## Before entering the tree: where does our input come from? Your own pawn reads the keys. Anything a client owns, on the
+## server, gets its input from the network. A pawn nobody owns keeps the brain it has, which is how AI runs on the server.
+func _on_network_role(entity: NetworkEntity) -> void:
+	if entity.is_local:
+		brain = Brain.PLAYER
+	elif entity.owner_peer != 0 or entity.role != NetworkEntity.Role.AUTHORITY:
+		brain = Brain.NETWORK
+
+
+## On the server: a client's input is never trusted. Wrong types are replaced, and direction is limited to full speed.
+func sanitize_network_input(values: Dictionary) -> Dictionary:
+	var clean := values.duplicate()
+	var wanted: Variant = values.get("move_dir", Vector3.ZERO)
+	clean["move_dir"] = wanted.limit_length(1.0) if wanted is Vector3 and wanted.is_finite() else Vector3.ZERO
+	clean["wants_sprint"] = values.get("wants_sprint", false) is bool and values.get("wants_sprint", false)
+	clean["wants_jump"] = values.get("wants_jump", false) is bool and values.get("wants_jump", false)
+	return clean
+
+
+## On the server: this tick's input never arrived, so the last one repeats. A held direction repeats fine, a press doesn't.
+func _network_input_missing() -> void:
+	wants_jump = false
+
+
+## On a client, for a pawn someone else controls: it was just moved between snapshots, so the model follows.
+func _on_network_interpolated() -> void:
+	_prev_xform = _curr_xform
+	_curr_xform = _visual_transform()
+
+
+## On a client: a correction moved our body by this much.
+func _on_network_corrected(jump: Variant) -> void:
+	if jump is Vector3:
+		_correction_offset += jump
 
 
 # --- Escape clause: no tick driver ----------------------------------------------------------------

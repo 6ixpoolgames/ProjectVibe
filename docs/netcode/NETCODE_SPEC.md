@@ -2,7 +2,7 @@
 
 # Netcode Spec (draft 1)
 
-**Status:** design draft, **not locked**. Written from the design discussion of 2026-11-04. **Built:** the offline tick driver (section 3, `assets/scripts/singletons/NetworkTime.gd`) and rollback state with offline replay (sections 3.5, 5 and 6, `assets/scripts/netcode/`). Tests: `singletons/tests/tick_driver_selftest`, `netcode/tests/tick_state_selftest`. Everything else is a proposal.
+**Status:** design draft, **not locked**. Written from the design discussion of 2026-11-04. **Built:** the tick driver, rollback state, and stage v0 multiplayer (section 16). Code: `assets/scripts/singletons/NetworkTime.gd` and `NetworkSession.gd`, and `assets/scripts/netcode/`. Tests: `singletons/tests/tick_driver_selftest`, `netcode/tests/tick_state_selftest`, `netcode/tests/net_selftest`. Playable: `net_sample.tscn`. Dynamic dilation, projectiles and packet stages v1 and v2 are still proposals.
 **Scope:** everything engine-wide about multiplayer: the tick driver every simulated entity runs on, how state is saved and rolled back, prediction, interpolation, lag compensation, and what goes over the wire. The pawn-specific parts (abilities, input buffer, intent) live in `docs/pawn/PAWN_ARCHITECTURE.md`, which follows the rules here.
 **Approach:** our own implementation, **modelled on the netfox addon's concepts** (a network clock, rollback driven by declared state and input properties, tick interpolation for visuals). We study netfox; we don't depend on it. Unreal and Overwatch are studied the same way: we copy principles, never code.
 **Numbers** are ballpark estimates, not measurements.
@@ -35,13 +35,16 @@ Single player is just "no network": the same code runs, the local machine is the
 
 | Term | Meaning |
 |---|---|
-| **RPC** | Remote Procedure Call: calling a function on another machine. In Godot, a function marked `@rpc` can be called on other peers with `my_func.rpc(args)`. We use only a few RPCs, carrying our own packed bytes |
+| **RPC** | Remote Procedure Call: calling a function on another machine. In Godot, a function marked `@rpc` can be called on other peers with `my_func.rpc(args)`. We don't use RPCs for gameplay: see section 11.1 |
 | **Peer** | One connected machine. The server is a peer too |
 | **Tick** | One fixed simulation step, numbered. At 60 ticks/second, tick 600 is 10 s in |
 | **Authority** | The machine whose version of something is the truth. The server, for gameplay |
 | **Prediction** | A client simulating ahead on its own inputs without waiting for the server |
 | **Reconciliation** | Fixing a wrong prediction: load the server's state, then replay the inputs since |
 | **Rollback** | The load-and-replay mechanism itself |
+| **Resimulation** | Running ticks again after a rollback. These docs also call it a replay |
+| **Remote entity** | Anything on your machine that another machine controls |
+| **Locally controlled** | The pawn this machine provides input for |
 | **Interpolation** | Drawing something between two known past states |
 | **Extrapolation** | Guessing ahead from the last known state, when updates stop arriving |
 | **Lag compensation** | The server rewinding hitboxes to what a shooter saw |
@@ -154,9 +157,9 @@ The server's timeline is the present. Each client runs **ahead** of it for its o
 - **v1 (dynamic, the goal):** continuous RTT and jitter measurement (ping/pong a few times a second, smoothed), server feedback, gentle tick-rate adjustment. v1 is v0 plus a feedback loop, so switching is cheap.
 - The **interpolation delay adapts the same way**: more jitter, draw a little further in the past.
 
-**Not built yet.** `NetworkTime.tick_factor` exists and the tick loop respects it, but nothing sets it, because clock sync and server feedback need packets (build step 7).
+**Built so far:** stage v0, with one change. The lead is set when the client starts ticking, and if it drifts more than 4 ticks away, after a hitch say, the client jumps back. Otherwise a client that fell behind would have all its inputs arrive late for good. `NetworkTime.tick_factor` exists and the tick loop respects it, but nothing sets it yet: dynamic dilation is the next step (section 16).
 
-**Frames with more than one tick** *(found and fixed 2026-11-04)*. A speed-up makes some frames run two ticks, and catching up after a hitch or a `tick_rate` above the physics rate do the same, while the server runs one per frame. A moved body only reaches the collision world at the next physics step, so the second tick collided with positions from before the first. Two pawns touching diverged from a one-tick-per-frame run by 0.8 cm with two ticks every 50 frames (about a 2% speed-up), and 20.9 cm with two ticks every 10 frames. The driver now calls each participant's `_sync_collision()` between ticks in such a frame, and both cases come out at 0.000 m. Frames with one tick pay nothing, and frames with no tick needed no fix. Only entities with a `TickStateComponent` get this. Tested with Jolt on flat ground.
+**Frames with more than one tick** *(found and fixed 2026-11-04)*. A speed-up makes some frames run two ticks, and catching up after a hitch or a `tick_rate` above the physics rate do the same, while the server runs one per frame. A moved body only reaches the collision world at the next physics step, so the second tick collided with positions from before the first. Two pawns touching diverged from a one-tick-per-frame run by 0.8 cm with two ticks every 50 frames (about a 2% speed-up), and 20.9 cm with two ticks every 10 frames. The driver now calls each participant's `_sync_collision()` between ticks in such a frame, and both cases come out at 0.000 m. Frames with one tick pay nothing, and frames with no tick needed no fix. Only entities with a `TickStateComponent` get this. Tested on Godot's physics and on Jolt, on flat ground.
 
 ### 4.3 How late things are, in tick numbers
 
@@ -208,7 +211,7 @@ Every property in the schema has an **encoding type**: `vector3_mm` (the default
 - **`safe_margin` must sit between two rounding steps; the sample uses 0.0014.** A body rests one margin above the floor, and Godot's default is exactly 1 mm. Rounding parked it precisely on the edge of "touching", so float noise flipped the contact and the engine snapped it up to 2.4 cm into the floor while walking on flat ground.
 - **Don't turn the body by writing `rotation` every tick.** Each write goes through Godot's Euler and scale conversion and adds a float error, so the body's scale drifted (about 0.99995) and differently in a replay. That changed the collision shape and gave errors up to 19.5 cm lasting 42 ticks. Facing is a plain `yaw` property in the state list; the body stays unrotated and only the model turns.
 
-**Bodies replaying together must see each other** *(found 2026-11-04)*. With Jolt, a moved kinematic body reaches the collision world only at the next physics step; `force_update_transform()` doesn't help. A replay happens within one frame, so bodies collided with where the others were at the *end* of the replay, giving up to 2 m of error. `TickStateComponent._sync_collision()` makes the body static for that one call, because a static body's position applies at once, then restores its mode. Two pawns pushing against each other then replay with 0 mm of error. About 1.3 microseconds per call in a small test scene, and a replay of just one body skips it. Tested with Jolt only.
+**Bodies replaying together must see each other** *(found 2026-11-04)*. In Godot's physics (the project's current engine), a moved kinematic body reaches the collision world only at the next physics step; `force_update_transform()` doesn't help. A replay happens within one frame, so bodies collided with where the others were at the *end* of the replay, giving up to 2 m of error. `TickStateComponent._sync_collision()` makes the body static for that one call, because a static body's position applies at once, then restores its mode. Two pawns pushing against each other then replay with 0 mm of error. About 1.3 microseconds per call in a small test scene, and a replay of just one body skips it. The tests pass on Godot's physics and on Jolt.
 
 **A body replaying against one that isn't:** measured in section 6.5, with the open part in section 17, question 8.
 
@@ -260,7 +263,9 @@ Predicted code must give the same result from the same state and input. That mea
 
 **The mismatch can't be removed.** A replay needs the other pawn's positions on ticks your machine hasn't received (section 4.3), and some of them don't exist yet, because that player hasn't pressed those inputs. So the goal is to make the error small, let the server's correction settle it, and fade what's left on the visible model (section 6.2).
 
-**What the client does:** during a replay, an entity that isn't predicted takes its position from server data as far as that goes, and from an estimate past it (`FOLLOW_SERVER` mode). This is smoothing on the client, and doesn't affect what the server decides:
+**What the client does (standard, the default):** during a replay, an entity that isn't predicted stays where it's drawn. The server's correction settles what's left.
+
+**Optional, off by default:** `follows_during_rollback` makes it take its position from server data as far as that goes, and extrapolate past it. It doesn't affect what the server decides. It was built and tested, then turned off because the numbers below don't justify it:
 
 | Replayed tick | Other entity's position | Source |
 |---|---|---|
@@ -271,7 +276,7 @@ Your correction and the other pawn's data normally arrive in the same packet, so
 
 **Velocity-only and full prediction.** Both guess the other pawn's movement past the newest server data, but differently:
 
-| | Velocity-only (`FOLLOW_SERVER`, default) | Full prediction (`is_predicted`) |
+| | Velocity-only (`follows_during_rollback`, off by default) | Full prediction (`is_predicted`, off by default) |
 |---|---|---|
 | What runs each replayed tick | `position + velocity × time` | The entity's real simulation, with its last known input held |
 | Steering, acceleration, gravity | No | Yes |
@@ -285,7 +290,7 @@ Your correction and the other pawn's data normally arrive in the same packet, so
 |---|---|---|---|---|
 | Held where it's drawn | 10.3 (60.4) | 14.9 (59.6) | 26.3 (76.8) | 83.5 (229.9) |
 | Held at newest server data (cap 0) | 2.7 (28.4) | 11.3 (61.1) | 17.1 (60.8) | 61.2 (191.9) |
-| **Velocity-only, cap 0.2 s (default)** | 1.1 (13.5) | 4.2 (22.9) | 10.3 (38.9) | 60.9 (216.0) |
+| Velocity-only, cap 0.2 s | 1.1 (13.5) | 4.2 (22.9) | 10.3 (38.9) | 60.9 (216.0) |
 | Fully predicted, held input | 0.3 (13.5) | 2.2 (13.5) | 6.3 (40.3) | 66.9 (200.9) |
 
 **The cap.** How far the estimate runs before the pawn holds still:
@@ -299,16 +304,53 @@ Your correction and the other pawn's data normally arrive in the same packet, so
 | None | 1.1 (13.5) | 4.2 (22.9) | 11.1 (58.5) | 82.1 (240.8) |
 
 **Reading it:**
-- Velocity-only gets most of the benefit of full prediction at normal ping: at 200 ms, 4.2 cm against 14.9 cm for holding the pawn where it's drawn.
-- 0.2 s is the default because it's the best up to 20 ticks and the highest cap tested that isn't worse than just holding at any length. 0.1 s does better only on replays over 20 ticks, a round trip above about 330 ms, and worse on normal ones.
+- Offline, velocity-only looked much better than holding the pawn where it's drawn: at 200 ms, 4.2 cm against 14.9 cm. Real connections didn't bear that out (below).
+- 0.2 s is that setting's default because it's the best up to 20 ticks and the highest cap tested that isn't worse than just holding at any length. 0.1 s does better only on replays over 20 ticks, a round trip above about 330 ms, and worse on normal ones.
 - Full prediction is still the most accurate up to 20 ticks, which is why it stays available (section 7).
 - **CPU, small scene, GDScript:** velocity-only added about 11–18 µs per pawn per replayed tick, and full prediction about 37 µs. These came from separate runs, and the order options ran in affected them, so treat them as rough.
 
 **Replaying the client's own recording doesn't work.** That was the first version tried: the other pawn followed what this client had recorded for it. Since that record is late, it's even further from the truth than holding still. At 100 ms ping (1–6 tick replay, 12 ticks late) it averaged 4.5 cm against 4.2 cm held still, and at 200 ms (7–12 ticks, 18 late) 15.1 cm against 13.9 cm. Shifting that record forward by the lag can't help, because the drawn position is always older than the start of the replay.
 
-**Limits of these measurements:** a stand-in for a network, with exact inputs, constant delay, no loss or jitter, and the ideal lead (section 4.3). Only replays are covered, not the original live prediction, which still collides with the pawn where it's drawn. Random direction changes every 10 ticks are still easier to guess than a real player may be: with long stretches of steady input, held input scored almost 0. Flat ground, Jolt, two pawns in GDScript. Re-measure with real packets at build step 10.
+**Limits of these measurements:** a stand-in for a network, with exact inputs, constant delay, no loss or jitter, and the ideal lead (section 4.3). Only replays are covered, not the original live prediction, which still collides with the pawn where it's drawn. Random direction changes every 10 ticks are still easier to guess than a real player may be: with long stretches of steady input, held input scored almost 0. Flat ground, two pawns in GDScript.
 
-**Built 2026-11-04:** `TickStateComponent.replay_mode = FOLLOW_SERVER`, with `receive_server_state(tick, values)` for the snapshot code to call, `clear_server_state()` for teleports and respawns, and the settings `estimate_cap_seconds` (0.2) and `estimate_vertical` (off). During a replay the entity stands on server data, estimates past it, and gets back exactly what it had afterwards, without running its own simulation or `_on_state_loaded`. It keeps no history of its own. The position is the parent's `position` or `global_position`, and the velocity is any listed property called `velocity`, including on a part such as `Motor:velocity`. If it can only hold still and that looks like a mistake, it warns once. Nothing calls `receive_server_state` outside the tests until snapshots exist, and the setting isn't connected to `is_predicted` yet (build step 6).
+**Built 2026-11-04:** `TickStateComponent.rollback_mode = FOLLOW_SERVER`, with `receive_authoritative_state(tick, values)` for the snapshot code to call, `clear_authoritative_state()` for teleports and respawns, and the settings `extrapolation_cap_seconds` (0.2) and `extrapolate_vertical` (off). During a replay the entity stands on server data, estimates past it, and gets back exactly what it had afterwards, without running its own simulation or `_on_state_loaded`. It keeps no history of its own. The position is the parent's `position` or `global_position`, and the velocity is any listed property called `velocity`, including on a part such as `Motor:velocity`. If it can only hold still and that looks like a mistake, it warns once. `NetworkSession` calls `receive_authoritative_state` from snapshots, and `NetworkEntity` sets the mode from `is_predicted` when an entity spawns. During a rollback, a following entity only joins if it's within `follow_server_radius` of something being resimulated (10 m by default, a guess to tune), and a rollback with nothing to resimulate does nothing, so a large swarm stays affordable.
+
+**Measured over real connections, 2026-11-04.** A server and two clients as separate processes, 5 ms jitter and 1% loss, about 20 s per row, one run each. The pawns seek each other and change direction at random, touching about 4–9% of the time, which is far more contact than normal play. "Own" is your pawn against the server on the same tick, as first predicted. "Jump" is how far the body moved per correction, which the model hides over about 100 ms. Columns are in cm, worst case in brackets.
+
+| Round trip, what other pawns do during a rollback | Engine | Own | Corrections per s | Jump | Total jump per s |
+|---|---|---|---|---|---|
+| 0 ms, follow server | Godot | 1.2 (55) | 1.4 | 13.5 (64) | 19 |
+| 0 ms, follow server | Jolt | 1.6 (61) | 1.6 | 16.4 (68) | 26 |
+| 50 ms, follow server | Godot | 1.9 (131) | 0.7 | 28.9 (131) | 20 |
+| 50 ms, follow server | Jolt | 3.8 (88) | 1.5 | 27.7 (88) | 42 |
+| 100 ms, follow server | Godot | 5.6 (147) | 1.4 | 34.2 (147) | 48 |
+| 100 ms, follow server | Jolt | 5.1 (138) | 1.0 | 43.3 (138) | 43 |
+| 100 ms, held where drawn | Godot | 5.6 (159) | 2.3 | 21.0 (157) | 48 |
+| 100 ms, held where drawn | Jolt | 8.1 (173) | 2.9 | 24.2 (161) | 70 |
+| 100 ms, predicted | Godot | 0.3 (20) | 27.8 | 15.7 (110) | see below |
+| 100 ms, predicted | Jolt | 0.4 (28) | 28.1 | 16.9 (130) | see below |
+| 200 ms, follow server | Godot | 7.0 (237) | 1.1 | 41.3 (237) | 45 |
+| 200 ms, follow server | Jolt | 7.0 (170) | 1.0 | 42.8 (170) | 43 |
+| 200 ms, held where drawn | Godot | 6.6 (194) | 1.4 | 28.7 (190) | 40 |
+| 200 ms, held where drawn | Jolt | 6.6 (178) | 1.4 | 31.8 (191) | 45 |
+| 200 ms, predicted | Godot | 2.6 (101) | 27.5 | 35.2 (262) | see below |
+| 200 ms, predicted | Jolt | 3.8 (158) | 28.6 | 32.6 (254) | see below |
+
+**Reading it:**
+- **With nobody nearby, prediction is exact:** 0.00 cm over 474 ticks, at 80 ms with jitter and 5% loss (`net_selftest`). All the error above comes from contact with the other pawn.
+- **Follow server against held still:** in this first set, corrections are rarer but larger, and total movement and first-prediction error come out about the same. The offline test (4.2 cm against 14.9 cm) suggested a clear gain, and that doesn't show up here. These rows ran with following on by default, and 5 input repeats.
+- **Repeated comparison, Godot's physics, three runs each, averaged:**
+
+| Round trip, other pawns during a rollback | Own error | Worst | Corrections per s | Jump per s | Touching |
+|---|---|---|---|---|---|
+| 100 ms, stay where drawn | 5.8 cm | 148 cm | 2.15 | 50 cm | 6% |
+| 100 ms, follow server | 5.5 cm | 142 cm | 1.77 | 50 cm | 9% |
+| 200 ms, stay where drawn | 5.4 cm | 160 cm | 1.04 | 34 cm | 4% |
+| 200 ms, follow server | 8.2 cm | 167 cm | 1.03 | 51 cm | 5% |
+
+  A tie at 100 ms, and worse at 200 ms, though runs vary a lot and the follow rows had more contact. **So it's off by default**, which is also the standard behaviour and the simpler path.
+- **Predicting other pawns** gets by far the lowest first-prediction error at 100 ms. Its correction count is high because nearly every snapshot differs slightly, by about 0.7 cm on average, and "total" isn't comparable because the count includes the other pawn's corrections. It costs more download (4.1 against 2.4 KB/s) and a resimulation on most snapshots, and puts enemies at their present position, so it stays off by default.
+- **Remote pawns are drawn accurately:** within 0.3 cm of where they really were, about a round trip plus 10 ticks behind your own tick. No inputs were missed in any row.
 
 ---
 
@@ -326,7 +368,7 @@ Prediction is a choice, not a given. MOBAs and RTS games often **don't** predict
 | `is_replicated` | `is_predicted` | Behaviour | Example |
 |---|---|---|---|
 | No | n/a | Local only | Particles, ragdoll debris |
-| Yes | No (**default**) | Follows the server, drawn in the past, estimated during replays (section 6.5) | Other players in a shooter |
+| Yes | No (**default**) | Follows the server, drawn in the past, stays where it's drawn during replays (section 6.5) | Other players in a shooter |
 | Yes | Yes | Simulated ahead with its last known input, and re-simulated on correction | Rocket League cars and ball |
 
 - Your own pawn is predicted according to the ability rules above, whatever these flags say about other entities.
@@ -353,7 +395,8 @@ Detailed in the pawn spec; the netcode rules are:
 - The server keeps a hitbox history (section 6.1).
 - An attack command says "fired at tick T, seeing others at interpolation tick T − d".
 - The server moves the other hitboxes to T − d, runs the ray or melee shape, restores them.
-- **The rewind is capped** (default 200 ms). High-ping players can't hit people long since behind cover; past the cap, they have to lead their shots. Per-game setting.
+- **The rewind is capped** (default 350 ms, changed from 200 on 2026-11-04). A shooter sees others about a round trip, plus margin, plus interpolation behind its own tick, which is about 217 ms at 100 ms ping and 350 ms at 200 ms ping. A 200 ms cap would have cut off normal players. High-ping players can't hit people long since behind cover; past the cap, they have to lead their shots. Per-game setting.
+- **Built 2026-11-04** (`LagCompensation`). Measured with a target strafing at 5 m/s and the shooter aiming where it's drawn: at 100 ms ping, 22 of 23 shots hit, against 0 of 23 with it off; at 400 ms ping, past the cap, 0 of 22. Same on both physics engines.
 - Rewinding is done **once per tick for all of that tick's attacks**, not per bullet.
 
 ### 9.2 Projectiles
@@ -377,7 +420,8 @@ Rollback (section 6) and hit detection are separate: rollback fixes **your own p
 
 - **Interpolation:** each remote entity keeps ~4 snapshots and is drawn at interpolation time, blended between the two snapshots around it.
 - **Extrapolation:** if snapshots stop, continue along the last velocity for up to ~250 ms, then hold.
-- **During your replay:** entities that aren't predicted use the newest server position, carried on its velocity for up to 0.2 s (section 6.5). That cap is separate from the ~250 ms above, and neither changes where they're drawn during a replay.
+- **During your replay:** entities that aren't predicted stay where they're drawn. The optional `follows_during_rollback` is in section 6.5.
+- **Built 2026-11-04** with one setting for both: `extrapolation_cap_seconds`, 0.2 s, rather than a separate ~250 ms.
 - **AI pawns are remote pawns to clients.** Sensing, memory, states and behaviours run only on the server.
 
 UI reads from whichever timeline its value belongs to:
@@ -395,7 +439,7 @@ UI reads from whichever timeline its value belongs to:
 ### 11.1 Transport
 
 - Godot's ENet peer.
-- Our data is packed into `PackedByteArray` with `StreamPeerBuffer` and sent through a few RPCs that carry raw bytes. No per-property Variant messages.
+- Our data is packed into `PackedByteArray` with `StreamPeerBuffer` and sent with `SceneMultiplayer.send_bytes`, which skips RPC setup. No per-property Variant messages. Every value starts with a one-byte tag, so a broken packet can be spotted and dropped (`NetPackets`).
 - **Unreliable** channel for inputs and snapshots (disposable: the next one replaces them). **Reliable** channel for events that must arrive.
 
 ### 11.2 Handshake
@@ -412,11 +456,11 @@ Damage, deaths and one entity affecting another aren't handshakes. A client neve
 | Packet | Direction, rate, channel | Contents |
 |---|---|---|
 | **Input** | client → server, every tick, unreliable | last snapshot received (ack); first tick number; the last ~4–6 input commands (redundancy against loss) |
-| **Snapshot** | server → client, 30 Hz default, unreliable | server tick; your last processed input tick; input timing feedback (early/late, missed); your own pawn's full state; per visible entity: id + sync fields, including velocity for moving entities (section 6.5) |
+| **Snapshot** | server → client, 30 Hz default, unreliable | server tick; per entity: id, state, sync fields, and input if it's predicted by others. **Planned, not in v0:** your last processed input tick and input timing feedback (early/late, missed), which dynamic time dilation needs |
 | **Event** | reliable, as needed | spawn (id, type, initial state), despawn, death, phase events that must arrive |
 | **Time sync** | a few per second | ping/pong with timestamps |
 
-An input command is ~15 bytes (quantised move direction 2, move scale 1, aim 4, held mask 4–8, presses 2), so the input stream is ~5–6 KB/s even at 60 Hz with redundancy.
+An input command is ~15 bytes (quantised move direction 2, move scale 1, aim 4, held mask 4–8, presses 2), so the input stream is ~5–6 KB/s even at 60 Hz with redundancy. **Measured with the sample pawn:** 29 bytes per command, carried 3 times per packet, so 5.9 KB/s upload, with no missed inputs at 1% loss (reduced from 5 times and 9.3 KB/s). Two pawns take 2.4 KB/s download at 30 snapshots per second. A pawn's state is 25 bytes, as estimated.
 
 ### 11.4 Stages
 
@@ -452,9 +496,12 @@ The server never trusts a client:
 
 ## 14. Godot notes and C++
 
-- Godot's high-level multiplayer (ENet peer, RPCs) handles transport. `MultiplayerSpawner` / `MultiplayerSynchronizer` are not used for gameplay entities: relevancy needs per-client spawning, and they have no tick history.
+- Godot's high-level multiplayer (ENet peer, `send_bytes`) handles transport. `MultiplayerSpawner` / `MultiplayerSynchronizer` are not used for gameplay entities: relevancy needs per-client spawning, and they have no tick history.
 - `move_and_slide` can run several times in one frame for replay. Other bodies stay where they are during the replay, the standard accepted inaccuracy.
 - Godot physics isn't deterministic across machines. Fine here, because the server corrects clients; it only rules out lockstep.
+- **Physics engine** *(found 2026-11-04)*: the project's setting is `DEFAULT`, which is Godot's own physics. `project.godot` holds Jolt tuning values, but they do nothing unless Jolt is selected. Earlier notes saying "tested with Jolt" were wrong, because they were written from those values. All tests now run on both, using a temporary `override.cfg` for Jolt.
+- **Tests need separate processes.** `NetworkTime` is a single autoload, so one process can't hold both a server clock and a client clock.
+- **New scripts need registering.** A script with a new `class_name` needs an editor open or `--headless --import` once before headless runs can see it.
 - **RigidBody props** are server-authoritative and interpolated at tier 0 (Godot can't step them on demand for replay).
 - **C++:** not needed to start. The server never replays; a client normally replays only its own pawn for a few ticks; `move_and_slide` is already C++. Candidates once profiling says so: packet encoding (quantise, bit-pack, delta), history ring buffers, hitbox rewind. They'd go into a GDExtension like navcore, behind the same interfaces.
 
@@ -478,18 +525,27 @@ The server never trusts a client:
 
 ## 16. Build order
 
-The foundation (1–3) works offline and comes before the ability system, so abilities are built on it from day one.
+Revised 2026-11-04 while building: clock sync moved before input packets, because a client can't stamp its inputs with the right tick until it knows the server's. The fake bad network moved to the start, so every step gets tested under bad conditions.
 
-1. **Tick driver, offline:** loop, phases, registry, `interpolation_fraction`. Headless test: order of phases, max ticks per frame, fixed delta. **Built 2026-11-04.** The pawn pipeline moves onto it as the new ability-based pawn parts are built (the old movement code is left as it is, per CLAUDE.md); that also removes today's ~2-frame input lag.
-2. **Networked state contract:** property lists, encodings, quantise-each-tick, save/load overrides, state history. **Built 2026-11-04.**
-3. **Offline rollback test:** a headless test that forces `rollback(n)` and checks replay reproduces the same states, and that cosmetic effects don't refire. This proves re-runnable code without a network. **Built 2026-11-04**, including a real `CharacterBody3D` walking, jumping and pushing into a wall on flat ground, on three paths, two pawns pushing against each other, and frames that run two ticks or none. Follow-server mode added and measured (section 6.5).
-4. Transport + handshake + entity ids + spawn events.
-5. Input packets, server input queues, snapshots v0, reconciliation.
-6. Interpolation of remote entities; extrapolation; `is_replicated` and `is_predicted`; snapshots calling `receive_server_state` (section 6.5).
-7. Clock sync and fixed lead (dilation v0), then dynamic dilation (v1).
-8. Lag compensation for hitscan and melee; server projectiles.
-9. Delta compression (packets v1), then relevancy and priority (v2).
-10. A two-client test scene with simulated latency, loss and jitter. Re-measures section 6.5 with real packets.
+**Foundation, built 2026-11-04:**
+1. Tick driver, offline.
+2. Networked state: property lists, encodings, rounding each tick, history.
+3. Offline rollback test, including real bodies, walls, two pawns pushing against each other, and frames that run two ticks or none.
+
+**Stage v0, built 2026-11-04.** Tests: `netcode/tests/net_selftest`, which runs real connections between separate Godot processes. Measurements: `netcode/tests/net_measure`, section 6.5.
+4. Connection, handshake with hash check, entity ids, spawning (`NetworkSession`, `NetworkEntity`).
+5. Fake network: latency, jitter and loss (`NetFakeConditions`).
+6. Clock sync with fixed lead (`NetClock`).
+7. Input packets and server input queue.
+8. Snapshots and reconciliation.
+9. Interpolation of remote entities, extrapolation, `is_replicated`, `is_predicted`.
+10. Lag compensation for hitscan and melee (`LagCompensation`).
+11. Measured at set pings.
+
+**Next:**
+12. Dynamic time dilation (stage v1 of section 4.2).
+13. Server projectiles (section 9.2).
+14. Delta compression (packets v1), then relevancy and priority (v2).
 
 ---
 
@@ -502,22 +558,23 @@ The foundation (1–3) works offline and comes before the ability system, so abi
 5. **Rigid body props:** stay server-only, or predict some later?
 6. **Relevancy method** for v2: distance, line of sight, or both.
 7. **Dedicated server builds:** headless export without rendering, cameras or UI.
-8. **Your pawn bumping a pawn that isn't replayed.** Built: newest server position, carried on its velocity for up to 0.2 s, during replays only (section 6.5). Still open: whether the original live prediction should also collide with something other than the drawn pawn (at 200 ms and 5 m/s that's about 1.5 m from what you see), and how it holds up with real packets (build step 10).
+8. **Your pawn bumping a pawn that isn't replayed.** It stays where it's drawn, the standard behaviour, and the server corrects the difference (section 6.5). Still open: whether a real network or real players change that, and how to keep the large one-off corrections down (To do, below).
 
-### To do, after discussing the deeper architecture
+### To do
 
-Found in the 2026-11-04 review, or raised while discussing it. Deliberately not fixed yet.
-
-| # | Issue | Owner's notes |
+| # | Issue | Notes |
 |---|---|---|
-| 1 | **Distance cutoff for following entities.** Every `FOLLOW_SERVER` entity joins every replay, roughly 1.3–2.2 s per correction with 10,000 pawns. Only ones near a replaying body need placing. Client only, since the server never predicts. | Wanted. A radius setting; about 10 m is a guess to measure |
-| 2 | **Floor state is refreshed before other bodies are put back**, so a pawn standing on something that moves can start its replay with the wrong floor state. | Pawns shouldn't stack; simulate their collision instead. This would still matter for moving platforms. Also consider how the lead could smooth predictions |
-| 3 | **`FOLLOW_SERVER` doesn't stop live simulation.** A remote pawn registered with the driver keeps ticking on old inputs while snapshots also place it. | Not discussed yet. Belongs with remote entities (build step 6) |
-| 4 | **Rigid bodies and the collision sync.** `_sync_collision` briefly makes any body static, which may disturb a rigid body's speed or sleep state. It's a side effect of the workaround for Jolt deferring moved kinematic bodies. Untested. | Discuss with the physics issues |
-| 5 | **2D bodies.** `_sync_collision` does nothing for 2D physics and doesn't warn. Whether 2D defers moved bodies the same way hasn't been checked. | A 2D implementation is wanted |
-| 6 | **Pointless replays.** If only `FOLLOW_SERVER` entities load, as when your pawn is dead, the driver still walks every tick, returns true and emits `after_rollback`. | Ideas: prediction for movement, or flagging some states as replay off as a last resort |
-| 7 | **`is_resimulating()` is false during load and finish**, so a rollback from a load hook could nest, and guarded effects there could fire. The fix is in a comment at `NetworkTime.rollback`. | Implementation only; comment left |
-| 8 | **Vocabulary.** Align names and docs with standard terms (section 2), such as "authoritative" for what the server says and "extrapolate" for the velocity estimate. Renames `receive_server_state`, `estimate_cap_seconds`, `estimate_vertical`. | Owner is open to adopting standard terms |
+| 1 | **Client can claim the full rewind.** The server accepts any `view_ticks_behind` up to the cap, whatever that client's real latency. A cheat on low ping could always shoot 350 ms into the past | Needs server-side measurement of each client's latency, which fits with dynamic dilation |
+| 2 | **Large one-off corrections.** Worst cases of 1.4–2.4 m at 100–200 ms during pawn contact. Probably a pawn blocked on the server that wasn't blocked on the client, whose view of the other pawn is 300 ms old. Cause not confirmed. The visible model fades a jump over about 100 ms, which may look bad at that size | Investigate; options include softer pawn collisions |
+| 3 | **Pawn stacking.** Owner: pawns shouldn't stack, and should collide instead. Nothing stops one standing on another yet | Belongs with the motor |
+| 4 | **Spending the lead.** The standard way is an optional input delay (section 7): shorter replays, less responsive feel | Not built; a per-game setting, off by default |
+| 5 | **Rigid bodies and the collision sync.** `_sync_collision` briefly makes any body static, which may disturb a rigid body's speed or sleep state. Untested | Discuss with the physics issues |
+| 6 | **2D.** `_sync_collision` does nothing for 2D physics and doesn't warn. Whether 2D physics defers moved bodies the same way hasn't been checked. Lag compensation is 3D only | A 2D implementation is wanted |
+| 7 | **Physics engine.** The project's setting is `DEFAULT`, Godot's own physics, even though `project.godot` holds Jolt tuning values. All tests pass on both | Owner's call which to ship on |
+| 8 | **Upload size.** Inputs take 5.9 KB/s, about what section 11.3 estimated, though each command is about twice the estimated size | Could shrink with packed fields |
+| 9 | **Vocabulary in docs.** Code now uses standard names. These docs still often say "replay" for resimulation | Tidy as sections get rewritten |
+| 10 | **Lag compensation once per attack.** Section 9.1 wants one rewind per tick for all attacks. Tier 0 rewinds per attack | Costs more only if many fire on one tick |
+| 11 | **Not tested:** real internet connections, more than a few pawns, slopes, moving platforms, or playing by hand (`net_sample.tscn` has only had a headless start) | |
 
 ---
 
@@ -541,7 +598,12 @@ Found in the 2026-11-04 review, or raised while discussing it. Deliberately not 
 | Physics bodies don't rotate; facing is a plain `yaw` state value and only the model turns | 2026-11-04 |
 | Bodies replaying together sync to the collision world each tick by briefly going static; a single body skips it | 2026-11-04 |
 | Lag compensation rewinds for attacks only. A movement input that arrives after the server has passed its tick is dropped, and the client is corrected | 2026-11-04 |
-| On the client, entities that aren't predicted follow server data during a replay, then estimate from velocity for up to 0.2 s. The client's own recording isn't used | 2026-11-04 |
+| Entities that aren't predicted stay where they're drawn during a replay. Following server data with velocity is optional and off, because it measured no better over real connections | 2026-11-04 |
+| When on, following entities only join a rollback within a radius of something being resimulated. A rollback with nothing to resimulate does nothing | 2026-11-04 |
+| Each input packet carries 3 inputs, which saved about 40% of upload with no missed inputs at 1% loss | 2026-11-04 |
+| Lag compensation's rewind cap is 350 ms, because 200 ms would cut off normal players | 2026-11-04 |
+| Stage v0 keeps a jump-back resync if a client drifts more than 4 ticks | 2026-11-04 |
+| Multiplayer tests use real connections between separate processes, plus a fake bad network in our own code | 2026-11-04 |
 | Separate `is_replicated` and `is_predicted` settings; `is_predicted` is off by default, with a project default and per-entity override | 2026-11-04 |
 | A frame running several ticks syncs bodies to the collision world between them | 2026-11-04 |
 | Unreal, Overwatch and netfox are studied for principles; no code is copied | 2026-11-04 |
