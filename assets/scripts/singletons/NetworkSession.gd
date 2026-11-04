@@ -122,6 +122,12 @@ var world_root: Node = null
 var content_hash_salt: int = 0
 ## Which address the server listens on. "*" is all of them.
 var bind_address: String = "*"
+## Claude 2026-11-05: server: the most one client may send, so a broken or hostile client can't bury the server in work. Past these
+## its packets are dropped and counted in stats. 0 means no limit. A normal client sends about 60 packets and 6 KB a second for
+## each pawn it controls, plus a few pings, so raise these for a game that gives one client over about 30 pawns.
+var max_packets_per_second: int = 2000
+var max_bytes_per_second: int = 256 * 1024
+var max_packet_bytes: int = 64 * 1024
 ## Pretend the network is bad, for testing. See NetFakeConditions.gd. One for what this machine sends, one for what it receives.
 var fake := NetFakeConditions.new()
 var fake_in := NetFakeConditions.new()
@@ -130,7 +136,7 @@ var allow_debug_commands: bool = false
 ## Bytes and packets sent and received, for diagnostics.
 var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_received": 0, "snapshots_received": 0,
 		"corrections": 0, "correction_total": 0.0, "correction_worst": 0.0, "jump_total": 0.0, "jump_worst": 0.0, "resyncs": 0,
-		"bad_packets": 0, "rejected_inputs": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
+		"bad_packets": 0, "packets_over_limit": 0, "rejected_inputs": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
 		"margin_lowest": NO_MARGIN, "speed_lowest": 1.0, "speed_highest": 1.0}
 ## Client: which tick of the server's remote entities are being drawn at. -1 before the first snapshot.
 var render_tick: float = -1.0
@@ -141,6 +147,9 @@ const PING_INTERVAL_STARTING := 0.05
 const PING_INTERVAL := 0.25
 ## Most packets kept from one peer between ticks, so one client can't crowd out others. A client sends one per pawn per tick, and
 ## they pile up while the server is frozen, so this has room for 4 pawns through a freeze of half a second.
+## Claude 2026-11-05: the project setting that names a build. See content_hash.
+const BUILD_ID_SETTING := "project_base/network/build_id"
+const HASHED_FILE_TYPES: PackedStringArray = ["gd", "gdc", "tscn", "scn", "tres", "res"]
 const MAX_INBOX_PER_PEER := 128
 ## Most inputs one packet may carry. Fixed, because input_redundancy is a setting each machine has its own copy of.
 const MAX_INPUTS_PER_PACKET := 16
@@ -230,6 +239,7 @@ func host(port: int, max_clients: int = 32) -> Error:
 	if _driver == null:
 		return ERR_UNAVAILABLE # no tick driver, so nothing could run
 	leave()
+	content_hash() # Claude 2026-11-05: it reads files, so now rather than as a hitch when the first client arrives
 	var peer := ENetMultiplayerPeer.new()
 	peer.set_bind_ip(bind_address)
 	var error := peer.create_server(port, max_clients)
@@ -247,6 +257,7 @@ func join(address: String, port: int) -> Error:
 	if _driver == null:
 		return ERR_UNAVAILABLE
 	leave()
+	content_hash() # Claude 2026-11-05: it reads files, so now rather than during the handshake
 	var peer := ENetMultiplayerPeer.new()
 	var error := peer.create_client(address, port)
 	if error != OK:
@@ -389,7 +400,13 @@ func limit_view_ticks_behind(peer: int, claimed: float, tick: int) -> float:
 	return minf(claimed, age + interpolation_limit + 1.0)
 
 
-## A number that's the same on two machines only if they run the same content.
+## A number that's the same on two machines only if they run the same content. The handshake refuses a client whose number differs.
+## Claude 2026-11-05: it used to cover only the entity lists, so two different builds could connect and then disagree on every tick.
+## It now also covers the engine build, every physics setting, the tick rate, and the game's own files.
+##
+## Set the project setting BUILD_ID_SETTING to give a build a name instead of reading its files. That's the normal way for
+## a release: stamp the build number when exporting, and only builds with the same number play together. Also use it if
+## the same project on different operating systems refuses itself, since line endings can differ.
 func content_hash() -> int:
 	if _hash_is_cached and _cached_hash_salt == content_hash_salt:
 		return _cached_hash
@@ -397,6 +414,20 @@ func content_hash() -> int:
 	parts.append(str(NetPackets.PROTOCOL_VERSION))
 	parts.append(str(TagRegistry.content_hash()))
 	parts.append(str(content_hash_salt))
+	parts.append(String(Engine.get_version_info()["hash"]))
+	parts.append(str(_driver.get_tick_rate() if _driver else 0))
+	var setting_names: Array[String] = []
+	for property: Dictionary in ProjectSettings.get_property_list():
+		if String(property["name"]).begins_with("physics/"):
+			setting_names.append(property["name"])
+	setting_names.sort()
+	for setting_name in setting_names:
+		parts.append("%s=%s" % [setting_name, ProjectSettings.get_setting(setting_name)])
+	var build_id := str(ProjectSettings.get_setting(BUILD_ID_SETTING, ""))
+	if build_id != "":
+		parts.append(build_id)
+	else:
+		_add_file_hashes("res://", parts)
 	for type_name in _type_order:
 		parts.append(type_name)
 		var instance: Node = _types[type_name].instantiate()
@@ -408,6 +439,23 @@ func content_hash() -> int:
 	_cached_hash_salt = content_hash_salt
 	_hash_is_cached = true
 	return _cached_hash
+
+
+## Claude 2026-11-05: the name and contents of every script, scene and resource in this folder and below. Folders starting with
+## a dot are skipped: that's Godot's cache, and git's. An exported game has the same kinds of files, in their packed forms.
+func _add_file_hashes(folder: String, parts: PackedStringArray) -> void:
+	var files := DirAccess.get_files_at(folder)
+	files.sort()
+	for file_name in files:
+		if HASHED_FILE_TYPES.has(file_name.get_extension()):
+			var path := folder.path_join(file_name)
+			parts.append(path)
+			parts.append(FileAccess.get_md5(path))
+	var folders := DirAccess.get_directories_at(folder)
+	folders.sort()
+	for folder_name in folders:
+		if not folder_name.begins_with("."):
+			_add_file_hashes(folder.path_join(folder_name), parts)
 
 
 # --- Entities ----------------------------------------------------------------------------------
@@ -564,10 +612,36 @@ func _on_packet(peer: int, bytes: PackedByteArray) -> void:
 	if bytes.is_empty():
 		stats["bad_packets"] += 1
 		return
+	# Claude 2026-11-05: before anything else, so what's over the limit costs next to nothing.
+	if _mode == Mode.SERVER and not _within_limits(peer, bytes):
+		stats["packets_over_limit"] += 1
+		return
 	if fake_in.is_active():
 		fake_in.submit(peer, bytes, _is_reliable_type(int(bytes[0])), Time.get_ticks_usec())
 	else:
 		_handle_packet(peer, bytes, true)
+
+
+## Claude 2026-11-05: server: may this client send this packet now? Until it has passed the handshake, it may only send the
+## packet that does that. Pings used to be answered straight away with no limit at all, and so did everything else, up to the inbox.
+func _within_limits(peer: int, bytes: PackedByteArray) -> bool:
+	if not _peers.has(peer):
+		return false
+	var info: Dictionary = _peers[peer]
+	if not info["welcomed"] and int(bytes[0]) != NetPackets.Type.HELLO:
+		return false
+	if max_packet_bytes > 0 and bytes.size() > max_packet_bytes:
+		return false
+	var second := Time.get_ticks_msec() / 1000
+	if int(info.get("limit_second", -1)) != second:
+		info["limit_second"] = second
+		info["limit_packets"] = 0
+		info["limit_bytes"] = 0
+	info["limit_packets"] += 1
+	info["limit_bytes"] += bytes.size()
+	if max_packets_per_second > 0 and int(info["limit_packets"]) > max_packets_per_second:
+		return false
+	return max_bytes_per_second <= 0 or int(info["limit_bytes"]) <= max_bytes_per_second
 
 
 func _is_reliable_type(type: int) -> bool:
@@ -909,12 +983,18 @@ func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 	if entity == null or entity.owner_peer != peer or entity.state == null or count > MAX_INPUTS_PER_PACKET:
 		stats["rejected_inputs"] += 1
 		return
-	_note_input_timing(peer, newest, acknowledged, tick)
+	# Claude 2026-11-05: the whole packet is read first. A broken one used to count towards the timing that drives time
+	# dilation and lag compensation before the break was found.
+	var lists: Array = []
 	for i in count:
 		var values: Variant = NetPackets.read_list(buffer)
 		if values == null:
 			stats["bad_packets"] += 1
 			return
+		lists.append(values)
+	_note_input_timing(peer, newest, acknowledged, tick)
+	for i in count:
+		var values: Array = lists[i]
 		var input_tick := newest - i
 		# Already run: too late, and the server never rewinds for movement. Far ahead: can't be real.
 		if input_tick < tick or input_tick >= tick + entity.state.history_size:

@@ -320,6 +320,7 @@ func _test_offline() -> void:
 	input_check.apply_input(check_tick + 1)
 	_check(holder.want == Vector3.ONE and holder.amount == 2.0, "input: not-a-number and infinity are dropped")
 
+	_test_content_hash(session)
 	var hash_first := session.content_hash()
 	session.content_hash_salt = 5
 	var hash_salted := session.content_hash()
@@ -383,6 +384,52 @@ func _test_offline() -> void:
 	_check(session._peers[77]["acknowledged_snapshot"] == 50, "rewind claim: what a client acknowledges can't go backwards")
 	session._note_input_timing(77, 102, 9000, 98)
 	_check(session._peers[77]["acknowledged_snapshot"] == 50, "rewind claim: and it can't be from the future")
+	# Claude 2026-11-05: a broken input packet tells the timing nothing.
+	var margins_before: int = session._peers[77]["margins"].size()
+	var real_owner := target.owner_peer
+	target.owner_peer = 77
+	var broken_input := NetPackets.new_buffer()
+	broken_input.put_u8(NetPackets.Type.INPUT)
+	broken_input.put_u32(target.entity_id)
+	broken_input.put_u32(500)
+	broken_input.put_32(90)
+	broken_input.put_u8(2)
+	broken_input.put_u8(200) # claims a list of 200 values, and then the packet ends
+	session._on_input(77, broken_input.data_array, 490)
+	target.owner_peer = real_owner
+	_check(session._peers[77]["margins"].size() == margins_before and int(session._peers[77]["newest_input"]) < 500, "inputs: a broken packet doesn't count towards the timing")
+
+	# Claude 2026-11-05: what one client may send.
+	var limits_before: Array = [session.max_packets_per_second, session.max_bytes_per_second, session.max_packet_bytes]
+	var ping := PackedByteArray([NetPackets.Type.PING, 0, 0, 0, 0, 0, 0, 0, 0])
+	session.max_packets_per_second = 5
+	var allowed := 0
+	for i in 200:
+		if session._within_limits(77, ping):
+			allowed += 1
+	_check(allowed >= 5 and allowed < 200, "limits: packets past the rate are dropped (%d of 200 got through)" % allowed)
+	session.max_packets_per_second = 0
+	session.max_bytes_per_second = 90
+	session._peers[77].erase("limit_second")
+	allowed = 0
+	for i in 200:
+		if session._within_limits(77, ping):
+			allowed += 1
+	_check(allowed >= 10 and allowed < 200, "limits: so are bytes past the rate (%d of 200 got through)" % allowed)
+	session.max_bytes_per_second = 0
+	var oversized := PackedByteArray()
+	oversized.resize(session.max_packet_bytes + 1)
+	oversized[0] = NetPackets.Type.INPUT
+	_check(not session._within_limits(77, oversized), "limits: so is a packet over the size limit")
+	_check(not session._within_limits(12345, ping), "limits: so is anything from a peer the server doesn't know")
+	session._peers[77]["welcomed"] = false
+	_check(not session._within_limits(77, ping), "limits: before the handshake, a client can't send anything else")
+	_check(session._within_limits(77, PackedByteArray([NetPackets.Type.HELLO])), "limits: except the packet that starts the handshake")
+	session._peers[77]["welcomed"] = true
+	session.max_packets_per_second = limits_before[0]
+	session.max_bytes_per_second = limits_before[1]
+	session.max_packet_bytes = limits_before[2]
+
 	session.allow_debug_commands = true
 	var switch_packet := NetPackets.new_buffer()
 	switch_packet.put_u8(NetPackets.Type.DEBUG_SWITCH)
@@ -424,6 +471,50 @@ func _test_offline() -> void:
 	_check(session.get_entities().is_empty(), "offline: leaving removes the rest")
 	world.queue_free()
 	await get_tree().physics_frame
+
+
+# Claude 2026-11-05: two machines that would simulate differently must not be able to play together.
+func _test_content_hash(session: NetworkSessionSingleton) -> void:
+	var fresh_hash := func() -> int:
+		session._hash_is_cached = false
+		return session.content_hash()
+	var started := Time.get_ticks_usec()
+	var first: int = fresh_hash.call()
+	print("        hashing the project took %.1f ms" % ((Time.get_ticks_usec() - started) / 1000.0))
+	_check(fresh_hash.call() == first, "content hash: the same content gives the same number")
+
+	var gravity: Variant = ProjectSettings.get_setting("physics/3d/default_gravity")
+	ProjectSettings.set_setting("physics/3d/default_gravity", 20.0)
+	_check(fresh_hash.call() != first, "content hash: a physics setting changes it")
+	ProjectSettings.set_setting("physics/3d/default_gravity", gravity)
+
+	var folder := "user://net_test/%d/hash_test" % OS.get_process_id()
+	DirAccess.make_dir_recursive_absolute(folder)
+	var write := func(file_name: String, text: String) -> void:
+		var file := FileAccess.open(folder.path_join(file_name), FileAccess.WRITE)
+		file.store_string(text)
+		file.close()
+	var hash_of_folder := func() -> int:
+		var parts := PackedStringArray()
+		session._add_file_hashes(folder, parts)
+		return hash("|".join(parts))
+	write.call("script.gd", "one")
+	write.call("notes.txt", "one")
+	var folder_before: int = hash_of_folder.call()
+	write.call("notes.txt", "two")
+	_check(hash_of_folder.call() == folder_before, "content hash: other kinds of file don't count")
+	write.call("script.gd", "two")
+	_check(hash_of_folder.call() != folder_before, "content hash: changing a script does")
+	DirAccess.remove_absolute(folder.path_join("script.gd"))
+	DirAccess.remove_absolute(folder.path_join("notes.txt"))
+
+	ProjectSettings.set_setting(NetworkSessionSingleton.BUILD_ID_SETTING, "build 123")
+	var named: int = fresh_hash.call()
+	_check(named != first, "content hash: a build id changes it")
+	ProjectSettings.set_setting(NetworkSessionSingleton.BUILD_ID_SETTING, "build 124")
+	_check(fresh_hash.call() != named, "content hash: and two build ids differ")
+	ProjectSettings.set_setting(NetworkSessionSingleton.BUILD_ID_SETTING, null)
+	_check(fresh_hash.call() == first, "content hash: and with none, it's back to reading files")
 
 
 func _test_bench(session: NetworkSessionSingleton) -> void:
@@ -518,6 +609,13 @@ func _test_refused(run_name: String) -> void:
 	_check(not wrong["joined"], "refused: a client with different content doesn't join")
 	_check(String(wrong["refused"]).contains("mismatch"), "refused: and it's told why: %s" % wrong["refused"])
 	_check(server["spawned"].is_empty(), "refused: the server made no pawn for it")
+	# Claude 2026-11-05: the same code with different physics simulates differently, so it's refused too.
+	_port += 1
+	var other_physics := await NetRun.run(self, run_name + "_physics", {
+		"server": {"role": "server", "seconds": 4},
+		"wrong": {"role": "client", "seconds": 3, "gravity": 20},
+	}, _port)
+	_check(not other_physics["wrong"].has("timed_out") and not other_physics["wrong"]["joined"], "refused: so is one with different physics settings")
 
 
 func _test_late_join_and_leave(run_name: String) -> void:
@@ -557,6 +655,7 @@ func _test_bad_packets(run_name: String) -> void:
 	print("        server counted %d bad packets and %d rejected inputs" % [int(stats["bad_packets"]), int(stats["rejected_inputs"])])
 	_check(int(stats["rejected_inputs"]) >= 25, "bad packets: forged input for someone else's pawn was rejected")
 	_check(int(stats["bad_packets"]) > 0, "bad packets: broken packets were counted and dropped")
+	_check(int(stats["packets_over_limit"]) > 2000, "bad packets: a flood past the limit was dropped (%d)" % int(stats["packets_over_limit"]))
 	var positions: Dictionary = server["positions"].get(str(int(NetRun.own_entity(victim).get("id", 1))), {})
 	var xs: Array = positions.values().map(func(p: Array) -> float: return float(p[0]))
 	_check(xs.size() > 10 and absf(xs.max() - xs.min()) < 0.5, "bad packets: the victim's pawn wasn't moved by them")

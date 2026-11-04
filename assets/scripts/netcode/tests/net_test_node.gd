@@ -10,6 +10,7 @@
 ##   --delay=2           client: wait this long before joining
 ##   --leave-after=4     client: leave after this long
 ##   --salt=1            changes the content hash, so the server refuses this client
+##   --gravity=20        changes a physics setting on this machine, which should also get it refused
 ##   --garbage           client: also sends broken packets, and input for a pawn it doesn't own
 ##   --shove-at=240      server: moves the first pawn 2 m on this tick, which no client can predict
 ##   --custom            everyone: uses the pawn with custom state (NetTestCustomPawn)
@@ -56,6 +57,7 @@ var _finished := false
 var _next_slot := 0
 var _shoved := false
 var _garbage_sent := false
+var _flood_sent := false
 var _ai_spawned := false
 var _switched := false
 var _nav_tick_total_usec := 0
@@ -93,6 +95,8 @@ func _ready() -> void:
 	session.bind_address = "127.0.0.1"
 	session.register_type("pawn", load(CUSTOM_PAWN_SCENE if settings.has("custom") else PAWN_SCENE))
 	session.content_hash_salt = int(settings.get("salt", 0))
+	if settings.has("gravity"):
+		ProjectSettings.set_setting("physics/3d/default_gravity", float(settings["gravity"]))
 	session.lag_compensation_enabled = not settings.has("no-rewind")
 	session.default_predicted = settings.has("predicted")
 	session.fake.latency_ms = float(settings.get("latency", 0))
@@ -177,6 +181,9 @@ func _process(_delta: float) -> void:
 	if settings.has("garbage") and not _garbage_sent and result["joined"] and elapsed >= 2.0:
 		_garbage_sent = true
 		_send_garbage()
+	if settings.has("garbage") and not _flood_sent and result["joined"] and elapsed >= 4.0:
+		_flood_sent = true
+		_send_flood()
 	if settings.has("switch") and not _switched and elapsed >= float(String(settings["switch"]).split(":")[0]):
 		_switched = true
 		var parts := String(settings["switch"]).split(":")
@@ -405,6 +412,14 @@ func _finish() -> void:
 		DirAccess.rename_absolute(temporary, out_path) # so a reader never sees half a file
 	session.leave()
 	get_tree().quit(0)
+
+
+## Claude 2026-11-05: far more pings than the server allows one client in a second. Well after _send_garbage, so it uses up a
+## different second's budget and those packets still get read.
+func _send_flood() -> void:
+	var flood := PackedByteArray([NetPackets.Type.PING, 0, 0, 0, 0, 0, 0, 0, 0])
+	for i in 5000:
+		(multiplayer as SceneMultiplayer).send_bytes(flood, 1, MultiplayerPeer.TRANSFER_MODE_UNRELIABLE)
 
 
 ## Broken and forged packets. None of this may crash the server or move anything.
