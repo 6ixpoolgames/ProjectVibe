@@ -16,6 +16,9 @@
 ##
 ## Unusual state: if the parent, or a node in custom_state_nodes, has save_state() -> Dictionary and
 ## load_state(Dictionary), those run alongside the lists. save_state must return a new Dictionary each call.
+## Claude 2026-11-05: the Dictionary also goes to clients in every snapshot, and clients correct it like list entries. That makes
+## two rules: its values must come out exactly equal on server and client, so use ints, bools or floats you've rounded yourself,
+## and keep it small, since there are no encodings to shrink it.
 ## After every entity has loaded, the parent's _on_state_loaded(tick) runs if it has one (for things only the engine can
 ## restore). Claude 2026-11-04: it waits for all of them, so a floor check there sees the others where they were.
 ##
@@ -495,9 +498,19 @@ func get_input(tick: int) -> Dictionary:
 	return _to_dictionary(_inputs, _input_values[slot])
 
 
+## Claude 2026-11-05: what save_state returned on this tick, one entry per custom state node, for sending in snapshots. Empty if
+## this entity has none.
+func get_custom_values(tick: int) -> Array:
+	if _custom_paths.is_empty() or not has_state(tick):
+		return []
+	var saved: Variant = _state_custom[tick % history_size]
+	return saved if saved is Array else []
+
+
 ## True if these values match what's saved for that tick, within tolerance. Only compares list entries that are given
 ## and were saved. This is the reconciliation question: "was my prediction for this tick right?"
-func matches_state(tick: int, values: Dictionary) -> bool:
+## Claude 2026-11-05: custom is what the authority's save_state returned, from get_custom_values. Those compare exactly.
+func matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 	if not has_state(tick):
 		return false
 	var saved: Array = _state_values[tick % history_size]
@@ -506,6 +519,11 @@ func matches_state(tick: int, values: Dictionary) -> bool:
 		if values.has(p.key) and not is_same(saved[i], MISSING):
 			if not StateEncoding.nearly_equal(saved[i], values[p.key], p.encoding):
 				return false
+	if custom.size() == _custom_paths.size():
+		var saved_custom: Variant = _state_custom[tick % history_size]
+		for i in custom.size():
+			if saved_custom is Array and saved_custom[i] is Dictionary and custom[i] is Dictionary and saved_custom[i] != custom[i]:
+				return false
 	return true
 
 
@@ -513,13 +531,17 @@ func matches_state(tick: int, values: Dictionary) -> bool:
 ## NetworkTime.rollback(tick) to replay from them. Entries not given stay as predicted. Returns true if the history took it.
 ## If that tick has already fallen out of the history, a replay is impossible, so this snaps the entity straight to the
 ## given values and warns, and returns false (netcode spec section 15). A tick that hasn't happened yet changes nothing.
-func correct_state(tick: int, values: Dictionary) -> bool:
+## Claude 2026-11-05: custom corrects what save_state saved. The replay's first step then hands it to load_state.
+func correct_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
+	var custom_usable := custom.size() == _custom_paths.size() and not custom.is_empty()
 	if has_state(tick):
 		var saved: Array = _state_values[tick % history_size]
 		for i in _states.size():
 			var p := _states[i]
 			if values.has(p.key):
 				saved[i] = _rounded_copy(p, values[p.key])
+		if custom_usable:
+			_state_custom[tick % history_size] = custom
 		return true
 	if tick < 0 or tick > _newest_state_tick:
 		return false
@@ -527,6 +549,8 @@ func correct_state(tick: int, values: Dictionary) -> bool:
 	for p in _states:
 		if values.has(p.key) and _bind(p):
 			p.write(_rounded_copy(p, values[p.key]))
+	if custom_usable:
+		_load_customs(custom)
 	_notify_loaded(tick)
 	return false
 
@@ -538,6 +562,12 @@ func get_schema() -> PackedStringArray:
 	for pair in [["input", input_properties], ["state", state_properties], ["sync", sync_properties]]:
 		for entry in pair[1]:
 			out.append("%s %s" % [pair[0], entry])
+	# Claude 2026-11-05: custom state goes in snapshots now too, so both sides need to have the same.
+	var parent := get_parent()
+	if parent and parent.has_method(&"save_state"):
+		out.append("custom parent")
+	for path in custom_state_nodes:
+		out.append("custom %s" % path)
 	return out
 
 

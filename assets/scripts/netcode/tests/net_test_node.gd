@@ -12,6 +12,8 @@
 ##   --salt=1            changes the content hash, so the server refuses this client
 ##   --garbage           client: also sends broken packets, and input for a pawn it doesn't own
 ##   --shove-at=240      server: moves the first pawn 2 m on this tick, which no client can predict
+##   --custom            everyone: uses the pawn with custom state (NetTestCustomPawn)
+##   --bonus-at=240      server: sets the first pawn's bonus on this tick, which no client can predict
 ##   --no-rewind         server: turns lag compensation off, to compare
 ##   --off=a,b  --on=a,b      turn NetworkSession features off or on at the start
 ##   --switch=5:lag_compensation_enabled:0    turn a feature on or off after this many seconds
@@ -38,6 +40,7 @@
 extends Node
 
 const PAWN_SCENE := "res://assets/scripts/netcode/tests/net_test_pawn.tscn"
+const CUSTOM_PAWN_SCENE := "res://assets/scripts/netcode/tests/net_test_pawn_custom.tscn"
 const EDITS_FROM_TICK := 300
 
 var settings: Dictionary = {}
@@ -88,7 +91,7 @@ func _ready() -> void:
 		_build_arena()
 	session.world_root = self
 	session.bind_address = "127.0.0.1"
-	session.register_type("pawn", load(PAWN_SCENE))
+	session.register_type("pawn", load(CUSTOM_PAWN_SCENE if settings.has("custom") else PAWN_SCENE))
 	session.content_hash_salt = int(settings.get("salt", 0))
 	session.lag_compensation_enabled = not settings.has("no-rewind")
 	session.default_predicted = settings.has("predicted")
@@ -262,6 +265,11 @@ func _on_before_tick(_dt: float, tick: int) -> void:
 			var body: Node3D = entities[0].get_parent()
 			body.position += Vector3(2, 0, 0)
 			result["shoved_tick"] = tick
+	if settings.has("bonus-at") and not result.has("bonus_tick") and tick >= int(settings["bonus-at"]) and session.is_server():
+		var entities := session.get_entities()
+		if not entities.is_empty():
+			entities[0].get_parent().set("bonus", 1)
+			result["bonus_tick"] = tick
 
 
 ## Writes what each pawn did on this tick, the first time this tick happens.
@@ -377,7 +385,7 @@ func _update_summaries() -> void:
 			"health": body.health, "shots": body.shots_fired, "hits": body.hits_landed, "missed_inputs": entity.missed_inputs,
 			"last_input_tick": entity.last_input_tick, "offset": body._correction_offset.length(), "corrections_seen": body.corrections_seen,
 			"paths": body.paths_found, "path_failures": body.path_failures, "stuck": body.times_stuck, "walked": body.distance_walked,
-			"missing_stretches": body.missing_stretches,
+			"missing_stretches": body.missing_stretches, "bonus": body.get("bonus"), "total": body.get("total"), "tick": driver.tick,
 		}
 
 

@@ -955,6 +955,8 @@ func _send_snapshots(tick: int) -> void:
 		# Other clients predicting this entity need to know what it wants. An empty list keeps it small otherwise.
 		var input_values: Array = entity.state.get_input_values(tick) if (entity.is_predicted or default_predicted) else []
 		NetPackets.write_list(world, input_values, entity.state.get_input_encodings())
+		# Claude 2026-11-05: what save_state returned, so clients can correct it. One byte if there's none.
+		NetPackets.write_list(world, entity.state.get_custom_values(tick), [])
 		count += 1
 	var world_bytes := world.data_array
 	var server_features := 0
@@ -1020,10 +1022,11 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 		var state_values: Variant = NetPackets.read_list(buffer)
 		var sync_values: Variant = NetPackets.read_list(buffer)
 		var input_values: Variant = NetPackets.read_list(buffer)
-		if state_values == null or sync_values == null or input_values == null:
+		var custom_values: Variant = NetPackets.read_list(buffer)
+		if state_values == null or sync_values == null or input_values == null or custom_values == null:
 			stats["bad_packets"] += 1
 			return
-		parsed.append([entity_id, state_values, sync_values, input_values])
+		parsed.append([entity_id, state_values, sync_values, input_values, custom_values])
 	_note_snapshot_timing(tick)
 	_newest_snapshot_tick = tick
 	_missed_inputs = missed
@@ -1040,7 +1043,7 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 		entity.state.apply_sync_values(item[2])
 		entity.state.receive_authoritative_state(tick, values) # kept for all, so a switch takes effect at once
 		if not entity.follows_snapshots():
-			_reconcile_values[item[0]] = {"state": values, "input": entity.state.input_values_to_dictionary(item[3])}
+			_reconcile_values[item[0]] = {"state": values, "input": entity.state.input_values_to_dictionary(item[3]), "custom": item[4]}
 
 
 ## Client: compares predictions with the newest snapshot, and if any are wrong, corrects them and resimulates from there.
@@ -1057,9 +1060,10 @@ func _reconcile() -> void:
 		if entity == null:
 			continue
 		var values: Dictionary = _reconcile_values[entity_id]["state"]
+		var custom: Array = _reconcile_values[entity_id]["custom"]
 		if entity.role == NetworkEntity.Role.REMOTE_PREDICTED:
 			entity.state.hold_input_from(tick, _reconcile_values[entity_id]["input"])
-		if entity.state.matches_state(tick, values):
+		if entity.state.matches_state(tick, values, custom):
 			continue
 		if not entity.state.has_state(tick) and tick >= _driver.tick:
 			continue # the client has fallen behind the server; the clock check deals with that
@@ -1070,7 +1074,7 @@ func _reconcile() -> void:
 			stats["correction_total"] += error
 			stats["correction_worst"] = maxf(stats["correction_worst"], error)
 		before[entity_id] = entity.get_position_or_null()
-		if entity.state.correct_state(tick, values):
+		if entity.state.correct_state(tick, values, custom):
 			corrected = true
 	if corrected:
 		_driver.rollback(tick)

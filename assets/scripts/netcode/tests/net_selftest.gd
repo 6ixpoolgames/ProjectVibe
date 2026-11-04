@@ -34,6 +34,7 @@ func _ready() -> void:
 	await _scenario("clock", _test_clock)
 	await _scenario("inputs", _test_inputs)
 	await _scenario("correction", _test_correction)
+	await _scenario("custom_state", _test_custom_state)
 	await _scenario("interpolation", _test_interpolation)
 	await _scenario("lag_compensation", _test_lag_compensation)
 	await _scenario("predicted_others", _test_predicted_others)
@@ -624,6 +625,31 @@ func _test_correction(run_name: String) -> void:
 	var difference := Vector2(float(own["x"]) - float(own_on_server["x"]), float(own["z"]) - float(own_on_server["z"])).length()
 	_check(difference < 0.05, "correction: afterwards client and server agree (%.3f m apart)" % difference)
 	_check(int(stats["corrections"]) <= 3, "correction: and it doesn't keep correcting")
+
+
+# Claude 2026-11-05: state in save_state and load_state used to stay on each machine, so a client never learned the server had
+# changed it, and stayed wrong for good.
+func _test_custom_state(run_name: String) -> void:
+	var results := await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 9, "latency": 50, "custom": 1, "bonus-at": 400},
+		"a": {"role": "client", "seconds": 8, "latency": 50, "mode": "idle", "custom": 1},
+	}, _port)
+	var server: Dictionary = results["server"]
+	var a: Dictionary = results["a"]
+	if server.has("timed_out") or a.has("timed_out"):
+		_check(false, "custom state: every machine finished")
+		return
+	_check(server.has("bonus_tick"), "custom state: the server changed the value")
+	var own := NetRun.own_entity(a)
+	var own_on_server := NetRun.summary_of(server, int(own["id"]))
+	_check(int(own_on_server["bonus"]) == 1 and int(own["bonus"]) == 1, "custom state: the client got the server's value (%s)" % str(own["bonus"]))
+	# total goes up by one every tick from the change onward, so a replay from the wrong place would leave it off.
+	var since_change_client := int(own["tick"]) - int(server.get("bonus_tick", 0))
+	var since_change_server := int(own_on_server["tick"]) - int(server.get("bonus_tick", 0))
+	print("        total %d on the client after %d ticks, %d on the server after %d" % [int(own["total"]), since_change_client, int(own_on_server["total"]), since_change_server])
+	_check(absi(int(own["total"]) - since_change_client) <= 2, "custom state: the client replayed from the corrected value")
+	_check(absi(int(own_on_server["total"]) - since_change_server) <= 2, "custom state: the server counted the same way")
+	_check(int(a["stats"]["corrections"]) >= 1 and int(a["stats"]["corrections"]) <= 3, "custom state: one correction, and it doesn't keep correcting (%d)" % int(a["stats"]["corrections"]))
 
 
 func _test_interpolation(run_name: String) -> void:
