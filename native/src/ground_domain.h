@@ -20,7 +20,8 @@ namespace navcore {
 struct PathOutcome {
 	int id = 0;
 	bool ok = false;
-	bool partial = false; // goal unreachable: path leads to the closest reachable point
+	// Claude 2026-11-05: also set when the path was too long to return whole.
+	bool partial = false; // goal not reached: path leads as close as it could get
 	std::vector<float> points; // x, y, z per corner
 	std::string reason; // why it failed
 };
@@ -36,6 +37,7 @@ public:
 	bool ready() const { return m_mesh != nullptr; }
 
 	// Swap in a finished build. Takes ownership of r.nav_data on success.
+	// Claude 2026-11-05: if the new tile can't be added, the old one is put back, so a failure never leaves a hole.
 	bool commit_tile(TileBuildResult &r);
 	void remove_tile(const TileKey &key);
 
@@ -53,11 +55,22 @@ public:
 	// Triangles of every tile overlapping r, in Godot winding, plus one colour per vertex (by tier).
 	void debug_triangles(const WorldRect &r, std::vector<float> &verts, std::vector<float> &colors) const;
 	int tile_count() const;
+	// Claude 2026-11-05: for tests only, to reach failures that are very hard to cause for real.
+	void debug_fail_commits(int count) { m_debug_fail_commits = count; } // the next count tiles get corrupted before they're added
+	void debug_limit_corners(int limit) { m_debug_corner_limit = limit; } // room for this many path corners; 0 = normal
 
 private:
+	// Claude 2026-11-05: the start, goal and polygons of one search. find_path_now and the sliced search used to
+	// share these, so an immediate search during a slow one changed where the slow one ended.
+	struct QueryState {
+		dtPolyRef start_ref = 0, end_ref = 0;
+		float start_pos[3] = {}, end_pos[3] = {};
+		std::vector<dtPolyRef> polys;
+	};
+
 	const dtQueryFilter &filter_for(int tier) const;
-	bool snap_endpoints(dtNavMeshQuery *q, const float *from, const float *to, int tier, PathOutcome &fail);
-	void straighten(dtNavMeshQuery *q, int npolys, bool partial, PathOutcome &out);
+	bool snap_endpoints(dtNavMeshQuery *q, QueryState &state, const float *from, const float *to, int tier, PathOutcome &fail);
+	void straighten(dtNavMeshQuery *q, const QueryState &state, int npolys, bool partial, PathOutcome &out);
 
 	NavConfig m_cfg;
 	dtNavMesh *m_mesh = nullptr;
@@ -65,11 +78,10 @@ private:
 	dtNavMeshQuery *m_sliced_query = nullptr; // PathQueue's resumable searches
 	dtQueryFilter *m_filters = nullptr; // one per tier
 
-	// State of the endpoints / result of the current query.
-	dtPolyRef m_start_ref = 0, m_end_ref = 0;
-	float m_start_pos[3] = {}, m_end_pos[3] = {};
-	int m_sliced_tier = 0;
-	std::vector<dtPolyRef> m_polys;
+	QueryState m_sync_state; // used only by find_path_now, and finished within the call
+	QueryState m_sliced_state; // lasts as long as PathQueue's current search
+	int m_debug_fail_commits = 0;
+	int m_debug_corner_limit = 0;
 };
 
 } // namespace navcore

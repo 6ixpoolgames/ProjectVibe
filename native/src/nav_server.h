@@ -71,6 +71,9 @@ public:
 
 	// ---- debug / stats ---------------------------------------------------------------------
 	Dictionary get_debug_triangles(const AABB &area);
+	// Claude 2026-11-05: for tests only: see GroundDomain.
+	void debug_fail_tile_commits(int count) { m_ground.debug_fail_commits(count); }
+	void debug_limit_path_corners(int limit) { m_ground.debug_limit_corners(limit); }
 	Array get_tile_states() const;
 	Dictionary get_stats() const;
 	bool is_idle() const; // nothing left to build or commit

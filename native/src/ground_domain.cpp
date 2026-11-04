@@ -1,11 +1,13 @@
 // Written by Claude (claude-opus-5-5), 2026-11-03: the live ground nav mesh: commit, unload, queries, debug (spec 8.3, 12).
 #include "ground_domain.h"
 
+#include <DetourAlloc.h>
 #include <DetourCommon.h>
 #include <DetourNavMesh.h>
 #include <DetourNavMeshQuery.h>
 
 #include <algorithm>
+#include <cstring>
 
 static_assert(sizeof(dtPolyRef) == 8, "build with DT_POLYREF64 (see SConstruct)");
 
@@ -59,7 +61,8 @@ bool GroundDomain::init(const NavConfig &cfg) {
 			dtStatusFailed(m_sliced_query->init(m_mesh, MAX_QUERY_NODES))) {
 		return false;
 	}
-	m_polys.resize(MAX_PATH_POLYS);
+	m_sync_state.polys.resize(MAX_PATH_POLYS);
+	m_sliced_state.polys.resize(MAX_PATH_POLYS);
 	return true;
 }
 
@@ -69,16 +72,42 @@ bool GroundDomain::commit_tile(TileBuildResult &r) {
 	}
 	// Detour stitches shared edges with already loaded neighbours automatically on add.
 	const dtTileRef old = m_mesh->getTileRefAt(r.key.x, r.key.z, 0);
-	if (old) {
-		m_mesh->removeTile(old, nullptr, nullptr); // frees the old data (it was added with DT_TILE_FREE_DATA)
-	}
 	if (r.empty || !r.nav_data) {
+		if (old) {
+			m_mesh->removeTile(old, nullptr, nullptr); // frees the old data (it was added with DT_TILE_FREE_DATA)
+		}
 		return true;
 	}
+
+	// Claude 2026-11-05: the old tile has to go before the new one can take its place, and removing it frees its
+	// data, so keep a copy to put back if the new one is refused. Without this, a refused tile left a hole in the mesh.
+	unsigned char *backup = nullptr;
+	int backup_size = 0;
+	if (old) {
+		const dtMeshTile *tile = static_cast<const dtNavMesh *>(m_mesh)->getTileByRef(old);
+		backup_size = tile->dataSize;
+		backup = static_cast<unsigned char *>(dtAlloc(backup_size, DT_ALLOC_PERM));
+		if (!backup) {
+			return false; // out of memory: nothing has changed yet, the old tile stays
+		}
+		std::memcpy(backup, tile->data, backup_size);
+		m_mesh->removeTile(old, nullptr, nullptr);
+	}
+
+	if (m_debug_fail_commits > 0) {
+		--m_debug_fail_commits;
+		reinterpret_cast<dtMeshHeader *>(r.nav_data)->magic = 0; // Detour refuses a tile with the wrong magic number
+	}
+
 	const dtStatus s = m_mesh->addTile(r.nav_data, r.nav_data_size, DT_TILE_FREE_DATA, 0, nullptr);
 	if (dtStatusFailed(s)) {
+		// Passing old as the last argument gives the tile its old identity back, so searches running over it stay valid.
+		if (backup && dtStatusFailed(m_mesh->addTile(backup, backup_size, DT_TILE_FREE_DATA, old, nullptr))) {
+			dtFree(backup);
+		}
 		return false; // r keeps ownership and frees the data
 	}
+	dtFree(backup);
 	r.nav_data = nullptr; // dtNavMesh owns it now
 	return true;
 }
@@ -97,11 +126,11 @@ const dtQueryFilter &GroundDomain::filter_for(int tier) const {
 	return m_filters[std::clamp(tier, 0, MAX_TIERS - 1)];
 }
 
-bool GroundDomain::snap_endpoints(dtNavMeshQuery *q, const float *from, const float *to, int tier, PathOutcome &fail) {
+bool GroundDomain::snap_endpoints(dtNavMeshQuery *q, QueryState &state, const float *from, const float *to, int tier, PathOutcome &fail) {
 	const dtQueryFilter &f = filter_for(tier);
 	dtPolyRef sref = 0, eref = 0;
-	q->findNearestPoly(from, SNAP_EXTENTS, &f, &sref, m_start_pos);
-	q->findNearestPoly(to, SNAP_EXTENTS, &f, &eref, m_end_pos);
+	q->findNearestPoly(from, SNAP_EXTENTS, &f, &sref, state.start_pos);
+	q->findNearestPoly(to, SNAP_EXTENTS, &f, &eref, state.end_pos);
 	if (!sref) {
 		fail.reason = "no nav mesh near start";
 		return false;
@@ -110,23 +139,29 @@ bool GroundDomain::snap_endpoints(dtNavMeshQuery *q, const float *from, const fl
 		fail.reason = "no nav mesh near goal";
 		return false;
 	}
-	m_start_ref = sref;
-	m_end_ref = eref;
+	state.start_ref = sref;
+	state.end_ref = eref;
 	return true;
 }
 
-void GroundDomain::straighten(dtNavMeshQuery *q, int npolys, bool partial, PathOutcome &out) {
+void GroundDomain::straighten(dtNavMeshQuery *q, const QueryState &state, int npolys, bool partial, PathOutcome &out) {
 	float end[3];
-	dtVcopy(end, m_end_pos);
-	if (npolys > 0 && m_polys[size_t(npolys - 1)] != m_end_ref) {
+	dtVcopy(end, state.end_pos);
+	if (npolys > 0 && state.polys[size_t(npolys - 1)] != state.end_ref) {
 		// Goal not reached: aim for the closest point on the last polygon instead.
-		q->closestPointOnPoly(m_polys[size_t(npolys - 1)], m_end_pos, end, nullptr);
+		q->closestPointOnPoly(state.polys[size_t(npolys - 1)], state.end_pos, end, nullptr);
 		partial = true;
 	}
 	std::vector<float> corners(MAX_STRAIGHT * 3);
 	int ncorners = 0;
-	q->findStraightPath(m_start_pos, end, m_polys.data(), npolys, corners.data(), nullptr, nullptr, &ncorners, MAX_STRAIGHT, 0);
-	out.ok = ncorners > 0;
+	const int max_corners = m_debug_corner_limit > 0 ? std::min(m_debug_corner_limit, MAX_STRAIGHT) : MAX_STRAIGHT;
+	const dtStatus s = q->findStraightPath(state.start_pos, end, state.polys.data(), npolys, corners.data(), nullptr, nullptr, &ncorners, max_corners, 0);
+	// Claude 2026-11-05: Detour says when it ran out of room for corners. The path then stops short of the goal, so
+	// callers have to be told it isn't complete. This status used to be ignored.
+	if (dtStatusDetail(s, DT_BUFFER_TOO_SMALL)) {
+		partial = true;
+	}
+	out.ok = dtStatusSucceed(s) && ncorners > 0;
 	out.partial = partial;
 	out.points.assign(corners.begin(), corners.begin() + ncorners * 3);
 	if (!out.ok) {
@@ -139,17 +174,17 @@ bool GroundDomain::find_path_now(const float *from, const float *to, int tier, P
 		out.reason = "nav not initialised";
 		return false;
 	}
-	if (!snap_endpoints(m_sync_query, from, to, tier, out)) {
+	if (!snap_endpoints(m_sync_query, m_sync_state, from, to, tier, out)) {
 		return false;
 	}
 	int npolys = 0;
-	const dtStatus s = m_sync_query->findPath(m_start_ref, m_end_ref, m_start_pos, m_end_pos, &filter_for(tier),
-			m_polys.data(), &npolys, MAX_PATH_POLYS);
+	const dtStatus s = m_sync_query->findPath(m_sync_state.start_ref, m_sync_state.end_ref, m_sync_state.start_pos, m_sync_state.end_pos, &filter_for(tier),
+			m_sync_state.polys.data(), &npolys, MAX_PATH_POLYS);
 	if (dtStatusFailed(s) || npolys == 0) {
 		out.reason = "search failed";
 		return false;
 	}
-	straighten(m_sync_query, npolys, (s & DT_PARTIAL_RESULT) != 0, out);
+	straighten(m_sync_query, m_sync_state, npolys, (s & DT_PARTIAL_RESULT) != 0, out);
 	return out.ok;
 }
 
@@ -168,11 +203,10 @@ bool GroundDomain::begin_sliced(const float *from, const float *to, int tier, Pa
 		fail.reason = "nav not initialised";
 		return false;
 	}
-	if (!snap_endpoints(m_sliced_query, from, to, tier, fail)) {
+	if (!snap_endpoints(m_sliced_query, m_sliced_state, from, to, tier, fail)) {
 		return false;
 	}
-	m_sliced_tier = tier;
-	const dtStatus s = m_sliced_query->initSlicedFindPath(m_start_ref, m_end_ref, m_start_pos, m_end_pos, &filter_for(tier));
+	const dtStatus s = m_sliced_query->initSlicedFindPath(m_sliced_state.start_ref, m_sliced_state.end_ref, m_sliced_state.start_pos, m_sliced_state.end_pos, &filter_for(tier));
 	if (dtStatusFailed(s)) {
 		fail.reason = "search failed to start";
 		return false;
@@ -191,13 +225,13 @@ int GroundDomain::step_sliced(int max_iterations, int &used) {
 
 void GroundDomain::finish_sliced(PathOutcome &out) {
 	int npolys = 0;
-	const dtStatus s = m_sliced_query->finalizeSlicedFindPath(m_polys.data(), &npolys, MAX_PATH_POLYS);
+	const dtStatus s = m_sliced_query->finalizeSlicedFindPath(m_sliced_state.polys.data(), &npolys, MAX_PATH_POLYS);
 	if (dtStatusFailed(s) || npolys == 0) {
 		out.ok = false;
 		out.reason = "search failed";
 		return;
 	}
-	straighten(m_sliced_query, npolys, (s & DT_PARTIAL_RESULT) != 0, out);
+	straighten(m_sliced_query, m_sliced_state, npolys, (s & DT_PARTIAL_RESULT) != 0, out);
 }
 
 void GroundDomain::debug_triangles(const WorldRect &r, std::vector<float> &verts, std::vector<float> &colors) const {

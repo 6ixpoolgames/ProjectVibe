@@ -54,6 +54,12 @@ func _initialize() -> void:
 	var async_len := _async_path_length(a, b, 0)
 	_check(absf(async_len - _length(p0)) < 0.5, "async path matches sync path (%.1f vs %.1f m)" % [async_len, _length(p0)])
 
+	# Claude 2026-11-05: regression tests for the defects found in the audit.
+	_test_bad_requests_share_the_budget()
+	_test_searches_keep_their_own_endpoints(a, b)
+	_test_cut_short_path_says_so(a, b)
+	_test_refused_tile_keeps_the_old_one(a, b)
+
 	# 4. Edit: close the gap. Only the chunks around it are resubmitted, with tight dirty bounds.
 	_gap_open = false
 	var dirty := AABB(Vector3(-3, -10, -2), Vector3(6, 20, 5))
@@ -96,6 +102,76 @@ func _initialize() -> void:
 	quit(0 if _failures == 0 else 1)
 
 
+# Claude 2026-11-05: requests for places with no nav mesh fail straight away. They used to cost nothing, so a big
+# batch of them all ran in a single tick, however small the budget.
+func _test_bad_requests_share_the_budget() -> void:
+	var failures := [0]
+	var on_fail := func(_id: int, _reason: String) -> void: failures[0] += 1
+	NavServer.path_failed.connect(on_fail)
+	var count := 1000
+	for i in count:
+		NavServer.find_path(Vector3(-10, 0, -10), Vector3(9000, 0, 9000), 0)
+	NavServer.tick(1.0 / 60.0)
+	_check(failures[0] > 0 and failures[0] < count, "a batch of bad requests is spread over ticks (%d of %d in the first tick)" % [failures[0], count])
+	for i in 600:
+		if failures[0] >= count:
+			break
+		NavServer.tick(1.0 / 60.0)
+	_check(failures[0] == count, "every bad request gets its answer (%d of %d)" % [failures[0], count])
+	NavServer.path_failed.disconnect(on_fail)
+
+
+# Claude 2026-11-05: a search that takes several ticks must not be affected by an immediate search in the meantime.
+# They used to share their start and goal, so the slow one could finish at the other one's goal.
+func _test_searches_keep_their_own_endpoints(a: Vector3, b: Vector3) -> void:
+	NavServer.configure({"worker_threads": 4, "query_iterations_per_tick": 1})
+	_tick_until_idle()
+	var id := NavServer.find_path(a, b, 0)
+	NavServer.tick(1.0 / 60.0)
+	var other_goal := Vector3(25, 0, -25)
+	var other := NavServer.find_path_now(Vector3(20, 0, -20), other_goal, 0)
+	_check(other.size() >= 2 and other[other.size() - 1].distance_to(other_goal) < 1.0, "the immediate search reaches its own goal")
+	var result := _wait_for_path(id)
+	var points: PackedVector3Array = result.points
+	_check(points.size() >= 2, "the slow search finishes")
+	if points.size() >= 2:
+		_check(points[0].distance_to(a) < 1.0 and points[points.size() - 1].distance_to(b) < 1.0 and not result.partial, "the slow search keeps its own start and goal (ends %.1f m from its goal)" % points[points.size() - 1].distance_to(b))
+	NavServer.configure({"worker_threads": 4, "query_iterations_per_tick": 2000})
+	_tick_until_idle()
+
+
+# Claude 2026-11-05: when a path has more corners than there's room for, it stops short, and has to say so.
+func _test_cut_short_path_says_so(a: Vector3, b: Vector3) -> void:
+	var whole := _wait_for_path(NavServer.find_path(a, b, 0))
+	_check(not whole.partial and whole.points.size() > 2, "a normal path isn't marked partial (%d corners)" % whole.points.size())
+	NavServer.debug_limit_path_corners(2)
+	var cut := _wait_for_path(NavServer.find_path(a, b, 0))
+	NavServer.debug_limit_path_corners(0)
+	_check(cut.points.size() == 2 and cut.partial, "a path cut short is marked partial (%d corners)" % cut.points.size())
+
+
+# Claude 2026-11-05: the old tile is taken out before the new one goes in. If the new one is refused, the old one has to
+# go back, or the nav mesh has a hole in it until something else changes that tile.
+func _test_refused_tile_keeps_the_old_one(a: Vector3, b: Vector3) -> void:
+	var dirty := AABB(Vector3(-3, -10, -2), Vector3(6, 20, 5))
+	var before := _length(NavServer.find_path_now(a, b, 0))
+	NavServer.debug_fail_tile_commits(100000)
+	_gap_open = false
+	for key in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(0, 0)]:
+		_submit_chunk(key, dirty)
+	_tick_until_idle()
+	NavServer.debug_fail_tile_commits(0)
+	_check(NavServer.get_stats().failed > 0, "the corrupted tiles were refused (%d)" % NavServer.get_stats().failed)
+	var during := _length(NavServer.find_path_now(a, b, 0))
+	_check(absf(during - before) < 0.5, "the old tiles are still there, gap and all (%.1f m, was %.1f m)" % [during, before])
+	_gap_open = true
+	for key in [Vector2i(-1, -1), Vector2i(0, -1), Vector2i(-1, 0), Vector2i(0, 0)]:
+		_submit_chunk(key, dirty)
+	_tick_until_idle()
+	_check(NavServer.get_stats().failed == 0, "the same tiles build fine next time")
+	_check(absf(_length(NavServer.find_path_now(a, b, 0)) - before) < 0.5, "paths are back to normal")
+
+
 func _height(wx: float, wz: float) -> float:
 	var in_wall := wz >= 0.0 and wz <= 1.0 and absf(wx) <= 40.0
 	if in_wall and (absf(wx) >= 2.0 or not _gap_open):
@@ -122,12 +198,18 @@ func _tick_until_idle() -> void:
 
 
 func _async_path_length(from: Vector3, to: Vector3, tier: int) -> float:
-	var result := {"done": false, "len": -1.0}
-	var id := NavServer.find_path(from, to, tier)
-	var on_ready := func(rid: int, points: PackedVector3Array, _partial: bool):
+	var result := _wait_for_path(NavServer.find_path(from, to, tier))
+	return _length(result.points) if result.done else -1.0
+
+
+# Claude 2026-11-05: split out of _async_path_length, so tests can see the whole answer. Ticks until request id is answered.
+func _wait_for_path(id: int) -> Dictionary:
+	var result := {"done": false, "points": PackedVector3Array(), "partial": false}
+	var on_ready := func(rid: int, points: PackedVector3Array, partial: bool):
 		if rid == id:
 			result.done = true
-			result.len = _length(points)
+			result.points = points
+			result.partial = partial
 	var on_fail := func(rid: int, reason: String):
 		if rid == id:
 			result.done = true
@@ -140,7 +222,7 @@ func _async_path_length(from: Vector3, to: Vector3, tier: int) -> float:
 			break
 	NavServer.path_ready.disconnect(on_ready)
 	NavServer.path_failed.disconnect(on_fail)
-	return result.len
+	return result
 
 
 func _length(points: PackedVector3Array) -> float:

@@ -472,6 +472,8 @@ void NavServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("closest_point", "point", "tier"), &NavServer::closest_point, DEFVAL(0));
 
 	ClassDB::bind_method(D_METHOD("get_debug_triangles", "area"), &NavServer::get_debug_triangles);
+	ClassDB::bind_method(D_METHOD("debug_fail_tile_commits", "count"), &NavServer::debug_fail_tile_commits);
+	ClassDB::bind_method(D_METHOD("debug_limit_path_corners", "limit"), &NavServer::debug_limit_path_corners);
 	ClassDB::bind_method(D_METHOD("get_tile_states"), &NavServer::get_tile_states);
 	ClassDB::bind_method(D_METHOD("get_stats"), &NavServer::get_stats);
 	ClassDB::bind_method(D_METHOD("is_idle"), &NavServer::is_idle);

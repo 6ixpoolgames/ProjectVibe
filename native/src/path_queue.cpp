@@ -7,6 +7,9 @@ namespace navcore {
 
 namespace {
 constexpr int MAX_RETRIES = 3; // a tile committed mid-search invalidates it; just start over
+// Claude 2026-11-05: what starting a request costs, in search steps. Finding the nearest polygons to its start and goal
+// is real work, and requests that fail there used to cost nothing, so a big batch of them all ran in one tick.
+constexpr int REQUEST_START_COST = 16;
 }
 
 int PathQueue::push(const float *from, const float *to, int tier) {
@@ -42,11 +45,13 @@ void PathQueue::process(GroundDomain &domain, int iteration_budget, std::vector<
 			m_queue.pop_front();
 			PathOutcome fail;
 			fail.id = m_current.id;
+			budget -= REQUEST_START_COST;
 			if (!domain.begin_sliced(m_current.from, m_current.to, m_current.tier, fail)) {
 				out.push_back(std::move(fail));
 				continue;
 			}
 			m_active = true;
+			continue; // the budget may be used up now
 		}
 
 		int used = 0;
