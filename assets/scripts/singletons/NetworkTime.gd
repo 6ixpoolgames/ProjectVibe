@@ -89,6 +89,10 @@ var tick: int = 0
 var tick_factor: float = 1.0
 ## Ticks skipped by the max_ticks_per_frame limit, for diagnostics.
 var dropped_ticks: int = 0
+## Claude 2026-11-05: on, each tick phase adds up its time in microseconds into profile, for finding what's slow. Off, it costs
+## a few checks of this flag per tick.
+var profile_enabled: bool = false
+var profile: Dictionary = {}
 
 var _rate: int = 60
 var _accumulator: float = 0.0
@@ -244,6 +248,7 @@ func rollback(from_tick: int) -> bool:
 	if _in_phases or _resimulating:
 		push_warning("[NetworkTime] rollback(%d) ignored: not allowed during a tick's phases or another replay" % from_tick)
 		return false
+	var profile_started := Time.get_ticks_usec() if profile_enabled else 0
 	var real_tick := tick
 	var last_finished := tick - 1 if _in_tick else tick # from before_tick, the current tick hasn't run yet
 	if from_tick < 0 or from_tick > last_finished:
@@ -288,6 +293,10 @@ func rollback(from_tick: int) -> bool:
 		if is_instance_valid(p) and p.has_method(&"_rollback_finished"):
 			p._rollback_finished()
 	_resimulating = false
+	if profile_enabled:
+		profile["rollback"] += Time.get_ticks_usec() - profile_started
+		profile["rollbacks"] += 1
+		profile["rollback_ticks"] += last_finished - from_tick
 	after_rollback.emit(from_tick, last_finished)
 	return true
 
@@ -333,6 +342,11 @@ func _sync_collision_world() -> void:
 			p._sync_collision()
 
 
+## Claude 2026-11-05: empties the timing record. See profile_enabled.
+func reset_profile() -> void:
+	profile = {"ticks": 0, "before_tick": 0, "input": 0, "capture": 0, "simulate": 0, "record": 0, "after_tick": 0, "rollback": 0, "rollbacks": 0, "rollback_ticks": 0}
+
+
 ## True where gameplay outcomes are decided. Offline: always. Online: the server.
 func is_authority() -> bool:
 	if not is_inside_tree() or multiplayer == null or multiplayer.multiplayer_peer == null:
@@ -349,34 +363,52 @@ func _run_tick(dt: float) -> void:
 		_rebuild_phases()
 	tick += 1
 	_in_tick = true
+	var mark := Time.get_ticks_usec() if profile_enabled else 0
 	before_tick.emit(dt, tick)
+	mark = _profile_phase(&"before_tick", mark)
 	_in_phases = true # Claude 2026-11-04: rollback is refused from here until the phases end
 	for p in _input:
 		if not is_instance_valid(p):
 			_dirty = true
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_input(dt, tick)
+	mark = _profile_phase(&"input", mark)
 	# Claude 2026-11-04: inputs are saved here, after all of them are written and before simulate can consume them
 	for p in _capture:
 		if not is_instance_valid(p):
 			_dirty = true
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_capture_input(tick)
+	mark = _profile_phase(&"capture", mark)
 	for p in _simulate:
 		if not is_instance_valid(p):
 			_dirty = true
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_simulate(dt, tick)
+	mark = _profile_phase(&"simulate", mark)
 	for p in _record:
 		if not is_instance_valid(p):
 			_dirty = true
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_record(tick)
+	mark = _profile_phase(&"record", mark)
 	# Claude 2026-11-04: cleared before after_tick, so the finished tick counts as finished for a rollback from that signal
 	_in_phases = false
 	_in_tick = false
 	after_tick.emit(dt, tick)
+	_profile_phase(&"after_tick", mark)
+	if profile_enabled:
+		profile["ticks"] += 1
 	_removed_now.clear()
+
+
+## Claude 2026-11-05: adds the time since mark to this phase, and returns the new mark.
+func _profile_phase(phase: StringName, mark: int) -> int:
+	if not profile_enabled:
+		return 0
+	var now := Time.get_ticks_usec()
+	profile[phase] = int(profile.get(phase, 0)) + now - mark
+	return now
 
 
 ## Sorts participants and splits them by the phase methods they have. Only runs when the registry

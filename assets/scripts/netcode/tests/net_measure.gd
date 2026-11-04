@@ -47,7 +47,7 @@ const DILATION_SCENARIOS := [
 	{"label": "ramp 10 to 200 ms", "client": {"timeline": "0:5,5:5,10:100,14:100,19:5,24:5"}},
 ]
 
-var _port := 25500
+var _port := NetRun.first_port()
 var _totals: Dictionary = {} # label -> {"own": cm, "worst": cm, "jump_per_second": cm, "corrections": per s, "touching": %, "runs": n}
 
 

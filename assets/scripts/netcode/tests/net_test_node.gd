@@ -22,6 +22,12 @@
 ##   --walkers=4         server: gives each client this many pawns
 ##   --ai-mode=walk      server: what the --ai pawns do
 ##   --hitch=5:200       every 5 seconds, this machine freezes for 200 ms
+##   --profile           time each tick phase, and the whole physics frame
+##   --no-log            don't record every pawn's position, which takes time and memory at large counts
+##   --measure-after=6   start measuring after this many seconds, instead of 2
+##   --repath-every=30   every walker finds a new path this often, in ticks
+##   --edit-every=180    every machine raises or digs the terrain this often, in ticks, at the same place on the same tick number
+##   --edit-until=800    stops editing after this tick, to see whether anything recovers
 ##   --timeline=0:10,4:100    latency over time, both ways on this machine, as seconds:milliseconds
 ##   --conditions-seed=7      a fixed seed for the fake network
 ##   --claim=21          shooter: claims to be seeing others this many ticks behind, whatever's true
@@ -32,6 +38,7 @@
 extends Node
 
 const PAWN_SCENE := "res://assets/scripts/netcode/tests/net_test_pawn.tscn"
+const EDITS_FROM_TICK := 300
 
 var settings: Dictionary = {}
 var session: NetworkSessionSingleton
@@ -48,6 +55,17 @@ var _shoved := false
 var _garbage_sent := false
 var _ai_spawned := false
 var _switched := false
+var _nav_tick_total_usec := 0
+var _nav_tick_count := 0
+var _nav_tick_worst_usec := 0
+var _edit_total_usec := 0
+var _edit_worst_usec := 0
+var _edits := 0
+var _physics_total_ms := 0.0
+var _physics_samples := 0
+var _physics_worst_ms := 0.0
+var _physics_over_budget := 0
+var _physics_by_second: Dictionary = {}
 var _terrain: Node3D = null
 var _next_hitch_seconds := -1.0
 var _loop_started_usec := 0
@@ -103,6 +121,7 @@ func _ready() -> void:
 	NetTestPawn.default_mode = settings.get("mode", "seek")
 	NetTestPawn.lead_seconds = float(settings.get("lead-seconds", 0))
 	NetTestPawn.ai_mode = settings.get("ai-mode", "idle")
+	NetTestPawn.repath_every = int(settings.get("repath-every", 0))
 	session.joined.connect(func() -> void:
 		result["joined"] = true
 		result["peer_when_joined"] = session.get_local_peer())
@@ -127,7 +146,13 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	if settings.has("terrain"):
+		var started := Time.get_ticks_usec()
 		Engine.get_singleton(&"NavServer").tick(delta)
+		var spent := Time.get_ticks_usec() - started
+		if measure_from_tick >= 0:
+			_nav_tick_total_usec += spent
+			_nav_tick_count += 1
+			_nav_tick_worst_usec = maxi(_nav_tick_worst_usec, spent)
 
 
 func _process(_delta: float) -> void:
@@ -153,7 +178,19 @@ func _process(_delta: float) -> void:
 		_switched = true
 		var parts := String(settings["switch"]).split(":")
 		session.set_feature(parts[1], parts[2] == "1")
-	if measure_from_tick < 0 and elapsed >= 2.0 and driver.active:
+	if settings.has("profile") and measure_from_tick >= 0:
+		var physics_ms := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		_physics_total_ms += physics_ms
+		_physics_samples += 1
+		_physics_worst_ms = maxf(_physics_worst_ms, physics_ms)
+		var second := int(elapsed)
+		if not _physics_by_second.has(second):
+			_physics_by_second[second] = [0.0, 0]
+		_physics_by_second[second][0] += physics_ms
+		_physics_by_second[second][1] += 1
+		if physics_ms > 16.667:
+			_physics_over_budget += 1
+	if measure_from_tick < 0 and elapsed >= float(settings.get("measure-after", 2.0)) and driver.active:
 		_start_measuring()
 	if not _finished and elapsed >= float(settings.get("seconds", 8)):
 		_finish()
@@ -207,6 +244,17 @@ func _on_loop_finished() -> void:
 
 
 func _on_before_tick(_dt: float, tick: int) -> void:
+	var edit_every := int(settings.get("edit-every", 0))
+	# From a fixed tick, so every machine makes the same edits and has the same ground.
+	if edit_every > 0 and _terrain and tick % edit_every == 0 and tick >= EDITS_FROM_TICK and tick <= int(settings.get("edit-until", 1000000)):
+		var pick := RandomNumberGenerator.new()
+		pick.seed = tick
+		var started := Time.get_ticks_usec()
+		_terrain.call("edit", Vector3(pick.randf_range(-40.0, 40.0), 0.0, pick.randf_range(-40.0, 40.0)), 6.0, pick.randf_range(-1.5, 1.5))
+		var spent := Time.get_ticks_usec() - started
+		_edit_total_usec += spent
+		_edit_worst_usec = maxi(_edit_worst_usec, spent)
+		_edits += 1
 	if settings.has("shove-at") and not _shoved and tick >= int(settings["shove-at"]) and session.is_server():
 		var entities := session.get_entities()
 		if not entities.is_empty():
@@ -221,6 +269,9 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 	var logging_started := Time.get_ticks_usec()
 	if tick % 15 == 0:
 		_update_summaries()
+	if settings.has("no-log"):
+		_logging_usec += Time.get_ticks_usec() - logging_started
+		return
 	for entity: NetworkEntity in session.get_entities():
 		var id_key := str(entity.entity_id)
 		var body: Node3D = entity.get_parent()
@@ -240,6 +291,14 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 
 func _start_measuring() -> void:
 	measure_from_tick = driver.tick
+	driver.profile_enabled = settings.has("profile")
+	driver.reset_profile()
+	_loop_total_usec = 0
+	_loop_count = 0
+	_loop_worst_usec = 0
+	_loops_over_budget = 0
+	NetTestPawn.path_usec = 0
+	NetTestPawn.path_calls = 0
 	result["bytes_sent_start"] = session.stats["bytes_sent"]
 	result["bytes_received_start"] = session.stats["bytes_received"]
 	result["measure_start_usec"] = Time.get_ticks_usec()
@@ -275,6 +334,27 @@ func _capture_summary() -> void:
 		result["features"][feature] = session.is_feature_on(feature)
 	result["bursts"] = session.fake.bursts_started + session.fake_in.bursts_started
 	result["hitches"] = _hitches
+	result["profile"] = driver.profile
+	result["physics_average_ms"] = _physics_total_ms / maxi(_physics_samples, 1)
+	result["physics_worst_ms"] = _physics_worst_ms
+	result["physics_over_budget"] = _physics_over_budget
+	result["physics_frames"] = _physics_samples
+	var by_second: Array = []
+	var seconds: Array = _physics_by_second.keys()
+	seconds.sort()
+	for second: int in seconds:
+		by_second.append(snappedf(float(_physics_by_second[second][0]) / maxi(int(_physics_by_second[second][1]), 1), 0.1))
+	result["physics_by_second"] = by_second
+	result["active_objects"] = Performance.get_monitor(Performance.PHYSICS_3D_ACTIVE_OBJECTS)
+	result["path_usec"] = NetTestPawn.path_usec
+	result["path_calls"] = NetTestPawn.path_calls
+	result["nav_tick_average_ms"] = _nav_tick_total_usec / 1000.0 / maxi(_nav_tick_count, 1)
+	result["nav_tick_worst_ms"] = _nav_tick_worst_usec / 1000.0
+	result["edits"] = _edits
+	result["edit_average_ms"] = _edit_total_usec / 1000.0 / maxi(_edits, 1)
+	result["edit_worst_ms"] = _edit_worst_usec / 1000.0
+	if Engine.has_singleton(&"NavServer"):
+		result["nav_stats"] = Engine.get_singleton(&"NavServer").get_stats()
 	result["dropped_ticks"] = driver.dropped_ticks
 	result["loop_average_ms"] = float(_loop_total_usec) / maxi(_loop_count, 1) / 1000.0
 	result["loop_worst_ms"] = _loop_worst_usec / 1000.0

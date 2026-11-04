@@ -16,6 +16,11 @@ static var ai_mode: String = "idle"
 static var lead_seconds: float = 0.0
 ## A shooter's claim of how far behind it sees, whatever's true. Below 0, it tells the truth.
 static var forced_claim: float = -1.0
+## Time and calls spent finding paths in this process, for profiling.
+static var path_usec: int = 0
+## Above 0, every walker throws away its path this often, in ticks, to load the nav system with queries.
+static var repath_every: int = 0
+static var path_calls: int = 0
 
 var mode: String = "idle"
 var corrections_seen := 0
@@ -86,6 +91,10 @@ func _on_network_corrected(jump: Variant) -> void:
 func _walk(tick: int) -> void:
 	distance_walked += Vector2(position.x - _last_position.x, position.z - _last_position.z).length()
 	_last_position = position
+	if repath_every > 0 and (tick + _key) % repath_every == 0:
+		_path = PackedVector3Array()
+		_path_index = 0
+		_next_path_tick = tick
 	if _path_index >= _path.size():
 		move_dir = Vector3.ZERO
 		if tick >= _next_path_tick:
@@ -117,7 +126,10 @@ func _find_new_path(tick: int) -> void:
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash(Vector2i(_key, paths_found + path_failures))
 	var goal := Vector3(pick.randf_range(-WALK_RADIUS, WALK_RADIUS), 0.0, pick.randf_range(-WALK_RADIUS, WALK_RADIUS))
+	var started := Time.get_ticks_usec()
 	var found: PackedVector3Array = Engine.get_singleton(&"NavServer").find_path_now(position, goal, 0)
+	path_usec += Time.get_ticks_usec() - started
+	path_calls += 1
 	if found.size() < 2:
 		path_failures += 1
 		return

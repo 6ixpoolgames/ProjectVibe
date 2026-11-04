@@ -16,7 +16,7 @@ class InputHolder extends Node:
 
 
 var _failures := 0
-var _port := 24500
+var _port := NetRun.first_port()
 var _only := ""
 
 

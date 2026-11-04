@@ -28,7 +28,7 @@ const WALKERS := 4
 const AI_PAWNS := 20
 const GOOD := [{"name": "ping20", "bench-ping": 20}, {"name": "ping50", "bench-ping": 50}, {"name": "ping100", "bench-ping": 100}, {"name": "ping150", "bench-ping": 150}, {"name": "ping200", "bench-ping": 200}]
 
-var _port := 26500
+var _port := NetRun.first_port()
 var _only := ""
 
 

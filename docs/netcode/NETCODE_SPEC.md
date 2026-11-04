@@ -533,7 +533,53 @@ The server never trusts a client:
 - **Tests need separate processes.** `NetworkTime` is a single autoload, so one process can't hold both a server clock and a client clock.
 - **New scripts need registering.** A script with a new `class_name` needs an editor open or `--headless --import` once before headless runs can see it.
 - **RigidBody props** are server-authoritative and interpolated at tier 0 (Godot can't step them on demand for replay).
-- **C++:** not needed to start. The server never replays; a client normally replays only its own pawn for a few ticks; `move_and_slide` is already C++. Candidates once profiling says so: packet encoding (quantise, bit-pack, delta), history ring buffers, hitbox rewind. They'd go into a GDExtension like navcore, behind the same interfaces.
+- **C++:** see the profile below. New code would go into a GDExtension like navcore, behind the same interfaces.
+
+### 14.1 Profile, and the plan for C++ *(measured 2026-11-05)*
+
+`netcode/tests/net_profile`: a real server with AI pawns walking nav paths on hills, one client with 4 pawns of its own at 100 ms. One computer, both processes on it, one run per count. Costs grow in a straight line with pawn count from 25 to 400 pawns.
+
+**Server, microseconds per pawn per tick.** All of it has to fit in 16.7 ms at 60 ticks/s.
+
+| Part | Godot physics | Jolt | What it is |
+|---|---|---|---|
+| Simulate | 122 | 37 | Almost all `move_and_slide`, already C++. Alone in open ground, the script around it is about 2 µs |
+| Physics engine's own step, and the rest of the frame | 63 | 21 | Already C++ |
+| Save input | 17 | 16 | GDScript. **The server doesn't need this:** it never rolls back |
+| Save state | 13 | 14 | GDScript. The rounding is needed; the history isn't, on a server |
+| Build snapshots | 9 | 9 | GDScript |
+| Input and nav paths | 4 | 3 | Mostly GDScript |
+| **Total** | **about 232** | **about 105** | |
+| **Pawns that fit in 16.7 ms** | **about 70** | **about 160** | |
+
+So **about 60% of the server's time on Jolt is already C++**, and about 40% is GDScript. Porting all the GDScript to C++ can't save more than that 40%.
+
+**Client, for each remote pawn, per tick:** about 14 µs decoding snapshots and 11 µs placing it, about 25 µs in all, nearly all GDScript, and the same on both engines. Correcting your own pawn costs about 59 µs per pawn per replayed tick on Jolt and 150 on Godot's physics, so 2.4 ms per correction for 4 pawns at 100 ms. Client rows at 200 pawns and up are unreliable, because the overloaded server on the same computer makes replays much longer.
+
+**One pawn, one call at a time, on Jolt:** `move_and_slide` 12 µs in open ground (105 on Godot's physics). Save input 14, save state 9, encode 8, decode 8, place a remote pawn 8, rewind 6, floor refresh 9, collision sync 2.
+
+**Navigation isn't a bottleneck.** With 104 pawns, on Jolt:
+- Paths average 14 to 23 µs each, even at 9,000 in a run. In one-at-a-time timing, a 91 m path takes 8 µs, and one with no route takes under 1 µs.
+- The nav tick takes 0.01 ms per frame. Tile rebuilds take about 2.7 ms on worker threads, with under 0.1 ms on the main thread to commit them.
+- Prediction isn't affected by how often pawns path: walkers send plain directions.
+
+**Terrain edits are where systems interact:**
+- An edit takes about 8.5 ms on the main thread, in the test terrain's GDScript: heights, mesh and collision.
+- The physics frame runs up to about 10 ms slower for a second or two after each edit, and recovers fully when edits stop. Cause not pinned down.
+- **Pawns can fall through the world:** raising the ground above a pawn leaves it under a one-sided surface. Up to 6 fell in a run, and there's nothing to catch them.
+- These tests apply edits on every machine by tick number. Real edits have to be sent over the network, and that isn't built.
+
+**The plan, in order:**
+
+| Step | What | Expected gain | Certainty |
+|---|---|---|---|
+| 1 | **Jolt** as the project's physics engine | About 2.2 times the pawns, and all tests already pass on it | Measured |
+| 2 | **Server keeps no input or state history** | Up to about 16 µs of 105, plus some of the 14 | Estimate |
+| 3 | **C++ for the data path:** state rounding and history, packet encoding and decoding, placing remote pawns | Server from about 160 pawns to perhaps 230. Client cost per remote pawn perhaps a fifth | Estimate, assuming C++ runs these 5 to 10 times faster; worth testing on one piece first |
+| 4 | **Delta compression and relevancy** | About 0.9 KB/s per pawn per client today. Needed well before any swarm | Bandwidth measured, savings not |
+| 5 | **Swarms: crowd units with no `CharacterBody3D`** (nav spec) | 10,000 pawns at today's engine cost alone would take about 580 ms per tick, so C++ on its own can't do it. Needs bulk movement, and steps 3 and 4 | Arithmetic from measurements |
+
+**C++ on principle:** the data path in step 3 is a good fit anyway: plain data, tight loops, no engine calls. Gameplay logic such as abilities and the pawn's steering stays in GDScript, since the script around `move_and_slide` costs very little, and modders and designers need to read and change it.
 
 ---
 
@@ -663,10 +709,12 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | 9 | **Vocabulary in docs.** Code now uses standard names. These docs still often say "replay" for resimulation | Tidy as sections get rewritten |
 | 10 | **Lag compensation once per attack.** Section 9.1 wants one rewind per tick for all attacks. Tier 0 rewinds per attack | Costs more only if many fire on one tick |
 | 11 | **Not tested:** real internet connections, more than about 50 pawns, moving platforms, or playing by hand | |
-| 12 | **Server cost.** 44 pawns take 8.8 ms of a 16.7 ms frame on Godot's physics, or 5.7 ms on Jolt: all of the tick work, in GDScript, not yet broken down by part. At that rate 60 ticks/s runs out at somewhere around 85 to 130 pawns, far short of a swarm | Profile first. Section 14 lists candidates for C++ |
+| 12 | **Server cost.** About 70 pawns fit on Godot's physics and 160 on Jolt | Profiled, with a plan: section 14.1 |
 | 13 | **No crowd control.** Pawns follow paths and physically bump, with no avoidance. `CrowdSystem` is planned in the nav spec, not built. It would normally run on the server, and a predicted pawn can't predict it, which adds to the mismatch | Wanted eventually |
 | 14 | **Bandwidth at scale.** 44 pawns take about 44 KB/s down per client and 200 KB/s up from the server, and each pawn's input is its own packet | Delta compression and relevancy (section 16); bundle a client's inputs |
 | 15 | **Who paths a player's pawn?** The stress test has clients path their own walkers and send directions, to test prediction. Whether a click sends a target for the server to path is part of the intent question in the pawn spec | Owner is thinking about the pawn architecture |
+| 17 | **Pawns can fall through the world** when ground is raised above them, and nothing catches them. Needs a rule in the motor or terrain, and a safety net for anything falling forever | With the motor; found in section 14.1 |
+| 18 | **Terrain edits aren't sent over the network.** The tests apply them everywhere by tick number | With the real terrain system |
 | 16 | **Occasional stalls of several seconds on one client.** A healthy client sometimes runs about 10% fewer frames in a run, with late drawing or lost inputs. Probably the one test machine being overloaded, since nothing about that client stands out. Not confirmed | Check on a machine that isn't running 7 processes |
 
 ---

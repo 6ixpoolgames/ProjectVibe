@@ -8,10 +8,16 @@ const NODE_SCENE := "res://assets/scripts/netcode/tests/net_test_node.tscn"
 const EXTRA_SECONDS := 15.0
 
 
+## A range of ports for this run of a test, so two runs at once can't connect to each other. Each test adds to this as it goes.
+static func first_port() -> int:
+	return 24500 + (OS.get_process_id() % 400) * 50
+
+
 ## Starts every machine in machines ({name: {setting: value}}), waits for them all to finish, and returns {name: result}.
 ## A machine that didn't finish in time is stopped, and has "timed_out" in its result. owner is any node in the tree.
 static func run(owner: Node, run_name: String, machines: Dictionary, port: int) -> Dictionary:
-	var folder := ProjectSettings.globalize_path("user://net_test/%s" % run_name)
+	# Claude 2026-11-05: each run of a test keeps its own folder, because two copies of the project share one user data folder.
+	var folder := ProjectSettings.globalize_path("user://net_test/%d/%s" % [OS.get_process_id(), run_name])
 	DirAccess.make_dir_recursive_absolute(folder)
 	var pids: Dictionary = {}
 	var outs: Dictionary = {}

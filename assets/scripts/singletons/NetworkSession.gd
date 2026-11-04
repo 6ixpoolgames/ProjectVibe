@@ -819,6 +819,8 @@ func _on_despawn(peer: int, bytes: PackedByteArray) -> void:
 func _on_before_tick(_dt: float, tick: int) -> void:
 	if _mode == Mode.OFFLINE:
 		return
+	var profiling: bool = _driver.profile_enabled
+	var mark := Time.get_ticks_usec() if profiling else 0
 	var waiting := _inbox
 	_inbox = []
 	_inbox_counts.clear()
@@ -828,16 +830,35 @@ func _on_before_tick(_dt: float, tick: int) -> void:
 			_on_input(item[0], bytes, tick)
 		else:
 			_on_snapshot(item[0], bytes)
+	if profiling:
+		mark = _profile_part(&"flush", mark)
 	if _mode == Mode.CLIENT:
 		_reconcile()
+		if profiling:
+			mark = _profile_part(&"reconcile", mark)
 		_move_remote_entities()
+		if profiling:
+			_profile_part(&"remote", mark)
 
 
 func _on_after_tick(_dt: float, tick: int) -> void:
+	var profiling: bool = _driver.profile_enabled
+	var mark := Time.get_ticks_usec() if profiling else 0
 	if _mode == Mode.CLIENT:
 		_send_inputs(tick)
+		if profiling:
+			_profile_part(&"send_inputs", mark)
 	elif _mode == Mode.SERVER and tick % _snapshot_interval() == 0:
 		_send_snapshots(tick)
+		if profiling:
+			_profile_part(&"send_snapshots", mark)
+
+
+## Claude 2026-11-05: the network parts of a tick, in the driver's timing record.
+func _profile_part(part: StringName, mark: int) -> int:
+	var now := Time.get_ticks_usec()
+	_driver.profile[part] = int(_driver.profile.get(part, 0)) + now - mark
+	return now
 
 
 func _snapshot_interval() -> int:
