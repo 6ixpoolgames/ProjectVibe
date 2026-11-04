@@ -46,6 +46,8 @@ func _ready() -> void:
 	await _scenario("bench_ping", _test_bench_ping)
 	await _scenario("adaptive_interpolation", _test_adaptive_interpolation)
 	await _scenario("worst_case", _test_worst_case)
+	await _scenario("terrain", _test_terrain)
+	await _scenario("hitches", _test_hitches)
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -911,6 +913,61 @@ func _test_bench_ping(run_name: String) -> void:
 	_check(float(a["rtt_ms"]) > 110.0 and float(a["rtt_ms"]) < 165.0, "bench ping: a client sees the ping it set, from one side only")
 	_check(int(a["stats"]["resyncs"]) == 0, "bench ping: it doesn't need to jump")
 	_check(int(a["missed_inputs"]) - int(a["missed_inputs_start"]) <= 3, "bench ping: and it doesn't miss inputs")
+
+
+## A machine freezes every few seconds. Inputs lost should be about what the freeze itself costs, not seconds' worth.
+func _test_hitches(run_name: String) -> void:
+	var client_hitch := await NetRun.run(self, run_name + "_client", {
+		"server": {"role": "server", "seconds": 16, "walkers": 4},
+		"a": {"role": "client", "seconds": 15, "mode": "strafe", "latency": 25, "hitch": "3:250"},
+	}, _port)
+	_port += 1
+	var server_hitch := await NetRun.run(self, run_name + "_server", {
+		"server": {"role": "server", "seconds": 16, "walkers": 4, "hitch": "3:250"},
+		"a": {"role": "client", "seconds": 15, "mode": "strafe", "latency": 25},
+	}, _port)
+	if client_hitch["a"].has("timed_out") or server_hitch["a"].has("timed_out"):
+		_check(false, "hitches: every machine finished")
+		return
+	var a: Dictionary = client_hitch["a"]
+	var hitches := int(a["hitches"])
+	var missed := (int(a["missed_inputs"]) - int(a["missed_inputs_start"])) / 4
+	print("        client freezing 250 ms, %d times: %d inputs missed per pawn, %d jumps back" % [hitches, missed, int(a["stats"]["resyncs"])])
+	_check(hitches >= 2, "hitches: the client really froze")
+	_check(missed <= hitches * 30, "hitches: a client recovers from a freeze quickly, instead of missing inputs for seconds")
+	var bad := int(server_hitch["server"]["stats"]["bad_packets"])
+	print("        server freezing 250 ms, %d times: %d packets refused" % [int(server_hitch["server"]["hitches"]), bad])
+	_check(int(server_hitch["server"]["hitches"]) >= 2, "hitches: the server really froze")
+	_check(bad == 0, "hitches: real inputs aren't refused when they pile up during a server freeze")
+
+
+## One pawn alone on hills, walking nav paths: slopes with nothing to bump into.
+func _test_terrain(run_name: String) -> void:
+	var results := await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 26, "terrain": 1},
+		"a": {"role": "client", "seconds": 25, "terrain": 1, "mode": "walk", "bench-ping": 100},
+	}, _port)
+	var server: Dictionary = results["server"]
+	var a: Dictionary = results["a"]
+	if server.has("timed_out") or a.has("timed_out"):
+		_check(false, "terrain: every machine finished")
+		return
+	var own := NetRun.own_entity(a)
+	var error := NetRun.prediction_error(a, server, int(own["id"]))
+	var stats: Dictionary = a["stats"]
+	var climbed := _height_range(server, int(own["id"]))
+	print("        walked %.0f m on %d paths (%d failed, %d stuck), climbing through %.1f m of height" % [float(own["walked"]), int(own["paths"]), int(own["path_failures"]), int(own["stuck"]), climbed])
+	print("        own pawn on slopes against the server: average %.2f cm, worst %.2f cm over %d ticks; %d corrections, worst %.2f m" % [100.0 * error["average"], 100.0 * error["worst"], error["ticks"], int(stats["corrections"]), float(stats["correction_worst"])])
+	_check(float(own["walked"]) > 30.0 and int(own["paths"]) >= 1, "terrain: the pawn walks nav paths")
+	_check(climbed > 0.5, "terrain: and it really went up and down hills")
+	_check(error["average"] < 0.02, "terrain: prediction matches the server on slopes within 2 cm on average")
+	_check(int(stats["resyncs"]) == 0, "terrain: the clock stays settled")
+
+
+func _height_range(machine: Dictionary, entity_id: int) -> float:
+	var path: Dictionary = machine["positions"].get(str(entity_id), {})
+	var heights: Array = path.values().map(func(p: Array) -> float: return float(p[1]))
+	return 0.0 if heights.is_empty() else float(heights.max()) - float(heights.min())
 
 
 func _test_worst_case(run_name: String) -> void:

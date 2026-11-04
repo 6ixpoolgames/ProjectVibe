@@ -162,7 +162,7 @@ The server's timeline is the present. Each client runs **ahead** of it for its o
 - Inputs at least 3 ticks early through the whole of the last 5 seconds: slow down, by up to 3%.
 - Otherwise: normal speed, 1.000.
 
-The difference is deliberate: being late costs inputs, while being early only costs a little. The first version relaxed as soon as the last half second looked calm, and on Wi-Fi conditions it was worse than a fixed lead. A client more than 15 ticks from where it should be jumps back instead (4 ticks with dilation off), going by its fastest recent ping, so a jump during a spike doesn't land on an inflated lead. With no news for half a second, it runs at normal speed rather than act on an old answer. Only packets bringing new inputs count towards the timing, so duplicated or reordered packets don't look late. The 5-second check only counts once it covers the full 5 seconds.
+The difference is deliberate: being late costs inputs, while being early only costs a little. The first version relaxed as soon as the last half second looked calm, and on Wi-Fi conditions it was worse than a fixed lead. A client more than 6 ticks behind where its clock says it should be, or 15 ahead, jumps back at once (4 either way with dilation off). It's checked every frame and goes by the fastest recent ping, so a freeze recovers immediately, and a lag spike neither looks like falling behind nor makes a jump land on an inflated lead. Catching up by speed alone cost about 2 seconds of lost inputs per 250 ms freeze. With no news for half a second, it runs at normal speed rather than act on an old answer. Only packets bringing new inputs count towards the timing, so duplicated or reordered packets don't look late. The 5-second check only counts once it covers the full 5 seconds.
 
 **Measured, two clients in contact, 20 s, one run each, each client's conditions applied both ways (`net_measure --dilation`).** Bursts and spikes are random, so runs vary, and error figures can differ by half between identical runs:
 
@@ -244,7 +244,7 @@ Every property in the schema has an **encoding type**: `vector3_mm` (the default
 
 **A body replaying against one that isn't:** measured in section 6.5, with the open part in section 17, question 8.
 
-**Measured replay accuracy, flat floor and a wall, one machine:** with both rules, most paths replay with 0 mm of error, across 7 different paths tested. One path showed about 2 mm for one tick, so it isn't always zero: contact can still come out slightly differently, for reasons not fully traced. The self-test requires at most 1 cm, gone within a few ticks. Rounding helps rather than hurts: with rounding off, the same runs were clearly worse. Slopes and moving platforms are not tested yet.
+**Measured replay accuracy, flat floor and a wall, one machine:** with both rules, most paths replay with 0 mm of error, across 7 different paths tested. One path showed about 2 mm for one tick, so it isn't always zero: contact can still come out slightly differently, for reasons not fully traced. The self-test requires at most 1 cm, gone within a few ticks. Rounding helps rather than hurts: with rounding off, the same runs were clearly worse. Slopes are fine (section 16, stress test). Moving platforms are not tested yet.
 
 **Rule: authoritative state is quantised at the end of every tick, on server and client alike.** Both sides then simulate from exactly the values the wire can carry, so quantisation alone never causes a misprediction. (Quantising only when sending would make every prediction differ by a rounding error.)
 
@@ -580,6 +580,27 @@ Revised 2026-11-04 while building: clock sync moved before input packets, becaus
 14. Server projectiles (section 9.2).
 15. Delta compression (packets v1), then relevancy and priority (v2).
 
+### Stress test
+
+`netcode/tests/net_stress`: a server and up to 7 client processes on one computer, on hills with collision and nav, 44 to 52 pawns walking random nav paths for 30 s. Each client owns 4 walkers, works out their paths itself and sends directions as input. The server adds 20 AI walkers. Measured 2026-11-05 on Godot's physics, one run per row:
+
+| Row | Good clients' own error, average | Bad client's own error, average / worst | Server frame | Server sends |
+|---|---|---|---|---|
+| Within limits: 20 to 200 ms | 2.3 to 7.0 cm | | 8.8 ms | 199 KB/s |
+| One bad: plus 400 ms | 2.6 to 7.6 cm | 8 cm / 3.6 m | 10.1 ms | 265 KB/s |
+| Two bad: plus 400 ms and worst preset | 1.6 to 5.8 cm | 15 cm / 4.4 m and 55 cm / 8.6 m | 11.0 ms | 338 KB/s |
+| Client freezing 250 ms every 4 s | 0.9 to 4.5 cm | 11.6 cm / 3.1 m | 8.6 ms | 200 KB/s |
+| Server freezing 150 ms every 4 s | 2.5 to 8.0 cm | | 8.7 ms | 200 KB/s |
+
+**Reading it:**
+- **A bad connection doesn't hurt anyone else.** Good clients' numbers don't get worse as others go out of bounds, within the noise between runs. Others just see that one pawn behave badly, as designed. They pay for it only in bandwidth, and the rise in the server's load comes with the extra pawns as well.
+- **Slopes and nav work.** One pawn alone on hills, walking 155 m over 6.6 m of height, was within 0.20 cm of the server, on both physics engines. With other pawns about but none within 2 m, the average stays under 2 cm within limits. The worst cases there, up to about 2 m, are probably corrections still settling after contact.
+- **Within limits, single errors of 1 to 3 m still happen** during pawn contact (To do, section 17).
+- **Freezes recover quickly.** A client freezing 250 ms loses about 11 inputs per pawn per freeze, close to what the freeze itself costs, against about 90 before the jump-back. A server freeze costs each client a few ticks of input. No pawns fell through the world, and the server never dropped a tick.
+- **Jolt:** the within-limits row looks the same for clients, and the server frame is 5.7 ms against 8.8 ms.
+
+The first runs found two real bugs: a per-client packet limit too small for a client with 4 pawns during a server freeze, and the slow recovery from a freeze. All of this ran on one computer, so some stalls may be the computer's.
+
 ### Test bench
 
 Debug builds only. `NetTestBench` puts these on keys in `net_sample.tscn`, and the headless tests use the same code with fixed seeds, so a worst case can stay a permanent test.
@@ -610,6 +631,8 @@ A spike hits one direction at a time, so it adds its full size to the round trip
 | 9 | `time_dilation_enabled` | Fixed lead, jumping back when it drifts |
 | 0 | `adaptive_interpolation_enabled` | Interpolation delay stays at `interpolation_seconds` |
 
+Hitches are part of the tests too: a machine can be made to freeze on a schedule.
+
 The server-side ones (6 and 7) only ask the server, which only obeys a client that passed the handshake, in a debug build with `allow_debug_commands` on. Each snapshot says what the server's are, so every client's panel shows what's really in effect. Key 7 therefore affects everyone.
 
 ---
@@ -639,7 +662,12 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | 8 | **Upload size.** Inputs take 5.9 KB/s, about what section 11.3 estimated, though each command is about twice the estimated size | Could shrink with packed fields |
 | 9 | **Vocabulary in docs.** Code now uses standard names. These docs still often say "replay" for resimulation | Tidy as sections get rewritten |
 | 10 | **Lag compensation once per attack.** Section 9.1 wants one rewind per tick for all attacks. Tier 0 rewinds per attack | Costs more only if many fire on one tick |
-| 11 | **Not tested:** real internet connections, more than a few pawns, slopes, moving platforms, or playing by hand (`net_sample.tscn` has only had a headless start) | |
+| 11 | **Not tested:** real internet connections, more than about 50 pawns, moving platforms, or playing by hand | |
+| 12 | **Server cost.** 44 pawns take 8.8 ms of a 16.7 ms frame on Godot's physics, or 5.7 ms on Jolt: all of the tick work, in GDScript, not yet broken down by part. At that rate 60 ticks/s runs out at somewhere around 85 to 130 pawns, far short of a swarm | Profile first. Section 14 lists candidates for C++ |
+| 13 | **No crowd control.** Pawns follow paths and physically bump, with no avoidance. `CrowdSystem` is planned in the nav spec, not built. It would normally run on the server, and a predicted pawn can't predict it, which adds to the mismatch | Wanted eventually |
+| 14 | **Bandwidth at scale.** 44 pawns take about 44 KB/s down per client and 200 KB/s up from the server, and each pawn's input is its own packet | Delta compression and relevancy (section 16); bundle a client's inputs |
+| 15 | **Who paths a player's pawn?** The stress test has clients path their own walkers and send directions, to test prediction. Whether a click sends a target for the server to path is part of the intent question in the pawn spec | Owner is thinking about the pawn architecture |
+| 16 | **Occasional stalls of several seconds on one client.** A healthy client sometimes runs about 10% fewer frames in a run, with late drawing or lost inputs. Probably the one test machine being overloaded, since nothing about that client stands out. Not confirmed | Check on a machine that isn't running 7 processes |
 
 ---
 

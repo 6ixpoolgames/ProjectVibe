@@ -5,24 +5,44 @@
 ##   strafe   walks back and forth along Z in a straight line, a steady target
 ##   shoot    stands still and fires at the first other pawn where it's drawn, every 30 ticks
 ##   lead     the same, but aims ahead of where it's drawn, by a fixed distance. Used to check attacks behave past the rewind cap
+##   walk     picks random points and follows nav paths to them, for testing on terrain (needs NavServer)
 ##   idle     does nothing
 extends NetSamplePawn
 class_name NetTestPawn
 
 static var default_mode: String = "seek"
+## What pawns nobody owns do, on the server.
+static var ai_mode: String = "idle"
 static var lead_seconds: float = 0.0
 ## A shooter's claim of how far behind it sees, whatever's true. Below 0, it tells the truth.
 static var forced_claim: float = -1.0
 
 var mode: String = "idle"
 var corrections_seen := 0
+## Server: stretches of ticks with no input from this pawn's client, as [first, last]. For finding out when inputs go missing.
+var missing_stretches: Array = []
 var _local := false
 var _key := 0
 
+# Walking on nav paths. None of this is rolled back: it only decides inputs, and a replay uses the inputs already saved.
+const WALK_RADIUS := 45.0
+const CORNER_REACHED := 0.7
+var paths_found := 0
+var path_failures := 0
+var times_stuck := 0
+var distance_walked := 0.0
+var _path := PackedVector3Array()
+var _path_index := 0
+var _next_path_tick := 0
+var _progress_check_tick := 0
+var _progress_from := Vector3.ZERO
+var _last_position := Vector3.ZERO
+
 
 func _on_network_role(entity: NetworkEntity) -> void:
-	_local = entity.is_local
-	mode = default_mode if _local else "idle"
+	var nobody_owns := entity.role == NetworkEntity.Role.AUTHORITY and entity.owner_peer == 0
+	_local = entity.is_local or nobody_owns
+	mode = default_mode if entity.is_local else (ai_mode if nobody_owns else "idle")
 	_key = entity.entity_id
 	brain = Brain.NETWORK # the keyboard and the wander brain stay out of it
 
@@ -43,13 +63,69 @@ func _tick_input(dt: float, tick: int) -> void:
 		"shoot", "lead":
 			move_dir = Vector3.ZERO
 			_shoot(tick)
+		"walk":
+			_walk(tick)
 		_:
 			move_dir = Vector3.ZERO
+
+
+func _network_input_missing() -> void:
+	super()
+	var tick: int = _driver.tick
+	if not missing_stretches.is_empty() and int(missing_stretches[-1][1]) == tick - 1:
+		missing_stretches[-1][1] = tick
+	else:
+		missing_stretches.append([tick, tick])
 
 
 func _on_network_corrected(jump: Variant) -> void:
 	super(jump)
 	corrections_seen += 1
+
+
+func _walk(tick: int) -> void:
+	distance_walked += Vector2(position.x - _last_position.x, position.z - _last_position.z).length()
+	_last_position = position
+	if _path_index >= _path.size():
+		move_dir = Vector3.ZERO
+		if tick >= _next_path_tick:
+			_next_path_tick = tick + 30
+			_find_new_path(tick)
+		return
+	var to_corner := _path[_path_index] - position
+	to_corner.y = 0.0
+	if to_corner.length() < CORNER_REACHED:
+		_path_index += 1
+		move_dir = Vector3.ZERO
+		return
+	move_dir = to_corner.normalized()
+	wants_sprint = hash(Vector2i(tick / 120, _key)) % 4 == 0
+	# Not getting anywhere for a second: something's in the way, so it gives up on this path.
+	if tick >= _progress_check_tick:
+		var moved := Vector2(position.x - _progress_from.x, position.z - _progress_from.z).length()
+		if _progress_check_tick > 0 and moved < 1.0:
+			times_stuck += 1
+			_path = PackedVector3Array()
+			_path_index = 0
+		_progress_from = position
+		_progress_check_tick = tick + 60
+
+
+func _find_new_path(tick: int) -> void:
+	if not Engine.has_singleton(&"NavServer"):
+		return
+	var pick := RandomNumberGenerator.new()
+	pick.seed = hash(Vector2i(_key, paths_found + path_failures))
+	var goal := Vector3(pick.randf_range(-WALK_RADIUS, WALK_RADIUS), 0.0, pick.randf_range(-WALK_RADIUS, WALK_RADIUS))
+	var found: PackedVector3Array = Engine.get_singleton(&"NavServer").find_path_now(position, goal, 0)
+	if found.size() < 2:
+		path_failures += 1
+		return
+	paths_found += 1
+	_path = found
+	_path_index = 1
+	_progress_from = position
+	_progress_check_tick = tick + 60
 
 
 func _seek(tick: int) -> void:

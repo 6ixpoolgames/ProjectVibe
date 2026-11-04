@@ -18,6 +18,10 @@
 ##   --allow-debug       server: obey test switches sent by clients
 ##   --preset=worst      this machine sends and receives through a NetFakeConditions preset
 ##   --bench-ping=120    sets the round trip through NetTestBench, the same way its keys do
+##   --terrain           hills with collision and nav, instead of the flat arena. The same on every machine
+##   --walkers=4         server: gives each client this many pawns
+##   --ai-mode=walk      server: what the --ai pawns do
+##   --hitch=5:200       every 5 seconds, this machine freezes for 200 ms
 ##   --timeline=0:10,4:100    latency over time, both ways on this machine, as seconds:milliseconds
 ##   --conditions-seed=7      a fixed seed for the fake network
 ##   --claim=21          shooter: claims to be seeing others this many ticks behind, whatever's true
@@ -44,6 +48,15 @@ var _shoved := false
 var _garbage_sent := false
 var _ai_spawned := false
 var _switched := false
+var _terrain: Node3D = null
+var _next_hitch_seconds := -1.0
+var _loop_started_usec := 0
+var _logging_usec := 0
+var _loop_total_usec := 0
+var _loop_count := 0
+var _loop_worst_usec := 0
+var _loops_over_budget := 0
+var _hitches := 0
 var _summaries: Dictionary = {}          # entity id -> latest summary, kept after the entity is gone
 
 
@@ -51,7 +64,10 @@ func _ready() -> void:
 	session = get_node("/root/NetworkSession")
 	driver = get_node("/root/NetworkTime")
 	_read_settings()
-	_build_arena()
+	if settings.has("terrain"):
+		_build_terrain()
+	else:
+		_build_arena()
 	session.world_root = self
 	session.bind_address = "127.0.0.1"
 	session.register_type("pawn", load(PAWN_SCENE))
@@ -86,12 +102,17 @@ func _ready() -> void:
 	NetTestPawn.forced_claim = float(settings.get("claim", -1))
 	NetTestPawn.default_mode = settings.get("mode", "seek")
 	NetTestPawn.lead_seconds = float(settings.get("lead-seconds", 0))
-	session.joined.connect(func() -> void: result["joined"] = true)
+	NetTestPawn.ai_mode = settings.get("ai-mode", "idle")
+	session.joined.connect(func() -> void:
+		result["joined"] = true
+		result["peer_when_joined"] = session.get_local_peer())
 	session.refused.connect(func(reason: String) -> void: result["refused"] = reason)
 	session.disconnected.connect(func() -> void: result["disconnected"] = true)
 	session.entity_spawned.connect(_on_entity_spawned)
 	session.entity_despawned.connect(func(entity_id: int) -> void: result["despawned"].append(entity_id))
 	session.player_connected.connect(_on_player_connected)
+	driver.before_tick_loop.connect(func() -> void: _loop_started_usec = Time.get_ticks_usec())
+	driver.after_tick_loop.connect(_on_loop_finished)
 	driver.after_tick.connect(_on_after_tick)
 	driver.before_tick.connect(_on_before_tick)
 	started_usec = Time.get_ticks_usec()
@@ -104,8 +125,21 @@ func _ready() -> void:
 		_join()
 
 
+func _physics_process(delta: float) -> void:
+	if settings.has("terrain"):
+		Engine.get_singleton(&"NavServer").tick(delta)
+
+
 func _process(_delta: float) -> void:
 	var elapsed := (Time.get_ticks_usec() - started_usec) / 1000000.0
+	if settings.has("hitch") and elapsed >= 3.0:
+		var parts := String(settings["hitch"]).split(":")
+		if _next_hitch_seconds < 0.0:
+			_next_hitch_seconds = elapsed + float(parts[0])
+		elif elapsed >= _next_hitch_seconds:
+			_next_hitch_seconds = elapsed + float(parts[0])
+			_hitches += 1
+			OS.delay_msec(int(parts[1]))
 	if settings.has("delay") and not result.has("join_started") and elapsed >= float(settings["delay"]):
 		_join()
 	if settings.has("leave-after") and not _left and elapsed >= float(settings["leave-after"]):
@@ -137,13 +171,39 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 
 
 func _on_player_connected(peer: int) -> void:
-	var slots := [Vector3(-3, 0.1, 0), Vector3(3, 0.1, 0), Vector3(0, 0.1, -3), Vector3(0, 0.1, 3)]
-	session.spawn("pawn", peer, slots[_next_slot % slots.size()])
-	_next_slot += 1
+	for i in int(settings.get("walkers", 1)):
+		session.spawn("pawn", peer, _next_spawn_point())
 	if not _ai_spawned:
 		_ai_spawned = true
 		for i in int(settings.get("ai", 0)):
-			session.spawn("pawn", 0, Vector3(-5 + i, 0.1, 5))
+			session.spawn("pawn", 0, _next_spawn_point())
+
+
+## Spread out in a growing ring around the middle, starting with the four original spots.
+func _next_spawn_point() -> Vector3:
+	var slots := [Vector3(-3, 0.1, 0), Vector3(3, 0.1, 0), Vector3(0, 0.1, -3), Vector3(0, 0.1, 3)]
+	var index := _next_slot
+	_next_slot += 1
+	if index < slots.size():
+		return slots[index]
+	var angle := index * 2.4
+	var radius := 3.0 + 0.7 * sqrt(float(index)) * 2.0
+	var at := Vector3(cos(angle) * radius, 0.3, sin(angle) * radius)
+	# Standing on whatever's there, including the top of the test wall. Inside a wall, a pawn falls straight through the terrain.
+	if _terrain:
+		at.y = float(_terrain.call("height_at", at.x, at.z)) + 0.3
+	return at
+
+
+func _on_loop_finished() -> void:
+	# This test's own logging isn't part of what's being measured.
+	var spent := Time.get_ticks_usec() - _loop_started_usec - _logging_usec
+	_logging_usec = 0
+	_loop_total_usec += spent
+	_loop_count += 1
+	_loop_worst_usec = maxi(_loop_worst_usec, spent)
+	if spent > 16667:
+		_loops_over_budget += 1
 
 
 func _on_before_tick(_dt: float, tick: int) -> void:
@@ -158,6 +218,7 @@ func _on_before_tick(_dt: float, tick: int) -> void:
 
 ## Writes what each pawn did on this tick, the first time this tick happens.
 func _on_after_tick(_dt: float, tick: int) -> void:
+	var logging_started := Time.get_ticks_usec()
 	if tick % 15 == 0:
 		_update_summaries()
 	for entity: NetworkEntity in session.get_entities():
@@ -174,6 +235,7 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 				log_positions[id_key] = {}
 			if not log_positions[id_key].has(str(tick)):
 				log_positions[id_key][str(tick)] = [at.x, at.y, at.z]
+	_logging_usec += Time.get_ticks_usec() - logging_started
 
 
 func _start_measuring() -> void:
@@ -201,7 +263,8 @@ func _capture_summary() -> void:
 	result["tick"] = driver.tick
 	result["rtt_ms"] = session.get_rtt_ms()
 	result["lead_ticks"] = session.get_lead_ticks()
-	result["peer"] = session.get_local_peer()
+	# The session may already have ended by now, if the server quit first.
+	result["peer"] = result.get("peer_when_joined", session.get_local_peer())
 	result["measure_end_usec"] = Time.get_ticks_usec()
 	result["measure_from_tick"] = measure_from_tick
 	result["fake_lost"] = session.fake.packets_lost
@@ -211,6 +274,12 @@ func _capture_summary() -> void:
 	for feature: String in NetworkSessionSingleton.FEATURES:
 		result["features"][feature] = session.is_feature_on(feature)
 	result["bursts"] = session.fake.bursts_started + session.fake_in.bursts_started
+	result["hitches"] = _hitches
+	result["dropped_ticks"] = driver.dropped_ticks
+	result["loop_average_ms"] = float(_loop_total_usec) / maxi(_loop_count, 1) / 1000.0
+	result["loop_worst_ms"] = _loop_worst_usec / 1000.0
+	result["loops_over_budget"] = _loops_over_budget
+	result["loop_count"] = _loop_count
 	result["spikes"] = session.fake.spikes_started + session.fake_in.spikes_started
 	_update_summaries()
 	var entities: Array = []
@@ -224,9 +293,11 @@ func _update_summaries() -> void:
 	for entity: NetworkEntity in session.get_entities():
 		var body: Node3D = entity.get_parent()
 		_summaries[entity.entity_id] = {
-			"id": entity.entity_id, "owner": entity.owner_peer, "role": entity.role, "x": body.position.x, "z": body.position.z,
+			"id": entity.entity_id, "owner": entity.owner_peer, "role": entity.role, "x": body.position.x, "y": body.position.y, "z": body.position.z,
 			"health": body.health, "shots": body.shots_fired, "hits": body.hits_landed, "missed_inputs": entity.missed_inputs,
 			"last_input_tick": entity.last_input_tick, "offset": body._correction_offset.length(), "corrections_seen": body.corrections_seen,
+			"paths": body.paths_found, "path_failures": body.path_failures, "stuck": body.times_stuck, "walked": body.distance_walked,
+			"missing_stretches": body.missing_stretches,
 		}
 
 
@@ -281,6 +352,17 @@ func _read_settings() -> void:
 		var cleaned := argument.trim_prefix("--")
 		var parts := cleaned.split("=", true, 1)
 		settings[parts[0]] = parts[1] if parts.size() > 1 else "true"
+
+
+func _build_terrain() -> void:
+	var nav: Object = Engine.get_singleton(&"NavServer")
+	nav.configure({"worker_threads": 2})
+	nav.add_interest(Vector3.ZERO, 130.0, 160.0, 1)
+	var terrain: Node3D = load("res://assets/scripts/navigation/nav_test_terrain.gd").new()
+	terrain.set("nav_hooks", NavHooks.new())
+	terrain.set("build_collision", true)
+	add_child(terrain)
+	_terrain = terrain
 
 
 func _build_arena() -> void:

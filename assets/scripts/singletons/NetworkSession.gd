@@ -22,8 +22,9 @@
 ## Time dilation (netcode spec section 4.2, Claude 2026-11-04): the server reports how early each client's inputs have been
 ## arriving. A client cutting it too fine speeds up at once, going by the last half second. It only slows down again if the
 ## last 5 seconds have all been safe, so a rough connection keeps the lead it has shown it needs. Its lead settles on the
-## smallest that gets inputs there in time, whatever the connection is doing. Only clients dilate. Past
-## resync_threshold_ticks from where it should be, a client jumps back instead, after a hitch say.
+## smallest that gets inputs there in time, whatever the connection is doing. Only clients dilate. A
+## client well behind where its clock says it should be, after a freeze say, jumps straight back instead of slowly catching up,
+## because every tick behind is another input arriving too late.
 ##
 ## Test switches (Claude 2026-11-04): each feature in FEATURES can be turned off with set_feature, even while running.
 ## NetTestBench puts them on keys.
@@ -75,6 +76,8 @@ const MARGIN_LONG_WINDOW := 300
 ## this only covers things too big for that.
 @export var resync_threshold_ticks: int = 4
 @export var resync_threshold_with_dilation_ticks: int = 15
+## With dilation on, being behind is treated more urgently than being ahead: a tick behind is an input lost.
+@export var resync_behind_with_dilation_ticks: int = 6
 @export_group("Time dilation")
 ## Inputs should arrive at least this many ticks early. Below this in the last half second, the client speeds up.
 @export var dilation_margin_low_ticks: int = 1
@@ -136,8 +139,9 @@ const HANDSHAKE_TIMEOUT := 5.0
 const SAMPLES_BEFORE_TICKING := 6
 const PING_INTERVAL_STARTING := 0.05
 const PING_INTERVAL := 0.25
-## Most packets kept from one peer between ticks. A normal client sends one or two; the limit stops one client crowding out others.
-const MAX_INBOX_PER_PEER := 32
+## Most packets kept from one peer between ticks, so one client can't crowd out others. A client sends one per pawn per tick, and
+## they pile up while the server is frozen, so this has room for 4 pawns through a freeze of half a second.
+const MAX_INBOX_PER_PEER := 128
 ## Most inputs one packet may carry. Fixed, because input_redundancy is a setting each machine has its own copy of.
 const MAX_INPUTS_PER_PACKET := 16
 
@@ -194,6 +198,8 @@ func _process(_delta: float) -> void:
 
 func _physics_process(_delta: float) -> void:
 	_pump()
+	if _mode == Mode.CLIENT and _clock_ready:
+		_jump_back_if_drifted()
 
 
 func _pump() -> void:
@@ -757,9 +763,19 @@ func _on_pong(peer: int, bytes: PackedByteArray) -> void:
 			_driver.set_tick(_target_tick(now))
 			_driver.active = true
 			joined.emit()
-	elif absf(_driver.tick - _target_tick(now)) > (resync_threshold_with_dilation_ticks if time_dilation_enabled else resync_threshold_ticks):
+
+
+## Claude 2026-11-05: checked every frame rather than when a ping returns, so a client that froze is back on time at once. The clock
+## goes by the fastest recent ping, so a lag spike doesn't look like falling behind.
+func _jump_back_if_drifted() -> void:
+	var target := _target_tick(Time.get_ticks_usec())
+	var behind: int = target - _driver.tick
+	var too_far := absi(behind) > resync_threshold_ticks
+	if time_dilation_enabled:
+		too_far = behind > resync_behind_with_dilation_ticks or behind < -resync_threshold_with_dilation_ticks
+	if too_far:
 		stats["resyncs"] += 1
-		_driver.set_tick(_target_tick(now))
+		_driver.set_tick(target)
 
 
 func _target_tick(now_usec: int) -> int:
@@ -854,7 +870,9 @@ func _send_inputs(tick: int) -> void:
 
 ## Server: stores a client's inputs for the ticks they belong to. Only the owner may send them, and they're cleaned first.
 func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
-	if _mode != Mode.SERVER or not _peers.has(peer) or not _peers[peer]["welcomed"]:
+	if not _peers.has(peer):
+		return # its last packets, still waiting here when it left
+	if _mode != Mode.SERVER or not _peers[peer]["welcomed"]:
 		stats["bad_packets"] += 1
 		return
 	var buffer := NetPackets.reader(bytes)

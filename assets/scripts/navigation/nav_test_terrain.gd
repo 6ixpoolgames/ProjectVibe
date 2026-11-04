@@ -15,10 +15,13 @@ extends Node3D
 @export_range(0.001, 0.5, 0.001) var frequency := 0.015
 @export_range(1, 8) var octaves := 4
 @export var build_test_wall := true
+## Claude 2026-11-05: also make the terrain solid, so bodies can walk on it. Off for the nav demo, which only needs paths.
+@export var build_collision := false
 
 var _noise := FastNoiseLite.new()
 var _heights := {} # Vector2i -> PackedFloat32Array, (quads_per_chunk + 1)^2 samples
 var _mesh_nodes := {} # Vector2i -> MeshInstance3D
+var _collision_shapes := {} # Vector2i -> ConcavePolygonShape3D
 var _nav_layer := -1
 var _material := StandardMaterial3D.new()
 
@@ -172,3 +175,39 @@ func _rebuild_mesh(key: Vector2i) -> void:
 		add_child(mi)
 		_mesh_nodes[key] = mi
 	mi.mesh = st.commit()
+	if build_collision:
+		_rebuild_collision(key)
+
+
+## Claude 2026-11-05: built from the heights rather than the mesh, because a headless run keeps no mesh data to read back.
+## Same triangles and winding as the mesh above, so what you walk on is what you see and what nav sees.
+func _rebuild_collision(key: Vector2i) -> void:
+	var n := samples_per_edge()
+	var h: PackedFloat32Array = _heights[key]
+	var origin := Vector2(key.x * chunk_world(), key.y * chunk_world())
+	var faces := PackedVector3Array()
+	faces.resize((n - 1) * (n - 1) * 6)
+	var at := 0
+	for z in n - 1:
+		for x in n - 1:
+			var a := Vector3(origin.x + x * spacing, h[x + z * n], origin.y + z * spacing)
+			var b := Vector3(origin.x + (x + 1) * spacing, h[x + 1 + z * n], origin.y + z * spacing)
+			var c := Vector3(origin.x + x * spacing, h[x + (z + 1) * n], origin.y + (z + 1) * spacing)
+			var d := Vector3(origin.x + (x + 1) * spacing, h[x + 1 + (z + 1) * n], origin.y + (z + 1) * spacing)
+			faces[at] = a
+			faces[at + 1] = b
+			faces[at + 2] = c
+			faces[at + 3] = b
+			faces[at + 4] = d
+			faces[at + 5] = c
+			at += 6
+	var shape: ConcavePolygonShape3D = _collision_shapes.get(key)
+	if shape == null:
+		shape = ConcavePolygonShape3D.new()
+		_collision_shapes[key] = shape
+		var body := StaticBody3D.new()
+		var holder := CollisionShape3D.new()
+		holder.shape = shape
+		body.add_child(holder)
+		add_child(body)
+	shape.set_faces(faces)

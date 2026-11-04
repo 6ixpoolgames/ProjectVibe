@@ -129,6 +129,15 @@ static func own_entity(client: Dictionary) -> Dictionary:
 	return {}
 
 
+## Every entity a client owns, from its summary.
+static func own_entities(client: Dictionary) -> Array:
+	var owned: Array = []
+	for entity: Dictionary in client.get("summaries", []):
+		if int(entity.get("owner", -1)) == int(client.get("peer", -2)):
+			owned.append(entity)
+	return owned
+
+
 ## What a machine last knew about an entity, even if it's gone by the end. Clients quit before the server does.
 static func summary_of(machine: Dictionary, entity_id: int) -> Dictionary:
 	for entity: Dictionary in machine.get("summaries", []):
