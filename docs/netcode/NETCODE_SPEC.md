@@ -2,7 +2,7 @@
 
 # Netcode Spec (draft 1)
 
-**Status:** design draft, **not locked**. Written from the design discussion of 2026-11-04. **Built:** the tick driver, rollback state, and stage v0 multiplayer (section 16). Code: `assets/scripts/singletons/NetworkTime.gd` and `NetworkSession.gd`, and `assets/scripts/netcode/`. Tests: `singletons/tests/tick_driver_selftest`, `netcode/tests/tick_state_selftest`, `netcode/tests/net_selftest`. Playable: `net_sample.tscn`. Dynamic dilation, projectiles and packet stages v1 and v2 are still proposals.
+**Status:** design draft, **not locked**. Written from the design discussion of 2026-11-04. **Built:** the tick driver, rollback state, stage v0 multiplayer, dynamic time dilation and the test bench (section 16). Code: `assets/scripts/singletons/NetworkTime.gd` and `NetworkSession.gd`, and `assets/scripts/netcode/`. Tests: `singletons/tests/tick_driver_selftest`, `netcode/tests/tick_state_selftest`, `netcode/tests/net_selftest`. Playable: `net_sample.tscn`. Projectiles and packet stages v1 and v2 are still proposals.
 **Scope:** everything engine-wide about multiplayer: the tick driver every simulated entity runs on, how state is saved and rolled back, prediction, interpolation, lag compensation, and what goes over the wire. The pawn-specific parts (abilities, input buffer, intent) live in `docs/pawn/PAWN_ARCHITECTURE.md`, which follows the rules here.
 **Approach:** our own implementation, **modelled on the netfox addon's concepts** (a network clock, rollback driven by declared state and input properties, tick interpolation for visuals). We study netfox; we don't depend on it. Unreal and Overwatch are studied the same way: we copy principles, never code.
 **Numbers** are ballpark estimates, not measurements.
@@ -157,7 +157,29 @@ The server's timeline is the present. Each client runs **ahead** of it for its o
 - **v1 (dynamic, the goal):** continuous RTT and jitter measurement (ping/pong a few times a second, smoothed), server feedback, gentle tick-rate adjustment. v1 is v0 plus a feedback loop, so switching is cheap.
 - The **interpolation delay adapts the same way**: more jitter, draw a little further in the past.
 
-**Built so far:** stage v0, with one change. The lead is set when the client starts ticking, and if it drifts more than 4 ticks away, after a hitch say, the client jumps back. Otherwise a client that fell behind would have all its inputs arrive late for good. `NetworkTime.tick_factor` exists and the tick loop respects it, but nothing sets it yet: dynamic dilation is the next step (section 16).
+**Built 2026-11-04: dynamic dilation**, on by default, `time_dilation_enabled`. Rather than the formula above, it steers directly by what matters: the server reports how many ticks early each client's inputs are arriving, at worst, over the last half second and the last 5.
+- Inputs arriving less than 1 tick early in the last half second: speed up, by up to 5%, at once.
+- Inputs at least 3 ticks early through the whole of the last 5 seconds: slow down, by up to 3%.
+- Otherwise: normal speed, 1.000.
+
+The difference is deliberate: being late costs inputs, while being early only costs a little. The first version relaxed as soon as the last half second looked calm, and on Wi-Fi conditions it was worse than a fixed lead. A client more than 15 ticks from where it should be jumps back instead (4 ticks with dilation off). With no news for half a second, it runs at normal speed rather than act on an old answer.
+
+**Measured, two clients in contact, 20 s, each client's conditions applied both ways (`net_measure --dilation`).** Bursts and spikes are random, so runs vary, and rows on the same connection can differ by more than half on error alone:
+
+| Conditions | Lead | Missed inputs | Resyncs | Inputs early, average / lowest | Speed | Own error, average / worst | Jump per s |
+|---|---|---|---|---|---|---|---|
+| Steady 100 ms | fixed | 0 | 0 | 2.0 / 1 | 1.000 | 2.2 / 90 cm | 25 cm |
+| Steady 100 ms | dilation | 0 | 0 | 2.0 / 2 | 1.000 | 3.2 / 93 cm | 36 cm |
+| Wi-Fi preset | fixed | 27 | 0 | 2.2 / -2 | 1.000 | 3.5 / 110 cm | 41 cm |
+| Wi-Fi preset | dilation | 16 | 0 | 2.3 / -1 | 0.98–1.04 | 5.3 / 97 cm | 54 cm |
+| Mobile preset | fixed | 174 | 0 | 0.5 / -11 | 1.000 | 9.7 / 191 cm | 80 cm |
+| Mobile preset | dilation | 0 | 0 | 3.6 / -2 | 1.00–1.05 | 4.7 / 256 cm | 30 cm |
+| Worst preset | fixed | 1281 | 3 | -5.0 / -20 | 1.000 | 118 / 659 cm | 470 cm |
+| Worst preset | dilation | 867 | 1 | 0.9 / -19 | 0.97–1.05 | 102 / 865 cm | 348 cm |
+| Ramp, 10 to 200 ms and back | fixed | 368 | 4 | 2.5 / -3 | 1.000 | 9.5 / 121 cm | 102 cm |
+| Ramp, 10 to 200 ms and back | dilation | 2 | 0 | 2.3 / -1 | 0.97–1.04 | 4.7 / 223 cm | 44 cm |
+
+Dilation clearly helps when conditions change: the ramp goes from 368 missed inputs to 2, and mobile from 174 to 0. It leaves a steady connection alone. The worst preset stays bad either way, with a third of inputs missed and errors over a metre, because 1-second bursts lose everything regardless of timing. That one is a stress test, not a target. When ping drops, inputs arrive about 3 ticks early with dilation against 4–6 with a fixed lead, and the gap closes slowly because it waits for 5 safe seconds. Rendering to video makes a client look far worse, with resyncs and missed inputs, because movie mode ties its clock to how fast it can render rather than real time.
 
 **Frames with more than one tick** *(found and fixed 2026-11-04)*. A speed-up makes some frames run two ticks, and catching up after a hitch or a `tick_rate` above the physics rate do the same, while the server runs one per frame. A moved body only reaches the collision world at the next physics step, so the second tick collided with positions from before the first. Two pawns touching diverged from a one-tick-per-frame run by 0.8 cm with two ticks every 50 frames (about a 2% speed-up), and 20.9 cm with two ticks every 10 frames. The driver now calls each participant's `_sync_collision()` between ticks in such a frame, and both cases come out at 0.000 m. Frames with one tick pay nothing, and frames with no tick needed no fix. Only entities with a `TickStateComponent` get this. Tested on Godot's physics and on Jolt, on flat ground.
 
@@ -396,6 +418,7 @@ Detailed in the pawn spec; the netcode rules are:
 - An attack command says "fired at tick T, seeing others at interpolation tick T − d".
 - The server moves the other hitboxes to T − d, runs the ray or melee shape, restores them.
 - **The rewind is capped** (default 350 ms, changed from 200 on 2026-11-04). A shooter sees others about a round trip, plus margin, plus interpolation behind its own tick, which is about 217 ms at 100 ms ping and 350 ms at 200 ms ping. A 200 ms cap would have cut off normal players. High-ping players can't hit people long since behind cover; past the cap, they have to lead their shots. Per-game setting.
+- **The claim is limited** *(added 2026-11-04)*. A client can't be drawing anything newer than the snapshot it last acknowledged in its inputs, or further behind that than `max_interpolation_seconds`, so the server caps what it claims to that. This stops a low-ping client claiming the full cap: at low ping it gets about 200 ms plus its real delay, instead of 350 ms. It doesn't stop everything: a client can fake old acknowledgements, which looks the same as really having high ping, the classic lag-switch problem. Favoring the shooter itself is a known, accepted trade-off.
 - **Built 2026-11-04** (`LagCompensation`). Measured with a target strafing at 5 m/s and the shooter aiming where it's drawn: at 100 ms ping, 22 of 23 shots hit, against 0 of 23 with it off; at 400 ms ping, past the cap, 0 of 22. Same on both physics engines.
 - Rewinding is done **once per tick for all of that tick's attacks**, not per bullet.
 
@@ -418,7 +441,7 @@ Rollback (section 6) and hit detection are separate: rollback fixes **your own p
 
 ## 10. Remote entities and UI
 
-- **Interpolation:** each remote entity keeps ~4 snapshots and is drawn at interpolation time, blended between the two snapshots around it.
+- **Interpolation:** each remote entity keeps ~4 snapshots and is drawn at interpolation time, blended between the two snapshots around it. *(Built 2026-11-04)* The delay adapts: more jitter draws further back, from `interpolation_seconds` up to `max_interpolation_seconds` (0.1 to 0.2 s), so there are still two snapshots to blend.
 - **Extrapolation:** if snapshots stop, continue along the last velocity for up to ~250 ms, then hold.
 - **During your replay:** entities that aren't predicted stay where they're drawn. The optional `follows_during_rollback` is in section 6.5.
 - **Built 2026-11-04** with one setting for both: `extrapolation_cap_seconds`, 0.2 s, rather than a separate ~250 ms.
@@ -456,7 +479,7 @@ Damage, deaths and one entity affecting another aren't handshakes. A client neve
 | Packet | Direction, rate, channel | Contents |
 |---|---|---|
 | **Input** | client → server, every tick, unreliable | last snapshot received (ack); first tick number; the last ~4–6 input commands (redundancy against loss) |
-| **Snapshot** | server → client, 30 Hz default, unreliable | server tick; per entity: id, state, sync fields, and input if it's predicted by others. **Planned, not in v0:** your last processed input tick and input timing feedback (early/late, missed), which dynamic time dilation needs |
+| **Snapshot** | server → client, 30 Hz default, unreliable | server tick; for this client: how early its inputs have been arriving, at worst, over half a second and over 5, and how many were missed; per entity: id, state, sync fields, and input if it's predicted by others |
 | **Event** | reliable, as needed | spawn (id, type, initial state), despawn, death, phase events that must arrive |
 | **Time sync** | a few per second | ping/pong with timestamps |
 
@@ -542,10 +565,45 @@ Revised 2026-11-04 while building: clock sync moved before input packets, becaus
 10. Lag compensation for hitscan and melee (`LagCompensation`).
 11. Measured at set pings.
 
+**Built 2026-11-04, after v0:**
+12. Test bench: feature switches and a worst-case fake network, below.
+13. Dynamic time dilation (section 4.2) and adaptive interpolation (section 10).
+
 **Next:**
-12. Dynamic time dilation (stage v1 of section 4.2).
-13. Server projectiles (section 9.2).
-14. Delta compression (packets v1), then relevancy and priority (v2).
+14. Server projectiles (section 9.2).
+15. Delta compression (packets v1), then relevancy and priority (v2).
+
+### Test bench
+
+Debug builds only. `NetTestBench` puts these on keys in `net_sample.tscn`, and the headless tests use the same code with fixed seeds, so a worst case can stay a permanent test.
+
+**Fake network** (`NetFakeConditions`). `NetworkSession.fake` handles sending and `fake_in` receiving, so one window sets its whole ping. Latency, jitter, jitter that wanders over time, random loss, bursts of total loss, lag spikes, reordering and duplicates can all change while running. Reliable packets are never lost. Presets, as round trips:
+
+| Preset | Ping | Jitter | Wander | Loss | Spikes | Bursts |
+|---|---|---|---|---|---|---|
+| good | 30 ms | 2 ms | | | | |
+| wifi | 60 ms | 20 ms | 50% | 1% | 100 ms, 1 per 20 s | 0.15 s, 1 per 33 s |
+| mobile | 120 ms | 40 ms | 70% | 3% | 250 ms for 1 s, 1 per 10 s | 0.4 s, 1 per 20 s |
+| worst | 250 ms | 80 ms | 100% | 8% | 500 ms for 1.5 s, 1 per 4 s | 1 s, 1 per 7 s |
+
+These figures are chosen to be recognisably bad, not measured from real networks. Worst also adds 5% reordering and 2% duplicates, and mobile 2% reordering.
+
+**Feature switches.** `NetworkSession.set_feature(name, on)`, all live:
+
+| Key | Feature | Off means |
+|---|---|---|
+| 1 | `prediction_enabled` | Your own pawn waits for the server, so what you do shows up after your ping |
+| 2 | `reconciliation_enabled` | Your own pawn is never corrected, so it drifts |
+| 3 | `interpolation_enabled` | Remote pawns jump to each newest snapshot |
+| 4 | `extrapolation_enabled` | Remote pawns hold when nothing newer has arrived |
+| 5 | `correction_smoothing_enabled` | You see the jump when corrected |
+| 6 | `lag_compensation_enabled` | Shots are checked against where targets are now |
+| 7 | `default_predicted` | On, other pawns are predicted too. Off by default |
+| 8 | `follow_during_rollback` | On, other pawns stand on server data during a rollback. Off by default |
+| 9 | `time_dilation_enabled` | Fixed lead, jumping back when it drifts |
+| 0 | `adaptive_interpolation_enabled` | Interpolation delay stays at `interpolation_seconds` |
+
+The server-side ones (6 and 7) are sent to the server, which only obeys in a debug build with `allow_debug_commands` on.
 
 ---
 
@@ -564,7 +622,7 @@ Revised 2026-11-04 while building: clock sync moved before input packets, becaus
 
 | # | Issue | Notes |
 |---|---|---|
-| 1 | **Client can claim the full rewind.** The server accepts any `view_ticks_behind` up to the cap, whatever that client's real latency. A cheat on low ping could always shoot 350 ms into the past | Needs server-side measurement of each client's latency, which fits with dynamic dilation |
+| 1 | **Faked lag.** The rewind claim is now limited by a client's snapshot acknowledgements (section 9.1), but a client can fake old ones, which looks like real high ping. Tighter limits would also cut off real players, and it's partly a detection problem | Known problem in the industry; later |
 | 2 | **Large one-off corrections.** Worst cases of 1.4–2.4 m at 100–200 ms during pawn contact. Probably a pawn blocked on the server that wasn't blocked on the client, whose view of the other pawn is 300 ms old. Cause not confirmed. The visible model fades a jump over about 100 ms, which may look bad at that size | Investigate; options include softer pawn collisions |
 | 3 | **Pawn stacking.** Owner: pawns shouldn't stack, and should collide instead. Nothing stops one standing on another yet | Belongs with the motor |
 | 4 | **Spending the lead.** The standard way is an optional input delay (section 7): shorter replays, less responsive feel | Not built; a per-game setting, off by default |
@@ -602,7 +660,9 @@ Revised 2026-11-04 while building: clock sync moved before input packets, becaus
 | When on, following entities only join a rollback within a radius of something being resimulated. A rollback with nothing to resimulate does nothing | 2026-11-04 |
 | Each input packet carries 3 inputs, which saved about 40% of upload with no missed inputs at 1% loss | 2026-11-04 |
 | Lag compensation's rewind cap is 350 ms, because 200 ms would cut off normal players | 2026-11-04 |
-| Stage v0 keeps a jump-back resync if a client drifts more than 4 ticks | 2026-11-04 |
+| Stage v0 keeps a jump-back resync if a client drifts more than 4 ticks; 15 with dilation on | 2026-11-04 |
+| Dilation steers by how early inputs really arrive: speeds up on the last half second, slows down only if the last 5 seconds were safe | 2026-11-04 |
+| Test switches and client-sent server switches exist only in debug builds | 2026-11-04 |
 | Multiplayer tests use real connections between separate processes, plus a fake bad network in our own code | 2026-11-04 |
 | Separate `is_replicated` and `is_predicted` settings; `is_predicted` is off by default, with a project default and per-entity override | 2026-11-04 |
 | A frame running several ticks syncs bodies to the collision world between them | 2026-11-04 |

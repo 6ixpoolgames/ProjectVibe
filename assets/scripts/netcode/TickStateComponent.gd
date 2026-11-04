@@ -92,6 +92,8 @@ enum RollbackMode { RESIMULATE, FOLLOW_SERVER }
 ## Claude 2026-11-04: with that on, this entity only joins a rollback if it's this close to something being resimulated. 0 means no limit.
 ## A guess to tune: it only has to reach anything a replaying pawn could touch during a replay (netcode spec section 6.5).
 @export var follow_server_radius: float = 10.0
+## Claude 2026-11-04: FOLLOW_SERVER normally saves no input. Your own pawn with prediction off still has inputs to send.
+var keep_input_history: bool = false
 
 ## Stored in a history slot for a property that didn't exist that tick.
 const MISSING := &"__tick_state_missing__"
@@ -195,7 +197,7 @@ func _ready() -> void:
 
 ## After every entity's input phase, before anything simulates.
 func _tick_capture_input(tick: int) -> void:
-	if _inputs.is_empty() or rollback_mode == RollbackMode.FOLLOW_SERVER: # Claude 2026-11-04: following replays no inputs
+	if _inputs.is_empty() or (rollback_mode == RollbackMode.FOLLOW_SERVER and not keep_input_history): # Claude 2026-11-04: following replays no inputs
 		return
 	var slot := tick % history_size
 	_input_ticks[slot] = tick
@@ -338,8 +340,9 @@ func clear_authoritative_state() -> void:
 
 
 ## Claude 2026-11-04: places the entity for drawing, part way between the two snapshots around this tick. If nothing newer
-## has arrived, it moves on from the newest on its velocity, up to the cap, then holds. Before any data, it stays put.
-func follow_server_at(render_tick: float) -> void:
+## has arrived, it moves on from the newest on its velocity, up to the cap, then holds. With extrapolation off, it just holds
+## at the newest. Before any data, it stays put.
+func follow_server_at(render_tick: float, allow_extrapolation: bool = true) -> void:
 	if _authoritative_ticks.is_empty() or _newest_authoritative_tick < 0:
 		return
 	var whole := floori(render_tick)
@@ -352,8 +355,9 @@ func follow_server_at(render_tick: float) -> void:
 	var older: Array = _authoritative_values[before % history_size]
 	if after < 0:
 		_apply(_states, older)
-		_replay_base_tick = before
-		_extrapolate(render_tick - before)
+		if allow_extrapolation:
+			_replay_base_tick = before
+			_extrapolate(render_tick - before)
 		return
 	var newer: Array = _authoritative_values[after % history_size]
 	var weight := clampf((render_tick - before) / float(after - before), 0.0, 1.0)

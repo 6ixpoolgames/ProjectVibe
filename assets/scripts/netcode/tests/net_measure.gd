@@ -2,6 +2,7 @@
 ## separate Godot processes. Prints a table; it doesn't pass or fail. Takes several minutes.
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/netcode/tests/net_measure.tscn"
 ## Add -- --compare to run just the comparison of what other pawns do during a rollback, repeated, with an average per kind.
+## Add -- --dilation to compare time dilation with a fixed lead, on bad connections. Each client's conditions apply both ways.
 ##
 ## Two clients walk toward the middle of a small arena, changing direction at random every 10 ticks, so they bump often. That's
 ## far more contact than normal play, and a worst case for prediction. Each row runs with 5 ms of jitter and 1% packet loss.
@@ -38,6 +39,13 @@ const COMPARE_ROWS := [
 	{"label": "200 ms, others follow", "latency": 100, "extra": {"follow": 1}},
 ]
 const COMPARE_REPEATS := 3
+const DILATION_SCENARIOS := [
+	{"label": "steady 100 ms", "client": {"latency": 50, "jitter": 5}},
+	{"label": "wifi", "client": {"preset": "wifi", "conditions-seed": 21}},
+	{"label": "mobile", "client": {"preset": "mobile", "conditions-seed": 22}},
+	{"label": "worst", "client": {"preset": "worst", "conditions-seed": 23}},
+	{"label": "ramp 10 to 200 ms", "client": {"timeline": "0:5,5:5,10:100,14:100,19:5,24:5"}},
+]
 
 var _port := 25500
 var _totals: Dictionary = {} # label -> {"own": cm, "worst": cm, "jump_per_second": cm, "corrections": per s, "touching": %, "runs": n}
@@ -46,7 +54,9 @@ var _totals: Dictionary = {} # label -> {"own": cm, "worst": cm, "jump_per_secon
 func _ready() -> void:
 	print("--- Multiplayer measurement (physics engine: %s) ---" % ProjectSettings.get_setting("physics/3d/physics_engine", "DEFAULT"))
 	print("ping | own avg/worst cm | corr/s | corr size cm | jump avg/worst cm | jump/s cm | view cm | behind | missed | down/up KB/s | touching")
-	if OS.get_cmdline_user_args().has("--compare"):
+	if OS.get_cmdline_user_args().has("--dilation"):
+		await _measure_dilation()
+	elif OS.get_cmdline_user_args().has("--compare"):
 		for i in COMPARE_REPEATS:
 			for row: Dictionary in COMPARE_ROWS:
 				await _measure(row)
@@ -115,6 +125,48 @@ func _measure(row: Dictionary) -> void:
 		view_text, behind_text, missed,
 		band_a["received"] / 1000.0, band_a["sent"] / 1000.0,
 		roundi(touching),
+	])
+
+
+## Time dilation on and off, under the same conditions, with the same random seed.
+func _measure_dilation() -> void:
+	print("conditions, lead | missed inputs | resyncs | margin avg/lowest ticks | speed | own avg/worst cm | corr/s | jump/s cm | late drawing | bursts+spikes")
+	for scenario: Dictionary in DILATION_SCENARIOS:
+		for dilation_on: bool in [false, true]:
+			_port += 1
+			var client: Dictionary = {"role": "client", "seconds": SECONDS, "mode": "seek"}
+			client.merge(scenario["client"])
+			if not dilation_on:
+				client["off"] = "time_dilation_enabled"
+			var results := await NetRun.run(self, "dilation_%d" % _port, {"server": {"role": "server", "seconds": SECONDS + 1}, "a": client.duplicate(), "b": client.duplicate()}, _port)
+			_print_dilation_row("%s, %s" % [scenario["label"], "dilation" if dilation_on else "fixed"], results)
+
+
+func _print_dilation_row(label: String, results: Dictionary) -> void:
+	var server: Dictionary = results["server"]
+	var a: Dictionary = results["a"]
+	var b: Dictionary = results["b"]
+	if server.has("timed_out") or a.has("timed_out") or b.has("timed_out"):
+		print("%s | didn't finish" % label)
+		return
+	var id_a := int(NetRun.own_entity(a)["id"])
+	var id_b := int(NetRun.own_entity(b)["id"])
+	var own_a := NetRun.prediction_error(a, server, id_a)
+	var own_b := NetRun.prediction_error(b, server, id_b)
+	var seconds: float = (float(a["measure_end_usec"]) - float(a["measure_start_usec"])) / 1000000.0
+	var missed := int(a["missed_inputs"]) - int(a["missed_inputs_start"]) + int(b["missed_inputs"]) - int(b["missed_inputs_start"])
+	var margin_reports: float = float(a["stats"]["margin_reports"]) + float(b["stats"]["margin_reports"])
+	var margin_average: float = (float(a["stats"]["margin_total"]) + float(b["stats"]["margin_total"])) / maxf(margin_reports, 1.0)
+	print("%s | %d | %d | %.1f / %d | %.3f-%.3f | %.1f / %.0f | %.1f | %.0f | %d | %d" % [
+		label, missed,
+		_since_start(a, "resyncs") + _since_start(b, "resyncs"),
+		margin_average, mini(int(a["stats"]["margin_lowest"]), int(b["stats"]["margin_lowest"])),
+		minf(a["stats"]["speed_lowest"], b["stats"]["speed_lowest"]), maxf(a["stats"]["speed_highest"], b["stats"]["speed_highest"]),
+		50.0 * (own_a["average"] + own_b["average"]), 100.0 * maxf(own_a["worst"], own_b["worst"]),
+		(_since_start(a, "corrections") + _since_start(b, "corrections")) / (2.0 * maxf(seconds, 0.001)),
+		100.0 * (_since_start(a, "jump_total") + _since_start(b, "jump_total")) / (2.0 * maxf(seconds, 0.001)),
+		_since_start(a, "interpolation_underruns") + _since_start(b, "interpolation_underruns"),
+		int(a["bursts"]) + int(a["spikes"]) + int(b["bursts"]) + int(b["spikes"]),
 	])
 
 

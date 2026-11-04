@@ -11,8 +11,11 @@ class_name NetTestPawn
 
 static var default_mode: String = "seek"
 static var lead_seconds: float = 0.0
+## A shooter's claim of how far behind it sees, whatever's true. Below 0, it tells the truth.
+static var forced_claim: float = -1.0
 
 var mode: String = "idle"
+var corrections_seen := 0
 var _local := false
 var _key := 0
 
@@ -44,6 +47,11 @@ func _tick_input(dt: float, tick: int) -> void:
 			move_dir = Vector3.ZERO
 
 
+func _on_network_corrected(jump: Variant) -> void:
+	super(jump)
+	corrections_seen += 1
+
+
 func _seek(tick: int) -> void:
 	var change := RandomNumberGenerator.new()
 	change.seed = hash(Vector2i(tick / 10, _key))
@@ -67,6 +75,6 @@ func _shoot(tick: int) -> void:
 		if mode == "lead" and "velocity" in target:
 			aim_at += target.velocity * lead_seconds
 		aim_dir = (aim_at - (global_position + Vector3(0, 1.4, 0))).normalized()
-		view_ticks_behind = _session_view_ticks_behind()
+		view_ticks_behind = forced_claim if forced_claim >= 0.0 else _session_view_ticks_behind()
 		wants_attack = tick % 30 == 0 and _entity.session.render_tick >= 0.0
 		return

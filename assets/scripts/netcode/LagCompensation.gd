@@ -3,7 +3,8 @@
 ## moved on. The server moves everyone else back to where the shooter saw them, checks the hit, and puts them back.
 ##
 ## How far back: the client says how many ticks behind its own tick it was drawing others (view_ticks_behind). The server
-## never trusts that blindly: it's limited to between 0 and NetworkSession.rewind_cap_seconds.
+## never trusts that blindly: it's limited to between 0 and NetworkSession.rewind_cap_seconds, and to what that client's
+## snapshot acknowledgements make believable (NetworkSession.limit_view_ticks_behind).
 ##
 ## Rules, checked in tests/net_selftest.gd:
 ##   - Past the cap, a high-ping shooter has to lead the target.
@@ -64,7 +65,8 @@ static func _rewind_others(shooter: NetworkEntity, view_ticks_behind: float) -> 
 	if driver == null:
 		return rewound
 	var cap: float = session.rewind_cap_seconds * driver.get_tick_rate()
-	var view_tick: float = driver.tick - clampf(view_ticks_behind, 0.0, cap)
+	var believable: float = session.limit_view_ticks_behind(shooter.owner_peer, view_ticks_behind, driver.tick)
+	var view_tick: float = driver.tick - clampf(believable, 0.0, cap)
 	for entity: NetworkEntity in session.get_entities():
 		if entity != shooter and entity.rewind_to(view_tick):
 			rewound.append(entity)

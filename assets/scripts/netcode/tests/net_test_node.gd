@@ -13,6 +13,14 @@
 ##   --garbage           client: also sends broken packets, and input for a pawn it doesn't own
 ##   --shove-at=240      server: moves the first pawn 2 m on this tick, which no client can predict
 ##   --no-rewind         server: turns lag compensation off, to compare
+##   --off=a,b  --on=a,b      turn NetworkSession features off or on at the start
+##   --switch=5:lag_compensation_enabled:0    turn a feature on or off after this many seconds
+##   --allow-debug       server: obey test switches sent by clients
+##   --preset=worst      this machine sends and receives through a NetFakeConditions preset
+##   --bench-ping=120    sets the round trip through NetTestBench, the same way its keys do
+##   --timeline=0:10,4:100    latency over time, both ways on this machine, as seconds:milliseconds
+##   --conditions-seed=7      a fixed seed for the fake network
+##   --claim=21          shooter: claims to be seeing others this many ticks behind, whatever's true
 ##   --lead-seconds=0.3  shooter: how far ahead of the drawn target to aim
 ##   --predicted         everyone: other pawns are predicted (is_predicted)
 ##   --ai=2              server: adds this many AI pawns nobody owns
@@ -35,6 +43,7 @@ var _next_slot := 0
 var _shoved := false
 var _garbage_sent := false
 var _ai_spawned := false
+var _switched := false
 var _summaries: Dictionary = {}          # entity id -> latest summary, kept after the entity is gone
 
 
@@ -52,7 +61,29 @@ func _ready() -> void:
 	session.fake.latency_ms = float(settings.get("latency", 0))
 	session.fake.jitter_ms = float(settings.get("jitter", 0))
 	session.fake.loss = float(settings.get("loss", 0))
-	session.fake.set_seed(hash(settings.get("name", "server")))
+	var conditions_seed := int(settings.get("conditions-seed", hash(settings.get("name", "server"))))
+	session.fake.set_seed(conditions_seed)
+	session.fake_in.set_seed(conditions_seed + 1)
+	if settings.has("preset"):
+		session.fake.apply_preset(settings["preset"])
+		session.fake_in.apply_preset(settings["preset"])
+	if settings.has("timeline"):
+		var points: Array = []
+		for part in String(settings["timeline"]).split(","):
+			var pieces := part.split(":")
+			points.append([float(pieces[0]), float(pieces[1])])
+		session.fake.timeline = points
+		session.fake_in.timeline = points
+	if settings.has("bench-ping"):
+		var bench := NetTestBench.new()
+		add_child(bench)
+		bench.set_ping(float(settings["bench-ping"]))
+	session.allow_debug_commands = settings.has("allow-debug")
+	for feature in String(settings.get("off", "")).split(",", false):
+		session.set(feature, false)
+	for feature in String(settings.get("on", "")).split(",", false):
+		session.set(feature, true)
+	NetTestPawn.forced_claim = float(settings.get("claim", -1))
 	NetTestPawn.default_mode = settings.get("mode", "seek")
 	NetTestPawn.lead_seconds = float(settings.get("lead-seconds", 0))
 	session.joined.connect(func() -> void: result["joined"] = true)
@@ -84,6 +115,10 @@ func _process(_delta: float) -> void:
 	if settings.has("garbage") and not _garbage_sent and result["joined"] and elapsed >= 2.0:
 		_garbage_sent = true
 		_send_garbage()
+	if settings.has("switch") and not _switched and elapsed >= float(String(settings["switch"]).split(":")[0]):
+		_switched = true
+		var parts := String(settings["switch"]).split(":")
+		session.set_feature(parts[1], parts[2] == "1")
 	if measure_from_tick < 0 and elapsed >= 2.0 and driver.active:
 		_start_measuring()
 	if not _finished and elapsed >= float(settings.get("seconds", 8)):
@@ -129,7 +164,7 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 		var id_key := str(entity.entity_id)
 		var body: Node3D = entity.get_parent()
 		var at := body.position
-		if entity.role == NetworkEntity.Role.REMOTE_FOLLOWING:
+		if entity.follows_snapshots():
 			if not log_views.has(id_key):
 				log_views[id_key] = {}
 			if not log_views[id_key].has(str(tick)):
@@ -149,6 +184,14 @@ func _start_measuring() -> void:
 	result["corrections_start"] = session.stats["corrections"]
 	result["correction_total_start"] = session.stats["correction_total"]
 	result["jump_total_start"] = session.stats["jump_total"]
+	result["resyncs_start"] = session.stats["resyncs"]
+	result["interpolation_underruns_start"] = session.stats["interpolation_underruns"]
+	result["missed_inputs_start"] = session.get_missed_inputs()
+	session.stats["margin_total"] = 0
+	session.stats["margin_reports"] = 0
+	session.stats["margin_lowest"] = NetworkSessionSingleton.NO_MARGIN
+	session.stats["speed_lowest"] = session.get_tick_factor()
+	session.stats["speed_highest"] = session.get_tick_factor()
 	for entity: NetworkEntity in session.get_entities():
 		entity.missed_inputs = 0
 
@@ -162,6 +205,12 @@ func _capture_summary() -> void:
 	result["measure_end_usec"] = Time.get_ticks_usec()
 	result["measure_from_tick"] = measure_from_tick
 	result["fake_lost"] = session.fake.packets_lost
+	result["missed_inputs"] = session.get_missed_inputs()
+	result["features"] = {}
+	for feature: String in NetworkSessionSingleton.FEATURES:
+		result["features"][feature] = session.is_feature_on(feature)
+	result["bursts"] = session.fake.bursts_started + session.fake_in.bursts_started
+	result["spikes"] = session.fake.spikes_started + session.fake_in.spikes_started
 	_update_summaries()
 	var entities: Array = []
 	for entity: NetworkEntity in session.get_entities():
@@ -176,7 +225,7 @@ func _update_summaries() -> void:
 		_summaries[entity.entity_id] = {
 			"id": entity.entity_id, "owner": entity.owner_peer, "role": entity.role, "x": body.position.x, "z": body.position.z,
 			"health": body.health, "shots": body.shots_fired, "hits": body.hits_landed, "missed_inputs": entity.missed_inputs,
-			"last_input_tick": entity.last_input_tick, "offset": body._correction_offset.length(),
+			"last_input_tick": entity.last_input_tick, "offset": body._correction_offset.length(), "corrections_seen": body.corrections_seen,
 		}
 
 

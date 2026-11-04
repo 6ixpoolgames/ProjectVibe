@@ -17,8 +17,16 @@
 ##   # on the server, when player_connected fires:
 ##   NetworkSession.spawn("pawn", peer_id, Vector3(0, 1, 0))
 ##
-## Stage v0 means: full snapshots of everything to everyone, a fixed lead, and no time dilation. If a client drifts well
-## away from its lead, after a hitch say, it jumps back. Dilation and delta compression are stage v1.
+## Snapshots are still full, of everything to everyone; delta compression is a later stage.
+##
+## Time dilation (netcode spec section 4.2, Claude 2026-11-04): the server reports how early each client's inputs have been
+## arriving. A client cutting it too fine speeds up at once, going by the last half second. It only slows down again if the
+## last 5 seconds have all been safe, so a rough connection keeps the lead it has shown it needs. Its lead settles on the
+## smallest that gets inputs there in time, whatever the connection is doing. Only clients dilate. Past
+## resync_threshold_ticks from where it should be, a client jumps back instead, after a hitch say.
+##
+## Test switches (Claude 2026-11-04): each feature in FEATURES can be turned off with set_feature, even while running.
+## NetTestBench puts them on keys.
 ##
 ## One tick on a client:   before_tick: apply snapshots (which may roll back), move remote entities ->
 ##                         the tick's phases -> after_tick: send input
@@ -44,14 +52,57 @@ signal entity_despawned(entity_id: int)
 
 enum Mode { OFFLINE, SERVER, CLIENT }
 
+## Every switch set_feature understands, in the order NetTestBench shows them.
+const FEATURES: Array[String] = ["prediction_enabled", "reconciliation_enabled", "interpolation_enabled", "extrapolation_enabled", "correction_smoothing_enabled", "lag_compensation_enabled", "default_predicted", "follow_during_rollback", "time_dilation_enabled", "adaptive_interpolation_enabled"]
+## The ones the server decides or needs to know about. A client's switch is also sent to the server, for testing.
+const SERVER_FEATURES: Array[String] = ["lag_compensation_enabled", "default_predicted"]
+## What snapshots say when a client has sent no input lately.
+const NO_MARGIN := 32767
+## How many recent input packets count, for the quick check that speeds up and the slow one that slows down. At 60 per second,
+## half a second and 5 seconds.
+const MARGIN_SHORT_WINDOW := 30
+const MARGIN_LONG_WINDOW := 300
+
 ## Snapshots per second.
 @export var snapshot_rate: int = 30
 ## How far in the past remote entities are drawn. Enough to always have two snapshots to blend between.
 @export var interpolation_seconds: float = 0.1
+## The most the adaptive version may draw in the past. Also limits how far back a client may claim to see.
+@export var max_interpolation_seconds: float = 0.2
 ## Extra ticks of lead beyond half the round trip, so input still arrives on time when the connection wobbles.
 @export var lead_margin_ticks: int = 3
-## How far from its lead a client can drift before it jumps back.
+## How far from its lead a client can drift before it jumps back, with dilation off. With dilation on it corrects gently, so
+## this only covers things too big for that.
 @export var resync_threshold_ticks: int = 4
+@export var resync_threshold_with_dilation_ticks: int = 15
+@export_group("Time dilation")
+## Inputs should arrive at least this many ticks early. Below this in the last half second, the client speeds up.
+@export var dilation_margin_low_ticks: int = 1
+## If even the worst of the last 5 seconds is above this, the client is further ahead than it needs to be, and slows down.
+@export var dilation_margin_high_ticks: int = 2
+## How much to change speed per tick outside that range. Low enough not to overshoot on a late answer.
+@export var dilation_gain: float = 0.02
+## Fastest and slowest a client will run. A few percent isn't noticeable.
+@export var dilation_max_speedup: float = 0.05
+@export var dilation_max_slowdown: float = 0.03
+@export_group("Features")
+## Your own pawn reacts at once and gets corrected. Off: it waits for the server, so what you do shows up after your ping.
+@export var prediction_enabled: bool = true
+## Your own pawn is corrected when the server disagrees. Off: it drifts, which shows what prediction alone would do.
+@export var reconciliation_enabled: bool = true
+## Remote entities are drawn in the past between snapshots. Off: they jump to each newest snapshot.
+@export var interpolation_enabled: bool = true
+## Remote entities move on from the newest snapshot if nothing newer has arrived. Off: they hold.
+@export var extrapolation_enabled: bool = true
+## The visible model hides a correction's jump. Off: you see the jump.
+@export var correction_smoothing_enabled: bool = true
+## During a rollback, remote entities stand on server data rather than where they're drawn. See TickStateComponent.
+@export var follow_during_rollback: bool = false
+## A client's lead follows its connection. Off: it's set once, and jumps back when it drifts.
+@export var time_dilation_enabled: bool = true
+## More jitter draws remote entities further in the past. Off: always interpolation_seconds.
+@export var adaptive_interpolation_enabled: bool = true
+@export_group("")
 ## How far back lag compensation may go. At 200 ms ping a shooter sees others about 350 ms behind its own tick (round trip,
 ## margin and interpolation), so this covers that and not much more. Past it, players have to lead their shots.
 @export var rewind_cap_seconds: float = 0.35
@@ -68,12 +119,16 @@ var world_root: Node = null
 var content_hash_salt: int = 0
 ## Which address the server listens on. "*" is all of them.
 var bind_address: String = "*"
-## Pretend the network is bad, for testing. See NetFakeConditions.gd.
+## Pretend the network is bad, for testing. See NetFakeConditions.gd. One for what this machine sends, one for what it receives.
 var fake := NetFakeConditions.new()
+var fake_in := NetFakeConditions.new()
+## Server: obey test switches sent by clients. Also needs a debug build, so a release game can never turn this on.
+var allow_debug_commands: bool = false
 ## Bytes and packets sent and received, for diagnostics.
 var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_received": 0, "snapshots_received": 0,
 		"corrections": 0, "correction_total": 0.0, "correction_worst": 0.0, "jump_total": 0.0, "jump_worst": 0.0, "resyncs": 0,
-		"bad_packets": 0, "rejected_inputs": 0}
+		"bad_packets": 0, "rejected_inputs": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
+		"margin_lowest": NO_MARGIN, "speed_lowest": 1.0, "speed_highest": 1.0}
 ## Client: which tick of the server's remote entities are being drawn at. -1 before the first snapshot.
 var render_tick: float = -1.0
 
@@ -104,6 +159,12 @@ var _next_ping_usec := 0
 var _newest_snapshot_tick := -1
 var _reconcile_values: Dictionary = {} # entity id -> {"state": Dictionary, "input": Dictionary} for the newest snapshot
 var _reconcile_tick := -1
+var _input_margin := NO_MARGIN         # client: the worst margin the server last reported
+var _missed_inputs := 0                # client: how many of its inputs the server has lacked
+var _last_feedback_usec := 0
+var _last_snapshot_usec := 0
+var _last_snapshot_tick := -1
+var _snapshot_jitter_usec := 0.0
 
 
 func _ready() -> void:
@@ -134,9 +195,14 @@ func _physics_process(_delta: float) -> void:
 
 
 func _pump() -> void:
-	fake.release_due(Time.get_ticks_usec(), _send_now)
+	var now := Time.get_ticks_usec()
+	fake.release_due(now, _send_now)
+	fake_in.release_due(now, _handle_packet)
 	if _mode == Mode.CLIENT and is_connected_to_session():
 		_ping_if_due()
+		# No news for a while, in a dropout say: don't keep correcting on an old answer.
+		if _clock_ready and now - _last_feedback_usec > 500000:
+			_set_tick_factor(1.0)
 	if _mode == Mode.SERVER:
 		_drop_silent_peers()
 
@@ -200,6 +266,15 @@ func leave() -> void:
 	render_tick = -1.0
 	_next_entity_id = 1
 	fake.clear()
+	fake_in.clear()
+	_input_margin = NO_MARGIN
+	_missed_inputs = 0
+	_last_feedback_usec = 0
+	_last_snapshot_usec = 0
+	_last_snapshot_tick = -1
+	_snapshot_jitter_usec = 0.0
+	if _driver:
+		_driver.tick_factor = 1.0
 	if multiplayer.multiplayer_peer and not (multiplayer.multiplayer_peer is OfflineMultiplayerPeer):
 		multiplayer.multiplayer_peer.close()
 		multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -249,6 +324,56 @@ func get_view_ticks_behind() -> float:
 	if _mode != Mode.CLIENT or render_tick < 0.0:
 		return 0.0
 	return maxf(_driver.tick - render_tick, 0.0)
+
+
+## Client: how fast its ticks are running compared to normal.
+func get_tick_factor() -> float:
+	return _driver.tick_factor if _driver else 1.0
+
+
+## Client: the worst the server has lately seen its inputs arrive, in ticks early. Negative is late. NO_MARGIN if unknown.
+func get_input_margin() -> int:
+	return _input_margin
+
+
+## Client: how many of its inputs the server has had to do without.
+func get_missed_inputs() -> int:
+	return _missed_inputs
+
+
+func is_feature_on(feature: String) -> bool:
+	return FEATURES.has(feature) and get(feature)
+
+
+## Turns a feature on or off, even while running. See FEATURES.
+func set_feature(feature: String, on: bool) -> void:
+	if not FEATURES.has(feature):
+		push_warning("[NetworkSession] no feature called '%s'" % feature)
+		return
+	set(feature, on)
+	_refresh_entities()
+	if not time_dilation_enabled and _driver:
+		_set_tick_factor(1.0)
+	if _mode == Mode.CLIENT and SERVER_FEATURES.has(feature):
+		var buffer := NetPackets.new_buffer()
+		buffer.put_u8(NetPackets.Type.DEBUG_SWITCH)
+		NetPackets.write_value(buffer, feature, StateEncoding.RAW)
+		NetPackets.write_value(buffer, on, StateEncoding.RAW)
+		_send(1, buffer.data_array, true)
+
+
+## How many ticks behind its own tick a client can believably be drawing others, for lag compensation. It can't be drawing
+## anything newer than the snapshot it last acknowledged, and it can't be further behind that than the interpolation limit.
+## A client could still fake old acknowledgements, which looks the same as really having high ping. Offline, the host's own
+## pawn and AI aren't limited.
+func limit_view_ticks_behind(peer: int, claimed: float, tick: int) -> float:
+	if not _peers.has(peer):
+		return claimed
+	var acknowledged: int = _peers[peer].get("acknowledged_snapshot", -1)
+	if acknowledged < 0:
+		return 0.0
+	var interpolation_limit: float = max_interpolation_seconds * _driver.get_tick_rate()
+	return minf(claimed, (tick - acknowledged) + interpolation_limit + 1.0)
 
 
 ## A number that's the same on two machines only if they run the same content.
@@ -336,15 +461,9 @@ func _create_entity(entity_id: int, type_name: String, owner_peer: int, at: Vari
 		root.free()
 		return null
 	var local := owner_peer == get_local_peer() and owner_peer != 0
-	var new_role := NetworkEntity.Role.AUTHORITY
-	if _mode == Mode.CLIENT:
-		if local:
-			new_role = NetworkEntity.Role.LOCAL_PREDICTED
-		elif entity.is_predicted or default_predicted:
-			new_role = NetworkEntity.Role.REMOTE_PREDICTED
-		else:
-			new_role = NetworkEntity.Role.REMOTE_FOLLOWING
-	entity.configure(entity_id, type_name, owner_peer, new_role, local, self)
+	entity.configure(entity_id, type_name, owner_peer, _role_for(entity, local), local, self)
+	if entity.state:
+		entity.state.follows_during_rollback = follow_during_rollback
 	if at != null and "position" in root:
 		root.position = at
 	var parent: Node = world_root if is_instance_valid(world_root) else get_tree().current_scene
@@ -352,6 +471,24 @@ func _create_entity(entity_id: int, type_name: String, owner_peer: int, at: Vari
 	_entities[entity_id] = entity
 	entity_spawned.emit(entity)
 	return entity
+
+
+func _role_for(entity: NetworkEntity, local: bool) -> NetworkEntity.Role:
+	if _mode != Mode.CLIENT:
+		return NetworkEntity.Role.AUTHORITY
+	if local:
+		return NetworkEntity.Role.LOCAL_PREDICTED if prediction_enabled else NetworkEntity.Role.LOCAL_UNPREDICTED
+	if entity.is_predicted or default_predicted:
+		return NetworkEntity.Role.REMOTE_PREDICTED
+	return NetworkEntity.Role.REMOTE_FOLLOWING
+
+
+## A switch changed: every entity works out its role again.
+func _refresh_entities() -> void:
+	for entity: NetworkEntity in get_entities():
+		entity.set_role(_role_for(entity, entity.is_local))
+		if entity.state:
+			entity.state.follows_during_rollback = follow_during_rollback
 
 
 func _remove_entity(entity_id: int) -> void:
@@ -403,6 +540,17 @@ func _on_packet(peer: int, bytes: PackedByteArray) -> void:
 	if bytes.is_empty():
 		stats["bad_packets"] += 1
 		return
+	if fake_in.is_active():
+		fake_in.submit(peer, bytes, _is_reliable_type(int(bytes[0])), Time.get_ticks_usec())
+	else:
+		_handle_packet(peer, bytes, true)
+
+
+func _is_reliable_type(type: int) -> bool:
+	return type != NetPackets.Type.INPUT and type != NetPackets.Type.SNAPSHOT and type != NetPackets.Type.PING and type != NetPackets.Type.PONG
+
+
+func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 	match int(bytes[0]):
 		NetPackets.Type.HELLO:
 			_on_hello(peer, bytes)
@@ -418,6 +566,8 @@ func _on_packet(peer: int, bytes: PackedByteArray) -> void:
 			_on_spawn(peer, bytes)
 		NetPackets.Type.DESPAWN:
 			_on_despawn(peer, bytes)
+		NetPackets.Type.DEBUG_SWITCH:
+			_on_debug_switch(peer, bytes)
 		NetPackets.Type.INPUT, NetPackets.Type.SNAPSHOT:
 			var from_peer: int = _inbox_counts.get(peer, 0)
 			if not _driver.active:
@@ -431,11 +581,26 @@ func _on_packet(peer: int, bytes: PackedByteArray) -> void:
 			stats["bad_packets"] += 1
 
 
+## Server: a client's test switch. Refused unless this is a debug build and the game allows it, and only for SERVER_FEATURES.
+func _on_debug_switch(_peer: int, bytes: PackedByteArray) -> void:
+	if _mode != Mode.SERVER or not allow_debug_commands or not OS.is_debug_build():
+		stats["bad_packets"] += 1
+		return
+	var buffer := NetPackets.reader(bytes)
+	buffer.get_u8()
+	var feature: Variant = NetPackets.read_value(buffer)
+	var on: Variant = NetPackets.read_value(buffer)
+	if feature is String and SERVER_FEATURES.has(feature) and on is bool:
+		set(feature, on)
+	else:
+		stats["bad_packets"] += 1
+
+
 # --- Handshake ---------------------------------------------------------------------------------
 
 func _on_peer_connected(peer: int) -> void:
 	if _mode == Mode.SERVER:
-		_peers[peer] = {"welcomed": false, "connected_at": Time.get_ticks_usec()}
+		_peers[peer] = {"welcomed": false, "connected_at": Time.get_ticks_usec(), "margins": [], "acknowledged_snapshot": -1}
 
 
 func _on_peer_disconnected(peer: int) -> void:
@@ -574,7 +739,7 @@ func _on_pong(peer: int, bytes: PackedByteArray) -> void:
 			_driver.set_tick(_target_tick(now))
 			_driver.active = true
 			joined.emit()
-	elif absf(_driver.tick - _target_tick(now)) > resync_threshold_ticks:
+	elif absf(_driver.tick - _target_tick(now)) > (resync_threshold_with_dilation_ticks if time_dilation_enabled else resync_threshold_ticks):
 		stats["resyncs"] += 1
 		_driver.set_tick(_target_tick(now))
 
@@ -654,6 +819,7 @@ func _send_inputs(tick: int) -> void:
 		buffer.put_u8(NetPackets.Type.INPUT)
 		buffer.put_u32(entity.entity_id)
 		buffer.put_u32(tick)
+		buffer.put_u32(maxi(_newest_snapshot_tick, 0))
 		var count := 0
 		for t in range(tick, tick - mini(input_redundancy, MAX_INPUTS_PER_PACKET), -1):
 			if entity.state.get_input_values(t).is_empty():
@@ -673,16 +839,24 @@ func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 		return
 	var buffer := NetPackets.reader(bytes)
 	buffer.get_u8()
-	if not NetPackets.has_bytes(buffer, 9):
+	if not NetPackets.has_bytes(buffer, 13):
 		stats["bad_packets"] += 1
 		return
 	var entity_id := buffer.get_u32()
 	var newest := buffer.get_u32()
+	var acknowledged := buffer.get_u32()
 	var count := buffer.get_u8()
 	var entity: NetworkEntity = get_entity(entity_id)
 	if entity == null or entity.owner_peer != peer or entity.state == null or count > MAX_INPUTS_PER_PACKET:
 		stats["rejected_inputs"] += 1
 		return
+	# How early this input arrived, for time dilation. A client can't have seen the future.
+	var margins: Array = _peers[peer]["margins"]
+	margins.append(clampi(newest - tick, -30000, 30000))
+	if margins.size() > MARGIN_LONG_WINDOW:
+		margins.pop_front()
+	if acknowledged <= tick:
+		_peers[peer]["acknowledged_snapshot"] = acknowledged
 	for i in count:
 		var values: Variant = NetPackets.read_list(buffer)
 		if values == null:
@@ -697,8 +871,7 @@ func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 
 # --- Snapshots ---------------------------------------------------------------------------------
 
-## Server: sends the whole world to every client. Stage v0 sends the same packet to all of them. Reporting each client's
-## input timing, which dynamic time dilation needs, comes with that (netcode spec section 11.3).
+## Server: sends the whole world to every client, with a note for each on how its input is arriving, for time dilation.
 func _send_snapshots(tick: int) -> void:
 	var world := NetPackets.new_buffer()
 	var count := 0
@@ -715,15 +888,23 @@ func _send_snapshots(tick: int) -> void:
 		var input_values: Array = entity.state.get_input_values(tick) if (entity.is_predicted or default_predicted) else []
 		NetPackets.write_list(world, input_values, entity.state.get_input_encodings())
 		count += 1
-	var packet := NetPackets.new_buffer()
-	packet.put_u8(NetPackets.Type.SNAPSHOT)
-	packet.put_u32(tick)
-	packet.put_u16(count)
-	packet.put_data(world.data_array)
-	var bytes := packet.data_array
+	var world_bytes := world.data_array
+	var missed_by_peer: Dictionary = {}
+	for entity: NetworkEntity in get_entities():
+		missed_by_peer[entity.owner_peer] = int(missed_by_peer.get(entity.owner_peer, 0)) + entity.missed_inputs
 	for peer: int in _peers:
-		if _peers[peer]["welcomed"]:
-			_send(peer, bytes, false)
+		if not _peers[peer]["welcomed"]:
+			continue
+		var packet := NetPackets.new_buffer()
+		packet.put_u8(NetPackets.Type.SNAPSHOT)
+		packet.put_u32(tick)
+		var margins: Array = _peers[peer]["margins"]
+		packet.put_16(NO_MARGIN if margins.is_empty() else margins.slice(-MARGIN_SHORT_WINDOW).min())
+		packet.put_16(NO_MARGIN if margins.is_empty() else margins.min())
+		packet.put_u32(missed_by_peer.get(peer, 0))
+		packet.put_u16(count)
+		packet.put_data(world_bytes)
+		_send(peer, packet.data_array, false)
 
 
 ## Client: remote entities store what the snapshot says. Predicted ones keep it aside for _reconcile, newest only.
@@ -733,10 +914,13 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 		return
 	var buffer := NetPackets.reader(bytes)
 	buffer.get_u8()
-	if not NetPackets.has_bytes(buffer, 6):
+	if not NetPackets.has_bytes(buffer, 14):
 		stats["bad_packets"] += 1
 		return
 	var tick := buffer.get_u32()
+	var margin := buffer.get_16()
+	var margin_long := buffer.get_16()
+	var missed := buffer.get_u32()
 	var count := buffer.get_u16()
 	if tick <= _newest_snapshot_tick:
 		return # arrived out of order; the newer one already replaced it
@@ -753,8 +937,11 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 			stats["bad_packets"] += 1
 			return
 		parsed.append([entity_id, state_values, sync_values, input_values])
+	_note_snapshot_timing(tick)
 	_newest_snapshot_tick = tick
+	_missed_inputs = missed
 	stats["snapshots_received"] += 1
+	_update_dilation(margin, margin_long)
 	_reconcile_values.clear()
 	_reconcile_tick = tick
 	for item: Array in parsed:
@@ -763,15 +950,15 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 			continue # its spawn hasn't arrived yet; the next snapshot covers it
 		var values := entity.state.state_values_to_dictionary(item[1])
 		entity.state.apply_sync_values(item[2])
-		if entity.role == NetworkEntity.Role.REMOTE_FOLLOWING:
-			entity.state.receive_authoritative_state(tick, values)
-		else:
+		entity.state.receive_authoritative_state(tick, values) # kept for all, so a switch takes effect at once
+		if not entity.follows_snapshots():
 			_reconcile_values[item[0]] = {"state": values, "input": entity.state.input_values_to_dictionary(item[3])}
 
 
 ## Client: compares predictions with the newest snapshot, and if any are wrong, corrects them and resimulates from there.
 func _reconcile() -> void:
-	if _reconcile_tick < 0:
+	if _reconcile_tick < 0 or not reconciliation_enabled:
+		_reconcile_tick = -1
 		return
 	var tick := _reconcile_tick
 	_reconcile_tick = -1
@@ -807,7 +994,8 @@ func _reconcile() -> void:
 			var jump: Variant = was - now
 			stats["jump_total"] += jump.length()
 			stats["jump_worst"] = maxf(stats["jump_worst"], jump.length())
-			entity.tell_corrected(jump)
+			if correction_smoothing_enabled:
+				entity.tell_corrected(jump)
 	_reconcile_values.clear()
 
 
@@ -818,11 +1006,65 @@ func _reconcile() -> void:
 func _move_remote_entities() -> void:
 	if _newest_snapshot_tick < 0:
 		return
-	var target: float = _newest_snapshot_tick - interpolation_seconds * _driver.get_tick_rate()
-	if render_tick < 0.0 or absf(render_tick - target) > 30.0:
+	var target: float = _newest_snapshot_tick - _interpolation_ticks()
+	if not interpolation_enabled:
+		render_tick = float(_newest_snapshot_tick)
+	elif render_tick < 0.0 or absf(render_tick - target) > 30.0:
 		render_tick = target
 	else:
 		render_tick += 1.0 + clampf((target - render_tick) * 0.1, -0.1, 0.1)
+	if interpolation_enabled and render_tick > _newest_snapshot_tick:
+		stats["interpolation_underruns"] += 1
 	for entity: NetworkEntity in get_entities():
-		if entity.role == NetworkEntity.Role.REMOTE_FOLLOWING:
-			entity.follow_server(render_tick)
+		if entity.follows_snapshots():
+			entity.follow_server(render_tick, extrapolation_enabled)
+
+
+## How far behind the newest snapshot to draw. With jitter, snapshots arrive unevenly, so it draws further back to keep having two
+## to blend between.
+func _interpolation_ticks() -> float:
+	var rate: float = _driver.get_tick_rate()
+	var base := interpolation_seconds * rate
+	if not adaptive_interpolation_enabled:
+		return base
+	var jitter_ticks := _snapshot_jitter_usec / _tick_usec()
+	return clampf(base + 2.0 * jitter_ticks, base, maxf(base, max_interpolation_seconds * rate))
+
+
+## How unevenly snapshots are arriving, as a slow average of how far each is from when it was expected.
+func _note_snapshot_timing(tick: int) -> void:
+	var now := Time.get_ticks_usec()
+	if _last_snapshot_usec > 0 and tick > _last_snapshot_tick:
+		var expected := (tick - _last_snapshot_tick) * _tick_usec()
+		_snapshot_jitter_usec = lerpf(_snapshot_jitter_usec, absf((now - _last_snapshot_usec) - expected), 0.05)
+	_last_snapshot_usec = now
+	_last_snapshot_tick = tick
+
+
+# --- Time dilation -----------------------------------------------------------------------------
+
+## Client: the server said how early our inputs have been arriving, at worst, over the last half second and the last 5.
+## Too close over the short one: speed up, more the further out it is. Plenty to spare over the whole of the long one: slow down.
+## Otherwise, normal speed. The difference is deliberate: being late costs inputs, and being early only costs a little.
+func _update_dilation(margin: int, margin_long: int) -> void:
+	_last_feedback_usec = Time.get_ticks_usec()
+	if margin == NO_MARGIN:
+		return
+	_input_margin = margin
+	stats["margin_total"] += margin
+	stats["margin_reports"] += 1
+	stats["margin_lowest"] = mini(stats["margin_lowest"], margin)
+	if not time_dilation_enabled:
+		return
+	var error := 0
+	if margin < dilation_margin_low_ticks:
+		error = margin - dilation_margin_low_ticks
+	elif margin_long > dilation_margin_high_ticks:
+		error = margin_long - dilation_margin_high_ticks
+	_set_tick_factor(1.0 - clampf(error * dilation_gain, -dilation_max_speedup, dilation_max_slowdown))
+
+
+func _set_tick_factor(factor: float) -> void:
+	_driver.tick_factor = factor
+	stats["speed_lowest"] = minf(stats["speed_lowest"], factor)
+	stats["speed_highest"] = maxf(stats["speed_highest"], factor)

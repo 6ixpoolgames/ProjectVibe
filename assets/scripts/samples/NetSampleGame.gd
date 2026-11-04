@@ -1,11 +1,12 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-04: a small game you can play to feel the multiplayer code.
 ## Open net_sample.tscn twice. In one window press Host, in the other press Join. WASD to move, Shift to sprint, Space to jump,
-## and click to shoot where the mouse points. Set the fake latency in each window to feel a bad connection.
+## and click to shoot where the mouse points. In a debug build, a panel of keys changes the fake network and switches features
+## on and off while you play: see NetTestBench.gd.
 ## A dedicated server or a scripted start also work, after "--" on the command line:
 ##   --server            hosts with no player of its own
 ##   --host              hosts and plays
 ##   --join=127.0.0.1    joins
-##   --latency=50        adds this many milliseconds each way
+##   --ping=100          sets the test bench's fake ping, in milliseconds
 extends Node3D
 
 const PORT := 24890
@@ -19,7 +20,7 @@ var _driver: NetworkTimeSingleton
 var _status: Label
 var _menu: Control
 var _address: LineEdit
-var _latency: SpinBox
+var _bench: NetTestBench
 var _next_spawn := 0
 var _dedicated := false
 var _message := ""
@@ -34,6 +35,9 @@ func _ready() -> void:
 	_session.joined.connect(func() -> void: _message = "joined")
 	_session.refused.connect(_on_refused)
 	_session.disconnected.connect(func() -> void: _show_menu("disconnected"))
+	_session.allow_debug_commands = true # only has any effect in a debug build, which is also the only place the bench exists
+	_bench = NetTestBench.new()
+	add_child(_bench)
 	_build_hud()
 	_read_command_line()
 
@@ -43,7 +47,6 @@ func _process(_delta: float) -> void:
 
 
 func _host(with_player: bool) -> void:
-	_apply_latency()
 	var error := _session.host(PORT)
 	if error != OK:
 		_show_menu("couldn't host: error %d" % error)
@@ -57,7 +60,6 @@ func _host(with_player: bool) -> void:
 
 
 func _join(address: String) -> void:
-	_apply_latency()
 	var error := _session.join(address, PORT)
 	if error != OK:
 		_show_menu("couldn't join: error %d" % error)
@@ -73,10 +75,6 @@ func _spawn_player(peer: int) -> void:
 
 func _on_refused(reason: String) -> void:
 	_show_menu("refused: " + reason)
-
-
-func _apply_latency() -> void:
-	_session.fake.latency_ms = _latency.value
 
 
 func _show_menu(message: String) -> void:
@@ -108,8 +106,8 @@ func _read_command_line() -> void:
 	for argument in OS.get_cmdline_user_args():
 		var parts := argument.trim_prefix("--").split("=", true, 1)
 		settings[parts[0]] = parts[1] if parts.size() > 1 else "true"
-	if settings.has("latency"):
-		_latency.value = float(settings["latency"])
+	if settings.has("ping") and OS.is_debug_build():
+		_bench.set_ping(float(settings["ping"]))
 	if settings.has("server"):
 		_host(false)
 	elif settings.has("host"):
@@ -139,11 +137,3 @@ func _build_hud() -> void:
 	join_button.text = "Join"
 	join_button.pressed.connect(func() -> void: _join(_address.text))
 	menu.add_child(join_button)
-	var latency_label := Label.new()
-	latency_label.text = "Fake latency each way (ms)"
-	menu.add_child(latency_label)
-	_latency = SpinBox.new()
-	_latency.min_value = 0.0
-	_latency.max_value = 500.0
-	_latency.step = 10.0
-	menu.add_child(_latency)

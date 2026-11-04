@@ -5,6 +5,8 @@
 ## Roles, set per machine:
 ##   AUTHORITY          the server (or offline). It simulates for real and its results count.
 ##   LOCAL_PREDICTED    your own pawn on your client. It simulates ahead and gets corrected.
+##   LOCAL_UNPREDICTED  your own pawn with prediction off: MOBA-style. It sends inputs and waits, so what you do shows up after
+##                      your ping. It's drawn from snapshots like a remote entity.
 ##   REMOTE_FOLLOWING   anything else on a client, by default. It doesn't simulate: it's drawn in the past between snapshots
 ##                      (interpolation), and stays where it's drawn during a rollback.
 ##   REMOTE_PREDICTED   anything else on a client, when predicted. It simulates ahead on its last known input and gets
@@ -25,7 +27,7 @@
 extends Node
 class_name NetworkEntity
 
-enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED }
+enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED, LOCAL_UNPREDICTED }
 
 ## Off: stays on this machine only, like particles or debris.
 @export var is_replicated: bool = true
@@ -62,10 +64,9 @@ func configure(new_id: int, new_type: String, new_owner: int, new_role: Role, lo
 	session = new_session
 	_root = get_parent()
 	state = _find_state()
-	if state:
-		state.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER if role == Role.REMOTE_FOLLOWING else TickStateComponent.RollbackMode.RESIMULATE
-	else:
+	if state == null:
 		push_warning("[NetworkEntity] %s has no TickStateComponent, so it has nothing to send" % _root.name)
+	_apply_role_to_state()
 	_root.set_meta(&"network_entity", self)
 	if _root.has_method(&"_on_network_role"):
 		_root._on_network_role(self)
@@ -89,15 +90,47 @@ func _ready() -> void:
 	_hit_ticks.resize(HIT_HISTORY_SIZE)
 	_hit_ticks.fill(-1)
 	_hit_positions.resize(HIT_HISTORY_SIZE)
-	# A remote entity is placed from snapshots, so its own simulation must not run as well.
-	if role == Role.REMOTE_FOLLOWING and _driver:
+	_apply_role_to_driver()
+
+
+## True if this entity is placed from snapshots rather than simulated here.
+func follows_snapshots() -> bool:
+	return role == Role.REMOTE_FOLLOWING or role == Role.LOCAL_UNPREDICTED
+
+
+## Changes role while running, for the test switches. Its history simply starts again from here.
+func set_role(new_role: Role) -> void:
+	if new_role == role:
+		return
+	role = new_role
+	_apply_role_to_state()
+	_apply_role_to_driver()
+
+
+func _apply_role_to_state() -> void:
+	if state == null:
+		return
+	state.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER if follows_snapshots() else TickStateComponent.RollbackMode.RESIMULATE
+	state.keep_input_history = is_local
+
+
+## Something placed from snapshots must not also simulate itself. Your own unpredicted pawn still decides its input, in _tick_input below.
+func _apply_role_to_driver() -> void:
+	if _driver == null or _root == null:
+		return
+	if follows_snapshots():
 		_driver.unregister(_root)
+	else:
+		_driver.register(_root)
 
 
 # --- Called by the tick driver -----------------------------------------------------------------
 
 ## Server: hands the entity the input its owner sent for this tick. This runs after the parent's own _tick_input.
-func _tick_input(_dt: float, tick: int) -> void:
+func _tick_input(dt: float, tick: int) -> void:
+	if role == Role.LOCAL_UNPREDICTED and _root.has_method(&"_tick_input"):
+		_root._tick_input(dt, tick)
+		return
 	if role != Role.AUTHORITY or is_local or owner_peer == 0 or state == null:
 		return
 	if state.apply_input(tick):
@@ -119,11 +152,11 @@ func _tick_record(tick: int) -> void:
 
 # --- Called by NetworkSession ------------------------------------------------------------------
 
-## A remote entity: places it for this tick, between snapshots.
-func follow_server(render_tick: float) -> void:
+## Something placed from snapshots: places it for this tick, between them.
+func follow_server(render_tick: float, allow_extrapolation: bool = true) -> void:
 	if state == null:
 		return
-	state.follow_server_at(render_tick)
+	state.follow_server_at(render_tick, allow_extrapolation)
 	if _root.has_method(&"_on_network_interpolated"):
 		_root._on_network_interpolated()
 

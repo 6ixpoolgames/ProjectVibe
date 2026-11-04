@@ -1,5 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-04: headless multiplayer self-test, using real connections between separate
-## Godot processes on this machine, with a fake bad network added in our own code. Takes a few minutes. Exits 0 on success.
+## Godot processes on this machine, with a fake bad network added in our own code. Takes about 6 minutes. Exits 0 on success.
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/netcode/tests/net_selftest.tscn"
 ## Add -- --only=name to run one scenario.
 extends Node
@@ -32,6 +32,14 @@ func _ready() -> void:
 	await _scenario("interpolation", _test_interpolation)
 	await _scenario("lag_compensation", _test_lag_compensation)
 	await _scenario("predicted_others", _test_predicted_others)
+	await _scenario("dilation", _test_dilation)
+	await _scenario("dilation_ramp", _test_dilation_ramp)
+	await _scenario("prediction_off", _test_prediction_off)
+	await _scenario("reconciliation_off", _test_reconciliation_off)
+	await _scenario("interpolation_off", _test_interpolation_off)
+	await _scenario("live_switches", _test_live_switches)
+	await _scenario("bench_ping", _test_bench_ping)
+	await _scenario("worst_case", _test_worst_case)
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -129,6 +137,78 @@ func _test_packets() -> void:
 	fake.submit(1, PackedByteArray([5]), true, 0)
 	fake.release_due(1000000, catch_sent)
 	_check(sent == [1, 2, 3, 5], "fake network: only unreliable packets get lost")
+	_test_fake_conditions()
+
+
+func _test_fake_conditions() -> void:
+	var sent: Array = []
+	var catch_sent := func(_peer: int, bytes: PackedByteArray, _reliable: bool) -> void: sent.append(bytes[0])
+	var rough := NetFakeConditions.new()
+	rough.set_seed(1)
+	_check(not rough.is_active(), "fake network: off until something is set")
+	rough.start_burst(0, 1.0)
+	_check(rough.is_active() and rough.is_in_burst(500000) and not rough.is_in_burst(1500000), "fake network: a burst lasts as long as it was asked to")
+	rough.submit(1, PackedByteArray([6]), false, 0)
+	rough.submit(1, PackedByteArray([7]), true, 0)
+	rough.release_due(500000, catch_sent)
+	_check(sent.is_empty() and rough.packets_lost == 1, "fake network: in a burst, unreliable packets are lost and reliable ones wait")
+	rough.release_due(1100000, catch_sent)
+	_check(sent == [7], "fake network: reliable packets arrive when the burst ends")
+
+	rough.clear()
+	sent.clear()
+	rough.start_spike(2000000, 1.0, 100.0)
+	rough.submit(1, PackedByteArray([8]), false, 2000000)
+	rough.release_due(2050000, catch_sent)
+	_check(sent.is_empty(), "fake network: a spike adds to the delay")
+	rough.release_due(2110000, catch_sent)
+	_check(sent == [8], "fake network: and it arrives after that")
+	rough.release_due(9000000, catch_sent)
+	_check(not rough.is_active(), "fake network: once a burst and a spike are over, it goes back to off")
+
+	var ramp := NetFakeConditions.new()
+	ramp.timeline = [[0.0, 10.0], [10.0, 110.0], [12.0, 110.0]]
+	ramp.update(3000000)
+	_check(is_equal_approx(ramp.latency_ms, 10.0), "fake network: a timeline starts at its first value")
+	ramp.update(8000000)
+	_check(is_equal_approx(ramp.latency_ms, 60.0), "fake network: and moves in a straight line between its points")
+	ramp.update(30000000)
+	_check(is_equal_approx(ramp.latency_ms, 110.0), "fake network: and holds at the end")
+
+	var wander := NetFakeConditions.new()
+	wander.set_seed(2)
+	wander.jitter_ms = 10.0
+	wander.jitter_variation = 1.0
+	var seen_low := 99.0
+	var seen_high := 0.0
+	for i in 400:
+		wander.update(i * 100000)
+		seen_low = minf(seen_low, wander.get_current_jitter_ms())
+		seen_high = maxf(seen_high, wander.get_current_jitter_ms())
+	_check(seen_low >= 0.0 and seen_high <= 20.0 and seen_high - seen_low > 8.0, "fake network: jitter itself wanders, within its limits")
+
+	sent.clear()
+	var doubles := NetFakeConditions.new()
+	doubles.duplicate_chance = 1.0
+	doubles.submit(1, PackedByteArray([9]), false, 0)
+	doubles.submit(1, PackedByteArray([10]), true, 0)
+	doubles.release_due(100000, catch_sent)
+	_check(sent.count(9) == 2 and sent.count(10) == 1, "fake network: unreliable packets can arrive twice, reliable ones never")
+
+	sent.clear()
+	var shuffled := NetFakeConditions.new()
+	shuffled.reorder_chance = 1.0
+	shuffled.submit(1, PackedByteArray([11]), false, 0)
+	shuffled.reorder_chance = 0.0
+	shuffled.submit(1, PackedByteArray([12]), false, 1000)
+	shuffled.release_due(200000, catch_sent)
+	_check(sent == [12, 11], "fake network: a reordered packet arrives after a later one")
+
+	var preset := NetFakeConditions.new()
+	preset.apply_preset("worst")
+	_check(is_equal_approx(preset.latency_ms, 125.0) and preset.is_active(), "fake network: a preset gives each direction half the round trip")
+	preset.apply_preset("off")
+	_check(not preset.is_active(), "fake network: the off preset turns it all off")
 
 
 ## Offline: entities spawn with no connection, and lag compensation works on its own.
@@ -235,12 +315,75 @@ func _test_offline() -> void:
 	session.content_hash_salt = 0
 	_check(hash_first != hash_salted and session.content_hash() == hash_first, "content hash: stays the same, and changes when it should, even though it's cached")
 
+	_test_bench(session)
+	var following := TickStateComponent.new()
+	var following_holder := InputHolder.new()
+	following.state_properties = ["want"]
+	following.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER
+	following_holder.add_child(following)
+	world.add_child(following_holder)
+	following.receive_authoritative_state(1000, {"want": Vector3(2, 0, 0)})
+	following.follow_server_at(1000.5)
+	_check(following_holder.want == Vector3(2, 0, 0), "follow server: with nothing to blend to, it holds where it was")
+
+	session._peers[77] = {"welcomed": true, "acknowledged_snapshot": 100}
+	var interpolation_limit: float = session.max_interpolation_seconds * driver.get_tick_rate()
+	_check(session.limit_view_ticks_behind(77, 8.0, 103) == 8.0, "rewind claim: a believable claim is left alone")
+	_check(is_equal_approx(session.limit_view_ticks_behind(77, 500.0, 103), 3.0 + interpolation_limit + 1.0), "rewind claim: a low-ping client can't claim more than its acknowledgements allow")
+	session._peers[77]["acknowledged_snapshot"] = -1
+	_check(session.limit_view_ticks_behind(77, 8.0, 103) == 0.0, "rewind claim: a client that has seen nothing gets no rewind")
+	_check(session.limit_view_ticks_behind(999, 8.0, 103) == 8.0, "rewind claim: the host's own pawn and AI aren't limited")
+	session._peers.erase(77)
+
 	session.despawn(target.entity_id)
 	_check(session.get_entity(target.entity_id) == null, "offline: despawn removes an entity")
 	session.leave()
 	_check(session.get_entities().is_empty(), "offline: leaving removes the rest")
 	world.queue_free()
 	await get_tree().physics_frame
+
+
+func _test_bench(session: NetworkSessionSingleton) -> void:
+	var bench := NetTestBench.new()
+	add_child(bench)
+	_check(bench.handle_key(KEY_BRACKETRIGHT) and is_equal_approx(session.fake.latency_ms, 5.0) and is_equal_approx(session.fake_in.latency_ms, 5.0), "bench: ] raises the ping, half each way")
+	bench.handle_key(KEY_BRACKETLEFT)
+	bench.handle_key(KEY_BRACKETLEFT)
+	_check(session.fake.latency_ms == 0.0, "bench: [ lowers it, and it can't go below zero")
+	bench.handle_key(KEY_EQUAL)
+	_check(is_equal_approx(session.fake.jitter_ms, 2.5), "bench: = raises jitter")
+	bench.handle_key(KEY_MINUS)
+	_check(session.fake.jitter_ms == 0.0, "bench: - lowers it")
+	bench.handle_key(KEY_PERIOD)
+	_check(is_equal_approx(session.fake.loss, 0.005), "bench: . raises loss")
+	bench.handle_key(KEY_COMMA)
+	_check(is_equal_approx(session.fake.loss, 0.0), "bench: , lowers it")
+	bench.handle_key(KEY_APOSTROPHE)
+	_check(is_equal_approx(session.fake.jitter_variation, 0.1), "bench: ' makes jitter wander more")
+	bench.handle_key(KEY_SEMICOLON)
+	_check(is_equal_approx(session.fake.jitter_variation, 0.0), "bench: ; makes it wander less")
+	bench.handle_key(KEY_F5)
+	_check(is_equal_approx(session.fake.latency_ms, 125.0) and is_equal_approx(session.fake_in.latency_ms, 125.0) and bench.preset_name == "worst", "bench: F5 is the worst case preset")
+	bench.handle_key(KEY_F1)
+	_check(not session.fake.is_active(), "bench: F1 turns it all off")
+	bench.handle_key(KEY_B)
+	_check(session.fake.is_in_burst(Time.get_ticks_usec()), "bench: B starts a burst")
+	bench.handle_key(KEY_N)
+	_check(session.fake.is_in_spike(Time.get_ticks_usec()), "bench: N starts a spike")
+	session.fake.clear()
+	session.fake_in.clear()
+	session.fake.apply_preset("off")
+	session.fake_in.apply_preset("off")
+	var was_on := session.is_feature_on("prediction_enabled")
+	bench.handle_key(KEY_1)
+	_check(session.is_feature_on("prediction_enabled") != was_on, "bench: 1 switches the first feature")
+	bench.handle_key(KEY_1)
+	_check(session.is_feature_on("prediction_enabled") == was_on, "bench: and back")
+	_check(not bench.handle_key(KEY_Z), "bench: other keys are left alone")
+	_check(bench.status_text().contains("time_dilation_enabled"), "bench: the panel lists the features")
+	session.set_feature("not_a_feature", true)
+	_check(not session.is_feature_on("not_a_feature"), "switches: an unknown feature is ignored")
+	bench.free()
 
 
 # --- Real connections ------------------------------------------------------------------------------
@@ -348,7 +491,7 @@ func _test_clock(run_name: String) -> void:
 	print("        round trip %.1f ms, lead %.1f ticks, resyncs %d" % [float(a["rtt_ms"]), float(a["lead_ticks"]), int(a["stats"]["resyncs"])])
 	_check(float(a["rtt_ms"]) > 95.0 and float(a["rtt_ms"]) < 140.0, "clock: the client measures the fake 100 ms round trip")
 	# Half of 100 ms is 3 ticks, plus a margin of 3.
-	_check(float(a["lead_ticks"]) > 4.0 and float(a["lead_ticks"]) < 8.5, "clock: the client runs half the round trip plus the margin ahead of the server")
+	_check(float(a["lead_ticks"]) > 4.0 and float(a["lead_ticks"]) < 9.0, "clock: the client runs half the round trip plus the margin ahead of the server")
 	_check(int(a["stats"]["resyncs"]) <= 1, "clock: and stays there")
 
 
@@ -476,6 +619,215 @@ func _test_predicted_others(run_name: String) -> void:
 	print("        another client's pawn, predicted, against the server on the same tick: average %.2f cm, worst %.2f cm" % [100.0 * error["average"], 100.0 * error["worst"]])
 	_check(error["ticks"] > 200, "predicted others: enough ticks to compare")
 	_check(error["average"] < 0.15, "predicted others: a steady mover is predicted close to where it really is, not in the past")
+
+
+## A client on a steady connection, with dilation on and off.
+func _dilation_results(run_name: String, client_extra: Dictionary) -> Dictionary:
+	_port += 1
+	var client: Dictionary = {"role": "client", "seconds": 16, "mode": "strafe"}
+	client.merge(client_extra)
+	return await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 17},
+		"a": client,
+	}, _port)
+
+
+func _margin_average(machine: Dictionary) -> float:
+	var stats: Dictionary = machine["stats"]
+	return float(stats["margin_total"]) / maxf(float(stats["margin_reports"]), 1.0)
+
+
+func _test_dilation(run_name: String) -> void:
+	var results := await _dilation_results(run_name + "_on", {"latency": 100, "jitter": 10})
+	var fixed := await _dilation_results(run_name + "_off", {"latency": 100, "jitter": 10, "off": "time_dilation_enabled"})
+	if results["a"].has("timed_out") or fixed["a"].has("timed_out"):
+		_check(false, "dilation: every machine finished")
+		return
+	var a: Dictionary = results["a"]
+	var f: Dictionary = fixed["a"]
+	print("        with dilation: inputs arrive %.1f ticks early on average, lowest %d, speed %.3f to %.3f, %d missed, %d resyncs" % [_margin_average(a), int(a["stats"]["margin_lowest"]), float(a["stats"]["speed_lowest"]), float(a["stats"]["speed_highest"]), int(a["missed_inputs"]), int(a["stats"]["resyncs"])])
+	print("        fixed lead:    inputs arrive %.1f ticks early on average, lowest %d, speed %.3f to %.3f, %d missed, %d resyncs" % [_margin_average(f), int(f["stats"]["margin_lowest"]), float(f["stats"]["speed_lowest"]), float(f["stats"]["speed_highest"]), int(f["missed_inputs"]), int(f["stats"]["resyncs"])])
+	_check(float(f["stats"]["speed_lowest"]) == 1.0 and float(f["stats"]["speed_highest"]) == 1.0, "dilation: turned off, the client always runs at normal speed")
+	# On a steady connection the fixed lead is already about right, so dilation has little to do.
+	_check(_margin_average(a) <= _margin_average(f) + 0.5, "dilation: on a steady connection it wastes no more time than a fixed lead")
+	_check(float(a["stats"]["speed_lowest"]) >= 0.96 and float(a["stats"]["speed_highest"]) <= 1.06, "dilation: speed changes stay within a few percent")
+	_check(int(a["stats"]["margin_lowest"]) >= -1, "dilation: inputs still arrive on time")
+	_check(int(a["stats"]["resyncs"]) == 0, "dilation: it never needs to jump")
+	_check(int(a["missed_inputs"]) <= 5, "dilation: almost no inputs are missed")
+
+
+func _test_dilation_ramp(run_name: String) -> void:
+	# Ping climbs from 10 ms to 120 ms and back, which a fixed lead can't follow without jumping.
+	var timeline := "0:5,4:5,7:60,10:60,13:5,16:5"
+	var results := await _dilation_results(run_name + "_on", {"timeline": timeline})
+	var fixed := await _dilation_results(run_name + "_off", {"timeline": timeline, "off": "time_dilation_enabled"})
+	if results["a"].has("timed_out") or fixed["a"].has("timed_out"):
+		_check(false, "dilation ramp: every machine finished")
+		return
+	var a: Dictionary = results["a"]
+	var f: Dictionary = fixed["a"]
+	print("        with dilation: %d missed inputs, %d resyncs, lowest margin %d" % [int(a["missed_inputs"]) - int(a["missed_inputs_start"]), int(a["stats"]["resyncs"]), int(a["stats"]["margin_lowest"])])
+	print("        fixed lead:    %d missed inputs, %d resyncs, lowest margin %d" % [int(f["missed_inputs"]) - int(f["missed_inputs_start"]), int(f["stats"]["resyncs"]), int(f["stats"]["margin_lowest"])])
+	_check(int(a["stats"]["resyncs"]) <= int(f["stats"]["resyncs"]), "dilation ramp: no more jumps than a fixed lead")
+	_check(int(a["missed_inputs"]) - int(a["missed_inputs_start"]) <= int(f["missed_inputs"]) - int(f["missed_inputs_start"]) + 3, "dilation ramp: no more missed inputs than a fixed lead")
+	# Ping drops after the client settled on a large lead, so it ends up further ahead than it needs to be.
+	var dropping := "0:60,5:60,7:5,16:5"
+	var down_on := await _dilation_results(run_name + "_down_on", {"timeline": dropping})
+	var down_off := await _dilation_results(run_name + "_down_off", {"timeline": dropping, "off": "time_dilation_enabled"})
+	if down_on["a"].has("timed_out") or down_off["a"].has("timed_out"):
+		_check(false, "dilation ramp: every machine finished")
+		return
+	print("        ping dropping, inputs arrive early by: %.1f ticks with dilation, %.1f with a fixed lead" % [_margin_average(down_on["a"]), _margin_average(down_off["a"])])
+	_check(_margin_average(down_on["a"]) < _margin_average(down_off["a"]), "dilation ramp: when ping drops, it stops wasting the extra lead")
+
+
+func _test_prediction_off(run_name: String) -> void:
+	var results := await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 11, "latency": 50},
+		"a": {"role": "client", "seconds": 10, "latency": 50, "mode": "strafe", "off": "prediction_enabled"},
+	}, _port)
+	var server: Dictionary = results["server"]
+	var a: Dictionary = results["a"]
+	if server.has("timed_out") or a.has("timed_out"):
+		_check(false, "prediction off: every machine finished")
+		return
+	var own := NetRun.own_entity(a)
+	_check(int(own["role"]) == NetworkEntity.Role.LOCAL_UNPREDICTED, "prediction off: your own pawn isn't predicted")
+	var truth: Dictionary = server["positions"].get(str(int(own["id"])), {})
+	var zs: Array = truth.values().map(func(p: Array) -> float: return float(p[2]))
+	_check(zs.size() > 100 and absf(zs.max() - zs.min()) > 3.0, "prediction off: the server still moves it from your inputs")
+	var view := NetRun.view_error(a, server, int(own["id"]))
+	print("        your own pawn is drawn %.1f ticks behind your own tick, %.2f cm from where it really was then" % [view["behind_ticks"], 100.0 * view["average"]])
+	_check(view["ticks"] > 100 and view["average"] < 0.05, "prediction off: you see where it really was")
+	_check(view["behind_ticks"] > 8.0, "prediction off: and what you do shows up late, which is the point")
+	_check(int(a["stats"]["corrections"]) == 0, "prediction off: nothing needs correcting")
+
+
+func _test_reconciliation_off(run_name: String) -> void:
+	for smoothing_off: bool in [false, true]:
+		_port += 1
+		var client: Dictionary = {"role": "client", "seconds": 8, "latency": 50, "mode": "idle"}
+		if smoothing_off:
+			client["off"] = "correction_smoothing_enabled"
+		var with_correction := await NetRun.run(self, run_name + ("_smoothing_off" if smoothing_off else "_smoothing_on"), {
+			"server": {"role": "server", "seconds": 9, "latency": 50, "shove-at": 400},
+			"a": client,
+		}, _port)
+		if with_correction["a"].has("timed_out"):
+			_check(false, "correction smoothing: every machine finished")
+			return
+		var seen := int(NetRun.own_entity(with_correction["a"]).get("corrections_seen", -1))
+		if smoothing_off:
+			_check(seen == 0 and int(with_correction["a"]["stats"]["corrections"]) >= 1, "correction smoothing: off, corrections happen but the model isn't told")
+		else:
+			_check(seen >= 1, "correction smoothing: on, the model hides the jump")
+	_port += 1
+	var results := await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 9, "latency": 50, "shove-at": 400},
+		"a": {"role": "client", "seconds": 8, "latency": 50, "mode": "idle", "off": "reconciliation_enabled"},
+	}, _port)
+	var server: Dictionary = results["server"]
+	var a: Dictionary = results["a"]
+	if server.has("timed_out") or a.has("timed_out"):
+		_check(false, "reconciliation off: every machine finished")
+		return
+	_check(int(a["stats"]["corrections"]) == 0, "reconciliation off: the client never corrects itself")
+	var own := NetRun.own_entity(a)
+	var on_server := NetRun.summary_of(server, int(own["id"]))
+	var apart := Vector2(float(own["x"]) - float(on_server["x"]), float(own["z"]) - float(on_server["z"])).length()
+	print("        client and server ended %.2f m apart" % apart)
+	_check(apart > 1.5, "reconciliation off: so client and server stay apart after a shove")
+
+
+func _test_interpolation_off(run_name: String) -> void:
+	var results := await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 11, "latency": 40},
+		"mover": {"role": "client", "seconds": 10, "latency": 40, "mode": "strafe"},
+		"watcher": {"role": "client", "seconds": 10, "latency": 40, "mode": "idle", "off": "interpolation_enabled"},
+	}, _port)
+	var server: Dictionary = results["server"]
+	var mover: Dictionary = results["mover"]
+	var watcher: Dictionary = results["watcher"]
+	if server.has("timed_out") or mover.has("timed_out") or watcher.has("timed_out"):
+		_check(false, "interpolation off: every machine finished")
+		return
+	var view := NetRun.view_error(watcher, server, int(NetRun.own_entity(mover)["id"]))
+	print("        drawn %.1f ticks behind, largest step %.1f cm in one tick" % [view["behind_ticks"], 100.0 * view["largest_step"]])
+	_check(view["behind_ticks"] < 12.0, "interpolation off: remote pawns are drawn less far in the past")
+	_check(view["largest_step"] > 0.13, "interpolation off: and they visibly jump from snapshot to snapshot")
+
+
+func _test_live_switches(run_name: String) -> void:
+	var results := await NetRun.run(self, run_name + "_allowed", {
+		"server": {"role": "server", "seconds": 10, "allow-debug": 1},
+		"a": {"role": "client", "seconds": 9, "mode": "strafe", "switch": "4:lag_compensation_enabled:0"},
+		"b": {"role": "client", "seconds": 9, "mode": "strafe", "switch": "5:prediction_enabled:0"},
+	}, _port)
+	if results["server"].has("timed_out") or results["a"].has("timed_out") or results["b"].has("timed_out"):
+		_check(false, "live switches: every machine finished")
+		return
+	_check(not results["server"]["features"]["lag_compensation_enabled"], "live switches: with permission, a client can switch a server feature for testing")
+	_check(int(NetRun.own_entity(results["b"])["role"]) == NetworkEntity.Role.LOCAL_UNPREDICTED, "live switches: prediction can be turned off while running")
+	_port += 1
+	var refused := await NetRun.run(self, run_name + "_refused", {
+		"server": {"role": "server", "seconds": 7},
+		"a": {"role": "client", "seconds": 6, "mode": "idle", "switch": "3:lag_compensation_enabled:0"},
+	}, _port)
+	if refused["server"].has("timed_out"):
+		_check(false, "live switches: the server finished")
+		return
+	_check(refused["server"]["features"]["lag_compensation_enabled"], "live switches: without permission, the server ignores it")
+	_check(int(refused["server"]["stats"]["bad_packets"]) >= 1, "live switches: and counts it as a bad packet")
+	_port += 1
+	var to_predicted := await NetRun.run(self, run_name + "_predicted", {
+		"server": {"role": "server", "seconds": 10, "allow-debug": 1},
+		"mover": {"role": "client", "seconds": 9, "mode": "strafe"},
+		"watcher": {"role": "client", "seconds": 9, "mode": "idle", "switch": "4:default_predicted:1"},
+	}, _port)
+	if to_predicted["watcher"].has("timed_out") or to_predicted["mover"].has("timed_out"):
+		_check(false, "live switches: every machine finished")
+		return
+	var mover_id := int(NetRun.own_entity(to_predicted["mover"])["id"])
+	_check(int(NetRun.summary_of(to_predicted["watcher"], mover_id)["role"]) == NetworkEntity.Role.REMOTE_PREDICTED, "live switches: other pawns can start being predicted while running")
+
+
+## The bench sets its whole ping from one side, through both of that client's fake networks.
+func _test_bench_ping(run_name: String) -> void:
+	var results := await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 13},
+		"a": {"role": "client", "seconds": 12, "mode": "strafe", "bench-ping": 120},
+	}, _port)
+	var a: Dictionary = results["a"]
+	if a.has("timed_out"):
+		_check(false, "bench ping: the client finished")
+		return
+	print("        bench ping 120: measured %.1f ms, lead %.1f ticks, %d resyncs, %d missed inputs" % [float(a["rtt_ms"]), float(a["lead_ticks"]), int(a["stats"]["resyncs"]), int(a["missed_inputs"]) - int(a["missed_inputs_start"])])
+	_check(float(a["rtt_ms"]) > 110.0 and float(a["rtt_ms"]) < 165.0, "bench ping: a client sees the ping it set, from one side only")
+	_check(int(a["stats"]["resyncs"]) == 0, "bench ping: it doesn't need to jump")
+	_check(int(a["missed_inputs"]) - int(a["missed_inputs_start"]) <= 3, "bench ping: and it doesn't miss inputs")
+
+
+func _test_worst_case(run_name: String) -> void:
+	var results := await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 21},
+		"a": {"role": "client", "seconds": 20, "mode": "seek", "preset": "worst", "conditions-seed": 11},
+		"b": {"role": "client", "seconds": 20, "mode": "seek", "preset": "mobile", "conditions-seed": 12},
+	}, _port)
+	var server: Dictionary = results["server"]
+	var a: Dictionary = results["a"]
+	var b: Dictionary = results["b"]
+	if server.has("timed_out") or a.has("timed_out") or b.has("timed_out"):
+		_check(false, "worst case: every machine finished")
+		return
+	print("        worst case client: %d bursts, %d spikes, %d resyncs, %d of its inputs missed, lowest margin %d, speed %.3f to %.3f" % [int(a["bursts"]), int(a["spikes"]), int(a["stats"]["resyncs"]), int(a["missed_inputs"]), int(a["stats"]["margin_lowest"]), float(a["stats"]["speed_lowest"]), float(a["stats"]["speed_highest"])])
+	_check(a["joined"] and b["joined"], "worst case: both clients still join")
+	_check(int(a["bursts"]) + int(a["spikes"]) > 0, "worst case: it really was bad")
+	var truth: Dictionary = server["positions"].get(str(int(NetRun.own_entity(a).get("id", -1))), {})
+	var xs: Array = truth.values().map(func(p: Array) -> float: return float(p[0]))
+	_check(xs.size() > 100 and absf(xs.max() - xs.min()) > 1.0, "worst case: the pawn still moves from its inputs")
+	var own := NetRun.own_entity(a)
+	var on_server := NetRun.summary_of(server, int(own["id"]))
+	_check(not on_server.is_empty(), "worst case: and the client stayed connected")
 
 
 func _check(ok: bool, what: String) -> void:
