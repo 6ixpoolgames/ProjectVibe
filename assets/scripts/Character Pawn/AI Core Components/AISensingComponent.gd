@@ -258,6 +258,9 @@ func _update_entities_in_LOS() -> void:
 	for e in entitiesInDetectionAngle:
 		if _is_in_LOS(e):
 			entitiesInLOS.append(e)
+			# Claude 2026-11-03: anything actually seen is written to memory, so it's remembered after LOS is lost
+			if aiCore and aiCore.aiMemory:
+				aiCore.aiMemory.record(&"pawn_seen", e, e.global_position, 1.0, &"vision")
 
 
 ##gets all colliders in the parent pawn, supposedly for raycast exclusion purposes.

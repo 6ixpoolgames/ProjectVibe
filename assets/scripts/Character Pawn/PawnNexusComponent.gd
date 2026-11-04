@@ -13,6 +13,7 @@ var aiCore: AICoreComponent
 var sensingComponent: AISensingComponent
 var aiStateManager: AIStateManagerComponent
 var aiBehaviourManager: AIBehaviourManagerComponent
+var aiMemory: AIMemoryComponent # Claude 2026-11-03: new AI memory component registers itself here
 #var CombatManager: CombatManagerComponent				#still pending implementation
 
 @export var allow_overwrites = {
@@ -25,7 +26,8 @@ var aiBehaviourManager: AIBehaviourManagerComponent
 	"AICore":false,
 	"AISensingComponent":false,
 	"AIStateManager":false,
-	"AIBehaviourManager":false
+	"AIBehaviourManager":false,
+	"AIMemory":false # Claude 2026-11-03: same premade/spawned rule for the memory component
 #	"combatManager":false
 }
 

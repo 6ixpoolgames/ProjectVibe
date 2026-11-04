@@ -19,6 +19,8 @@ var sensingComponent: AISensingComponent
 #var AIStateManager: AIStateManagerComponent
 var aiStateManager: AIStateManagerComponent
 var aiBehaviourManager: AIBehaviourManagerComponent
+var aiMemory: AIMemoryComponent # Claude 2026-11-03: working memory, written by sensing, read by states/behaviours
+var context:= AIContext.new() # Claude 2026-11-04: one shared context per pawn, used by both the state and behaviour managers
 
 
 #references and ready checks
@@ -28,6 +30,7 @@ var aiBehaviourManager: AIBehaviourManagerComponent
 @export var addAISensingComponentOnSpawn:= true
 @export var addAIStateManagerOnSpawn:= true
 @export var addAIBehaviourManagerOnSpawn:= true
+@export var addAIMemoryOnSpawn:= true # Claude 2026-11-03: spawn an AIMemoryComponent like the other subcomponents
 
 #initalization resources
 @export var sensingInitRes:AISensingInitializerBaseRes = ResourcePreloadManager.SenseInitRes_default ##initializer resource for sensing component of type AISensingInitializerBaseRes
@@ -47,6 +50,7 @@ func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAISt
 	addAIBehaviourManagerOnSpawn = addBehave
 	polling_freq_frame_count = pollFreq
 	polling_group = pollGrp
+	context.aiCore = self # Claude 2026-11-04: the context reads every other reference through the AI core
 #endregion
 
 
@@ -54,6 +58,7 @@ func _init(addSense:bool = addAISensingComponentOnSpawn, addState:bool = addAISt
 func _enter_tree() -> void:
 	print_stack()
 	_update_component_references()
+	_init_memory_component() # Claude 2026-11-03: before sensing, so sensing has somewhere to write from its first poll
 	_init_sensing_component(sensingInitRes)
 	_init_state_manager_component()
 	_init_behaviour_manager_component()
@@ -71,6 +76,14 @@ func _init_sensing_component(senseRes: AISensingInitializerBaseRes = sensingInit
 		sensingComponent = AISensingComponent.new(senseRes)
 		sensingComponent.name = "AISensingComponent"
 		self.add_child(sensingComponent)
+
+
+# Claude 2026-11-03: spawns the memory component, same pattern as the sensing/state/behaviour spawners
+func _init_memory_component()->void:
+	if addAIMemoryOnSpawn:
+		aiMemory = AIMemoryComponent.new()
+		aiMemory.name = "AIMemoryComponent"
+		self.add_child(aiMemory)
 
 
 func _init_state_manager_component():
@@ -135,7 +148,8 @@ func _physics_process(_delta: float) -> void:
 			statManager = pawn.statManager
 			pass_subcomponent_references()
 			sensingComponent.set_is_sensing_active(true)
-			aiStateManager.set_is_state_manager_active(true)
+			if aiStateManager: # Claude 2026-11-04: guard, the state manager is optional (addAIStateManagerOnSpawn)
+				aiStateManager.set_is_state_manager_active(true)
 			doOnce = true
 
 
@@ -149,6 +163,11 @@ func get_state_manager()->AIStateManagerComponent:
 
 func get_behaviour_component()->AIBehaviourManagerComponent:         #WARNING not yet implemented
 	return aiBehaviourManager
+
+
+# Claude 2026-11-03: accessor for the new memory component, matching the getters above
+func get_memory_component()->AIMemoryComponent:
+	return aiMemory
 
 
 func _update_component_references()->void:
