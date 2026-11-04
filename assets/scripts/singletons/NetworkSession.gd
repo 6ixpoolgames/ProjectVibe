@@ -54,7 +54,7 @@ enum Mode { OFFLINE, SERVER, CLIENT }
 
 ## Every switch set_feature understands, in the order NetTestBench shows them.
 const FEATURES: Array[String] = ["prediction_enabled", "reconciliation_enabled", "interpolation_enabled", "extrapolation_enabled", "correction_smoothing_enabled", "lag_compensation_enabled", "default_predicted", "follow_during_rollback", "time_dilation_enabled", "adaptive_interpolation_enabled"]
-## The ones the server decides or needs to know about. A client's switch is also sent to the server, for testing.
+## The ones the server decides. A client's switch only asks the server, and snapshots say what the server's are.
 const SERVER_FEATURES: Array[String] = ["lag_compensation_enabled", "default_predicted"]
 ## What snapshots say when a client has sent no input lately.
 const NO_MARGIN := 32767
@@ -146,6 +146,8 @@ var _driver: Node = null
 var _types: Dictionary = {}          # name -> PackedScene
 var _type_order: Array[String] = []
 var _entities: Dictionary = {}       # id -> NetworkEntity
+var _entity_list: Array[NetworkEntity] = []
+var _entity_list_dirty := true
 var _next_entity_id := 1
 var _peers: Dictionary = {}          # server: peer -> {"welcomed": bool, "connected_at": usec}
 var _inbox: Array = []               # [peer, bytes] waiting for the next tick
@@ -255,6 +257,7 @@ func leave() -> void:
 	for entity_id: int in _entities.keys():
 		_remove_entity(entity_id)
 	_entities.clear()
+	_entity_list_dirty = true
 	_peers.clear()
 	_inbox.clear()
 	_inbox_counts.clear()
@@ -345,35 +348,39 @@ func is_feature_on(feature: String) -> bool:
 	return FEATURES.has(feature) and get(feature)
 
 
-## Turns a feature on or off, even while running. See FEATURES.
+## Turns a feature on or off, even while running. See FEATURES. On a client, a feature the server decides only changes if the
+## server agrees: the next snapshot says.
 func set_feature(feature: String, on: bool) -> void:
 	if not FEATURES.has(feature):
 		push_warning("[NetworkSession] no feature called '%s'" % feature)
 		return
-	set(feature, on)
-	_refresh_entities()
-	if not time_dilation_enabled and _driver:
-		_set_tick_factor(1.0)
 	if _mode == Mode.CLIENT and SERVER_FEATURES.has(feature):
 		var buffer := NetPackets.new_buffer()
 		buffer.put_u8(NetPackets.Type.DEBUG_SWITCH)
 		NetPackets.write_value(buffer, feature, StateEncoding.RAW)
 		NetPackets.write_value(buffer, on, StateEncoding.RAW)
 		_send(1, buffer.data_array, true)
+		return
+	set(feature, on)
+	_refresh_entities()
+	if not time_dilation_enabled and _driver:
+		_set_tick_factor(1.0)
 
 
 ## How many ticks behind its own tick a client can believably be drawing others, for lag compensation. It can't be drawing
 ## anything newer than the snapshot it last acknowledged, and it can't be further behind that than the interpolation limit.
-## A client could still fake old acknowledgements, which looks the same as really having high ping. Offline, the host's own
-## pawn and AI aren't limited.
+## Acknowledgements only ever move forward, and one older than the rewind cap gets no rewind. A client that deliberately
+## acknowledges late still gets through, but that looks exactly like really having high ping, so this can't stop it entirely.
+## Offline, the host's own pawn and AI aren't limited.
 func limit_view_ticks_behind(peer: int, claimed: float, tick: int) -> float:
 	if not _peers.has(peer):
 		return claimed
 	var acknowledged: int = _peers[peer].get("acknowledged_snapshot", -1)
-	if acknowledged < 0:
+	var age: int = tick - acknowledged
+	if acknowledged < 0 or age > rewind_cap_seconds * _driver.get_tick_rate():
 		return 0.0
 	var interpolation_limit: float = max_interpolation_seconds * _driver.get_tick_rate()
-	return minf(claimed, (tick - acknowledged) + interpolation_limit + 1.0)
+	return minf(claimed, age + interpolation_limit + 1.0)
 
 
 ## A number that's the same on two machines only if they run the same content.
@@ -437,16 +444,19 @@ func get_entity(entity_id: int) -> NetworkEntity:
 	return _entities.get(entity_id, null)
 
 
-## Every live entity, in id order.
+## Every live entity, in id order. Claude 2026-11-04: the same list each time, rebuilt only when entities come and go, because
+## several per-tick paths use it. Read it, don't change it.
 func get_entities() -> Array[NetworkEntity]:
-	var ids: Array = _entities.keys()
-	ids.sort()
-	var out: Array[NetworkEntity] = []
-	for entity_id: int in ids:
-		var entity: NetworkEntity = _entities[entity_id]
-		if is_instance_valid(entity):
-			out.append(entity)
-	return out
+	if _entity_list_dirty:
+		_entity_list_dirty = false
+		var ids: Array = _entities.keys()
+		ids.sort()
+		_entity_list.clear()
+		for entity_id: int in ids:
+			var entity: NetworkEntity = _entities[entity_id]
+			if is_instance_valid(entity):
+				_entity_list.append(entity)
+	return _entity_list
 
 
 func _create_entity(entity_id: int, type_name: String, owner_peer: int, at: Variant) -> NetworkEntity:
@@ -467,8 +477,11 @@ func _create_entity(entity_id: int, type_name: String, owner_peer: int, at: Vari
 	if at != null and "position" in root:
 		root.position = at
 	var parent: Node = world_root if is_instance_valid(world_root) else get_tree().current_scene
-	parent.add_child(root)
 	_entities[entity_id] = entity
+	_entity_list_dirty = true
+	# However it goes, even if the game frees it directly, it stops being listed.
+	root.tree_exited.connect(_forget_entity.bind(entity_id), CONNECT_ONE_SHOT)
+	parent.add_child(root)
 	entity_spawned.emit(entity)
 	return entity
 
@@ -491,9 +504,14 @@ func _refresh_entities() -> void:
 			entity.state.follows_during_rollback = follow_during_rollback
 
 
+func _forget_entity(entity_id: int) -> void:
+	_entities.erase(entity_id)
+	_entity_list_dirty = true
+
+
 func _remove_entity(entity_id: int) -> void:
 	var entity: NetworkEntity = _entities.get(entity_id, null)
-	_entities.erase(entity_id)
+	_forget_entity(entity_id)
 	if is_instance_valid(entity):
 		var root := entity.get_parent()
 		if root.get_parent():
@@ -582,8 +600,8 @@ func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 
 
 ## Server: a client's test switch. Refused unless this is a debug build and the game allows it, and only for SERVER_FEATURES.
-func _on_debug_switch(_peer: int, bytes: PackedByteArray) -> void:
-	if _mode != Mode.SERVER or not allow_debug_commands or not OS.is_debug_build():
+func _on_debug_switch(peer: int, bytes: PackedByteArray) -> void:
+	if _mode != Mode.SERVER or not allow_debug_commands or not OS.is_debug_build() or not _peers.has(peer) or not _peers[peer]["welcomed"]:
 		stats["bad_packets"] += 1
 		return
 	var buffer := NetPackets.reader(bytes)
@@ -745,7 +763,9 @@ func _on_pong(peer: int, bytes: PackedByteArray) -> void:
 
 
 func _target_tick(now_usec: int) -> int:
-	return roundi(_clock.estimate_server_tick(now_usec, _tick_usec())) + _clock.get_lead_ticks(_tick_usec(), lead_margin_ticks)
+	# Claude 2026-11-04: with dilation on, from the fastest recent ping, so a jump during a spike doesn't land on an inflated lead
+	# that takes a long time to give back. If that's too little, dilation adds more.
+	return roundi(_clock.estimate_server_tick(now_usec, _tick_usec())) + _clock.get_lead_ticks(_tick_usec(), lead_margin_ticks, time_dilation_enabled)
 
 
 # --- Spawning, on a client ---------------------------------------------------------------------
@@ -819,7 +839,7 @@ func _send_inputs(tick: int) -> void:
 		buffer.put_u8(NetPackets.Type.INPUT)
 		buffer.put_u32(entity.entity_id)
 		buffer.put_u32(tick)
-		buffer.put_u32(maxi(_newest_snapshot_tick, 0))
+		buffer.put_32(_newest_snapshot_tick) # -1 if it hasn't seen one yet
 		var count := 0
 		for t in range(tick, tick - mini(input_redundancy, MAX_INPUTS_PER_PACKET), -1):
 			if entity.state.get_input_values(t).is_empty():
@@ -844,19 +864,13 @@ func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 		return
 	var entity_id := buffer.get_u32()
 	var newest := buffer.get_u32()
-	var acknowledged := buffer.get_u32()
+	var acknowledged := buffer.get_32()
 	var count := buffer.get_u8()
 	var entity: NetworkEntity = get_entity(entity_id)
 	if entity == null or entity.owner_peer != peer or entity.state == null or count > MAX_INPUTS_PER_PACKET:
 		stats["rejected_inputs"] += 1
 		return
-	# How early this input arrived, for time dilation. A client can't have seen the future.
-	var margins: Array = _peers[peer]["margins"]
-	margins.append(clampi(newest - tick, -30000, 30000))
-	if margins.size() > MARGIN_LONG_WINDOW:
-		margins.pop_front()
-	if acknowledged <= tick:
-		_peers[peer]["acknowledged_snapshot"] = acknowledged
+	_note_input_timing(peer, newest, acknowledged, tick)
 	for i in count:
 		var values: Variant = NetPackets.read_list(buffer)
 		if values == null:
@@ -867,6 +881,21 @@ func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 		if input_tick < tick or input_tick >= tick + entity.state.history_size:
 			continue
 		entity.state.receive_input(input_tick, entity.clean_input(entity.state.input_values_to_dictionary(values)))
+
+
+## Server: how early this input packet arrived, for time dilation. Only packets bringing something new count: a duplicate, or one
+## overtaken on the way, isn't late input, because the server already has what it carries. What a client acknowledges only
+## moves forward, and a client can't have seen the future.
+func _note_input_timing(peer: int, newest: int, acknowledged: int, tick: int) -> void:
+	var info: Dictionary = _peers[peer]
+	if newest > int(info.get("newest_input", -1)):
+		info["newest_input"] = newest
+		var margins: Array = info["margins"]
+		margins.append(clampi(newest - tick, -30000, 30000))
+		if margins.size() > MARGIN_LONG_WINDOW:
+			margins.pop_front()
+	if acknowledged <= tick:
+		info["acknowledged_snapshot"] = maxi(int(info.get("acknowledged_snapshot", -1)), acknowledged)
 
 
 # --- Snapshots ---------------------------------------------------------------------------------
@@ -889,6 +918,10 @@ func _send_snapshots(tick: int) -> void:
 		NetPackets.write_list(world, input_values, entity.state.get_input_encodings())
 		count += 1
 	var world_bytes := world.data_array
+	var server_features := 0
+	for i in SERVER_FEATURES.size():
+		if get(SERVER_FEATURES[i]):
+			server_features |= 1 << i
 	var missed_by_peer: Dictionary = {}
 	for entity: NetworkEntity in get_entities():
 		missed_by_peer[entity.owner_peer] = int(missed_by_peer.get(entity.owner_peer, 0)) + entity.missed_inputs
@@ -900,11 +933,25 @@ func _send_snapshots(tick: int) -> void:
 		packet.put_u32(tick)
 		var margins: Array = _peers[peer]["margins"]
 		packet.put_16(NO_MARGIN if margins.is_empty() else margins.slice(-MARGIN_SHORT_WINDOW).min())
-		packet.put_16(NO_MARGIN if margins.is_empty() else margins.min())
+		# The long check only counts once it covers the whole 5 seconds. A few calm packets prove nothing.
+		packet.put_16(margins.min() if margins.size() >= MARGIN_LONG_WINDOW else NO_MARGIN)
 		packet.put_u32(missed_by_peer.get(peer, 0))
+		packet.put_u8(server_features)
 		packet.put_u16(count)
 		packet.put_data(world_bytes)
 		_send(peer, packet.data_array, false)
+
+
+## Client: the features the server decides are whatever it says, so the test panel can't show something that isn't so.
+func _apply_server_features(mask: int) -> void:
+	var changed := false
+	for i in SERVER_FEATURES.size():
+		var on: bool = mask & (1 << i) != 0
+		if get(SERVER_FEATURES[i]) != on:
+			set(SERVER_FEATURES[i], on)
+			changed = true
+	if changed:
+		_refresh_entities()
 
 
 ## Client: remote entities store what the snapshot says. Predicted ones keep it aside for _reconcile, newest only.
@@ -914,13 +961,14 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 		return
 	var buffer := NetPackets.reader(bytes)
 	buffer.get_u8()
-	if not NetPackets.has_bytes(buffer, 14):
+	if not NetPackets.has_bytes(buffer, 15):
 		stats["bad_packets"] += 1
 		return
 	var tick := buffer.get_u32()
 	var margin := buffer.get_16()
 	var margin_long := buffer.get_16()
 	var missed := buffer.get_u32()
+	var server_features := buffer.get_u8()
 	var count := buffer.get_u16()
 	if tick <= _newest_snapshot_tick:
 		return # arrived out of order; the newer one already replaced it
@@ -942,6 +990,7 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 	_missed_inputs = missed
 	stats["snapshots_received"] += 1
 	_update_dilation(margin, margin_long)
+	_apply_server_features(server_features)
 	_reconcile_values.clear()
 	_reconcile_tick = tick
 	for item: Array in parsed:
@@ -1059,7 +1108,7 @@ func _update_dilation(margin: int, margin_long: int) -> void:
 	var error := 0
 	if margin < dilation_margin_low_ticks:
 		error = margin - dilation_margin_low_ticks
-	elif margin_long > dilation_margin_high_ticks:
+	elif margin_long != NO_MARGIN and margin_long > dilation_margin_high_ticks:
 		error = margin_long - dilation_margin_high_ticks
 	_set_tick_factor(1.0 - clampf(error * dilation_gain, -dilation_max_speedup, dilation_max_slowdown))
 

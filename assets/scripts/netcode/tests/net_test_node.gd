@@ -206,6 +206,7 @@ func _capture_summary() -> void:
 	result["measure_from_tick"] = measure_from_tick
 	result["fake_lost"] = session.fake.packets_lost
 	result["missed_inputs"] = session.get_missed_inputs()
+	result["margin_last"] = session.get_input_margin()
 	result["features"] = {}
 	for feature: String in NetworkSessionSingleton.FEATURES:
 		result["features"][feature] = session.is_feature_on(feature)

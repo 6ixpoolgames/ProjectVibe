@@ -162,24 +162,31 @@ The server's timeline is the present. Each client runs **ahead** of it for its o
 - Inputs at least 3 ticks early through the whole of the last 5 seconds: slow down, by up to 3%.
 - Otherwise: normal speed, 1.000.
 
-The difference is deliberate: being late costs inputs, while being early only costs a little. The first version relaxed as soon as the last half second looked calm, and on Wi-Fi conditions it was worse than a fixed lead. A client more than 15 ticks from where it should be jumps back instead (4 ticks with dilation off). With no news for half a second, it runs at normal speed rather than act on an old answer.
+The difference is deliberate: being late costs inputs, while being early only costs a little. The first version relaxed as soon as the last half second looked calm, and on Wi-Fi conditions it was worse than a fixed lead. A client more than 15 ticks from where it should be jumps back instead (4 ticks with dilation off), going by its fastest recent ping, so a jump during a spike doesn't land on an inflated lead. With no news for half a second, it runs at normal speed rather than act on an old answer. Only packets bringing new inputs count towards the timing, so duplicated or reordered packets don't look late. The 5-second check only counts once it covers the full 5 seconds.
 
-**Measured, two clients in contact, 20 s, each client's conditions applied both ways (`net_measure --dilation`).** Bursts and spikes are random, so runs vary, and rows on the same connection can differ by more than half on error alone:
+**Measured, two clients in contact, 20 s, one run each, each client's conditions applied both ways (`net_measure --dilation`).** Bursts and spikes are random, so runs vary, and error figures can differ by half between identical runs:
 
 | Conditions | Lead | Missed inputs | Resyncs | Inputs early, average / lowest | Speed | Own error, average / worst | Jump per s |
 |---|---|---|---|---|---|---|---|
-| Steady 100 ms | fixed | 0 | 0 | 2.0 / 1 | 1.000 | 2.2 / 90 cm | 25 cm |
-| Steady 100 ms | dilation | 0 | 0 | 2.0 / 2 | 1.000 | 3.2 / 93 cm | 36 cm |
-| Wi-Fi preset | fixed | 27 | 0 | 2.2 / -2 | 1.000 | 3.5 / 110 cm | 41 cm |
-| Wi-Fi preset | dilation | 16 | 0 | 2.3 / -1 | 0.98–1.04 | 5.3 / 97 cm | 54 cm |
-| Mobile preset | fixed | 174 | 0 | 0.5 / -11 | 1.000 | 9.7 / 191 cm | 80 cm |
-| Mobile preset | dilation | 0 | 0 | 3.6 / -2 | 1.00–1.05 | 4.7 / 256 cm | 30 cm |
-| Worst preset | fixed | 1281 | 3 | -5.0 / -20 | 1.000 | 118 / 659 cm | 470 cm |
-| Worst preset | dilation | 867 | 1 | 0.9 / -19 | 0.97–1.05 | 102 / 865 cm | 348 cm |
-| Ramp, 10 to 200 ms and back | fixed | 368 | 4 | 2.5 / -3 | 1.000 | 9.5 / 121 cm | 102 cm |
-| Ramp, 10 to 200 ms and back | dilation | 2 | 0 | 2.3 / -1 | 0.97–1.04 | 4.7 / 223 cm | 44 cm |
+| Steady 100 ms | fixed | 0 | 0 | 2.8 / 2 | 1.000 | 2.0 / 115 cm | 23 cm |
+| Steady 100 ms | dilation | 0 | 0 | 1.5 / 1 | 1.000 | 2.1 / 99 cm | 28 cm |
+| Wi-Fi preset | fixed | 75 | 0 | 2.3 / -3 | 1.000 | 6.2 / 114 cm | 61 cm |
+| Wi-Fi preset | dilation | 84 | 0 | 2.6 / -4 | 0.97–1.05 | 6.3 / 118 cm | 66 cm |
+| Mobile preset | fixed | 113 | 0 | 2.4 / -13 | 1.000 | 11.0 / 231 cm | 62 cm |
+| Mobile preset | dilation | 116 | 0 | 0.7 / -14 | 1.00–1.05 | 12.3 / 336 cm | 74 cm |
+| Worst preset | fixed | 1031 | 3 | -3.5 / -27 | 1.000 | 103 / 779 cm | 373 cm |
+| Worst preset | dilation | 742 | 1 | -2.3 / -31 | 0.97–1.05 | 69 / 643 cm | 283 cm |
+| Ramp, 10 to 200 ms and back | fixed | 319 | 3 | 2.2 / -3 | 1.000 | 7.5 / 168 cm | 83 cm |
+| Ramp, 10 to 200 ms and back | dilation | 1 | 0 | 2.7 / -1 | 0.97–1.04 | 5.1 / 190 cm | 45 cm |
 
-Dilation clearly helps when conditions change: the ramp goes from 368 missed inputs to 2, and mobile from 174 to 0. It leaves a steady connection alone. The worst preset stays bad either way, with a third of inputs missed and errors over a metre, because 1-second bursts lose everything regardless of timing. That one is a stress test, not a target. When ping drops, inputs arrive about 3 ticks early with dilation against 4–6 with a fixed lead, and the gap closes slowly because it waits for 5 safe seconds. Rendering to video makes a client look far worse, with resyncs and missed inputs, because movie mode ties its clock to how fast it can render rather than real time.
+**Reading it:**
+- **Dilation clearly helps when conditions change and stay changed:** the ramp goes from 319 missed inputs to 1, with half the corrections.
+- **Against short sudden spikes it's a tie,** as the Wi-Fi and mobile rows show. Inputs are already late before any feedback can get back, and the spike has often ended by the time the client has reacted. No dilation scheme can predict one. An earlier measurement showing mobile at 174 to 0 was wrong: it used spikes half the stated size.
+- **The worst preset stays bad either way,** with about a third of inputs missed and errors near a metre, because 1-second bursts lose everything regardless of timing. It's a stress test, not a target.
+- **A steady connection is left alone,** at speed 1.000.
+- **When ping drops,** inputs arrive about 3 ticks early with dilation against about 5 with a fixed lead, closing slowly because it waits for 5 safe seconds.
+
+Rendering to video makes a client look far worse, with resyncs and missed inputs, because movie mode ties its clock to how fast it can render rather than real time.
 
 **Frames with more than one tick** *(found and fixed 2026-11-04)*. A speed-up makes some frames run two ticks, and catching up after a hitch or a `tick_rate` above the physics rate do the same, while the server runs one per frame. A moved body only reaches the collision world at the next physics step, so the second tick collided with positions from before the first. Two pawns touching diverged from a one-tick-per-frame run by 0.8 cm with two ticks every 50 frames (about a 2% speed-up), and 20.9 cm with two ticks every 10 frames. The driver now calls each participant's `_sync_collision()` between ticks in such a frame, and both cases come out at 0.000 m. Frames with one tick pay nothing, and frames with no tick needed no fix. Only entities with a `TickStateComponent` get this. Tested on Godot's physics and on Jolt, on flat ground.
 
@@ -418,7 +425,7 @@ Detailed in the pawn spec; the netcode rules are:
 - An attack command says "fired at tick T, seeing others at interpolation tick T − d".
 - The server moves the other hitboxes to T − d, runs the ray or melee shape, restores them.
 - **The rewind is capped** (default 350 ms, changed from 200 on 2026-11-04). A shooter sees others about a round trip, plus margin, plus interpolation behind its own tick, which is about 217 ms at 100 ms ping and 350 ms at 200 ms ping. A 200 ms cap would have cut off normal players. High-ping players can't hit people long since behind cover; past the cap, they have to lead their shots. Per-game setting.
-- **The claim is limited** *(added 2026-11-04)*. A client can't be drawing anything newer than the snapshot it last acknowledged in its inputs, or further behind that than `max_interpolation_seconds`, so the server caps what it claims to that. This stops a low-ping client claiming the full cap: at low ping it gets about 200 ms plus its real delay, instead of 350 ms. It doesn't stop everything: a client can fake old acknowledgements, which looks the same as really having high ping, the classic lag-switch problem. Favoring the shooter itself is a known, accepted trade-off.
+- **The claim is limited** *(added 2026-11-04)*. A client can't be drawing anything newer than the snapshot it last acknowledged in its inputs, or further behind that than `max_interpolation_seconds`, so the server caps what it claims to that. Acknowledgements can only move forward, and one older than the cap gets no rewind. So a low-ping client that's honest about its acknowledgements gets about 200 ms plus its real delay, instead of 350 ms. It doesn't stop everything: a client can deliberately keep acknowledging late, and that's indistinguishable from really having high ping, the classic lag-switch problem. The standard answer is the same: a cap, limits from what the server can measure, and accepting the rest, with statistical anti-cheat on top. Favoring the shooter itself is a known, accepted trade-off.
 - **Built 2026-11-04** (`LagCompensation`). Measured with a target strafing at 5 m/s and the shooter aiming where it's drawn: at 100 ms ping, 22 of 23 shots hit, against 0 of 23 with it off; at 400 ms ping, past the cap, 0 of 22. Same on both physics engines.
 - Rewinding is done **once per tick for all of that tick's attacks**, not per bullet.
 
@@ -441,7 +448,7 @@ Rollback (section 6) and hit detection are separate: rollback fixes **your own p
 
 ## 10. Remote entities and UI
 
-- **Interpolation:** each remote entity keeps ~4 snapshots and is drawn at interpolation time, blended between the two snapshots around it. *(Built 2026-11-04)* The delay adapts: more jitter draws further back, from `interpolation_seconds` up to `max_interpolation_seconds` (0.1 to 0.2 s), so there are still two snapshots to blend.
+- **Interpolation:** each remote entity keeps ~4 snapshots and is drawn at interpolation time, blended between the two snapshots around it. *(Built 2026-11-04)* The delay adapts: more jitter draws further back, from `interpolation_seconds` up to `max_interpolation_seconds` (0.1 to 0.2 s), so there are still two snapshots to blend. Measured at 150 ms of jitter: it ran out of snapshots 0 times against 5, at the cost of drawing about 4 ticks further back. At 60 ms, 100 ms is already enough, and it makes no difference.
 - **Extrapolation:** if snapshots stop, continue along the last velocity for up to ~250 ms, then hold.
 - **During your replay:** entities that aren't predicted stay where they're drawn. The optional `follows_during_rollback` is in section 6.5.
 - **Built 2026-11-04** with one setting for both: `extrapolation_cap_seconds`, 0.2 s, rather than a separate ~250 ms.
@@ -479,7 +486,7 @@ Damage, deaths and one entity affecting another aren't handshakes. A client neve
 | Packet | Direction, rate, channel | Contents |
 |---|---|---|
 | **Input** | client → server, every tick, unreliable | last snapshot received (ack); first tick number; the last ~4–6 input commands (redundancy against loss) |
-| **Snapshot** | server → client, 30 Hz default, unreliable | server tick; for this client: how early its inputs have been arriving, at worst, over half a second and over 5, and how many were missed; per entity: id, state, sync fields, and input if it's predicted by others |
+| **Snapshot** | server → client, 30 Hz default, unreliable | server tick; for this client: how early its inputs have been arriving, at worst, over half a second and over 5, and how many were missed; which server-decided features are on; per entity: id, state, sync fields, and input if it's predicted by others |
 | **Event** | reliable, as needed | spawn (id, type, initial state), despawn, death, phase events that must arrive |
 | **Time sync** | a few per second | ping/pong with timestamps |
 
@@ -586,7 +593,7 @@ Debug builds only. `NetTestBench` puts these on keys in `net_sample.tscn`, and t
 | mobile | 120 ms | 40 ms | 70% | 3% | 250 ms for 1 s, 1 per 10 s | 0.4 s, 1 per 20 s |
 | worst | 250 ms | 80 ms | 100% | 8% | 500 ms for 1.5 s, 1 per 4 s | 1 s, 1 per 7 s |
 
-These figures are chosen to be recognisably bad, not measured from real networks. Worst also adds 5% reordering and 2% duplicates, and mobile 2% reordering.
+A spike hits one direction at a time, so it adds its full size to the round trip. These figures are chosen to be recognisably bad, not measured from real networks. Worst also adds 5% reordering and 2% duplicates, and mobile 2% reordering.
 
 **Feature switches.** `NetworkSession.set_feature(name, on)`, all live:
 
@@ -603,7 +610,7 @@ These figures are chosen to be recognisably bad, not measured from real networks
 | 9 | `time_dilation_enabled` | Fixed lead, jumping back when it drifts |
 | 0 | `adaptive_interpolation_enabled` | Interpolation delay stays at `interpolation_seconds` |
 
-The server-side ones (6 and 7) are sent to the server, which only obeys in a debug build with `allow_debug_commands` on.
+The server-side ones (6 and 7) only ask the server, which only obeys a client that passed the handshake, in a debug build with `allow_debug_commands` on. Each snapshot says what the server's are, so every client's panel shows what's really in effect. Key 7 therefore affects everyone.
 
 ---
 
@@ -622,7 +629,7 @@ The server-side ones (6 and 7) are sent to the server, which only obeys in a deb
 
 | # | Issue | Notes |
 |---|---|---|
-| 1 | **Faked lag.** The rewind claim is now limited by a client's snapshot acknowledgements (section 9.1), but a client can fake old ones, which looks like real high ping. Tighter limits would also cut off real players, and it's partly a detection problem | Known problem in the industry; later |
+| 1 | **Faked lag.** The rewind claim is limited by a client's snapshot acknowledgements (section 9.1), but a client can deliberately acknowledge late, which looks like real high ping. Tighter limits would also cut off real players. The standard answer adds statistical anti-cheat on top | Accepted for now; a known industry problem |
 | 2 | **Large one-off corrections.** Worst cases of 1.4–2.4 m at 100–200 ms during pawn contact. Probably a pawn blocked on the server that wasn't blocked on the client, whose view of the other pawn is 300 ms old. Cause not confirmed. The visible model fades a jump over about 100 ms, which may look bad at that size | Investigate; options include softer pawn collisions |
 | 3 | **Pawn stacking.** Owner: pawns shouldn't stack, and should collide instead. Nothing stops one standing on another yet | Belongs with the motor |
 | 4 | **Spending the lead.** The standard way is an optional input delay (section 7): shorter replays, less responsive feel | Not built; a per-game setting, off by default |

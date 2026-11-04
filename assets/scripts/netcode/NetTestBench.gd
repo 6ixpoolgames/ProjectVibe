@@ -11,7 +11,8 @@
 ##   H        hide or show this panel
 ##
 ## Ping is split evenly between sending and receiving, so one window sets its whole connection. Switches for things the server
-## decides, like lag compensation, also go to the server, which only obeys if allow_debug_commands is on there.
+## decides, like lag compensation, are sent to the server, which only obeys if allow_debug_commands is on there. On a client,
+## those lines show what the server says, so if it refuses, the panel stays as it was.
 extends CanvasLayer
 class_name NetTestBench
 

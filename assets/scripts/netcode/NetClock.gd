@@ -69,6 +69,18 @@ func estimate_server_tick(now_usec: int, tick_usec: float) -> float:
 	return best["server_tick_at_receive"] + since / tick_usec
 
 
-## How many ticks ahead of the server a client should run.
-func get_lead_ticks(tick_usec: float, margin_ticks: int) -> int:
-	return ceili(get_rtt_usec() * 0.5 / tick_usec) + margin_ticks
+## The fastest recent round trip in microseconds, which a lag spike doesn't inflate. 0 before any sample.
+func get_lowest_rtt_usec() -> float:
+	if _samples.is_empty():
+		return 0.0
+	var lowest: int = _samples[0]["rtt"]
+	for sample: Dictionary in _samples:
+		lowest = mini(lowest, sample["rtt"])
+	return float(lowest)
+
+
+## How many ticks ahead of the server a client should run. Claude 2026-11-04: from_lowest uses the fastest recent ping instead
+## of the average, for when time dilation will add whatever more is needed.
+func get_lead_ticks(tick_usec: float, margin_ticks: int, from_lowest: bool = false) -> int:
+	var rtt := get_lowest_rtt_usec() if from_lowest else get_rtt_usec()
+	return ceili(rtt * 0.5 / tick_usec) + margin_ticks

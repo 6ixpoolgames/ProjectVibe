@@ -4,6 +4,11 @@
 ## Add -- --only=name to run one scenario.
 extends Node
 
+## Has a position and velocity to extrapolate from.
+class Mover3D extends Node3D:
+	var velocity := Vector3.ZERO
+
+
 ## Holds input with no hook to clean it.
 class InputHolder extends Node:
 	var want := Vector3.ONE
@@ -39,6 +44,7 @@ func _ready() -> void:
 	await _scenario("interpolation_off", _test_interpolation_off)
 	await _scenario("live_switches", _test_live_switches)
 	await _scenario("bench_ping", _test_bench_ping)
+	await _scenario("adaptive_interpolation", _test_adaptive_interpolation)
 	await _scenario("worst_case", _test_worst_case)
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -119,6 +125,7 @@ func _test_packets() -> void:
 	_check(absf(clock.get_rtt_usec() - 150000.0) < 1.0, "clock: round trip is the average")
 	_check(absf(clock.estimate_server_tick(100000, 10000.0) - 1005.0) < 0.01, "clock: server tick comes from the fastest ping")
 	_check(clock.get_lead_ticks(10000.0, 3) == 11, "clock: lead is half the round trip plus the margin")
+	_check(clock.get_lead_ticks(10000.0, 3, true) == 8, "clock: or the fastest recent one, which a spike can't inflate")
 
 	var fake := NetFakeConditions.new()
 	var sent: Array = []
@@ -207,6 +214,7 @@ func _test_fake_conditions() -> void:
 	var preset := NetFakeConditions.new()
 	preset.apply_preset("worst")
 	_check(is_equal_approx(preset.latency_ms, 125.0) and preset.is_active(), "fake network: a preset gives each direction half the round trip")
+	_check(preset.spike_ms == 500.0, "fake network: but a spike keeps its full size, because each direction spikes on its own")
 	preset.apply_preset("off")
 	_check(not preset.is_active(), "fake network: the off preset turns it all off")
 
@@ -325,11 +333,83 @@ func _test_offline() -> void:
 	following.receive_authoritative_state(1000, {"want": Vector3(2, 0, 0)})
 	following.follow_server_at(1000.5)
 	_check(following_holder.want == Vector3(2, 0, 0), "follow server: with nothing to blend to, it holds where it was")
+	var late_state := TickStateComponent.new()
+	late_state.state_properties = ["position", "velocity"]
+	late_state.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER
+	var late_mover := Mover3D.new()
+	late_mover.add_child(late_state)
+	world.add_child(late_mover)
+	late_state.receive_authoritative_state(1000, {"position": Vector3(1, 0, 0), "velocity": Vector3(60, 0, 0)})
+	late_state.follow_server_at(1002.0, true)
+	_check(late_mover.position.distance_to(Vector3(3, 0, 0)) < 0.01, "extrapolation: on, past the newest snapshot it moves on its velocity")
+	late_state.follow_server_at(1002.0, false)
+	_check(late_mover.position.distance_to(Vector3(1, 0, 0)) < 0.01, "extrapolation: off, it holds at the newest snapshot")
+
+	var base_ticks: float = session.interpolation_seconds * driver.get_tick_rate()
+	var top_ticks: float = session.max_interpolation_seconds * driver.get_tick_rate()
+	session._snapshot_jitter_usec = 0.0
+	_check(is_equal_approx(session._interpolation_ticks(), base_ticks), "adaptive interpolation: with no jitter, it draws the normal distance back")
+	session._snapshot_jitter_usec = 1000000.0 / driver.get_tick_rate()
+	_check(is_equal_approx(session._interpolation_ticks(), base_ticks + 2.0), "adaptive interpolation: with jitter, further back")
+	session._snapshot_jitter_usec = 10000000.0
+	_check(is_equal_approx(session._interpolation_ticks(), top_ticks), "adaptive interpolation: never past its limit")
+	session.adaptive_interpolation_enabled = false
+	_check(is_equal_approx(session._interpolation_ticks(), base_ticks), "adaptive interpolation: off, it stays at the normal distance")
+	session.adaptive_interpolation_enabled = true
+	session._snapshot_jitter_usec = 0.0
+
+	var factor_before: float = driver.tick_factor
+	session._update_dilation(5, NetworkSessionSingleton.NO_MARGIN)
+	_check(driver.tick_factor == 1.0, "dilation: no slowing down until the whole 5 seconds have been seen")
+	session._update_dilation(5, 5)
+	_check(driver.tick_factor < 1.0 and driver.tick_factor >= 0.97, "dilation: inputs safely early for 5 seconds, it slows down a little")
+	session._update_dilation(-2, -2)
+	_check(driver.tick_factor > 1.0 and driver.tick_factor <= 1.05, "dilation: inputs late, it speeds up a little")
+	session._update_dilation(1, 1)
+	_check(driver.tick_factor == 1.0, "dilation: in the wanted range, it runs at normal speed")
+	driver.tick_factor = factor_before
+
+	var was_mode := session._mode
+	session._mode = NetworkSessionSingleton.Mode.SERVER
+	session._peers[77] = {"welcomed": true, "margins": [], "acknowledged_snapshot": -1, "connected_at": 0}
+	session._note_input_timing(77, 100, 50, 95)
+	session._note_input_timing(77, 100, 50, 96)
+	session._note_input_timing(77, 99, 50, 96)
+	_check(session._peers[77]["margins"] == [5], "dilation: a duplicate or overtaken packet isn't counted as late")
+	session._note_input_timing(77, 101, 40, 97)
+	_check(session._peers[77]["acknowledged_snapshot"] == 50, "rewind claim: what a client acknowledges can't go backwards")
+	session._note_input_timing(77, 102, 9000, 98)
+	_check(session._peers[77]["acknowledged_snapshot"] == 50, "rewind claim: and it can't be from the future")
+	session.allow_debug_commands = true
+	var switch_packet := NetPackets.new_buffer()
+	switch_packet.put_u8(NetPackets.Type.DEBUG_SWITCH)
+	NetPackets.write_value(switch_packet, "lag_compensation_enabled", StateEncoding.RAW)
+	NetPackets.write_value(switch_packet, false, StateEncoding.RAW)
+	session._peers[77]["welcomed"] = false
+	session._on_debug_switch(77, switch_packet.data_array)
+	_check(session.lag_compensation_enabled, "switches: a client that hasn't passed the handshake can't change anything")
+	session._peers[77]["welcomed"] = true
+	session._on_debug_switch(77, switch_packet.data_array)
+	_check(not session.lag_compensation_enabled, "switches: one that has can, if allowed")
+	session.lag_compensation_enabled = true
+	session.allow_debug_commands = false
+	session._mode = was_mode
+	session._peers.erase(77)
+
+	var list_before: Array[NetworkEntity] = session.get_entities()
+	_check(session.get_entities() == list_before, "entity list: it's kept, not rebuilt each time")
+	var freed_body: Node = session.spawn("pawn", 0, Vector3(9, 0.1, 9))
+	var freed_entity: NetworkEntity = freed_body.get_node("NetworkEntity")
+	var freed_id := freed_entity.entity_id
+	_check(session.get_entities().has(freed_entity), "entity list: a new entity joins it")
+	freed_body.free()
+	_check(session.get_entity(freed_id) == null and session.get_entities().size() == 2, "entity list: one freed directly by the game leaves it")
 
 	session._peers[77] = {"welcomed": true, "acknowledged_snapshot": 100}
 	var interpolation_limit: float = session.max_interpolation_seconds * driver.get_tick_rate()
 	_check(session.limit_view_ticks_behind(77, 8.0, 103) == 8.0, "rewind claim: a believable claim is left alone")
 	_check(is_equal_approx(session.limit_view_ticks_behind(77, 500.0, 103), 3.0 + interpolation_limit + 1.0), "rewind claim: a low-ping client can't claim more than its acknowledgements allow")
+	_check(session.limit_view_ticks_behind(77, 8.0, 100 + roundi(session.rewind_cap_seconds * driver.get_tick_rate()) + 1) == 0.0, "rewind claim: an acknowledgement older than the cap gets no rewind")
 	session._peers[77]["acknowledged_snapshot"] = -1
 	_check(session.limit_view_ticks_behind(77, 8.0, 103) == 0.0, "rewind claim: a client that has seen nothing gets no rewind")
 	_check(session.limit_view_ticks_behind(999, 8.0, 103) == 8.0, "rewind claim: the host's own pawn and AI aren't limited")
@@ -493,6 +573,7 @@ func _test_clock(run_name: String) -> void:
 	# Half of 100 ms is 3 ticks, plus a margin of 3.
 	_check(float(a["lead_ticks"]) > 4.0 and float(a["lead_ticks"]) < 9.0, "clock: the client runs half the round trip plus the margin ahead of the server")
 	_check(int(a["stats"]["resyncs"]) <= 1, "clock: and stays there")
+	_check(int(a["missed_inputs"]) <= 3, "clock: time spent syncing doesn't count as missed input (%d)" % int(a["missed_inputs"]))
 
 
 func _test_inputs(run_name: String) -> void:
@@ -648,8 +729,8 @@ func _test_dilation(run_name: String) -> void:
 	print("        with dilation: inputs arrive %.1f ticks early on average, lowest %d, speed %.3f to %.3f, %d missed, %d resyncs" % [_margin_average(a), int(a["stats"]["margin_lowest"]), float(a["stats"]["speed_lowest"]), float(a["stats"]["speed_highest"]), int(a["missed_inputs"]), int(a["stats"]["resyncs"])])
 	print("        fixed lead:    inputs arrive %.1f ticks early on average, lowest %d, speed %.3f to %.3f, %d missed, %d resyncs" % [_margin_average(f), int(f["stats"]["margin_lowest"]), float(f["stats"]["speed_lowest"]), float(f["stats"]["speed_highest"]), int(f["missed_inputs"]), int(f["stats"]["resyncs"])])
 	_check(float(f["stats"]["speed_lowest"]) == 1.0 and float(f["stats"]["speed_highest"]) == 1.0, "dilation: turned off, the client always runs at normal speed")
-	# On a steady connection the fixed lead is already about right, so dilation has little to do.
-	_check(_margin_average(a) <= _margin_average(f) + 0.5, "dilation: on a steady connection it wastes no more time than a fixed lead")
+	# It waits 5 safe seconds before giving back any lead, so what counts is where it ends up, not the average on the way there.
+	_check(int(a["margin_last"]) >= 1 and int(a["margin_last"]) <= 2, "dilation: on a steady connection it settles with inputs 1 to 2 ticks early (%d)" % int(a["margin_last"]))
 	_check(float(a["stats"]["speed_lowest"]) >= 0.96 and float(a["stats"]["speed_highest"]) <= 1.06, "dilation: speed changes stay within a few percent")
 	_check(int(a["stats"]["margin_lowest"]) >= -1, "dilation: inputs still arrive on time")
 	_check(int(a["stats"]["resyncs"]) == 0, "dilation: it never needs to jump")
@@ -767,6 +848,7 @@ func _test_live_switches(run_name: String) -> void:
 		_check(false, "live switches: every machine finished")
 		return
 	_check(not results["server"]["features"]["lag_compensation_enabled"], "live switches: with permission, a client can switch a server feature for testing")
+	_check(not results["a"]["features"]["lag_compensation_enabled"] and not results["b"]["features"]["lag_compensation_enabled"], "live switches: and every client's panel shows it")
 	_check(int(NetRun.own_entity(results["b"])["role"]) == NetworkEntity.Role.LOCAL_UNPREDICTED, "live switches: prediction can be turned off while running")
 	_port += 1
 	var refused := await NetRun.run(self, run_name + "_refused", {
@@ -777,6 +859,7 @@ func _test_live_switches(run_name: String) -> void:
 		_check(false, "live switches: the server finished")
 		return
 	_check(refused["server"]["features"]["lag_compensation_enabled"], "live switches: without permission, the server ignores it")
+	_check(refused["a"]["features"]["lag_compensation_enabled"], "live switches: and the client's panel doesn't claim otherwise")
 	_check(int(refused["server"]["stats"]["bad_packets"]) >= 1, "live switches: and counts it as a bad packet")
 	_port += 1
 	var to_predicted := await NetRun.run(self, run_name + "_predicted", {
@@ -789,6 +872,29 @@ func _test_live_switches(run_name: String) -> void:
 		return
 	var mover_id := int(NetRun.own_entity(to_predicted["mover"])["id"])
 	_check(int(NetRun.summary_of(to_predicted["watcher"], mover_id)["role"]) == NetworkEntity.Role.REMOTE_PREDICTED, "live switches: other pawns can start being predicted while running")
+
+
+## On a jittery connection, drawing further back should mean running out of snapshots less often.
+func _test_adaptive_interpolation(run_name: String) -> void:
+	var totals := {}
+	for adaptive: bool in [true, false]:
+		_port += 1
+		var watcher: Dictionary = {"role": "client", "seconds": 11, "latency": 20, "jitter": 150, "mode": "idle", "conditions-seed": 31}
+		if not adaptive:
+			watcher["off"] = "adaptive_interpolation_enabled"
+		var results := await NetRun.run(self, run_name + ("_on" if adaptive else "_off"), {
+			"server": {"role": "server", "seconds": 12, "latency": 20, "jitter": 150, "conditions-seed": 32},
+			"mover": {"role": "client", "seconds": 11, "mode": "strafe"},
+			"watcher": watcher,
+		}, _port)
+		if results["watcher"].has("timed_out") or results["mover"].has("timed_out"):
+			_check(false, "adaptive interpolation: every machine finished")
+			return
+		var view := NetRun.view_error(results["watcher"], results["server"], int(NetRun.own_entity(results["mover"])["id"]))
+		totals[adaptive] = {"behind": view["behind_ticks"], "late": int(results["watcher"]["stats"]["interpolation_underruns"])}
+	print("        with 150 ms jitter: adaptive draws %.1f ticks behind and runs out %d times; fixed draws %.1f behind and runs out %d times" % [totals[true]["behind"], totals[true]["late"], totals[false]["behind"], totals[false]["late"]])
+	_check(totals[true]["behind"] > totals[false]["behind"], "adaptive interpolation: on a jittery connection, it draws further back")
+	_check(totals[true]["late"] < totals[false]["late"], "adaptive interpolation: and runs out of snapshots less often")
 
 
 ## The bench sets its whole ping from one side, through both of that client's fake networks.

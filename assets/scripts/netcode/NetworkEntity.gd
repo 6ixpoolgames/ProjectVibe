@@ -136,7 +136,9 @@ func _tick_input(dt: float, tick: int) -> void:
 	if state.apply_input(tick):
 		last_input_tick = tick
 	else:
-		missed_inputs += 1
+		# Claude 2026-11-04: only once it has started sending. A client takes a moment to sync its clock after its pawn spawns.
+		if last_input_tick >= 0:
+			missed_inputs += 1
 		if _root.has_method(&"_network_input_missing"):
 			_root._network_input_missing()
 

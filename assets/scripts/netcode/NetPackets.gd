@@ -12,7 +12,7 @@ class_name NetPackets
 extends RefCounted
 
 ## Bump this when the wire format changes. It's part of the handshake's content hash.
-const PROTOCOL_VERSION := 2
+const PROTOCOL_VERSION := 3
 
 enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, DEBUG_SWITCH }
 

@@ -72,6 +72,7 @@ func set_seed(new_seed: int) -> void:
 
 
 ## Sets everything to a named preset, taking this share of its round-trip figures. Each direction normally takes 0.5.
+## A spike's size isn't shared: each direction spikes on its own, so it has to be the full size to add that much to the ping.
 func apply_preset(preset_name: String, share: float = 0.5) -> void:
 	var preset: Dictionary = PRESETS.get(preset_name, {})
 	latency_ms = float(preset.get("latency", 0.0)) * share
@@ -79,7 +80,7 @@ func apply_preset(preset_name: String, share: float = 0.5) -> void:
 	jitter_variation = preset.get("variation", 0.0)
 	loss = float(preset.get("loss", 0.0)) * share
 	spike_rate_per_second = float(preset.get("spike_rate", 0.0)) * share
-	spike_ms = float(preset.get("spike_ms", 200.0)) * share
+	spike_ms = float(preset.get("spike_ms", 200.0))
 	spike_seconds = preset.get("spike_seconds", 0.5)
 	burst_rate_per_second = float(preset.get("burst_rate", 0.0)) * share
 	burst_seconds = preset.get("burst_seconds", 0.5)
