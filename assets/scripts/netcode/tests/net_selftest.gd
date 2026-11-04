@@ -442,9 +442,21 @@ func _test_offline() -> void:
 	session._on_debug_switch(77, switch_packet.data_array)
 	_check(not session.lag_compensation_enabled, "switches: one that has can, if allowed")
 	session.lag_compensation_enabled = true
+	# Claude 2026-11-05: the server only saves inputs when clients predicting the entity need them.
+	session._refresh_entities()
+	_check(target.state.skip_input_capture, "input saving: a server skips it")
+	var predicted_packet := NetPackets.new_buffer()
+	predicted_packet.put_u8(NetPackets.Type.DEBUG_SWITCH)
+	NetPackets.write_value(predicted_packet, "default_predicted", StateEncoding.RAW)
+	NetPackets.write_value(predicted_packet, true, StateEncoding.RAW)
+	session._on_debug_switch(77, predicted_packet.data_array)
+	_check(not target.state.skip_input_capture, "input saving: unless clients are predicting, even when switched on live")
+	session.default_predicted = false
 	session.allow_debug_commands = false
 	session._mode = was_mode
 	session._peers.erase(77)
+	session._refresh_entities()
+	_check(not target.state.skip_input_capture, "input saving: offline keeps it")
 
 	var list_before: Array[NetworkEntity] = session.get_entities()
 	_check(session.get_entities() == list_before, "entity list: it's kept, not rebuilt each time")

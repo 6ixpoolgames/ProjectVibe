@@ -97,6 +97,9 @@ enum RollbackMode { RESIMULATE, FOLLOW_SERVER }
 @export var follow_server_radius: float = 10.0
 ## Claude 2026-11-04: FOLLOW_SERVER normally saves no input. Your own pawn with prediction off still has inputs to send.
 var keep_input_history: bool = false
+## Claude 2026-11-05: the server never replays, so it has no use for a record of what each tick's input turned out to be, unless
+## clients predicting this entity need it sent to them. Inputs arriving from clients are still stored until their tick comes.
+var skip_input_capture: bool = false
 
 ## Stored in a history slot for a property that didn't exist that tick.
 const MISSING := &"__tick_state_missing__"
@@ -200,7 +203,7 @@ func _ready() -> void:
 
 ## After every entity's input phase, before anything simulates.
 func _tick_capture_input(tick: int) -> void:
-	if _inputs.is_empty() or (rollback_mode == RollbackMode.FOLLOW_SERVER and not keep_input_history): # Claude 2026-11-04: following replays no inputs
+	if skip_input_capture or _inputs.is_empty() or (rollback_mode == RollbackMode.FOLLOW_SERVER and not keep_input_history): # Claude 2026-11-04: following replays no inputs
 		return
 	var slot := tick % history_size
 	_input_ticks[slot] = tick

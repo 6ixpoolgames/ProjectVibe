@@ -554,6 +554,7 @@ func _role_for(entity: NetworkEntity, local: bool) -> NetworkEntity.Role:
 func _refresh_entities() -> void:
 	for entity: NetworkEntity in get_entities():
 		entity.set_role(_role_for(entity, entity.is_local))
+		entity.refresh_input_saving() # Claude 2026-11-05: a server's role doesn't change with default_predicted, but this does
 		if entity.state:
 			entity.state.follows_during_rollback = follow_during_rollback
 
@@ -690,6 +691,7 @@ func _on_debug_switch(peer: int, bytes: PackedByteArray) -> void:
 	var on: Variant = NetPackets.read_value(buffer)
 	if feature is String and SERVER_FEATURES.has(feature) and on is bool:
 		set(feature, on)
+		_refresh_entities() # Claude 2026-11-05
 	else:
 		stats["bad_packets"] += 1
 

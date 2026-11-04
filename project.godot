@@ -98,6 +98,7 @@ move_crouch={
 
 [physics]
 
+3d/physics_engine="Jolt Physics"
 jolt_physics_3d/simulation/penetration_slop=0.04
 jolt_physics_3d/queries/use_enhanced_internal_edge_removal=true
 

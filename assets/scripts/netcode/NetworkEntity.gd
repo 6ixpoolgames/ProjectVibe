@@ -112,6 +112,14 @@ func _apply_role_to_state() -> void:
 		return
 	state.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER if follows_snapshots() else TickStateComponent.RollbackMode.RESIMULATE
 	state.keep_input_history = is_local
+	refresh_input_saving()
+
+
+## Claude 2026-11-05: on a server, only entities that clients predict need their inputs saved, so they can go in snapshots.
+## Offline stays as it was, since a single-player game could still choose to roll back.
+func refresh_input_saving() -> void:
+	if state:
+		state.skip_input_capture = role == Role.AUTHORITY and session != null and session.is_server() and not (is_predicted or session.default_predicted)
 
 
 ## Something placed from snapshots must not also simulate itself. Your own unpredicted pawn still decides its input, in _tick_input below.
