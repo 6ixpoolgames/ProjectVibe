@@ -27,9 +27,11 @@ func _ready() -> void:
 	_check(nt.tick - t0 == 120, "one tick per physics frame at the default rate")
 	_check(wanderer.global_position.distance_to(wanderer_start) > 0.5, "wanderer moved by itself (seeded wander, timers in ticks)")
 	_check(player.global_position.distance_to(Vector3.ZERO) < 0.05, "player without input stays put")
-	var rec := player.get_recorded(nt.tick)
-	_check(not rec.is_empty() and rec.position.is_equal_approx(player.global_position), "_tick_record stored this tick's state")
-	_check(player.get_recorded(nt.tick - 100).is_empty(), "history only keeps the last 64 ticks")
+	# Claude 2026-11-04: recording moved from the pawn to its TickState child node
+	var state: TickStateComponent = player.get_node("TickState")
+	var rec := state.get_state(nt.tick)
+	_check(not rec.is_empty() and rec["position"].is_equal_approx(player.position), "TickState stored this tick's state")
+	_check(state.get_state(nt.tick - 100).is_empty(), "history only keeps the last 64 ticks")
 
 	# Hold forward for one second at the physics rate, then at 20 ticks/s: same distance either way.
 	var d60 := await _walk_one_second(nt, player, 0)

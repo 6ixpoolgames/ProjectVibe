@@ -6,7 +6,9 @@
 ##   - registering with NetworkTime, and an escape clause when the autoload is missing
 ##   - _tick_input: deciding what the pawn WANTS this tick (player keys, or a seeded random wander), as plain data
 ##   - _tick_simulate: acting on it with the fixed tick dt (steer, turn, gravity, jump, move_and_slide)
-##   - _tick_record: saving the state rollback will need later (here into a small ring buffer)
+##   - rollback: the TickState child node (TickStateComponent) lists move_dir, position, velocity and so on in the
+##     inspector, and handles saving, rounding and replaying them. The pawn needs no rollback code. # Claude 2026-11-04
+##   - repeatable randomness with NetworkTime.tick_rng, and a cosmetic effect that doesn't replay # Claude 2026-11-04
 ##   - timers in ticks, seconds only in the inspector
 ##   - latching a key press between rendered frames and ticks, so a press is never lost or doubled
 ##   - smoothing the visible model between ticks with the interpolation fraction
@@ -37,18 +39,27 @@ var move_dir := Vector3.ZERO
 var wants_sprint := false
 var wants_jump := false
 
-const HISTORY_SIZE := 64
+# Claude 2026-11-04: our own copy of "on the floor", because rollback has to be able to restore it and
+# CharacterBody3D.is_on_floor() can't be set. Listed in TickState's state_properties.
+var grounded := false
+# Claude 2026-11-04: facing is a plain number, and the physics body itself never rotates; only the model turns. Writing
+# rotation every tick goes through Godot's Euler and scale conversion, which adds a float error each time, so the body's
+# scale slowly drifted (about 0.99995 in testing) and differently in a replay. That changed the collision capsule's size
+# and made the physics results differ. A capsule looks the same from every side, so nothing is lost.
+var yaw := 0.0
+## How many jump effects have played. Stands in for a sound or particle: only counts real jumps, not replayed ones.
+var jump_effects_played := 0
 
 var _driver: Node = null         # the NetworkTime autoload, or null (escape clause: we tick ourselves)
 var _fallback_tick := 0
 var _jump_latched := false       # set per rendered frame, consumed by the next tick
-var _rng := RandomNumberGenerator.new()
+var _rng := RandomNumberGenerator.new() # only used without the tick driver
+var _wander_key := 0
 var _next_wander_tick := 0
 var _model: Node3D = null
 var _model_offset := Transform3D.IDENTITY
 var _prev_xform := Transform3D.IDENTITY # body transform before and after the last tick, for smoothing
 var _curr_xform := Transform3D.IDENTITY
-var _history: Array = []
 var _gravity: float = 9.8
 
 
@@ -70,16 +81,22 @@ func _ready() -> void:
 	# The driver calls us, so our own physics callback stays off. This must be in _ready, not _enter_tree:
 	# Godot switches _physics_process on at ready for any script that defines it, which would tick us twice.
 	set_physics_process(_driver == null)
+	# Claude 2026-11-04: Godot's default margin is exactly 1 mm, and TickState rounds positions to exact 1 mm steps. That
+	# parks a standing body precisely on the edge of "touching the floor", so float noise flips the contact and the engine
+	# snaps it about 6 mm into the floor. A margin between two steps keeps the rounded height clearly inside contact.
+	safe_margin = 0.0014
 	_gravity = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
-	_rng.seed = hash(String(name)) # seeded: the same pawn wanders the same way on every machine
-	_history.resize(HISTORY_SIZE)
+	_wander_key = hash(String(name)) # the same pawn wanders the same way on every machine
+	_rng.seed = _wander_key
 	_model = get_node_or_null(model_path)
 	if _model:
 		_model_offset = _model.transform
 		_model.top_level = true # the model is placed by _process, between ticks, not by the body
 		_apply_color()
-	_prev_xform = global_transform
-	_curr_xform = global_transform
+	yaw = rotation.y # whatever the scene placed it at; from here on the body itself stays unrotated
+	rotation = Vector3.ZERO
+	_prev_xform = _visual_transform()
+	_curr_xform = _prev_xform
 
 
 # --- Phase 1: input -------------------------------------------------------------------------------
@@ -94,8 +111,10 @@ func _tick_input(_dt: float, tick: int) -> void:
 			_jump_latched = false
 		Brain.WANDER:
 			if tick >= _next_wander_tick:
-				var angle := _rng.randf() * TAU
-				var walking := _rng.randf() > 0.25 # sometimes stand still for a while
+				# Claude 2026-11-04: tick_rng rolls repeat on every machine and in a replay, with no generator state to save
+				var rng: RandomNumberGenerator = _driver.tick_rng(_wander_key) if _driver else _rng
+				var angle := rng.randf() * TAU
+				var walking := rng.randf() > 0.25 # sometimes stand still for a while
 				move_dir = Vector3(cos(angle), 0.0, sin(angle)) if walking else Vector3.ZERO
 				_next_wander_tick = tick + _seconds_to_ticks(wander_change_seconds)
 			wants_sprint = false
@@ -109,7 +128,7 @@ func _tick_input(_dt: float, tick: int) -> void:
 # --- Phase 2: simulate ----------------------------------------------------------------------------
 
 func _tick_simulate(dt: float, _tick: int) -> void:
-	_prev_xform = global_transform
+	_prev_xform = _visual_transform()
 
 	# Steer: accelerate the horizontal velocity toward what we want (Walk's job in the real pawn).
 	var speed := max_speed * (sprint_multiplier if wants_sprint else 1.0)
@@ -121,43 +140,51 @@ func _tick_simulate(dt: float, _tick: int) -> void:
 	velocity.z = horizontal.z
 
 	# Gravity and jump (the motor's and Jump's jobs).
-	if not is_on_floor():
+	# Claude 2026-11-04: reads our own grounded, not is_on_floor(), so a replay starts from the restored value. The input
+	# is no longer cleared here, because a replay restores it per tick and it's only read in this tick.
+	if not grounded:
 		velocity.y -= _gravity * dt
 	elif wants_jump:
 		velocity.y = jump_velocity
-	wants_jump = false
+		if not (_driver and _driver.is_resimulating()):
+			jump_effects_played += 1 # a real game plays a sound here; a replay must not play it again
 
 	# Face where we're moving. Godot's forward is -Z.
 	if horizontal.length_squared() > 0.01:
 		var target_yaw := atan2(-horizontal.x, -horizontal.z)
-		rotation.y = rotate_toward(rotation.y, target_yaw, deg_to_rad(turn_rate_deg) * dt)
+		yaw = rotate_toward(yaw, target_yaw, deg_to_rad(turn_rate_deg) * dt)
 
 	# move_and_slide uses Godot's physics delta; scale so one tick moves velocity * tick dt.
 	var factor: float = _driver.get_physics_factor() if _driver else 1.0
 	velocity *= factor
 	move_and_slide()
 	velocity /= factor
+	grounded = is_on_floor() # Claude 2026-11-04: see the note on grounded above
 
-	_curr_xform = global_transform
-
-
-# --- Phase 3: record ------------------------------------------------------------------------------
-
-## What rollback will need to restore this tick later (netcode spec section 5.2). For now just stored.
-func _tick_record(tick: int) -> void:
-	_history[tick % HISTORY_SIZE] = {
-		"tick": tick,
-		"position": global_position,
-		"yaw": rotation.y,
-		"velocity": velocity,
-		"next_wander_tick": _next_wander_tick,
-	}
+	_curr_xform = _visual_transform()
 
 
-## The state recorded for a tick, or an empty Dictionary if it's no longer in the history.
-func get_recorded(tick: int) -> Dictionary:
-	var entry = _history[tick % HISTORY_SIZE]
-	return entry if entry is Dictionary and entry.tick == tick else {}
+# --- After a rollback load -------------------------------------------------------------------------
+
+## Claude 2026-11-04: TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that
+## still holds what the body is doing NOW. Left alone, move_and_slide would snap an airborne pawn down to the floor or
+## drop a grounded one out of its floor contact on the first replayed tick. Nothing can set that flag directly, so this
+## makes the engine work it out again, then puts position and velocity back. The real motor will do the same.
+func _on_state_loaded(_tick: int) -> void:
+	var saved_position := position
+	var saved_velocity := velocity
+	var saved_snap := floor_snap_length
+	floor_snap_length = 0.0 # stops the stale flag snapping us while we refresh it
+	velocity = Vector3.ZERO
+	move_and_slide()
+	floor_snap_length = saved_snap
+	if grounded and not is_on_floor():
+		apply_floor_snap()
+	position = saved_position
+	velocity = saved_velocity
+	# Keep the visible model honest even if no ticks get replayed after this load.
+	_prev_xform = _visual_transform()
+	_curr_xform = _prev_xform
 
 
 # --- Per rendered frame: presses and visuals ------------------------------------------------------
@@ -181,10 +208,14 @@ func _physics_process(delta: float) -> void:
 	_fallback_tick += 1
 	_tick_input(delta, _fallback_tick)
 	_tick_simulate(delta, _fallback_tick)
-	_tick_record(_fallback_tick)
 
 
 # --- Helpers ----------------------------------------------------------------------------------------
+
+## Where the model should be: the body's position, turned to our facing.
+func _visual_transform() -> Transform3D:
+	return Transform3D(Basis(Vector3.UP, yaw), global_position)
+
 
 func _seconds_to_ticks(seconds: float) -> int:
 	if _driver:

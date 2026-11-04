@@ -1,6 +1,7 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/samples/TickSamplePawn.gd" id="1_pawn"]
+[ext_resource type="Script" path="res://assets/scripts/netcode/TickStateComponent.gd" id="2_state"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -29,3 +30,8 @@ mesh = SubResource("CapsuleMesh_body")
 [node name="Nose" type="MeshInstance3D" parent="Model"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4, -0.45)
 mesh = SubResource("BoxMesh_nose")
+
+[node name="TickState" type="Node" parent="."]
+script = ExtResource("2_state")
+input_properties = Array[String](["move_dir", "wants_sprint", "wants_jump"])
+state_properties = Array[String](["position", "velocity", "yaw @angle_u16", "grounded"])

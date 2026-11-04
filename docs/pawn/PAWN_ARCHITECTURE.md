@@ -338,6 +338,8 @@ func is_grounded() -> bool
 ```
 
 - **The pawn's main job is `move_and_slide`** (plus gravity and the primitives above). Movement stats (speed, acceleration, deceleration, turn speed, air control, jump velocity) **move to the stat manager**. Abilities read them through the context (`get_stat`), with failsafe defaults when a stat is missing. *(Revised 2026-11-04: previously the stats stayed on the pawn.)*
+- **Rollback, pawn against pawn** *(added 2026-11-04)*: covered by `TickStateComponent._sync_collision` when both replay. Against a pawn that isn't replayed, it uses the newest server position carried on its velocity during the replay (`FOLLOW_SERVER`), with the server correcting what's left (netcode spec section 6.5). Built, and waiting on snapshots to feed it.
+- **Rollback** *(added 2026-11-04)*: the motor reads a `grounded` state property rather than `is_on_floor()`, and refreshes the engine's private floor flag after a state load (netcode spec section 5.2). Its `safe_margin` is 0.0014 rather than Godot's 1 mm default, and the body itself never rotates: facing is a `yaw` state value and only the model turns (netcode spec section 5.3).
 - **Facing is separate from moving.** The default faces the move direction (today's behaviour); `face_target` overrides it, so the pawn can face an enemy while backing away. Today only `characterModel` turns; the motor keeps that for now.
 - **Escape clause:** with no locomotion ability present, the pawn falls back to its current built-in movement, so existing scenes keep working.
 
@@ -421,7 +423,7 @@ Each step is testable on its own, with a headless test like the AI ones.
 
 1. **Tag registry + category masks.** Static class, declared categories in fixed order, parent bits, a test. **Built 2026-11-04.**
 2. **Tick driver, offline** (netcode spec step 1). **Built 2026-11-04.** New pawn parts register with it as they're built.
-3. **Networked state contract + offline rollback test** (netcode spec steps 2–3).
+3. **Networked state contract + offline rollback test** (netcode spec steps 2–3). **Built 2026-11-04:** `TickStateComponent`, `StateEncoding`, `NetworkTime.rollback`.
 4. **Motor primitives** on the pawn, with save/load state. No behaviour change.
 5. **AbilityBase + ability manager:** lockouts, buffer, cooldowns, costs, all in ticks, with save/load state. Tested with scripted test abilities, including a forced rollback.
 6. **Walk + Sprint + intent fields + input commands + controller manager control.** Player WASD and AI `move_to` both drive Walk.
