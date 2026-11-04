@@ -543,6 +543,7 @@ void buildPortals(const TileKey& key, const rcPolyMesh& pm, const GroundConfig& 
 void GroundDomain::commitTile(const TileKey& key, std::unique_ptr<TileBuildResult> r) {
     // Caller (TileManager) already checked r->builtFromVersion == tile.version.
     dtTileRef old = m_navMesh->getTileRefAt(key.x, key.z, key.band);
+    // Claude 2026-11-05: as built, the old tile's data is copied first and put back if addTile refuses the new one.
     if (old) m_navMesh->removeTile(old, nullptr, nullptr);       // frees old tile data
     m_navMesh->addTile(r->tileData, r->tileSize, DT_TILE_FREE_DATA, 0, nullptr);
     // Detour automatically connects shared edges with already loaded neighbours,
@@ -742,7 +743,7 @@ struct PathResult {
     TileCorridor               corridor;   // full coarse route
     std::vector<dtPolyRef>     finePolys;  // refined prefix only
     std::vector<uint32_t>      linksOnRoute;
-    bool                       partial;    // goal unreachable -> path to closest reachable point
+    bool                       partial;    // goal not reached (unreachable, or too long to return) -> path as close as it got
 };
 ```
 

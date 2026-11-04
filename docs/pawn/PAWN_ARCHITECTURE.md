@@ -112,6 +112,9 @@ CharacterPawn3D                (the entity; physics body; movement stats)
 3. The navigation manager decides (section 8): close and clear means a straight line; otherwise it computes a path once and hands out corners as Walk reaches them.
 4. On arrival, the navigation manager reports done and the controller clears `move_target`.
 
+<!-- Claude 2026-11-05: flagged for the owner's architecture pass, not decided here. -->
+**To settle, for multiplayer:** step 2 must not ask the navigation system during a replay, because the answer could differ from the first time (netcode spec, section 6.4). The usual ways are to decide in the input phase and save the result, or to have the path decide inputs, which a replay reuses.
+
 ### 4.3 AI investigates a sound
 
 1. Sensing records a `heard_noise` fact in memory (built).

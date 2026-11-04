@@ -221,7 +221,7 @@ GDScript has no custom annotations (no `@replicated`), and Godot's own `Multipla
 | **sync** (server-only) | server → clients | no (clients keep a few snapshots to interpolate) | health, team, remote pawn transforms |
 
 - **Default: automatic from the lists.** Inspector-friendly for designers.
-- **Override:** a component with unusual state implements `save_state() -> Dictionary` / `load_state(Dictionary)` instead.
+- **Override:** a component with unusual state implements `save_state() -> Dictionary` / `load_state(Dictionary)` instead. *(2026-11-05:)* the Dictionary goes in every snapshot and gets corrected like list entries, so two rules apply. Its values must come out exactly equal on server and client: use ints, bools, ticks, or floats you've rounded yourself. And keep it small, since there are no encodings to shrink it. Entities drawn from snapshots ignore it: use sync properties for what they need to show.
 - **Not listed = not networked.** That's the safe default for single player and for anything cosmetic.
 
 ### 5.2 What "state" must include
@@ -240,7 +240,7 @@ Every property in the schema has an **encoding type**: `vector3_mm` (the default
 - **`safe_margin` must sit between two rounding steps; the sample uses 0.0014.** A body rests one margin above the floor, and Godot's default is exactly 1 mm. Rounding parked it precisely on the edge of "touching", so float noise flipped the contact and the engine snapped it up to 2.4 cm into the floor while walking on flat ground.
 - **Don't turn the body by writing `rotation` every tick.** Each write goes through Godot's Euler and scale conversion and adds a float error, so the body's scale drifted (about 0.99995) and differently in a replay. That changed the collision shape and gave errors up to 19.5 cm lasting 42 ticks. Facing is a plain `yaw` property in the state list; the body stays unrotated and only the model turns.
 
-**Bodies replaying together must see each other** *(found 2026-11-04)*. In Godot's physics (the project's current engine), a moved kinematic body reaches the collision world only at the next physics step; `force_update_transform()` doesn't help. A replay happens within one frame, so bodies collided with where the others were at the *end* of the replay, giving up to 2 m of error. `TickStateComponent._sync_collision()` makes the body static for that one call, because a static body's position applies at once, then restores its mode. Two pawns pushing against each other then replay with 0 mm of error. About 1.3 microseconds per call in a small test scene, and a replay of just one body skips it. The tests pass on Godot's physics and on Jolt.
+**Bodies replaying together must see each other** *(found 2026-11-04)*. In Godot's physics (the project's engine until 2026-11-05), a moved kinematic body reaches the collision world only at the next physics step; `force_update_transform()` doesn't help. A replay happens within one frame, so bodies collided with where the others were at the *end* of the replay, giving up to 2 m of error. `TickStateComponent._sync_collision()` makes the body static for that one call, because a static body's position applies at once, then restores its mode. Two pawns pushing against each other then replay with 0 mm of error. About 1.3 microseconds per call in a small test scene, and a replay of just one body skips it. The tests pass on Godot's physics and on Jolt.
 
 **A body replaying against one that isn't:** measured in section 6.5, with the open part in section 17, question 8.
 
@@ -250,7 +250,7 @@ Every property in the schema has an **encoding type**: `vector3_mm` (the default
 
 ### 5.4 Schema and hash
 
-At startup each networked entity type's property lists become an ordered **schema**. Server and client run the same code, so schemas match. The default list that `FOLLOW_SERVER` uses when nothing is listed isn't part of the schema, because that mode can differ between machines. A **hash** of all schemas, the tag registry and the protocol version is compared at connect (section 11.2).
+At startup each networked entity type's property lists become an ordered **schema**. Server and client run the same code, so schemas match. The default list that `FOLLOW_SERVER` uses when nothing is listed isn't part of the schema, because that mode can differ between machines. A **hash** of all schemas, the tag registry and the protocol version is compared at connect (section 11.2). *(2026-11-05:)* same-looking schemas don't prove two machines simulate the same, so it now also covers the engine build, every physics setting, the tick rate, and the game's files, or a named build (section 11.2).
 
 ---
 
@@ -287,6 +287,8 @@ Mispredictions come from things the client couldn't know: being shoved, stunned 
 ### 6.4 Re-runnable code
 
 Predicted code must give the same result from the same state and input. That means: fixed `tick_dt`; **ticks for all gameplay timing** (cooldowns, buffer windows, durations); **seeded randomness** per entity per tick (`NetworkTime.tick_rng(key, salt)`, no global `randf()`; the rolls depend only on key, tick and salt, so there's no generator state to save); no reading wall-clock time.
+
+**Queries of outside systems** *(2026-11-05)*: anything that can give a different answer later, such as a nav path while tiles are changing, must not be asked during a replay. Ask once in the input phase, and either save the result as state or let it become inputs, which a replay reuses. The test walkers do this: they path in the input phase and send plain directions. The nav server's answers aren't tied to a tick, so one asked during a replay gets today's mesh for an old tick. Section 4.2 of the pawn spec reads as if Walk asks each update, which would break this if it ran during a replay, so that's one to settle when the pawn is designed.
 
 ### 6.5 Bodies that don't replay
 
@@ -475,7 +477,7 @@ UI reads from whichever timeline its value belongs to:
 ### 11.2 Handshake
 
 The **handshake** is the connection setup, not gameplay:
-1. Client connects and sends its protocol version and **content hash** (schemas + tag registry).
+1. Client connects and sends its protocol version and **content hash**: schemas, tag registry, engine build, every `physics/` project setting, tick rate, and the name and contents of every script, scene and resource. *(2026-11-05)* It's worked out once, when hosting or joining, and takes about 100 ms. Setting `project_base/network/build_id` replaces the file part with that name, which is the usual way for a release: stamp a build number when exporting. It's also the way out if the same project on two operating systems refuses itself because of line endings.
 2. **Hashes match:** server assigns a player id and entity ids, starts time sync, sends the initial world (spawn events).
 3. **Hashes differ:** the server **rejects** the connection with a clear message ("version mismatch: server runs X"). It can't impose code on a client, and a mismatched client would desync silently. Later (section 17): data-only content (stat blocks, ability settings, which are resources, not code) could be pushed by the server so modded servers work with vanilla clients.
 
@@ -512,6 +514,8 @@ The server never trusts a client:
 - It accepts inputs only, never positions, hits or stat values.
 - It validates every input command: clamps `move_scale` to 0–1 and directions to unit length; drops requests for abilities the pawn doesn't have; rate-limits presses.
 - Late or missing inputs are replaced by the last one, never by client-supplied catch-up state.
+- *(2026-11-05)* It limits what each client may send, before reading any of it: 2000 packets a second, 256 KB a second, 64 KB a packet (`max_packets_per_second`, `max_bytes_per_second`, `max_packet_bytes`; 0 means no limit). A client gets 2000 packets a second only because a client controlling 30 pawns sends about that. Before the handshake, only the packet that starts it gets through. Anything over is dropped and counted in `stats["packets_over_limit"]`. An offender isn't disconnected yet (section 17).
+- *(2026-11-05)* An input packet is read whole before its timing counts, so a broken one can't feed time dilation or the rewind limit.
 
 ---
 
@@ -529,7 +533,7 @@ The server never trusts a client:
 - Godot's high-level multiplayer (ENet peer, `send_bytes`) handles transport. `MultiplayerSpawner` / `MultiplayerSynchronizer` are not used for gameplay entities: relevancy needs per-client spawning, and they have no tick history.
 - `move_and_slide` can run several times in one frame for replay. Other bodies stay where they are during the replay, the standard accepted inaccuracy.
 - Godot physics isn't deterministic across machines. Fine here, because the server corrects clients; it only rules out lockstep.
-- **Physics engine** *(found 2026-11-04)*: the project's setting is `DEFAULT`, which is Godot's own physics. `project.godot` holds Jolt tuning values, but they do nothing unless Jolt is selected. Earlier notes saying "tested with Jolt" were wrong, because they were written from those values. All tests now run on both, using a temporary `override.cfg` for Jolt.
+- **Physics engine** *(decided 2026-11-05)*: the project runs on **Jolt**, for the measurements in section 14.1. Godot's own physics still passes the multiplayer tests, using a temporary `override.cfg`, for a game that prefers it. Notes before 2026-11-05 saying "tested with Jolt" were wrong, because the setting was still `DEFAULT` and they were written from the tuning values in `project.godot`. The real pawn in `test scene.tscn` has only had a headless smoke check on Jolt: how it feels can only be judged by playing it.
 - **Tests need separate processes.** `NetworkTime` is a single autoload, so one process can't hold both a server clock and a client clock.
 - **New scripts need registering.** A script with a new `class_name` needs an editor open or `--headless --import` once before headless runs can see it.
 - **RigidBody props** are server-authoritative and interpolated at tier 0 (Godot can't step them on demand for replay).
@@ -541,18 +545,18 @@ The server never trusts a client:
 
 **Server, microseconds per pawn per tick.** All of it has to fit in 16.7 ms at 60 ticks/s.
 
-| Part | Godot physics | Jolt | What it is |
-|---|---|---|---|
-| Simulate | 122 | 37 | Almost all `move_and_slide`, already C++. Alone in open ground, the script around it is about 2 µs |
-| Physics engine's own step, and the rest of the frame | 63 | 21 | Already C++ |
-| Save input | 17 | 16 | GDScript. **The server doesn't need this:** it never rolls back |
-| Save state | 13 | 14 | GDScript. The rounding is needed; the history isn't, on a server |
-| Build snapshots | 9 | 9 | GDScript |
-| Input and nav paths | 4 | 3 | Mostly GDScript |
-| **Total** | **about 232** | **about 105** | |
-| **Pawns that fit in 16.7 ms** | **about 70** | **about 160** | |
+| Part | Godot physics | Jolt | Jolt, after step 2 below | What it is |
+|---|---|---|---|---|
+| Simulate | 122 | 37 | 33 to 39 | Almost all `move_and_slide`, already C++. Alone in open ground, the script around it is about 2 µs |
+| Physics engine's own step, and the rest of the frame | 63 | 21 | 17 to 26 | Already C++ |
+| Save input | 17 | 16 | 0.3 | GDScript. The server has stopped doing this, since it never rolls back |
+| Save state | 13 | 14 | 13 to 15 | GDScript. Still needed: the rounding, and the slot snapshots read from |
+| Build snapshots | 9 | 9 | 9 to 10 | GDScript |
+| Input and nav paths | 4 | 3 | 3 | Mostly GDScript |
+| **Total** | **about 232** | **about 105** | **83 to 92** | From the rows with 100, 200 and 400 pawns |
+| **Pawns that fit in 16.7 ms** | **about 70** | **about 160** | **about 190** | With 204 pawns, the frame averages 17.6 ms |
 
-So **about 60% of the server's time on Jolt is already C++**, and about 40% is GDScript. Porting all the GDScript to C++ can't save more than that 40%.
+So now **about 70% of the server's time is already C++**, and about 30% is GDScript. Porting all the GDScript to C++ can't save more than that 30%, on the server.
 
 **Client, for each remote pawn, per tick:** about 14 µs decoding snapshots and 11 µs placing it, about 25 µs in all, nearly all GDScript, and the same on both engines. Correcting your own pawn costs about 59 µs per pawn per replayed tick on Jolt and 150 on Godot's physics, so 2.4 ms per correction for 4 pawns at 100 ms. Client rows at 200 pawns and up are unreliable, because the overloaded server on the same computer makes replays much longer.
 
@@ -573,9 +577,9 @@ So **about 60% of the server's time on Jolt is already C++**, and about 40% is G
 
 | Step | What | Expected gain | Certainty |
 |---|---|---|---|
-| 1 | **Jolt** as the project's physics engine | About 2.2 times the pawns, and all tests already pass on it | Measured |
-| 2 | **Server keeps no input or state history** | Up to about 16 µs of 105, plus some of the 14 | Estimate |
-| 3 | **C++ for the data path:** state rounding and history, packet encoding and decoding, placing remote pawns | Server from about 160 pawns to perhaps 230. Client cost per remote pawn perhaps a fifth | Estimate, assuming C++ runs these 5 to 10 times faster; worth testing on one piece first |
+| 1 | **Jolt** as the project's physics engine | **Done 2026-11-05.** About 2.2 times the pawns | Measured |
+| 2 | **Server saves no input history** | **Done 2026-11-05.** Saved about 16 µs per pawn, as estimated. The state history stayed: its rounding and current slot are still needed, so it saved nothing there | Measured |
+| 3 | **C++ for the data path:** state rounding and history, packet encoding and decoding, placing remote pawns | Server from about 190 pawns to perhaps 250. Client cost per remote pawn perhaps a fifth | Estimate, assuming C++ runs these 5 to 10 times faster; worth testing on one piece first |
 | 4 | **Delta compression and relevancy** | About 0.9 KB/s per pawn per client today. Needed well before any swarm | Bandwidth measured, savings not |
 | 5 | **Swarms: crowd units with no `CharacterBody3D`** (nav spec) | 10,000 pawns at today's engine cost alone would take about 580 ms per tick, so C++ on its own can't do it. Needs bulk movement, and steps 3 and 4 | Arithmetic from measurements |
 
@@ -704,17 +708,22 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | 4 | **Spending the lead.** The standard way is an optional input delay (section 7): shorter replays, less responsive feel | Not built; a per-game setting, off by default |
 | 5 | **Rigid bodies and the collision sync.** `_sync_collision` briefly makes any body static, which may disturb a rigid body's speed or sleep state. Untested | **Deferred 2026-11-05.** Server-simulated rigid bodies are moderate work: record without writing back, a rotation encoding, frozen on clients, skipped by lag compensation and the sync. Predicted rigid bodies, such as a Rocket League ball, are much harder, because as far as we know Godot can't step one body on demand |
 | 6 | **2D.** `_sync_collision` does nothing for 2D physics and doesn't warn. Whether 2D physics defers moved bodies the same way hasn't been checked. Lag compensation is 3D only | Wanted, **deferred 2026-11-05**. Moderate work. It needs a coarser position encoding first, because 0.001-unit steps limit positions to about 8,300 pixels |
-| 7 | **Physics engine.** The project's setting is `DEFAULT`, Godot's own physics, even though `project.godot` holds Jolt tuning values. All tests pass on both | Owner's call which to ship on |
+| 7 | **Physics engine.** Settled 2026-11-05: Jolt. Godot's own physics still passes the multiplayer tests | Done. The real pawn still has to be played on Jolt by hand |
 | 8 | **Upload size.** Inputs take 5.9 KB/s, about what section 11.3 estimated, though each command is about twice the estimated size | Could shrink with packed fields |
 | 9 | **Vocabulary in docs.** Code now uses standard names. These docs still often say "replay" for resimulation | Tidy as sections get rewritten |
 | 10 | **Lag compensation once per attack.** Section 9.1 wants one rewind per tick for all attacks. Tier 0 rewinds per attack | Costs more only if many fire on one tick |
 | 11 | **Not tested:** real internet connections, more than about 50 pawns, moving platforms, or playing by hand | |
-| 12 | **Server cost.** About 70 pawns fit on Godot's physics and 160 on Jolt | Profiled, with a plan: section 14.1 |
+| 12 | **Server cost.** About 70 pawns fit on Godot's physics and 190 on Jolt | Profiled, with a plan: section 14.1 |
 | 13 | **No crowd control.** Pawns follow paths and physically bump, with no avoidance. `CrowdSystem` is planned in the nav spec, not built. It would normally run on the server, and a predicted pawn can't predict it, which adds to the mismatch | Wanted eventually |
 | 14 | **Bandwidth at scale.** 44 pawns take about 44 KB/s down per client and 200 KB/s up from the server, and each pawn's input is its own packet | Delta compression and relevancy (section 16); bundle a client's inputs |
 | 15 | **Who paths a player's pawn?** The stress test has clients path their own walkers and send directions, to test prediction. Whether a click sends a target for the server to path is part of the intent question in the pawn spec | Owner is thinking about the pawn architecture |
 | 17 | **Pawns can fall through the world** when ground is raised above them, and nothing catches them. Needs a rule in the motor or terrain, and a safety net for anything falling forever | With the motor; found in section 14.1 |
 | 18 | **Terrain edits aren't sent over the network.** The tests apply them everywhere by tick number | With the real terrain system |
+| 19 | **A client over the packet limits only gets dropped, not disconnected.** It still costs the server a little per packet | Disconnect after a sustained flood; pick the numbers from real play |
+| 20 | **Custom state goes to every client,** including those who only draw that entity and ignore it | With relevancy (section 14.1, step 4) |
+| 21 | **Entities spawned or removed during a replay** aren't tested | From the 2026-11-05 audit. Matters once abilities spawn things |
+| 22 | **Hit history is position only.** A rewind moves the whole body back, not its pose | From the 2026-11-05 audit. Matters once hitboxes follow animation |
+| 23 | **`NetworkSession` is over 1,000 lines,** and does connecting, spawning, inputs, snapshots and clock control | From the 2026-11-05 audit. Split it when something else needs to change in there |
 | 16 | **Occasional stalls of several seconds on one client.** A healthy client sometimes runs about 10% fewer frames in a run, with late drawing or lost inputs. Probably the one test machine being overloaded, since nothing about that client stands out. Not confirmed | Check on a machine that isn't running 7 processes |
 
 ---
@@ -751,6 +760,11 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | A frame running several ticks syncs bodies to the collision world between them | 2026-11-04 |
 | Unreal, Overwatch and netfox are studied for principles; no code is copied | 2026-11-04 |
 | A correction older than the history snaps without a replay, and warns | 2026-11-04 |
+| The project runs on Jolt; tests can still run on Godot's own physics | 2026-11-05 |
+| `save_state` data goes in snapshots and is corrected; its values must compare exactly | 2026-11-05 |
+| The handshake compares the engine build, physics settings, tick rate and game files, or a named build | 2026-11-05 |
+| The server limits packets and bytes per client, before reading them | 2026-11-05 |
+| Queries of outside systems, such as nav, are never made during a replay | 2026-11-05 |
 | Gameplay reads its own `grounded` state, and entities refresh engine-private floor state after a load (`_on_state_loaded`) | 2026-11-04 |
 | Input is saved in its own phase, after input and before simulate | 2026-11-04 |
 | The tick loop runs inside `_physics_process` with its own accumulator (physics queries stay safe); default tick rate = physics rate; `physics_factor` for `move_and_slide` | 2026-11-04 |
