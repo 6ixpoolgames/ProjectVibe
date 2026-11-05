@@ -9,6 +9,8 @@ Godot 4.4 hobby project (GDScript). Meant as a reusable base for many kinds of g
    - Edited block: a comment on or above the change, e.g. `# Claude 2026-11-02: <what changed and why>`
    - `.tscn` / `.tres` files can't hold comments reliably (the editor strips them), so list those changes in the commit message and in the chat summary instead.
 2. **The owner wants to understand the whole codebase.** Don't make changes they can't follow. After every change, explain what changed, how it fits into the rest of the system, and anything it affects elsewhere. Prefer clear and boring over clever.
+3. **Comment generously, in plain language.** The owner is getting back into reading and writing GDScript, so new GDScript explains what it does and why, and explains language features as they come up. `assets/scripts/Procedural Terrain/heightmap_terrain.gd` shows the level of detail, with its `GDScript note:` comments. <!-- Claude 2026-11-05: asked for by the owner -->
+
 
 ## Layout
 
@@ -20,6 +22,7 @@ Godot 4.4 hobby project (GDScript). Meant as a reusable base for many kinds of g
 - `tick_pawn_sample.tscn` (project root): sample showing a pawn hooked onto the tick driver; scripts in `assets/scripts/samples/`, pawn scene in `assets/scenes/samples/`, test in `samples/tests/`. A teaching example, not the real pawn <!-- Claude 2026-11-04: new sample -->
 - `net_sample.tscn` (project root): a small multiplayer game to play. Open it twice, Host in one and Join in the other. In a debug build, keys change the fake network and switch features live (`NetTestBench.gd`). Scripts `samples/NetSampleGame.gd` and `NetSamplePawn.gd` <!-- Claude 2026-11-04: new sample -->
 - Headless tests are scenes (so autoloads load): `Godot_v4.4.1-stable_win64.exe --headless --path . "res://<path>/tests/<name>_selftest.tscn"`, exit code 0 = pass. After adding a script with a new `class_name`, run `--headless --import --path .` once first. A script that fails to compile leaves a test scene running forever, so use a timeout. The project runs on Jolt. To test on Godot's own physics, temporarily add an `override.cfg` with `[physics]` and `3d/physics_engine="DEFAULT"` <!-- Claude 2026-11-04: how to run tests; 2026-11-05: Jolt is now the project's engine -->
+- `assets/scripts/Procedural Terrain/`: `heightmap_terrain.gd` (`HeightmapTerrain`) brings `procgen_tile.gd` and `navigation/nav_test_terrain.gd` together in one generator with a low-poly default (flat shading, jittered grid points), feeds nav through its mesh input, and also shows the commenting style the owner wants. To see it, open `terrain_sample.tscn` (project root); the test is in `tests/`. Both originals stay in use: `test scene.tscn` still uses `procgen_tile.gd`, and the nav demo and netcode tests still use `nav_test_terrain.gd` <!-- Claude 2026-11-05: new generator -->
 - `assets/scripts/resources/`: custom Resource classes (stat blocks, initializer configs)
 - `assets/legacy/` and `Orchastrated Component System - legacy/`: old code, not used
 - `Pawn Heirarchy Reference.txt`: the owner's design doc for the pawn component tree
