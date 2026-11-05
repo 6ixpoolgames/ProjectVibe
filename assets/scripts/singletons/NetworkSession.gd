@@ -116,6 +116,9 @@ const MARGIN_LONG_WINDOW := 300
 ## How many inputs each input packet carries, the newest and some past ones, in case some are lost. Each extra one adds about
 ## 1.7 KB/s of upload. At 3, three packets in a row must be lost for an input to go missing.
 @export var input_redundancy: int = 3
+## Claude 2026-11-05: snapshots go through NetCodec in C++ when that library is here. Off, or with no library for this platform, they
+## go through NetPackets instead. The bytes are the same, so machines of either kind can play together. Takes effect at host or join.
+@export var use_native_encoding: bool = true
 ## Where spawned entities go. Defaults to the current scene.
 var world_root: Node = null
 ## Changes the content hash, to test the refusal.
@@ -165,6 +168,7 @@ var _next_entity_id := 1
 var _peers: Dictionary = {}          # server: peer -> {"welcomed": bool, "connected_at": usec}
 var _inbox: Array = []               # [peer, bytes] waiting for the next tick
 var _inbox_counts: Dictionary = {}   # peer -> how many of those are theirs
+var _codec: Object = null             # NetCodec, or null to use NetPackets. Claude 2026-11-05
 var _cached_hash := 0                # content_hash is costly and a client can ask for it, so it's kept
 var _cached_hash_salt := -1
 var _hash_is_cached := false
@@ -240,6 +244,7 @@ func host(port: int, max_clients: int = 32) -> Error:
 		return ERR_UNAVAILABLE # no tick driver, so nothing could run
 	leave()
 	content_hash() # Claude 2026-11-05: it reads files, so now rather than as a hitch when the first client arrives
+	_codec = _make_codec(NetPackets.PROTOCOL_VERSION) # Claude 2026-11-05
 	var peer := ENetMultiplayerPeer.new()
 	peer.set_bind_ip(bind_address)
 	var error := peer.create_server(port, max_clients)
@@ -258,6 +263,7 @@ func join(address: String, port: int) -> Error:
 		return ERR_UNAVAILABLE
 	leave()
 	content_hash() # Claude 2026-11-05: it reads files, so now rather than during the handshake
+	_codec = _make_codec(NetPackets.PROTOCOL_VERSION) # Claude 2026-11-05
 	var peer := ENetMultiplayerPeer.new()
 	var error := peer.create_client(address, port)
 	if error != OK:
@@ -1021,26 +1027,50 @@ func _note_input_timing(peer: int, newest: int, acknowledged: int, tick: int) ->
 
 # --- Snapshots ---------------------------------------------------------------------------------
 
+## Claude 2026-11-05: NetCodec if it's usable. Falls back to NetPackets if the library is missing, or was built for another
+## packet format and would need rebuilding. Asking for it by name means this script still runs on a platform without the library.
+func _make_codec(expected_protocol: int) -> Object:
+	if not use_native_encoding or not ClassDB.class_exists(&"NetCodec"):
+		return null
+	var codec: Object = ClassDB.instantiate(&"NetCodec")
+	if codec.call(&"get_protocol_version") != expected_protocol:
+		push_warning("[NetworkSession] the C++ library uses another packet format; rebuild native/. Using the GDScript encoding for now")
+		return null
+	return codec
+
+
+## True if snapshots are going through C++ right now.
+func is_using_native_encoding() -> bool:
+	return _codec != null
+
+
 ## Server: sends the whole world to every client, with a note for each on how its input is arriving, for time dilation.
 func _send_snapshots(tick: int) -> void:
-	var world := NetPackets.new_buffer()
-	var count := 0
-	for entity: NetworkEntity in get_entities():
+	# Claude 2026-11-05: everything is gathered first and encoded in one call, so C++ is only called into once per snapshot.
+	var all_entities := get_entities()
+	var entries: Array = []
+	entries.resize(all_entities.size() * NetPackets.WORLD_ENTRY_SIZE)
+	var at := 0
+	for entity: NetworkEntity in all_entities:
 		if not entity.is_replicated or entity.state == null:
 			continue
 		var values := entity.state.get_state_values(tick)
 		if values.is_empty():
 			continue
-		world.put_u32(entity.entity_id)
-		NetPackets.write_list(world, values, entity.state.get_state_encodings())
-		NetPackets.write_list(world, entity.state.get_sync_values(), entity.state.get_sync_encodings())
+		entries[at] = entity.entity_id
+		entries[at + 1] = values
+		entries[at + 2] = entity.state.get_state_encodings()
+		entries[at + 3] = entity.state.get_sync_values()
+		entries[at + 4] = entity.state.get_sync_encodings()
 		# Other clients predicting this entity need to know what it wants. An empty list keeps it small otherwise.
-		var input_values: Array = entity.state.get_input_values(tick) if (entity.is_predicted or default_predicted) else []
-		NetPackets.write_list(world, input_values, entity.state.get_input_encodings())
+		entries[at + 5] = entity.state.get_input_values(tick) if (entity.is_predicted or default_predicted) else []
+		entries[at + 6] = entity.state.get_input_encodings()
 		# Claude 2026-11-05: what save_state returned, so clients can correct it. One byte if there's none.
-		NetPackets.write_list(world, entity.state.get_custom_values(tick), [])
-		count += 1
-	var world_bytes := world.data_array
+		entries[at + 7] = entity.state.get_custom_values(tick)
+		at += NetPackets.WORLD_ENTRY_SIZE
+	entries.resize(at)
+	var count := at / NetPackets.WORLD_ENTRY_SIZE
+	var world_bytes: PackedByteArray = _codec.write_world(entries) if _codec != null else NetPackets.write_world(entries)
 	var server_features := 0
 	for i in SERVER_FEATURES.size():
 		if get(SERVER_FEATURES[i]):
@@ -1095,20 +1125,11 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 	var count := buffer.get_u16()
 	if tick <= _newest_snapshot_tick:
 		return # arrived out of order; the newer one already replaced it
-	var parsed: Array = []
-	for i in count:
-		if not NetPackets.has_bytes(buffer, 4):
-			stats["bad_packets"] += 1
-			return
-		var entity_id := buffer.get_u32()
-		var state_values: Variant = NetPackets.read_list(buffer)
-		var sync_values: Variant = NetPackets.read_list(buffer)
-		var input_values: Variant = NetPackets.read_list(buffer)
-		var custom_values: Variant = NetPackets.read_list(buffer)
-		if state_values == null or sync_values == null or input_values == null or custom_values == null:
-			stats["bad_packets"] += 1
-			return
-		parsed.append([entity_id, state_values, sync_values, input_values, custom_values])
+	# Claude 2026-11-05: the header above stays in GDScript, and the entities are read in one call.
+	var parsed: Variant = _codec.read_world(bytes, buffer.get_position(), count) if _codec != null else NetPackets.read_world(buffer, count)
+	if parsed == null:
+		stats["bad_packets"] += 1
+		return
 	_note_snapshot_timing(tick)
 	_newest_snapshot_tick = tick
 	_missed_inputs = missed

@@ -12,6 +12,7 @@ class_name NetPackets
 extends RefCounted
 
 ## Bump this when the wire format changes. It's part of the handshake's content hash.
+## Claude 2026-11-05: native/src/net_codec.cpp holds its own copy of this format and this number, so bump and change both.
 const PROTOCOL_VERSION := 4 # Claude 2026-11-05: 4 adds custom state to snapshots
 
 enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, DEBUG_SWITCH }
@@ -20,6 +21,9 @@ enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAP
 const BAD := &"__net_bad_packet__"
 const MAX_LIST_SIZE := 255
 const INT24_LIMIT := 8388607
+## Claude 2026-11-05: items per entity in write_world's list: id, state values, state encodings, sync values, sync encodings,
+## input values, input encodings, custom values.
+const WORLD_ENTRY_SIZE := 8
 
 enum Tag { MISSING = 0, VECTOR3_MM, VECTOR3_CM, VECTOR2_MM, ANGLE_U16, ANGLE_BYTE, FLOAT32, BOOL_FALSE, BOOL_TRUE, INT32, INT64, OTHER }
 
@@ -160,6 +164,38 @@ static func read_list(buffer: StreamPeerBuffer) -> Variant:
 			return null
 		values[i] = value
 	return values
+
+
+# --- A snapshot's entities -------------------------------------------------------------------------
+
+## Claude 2026-11-05: moved here from NetworkSession. NetCodec in C++ does the same job, faster, with the same bytes: this version is
+## what runs where that library isn't available.
+static func write_world(entries: Array) -> PackedByteArray:
+	var world := new_buffer()
+	for at in range(0, entries.size() - WORLD_ENTRY_SIZE + 1, WORLD_ENTRY_SIZE):
+		world.put_u32(entries[at])
+		write_list(world, entries[at + 1], entries[at + 2])
+		write_list(world, entries[at + 3], entries[at + 4])
+		write_list(world, entries[at + 5], entries[at + 6])
+		write_list(world, entries[at + 7], [])
+	return world.data_array
+
+
+## Claude 2026-11-05: an Array of [id, state, sync, input, custom] for each entity. Null if the packet is broken.
+static func read_world(buffer: StreamPeerBuffer, count: int) -> Variant:
+	var parsed: Array = []
+	for i in count:
+		if not has_bytes(buffer, 4):
+			return null
+		var entity_id := buffer.get_u32()
+		var state_values: Variant = read_list(buffer)
+		var sync_values: Variant = read_list(buffer)
+		var input_values: Variant = read_list(buffer)
+		var custom_values: Variant = read_list(buffer)
+		if state_values == null or sync_values == null or input_values == null or custom_values == null:
+			return null
+		parsed.append([entity_id, state_values, sync_values, input_values, custom_values])
+	return parsed
 
 
 # --- Internals -------------------------------------------------------------------------------------

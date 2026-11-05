@@ -26,6 +26,7 @@ func _ready() -> void:
 		if argument.begins_with("--only="):
 			_only = argument.trim_prefix("--only=")
 	_test_packets()
+	_test_encoding_choice()
 	await _test_offline()
 	await _scenario("connecting", _test_connecting)
 	await _scenario("refused", _test_refused)
@@ -35,6 +36,7 @@ func _ready() -> void:
 	await _scenario("inputs", _test_inputs)
 	await _scenario("correction", _test_correction)
 	await _scenario("custom_state", _test_custom_state)
+	await _scenario("mixed_encoding", _test_mixed_encoding)
 	await _scenario("interpolation", _test_interpolation)
 	await _scenario("lag_compensation", _test_lag_compensation)
 	await _scenario("predicted_others", _test_predicted_others)
@@ -62,6 +64,17 @@ func _scenario(scenario_name: String, test: Callable) -> void:
 
 
 # --- No processes needed ---------------------------------------------------------------------------
+
+## Claude 2026-11-05: which encoding a session picks. The missing library itself can't be tested here, but turning it off takes the
+## same path through the code.
+func _test_encoding_choice() -> void:
+	var session: NetworkSessionSingleton = get_node("/root/NetworkSession")
+	_check(session._make_codec(NetPackets.PROTOCOL_VERSION) != null, "encoding: C++ is used when the library is here")
+	_check(session._make_codec(NetPackets.PROTOCOL_VERSION + 1) == null, "encoding: a library built for another packet format isn't used")
+	session.use_native_encoding = false
+	_check(session._make_codec(NetPackets.PROTOCOL_VERSION) == null, "encoding: turned off, it uses GDScript")
+	session.use_native_encoding = true
+
 
 ## Packets: what goes in comes out, rounded values come back exact, and broken bytes are caught.
 func _test_packets() -> void:
@@ -761,6 +774,28 @@ func _test_custom_state(run_name: String) -> void:
 	_check(absi(int(own["total"]) - since_change_client) <= 2, "custom state: the client replayed from the corrected value")
 	_check(absi(int(own_on_server["total"]) - since_change_server) <= 2, "custom state: the server counted the same way")
 	_check(int(a["stats"]["corrections"]) >= 1 and int(a["stats"]["corrections"]) <= 3, "custom state: one correction, and it doesn't keep correcting (%d)" % int(a["stats"]["corrections"]))
+
+
+## Claude 2026-11-05: a machine using C++ snapshots and one using GDScript play together, whichever is the server. The custom
+## pawn is used because its state takes the slowest path through the format.
+func _test_mixed_encoding(run_name: String) -> void:
+	for server_uses_cpp: bool in [true, false]:
+		var server: Dictionary = {"role": "server", "seconds": 8, "latency": 30, "custom": 1, "bonus-at": 300}
+		var client: Dictionary = {"role": "client", "seconds": 7, "latency": 30, "mode": "idle", "custom": 1}
+		(client if server_uses_cpp else server)["script-encoding"] = 1
+		var label := "C++ server, GDScript client" if server_uses_cpp else "GDScript server, C++ client"
+		_port += 1
+		var results := await NetRun.run(self, "%s_%s" % [run_name, server_uses_cpp], {"server": server, "a": client}, _port)
+		var a: Dictionary = results["a"]
+		if results["server"].has("timed_out") or a.has("timed_out"):
+			_check(false, "%s: every machine finished" % label)
+			continue
+		_check(results["server"]["native_encoding"] == server_uses_cpp and a["native_encoding"] != server_uses_cpp, "%s: each machine used what it was told to" % label)
+		_check(int(a["stats"]["snapshots_received"]) > 100, "%s: snapshots arrive (%d)" % [label, int(a["stats"]["snapshots_received"])])
+		_check(int(a["stats"]["bad_packets"]) == 0 and int(results["server"]["stats"]["bad_packets"]) == 0, "%s: no packet was refused" % label)
+		var own := NetRun.own_entity(a)
+		_check(int(own["bonus"]) == 1, "%s: the client got the server's value" % label)
+		_check(int(a["stats"]["corrections"]) <= 3, "%s: predictions still match (%d corrections)" % [label, int(a["stats"]["corrections"])])
 
 
 func _test_interpolation(run_name: String) -> void:

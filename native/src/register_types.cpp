@@ -1,6 +1,7 @@
 // Written by Claude (claude-opus-5-5), 2026-11-03: GDExtension entry point; registers NavHooks and the NavServer singleton.
 #include "nav_hooks.h"
 #include "nav_server.h"
+#include "net_codec.h" // Claude 2026-11-05: packet encoding in C++, a measured test the game doesn't use yet
 
 #include <gdextension_interface.h>
 #include <godot_cpp/classes/engine.hpp>
@@ -18,6 +19,7 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	}
 	GDREGISTER_CLASS(NavHooks);
 	GDREGISTER_CLASS(NavServer);
+	GDREGISTER_CLASS(NetCodec); // Claude 2026-11-05
 	g_nav_server = memnew(NavServer);
 	Engine::get_singleton()->register_singleton("NavServer", g_nav_server);
 }

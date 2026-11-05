@@ -16,6 +16,7 @@
 ##   --custom            everyone: uses the pawn with custom state (NetTestCustomPawn)
 ##   --bonus-at=240      server: sets the first pawn's bonus on this tick, which no client can predict
 ##   --no-rewind         server: turns lag compensation off, to compare
+##   --script-encoding   this machine's snapshots go through NetPackets rather than C++
 ##   --off=a,b  --on=a,b      turn NetworkSession features off or on at the start
 ##   --switch=5:lag_compensation_enabled:0    turn a feature on or off after this many seconds
 ##   --allow-debug       server: obey test switches sent by clients
@@ -95,6 +96,7 @@ func _ready() -> void:
 	session.bind_address = "127.0.0.1"
 	session.register_type("pawn", load(CUSTOM_PAWN_SCENE if settings.has("custom") else PAWN_SCENE))
 	session.content_hash_salt = int(settings.get("salt", 0))
+	session.use_native_encoding = not settings.has("script-encoding") # Claude 2026-11-05
 	if settings.has("gravity"):
 		ProjectSettings.set_setting("physics/3d/default_gravity", float(settings["gravity"]))
 	session.lag_compensation_enabled = not settings.has("no-rewind")
@@ -334,6 +336,7 @@ func _start_measuring() -> void:
 
 func _capture_summary() -> void:
 	result["stats"] = session.stats.duplicate()
+	result["native_encoding"] = session.is_using_native_encoding() # Claude 2026-11-05
 	result["tick"] = driver.tick
 	result["rtt_ms"] = session.get_rtt_ms()
 	result["lead_ticks"] = session.get_lead_ticks()

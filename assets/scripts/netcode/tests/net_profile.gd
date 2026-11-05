@@ -4,7 +4,8 @@
 ## fail. Takes several minutes.
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/netcode/tests/net_profile.tscn"
 ## Add -- --micro to run only the micro-timings, -- --counts=50,100 to choose the pawn counts, and -- --nav to run only the
-## navigation rows: heavy path demand, and terrain edits during play.
+## navigation rows: heavy path demand, and terrain edits during play. -- --script-encoding sends snapshots through NetPackets instead
+## of C++, to compare.
 ##
 ## How to read the tables: "whole physics frame" is everything in a physics frame, including the physics engine's own step. "Tick work"
 ## is NetworkTime's ticks inside that. All of it has to fit in 16.7 ms at 60 ticks/s. The rest of the frame is rendering, which a
@@ -22,6 +23,7 @@ var _port := NetRun.first_port()
 var _counts: Array = DEFAULT_COUNTS
 var _micro_only := false
 var _nav_only := false
+var _script_encoding := false # Claude 2026-11-05
 
 
 func _ready() -> void:
@@ -30,6 +32,8 @@ func _ready() -> void:
 			_micro_only = true
 		elif argument == "--nav":
 			_nav_only = true
+		elif argument == "--script-encoding":
+			_script_encoding = true
 		elif argument.begins_with("--counts="):
 			_counts = Array(argument.trim_prefix("--counts=").split(",")).map(func(c: String) -> int: return int(c))
 	print("--- Multiplayer profile (physics engine: %s) ---" % ProjectSettings.get_setting("physics/3d/physics_engine", "DEFAULT"))
@@ -92,6 +96,14 @@ func _micro_timings() -> void:
 	_report("collision sync (static flip)", _time_calls(5000, func() -> void: state._sync_collision()))
 	var values := state.get_state_values(tick)
 	var encodings := state.get_state_encodings()
+	# Claude 2026-11-05: what _send_snapshots asks each pawn for before any encoding. The C++ encoding test can't speed this up.
+	_report("gather a pawn's lists for a snapshot", _time_calls(5000, func() -> void:
+		state.get_state_values(tick)
+		state.get_state_encodings()
+		state.get_sync_values()
+		state.get_sync_encodings()
+		state.get_input_encodings()
+		state.get_custom_values(tick)))
 	_report("encode a pawn's state for a snapshot", _time_calls(5000, func() -> void:
 		var buffer := NetPackets.new_buffer()
 		NetPackets.write_list(buffer, values, encodings)))
@@ -137,6 +149,8 @@ func _report(label: String, microseconds: float) -> void:
 func _measure(count: int) -> void:
 	_port += 1
 	var shared := {"terrain": 1, "profile": 1, "no-log": 1, "measure-after": MEASURE_AFTER}
+	if _script_encoding:
+		shared["script-encoding"] = 1
 	var server: Dictionary = {"role": "server", "seconds": SECONDS + 3, "walkers": CLIENT_WALKERS, "ai": count, "ai-mode": "walk"}
 	var client: Dictionary = {"role": "client", "seconds": SECONDS, "mode": "walk", "bench-ping": 100}
 	server.merge(shared)

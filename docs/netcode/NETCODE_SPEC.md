@@ -579,11 +579,51 @@ So now **about 70% of the server's time is already C++**, and about 30% is GDScr
 |---|---|---|---|
 | 1 | **Jolt** as the project's physics engine | **Done 2026-11-05.** About 2.2 times the pawns | Measured |
 | 2 | **Server saves no input history** | **Done 2026-11-05.** Saved about 16 µs per pawn, as estimated. The state history stayed: its rounding and current slot are still needed, so it saved nothing there | Measured |
-| 3 | **C++ for the data path:** state rounding and history, packet encoding and decoding, placing remote pawns | Server from about 190 pawns to perhaps 250. Client cost per remote pawn perhaps a fifth | Estimate, assuming C++ runs these 5 to 10 times faster; worth testing on one piece first |
+| 3 | **C++ for the data path:** state rounding and history, packet encoding and decoding, placing remote pawns | Server from about 190 pawns to perhaps 250. Client cost per remote pawn perhaps a fifth | Estimate. **Snapshot encoding done 2026-11-05**, measured below. State rounding and history, and placing remote pawns, are still GDScript |
 | 4 | **Delta compression and relevancy** | About 0.9 KB/s per pawn per client today. Needed well before any swarm | Bandwidth measured, savings not |
 | 5 | **Swarms: crowd units with no `CharacterBody3D`** (nav spec) | 10,000 pawns at today's engine cost alone would take about 580 ms per tick, so C++ on its own can't do it. Needs bulk movement, and steps 3 and 4 | Arithmetic from measurements |
 
 **C++ on principle:** the data path in step 3 is a good fit anyway: plain data, tight loops, no engine calls. Gameplay logic such as abilities and the pawn's steering stays in GDScript, since the script around `move_and_slide` costs very little, and modders and designers need to read and change it.
+
+**Step 3's first piece: snapshot encoding** *(2026-11-05, `tests/net_codec_selftest`, `tests/net_profile`)*. Snapshots now go through `NetCodec` in `native/`, one call per snapshot. `NetPackets` stays as the fallback, used when the C++ library is missing, when its protocol version doesn't match, or when `NetworkSession.use_native_encoding` is off. Input packets and the other packets still use `NetPackets`.
+
+The format now lives in two places, `NetPackets.gd` and `net_codec.cpp`, so a change has to go in both. `net_codec_selftest` fails if they differ. It compares them on 20,000 random lists, every cut-short length of 300 packets, and 3,500 broken packets. The `mixed_encoding` scenario in `net_selftest` plays a C++ server with a GDScript client, and the reverse.
+
+Encoding alone, in microseconds per pawn for each snapshot, with a 37-byte pawn:
+
+| Version | Write | Read |
+|---|---|---|
+| GDScript (`NetPackets`, the fallback) | 9.8 | 11.2 |
+| GDScript written for speed (four value types only, so slightly flattered) | 1.7 | 2.0 |
+| C++, one call per list | 0.6 | 1.0 |
+| C++, one call for the whole world (what the game uses) | 0.7 | 0.6 |
+
+Two other versions were measured and removed. Encodings passed as compiled numbers instead of names saved almost nothing. Flat arrays with no Variants took 0.07 to write and 0.05 to read, but need a fixed list of properties and state living in C++, and nothing in the game could use them.
+
+In the running game, in ms per tick, averaged over two runs of each, taking turns on one computer. "200 pawns" is 200 AI pawns plus a client's 4:
+
+| | 100 pawns, GDScript | 100 pawns, C++ | 200 pawns, GDScript | 200 pawns, C++ |
+|---|---|---|---|---|
+| Server: `send_snapshots` | 1.00 | 0.46 | 1.83 | 0.81 |
+| Server: all tick work | 7.0 | 6.6 | 13.5 | 12.3 |
+| Server: whole physics frame | 9.5 | 8.8 | 17.8 | 15.4 |
+| Server: frames over 16.7 ms | 0 | 0 | 1555 and 1829, of about 2020 | 285 and 89, of about 2150 |
+| Client: `flush` | 1.40 | 0.84 | 2.89 | 1.57 |
+| Client: all tick work | 3.7 | 3.2 | 6.6 | 5.6 |
+| Client: whole physics frame | 8.4 | 7.3 | 15.0 | 11.8 |
+| Client: frames over 16.7 ms | 0 | 0 | 578 and 202, of about 1735 | 0 and 0, of about 1738 |
+
+What this shows:
+
+- The measured saving matches the estimate from the encoding test. The server saves about 5 µs per pawn per tick (4.3 estimated). A client saves about 5.5 to 6.5 µs (5.3 estimated).
+- **At 200 pawns the whole frame improved by two to three times what tick work did,** in both runs, so it isn't one lucky run. At 100 pawns it's less clear, because client frames varied more from run to run. The cause isn't known. Server and client share one computer in this test, so one using less might help the other, but that's a guess. Check it on separate machines before relying on the larger number.
+- So the server's limit goes from about 190 pawns to somewhere between 200 (counting only the tick work saved) and about 225 (going by whole-frame times). The over-budget counts make the gain look bigger than it is, because frames at 200 pawns sit close to the 16.7 ms limit, and a small saving tips many of them under it.
+- Rollbacks and corrections show no difference. Rollbacks ranged from 78 to 218 with C++ and from 99 to 189 with GDScript, and those ranges overlap.
+- Most of the old cost wasn't the language: GDScript written for speed is already over 5 times faster than `NetPackets`, and C++ is about 3 times that. Speed-tuned GDScript would have got most of the saving, but it handles only four value types, and C++ is a better fit for this job anyway.
+- With no GDScript at all, the server tops out at about 270 pawns, because physics is already C++.
+- What's left on a client, per remote pawn per tick: placing it, about 8.1 µs; storing server state, about 3.5; building the dictionary, about 1.4. On a server: saving state, about 9.5; gathering lists for snapshots, about 2.5.
+
+All of this ran in the editor build of Godot with a debug C++ library, because no export templates are installed. A release build may be kinder to GDScript, so the gaps could narrow.
 
 ---
 
@@ -713,7 +753,7 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | 9 | **Vocabulary in docs.** Code now uses standard names. These docs still often say "replay" for resimulation | Tidy as sections get rewritten |
 | 10 | **Lag compensation once per attack.** Section 9.1 wants one rewind per tick for all attacks. Tier 0 rewinds per attack | Costs more only if many fire on one tick |
 | 11 | **Not tested:** real internet connections, more than about 50 pawns, moving platforms, or playing by hand | |
-| 12 | **Server cost.** About 70 pawns fit on Godot's physics and 190 on Jolt | Profiled, with a plan: section 14.1 |
+| 12 | **Server cost.** About 70 pawns fit on Godot's physics and 190 on Jolt; 200 to 225 on Jolt with C++ snapshots | Profiled, with a plan: section 14.1 |
 | 13 | **No crowd control.** Pawns follow paths and physically bump, with no avoidance. `CrowdSystem` is planned in the nav spec, not built. It would normally run on the server, and a predicted pawn can't predict it, which adds to the mismatch | Wanted eventually |
 | 14 | **Bandwidth at scale.** 44 pawns take about 44 KB/s down per client and 200 KB/s up from the server, and each pawn's input is its own packet | Delta compression and relevancy (section 16); bundle a client's inputs |
 | 15 | **Who paths a player's pawn?** The stress test has clients path their own walkers and send directions, to test prediction. Whether a click sends a target for the server to path is part of the intent question in the pawn spec | Owner is thinking about the pawn architecture |
@@ -724,6 +764,7 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | 21 | **Entities spawned or removed during a replay** aren't tested | From the 2026-11-05 audit. Matters once abilities spawn things |
 | 22 | **Hit history is position only.** A rewind moves the whole body back, not its pose | From the 2026-11-05 audit. Matters once hitboxes follow animation |
 | 23 | **`NetworkSession` is over 1,000 lines,** and does connecting, spawning, inputs, snapshots and clock control | From the 2026-11-05 audit. Split it when something else needs to change in there |
+| 24 | **Two timing checks in `net_selftest` fail now and then:** "settles with inputs 1 to 2 ticks early", and "no more missed inputs than a fixed lead". The second compares two noisy numbers: a fixed lead missed 0 inputs in one run and 177 in the next. Seen once in two runs on 2026-11-05, in a change the game doesn't run. Cause not confirmed | Make them hold over several runs, or compare against a margin |
 | 16 | **Occasional stalls of several seconds on one client.** A healthy client sometimes runs about 10% fewer frames in a run, with late drawing or lost inputs. Probably the one test machine being overloaded, since nothing about that client stands out. Not confirmed | Check on a machine that isn't running 7 processes |
 
 ---
@@ -765,6 +806,7 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | The handshake compares the engine build, physics settings, tick rate and game files, or a named build | 2026-11-05 |
 | The server limits packets and bytes per client, before reading them | 2026-11-05 |
 | Queries of outside systems, such as nav, are never made during a replay | 2026-11-05 |
+| Snapshots are encoded in C++ with `NetPackets` as the fallback; both write the same bytes, so machines using either can play together | 2026-11-05 |
 | Gameplay reads its own `grounded` state, and entities refresh engine-private floor state after a load (`_on_state_loaded`) | 2026-11-04 |
 | Input is saved in its own phase, after input and before simulate | 2026-11-04 |
 | The tick loop runs inside `_physics_process` with its own accumulator (physics queries stay safe); default tick rate = physics rate; `physics_factor` for `move_and_slide` | 2026-11-04 |
