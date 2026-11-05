@@ -1,10 +1,10 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3 uid="uid://cegpal62tvr45"]
 
-[ext_resource type="Script" path="res://assets/scripts/navigation/nav_bootstrap.gd" id="1_boot"]
-[ext_resource type="Script" path="res://assets/scripts/navigation/nav_test_terrain.gd" id="2_terrain"]
-[ext_resource type="Script" path="res://assets/scripts/navigation/nav_test_camera.gd" id="3_cam"]
-[ext_resource type="Script" path="res://assets/scripts/navigation/nav_debug_draw.gd" id="4_debug"]
-[ext_resource type="Script" path="res://assets/scripts/navigation/nav_path_tester.gd" id="5_tester"]
+[ext_resource type="Script" uid="uid://eamf5brbdmfn" path="res://assets/scripts/navigation/nav_bootstrap.gd" id="1_boot"]
+[ext_resource type="Script" uid="uid://bbr2lcbbm0hdr" path="res://assets/scripts/navigation/nav_test_terrain.gd" id="2_terrain"]
+[ext_resource type="Script" uid="uid://m8bkjqbrte8i" path="res://assets/scripts/navigation/nav_test_camera.gd" id="3_cam"]
+[ext_resource type="Script" uid="uid://bfeqdnlmwhj74" path="res://assets/scripts/navigation/nav_debug_draw.gd" id="4_debug"]
+[ext_resource type="Script" uid="uid://chbqnlrh61i0r" path="res://assets/scripts/navigation/nav_path_tester.gd" id="5_tester"]
 
 [sub_resource type="NavHooks" id="NavHooks_terrain"]
 

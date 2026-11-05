@@ -1,6 +1,6 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=7 format=3 uid="uid://bq8736kckidkw"]
 
-[ext_resource type="Script" path="res://assets/scripts/samples/NetSampleGame.gd" id="1_game"]
+[ext_resource type="Script" uid="uid://cldd0pasunljo" path="res://assets/scripts/samples/NetSampleGame.gd" id="1_game"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_floor"]
 size = Vector3(40, 1, 40)
