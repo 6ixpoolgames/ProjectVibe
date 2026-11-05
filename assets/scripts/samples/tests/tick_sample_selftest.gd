@@ -41,6 +41,8 @@ func _ready() -> void:
 	_check(absf(d20 - d60) < d60 * 0.12, "physics_factor: same distance per second at 20 ticks/s")
 	_check(nt.get_tick_rate() == Engine.physics_ticks_per_second, "tick rate restored")
 
+	await _test_wanderers_stay_on_the_ground(sample) # Claude 2026-11-05
+
 	nt.active = false
 	var paused_at := nt.tick
 	await _frames(10)
@@ -53,6 +55,54 @@ func _ready() -> void:
 
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
+
+
+## Claude 2026-11-05: wanderers on a small platform, far from the sample's floor. The ones with the ground check off show that
+## this test can really see a pawn fall: one wander decision walks further than the platform is wide.
+func _test_wanderers_stay_on_the_ground(sample: Node3D) -> void:
+	var careful := _add_wanderers_on_platform(sample, Vector3(500, 0, 0), "Careful", 1.5)
+	var careless := _add_wanderers_on_platform(sample, Vector3(-500, 0, 0), "Careless", 0.0)
+	var starts: Array[Vector3] = []
+	for pawn in careful:
+		starts.append(pawn.global_position)
+	await _frames(600)
+	var careful_fallen := 0
+	var careful_moved := 0
+	for i in careful.size():
+		if careful[i].global_position.y < -1.0:
+			careful_fallen += 1
+		if careful[i].global_position.distance_to(starts[i]) > 0.5:
+			careful_moved += 1
+	var careless_fallen := 0
+	for pawn in careless:
+		if pawn.global_position.y < -1.0:
+			careless_fallen += 1
+	print("        fallen after 10 s: %d of %d with the check, %d of %d without" % [careful_fallen, careful.size(), careless_fallen, careless.size()])
+	_check(careless_fallen > 0, "wanderers without the ground check walk off a small platform")
+	_check(careful_fallen == 0, "wanderers with the ground check stay on it")
+	_check(careful_moved > 0, "and they keep walking")
+
+
+func _add_wanderers_on_platform(sample: Node3D, at: Vector3, label: String, look_ahead: float) -> Array[TickSamplePawn]:
+	var platform := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(6, 1, 6)
+	shape.shape = box
+	platform.add_child(shape)
+	platform.position = at + Vector3(0, -0.5, 0)
+	sample.add_child(platform)
+	var pawns: Array[TickSamplePawn] = []
+	var pawn_scene: PackedScene = load("res://assets/scenes/samples/tick_sample_pawn.tscn")
+	for offset: Vector3 in [Vector3(-1, 0.1, -1), Vector3(1, 0.1, -1), Vector3(-1, 0.1, 1), Vector3(1, 0.1, 1)]:
+		var pawn: TickSamplePawn = pawn_scene.instantiate()
+		pawn.name = "%s%d" % [label, pawns.size()]
+		pawn.brain = TickSamplePawn.Brain.WANDER
+		pawn.wander_look_ahead = look_ahead
+		pawn.position = at + offset
+		sample.add_child(pawn)
+		pawns.append(pawn)
+	return pawns
 
 
 func _walk_one_second(nt: NetworkTimeSingleton, pawn: TickSamplePawn, rate: int) -> float:

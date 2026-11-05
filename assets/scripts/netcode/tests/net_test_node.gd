@@ -39,6 +39,9 @@
 ##   --predicted         everyone: other pawns are predicted (is_predicted)
 ##   --ai=2              server: adds this many AI pawns nobody owns
 ##   --follow            client: remote pawns stand on server data during a rollback, to compare
+##   --bind=0.0.0.0      server: listen on this address instead of this machine only. Claude 2026-11-05, for testing across operating systems
+##   --address=172.18.0.1  client: the server's address, when it isn't on this machine. Claude 2026-11-05
+##   --build-id=test     everyone: names the build, so the handshake compares that instead of the game's files. Claude 2026-11-05
 extends Node
 
 const PAWN_SCENE := "res://assets/scripts/netcode/tests/net_test_pawn.tscn"
@@ -59,6 +62,9 @@ var _next_slot := 0
 var _shoved := false
 var _garbage_sent := false
 var _flood_sent := false
+const FLOOD_PACKETS := 8000 # Claude 2026-11-05: see _send_some_of_the_flood
+const FLOOD_PACKETS_PER_TICK := 200
+var _flood_left := 0
 var _ai_spawned := false
 var _switched := false
 var _nav_tick_total_usec := 0
@@ -93,7 +99,9 @@ func _ready() -> void:
 	else:
 		_build_arena()
 	session.world_root = self
-	session.bind_address = "127.0.0.1"
+	session.bind_address = settings.get("bind", "127.0.0.1") # Claude 2026-11-05: see --bind
+	if settings.has("build-id"): # Claude 2026-11-05: see --build-id
+		ProjectSettings.set_setting(NetworkSessionSingleton.BUILD_ID_SETTING, settings["build-id"])
 	session.register_type("pawn", load(CUSTOM_PAWN_SCENE if settings.has("custom") else PAWN_SCENE))
 	session.content_hash_salt = int(settings.get("salt", 0))
 	session.use_native_encoding = not settings.has("script-encoding") # Claude 2026-11-05
@@ -162,6 +170,7 @@ func _physics_process(delta: float) -> void:
 			_nav_tick_total_usec += spent
 			_nav_tick_count += 1
 			_nav_tick_worst_usec = maxi(_nav_tick_worst_usec, spent)
+	_send_some_of_the_flood() # Claude 2026-11-05
 
 
 func _process(_delta: float) -> void:
@@ -185,7 +194,7 @@ func _process(_delta: float) -> void:
 		_send_garbage()
 	if settings.has("garbage") and not _flood_sent and result["joined"] and elapsed >= 4.0:
 		_flood_sent = true
-		_send_flood()
+		_flood_left = FLOOD_PACKETS
 	if settings.has("switch") and not _switched and elapsed >= float(String(settings["switch"]).split(":")[0]):
 		_switched = true
 		var parts := String(settings["switch"]).split(":")
@@ -210,7 +219,7 @@ func _process(_delta: float) -> void:
 
 func _join() -> void:
 	result["join_started"] = true
-	session.join("127.0.0.1", int(settings.get("port", 24500)))
+	session.join(settings.get("address", "127.0.0.1"), int(settings.get("port", 24500))) # Claude 2026-11-05: see --address
 
 
 func _on_entity_spawned(entity: NetworkEntity) -> void:
@@ -418,11 +427,15 @@ func _finish() -> void:
 
 
 ## Claude 2026-11-05: far more pings than the server allows one client in a second. Well after _send_garbage, so it uses up a
-## different second's budget and those packets still get read.
-func _send_flood() -> void:
+## different second's budget and those packets still get read. Sent over several ticks: all at once, Linux's default socket buffer
+## drops most of them before the game sees them, and the limit never gets tested. 8000 stays over the limit even if the server's
+## one-second count restarts halfway through.
+func _send_some_of_the_flood() -> void:
 	var flood := PackedByteArray([NetPackets.Type.PING, 0, 0, 0, 0, 0, 0, 0, 0])
-	for i in 5000:
+	var count := mini(_flood_left, FLOOD_PACKETS_PER_TICK)
+	for i in count:
 		(multiplayer as SceneMultiplayer).send_bytes(flood, 1, MultiplayerPeer.TRANSFER_MODE_UNRELIABLE)
+	_flood_left -= count
 
 
 ## Broken and forged packets. None of this may crash the server or move anything.

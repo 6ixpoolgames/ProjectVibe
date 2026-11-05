@@ -31,6 +31,11 @@ enum Brain { PLAYER, WANDER, IDLE, NETWORK }
 @export_group("Wander")
 ## Seconds between wander decisions; converted to ticks.
 @export var wander_change_seconds: float = 1.5
+## Claude 2026-11-05: how far ahead a wandering pawn looks for ground, in meters. It has to be further than the pawn travels
+## while turning around, about 0.5 m at the default speed. 0 turns the check off.
+@export var wander_look_ahead: float = 1.5
+## Claude 2026-11-05: ground further below the pawn than this counts as a drop, in meters.
+@export var wander_max_drop: float = 1.5
 @export_group("Visuals")
 ## Blend the visible model between ticks. Turn off to see the raw tick steps (most visible at low tick rates).
 @export var smooth_visuals: bool = true
@@ -120,6 +125,9 @@ func _tick_input(_dt: float, tick: int) -> void:
 				var walking := rng.randf() > 0.25 # sometimes stand still for a while
 				move_dir = Vector3(cos(angle), 0.0, sin(angle)) if walking else Vector3.ZERO
 				_next_wander_tick = tick + _seconds_to_ticks(wander_change_seconds)
+			# Claude 2026-11-05: checked every tick, since one wander decision can walk about 7 m. Wandering pawns kept walking
+			# off the floor in the samples. This runs only where the wander is decided, never in a replay or on a client.
+			move_dir = _away_from_drops(move_dir)
 			wants_sprint = false
 			wants_jump = false
 		Brain.IDLE:
@@ -264,6 +272,21 @@ func _physics_process(delta: float) -> void:
 ## Where the model should be: the body's position, turned to our facing.
 func _visual_transform() -> Transform3D:
 	return Transform3D(Basis(Vector3.UP, yaw), global_position)
+
+
+## Claude 2026-11-05: keeps a wander on the ground. If there's no ground ahead it turns around, and if there's none behind
+## either it stands still. A simple stand-in for real navigation: it only sees drops, and walls are left to move_and_slide.
+func _away_from_drops(direction: Vector3) -> Vector3:
+	if wander_look_ahead <= 0.0 or direction == Vector3.ZERO or _has_ground_toward(direction):
+		return direction
+	return -direction if _has_ground_toward(-direction) else Vector3.ZERO
+
+
+## Claude 2026-11-05: a ray straight down, wander_look_ahead in front of us. It starts 1 m up so that it also finds a slope rising ahead.
+func _has_ground_toward(direction: Vector3) -> bool:
+	var ahead := global_position + direction.normalized() * wander_look_ahead
+	var ray := PhysicsRayQueryParameters3D.create(ahead + Vector3.UP, ahead + Vector3.DOWN * wander_max_drop, collision_mask, [get_rid()])
+	return not get_world_3d().direct_space_state.intersect_ray(ray).is_empty()
 
 
 func _seconds_to_ticks(seconds: float) -> int:
