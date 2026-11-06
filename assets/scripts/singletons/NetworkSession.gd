@@ -419,6 +419,8 @@ func content_hash() -> int:
 	var parts := PackedStringArray()
 	parts.append(str(NetPackets.PROTOCOL_VERSION))
 	parts.append(str(TagRegistry.content_hash()))
+	# Claude 2026-11-06: navigation now has its own tags, and machines must agree on those bits too.
+	parts.append(str(NavTags.content_hash()))
 	parts.append(str(content_hash_salt))
 	parts.append(String(Engine.get_version_info()["hash"]))
 	parts.append(str(_driver.get_tick_rate() if _driver else 0))

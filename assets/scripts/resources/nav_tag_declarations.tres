@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="TagDeclarationsRes" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/resources/TagDeclarations_resource.gd" id="1_tagdecl"]
+
+[resource]
+script = ExtResource("1_tagdecl")
+tags = Array[StringName]([&"link.jump", &"link.climb", &"link.door", &"link.teleport", &"area.road", &"area.hazard", &"area.water", &"area.forbidden", &"obstacle.crate", &"obstacle.vehicle", &"point.cover", &"point.patrol", &"point.ambush", &"point.wander", &"use.seat", &"use.work", &"use.pickup"])

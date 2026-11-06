@@ -4,14 +4,15 @@
 
 **Status:** design only. No code exists yet. All function signatures are proposals, written as C++ headers (GDExtension, godot-cpp) and a little GDScript for the pawn side.
 **Scope:** flat-plane worlds, constant gravity (−Y). Solid spans on the nav grid are the universal input; any terrain generator (heightmap, blocks, density, meshes) opts in through an optional **NavHooks** resource and is stacked with the others (section 5).
-**Revisions:** 2026-11-03 (Claude): section 5 rewritten from a single voxel source to the NavHooks / provider model; pipeline, API, walkthroughs and phases updated to match.
+**Revisions:** 2026-11-03 (Claude): section 5 rewritten from a single voxel source to the NavHooks / provider model; pipeline, API, walkthroughs and phases updated to match. 2026-11-06 (Claude): section 21 added, nav markers and modules.
 **Performance numbers** are ballpark estimates, not measurements. Phase 0 is a benchmark spike to replace them.
 
 How to read this:
 - Sections 1–4 are the vocabulary: goals, the moving parts, the threading model, the core types.
 - Sections 5–15 go module by module, bottom (voxels) to top (Godot pawns). Each lists its job, its data, and its major functions with what they do.
 - Section 16 walks through six concrete scenarios end to end. **If you only read one section to understand the code flow, read 16.**
-- Sections 17–19 cover performance budgets, build phases, and open questions.
+- Sections 17–20 cover the pawn side, performance budgets, build phases, and open questions.
+- Section 21 covers nav markers and modules. <!-- Claude 2026-11-06: new section; also corrected the range above -->
 
 ---
 
@@ -63,7 +64,7 @@ How to read this:
 | `CompositeProvider` | Stacks every input layer in order (add / carve / surface) into one set of spans. |
 | `InputStore` | Immutable, versioned copies of submitted generator data, safe for worker threads. |
 | `NavServer` | The only public entry point. Owns everything below and runs the per-frame tick. |
-| `TagRegistry` | Maps tag names (`"jump"`, `"door"`) to bits. Shared with the action system. |
+| `TagRegistry` | Maps tag names (`"jump"`, `"door"`) to bits. Shared with the action system. **Replaced for nav by `NavTags`, section 21.3.** <!-- Claude 2026-11-06 --> |
 | `TileManager` | Tile lifecycle: which tiles exist, their state, versions, build scheduling, commits. |
 | `INavDomain` | Interface every domain implements: build a tile, commit it, query it. |
 | `GroundDomain` | Spans → clearance tiers → regions → polygons → Detour tiles. The main one. |
@@ -75,6 +76,7 @@ How to read this:
 | `CrowdSystem` | Path following, local avoidance (ORCA), crowd unit integration. |
 | `ObstacleSystem` | Non-navigating dynamic objects: carve / avoid / cost. |
 | `EventBus` | Tile changed, link reached, path invalidated, etc. Read by agents and the coordinator. |
+| `NavWorld` | GDScript layer over `NavServer`: stores tagged marker data (links, areas, points) and searches it. Modules hold the code for each kind. Section 21. <!-- Claude 2026-11-06 --> |
 | `WorkerPool` | Background threads for tile builds and sliced path searches. |
 
 ---
@@ -627,6 +629,8 @@ private:
 
 **Job:** connect nav to the pawn's action system. Nav never knows *how* to jump; it only says "a link tagged `jump_gap_2` starts here".
 
+*2026-11-06: nav now has its own tags (`NavTags`), and a link names its action separately. See section 21.3, which replaces the shared registry below.* <!-- Claude 2026-11-06 -->
+
 ```cpp
 class TagRegistry {
 public:
@@ -1100,6 +1104,8 @@ func _on_link_reached(id, link_id, tags, start, end, payload) -> void:
 
 Phases 1–3 are the everyday core. Everything after is additive.
 
+Markers (section 21) aren't a phase of their own, and section 21.10 gives their build order. `NavWorld`, the data classes, `NavMarkerNode`, module base, debug module and report are GDScript and don't need the library, so they can be built at any time. Each other module waits for the system it talks to, as section 21.4 lists. <!-- Claude 2026-11-06 -->
+
 ---
 
 ## 20. Open questions
@@ -1114,3 +1120,267 @@ Phases 1–3 are the everyday core. Everything after is additive.
 6. **Terrain summary:** what can your terrain generator cheaply say about an ungenerated tile (height range, water, roughness)? Better estimates = better long paths before tiles exist. A heightmap's low-res mip is ideal.
 7. **Surface conflicts:** when two layers set different surface types on the same walkable top, the higher `order` wins. Good enough, or do some surfaces need priority (e.g. water always wins)?
 8. **Native providers:** should the heightmap's noise function be ported to C++ so workers can evaluate it directly (no submission, free borders), or is GDScript-generate-then-submit fast enough? Measure in phase 0.
+
+---
+
+<!-- Claude 2026-11-06: new section, designed with the owner. Added at the end so existing section numbers stay the same. -->
+## 21. Nav markers and modules
+
+**Status:** design agreed with the owner 2026-11-06. Not built. Signatures are proposals.
+
+**Job:** let anything in a level say "this spot or thing means something to nav or AI", such as a ladder, a cover spot or a seat, without the core needing to know every kind.
+
+The usual industry terms are off-mesh link, nav modifier volume, dynamic obstacle, tactical point, point of interest (POI) and smart object. **Not the same as `NavHooks`** (section 5.1), which makes a terrain generator feed nav. Markers are things placed on or in the world.
+
+**Where this differs from older sections, this section wins:**
+- Nav has its own tags (`NavTags`, section 21.3). It doesn't share `TagRegistry` with abilities as sections 2, 4 and 10 say.
+- Generators announce their own links as markers (section 21.6). This replaces link hints in section 5. `send_link_hints` on `NavHooks` is removed at the next C++ rebuild. Nothing reads that setting today. Auto-generated links, such as step-ups and gaps, stay inside nav.
+
+### 21.1 The parts
+
+The split is the one an entity component system uses: plain data, with separate code acting on it.
+
+| Part | What it is | Job |
+|---|---|---|
+| `NavWorld` | GDScript autoload, the nav singleton's public layer | The one door for markers, tags, terrain settings and modules. Uses `NavServer` when the library is there |
+| `NavMarker` and subclasses | Data objects (`Resource`) | Say what a marker is, when it's registered and for its less-used data |
+| `NavMarkerModule` and subclasses | Nodes, added to or left out of each level | All the code for specific kinds of marker |
+| `NavMarkerNode` | Thin node | Places a marker by hand. Generators skip it |
+| `NavTags` | Static class, like `TagRegistry` | Nav's own tag names and bits |
+
+`NavWorld` is global and belongs to no chunk. Chunks ask it to register things, and what it stores outlives them (section 21.6).
+
+**Without the library,** markers, search, modules and the report all still work, because they're GDScript. Paths and links need `NavServer`, and estimates need the C++ module (section 21.8).
+
+**A marker with no module is harmless.** It's registered and can be searched, and nothing else happens to it, because no code acts on it. The debug report (section 21.7) says so.
+
+### 21.2 Marker data
+
+```gdscript
+## SKETCH for the spec only. Not a real file yet.
+class_name NavMarker extends Resource
+
+@export var tag: StringName        ## e.g. &"link.jump". Goes through NavTags
+@export var radius := 1.0          ## how close counts as "at it"
+@export var starts_enabled := true ## false = registered, but not used until switched on
+
+var position := Vector3.ZERO       ## set by NavMarkerNode or the generator before registering
+var facing := Vector3.FORWARD      ## for cover direction, seats, and so on
+```
+
+A marker is **input**. Registering copies its position, tag and enabled state into `NavWorld`'s rows (section 21.5), so changing those on the object afterwards does nothing. To change one, call `NavWorld.set_enabled(id, value)`. That keeps a single source of truth and lets changes be batched.
+
+Left out of the base on purpose:
+
+| Not in the base | Where it goes instead |
+|---|---|
+| Cost, shape, link ends | The subclasses that use them |
+| Slots, priority | `NavSmartObject`, `NavPoint` |
+| Who may use it | The agent's `NavFilter` (capabilities and forbidden tags, section 4) |
+| Nav domain | Add when a second domain exists, defaulting to ground |
+| Network code | See section 21.9 |
+
+### 21.3 Types and tags
+
+| Class | Industry term | Data beyond the base | Example tags |
+|---|---|---|---|
+| `NavLink` | Off-mesh link | End point, one or two way, cost, `action_tag` | `link.jump`, `link.climb`, `link.door`, `link.teleport` |
+| `NavArea` | Nav modifier volume | Box size, surface name. It names a surface instead of storing a cost, because each kind of agent holds its own cost per surface (`NavFilter`, section 4) | `area.road`, `area.hazard`, `area.water`, `area.forbidden` |
+| `NavObstacle` | Dynamic obstacle | Mode: carve, avoid or cost (section 11), box size, cost surface | `obstacle.crate`, `obstacle.vehicle` |
+| `NavPoint` | Tactical point, POI | None yet | `point.cover`, `point.patrol`, `point.ambush`, `point.wander` |
+| `NavSmartObject` (extends `NavPoint`) | Smart object | Slot count. Who is using it changes during play, so that belongs to its module | `use.seat`, `use.work`, `use.pickup` |
+
+**Rule: a new subclass only when the data differs; a new tag when only the meaning differs.** A ladder, a jump and a teleporter are all `NavLink`. A teleporter isn't called a "portal" here because this spec uses that word for the edge between tiles (section 7).
+
+Types are the guard: `marker is NavLink` works on every marker, generated or hand-placed, and the tag does the finer sorting. Later: `NavPatrolRoute` (an ordered list of points). Spawn points aren't nav markers.
+
+**`NavTags` follows `TagRegistry`'s rules with its own 64 bits and its own declarations file.** Names are dotted, a mask includes its parents' bits, and tags are declared and numbered at startup so every machine agrees. A tag nobody declared gets a one-time warning. `NetworkSession.content_hash` must include it, as it does `TagRegistry`.
+
+**Handing off to the pawn.** A `NavLink` keeps its nav tag for pathfinding, and its `action_tag` (a `TagRegistry` name such as `movement.jump`) says which action plays when the pawn reaches it. A pawn also needs a small table from its abilities to its nav capabilities, which waits for the pawn design.
+
+**Surface types:** 16 is accepted (15 plus the default), and allocating them is the designers' job. Stacking works today through layer `order`, where the higher one wins. Changing a region's surface rebuilds the tiles under it. A mix of two surfaces needs a surface type of its own.
+
+### 21.4 Modules
+
+```gdscript
+## SKETCH for the spec only. Not a real file yet.
+class_name NavMarkerModule extends Node
+
+## Announces which types this module works on. Subclasses of these count too.
+func handled_types() -> Array[Script]:
+	return []
+
+# Each is one call per batch, not one per marker. Use NavWorld.get_marker(id) for the data.
+func _markers_added(_ids: PackedInt64Array) -> void:
+	pass
+func _markers_changed(_ids: PackedInt64Array) -> void:
+	pass
+func _markers_removed(_ids: PackedInt64Array) -> void:
+	pass
+
+# _notification runs at every level of inheritance, so a subclass with its own _enter_tree can't stop this.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_ENTER_TREE:
+		NavWorld.add_module(self)
+	elif what == NOTIFICATION_EXIT_TREE:
+		NavWorld.remove_module(self)
+```
+
+Rules:
+1. **Load order doesn't matter.** A module joins on the next tick, so its `_ready` has run first. It's handed every matching marker already applied, and later ones as they arrive. Leaving happens straight away, because the module may not exist by the next tick.
+2. **Several modules can handle one type,** such as debug drawing and `NavLinkModule`.
+3. **Cleanup covers only a module's own work.** A module tracks what it made and undoes exactly that when it leaves, through a final `_markers_removed`. Markers belong to `NavWorld`, so a module never deletes them, and removing one module can't affect another using the same type.
+4. **Only one module does each job on a shared system.** Two modules both adding a marker's link to nav would make two links. Nothing enforces this in tier 0.
+5. **Gameplay changes run on the tick,** like everything else (netcode spec section 3).
+
+| Module | Depends on | When |
+|---|---|---|
+| `NavMarkerDebugModule` | Nothing | First |
+| `NavEstimatorModule` (loaded by default, section 21.8) | The library | After the markers |
+| `NavLinkModule` (calls `NavServer.add_link`, keeps a link inactive until both ends are loaded) | Agents and links | Phase 3 |
+| `NavAreaModule` | Surface input (section 5) | With the first game that needs it |
+| `NavObstacleModule` | `ObstacleSystem` | Phase 4 |
+| `NavPointModule`, `NavSmartObjectModule` | The AI side of the pawn | With the pawn |
+
+Markers can be placed before their module exists. They just do nothing until then.
+
+### 21.5 NavWorld, and getting ready for C++
+
+```gdscript
+## SKETCH for the spec only. Not a real file yet.
+func register_terrain(scene_path: String, settings: NavTerrainSettings) -> int  # returns a terrain id
+func unregister_terrain(terrain: int) -> void
+func get_terrain_settings(terrain: int) -> NavTerrainSettings
+func chunk_of(terrain: int, position: Vector3) -> Vector2i
+func request_markers(terrain: int, chunk: Vector2i, markers: Array[NavMarker]) -> int  # returns how many were accepted
+func request_scene_marker(scene_path: String, marker: NavMarker) -> int         # returns the id, 0 if refused
+func release_markers(terrain: int, chunk: Vector2i) -> void
+func remove_scene_marker(id: int) -> void
+func set_enabled(id: int, enabled: bool) -> void
+func get_marker(id: int) -> NavMarker
+func find_nearest(tag: StringName, from: Vector3, max_distance: float) -> int   # 0 if none
+func find_in_radius(tag: StringName, from: Vector3, radius: float) -> PackedInt64Array
+func add_module(module: NavMarkerModule) -> void
+func remove_module(module: NavMarkerModule) -> void
+func print_report() -> void
+```
+
+- **Doesn't:** find paths (`NavServer`), decide what a pawn does (AI), or send anything over the network.
+- **Searches** skip disabled markers and use a simple grid, so only nearby cells are checked. Equal distances are settled by the lower id, so every machine picks the same marker.
+- **Search isn't limited by modules.** AI searches go through the module that needs them, so code that has no module doesn't search.
+- **`NavMarkerNode`** copies its marker with `duplicate()` and registers the copy when it enters the scene. **Without this, every copy of a scene shares one marker,** so opening one door would open them all. An empty node or an undeclared tag shows an inspector warning. At runtime, it registers nothing and the game runs. In tier 0, a marker doesn't follow its node if the node moves afterwards. Placement goes through `NavMarker.place_at`, which subclasses can extend, so turning a placed `NavLink` also turns where it ends. Markers can only be seen in a running game for now, because there's no editor gizmo yet.
+
+**C++ later, for truly large games.** The GDScript layer is written so its insides can be replaced without changing anything that calls it. The project already does this with `NetCodec` in C++ and `NetPackets` as the GDScript fallback, and the same plan applies here: a C++ `NavMarkerStore` used when the library has it, with the GDScript as the fallback.
+
+These rules apply from the first line of code:
+
+1. **One door.** Everything outside goes through `NavWorld`'s public functions, and those stay the same when the insides move. Existing code that calls `NavServer` for tiles and paths stays as it is.
+2. **Plain types through the door.** Ints, floats, vectors, `StringName`s and packed arrays. Searches return ids, not objects, and `get_marker(id)` fetches the full data only when needed.
+3. **Rows, not objects, for what searches read.** Position, tag mask, enabled and type sit in packed arrays (`PackedVector3Array`, `PackedInt64Array`, `PackedByteArray`), one row per marker. Moving this to C++ is then close to retyping it. The `Resource` holds only the less-used data, such as a link's end point.
+4. **Batches.** A chunk registers its whole list in one call, and modules get one call per batch. No per-marker signals, because that's the cost that hurts at scale.
+5. **No script calls inside loops.** Searches filter by tag mask and distance only, with no callback filters.
+6. **Requests apply on the next tick.** A marker isn't searchable until then, even though its id comes back at once. Nothing may rely on it being instant, so the work can later move to other threads without surprises. Tests can call a `flush()`.
+7. **Ids come from a hash we write out ourselves** (FNV-1a, over terrain, chunk and index, or over the scene path). Godot's `hash()` could differ from a C++ version, which would change every id.
+8. **Tests go through the door only,** so the same tests run on both versions, and a comparison test checks they agree, as `net_codec_selftest` does.
+
+**When to move:** when the test at 100,000 markers or a real profile shows it's worth it. A later option for very large numbers is registering plain points by array with no `Resource` per marker.
+
+### 21.6 Chunks announce their markers
+
+1. A generator gives `NavWorld` a copy of its settings with `register_terrain`. These are plain values: seed, noise settings, chunk size, grid size and height scale. Changing the generator afterwards means registering again.
+2. A chunk generates and builds its list of links and POIs, because it knows its own terrain. In `HeightmapTerrain` this is `_make_chunk_markers(key)`, which a subclass overrides, as with `_shape_height`. By default a chunk has none and pays nothing. The list must come from the chunk's numbers, not random numbers, so every machine gets the same one. `tests/terrain_marker_example.gd` shows how.
+3. It calls `request_markers`. `NavWorld` refuses duplicate ids and undeclared tags with a warning, and accepts the rest.
+4. When the chunk unloads, the generator calls `release_markers` beside `release_chunk`. Modules clean up through `_markers_removed`.
+5. After an edit, a changed chunk announces again, so its markers don't float or get buried. Ids stay the same as long as the list's order does, so an edit should change heights, not the list.
+
+**Terrain ids** come from a hash of the generator's scene path, the same way hand-placed markers get theirs. They match on every machine with nobody choosing a number. Moving or renaming the generator's node changes them.
+
+**Links crossing a chunk border** belong to the chunk holding their start. `NavLinkModule` keeps one inactive until both ends are loaded.
+
+**`NavWorld` keeps what changed.** When a marker from an unloaded chunk had been changed, such as a door being disabled, it keeps that change by id and re-applies it when the chunk announces again. It keeps only changes, not every marker, so memory doesn't grow with the size of the world.
+
+**Terrain settings are used for** ids, knowing which chunk a position is in, and the estimator (section 21.8).
+
+**Chunk size.** About 256 m, as a setting, with chunks loaded around each player. `HeightmapTerrain`'s defaults are `tile_size` 256 and `grid_size` 43, which keeps squares of about 6 m, at about 3,700 triangles a chunk. **Measured 2026-11-06,** with collision and no nav: generating takes 10.7 ms a chunk on Windows and 8.2 ms on Linux, and an edit rebuilding one chunk takes about 8.4 ms and 6.4 ms. Both are on the main thread. An edit is fine now and then, and takes a large share of a 16.7 ms frame if it happens constantly, so a game with constant digging would want smaller chunks. At 1 m squares a chunk has about 131,000 triangles, roughly 35 times the work, so that needs worker threads or smaller chunks. The physics frame's slowdown after an edit (netcode spec section 14.1) isn't included in these times.
+
+**Clusters.** A cluster is a group of chunks, the size of a playable area. It's a possible tier above chunks, for things like area settings or grouped saved changes, and isn't being built yet. It can be added later because a chunk's cluster is just its coordinates divided by the cluster size. **Ids and saved data must use chunk coordinates, never cluster ones,** so that adding clusters changes nothing. The name avoids "region", which Recast already uses.
+
+### 21.7 Debug report
+
+`NavWorld` compares each marker's type with what modules announced in `handled_types()`:
+
+```
+[NavWorld] no module handles: NavLink (12 markers), NavSmartObject (3 markers)
+```
+
+- **When:** after registrations have gone quiet for a couple of seconds, since a module may just not have arrived yet.
+- **How often:** once per type. Again only if a type loses its last module or a new unclaimed type appears, so streaming doesn't repeat it.
+- **How serious:** a `push_warning`, in debug builds only. It's not an error, and `print_report()` gives the same list on demand.
+- **Off switch:** one setting, for games that leave a type unhandled on purpose.
+
+A level with no AI will report `NavPoint`. That's accepted: it's one line, and it's true.
+
+A module that only looks at markers, such as `NavMarkerDebugModule`, returns false from `counts_for_report()`. Otherwise, adding a debug drawing would hide that nothing actually acts on the markers.
+
+### 21.8 Terrain estimates
+
+**Job:** answer "roughly what's in this chunk?" for chunks that haven't generated, so long paths can be planned across them. This is the `estimate` in sections 5 and 9. The word "prediction" is avoided because the netcode spec uses it for something else.
+
+- **Written in C++,** as `NavTerrainEstimator`, so it can run on worker threads.
+- **`NavWorld` loads `NavEstimatorModule` onto itself by default at startup.** That thin GDScript module owns the C++ object. If the library is missing, it skips itself with one line in the report, and estimate calls return nothing. A setting turns it off, and a game can replace it.
+- **It only works on demand.** It sits idle until a path's goal lies beyond the loaded chunks, then estimates only the unloaded chunks along that route and caches the results. Paths inside the loaded area never touch it, and the trigger is "this chunk isn't loaded" rather than a fixed distance, so it adjusts as the number of loaded chunks changes.
+- **Same noise as the generator.** It uses Godot's `FastNoiseLite` with the settings from `register_terrain`.
+- **It's only ever approximate.** It can't run a `_shape_height` override, which is GDScript, and it ignores grid jitter and terrain edits. The real chunk always replaces the estimate (provisional tiles, section 9).
+
+```gdscript
+## SKETCH for the spec only. Not a real file yet.
+func estimate_heights(terrain: int, area: Rect2, samples: Vector2i) -> PackedFloat32Array  # empty if unavailable
+func estimate_tile(terrain: int, area: Rect2) -> Dictionary  # height range and steepest slope, empty if unavailable
+```
+
+**What uses it:** the coarse planner in phase 5, which isn't built, so until then only its test does. Filling in provisional tile borders may be an earlier use.
+
+**Test:** with no jitter and no override, estimated heights must match `HeightmapTerrain.height_at`.
+
+### 21.9 Multiplayer
+
+- **Every machine holds the same markers,** from the same level scene and generator seed. A static marker costs no bandwidth.
+- **Modules in the level scene mean every machine has the same set.** A mismatch is refused at the handshake, because the content hash covers `.tscn` files, unless a build id replaces the file check (netcode spec, to-do 26). A server-only module is fine for things clients don't simulate, such as AI. Anything a client predicts through, such as links, needs its module on both.
+- **A marker that belongs to a networked thing follows it.** A door with a `NetworkEntity` calls `set_enabled` from the door's replicated state.
+
+### 21.10 Build order
+
+1. `NavTags`. **Built 2026-11-06:** `assets/scripts/navigation/NavTags.gd`, with the tier 0 tags declared in `resources/nav_tag_declarations.tres` (22 of the 64 bits). Test: `navigation/tests/nav_tags_selftest`.
+2. `NavWorld` core: rows, ids, search and requests, with a test at 100,000 markers. **Built 2026-11-06:** `assets/scripts/singletons/NavWorld.gd`, `navigation/markers/NavMarker.gd`. Test: `navigation/tests/nav_world_selftest`. `register_terrain` and the type row aren't in yet, since nothing uses them until the steps below.
+3. Marker subclasses, the module base and the debug report. **Built 2026-11-06:** `navigation/markers/`, `navigation/modules/NavMarkerModule.gd`, and additions to `NavWorld.gd`. Test: `navigation/tests/nav_markers_selftest`. Applying 100,000 markers takes about 48 ms with no modules and 97 ms with two. A module leaving with 100,000 registered takes about 13 ms, because it checks every row.
+4. `NavMarkerNode` and `NavMarkerDebugModule`. **Built 2026-11-06:** `navigation/NavMarkerNode.gd`, `navigation/modules/NavMarkerDebugModule.gd`. Sample: `nav_marker_sample.tscn`. Test: `navigation/tests/nav_marker_node_selftest`.
+5. `HeightmapTerrain` registers its settings and announces and releases its chunks' markers, with the new chunk defaults. **Built 2026-11-06:** `navigation/NavTerrainSettings.gd`, additions to `NavWorld.gd` and `heightmap_terrain.gd`. Sample: `terrain_marker_sample.tscn`. Test: `Procedural Terrain/tests/terrain_markers_selftest`. Chunks don't stream yet: they're all built at startup, so this is the hook that streaming will use.
+6. `NavTerrainEstimator` in C++, and `NavEstimatorModule`. **On hold, the owner's decision 2026-11-06:** its only real user is the coarse planner in phase 5, which isn't built. Build it when something needs it.
+
+**Measured 2026-11-06,** 100,000 markers in 400 chunks of 250, Godot 4.7.2, GDScript:
+
+| | Windows | Linux (WSL2) |
+|---|---|---|
+| Making the marker objects | 164 ms, 119 MB, about 1,250 bytes each | 158 ms, 121 MB, about 1,270 bytes each |
+| Requesting them all | 981 ms, about 2.5 ms a chunk | 784 ms, about 2 ms a chunk |
+| Applying them on the tick | 58 ms | 49 ms |
+| `NavWorld`'s own memory | 24.8 MB | 24.8 MB |
+| `find_nearest`, 500 m reach | 15 µs | 14 µs |
+| `find_in_radius`, 50 m | 8 µs | 7 µs |
+| `find_nearest`, 20 km reach, nothing to find | 30 ms | 30 ms |
+| Releasing them all | 100 ms | 74 ms |
+
+Each other module comes when the system it talks to exists (section 21.4).
+
+### 21.11 Open points
+
+1. **Sending changes to generated markers.** `NavWorld` remembers them across unloads, but a marker with no node has no `NetworkEntity` to carry a change to other machines. This needs the same answer as terrain edits (netcode spec, to-do 18).
+2. **The ability-to-capability table.** Waits for the pawn design.
+3. **Sharing code with `TagRegistry`.** Settled 2026-11-06: `NavTags` is a separate copy, because `TagRegistry` is working and shouldn't be put at risk for this. A fix to one may need making in the other.
+4. **Reusing surface types per level** would need a reset call, because names stay registered once used. `surface_index` also numbers names in the order they first appear, so every machine has to register them in the same order.
+5. **Is `FastNoiseLite` safe to call from several threads at once?** Not checked. If it isn't, each worker gets its own copy.
+6. **Better estimates** could come from a generator sending a low-resolution height map, which would also cover `_shape_height` overrides (section 20, question 6).
+7. **Long searches for rare tags.** A long-reach `find_nearest` for a tag few markers have ends up checking every marker, about 30 ms at 100,000. Normal searches take microseconds. Per-tag cells or a per-tag count would fix it. Wait for a real need.
+8. **Memory per marker.** The `Resource` objects cost far more than the rows: about 1,250 bytes each against about 260. That's the strongest case found so far for registering plain points by array in very large games (section 21.5).
+9. **Terrain ids.** Settled 2026-11-06: a hash of the generator's scene path (section 21.6).
+10. **Hill size at the new chunk size.** The noise defaults (`frequency` 0.015, `height_scale` 12) weren't changed when chunks grew, so hills are small next to a 256 m chunk. That's a look decision for the owner.

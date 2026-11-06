@@ -204,7 +204,7 @@ Full rules in `docs/netcode/NETCODE_SPEC.md`. What they mean here:
 - **Tag registry:** a static class (not an autoload, so it works in tests) that gives every category level a **bit**. *(Revised 2026-11-04 for multiplayer:)* categories are **declared up front in a resource and registered in sorted order at startup**, never on first use, so every peer assigns the same bits. An undeclared category used at runtime is added with a warning (fine offline, a desync risk online). Example: `combat` = bit 0, `combat.melee` = bit 1, and so on. Strings are only touched when abilities register; runtime checks are bit operations.
   - An ability's `category_mask` holds its own bit **and its parents' bits**, so locking `combat` blocks `combat.melee` with one AND.
   - Limit: 64 category levels across the game (one int). The registry warns past that; the mask can later become a small array of ints with no change to designers.
-  - **Shared with navigation.** The nav spec's planned `TagMask` / `TagRegistry` (`NAV_SPEC.md` section 4) uses the same registry, so a pawn's movement abilities double as its nav capabilities (a pawn with `movement.jump` may use jump links).
+  - **Not shared with navigation.** *(Claude 2026-11-06, the owner's decision; this used to say shared.)* Nav has its own tags, `NavTags` (`NAV_SPEC.md` section 21.3). A nav link names the ability tag to play when a pawn reaches it, and a pawn needs a small table from its abilities to its nav capabilities (a pawn with `movement.jump` may use `link.jump` links). That table waits for this spec's design.
 
 ### 7.2 `AbilityBase` (node)
 

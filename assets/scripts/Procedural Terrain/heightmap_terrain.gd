@@ -56,9 +56,10 @@ const NO_GROUND := INF
 # Claude 2026-11-05: in procgen_tile.gd, tile_size was the size of one square, so a finer grid also made a bigger tile.
 # Here it's the whole chunk, so grid_size can change without changing how big the terrain is.
 # GDScript note: @export_range gives the inspector a slider. "or_greater" still lets you type a larger value by hand.
-@export_range(1.0, 1000.0, 0.5, "or_greater") var tile_size := 72.0
+# Claude 2026-11-06: defaults raised from 72 and 12, so a chunk is about 256 m with squares of about 6 m as before.
+@export_range(1.0, 1000.0, 0.5, "or_greater") var tile_size := 256.0
 ## How fine the grid is: the number of squares along each side of a chunk. Fewer squares look more low poly.
-@export_range(1, 256, 1, "or_greater") var grid_size := 12
+@export_range(1, 256, 1, "or_greater") var grid_size := 43
 ## How far the noise moves up and down, in metres. Noise values are between about -1 and 1.
 @export var height_scale := 12.0
 
@@ -126,6 +127,7 @@ var _collision_nodes := {} # Vector2i -> CollisionShape3D, each one inside its o
 var _plain_material := StandardMaterial3D.new() # used when the material setting is empty
 var _nav: Object = null # the NavServer, or null when this terrain isn't using nav
 var _nav_layer := -1 # our layer's number in the NavServer, or -1 for none
+var _terrain_id := 0 # our id in NavWorld, or 0 when not registered, such as in the editor preview
 var _has_generated := false
 
 
@@ -142,15 +144,21 @@ func _ready() -> void:
 func _enter_tree() -> void:
 	if _has_generated:
 		_connect_to_nav()
+		_register_with_nav_world()
 		# GDScript note: looping over a Dictionary gives you its keys.
 		for key in _points:
 			_rebuild_solid(key)
+			_announce_markers(key)
 
 
 func _exit_tree() -> void:
 	if _nav and _nav_layer >= 0:
 		_nav.remove_input_layer(_nav_layer)
 	_nav_layer = -1
+	_release_all_markers()
+	if _terrain_id != 0:
+		NavWorld.unregister_terrain(_terrain_id)
+		_terrain_id = 0
 
 
 # --- Things other scripts can call ---
@@ -166,6 +174,7 @@ func generate() -> void:
 	_plain_material.roughness = 1.0
 	if _nav_layer < 0:
 		_connect_to_nav()
+	_register_with_nav_world()
 
 	# All the points go first, because smooth lighting at a chunk's edge needs its neighbours' points.
 	# GDScript note: range(a, b) counts from a up to, but not including, b. That's why these have + 1.
@@ -175,6 +184,7 @@ func generate() -> void:
 	for key in _points:
 		_rebuild_mesh(key)
 		_rebuild_solid(key)
+		_announce_markers(key)
 	_has_generated = true
 
 
@@ -255,6 +265,8 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 		_rebuild_mesh(key)
 	for key in changed_chunks:
 		_rebuild_solid(key)
+		# Claude 2026-11-06: the ground moved, so the chunk announces its markers again, or they'd float or get buried.
+		_announce_markers(key)
 
 
 # --- For scripts that extend this one ---
@@ -268,6 +280,20 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 func _shape_height(_x: float, _z: float, noise_height: float) -> float:
 	# GDScript note: an underscore at the start of a parameter says "not used here on purpose", which stops a warning.
 	return noise_height
+
+
+## Change this to give a chunk its links and points of interest. Copy tests/terrain_marker_example.gd to see how.
+## This terrain announces them to NavWorld when the chunk is built and after an edit, and releases them when it's gone.
+## By default a chunk has none and pays nothing. Rules for what you return:
+##   - Make new markers every time, because this terrain moves them into place.
+##   - Set each marker's position measured from this node, as _shape_height does. _point_at gives grid points.
+##   - Build the list from the chunk's numbers, not random numbers, so every machine gets the same list. A marker's
+##     id comes from its place in the list. That's also why an edit shouldn't change the list, only the heights,
+##     or a change remembered for one marker could land on another.
+##   - Declare the markers' tags in nav_tag_declarations.tres, or they're refused.
+# Claude 2026-11-06: the nav spec's section 21.6. The generator knows its own terrain, so it says what's there.
+func _make_chunk_markers(_key: Vector2i) -> Array[NavMarker]:
+	return []
 
 
 # --- Building: the grid points ---
@@ -496,6 +522,59 @@ func _connect_to_nav() -> void:
 	_nav_layer = _nav.add_input_layer(self, nav_hooks, adapter)
 
 
+# --- Markers: telling NavWorld what's in each chunk ---
+# Claude 2026-11-06: added for nav spec section 21.6. NavWorld is plain GDScript, so all of this works without the
+# nav library. It stays out of the editor preview, because the autoload only exists while the game runs.
+
+
+## Gives NavWorld a copy of this terrain's settings, and gets the id its chunks' markers use.
+func _register_with_nav_world() -> void:
+	if Engine.is_editor_hint() or not is_inside_tree():
+		return
+	_terrain_id = NavWorld.register_terrain(str(get_path()), _make_nav_settings())
+
+
+func _make_nav_settings() -> NavTerrainSettings:
+	var settings := NavTerrainSettings.new()
+	settings.origin = _terrain_origin()
+	settings.tile_size = tile_size
+	settings.grid_size = grid_size
+	settings.height_scale = height_scale
+	settings.noise_seed = noise_seed
+	settings.noise_scale = noise_scale
+	settings.noise_type = noise_type
+	settings.frequency = frequency
+	settings.fractal_type = fractal_type
+	settings.fractal_octaves = fractal_octaves
+	settings.fractal_gain = fractal_gain
+	settings.fractal_lacunarity = fractal_lacunarity
+	return settings
+
+
+## Replaces whatever this chunk has announced with a fresh list. Takes effect on NavWorld's next tick.
+func _announce_markers(key: Vector2i) -> void:
+	if _terrain_id == 0:
+		return
+	NavWorld.release_markers(_terrain_id, key)
+	var markers := _make_chunk_markers(key)
+	if markers.is_empty():
+		return
+	if String(name).begins_with("@"):
+		push_warning("HeightmapTerrain: %s has an automatic name, so machines may disagree on its marker ids. Give it a name of its own." % get_path())
+	var origin := _terrain_origin()
+	for marker in markers:
+		if marker != null: # NavWorld refuses a null one and warns, so it's left in the list for that
+			marker.position += origin
+	NavWorld.request_markers(_terrain_id, key, markers)
+
+
+func _release_all_markers() -> void:
+	if _terrain_id == 0:
+		return
+	for key in _points:
+		NavWorld.release_markers(_terrain_id, key)
+
+
 ## Nav knows each mesh by one number, so this packs the chunk's two grid numbers into one. Adding 2^20 keeps negative
 ## chunk numbers positive, and "<<" slides the first number along so the two don't overlap.
 func _nav_mesh_id(key: Vector2i) -> int:
@@ -580,6 +659,7 @@ func _clear() -> void:
 	if _nav and _nav_layer >= 0:
 		for key in _points:
 			_nav.remove_mesh(_nav_layer, _nav_mesh_id(key))
+	_release_all_markers()
 	_mesh_nodes.clear()
 	_collision_nodes.clear()
 	_points.clear()
