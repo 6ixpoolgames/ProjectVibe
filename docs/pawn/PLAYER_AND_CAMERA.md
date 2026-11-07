@@ -4,9 +4,9 @@
 
 **Status:** tier -1 is built and tested, offline and over real connections on Windows and Linux. To play it, open `assets/scenes/samples/pawn_sample.tscn`. The layout is Unreal's gameplay framework, kept small: a controller that outlives pawns, pawns that can be possessed, and one real camera that attaches to virtual cameras.
 
-**Where this stands against the pawn spec:** `docs/pawn/PAWN_ARCHITECTURE.md` still describes the full pawn. This replaces its controller placement: `PlayerController` is no longer a child of the pawn. "Tier -1" means only the motor and a placeholder controller, with no nexus, managers or abilities, so that cameras can be tested with nav and netcode. The old pawn, old camera and `test scene.tscn` are untouched.
+**Where this stands against the pawn spec:** `docs/legacy/PAWN_ARCHITECTURE.md` still describes the full pawn. This replaces its controller placement: `PlayerController` is no longer a child of the pawn. "Tier -1" means only the motor and a placeholder controller, with no nexus, managers or abilities, so that cameras can be tested with nav and netcode. The old pawn, old camera and `test scene.tscn` are untouched.
 
-**Rule:** legacy files are never modified. New systems get new names beside them, which is why this has `PlayerCamera` next to the old `PlayerCamera3D`, and `PossessionCoordinator` next to the old `PossessionManager.gd` stub.
+**Rule:** legacy files are never modified. New systems get new names beside them, which is why this has `PlayerCamera` beside the old `PlayerCamera3D`, and `PossessionCoordinator` beside the old `PossessionManager.gd` stub. *(Claude 2026-11-08: the old ones are now in `assets/legacy/`.)*
 
 ## 1. Hierarchy
 
@@ -68,7 +68,7 @@ LEVEL
 ## 4. Movement
 
 - **`Pawn` holds input as plain data:** `move_input`, `held_actions`, `look_yaw`, `look_pitch`. All of it goes in the input command, which keeps replays possible later. *(Claude 2026-11-07: `held_actions` replaced `wants_jump` and `wants_sprint`. Controllers give an `InputCommand` to `apply_input()`; see `PAWN_SPEC.md` section 5.)*
-- **For now, a placeholder module does the moving.** A pawn with no module stands still. The current direction, which is work in progress and open to better ideas, has no motor layer and no movement modules: locomotion abilities such as Walk and Fly write velocity, and the pawn makes the one `move_and_slide` call. See `PAWN_ARCHITECTURE.md` section 9.
+- **For now, a placeholder module does the moving.** A pawn with no module stands still. The current direction, which is work in progress and open to better ideas, has no motor layer and no movement modules: locomotion abilities such as Walk and Fly write velocity, and the pawn makes the one `move_and_slide` call. See `docs/legacy/PAWN_ARCHITECTURE.md` section 9.
 - **Speeds are plain settings for now,** because there's no stat manager.
 - **The controller is a placeholder.** The steering decision moves to a `Walk` ability when abilities exist.
 

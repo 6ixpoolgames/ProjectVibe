@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-03: headless self-test for AIMemoryComponent. Exits 0 on success, 1 on failure.
 ## Run from the project folder (as a scene, so the project's autoloads exist):
-##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/Character Pawn/AI Core Components/tests/ai_memory_selftest.tscn"
+##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/legacy/Character Pawn/AI Core Components/tests/ai_memory_selftest.tscn"
 ## Drives fading with decay_by() instead of waiting real time, so it runs instantly.
 extends Node
 

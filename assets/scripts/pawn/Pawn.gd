@@ -1,6 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: the tier -1 pawn: a body something can possess, with movement in a module.
 ## No nexus, managers or abilities yet. This is enough to test cameras, nav and netcode with real ground movement. Spec:
-## docs/pawn/PLAYER_AND_CAMERA.md. Claude 2026-11-07: it now has managers and abilities (docs/pawn/PAWN_SPEC.md); still no nexus. The old CharacterPawn3D is untouched, and carries on working in test scene.tscn.
+## docs/pawn/PLAYER_AND_CAMERA.md. Claude 2026-11-07: it now has managers and abilities (docs/pawn/PAWN_SPEC.md); still no nexus. The old CharacterPawn3D is untouched, and carries on working in test scene.tscn
+## (Claude 2026-11-08: both are now in assets/legacy/).
 ##
 ## How to use it: use assets/scenes/pawn/pawn.tscn as it is, or inherit from it. Something writes this pawn's input each tick,
 ## such as a PlayerController, or an AI script on the server. Its abilities make that into movement.

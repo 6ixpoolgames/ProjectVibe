@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-04: headless self-test for AIStateManagerComponent and the example states.
 ## Checks match the corner cases documented at the top of AIStateManager.gd. Exits 0 on success, 1 on failure.
 ## Run from the project folder (as a scene, so the project's autoloads exist):
-##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/Character Pawn/AI Core Components/tests/ai_state_selftest.tscn"
+##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/legacy/Character Pawn/AI Core Components/tests/ai_state_selftest.tscn"
 extends Node
 
 var _failures := 0

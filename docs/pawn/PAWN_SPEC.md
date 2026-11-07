@@ -1,4 +1,4 @@
-<!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/pawn/PAWN_ARCHITECTURE.md, which stays as a guide. -->
+<!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
 # Pawn Spec v0.5
 
@@ -14,7 +14,7 @@
 **Scope:** everything on a pawn. That covers its parts, how a controller drives it, abilities, stats, navigation and the AI.
 
 **Related docs:**
-- `docs/pawn/PAWN_ARCHITECTURE.md`: the old spec, now a guide. Sections 7.1 to 7.5 (categories, lockouts, cooldowns, input buffer) are borrowed below.
+- `docs/legacy/PAWN_ARCHITECTURE.md`: the old spec, now a guide. Sections 7.1 to 7.5 (categories, lockouts, cooldowns, input buffer) are borrowed below.
 - `docs/pawn/PLAYER_AND_CAMERA.md`: the player controller, cameras, possession and `GameMode` **(built)**.
 - `docs/netcode/NETCODE_SPEC.md`: ticks, rollback and inputs. The pawn follows it.
 

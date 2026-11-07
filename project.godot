@@ -15,15 +15,15 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="ProjectVibe"
-run/main_scene="uid://cla16t20anuss"
+run/main_scene="res://assets/scenes/samples/pawn_sample.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://assets/2d/icon.svg"
 
 [autoload]
 
-GlobalTools="*res://assets/scripts/singletons/GlobalTools.gd"
-GlobalAICoordinator="*res://assets/scripts/singletons/GlobalAICoordinator.gd"
-ResourcePreloadManager="*res://assets/scripts/singletons/ResourcePreloadSingleton.gd"
+GlobalTools="*res://assets/legacy/singletons/GlobalTools.gd"
+GlobalAICoordinator="*res://assets/legacy/singletons/GlobalAICoordinator.gd"
+ResourcePreloadManager="*res://assets/legacy/singletons/ResourcePreloadSingleton.gd"
 TickDriver="*res://assets/scripts/singletons/TickDriver.gd"
 NetworkSession="*res://assets/scripts/singletons/NetworkSession.gd"
 NavMarkerManager="*res://assets/scripts/singletons/NavMarkerManager.gd"

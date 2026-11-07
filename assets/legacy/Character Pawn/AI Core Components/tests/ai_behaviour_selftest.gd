@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-03: headless self-test for AIBehaviourManagerComponent's selection rules.
 ## Each check matches a corner case documented at the top of AIBehaviourManagerComponent.gd. Exits 0 on success, 1 on failure.
 ## Run from the project folder (as a scene, so the project's autoloads exist):
-##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/Character Pawn/AI Core Components/tests/ai_behaviour_selftest.tscn"
+##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/legacy/Character Pawn/AI Core Components/tests/ai_behaviour_selftest.tscn"
 extends Node
 
 var _failures := 0

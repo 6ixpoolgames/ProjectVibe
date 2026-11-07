@@ -82,7 +82,9 @@ func _test_adding_and_removing() -> void:
 
 
 func _test_bad_settings() -> void:
-	ProjectSettings.set_setting(GameModeSingleton.MODULES_SETTING, ["res://no/such/script.gd", "res://assets/scripts/singletons/GlobalTools.gd"])
+	# Claude 2026-11-08: the "not a module" example was GlobalTools.gd, which moved to assets/legacy/. InputCommand is a
+	# plain tier 0 data script, so the test no longer leans on legacy code.
+	ProjectSettings.set_setting(GameModeSingleton.MODULES_SETTING, ["res://no/such/script.gd", "res://assets/scripts/controllers/InputCommand.gd"])
 	var other := GameModeSingleton.new()
 	add_child(other)
 	_check(other.get_modules().is_empty(), "paths that don't load, or aren't modules, are skipped with a warning")
