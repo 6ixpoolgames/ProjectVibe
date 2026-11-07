@@ -118,7 +118,8 @@ func _test_missing_or_wrong_file() -> void:
 	NavTags.reset()
 	_check(NavTags.get_tag_count() == 0, "no declarations file: no tags, no error")
 	_check(NavTags.mask_of(&"link.jump") != 0, "...and tags still work, as undeclared ones")
-	ProjectSettings.set_setting(setting, "res://terrain_sample.tscn") # a real file of the wrong kind
+	# Claude 2026-11-06: the sample scenes moved to assets/scenes/samples.
+	ProjectSettings.set_setting(setting, "res://assets/scenes/samples/terrain_sample.tscn") # a real file of the wrong kind
 	NavTags.reset()
 	_check(NavTags.get_tag_count() == 0, "a file of the wrong kind: warns, no tags, no error")
 	# Claude 2026-11-06: null removes the setting again, so this test leaves nothing behind.

@@ -266,7 +266,8 @@ func _test_debug_module_rebuilds_by_itself() -> void:
 
 func _test_sample_scene() -> void:
 	NavWorld.reset()
-	var sample: Node = load("res://nav_marker_sample.tscn").instantiate()
+	# Claude 2026-11-06: the sample scenes moved to assets/scenes/samples.
+	var sample: Node = load("res://assets/scenes/samples/nav_marker_sample.tscn").instantiate()
 	add_child(sample)
 	NavWorld.flush()
 	_check(NavWorld.get_marker_count() == 7, "sample scene: all seven markers register")

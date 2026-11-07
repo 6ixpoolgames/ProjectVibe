@@ -75,7 +75,7 @@ var _free_rows := PackedInt32Array()       # rows ready to be reused
 var _row_of_id := {}                       # marker id -> row
 var _cell_heads := {}                      # cell (Vector2i) -> the first row in that cell
 var _chunk_ids := {}                       # _chunk_key(terrain, chunk) -> PackedInt64Array of its ids
-var _terrains := {}                        # terrain id -> NavTerrainSettings
+var _terrains := {}                        # terrain id -> TerrainSettings
 var _kept_changes := {}                    # marker id -> enabled value, for chunk markers changed from how they started
 var _queue: Array = []                     # requests waiting for the next tick, in the order they were made
 
@@ -111,7 +111,7 @@ func _on_before_tick(dt: float, _tick: int) -> void:
 ## A generator registers a copy of its settings, and gets the terrain id it uses for its chunks' markers.
 ## The id comes from the generator's scene path, so it matches on every machine, and across reloads, with nobody
 ## having to choose a number. Moving or renaming the node changes it. Registering again replaces the settings.
-func register_terrain(scene_path: String, settings: NavTerrainSettings) -> int:
+func register_terrain(scene_path: String, settings: TerrainSettings) -> int:
 	var id := scene_marker_id(scene_path)
 	_terrains[id] = settings
 	return id
@@ -123,17 +123,17 @@ func unregister_terrain(terrain: int) -> void:
 
 
 ## A registered terrain's settings, or null if there's no such terrain.
-func get_terrain_settings(terrain: int) -> NavTerrainSettings:
+func get_terrain_settings(terrain: int) -> TerrainSettings:
 	return _terrains.get(terrain)
 
 
 ## Which chunk a position in the world is in, whether or not that chunk is loaded. Vector2i.ZERO for an unknown terrain.
 func chunk_of(terrain: int, position: Vector3) -> Vector2i:
-	var settings: NavTerrainSettings = _terrains.get(terrain)
+	var settings: TerrainSettings = _terrains.get(terrain)
 	if settings == null:
 		return Vector2i.ZERO
 	var local := position - settings.origin
-	return Vector2i(floori(local.x / settings.tile_size), floori(local.z / settings.tile_size))
+	return Vector2i(floori(local.x / settings.chunk_size), floori(local.z / settings.chunk_size))
 
 
 # --- Requests. These are checked straight away and take effect on the next tick. ---------------

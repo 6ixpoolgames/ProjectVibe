@@ -10,7 +10,8 @@ var _failures := 0
 func _ready() -> void:
 	print("--- Tick sample self-test ---")
 	var nt: NetworkTimeSingleton = get_node("/root/NetworkTime")
-	var sample: Node3D = load("res://tick_pawn_sample.tscn").instantiate()
+	# Claude 2026-11-06: the sample scenes moved to assets/scenes/samples.
+	var sample: Node3D = load("res://assets/scenes/samples/tick_pawn_sample.tscn").instantiate()
 	add_child(sample)
 	var player: TickSamplePawn = sample.get_node("Player")
 	var wanderer: TickSamplePawn = sample.get_node("WandererA")

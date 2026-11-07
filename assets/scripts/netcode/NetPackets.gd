@@ -15,7 +15,8 @@ extends RefCounted
 ## Claude 2026-11-05: native/src/net_codec.cpp holds its own copy of this format and this number, so bump and change both.
 const PROTOCOL_VERSION := 4 # Claude 2026-11-05: 4 adds custom state to snapshots
 
-enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, DEBUG_SWITCH }
+# Claude 2026-11-07: WORLD_MESSAGE, OWNER_CHANGED and POSSESS_REQUEST added. NetCodec only handles inputs and snapshots, so it doesn't need to know.
+enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, DEBUG_SWITCH, WORLD_MESSAGE, OWNER_CHANGED, POSSESS_REQUEST }
 
 ## What read_value returns for a broken packet. Stop reading when you see it.
 const BAD := &"__net_bad_packet__"

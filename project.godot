@@ -27,6 +27,7 @@ ResourcePreloadManager="*res://assets/scripts/singletons/ResourcePreloadSingleto
 NetworkTime="*res://assets/scripts/singletons/NetworkTime.gd"
 NetworkSession="*res://assets/scripts/singletons/NetworkSession.gd"
 NavWorld="*res://assets/scripts/singletons/NavWorld.gd"
+GameMode="*res://assets/scripts/singletons/GameMode.gd"
 
 [input]
 

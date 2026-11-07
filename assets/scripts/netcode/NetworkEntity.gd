@@ -98,6 +98,22 @@ func follows_snapshots() -> bool:
 	return role == Role.REMOTE_FOLLOWING or role == Role.LOCAL_UNPREDICTED
 
 
+## Claude 2026-11-07: changes who owns this entity while running, which is what swapping pawns does. Input queued from the old owner
+## is forgotten, and the parent is told its new role again.
+func change_owner(new_owner: int, local: bool, new_role: Role) -> void:
+	owner_peer = new_owner
+	is_local = local
+	last_input_tick = -1
+	missed_inputs = 0
+	role = new_role
+	if state:
+		state.forget_queued_input()
+	_apply_role_to_state()
+	_apply_role_to_driver()
+	if _root and _root.has_method(&"_on_network_role"):
+		_root._on_network_role(self)
+
+
 ## Changes role while running, for the test switches. Its history simply starts again from here.
 func set_role(new_role: Role) -> void:
 	if new_role == role:

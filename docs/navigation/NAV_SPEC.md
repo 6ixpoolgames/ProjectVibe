@@ -2,7 +2,7 @@
 
 # Navigation System Spec (draft 1)
 
-**Status:** design only. No code exists yet. All function signatures are proposals, written as C++ headers (GDExtension, godot-cpp) and a little GDScript for the pawn side.
+**Status:** phases 1 and 2 of section 19 are built, along with the marker steps in section 21.10. The rest is design. Function signatures for anything not built are proposals, written as C++ headers (GDExtension, godot-cpp) and a little GDScript for the pawn side. <!-- Claude 2026-11-06: this line still said no code exists -->
 **Scope:** flat-plane worlds, constant gravity (−Y). Solid spans on the nav grid are the universal input; any terrain generator (heightmap, blocks, density, meshes) opts in through an optional **NavHooks** resource and is stacked with the others (section 5).
 **Revisions:** 2026-11-03 (Claude): section 5 rewritten from a single voxel source to the NavHooks / provider model; pipeline, API, walkthroughs and phases updated to match. 2026-11-06 (Claude): section 21 added, nav markers and modules.
 **Performance numbers** are ballpark estimates, not measurements. Phase 0 is a benchmark spike to replace them.
@@ -320,7 +320,7 @@ Example world:
 
 ```
 order  layer                    op       adapter
-  0    HeightmapTerrain         ADD      HeightmapAdapter   ground
+  0    Terrain         ADD      HeightmapAdapter   ground
  10    CaveCarver               CARVE    BlockAdapter       tunnels cut into the ground
  20    Buildings (scene meshes) ADD      MeshAdapter        imported buildings / props
  30    RoadSplines              SURFACE  native            roads become a cheap surface type
@@ -1126,7 +1126,7 @@ Markers (section 21) aren't a phase of their own, and section 21.10 gives their 
 <!-- Claude 2026-11-06: new section, designed with the owner. Added at the end so existing section numbers stay the same. -->
 ## 21. Nav markers and modules
 
-**Status:** design agreed with the owner 2026-11-06. Not built. Signatures are proposals.
+**Status:** design agreed with the owner 2026-11-06. Steps 1 to 5 of section 21.10 are built, and step 6 is on hold. Signatures for anything not built are proposals. <!-- Claude 2026-11-06: this line still said not built -->
 
 **Job:** let anything in a level say "this spot or thing means something to nav or AI", such as a ladder, a cover spot or a seat, without the core needing to know every kind.
 
@@ -1248,9 +1248,9 @@ Markers can be placed before their module exists. They just do nothing until the
 
 ```gdscript
 ## SKETCH for the spec only. Not a real file yet.
-func register_terrain(scene_path: String, settings: NavTerrainSettings) -> int  # returns a terrain id
+func register_terrain(scene_path: String, settings: TerrainSettings) -> int  # returns a terrain id
 func unregister_terrain(terrain: int) -> void
-func get_terrain_settings(terrain: int) -> NavTerrainSettings
+func get_terrain_settings(terrain: int) -> TerrainSettings
 func chunk_of(terrain: int, position: Vector3) -> Vector2i
 func request_markers(terrain: int, chunk: Vector2i, markers: Array[NavMarker]) -> int  # returns how many were accepted
 func request_scene_marker(scene_path: String, marker: NavMarker) -> int         # returns the id, 0 if refused
@@ -1288,7 +1288,7 @@ These rules apply from the first line of code:
 ### 21.6 Chunks announce their markers
 
 1. A generator gives `NavWorld` a copy of its settings with `register_terrain`. These are plain values: seed, noise settings, chunk size, grid size and height scale. Changing the generator afterwards means registering again.
-2. A chunk generates and builds its list of links and POIs, because it knows its own terrain. In `HeightmapTerrain` this is `_make_chunk_markers(key)`, which a subclass overrides, as with `_shape_height`. By default a chunk has none and pays nothing. The list must come from the chunk's numbers, not random numbers, so every machine gets the same one. `tests/terrain_marker_example.gd` shows how.
+2. A chunk generates and builds its list of links and POIs, because it knows its own terrain. In `Terrain` this is `_make_chunk_markers(key)`, which a subclass overrides, as with `_shape_height`. By default a chunk has none and pays nothing. The list must come from the chunk's numbers, not random numbers, so every machine gets the same one. `tests/terrain_marker_example.gd` shows how.
 3. It calls `request_markers`. `NavWorld` refuses duplicate ids and undeclared tags with a warning, and accepts the rest.
 4. When the chunk unloads, the generator calls `release_markers` beside `release_chunk`. Modules clean up through `_markers_removed`.
 5. After an edit, a changed chunk announces again, so its markers don't float or get buried. Ids stay the same as long as the list's order does, so an edit should change heights, not the list.
@@ -1301,7 +1301,7 @@ These rules apply from the first line of code:
 
 **Terrain settings are used for** ids, knowing which chunk a position is in, and the estimator (section 21.8).
 
-**Chunk size.** About 256 m, as a setting, with chunks loaded around each player. `HeightmapTerrain`'s defaults are `tile_size` 256 and `grid_size` 43, which keeps squares of about 6 m, at about 3,700 triangles a chunk. **Measured 2026-11-06,** with collision and no nav: generating takes 10.7 ms a chunk on Windows and 8.2 ms on Linux, and an edit rebuilding one chunk takes about 8.4 ms and 6.4 ms. Both are on the main thread. An edit is fine now and then, and takes a large share of a 16.7 ms frame if it happens constantly, so a game with constant digging would want smaller chunks. At 1 m squares a chunk has about 131,000 triangles, roughly 35 times the work, so that needs worker threads or smaller chunks. The physics frame's slowdown after an edit (netcode spec section 14.1) isn't included in these times.
+**Chunk size.** About 128 m, as a setting, with chunks loaded around each player. `Terrain`'s defaults are `chunk_size` 128 and `chunk_resolution` 21, which keeps squares of about 6 m, at about 880 triangles a chunk. The owner lowered this from 256 m on 2026-11-06, after the stress test in `docs/streaming/STREAMING_SPEC.md`. <!-- Claude 2026-11-06 --> **Measured 2026-11-06 at 256 m,** with collision and no nav: generating takes 10.7 ms a chunk on Windows and 8.2 ms on Linux, and an edit rebuilding one chunk takes about 8.4 ms and 6.4 ms. Both are on the main thread. An edit is fine now and then, and takes a large share of a 16.7 ms frame if it happens constantly, so a game with constant digging would want smaller chunks. At 1 m squares a chunk has about 131,000 triangles, roughly 35 times the work, so that needs worker threads or smaller chunks. The physics frame's slowdown after an edit (netcode spec section 14.1) isn't included in these times. *Later on 2026-11-06, for chunk streaming:* building meshes from arrays instead of `SurfaceTool` brought these down to 6.3 ms and 4.0 ms on Windows and 5.4 ms and 3.7 ms on Linux, and 128 m chunks came out most comfortable on slower machines, so they became the default. See `docs/streaming/STREAMING_SPEC.md`, which also covers nav across chunk borders.
 
 **Clusters.** A cluster is a group of chunks, the size of a playable area. It's a possible tier above chunks, for things like area settings or grouped saved changes, and isn't being built yet. It can be added later because a chunk's cluster is just its coordinates divided by the cluster size. **Ids and saved data must use chunk coordinates, never cluster ones,** so that adding clusters changes nothing. The name avoids "region", which Recast already uses.
 
@@ -1340,7 +1340,7 @@ func estimate_tile(terrain: int, area: Rect2) -> Dictionary  # height range and 
 
 **What uses it:** the coarse planner in phase 5, which isn't built, so until then only its test does. Filling in provisional tile borders may be an earlier use.
 
-**Test:** with no jitter and no override, estimated heights must match `HeightmapTerrain.height_at`.
+**Test:** with no jitter and no override, estimated heights must match `Terrain.height_at`.
 
 ### 21.9 Multiplayer
 
@@ -1354,7 +1354,7 @@ func estimate_tile(terrain: int, area: Rect2) -> Dictionary  # height range and 
 2. `NavWorld` core: rows, ids, search and requests, with a test at 100,000 markers. **Built 2026-11-06:** `assets/scripts/singletons/NavWorld.gd`, `navigation/markers/NavMarker.gd`. Test: `navigation/tests/nav_world_selftest`. `register_terrain` and the type row aren't in yet, since nothing uses them until the steps below.
 3. Marker subclasses, the module base and the debug report. **Built 2026-11-06:** `navigation/markers/`, `navigation/modules/NavMarkerModule.gd`, and additions to `NavWorld.gd`. Test: `navigation/tests/nav_markers_selftest`. Applying 100,000 markers takes about 48 ms with no modules and 97 ms with two. A module leaving with 100,000 registered takes about 13 ms, because it checks every row.
 4. `NavMarkerNode` and `NavMarkerDebugModule`. **Built 2026-11-06:** `navigation/NavMarkerNode.gd`, `navigation/modules/NavMarkerDebugModule.gd`. Sample: `nav_marker_sample.tscn`. Test: `navigation/tests/nav_marker_node_selftest`.
-5. `HeightmapTerrain` registers its settings and announces and releases its chunks' markers, with the new chunk defaults. **Built 2026-11-06:** `navigation/NavTerrainSettings.gd`, additions to `NavWorld.gd` and `heightmap_terrain.gd`. Sample: `terrain_marker_sample.tscn`. Test: `Procedural Terrain/tests/terrain_markers_selftest`. Chunks don't stream yet: they're all built at startup, so this is the hook that streaming will use.
+5. `Terrain` registers its settings and announces and releases its chunks' markers, with the new chunk defaults. **Built 2026-11-06:** `terrain/TerrainSettings.gd`, additions to `NavWorld.gd` and `Terrain.gd`. Sample: `terrain_marker_sample.tscn`. Test: `terrain/tests/terrain_markers_selftest`. Streaming now uses this hook: `ChunkStreamer`, in `docs/streaming/STREAMING_SPEC.md`.
 6. `NavTerrainEstimator` in C++, and `NavEstimatorModule`. **On hold, the owner's decision 2026-11-06:** its only real user is the coarse planner in phase 5, which isn't built. Build it when something needs it.
 
 **Measured 2026-11-06,** 100,000 markers in 400 chunks of 250, Godot 4.7.2, GDScript:
@@ -1383,4 +1383,4 @@ Each other module comes when the system it talks to exists (section 21.4).
 7. **Long searches for rare tags.** A long-reach `find_nearest` for a tag few markers have ends up checking every marker, about 30 ms at 100,000. Normal searches take microseconds. Per-tag cells or a per-tag count would fix it. Wait for a real need.
 8. **Memory per marker.** The `Resource` objects cost far more than the rows: about 1,250 bytes each against about 260. That's the strongest case found so far for registering plain points by array in very large games (section 21.5).
 9. **Terrain ids.** Settled 2026-11-06: a hash of the generator's scene path (section 21.6).
-10. **Hill size at the new chunk size.** The noise defaults (`frequency` 0.015, `height_scale` 12) weren't changed when chunks grew, so hills are small next to a 256 m chunk. That's a look decision for the owner.
+10. **Hill size at the new chunk size.** The noise defaults (`frequency` 0.015, `height_scale` 12) weren't changed when chunks grew, so hills are small next to a 128 m chunk. That's a look decision for the owner.

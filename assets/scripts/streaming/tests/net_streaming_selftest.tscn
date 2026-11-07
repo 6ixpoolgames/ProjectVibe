@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/streaming/tests/net_streaming_selftest.gd" id="1"]
+
+[node name="NetStreamingSelftest" type="Node"]
+script = ExtResource("1")

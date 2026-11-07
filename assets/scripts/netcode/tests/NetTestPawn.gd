@@ -21,12 +21,18 @@ static var path_usec: int = 0
 ## Above 0, every walker throws away its path this often, in ticks, to load the nav system with queries.
 static var repath_every: int = 0
 static var path_calls: int = 0
+## Claude 2026-11-07: for testing on Terrain. When set, walkers head outward from where they are instead of staying
+## near the middle.
+static var roam_terrain: Terrain = null
 
+## Ticks simulated with no chunk built underneath. It should stay 0.
+var ticks_without_ground := 0
 var mode: String = "idle"
 var corrections_seen := 0
 ## Server: stretches of ticks with no input from this pawn's client, as [first, last]. For finding out when inputs go missing.
 var missing_stretches: Array = []
 var _local := false
+var _nobody_owns := false
 var _key := 0
 
 # Walking on nav paths. None of this is rolled back: it only decides inputs, and a replay uses the inputs already saved.
@@ -42,12 +48,40 @@ var _next_path_tick := 0
 var _progress_check_tick := 0
 var _progress_from := Vector3.ZERO
 var _last_position := Vector3.ZERO
+var _has_last_position := false
+
+
+## Claude 2026-11-07: a pawn nobody owns is AI, so it's switched off where no source keeps the ground loaded. It only applies on
+## a Terrain: AIActivityModule doesn't know about the other test terrains.
+func _ready() -> void:
+	super()
+	add_to_group(Terrain.STAY_ABOVE_GROUP)
+	var game_mode: Node = get_node_or_null("/root/GameMode")
+	if _nobody_owns and game_mode and game_mode.ai_activity:
+		game_mode.ai_activity.add_pawn(self)
+
+
+func _exit_tree() -> void:
+	super()
+	var game_mode: Node = get_node_or_null("/root/GameMode")
+	if _nobody_owns and game_mode and game_mode.ai_activity:
+		game_mode.ai_activity.remove_pawn(self)
+
+
+## AIActivityModule calls this. Everything about the pawn stays as it is, and it simply stops ticking.
+func set_simulation_active(active: bool) -> void:
+	if _driver == null:
+		return
+	if active:
+		_driver.register(self)
+	else:
+		_driver.unregister(self)
 
 
 func _on_network_role(entity: NetworkEntity) -> void:
-	var nobody_owns := entity.role == NetworkEntity.Role.AUTHORITY and entity.owner_peer == 0
-	_local = entity.is_local or nobody_owns
-	mode = default_mode if entity.is_local else (ai_mode if nobody_owns else "idle")
+	_nobody_owns = entity.role == NetworkEntity.Role.AUTHORITY and entity.owner_peer == 0
+	_local = entity.is_local or _nobody_owns
+	mode = default_mode if entity.is_local else (ai_mode if _nobody_owns else "idle")
 	_key = entity.entity_id
 	brain = Brain.NETWORK # the keyboard and the wander brain stay out of it
 
@@ -74,6 +108,13 @@ func _tick_input(dt: float, tick: int) -> void:
 			move_dir = Vector3.ZERO
 
 
+## Claude 2026-11-07: only counts. A pawn with a source should always have ground, so a test fails if this isn't 0.
+func _tick_simulate(dt: float, tick: int) -> void:
+	if roam_terrain != null and not roam_terrain.has_chunk(roam_terrain.chunk_of(position)):
+		ticks_without_ground += 1
+	super(dt, tick)
+
+
 func _network_input_missing() -> void:
 	super()
 	var tick: int = _driver.tick
@@ -89,7 +130,10 @@ func _on_network_corrected(jump: Variant) -> void:
 
 
 func _walk(tick: int) -> void:
-	distance_walked += Vector2(position.x - _last_position.x, position.z - _last_position.z).length()
+	# Claude 2026-11-07: the first tick has nowhere to measure from. A pawn spawned 1 km out counted that as walking.
+	if _has_last_position:
+		distance_walked += Vector2(position.x - _last_position.x, position.z - _last_position.z).length()
+	_has_last_position = true
 	_last_position = position
 	if repath_every > 0 and (tick + _key) % repath_every == 0:
 		_path = PackedVector3Array()
@@ -126,6 +170,16 @@ func _find_new_path(tick: int) -> void:
 	var pick := RandomNumberGenerator.new()
 	pick.seed = hash(Vector2i(_key, paths_found + path_failures))
 	var goal := Vector3(pick.randf_range(-WALK_RADIUS, WALK_RADIUS), 0.0, pick.randf_range(-WALK_RADIUS, WALK_RADIUS))
+	# Claude 2026-11-07: each pawn keeps roughly one heading, so it keeps crossing into new chunks.
+	if roam_terrain != null:
+		var heading_pick := RandomNumberGenerator.new()
+		heading_pick.seed = hash(_key)
+		var heading := heading_pick.randf() * TAU + pick.randf_range(-0.7, 0.7)
+		goal = position + Vector3(cos(heading), 0.0, sin(heading)) * 30.0
+		if not roam_terrain.has_chunk(roam_terrain.chunk_of(goal)):
+			path_failures += 1
+			return
+		goal.y = roam_terrain.height_at(goal.x, goal.z)
 	var started := Time.get_ticks_usec()
 	var found: PackedVector3Array = Engine.get_singleton(&"NavServer").find_path_now(position, goal, 0)
 	path_usec += Time.get_ticks_usec() - started

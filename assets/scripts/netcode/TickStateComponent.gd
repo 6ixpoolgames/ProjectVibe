@@ -454,6 +454,12 @@ func receive_input(tick: int, values: Dictionary) -> void:
 	_input_values[slot] = saved
 
 
+## Claude 2026-11-07: drops every input waiting here. A new owner's inputs are the only ones that count from now on.
+func forget_queued_input() -> void:
+	if not _input_ticks.is_empty():
+		_input_ticks.fill(-1)
+
+
 ## Server: puts this tick's input on the entity. False if none has arrived for this tick.
 func apply_input(tick: int) -> bool:
 	var slot := tick % history_size

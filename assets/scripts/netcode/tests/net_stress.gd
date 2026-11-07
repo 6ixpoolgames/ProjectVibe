@@ -28,6 +28,11 @@ const WALKERS := 4
 const AI_PAWNS := 20
 const GOOD := [{"name": "ping20", "bench-ping": 20}, {"name": "ping50", "bench-ping": 50}, {"name": "ping100", "bench-ping": 100}, {"name": "ping150", "bench-ping": 150}, {"name": "ping200", "bench-ping": 200}]
 
+# Claude 2026-11-07: the default streaming distances, with the nav distance the stress test for streaming uses.
+const FIXED_BLOCK := {"fixed-block": 1, "nav-distance": 96}
+const REAL_PAWN := {"streaming": 1, "real-pawn": 1, "load-distance": 320, "nav-distance": 96, "unload-margin": 64}
+const STREAMED := {"streaming": 1, "load-distance": 320, "nav-distance": 96, "unload-margin": 64}
+
 var _port := NetRun.first_port()
 var _only := ""
 
@@ -42,8 +47,27 @@ func _ready() -> void:
 	await _row("two_bad", GOOD + [{"name": "ping400", "bench-ping": 400}, {"name": "worst", "preset": "worst", "conditions-seed": 41}], {})
 	await _row("client_hitches", [GOOD[0], GOOD[1], GOOD[2], GOOD[3], {"name": "ping100_hitch", "bench-ping": 100, "hitch": "4:250"}], {})
 	await _row("server_hitches", GOOD, {"hitch": "4:150"})
+	# Claude 2026-11-07: the same crowd on Terrain, first as one fixed block and then loaded around each player.
+	await _row("terrain_fixed", _with(GOOD, FIXED_BLOCK), FIXED_BLOCK)
+	await _row("terrain_streamed", _with(GOOD, STREAMED), _merged(STREAMED, {"ai-loads": 1}))
+	# Claude 2026-11-07: the same again with the real motor and cameras: each client possesses one of its pawns.
+	await _row("pawn_streamed", _with(GOOD, REAL_PAWN), _merged(REAL_PAWN, {"ai-loads": 1, "possess": 1}))
 	print("--- DONE ---")
 	get_tree().quit(0)
+
+
+## Claude 2026-11-07: a copy of each client's settings, plus these.
+func _with(clients: Array, extra: Dictionary) -> Array:
+	var copies := []
+	for client: Dictionary in clients:
+		copies.append(_merged(client, extra))
+	return copies
+
+
+func _merged(a: Dictionary, b: Dictionary) -> Dictionary:
+	var merged := a.duplicate()
+	merged.merge(b)
+	return merged
 
 
 func _row(row_name: String, clients: Array, server_extra: Dictionary) -> void:
@@ -107,6 +131,9 @@ func _print_client(label: String, client: Dictionary, server: Dictionary) -> voi
 		band["received"] / 1000.0, band["sent"] / 1000.0,
 		float(client["loop_average_ms"]), float(client["loop_worst_ms"]), int(client["loops_over_budget"]), int(client["loop_count"]),
 	])
+	if client.has("possession"):
+		var info: Dictionary = client["possession"]
+		print("    camera: on pawn %d, %.3f m a frame on average, worst %.2f m" % [int(info["my_pawn"]), float(info["camera_average_jump"]), float(info["camera_worst_jump"])])
 
 
 ## The longest stretch of missing input for any of these pawns, once it had started sending and before it stopped.

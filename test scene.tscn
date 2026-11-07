@@ -1,7 +1,7 @@
 [gd_scene load_steps=18 format=4 uid="uid://cla16t20anuss"]
 
-[ext_resource type="Script" uid="uid://fq5sx40suwlv" path="res://assets/scripts/Dynamic Camera/FreeFloatingCameraController.gd" id="1_gy7eo"]
-[ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://assets/legacy/proc_gen_tile.tscn" id="2_gy7eo"]
+[ext_resource type="Script" uid="uid://fq5sx40suwlv" path="res://assets/scripts/camera/FreeFloatingCameraController.gd" id="1_gy7eo"]
+[ext_resource type="PackedScene" uid="uid://dtrfwocnyoman" path="res://assets/scenes/proc_gen_tile.tscn" id="2_gy7eo"]
 [ext_resource type="Script" uid="uid://m21ym7goa67x" path="res://assets/scripts/Character Pawn/CharacterPawn3D.gd" id="3_5av4d"]
 [ext_resource type="Script" uid="uid://ch7e1kmli36w8" path="res://assets/scripts/Character Pawn/PawnNexusComponent.gd" id="4_6bchc"]
 [ext_resource type="Script" uid="uid://cwxtrbi3gjvc6" path="res://assets/scripts/Character Pawn/AI Core Components/AICoreComponent.gd" id="5_tv77q"]

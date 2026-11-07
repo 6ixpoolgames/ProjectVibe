@@ -14,7 +14,7 @@
 ##   NetworkSession.register_type("pawn", preload("res://pawn.tscn"))  # same types in the same order on every machine
 ##   NetworkSession.world_root = $Entities
 ##   NetworkSession.host(port)   or   NetworkSession.join(address, port)
-##   # on the server, when player_connected fires:
+##   # on the server, whenever the game wants something to exist. Claude 2026-11-07: a player joining spawns nothing by itself.
 ##   NetworkSession.spawn("pawn", peer_id, Vector3(0, 1, 0))
 ##
 ## Snapshots are still full, of everything to everyone; delta compression is a later stage.
@@ -38,7 +38,9 @@
 ##   - Input for an entity the sender doesn't own, broken packets of any kind, and too many packets from one client are dropped.
 ##   - A snapshot older than the newest one seen is dropped. Input for a tick the server has already run is dropped, and the
 ##     client gets corrected. The server repeats the last input when one is missing, and never rewinds for movement.
-##   - A client that joins late gets everything that exists. Entities owned by a client that leaves are removed.
+##   - A client that joins late gets everything that exists. Entities still owned by a client that leaves are removed. Claude
+##     2026-11-07: player_leaving fires first, so something can take back what it wants to keep. PossessionModule does this
+##     for a possessed pawn, which stays in the world with no owner.
 extends Node
 class_name NetworkSessionSingleton
 
@@ -47,9 +49,12 @@ signal joined                               # the client is connected and tickin
 signal refused(reason: String)              # couldn't join
 signal disconnected                         # the connection ended
 signal player_connected(peer: int)          # server: a client passed the handshake
+signal player_leaving(peer: int)            # Claude 2026-11-07: server: a client has gone, and what it owns hasn't been removed yet
 signal player_left(peer: int)
 signal entity_spawned(entity: NetworkEntity)
 signal entity_despawned(entity_id: int)
+signal entity_owner_changed(entity: NetworkEntity) # Claude 2026-11-07: on every machine
+signal possession_requested(peer: int, entity_id: int) # Claude 2026-11-07: server: a client asks for a pawn. 0 means let go
 
 enum Mode { OFFLINE, SERVER, CLIENT }
 
@@ -167,6 +172,8 @@ var _entity_list_dirty := true
 var _next_entity_id := 1
 var _peers: Dictionary = {}          # server: peer -> {"welcomed": bool, "connected_at": usec}
 var _inbox: Array = []               # [peer, bytes] waiting for the next tick
+var _world_channels := {} # Claude 2026-11-07: channel name's hash -> {"receive": Callable, "catch_up": Callable}
+var _world_inbox: Array[PackedByteArray] = []
 var _inbox_counts: Dictionary = {}   # peer -> how many of those are theirs
 var _codec: Object = null             # NetCodec, or null to use NetPackets. Claude 2026-11-05
 var _cached_hash := 0                # content_hash is costly and a client can ask for it, so it's kept
@@ -502,6 +509,61 @@ func despawn(entity_id: int) -> void:
 				_send(peer, buffer.data_array, true)
 
 
+## Claude 2026-11-07: server or offline: gives an entity to another player, or to nobody with 0. Every client hears about it. From
+## then on, its input comes from the new owner, and the new owner's machine predicts it.
+func set_entity_owner(entity_id: int, new_owner: int) -> void:
+	if _mode == Mode.CLIENT or not _entities.has(entity_id):
+		return
+	var entity: NetworkEntity = _entities[entity_id]
+	_apply_owner(entity, new_owner)
+	if entity.is_replicated and _mode == Mode.SERVER:
+		var buffer := NetPackets.new_buffer()
+		buffer.put_u8(NetPackets.Type.OWNER_CHANGED)
+		buffer.put_u32(entity_id)
+		buffer.put_u32(new_owner)
+		for peer: int in _peers:
+			if _peers[peer]["welcomed"]:
+				_send(peer, buffer.data_array, true)
+
+
+func _apply_owner(entity: NetworkEntity, new_owner: int) -> void:
+	var local := new_owner == get_local_peer() and new_owner != 0
+	entity.change_owner(new_owner, local, _role_for(entity, local))
+	entity_owner_changed.emit(entity)
+
+
+func _on_owner_changed(peer: int, bytes: PackedByteArray) -> void:
+	if _mode != Mode.CLIENT or peer != 1 or bytes.size() != 9:
+		stats["bad_packets"] += 1
+		return
+	var buffer := NetPackets.reader(bytes)
+	buffer.get_u8()
+	var entity_id := buffer.get_u32()
+	var new_owner := buffer.get_u32()
+	var entity: NetworkEntity = _entities.get(entity_id, null)
+	if entity:
+		_apply_owner(entity, new_owner)
+
+
+## Claude 2026-11-07: client: asks the server for a pawn. 0 means let go. The server can say no.
+func request_possession(entity_id: int) -> void:
+	if _mode != Mode.CLIENT:
+		return
+	var buffer := NetPackets.new_buffer()
+	buffer.put_u8(NetPackets.Type.POSSESS_REQUEST)
+	buffer.put_u32(entity_id)
+	_send(1, buffer.data_array, true)
+
+
+func _on_possess_request(peer: int, bytes: PackedByteArray) -> void:
+	if _mode != Mode.SERVER or not _peers.has(peer) or not _peers[peer]["welcomed"] or bytes.size() != 5:
+		stats["bad_packets"] += 1
+		return
+	var buffer := NetPackets.reader(bytes)
+	buffer.get_u8()
+	possession_requested.emit(peer, buffer.get_u32())
+
+
 func get_entity(entity_id: int) -> NetworkEntity:
 	return _entities.get(entity_id, null)
 
@@ -675,6 +737,12 @@ func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 			_on_despawn(peer, bytes)
 		NetPackets.Type.DEBUG_SWITCH:
 			_on_debug_switch(peer, bytes)
+		NetPackets.Type.WORLD_MESSAGE:
+			_on_world_message(peer, bytes)
+		NetPackets.Type.OWNER_CHANGED:
+			_on_owner_changed(peer, bytes)
+		NetPackets.Type.POSSESS_REQUEST:
+			_on_possess_request(peer, bytes)
 		NetPackets.Type.INPUT, NetPackets.Type.SNAPSHOT:
 			var from_peer: int = _inbox_counts.get(peer, 0)
 			if not _driver.active:
@@ -716,6 +784,10 @@ func _on_peer_disconnected(peer: int) -> void:
 		return
 	var welcomed: bool = _peers[peer]["welcomed"]
 	_peers.erase(peer)
+	# Claude 2026-11-07: after the erase, so nothing is sent to the peer that's gone, and before the loop, so anything given a new
+	# owner here isn't removed. A listener can also despawn things, because the loop below only looks at what's left afterwards.
+	if welcomed:
+		player_leaving.emit(peer)
 	for entity_id: int in _entities.keys():
 		var entity: NetworkEntity = _entities[entity_id]
 		if entity.owner_peer == peer:
@@ -766,6 +838,7 @@ func _on_hello(peer: int, bytes: PackedByteArray) -> void:
 	for entity: NetworkEntity in get_entities():
 		if entity.is_replicated:
 			_send(peer, _spawn_packet(entity), true)
+	_send_world_catch_up(peer) # Claude 2026-11-07
 	player_connected.emit(peer)
 
 
@@ -898,6 +971,69 @@ func _on_despawn(peer: int, bytes: PackedByteArray) -> void:
 	_remove_entity(buffer.get_u32())
 
 
+# --- World messages ----------------------------------------------------------------------------
+# Claude 2026-11-07: for changes to the world that aren't entities, such as terrain edits. The server sends, in order and reliably,
+# and each client gets them at the start of a tick. A system registers a channel by a name that's the same on every machine, with
+# a function to receive and, optionally, a function giving what a late joiner needs. A channel nobody has registered is ignored.
+
+## Sets up a channel. receive(bytes) runs on clients. catch_up() runs on the server when a client joins, and returns the bytes
+## to send it, or empty for nothing.
+func register_world_channel(channel: String, receive: Callable, catch_up: Callable = Callable()) -> void:
+	_world_channels[hash(channel)] = {"receive": receive, "catch_up": catch_up}
+
+
+func unregister_world_channel(channel: String) -> void:
+	_world_channels.erase(hash(channel))
+
+
+## Server: sends bytes to every client on a channel. Does nothing anywhere else.
+func send_world_message(channel: String, bytes: PackedByteArray) -> void:
+	if _mode != Mode.SERVER:
+		return
+	var packet := _world_packet(hash(channel), bytes)
+	for peer: int in _peers:
+		if _peers[peer]["welcomed"]:
+			_send(peer, packet, true)
+
+
+func _world_packet(channel_hash: int, bytes: PackedByteArray) -> PackedByteArray:
+	var buffer := NetPackets.new_buffer()
+	buffer.put_u8(NetPackets.Type.WORLD_MESSAGE)
+	buffer.put_u32(channel_hash)
+	buffer.put_data(bytes)
+	return buffer.data_array
+
+
+func _send_world_catch_up(peer: int) -> void:
+	for channel_hash: int in _world_channels:
+		var catch_up: Callable = _world_channels[channel_hash]["catch_up"]
+		if catch_up.is_valid():
+			var bytes: PackedByteArray = catch_up.call()
+			if not bytes.is_empty():
+				_send(peer, _world_packet(channel_hash, bytes), true)
+
+
+## Only a server sends these, so anyone else sending one is misbehaving.
+func _on_world_message(peer: int, bytes: PackedByteArray) -> void:
+	if _mode != Mode.CLIENT or peer != 1 or bytes.size() < 5:
+		stats["bad_packets"] += 1
+		return
+	_world_inbox.append(bytes)
+
+
+func _deliver_world_messages() -> void:
+	if _world_inbox.is_empty():
+		return
+	var waiting := _world_inbox
+	_world_inbox = []
+	for bytes: PackedByteArray in waiting:
+		var buffer := NetPackets.reader(bytes)
+		buffer.get_u8()
+		var channel: Dictionary = _world_channels.get(buffer.get_u32(), {})
+		if not channel.is_empty() and channel["receive"].is_valid():
+			channel["receive"].call(bytes.slice(5))
+
+
 # --- Once per tick -----------------------------------------------------------------------------
 
 func _on_before_tick(_dt: float, tick: int) -> void:
@@ -905,6 +1041,7 @@ func _on_before_tick(_dt: float, tick: int) -> void:
 		return
 	var profiling: bool = _driver.profile_enabled
 	var mark := Time.get_ticks_usec() if profiling else 0
+	_deliver_world_messages() # Claude 2026-11-07: first, so a snapshot after it is read in the world it describes
 	var waiting := _inbox
 	_inbox = []
 	_inbox_counts.clear()

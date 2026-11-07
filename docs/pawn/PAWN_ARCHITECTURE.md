@@ -4,6 +4,8 @@
 
 # Pawn Architecture Spec (draft 1)
 
+**Status (2026-11-07):** `docs/pawn/PLAYER_AND_CAMERA.md` replaces this spec's controller placement: `PlayerController` now lives outside the pawn and survives without one. <!-- Claude 2026-11-07 -->
+
 **Status:** design draft, **not locked**. Written from the design discussion of 2026-11-03/04. Sections marked **(built)** describe code that exists; everything else is a proposal. Function signatures are GDScript sketches, not final.
 **Scope:** everything that lives on a pawn: the body, its assembly, how players and AI say what they want, how abilities carry it out, and how the pawn asks navigation for a route.
 **Performance numbers** are ballpark estimates, not measurements. A stress scene is planned to replace them (section 12).
@@ -50,7 +52,7 @@ ABILITIES     Ability manager: turns intent and requests into abilities
                                    │                  ▲
 NAVIGATION    Navigation manager ──┘ next point       │ "where next?"   (waypoints stay private)
                                    │
-MOTOR         CharacterPawn3D: accelerate toward a velocity, turn, gravity, impulse, move_and_slide
+MOTOR         The pawn: the one move_and_slide, gravity, rollback state. CharacterBody3D does the colliding and sliding (section 9)
 ```
 
 The resulting node tree:
@@ -80,7 +82,7 @@ CharacterPawn3D                (the entity; physics body; movement stats)
 
 | Part | Responsible for | Not responsible for |
 |---|---|---|
-| **Pawn** (`CharacterPawn3D`) | Being *the entity*: the node other entities reference. Physics body: gravity, `move_and_slide`. Motor primitives (section 9) | Deciding anything. Steering math (that's Walk). Holding stats (that's the stat manager) |
+| **Pawn** (`CharacterPawn3D`) | Being *the entity*: the node other entities reference. Physics body: gravity, `move_and_slide`. Small movement helpers (section 9) | Deciding anything. Steering math (that's Walk). Holding stats (that's the stat manager) |
 | **Nexus** | Assembly: finds or creates components, fills gaps with safe defaults, never errors on a bad setup. **Owns the context.** The one place references are wired | Gameplay |
 | **Context** (`AIContext`, to be renamed) | Shared per-pawn knowledge: references to every part, **intent fields** (section 6), current AI state, blackboard | Logic beyond small helpers |
 | **Controllers** | Holding **intent** for their source. Player: from input. AI: from behaviours. Sending discrete ability requests | Executing anything |
@@ -175,6 +177,7 @@ Rules:
   2. **Swarm director**, when a game has one, beats the pawn's own AI.
   3. **AI controller.**
   Keeping every source's intent means control can switch back and forth without losing anyone's wishes. *(Revised 2026-11-04: previously "who has control by possession".)*
+  **When a player lets go, or leaves the game, the AI controller takes over at once if the pawn has one, and otherwise the pawn stands idle.** Leaving out the AI controller is how a game gets ordinary idle pawns. *(Owner, 2026-11-07. Tier -1 does the idle half; see `PLAYER_AND_CAMERA.md`.)*
   *Under discussion: exactly which fields intent holds, and when and how it is read (section 15).*
 - **Intent persists until changed.** No resending every frame, unlike today's request bus.
 - **Discrete actions are not intent.** Jump, attack and so on are requests to the ability manager (`request_ability`), which go through the input buffer.
@@ -330,7 +333,24 @@ The pawn's single point of contact with navigation. **v1 is deliberately simple:
 
 ## 9. Motor (the pawn)
 
-`CharacterPawn3D` keeps the physics and gains clean primitives for abilities to call:
+**Current direction (owner, 2026-11-07). Work in progress, and open to better ideas.** There's no separate motor layer to build. `CharacterBody3D` already does the colliding and sliding, floor detection and motion modes, so movement abilities use that through a thin pawn:
+
+| Part | Job |
+|---|---|
+| `CharacterBody3D` (built in) | Velocity, collide and slide, floor detection, motion mode |
+| The pawn | The one `move_and_slide` call per tick, scaling for tick speed, rollback state and floor-flag repair, `grounded`, `yaw`, smoothing, and gravity with a way to turn it off |
+| Locomotion abilities: Walk, Sprint, Fly, Swim | Write the velocity they want, with exactly one active. A locomotion sets up what it needs, such as `MOTION_MODE_FLOATING` for Fly |
+| Action abilities: Jump, Dash | Apply a one-off change to velocity |
+
+Why the pawn keeps these jobs:
+- **One `move_and_slide` call,** so a pawn can't move twice in a tick, and rollback stays exact.
+- **Gravity,** because it has to run with no locomotion active, or an idle or stunned pawn would hang in mid-air.
+
+`GroundMovement` and `MovementModule` on the tier -1 `Pawn` are placeholders until abilities exist. Steering becomes Walk, the jump becomes Jump, gravity moves to the pawn, and `MovementModule` goes away.
+
+**To measure when the ability manager is first built:** every moving pawn then needs at least a small one, and that cost per pawn isn't known yet. It matters for hordes on low-end machines. Flying through `move_and_slide` in floating mode hasn't been tried in this project either.
+
+The helpers below are shared by abilities, and aren't a layer of their own. The engine has no acceleration or turning, so Walk, Sprint and Swim share these:
 
 ```gdscript
 func accelerate_toward(velocity: Vector3, rate: float, delta: float) -> void
@@ -484,3 +504,4 @@ Networking itself (transport, snapshots, interpolation, lag compensation) follow
 | Abilities are set in seconds in the inspector and converted to ticks; each ability can override prediction | 2026-11-04 |
 | The current click-to-move is navigation debug code and is replaced, not ported | 2026-11-04 |
 | Tier 0 tag matching is from the root only; the any-level search is removed until it has a more robust design | 2026-11-04 |
+| Current direction, work in progress and open to better ideas: no separate motor layer or movement modules. Locomotion abilities write velocity, and the pawn makes the one `move_and_slide` call and handles gravity (section 9) | 2026-11-07 |

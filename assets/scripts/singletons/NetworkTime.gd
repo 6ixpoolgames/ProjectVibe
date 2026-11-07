@@ -70,6 +70,9 @@ signal before_tick(dt: float, tick: int)
 signal after_tick(dt: float, tick: int)
 signal after_tick_loop
 signal after_rollback(from_tick: int, to_tick: int) # Claude 2026-11-04: rollback added
+## Claude 2026-11-07: state is back to from_tick, and the replay is about to run. A correction can put a pawn somewhere new here,
+## and anything that has to be ready before it moves, such as the ground, gets its chance now.
+signal rollback_state_loaded(from_tick: int)
 
 const TICK_RATE_SETTING := "project_base/network/tick_rate"
 
@@ -272,6 +275,7 @@ func rollback(from_tick: int) -> bool:
 	for p in loaded:
 		if is_instance_valid(p) and p.has_method(&"_rollback_after_load"):
 			p._rollback_after_load(from_tick)
+	rollback_state_loaded.emit(from_tick)
 	var dt := get_tick_dt()
 	for t in range(from_tick + 1, last_finished + 1):
 		tick = t
