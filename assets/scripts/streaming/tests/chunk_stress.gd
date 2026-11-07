@@ -59,12 +59,14 @@ func _run_row(slowdown: float, chunk_size: float, chunk_resolution: int, scenari
 	terrain.build_on_start = false
 	terrain.chunk_size = chunk_size
 	terrain.chunk_resolution = chunk_resolution
-	terrain.nav_hooks = NavHooks.new()
+	var link := WorldNavLink.new() # Claude 2026-11-07: a terrain feeds nav through this now, and it ticks nav
+	link.nav_hooks = NavHooks.new()
+	link.tick_nav = true
+	terrain.add_child(link)
 	add_child(terrain)
 
 	var streamer := SlowChunkStreamer.new() # Claude 2026-11-07: the slower CPU moved out of ChunkStreamer
 	streamer.terrain = terrain
-	streamer.tick_nav = true
 	streamer.max_ms_per_frame = MAX_MS_PER_FRAME
 	streamer.simulate_slower_cpu = slowdown
 	add_child(streamer)

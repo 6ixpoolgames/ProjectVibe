@@ -1,8 +1,10 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/samples/StreamingSample.gd" id="1_sample"]
 [ext_resource type="Script" path="res://assets/scripts/terrain/Terrain.gd" id="2_terrain"]
 [ext_resource type="Script" path="res://assets/scripts/streaming/tests/SlowChunkStreamer.gd" id="3_streamer"]
+[ext_resource type="Script" path="res://assets/scripts/world/WorldCoordinator.gd" id="4_world"]
+[ext_resource type="Script" path="res://assets/scripts/world/WorldNavLink.gd" id="5_link"]
 
 [sub_resource type="NavHooks" id="Hooks"]
 
@@ -25,14 +27,18 @@ outline_color = Color(0, 0, 0, 1)
 [node name="StreamingSample" type="Node3D"]
 script = ExtResource("1_sample")
 
-[node name="Terrain" type="Node3D" parent="."]
-script = ExtResource("2_terrain")
-nav_hooks = SubResource("Hooks")
-build_on_start = false
+[node name="World" type="Node3D" parent="."]
+script = ExtResource("4_world")
 
-[node name="ChunkStreamer" type="Node" parent="." node_paths=PackedStringArray("terrain")]
+[node name="Terrain" type="Node3D" parent="World"]
+script = ExtResource("2_terrain")
+
+[node name="ChunkStreamer" type="Node" parent="World"]
 script = ExtResource("3_streamer")
-terrain = NodePath("../Terrain")
+
+[node name="WorldNavLink" type="Node" parent="World"]
+script = ExtResource("5_link")
+nav_hooks = SubResource("Hooks")
 tick_nav = true
 
 [node name="Camera" type="Camera3D" parent="."]

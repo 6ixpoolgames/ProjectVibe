@@ -9,7 +9,6 @@
 ##   --mode=seek|strafe|shoot|lead|idle       what this machine's pawn does (see NetTestPawn.gd)
 ##   --delay=2           client: wait this long before joining
 ##   --leave-after=4     client: leave after this long
-##   --salt=1            changes the content hash, so the server refuses this client
 ##   --gravity=20        changes a physics setting on this machine, which should also get it refused
 ##   --garbage           client: also sends broken packets, and input for a pawn it doesn't own
 ##   --shove-at=240      server: moves the first pawn 2 m on this tick, which no client can predict
@@ -67,6 +66,7 @@ const EDITS_FROM_TICK := 300
 
 var settings: Dictionary = {}
 var session: NetworkSessionSingleton
+var debug: NetDebugModule # Claude 2026-11-07: the fake network and the switches moved here from the session
 var driver: NetworkTimeSingleton
 var started_usec := 0
 var log_positions: Dictionary = {}      # entity id -> {tick: [x, y, z]}
@@ -121,6 +121,7 @@ var _summaries: Dictionary = {}          # entity id -> latest summary, kept aft
 
 func _ready() -> void:
 	session = get_node("/root/NetworkSession")
+	debug = NetDebugModule.on(session)
 	driver = get_node("/root/NetworkTime")
 	_read_settings()
 	if settings.has("terrain"):
@@ -135,33 +136,32 @@ func _ready() -> void:
 	if settings.has("real-pawn"):
 		pawn_scene = REAL_PAWN_SCENE
 	session.register_type("pawn", load(pawn_scene))
-	session.content_hash_salt = int(settings.get("salt", 0))
 	session.use_native_encoding = not settings.has("script-encoding") # Claude 2026-11-05
 	if settings.has("gravity"):
 		ProjectSettings.set_setting("physics/3d/default_gravity", float(settings["gravity"]))
 	session.lag_compensation_enabled = not settings.has("no-rewind")
 	session.default_predicted = settings.has("predicted")
-	session.fake.latency_ms = float(settings.get("latency", 0))
-	session.fake.jitter_ms = float(settings.get("jitter", 0))
-	session.fake.loss = float(settings.get("loss", 0))
+	debug.fake.latency_ms = float(settings.get("latency", 0))
+	debug.fake.jitter_ms = float(settings.get("jitter", 0))
+	debug.fake.loss = float(settings.get("loss", 0))
 	var conditions_seed := int(settings.get("conditions-seed", hash(settings.get("name", "server"))))
-	session.fake.set_seed(conditions_seed)
-	session.fake_in.set_seed(conditions_seed + 1)
+	debug.fake.set_seed(conditions_seed)
+	debug.fake_in.set_seed(conditions_seed + 1)
 	if settings.has("preset"):
-		session.fake.apply_preset(settings["preset"])
-		session.fake_in.apply_preset(settings["preset"])
+		debug.fake.apply_preset(settings["preset"])
+		debug.fake_in.apply_preset(settings["preset"])
 	if settings.has("timeline"):
 		var points: Array = []
 		for part in String(settings["timeline"]).split(","):
 			var pieces := part.split(":")
 			points.append([float(pieces[0]), float(pieces[1])])
-		session.fake.timeline = points
-		session.fake_in.timeline = points
+		debug.fake.timeline = points
+		debug.fake_in.timeline = points
 	if settings.has("bench-ping"):
 		var bench := NetTestBench.new()
 		add_child(bench)
 		bench.set_ping(float(settings["bench-ping"]))
-	session.allow_debug_commands = settings.has("allow-debug")
+	debug.allow_debug_commands = settings.has("allow-debug")
 	for feature in String(settings.get("off", "")).split(",", false):
 		session.set(feature, false)
 	for feature in String(settings.get("on", "")).split(",", false):
@@ -241,7 +241,7 @@ func _process(_delta: float) -> void:
 	if settings.has("switch") and not _switched and elapsed >= float(String(settings["switch"]).split(":")[0]):
 		_switched = true
 		var parts := String(settings["switch"]).split(":")
-		session.set_feature(parts[1], parts[2] == "1")
+		debug.set_feature(parts[1], parts[2] == "1")
 	if settings.has("profile") and measure_from_tick >= 0:
 		var physics_ms := Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
 		_physics_total_ms += physics_ms
@@ -490,13 +490,13 @@ func _capture_summary() -> void:
 	result["peer"] = result.get("peer_when_joined", session.get_local_peer())
 	result["measure_end_usec"] = Time.get_ticks_usec()
 	result["measure_from_tick"] = measure_from_tick
-	result["fake_lost"] = session.fake.packets_lost
+	result["fake_lost"] = debug.fake.packets_lost
 	result["missed_inputs"] = session.get_missed_inputs()
 	result["margin_last"] = session.get_input_margin()
 	result["features"] = {}
-	for feature: String in NetworkSessionSingleton.FEATURES:
-		result["features"][feature] = session.is_feature_on(feature)
-	result["bursts"] = session.fake.bursts_started + session.fake_in.bursts_started
+	for feature: String in NetDebugModule.FEATURES:
+		result["features"][feature] = debug.is_feature_on(feature)
+	result["bursts"] = debug.fake.bursts_started + debug.fake_in.bursts_started
 	result["hitches"] = _hitches
 	result["profile"] = driver.profile
 	result["physics_average_ms"] = _physics_total_ms / maxi(_physics_samples, 1)
@@ -524,7 +524,7 @@ func _capture_summary() -> void:
 	result["loop_worst_ms"] = _loop_worst_usec / 1000.0
 	result["loops_over_budget"] = _loops_over_budget
 	result["loop_count"] = _loop_count
-	result["spikes"] = session.fake.spikes_started + session.fake_in.spikes_started
+	result["spikes"] = debug.fake.spikes_started + debug.fake_in.spikes_started
 	_capture_streaming() # Claude 2026-11-07
 	_capture_possession()
 	_update_summaries()
@@ -560,7 +560,7 @@ func _run_possession_script(elapsed: float) -> void:
 				result["asked_for"] = entity.entity_id
 				possession.possess(entity.get_parent())
 				break
-		session.request_possession(999999) # no such pawn
+		possession._ask_server(999999) # no such pawn
 	if settings.has("despawn-possessed-at") and not result.has("despawned_possessed") and elapsed >= float(settings["despawn-possessed-at"]) and session.is_server():
 		result["despawned_possessed"] = true
 		for entity: NetworkEntity in session.get_entities().duplicate():
@@ -743,7 +743,11 @@ func _build_new_terrain() -> void:
 	terrain.name = "NetworkTerrain"
 	if settings.has("edit-log"):
 		terrain.add_child(TerrainEditLog.new())
-	terrain.nav_hooks = NavHooks.new()
+		terrain.add_child(TerrainBodyLifter.new()) # Claude 2026-11-07: an optional module now
+	var link := WorldNavLink.new() # Claude 2026-11-07: a terrain feeds nav through this now
+	link.nav_hooks = NavHooks.new()
+	link.unload_margin = float(settings.get("unload-margin", 32))
+	terrain.add_child(link)
 	terrain.build_meshes = settings.get("role", "server") != "server"
 	if settings.has("streaming"):
 		terrain.build_on_start = false

@@ -53,8 +53,6 @@ signal chunk_unloaded(key: Vector2i)
 @export_range(0.0, 2.0, 0.01, "or_greater") var refresh_seconds := 0.2
 ## With no active sources, keeps every chunk loaded. Off: they all unload.
 @export var hold_when_no_sources := true
-## The nav system needs one tick per physics frame from somewhere. Turn this on if nothing else in the scene does it.
-@export var tick_nav := false
 
 ## The nearest a chunk edge can be to a source before the next chunk is built straight away, in metres.
 const MIN_GROUND_REACH := 2.0
@@ -67,7 +65,6 @@ var _unload_queue: Array[Vector2i] = []
 var _current_build := Vector2i.ZERO # the chunk being built, which is finished before starting another
 var _has_current_build := false
 var _scores := {} # Vector2i -> how far outside a source's load_distance the chunk is, negative when inside
-var _nav_interests := {} # a source's instance id -> its interest id in NavServer
 var _refresh_timer := 0.0
 var _warned_no_terrain := false
 var _warned_too_many := false
@@ -99,10 +96,6 @@ func _ready() -> void:
 		_driver.rollback_state_loaded.connect(_on_rollback_state_loaded)
 
 
-func _exit_tree() -> void:
-	_remove_all_nav_interests()
-
-
 ## How things stand right now, as numbers for tests, stress runs and on-screen displays.
 func get_stats() -> Dictionary:
 	return {
@@ -123,10 +116,8 @@ func refresh_now() -> void:
 	_refresh()
 
 
-func _physics_process(delta: float) -> void:
+func _physics_process(_delta: float) -> void:
 	_build_ground_under_sources()
-	if tick_nav and Engine.has_singleton("NavServer"):
-		Engine.get_singleton("NavServer").tick(delta)
 
 
 func _on_before_tick(_dt: float, _tick: int) -> void:
@@ -210,7 +201,6 @@ func _process(delta: float) -> void:
 
 func _refresh() -> void:
 	var sources := _active_sources()
-	_update_nav_interests(sources)
 	if sources.is_empty() and hold_when_no_sources:
 		_build_queue.clear()
 		_unload_queue.clear()
@@ -324,39 +314,3 @@ func _unload_next() -> void:
 
 func _finish_step(step_started: int) -> void:
 	_worst_step_usec = maxi(_worst_step_usec, Time.get_ticks_usec() - step_started)
-
-
-# --- Nav: asking for nav tiles around each source ---
-# The nav library builds tiles only near an "interest". Each active source with a nav_distance gets one here.
-
-
-func _update_nav_interests(sources: Array[StreamingSource]) -> void:
-	if not terrain.uses_nav():
-		_remove_all_nav_interests()
-		return
-	var nav: Object = Engine.get_singleton("NavServer")
-	var still_active := {}
-	for source in sources:
-		if source.nav_distance <= 0.0:
-			continue
-		var id := source.get_instance_id()
-		still_active[id] = true
-		if _nav_interests.has(id):
-			nav.move_interest(_nav_interests[id], source.global_position)
-		else:
-			# There's no ground to build nav on past load_distance, so it can't ask for more than that.
-			var load_radius := minf(source.nav_distance, source.load_distance)
-			_nav_interests[id] = nav.add_interest(source.global_position, load_radius, load_radius + unload_margin, 1)
-	for id: int in _nav_interests.keys():
-		if not still_active.has(id):
-			nav.remove_interest(_nav_interests[id])
-			_nav_interests.erase(id)
-
-
-func _remove_all_nav_interests() -> void:
-	if _nav_interests.is_empty() or not Engine.has_singleton("NavServer"):
-		return
-	var nav: Object = Engine.get_singleton("NavServer")
-	for id: int in _nav_interests:
-		nav.remove_interest(_nav_interests[id])
-	_nav_interests.clear()

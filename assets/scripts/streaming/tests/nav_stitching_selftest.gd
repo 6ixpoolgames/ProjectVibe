@@ -197,8 +197,7 @@ func _test_unloading() -> void:
 	var start := _on_ground(terrain, Vector3.ZERO, Vector2(-20.0, 30.0))
 	var inside := _on_ground(terrain, Vector3.ZERO, Vector2(-40.0, 40.0))
 	# A chunk that isn't built has no height, so ask its height from a second terrain with the same ground.
-	var twin := _make_terrain(64.0, 11, Vector3.ZERO)
-	twin.nav_hooks = null
+	var twin := _make_terrain(64.0, 11, Vector3.ZERO, false)
 	twin.load_chunk(right)
 	var across := _on_ground(twin, Vector3.ZERO, Vector2(20.0, 30.0))
 	twin.free()
@@ -259,8 +258,8 @@ func _test_pawn_follows_nav() -> void:
 	terrain.build_collision = true
 	var streamer := ChunkStreamer.new()
 	streamer.terrain = terrain
-	streamer.tick_nav = true
 	add_child(streamer)
+	terrain.get_node("WorldNavLink").tick_nav = true # Claude 2026-11-07: it moved here from the streamer
 	var pawn := StreamingSamplePawn.new()
 	pawn.terrain = terrain
 	pawn.speed = 10.0
@@ -324,14 +323,18 @@ func _test_pawn_follows_nav() -> void:
 # --- Helpers ---
 
 
-func _make_terrain(chunk_size: float, chunk_resolution: int, offset: Vector3) -> Terrain:
+func _make_terrain(chunk_size: float, chunk_resolution: int, offset: Vector3, with_nav := true) -> Terrain:
 	var terrain := Terrain.new()
 	terrain.name = "Terrain"
 	terrain.build_on_start = false
 	terrain.chunk_size = chunk_size
 	terrain.chunk_resolution = chunk_resolution
 	terrain.build_collision = false
-	terrain.nav_hooks = NavHooks.new()
+	if with_nav: # Claude 2026-11-07: a terrain feeds nav through a WorldNavLink now
+		var link := WorldNavLink.new()
+		link.name = "WorldNavLink"
+		link.nav_hooks = NavHooks.new()
+		terrain.add_child(link)
 	terrain.position = offset
 	add_child(terrain)
 	return terrain

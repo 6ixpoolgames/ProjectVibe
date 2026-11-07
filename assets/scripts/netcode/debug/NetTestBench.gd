@@ -24,6 +24,7 @@ const LOSS_STEP := 0.01
 const VARIATION_STEP := 0.1
 
 var session: NetworkSessionSingleton = null
+var _debug: NetDebugModule = null # Claude 2026-11-07: the fake network and the switches moved here from the session
 var preset_name: String = "off"
 var _panel: Label = null
 var _ping_ms := 0.0
@@ -35,6 +36,8 @@ func _ready() -> void:
 		queue_free()
 		return
 	session = get_node_or_null("/root/NetworkSession")
+	if session:
+		_debug = NetDebugModule.on(session)
 	_panel = Label.new()
 	_panel.position = Vector2(12, 265)
 	add_child(_panel)
@@ -66,19 +69,19 @@ func handle_key(keycode: int) -> bool:
 		KEY_EQUAL:
 			set_jitter(_jitter_ms + JITTER_STEP)
 		KEY_COMMA:
-			set_loss(session.fake.loss * 2.0 - LOSS_STEP)
+			set_loss(_debug.fake.loss * 2.0 - LOSS_STEP)
 		KEY_PERIOD:
-			set_loss(session.fake.loss * 2.0 + LOSS_STEP)
+			set_loss(_debug.fake.loss * 2.0 + LOSS_STEP)
 		KEY_SEMICOLON:
-			set_variation(session.fake.jitter_variation - VARIATION_STEP)
+			set_variation(_debug.fake.jitter_variation - VARIATION_STEP)
 		KEY_APOSTROPHE:
-			set_variation(session.fake.jitter_variation + VARIATION_STEP)
+			set_variation(_debug.fake.jitter_variation + VARIATION_STEP)
 		KEY_B:
-			session.fake.start_burst(now, 1.0)
-			session.fake_in.start_burst(now, 1.0)
+			_debug.fake.start_burst(now, 1.0)
+			_debug.fake_in.start_burst(now, 1.0)
 		KEY_N:
-			session.fake.start_spike(now, 1.0, 150.0)
-			session.fake_in.start_spike(now, 1.0, 150.0)
+			_debug.fake.start_spike(now, 1.0, 150.0)
+			_debug.fake_in.start_spike(now, 1.0, 150.0)
 		KEY_H:
 			if _panel:
 				_panel.visible = not _panel.visible
@@ -95,60 +98,60 @@ func handle_key(keycode: int) -> bool:
 ## The whole round trip in milliseconds, half each way.
 func set_ping(milliseconds: float) -> void:
 	_ping_ms = maxf(milliseconds, 0.0)
-	session.fake.timeline = []
-	session.fake_in.timeline = []
-	session.fake.latency_ms = _ping_ms * 0.5
-	session.fake_in.latency_ms = _ping_ms * 0.5
+	_debug.fake.timeline = []
+	_debug.fake_in.timeline = []
+	_debug.fake.latency_ms = _ping_ms * 0.5
+	_debug.fake_in.latency_ms = _ping_ms * 0.5
 
 
 func set_jitter(milliseconds: float) -> void:
 	_jitter_ms = maxf(milliseconds, 0.0)
-	session.fake.jitter_ms = _jitter_ms * 0.5
-	session.fake_in.jitter_ms = _jitter_ms * 0.5
+	_debug.fake.jitter_ms = _jitter_ms * 0.5
+	_debug.fake_in.jitter_ms = _jitter_ms * 0.5
 
 
 ## Chance of loss across the whole connection, split evenly.
 func set_loss(chance: float) -> void:
 	var clamped := clampf(chance, 0.0, 1.0)
-	session.fake.loss = clamped * 0.5
-	session.fake_in.loss = clamped * 0.5
+	_debug.fake.loss = clamped * 0.5
+	_debug.fake_in.loss = clamped * 0.5
 
 
 func set_variation(amount: float) -> void:
 	var clamped := clampf(amount, 0.0, 1.0)
-	session.fake.jitter_variation = clamped
-	session.fake_in.jitter_variation = clamped
+	_debug.fake.jitter_variation = clamped
+	_debug.fake_in.jitter_variation = clamped
 
 
 func apply_preset(new_preset: String) -> void:
 	preset_name = new_preset
-	session.fake.apply_preset(new_preset)
-	session.fake_in.apply_preset(new_preset)
-	_ping_ms = session.fake.latency_ms * 2.0
-	_jitter_ms = session.fake.jitter_ms * 2.0
+	_debug.fake.apply_preset(new_preset)
+	_debug.fake_in.apply_preset(new_preset)
+	_ping_ms = _debug.fake.latency_ms * 2.0
+	_jitter_ms = _debug.fake.jitter_ms * 2.0
 
 
 ## Switches the feature at this place in NetworkSession.FEATURES.
 func toggle_feature(index: int) -> void:
-	if index < 0 or index >= NetworkSessionSingleton.FEATURES.size():
+	if index < 0 or index >= NetDebugModule.FEATURES.size():
 		return
-	var feature: String = NetworkSessionSingleton.FEATURES[index]
-	session.set_feature(feature, not session.is_feature_on(feature))
+	var feature: String = NetDebugModule.FEATURES[index]
+	_debug.set_feature(feature, not _debug.is_feature_on(feature))
 
 
 func status_text() -> String:
 	var lines := PackedStringArray()
 	var now := Time.get_ticks_usec()
 	var events := PackedStringArray()
-	if session.fake.is_in_burst(now):
+	if _debug.fake.is_in_burst(now):
 		events.append("BURST")
-	if session.fake.is_in_spike(now):
+	if _debug.fake.is_in_spike(now):
 		events.append("SPIKE")
-	lines.append("fake network: %s, ping %.0f ms, jitter %.0f ms (now %.0f), loss %.0f%%, jitter wander %.0f%% %s" % [preset_name, _ping_ms, _jitter_ms, session.fake.get_current_jitter_ms() * 2.0, session.fake.loss * 200.0, session.fake.jitter_variation * 100.0, " ".join(events)])
+	lines.append("fake network: %s, ping %.0f ms, jitter %.0f ms (now %.0f), loss %.0f%%, jitter wander %.0f%% %s" % [preset_name, _ping_ms, _jitter_ms, _debug.fake.get_current_jitter_ms() * 2.0, _debug.fake.loss * 200.0, _debug.fake.jitter_variation * 100.0, " ".join(events)])
 	lines.append("[ ] ping   - = jitter   , . loss   ; ' wander   B burst   N spike   F1-F5 presets   H hide")
 	var stats := session.stats
 	lines.append("client: speed %.3f, input margin %d ticks, drawn %.1f ticks behind, late drawing %d, missed inputs %d, resyncs %d" % [session.get_tick_factor(), session.get_input_margin(), session.get_view_ticks_behind(), stats["interpolation_underruns"], session.get_missed_inputs(), stats["resyncs"]])
-	for i in NetworkSessionSingleton.FEATURES.size():
-		var feature: String = NetworkSessionSingleton.FEATURES[i]
-		lines.append("%d  %s  %s" % [(i + 1) % 10, "ON " if session.is_feature_on(feature) else "off", feature])
+	for i in NetDebugModule.FEATURES.size():
+		var feature: String = NetDebugModule.FEATURES[i]
+		lines.append("%d  %s  %s" % [(i + 1) % 10, "ON " if _debug.is_feature_on(feature) else "off", feature])
 	return "\n".join(lines)

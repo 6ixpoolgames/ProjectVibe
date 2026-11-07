@@ -55,7 +55,7 @@ var _has_last_position := false
 ## a Terrain: AIActivityModule doesn't know about the other test terrains.
 func _ready() -> void:
 	super()
-	add_to_group(Terrain.STAY_ABOVE_GROUP)
+	add_to_group(TerrainBodyLifter.GROUP)
 	var game_mode: Node = get_node_or_null("/root/GameMode")
 	if _nobody_owns and game_mode and game_mode.ai_activity:
 		game_mode.ai_activity.add_pawn(self)

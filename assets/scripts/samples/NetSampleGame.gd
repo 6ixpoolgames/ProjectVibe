@@ -35,7 +35,7 @@ func _ready() -> void:
 	_session.joined.connect(func() -> void: _message = "joined")
 	_session.refused.connect(_on_refused)
 	_session.disconnected.connect(func() -> void: _show_menu("disconnected"))
-	_session.allow_debug_commands = true # only has any effect in a debug build, which is also the only place the bench exists
+	NetDebugModule.on(_session).allow_debug_commands = true # only has any effect in a debug build, which is also the only place the bench exists
 	_bench = NetTestBench.new()
 	add_child(_bench)
 	_build_hud()

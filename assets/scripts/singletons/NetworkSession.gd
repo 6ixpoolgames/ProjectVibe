@@ -26,8 +26,8 @@
 ## client well behind where its clock says it should be, after a freeze say, jumps straight back instead of slowly catching up,
 ## because every tick behind is another input arriving too late.
 ##
-## Test switches (Claude 2026-11-04): each feature in FEATURES can be turned off with set_feature, even while running.
-## NetTestBench puts them on keys.
+## Test tools (Claude 2026-11-07): the fake bad network and switching features while running are in NetDebugModule, an optional child that
+## fills packet_filter below. Without one, this does none of that. See docs/TEST_AND_DEBUG_CODE.md.
 ##
 ## One tick on a client:   before_tick: apply snapshots (which may roll back), move remote entities ->
 ##                         the tick's phases -> after_tick: send input
@@ -54,13 +54,10 @@ signal player_left(peer: int)
 signal entity_spawned(entity: NetworkEntity)
 signal entity_despawned(entity_id: int)
 signal entity_owner_changed(entity: NetworkEntity) # Claude 2026-11-07: on every machine
-signal possession_requested(peer: int, entity_id: int) # Claude 2026-11-07: server: a client asks for a pawn. 0 means let go
 
 enum Mode { OFFLINE, SERVER, CLIENT }
 
-## Every switch set_feature understands, in the order NetTestBench shows them.
-const FEATURES: Array[String] = ["prediction_enabled", "reconciliation_enabled", "interpolation_enabled", "extrapolation_enabled", "correction_smoothing_enabled", "lag_compensation_enabled", "default_predicted", "follow_during_rollback", "time_dilation_enabled", "adaptive_interpolation_enabled"]
-## The ones the server decides. A client's switch only asks the server, and snapshots say what the server's are.
+## The settings the server decides for everyone, so snapshots say what they are.
 const SERVER_FEATURES: Array[String] = ["lag_compensation_enabled", "default_predicted"]
 ## What snapshots say when a client has sent no input lately.
 const NO_MARGIN := 32767
@@ -126,8 +123,6 @@ const MARGIN_LONG_WINDOW := 300
 @export var use_native_encoding: bool = true
 ## Where spawned entities go. Defaults to the current scene.
 var world_root: Node = null
-## Changes the content hash, to test the refusal.
-var content_hash_salt: int = 0
 ## Which address the server listens on. "*" is all of them.
 var bind_address: String = "*"
 ## Claude 2026-11-05: server: the most one client may send, so a broken or hostile client can't bury the server in work. Past these
@@ -136,11 +131,9 @@ var bind_address: String = "*"
 var max_packets_per_second: int = 2000
 var max_bytes_per_second: int = 256 * 1024
 var max_packet_bytes: int = 64 * 1024
-## Pretend the network is bad, for testing. See NetFakeConditions.gd. One for what this machine sends, one for what it receives.
-var fake := NetFakeConditions.new()
-var fake_in := NetFakeConditions.new()
-## Server: obey test switches sent by clients. Also needs a debug build, so a release game can never turn this on.
-var allow_debug_commands: bool = false
+## Claude 2026-11-07: something that can hold packets back on their way out and in, or null, which is normal. It has hold_outgoing(peer,
+## bytes, reliable), hold_incoming(peer, bytes), release_due(now_usec) and clear().
+var packet_filter: Object = null
 ## Bytes and packets sent and received, for diagnostics.
 var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_received": 0, "snapshots_received": 0,
 		"corrections": 0, "correction_total": 0.0, "correction_worst": 0.0, "jump_total": 0.0, "jump_worst": 0.0, "resyncs": 0,
@@ -174,10 +167,10 @@ var _peers: Dictionary = {}          # server: peer -> {"welcomed": bool, "conne
 var _inbox: Array = []               # [peer, bytes] waiting for the next tick
 var _world_channels := {} # Claude 2026-11-07: channel name's hash -> {"receive": Callable, "catch_up": Callable}
 var _world_inbox: Array[PackedByteArray] = []
+var _client_channels := {} # Claude 2026-11-07: channel name's hash -> Callable(peer, bytes)
 var _inbox_counts: Dictionary = {}   # peer -> how many of those are theirs
 var _codec: Object = null             # NetCodec, or null to use NetPackets. Claude 2026-11-05
 var _cached_hash := 0                # content_hash is costly and a client can ask for it, so it's kept
-var _cached_hash_salt := -1
 var _hash_is_cached := false
 var _clock := NetClock.new()
 var _clock_ready := false
@@ -224,8 +217,8 @@ func _physics_process(_delta: float) -> void:
 
 func _pump() -> void:
 	var now := Time.get_ticks_usec()
-	fake.release_due(now, _send_now)
-	fake_in.release_due(now, _handle_packet)
+	if packet_filter:
+		packet_filter.release_due(now)
 	if _mode == Mode.CLIENT and is_connected_to_session():
 		_ping_if_due()
 		# No news for a while, in a dropout say: don't keep correcting on an old answer.
@@ -298,8 +291,8 @@ func leave() -> void:
 	_newest_snapshot_tick = -1
 	render_tick = -1.0
 	_next_entity_id = 1
-	fake.clear()
-	fake_in.clear()
+	if packet_filter:
+		packet_filter.clear()
 	_input_margin = NO_MARGIN
 	_missed_inputs = 0
 	_last_feedback_usec = 0
@@ -374,29 +367,6 @@ func get_missed_inputs() -> int:
 	return _missed_inputs
 
 
-func is_feature_on(feature: String) -> bool:
-	return FEATURES.has(feature) and get(feature)
-
-
-## Turns a feature on or off, even while running. See FEATURES. On a client, a feature the server decides only changes if the
-## server agrees: the next snapshot says.
-func set_feature(feature: String, on: bool) -> void:
-	if not FEATURES.has(feature):
-		push_warning("[NetworkSession] no feature called '%s'" % feature)
-		return
-	if _mode == Mode.CLIENT and SERVER_FEATURES.has(feature):
-		var buffer := NetPackets.new_buffer()
-		buffer.put_u8(NetPackets.Type.DEBUG_SWITCH)
-		NetPackets.write_value(buffer, feature, StateEncoding.RAW)
-		NetPackets.write_value(buffer, on, StateEncoding.RAW)
-		_send(1, buffer.data_array, true)
-		return
-	set(feature, on)
-	_refresh_entities()
-	if not time_dilation_enabled and _driver:
-		_set_tick_factor(1.0)
-
-
 ## How many ticks behind its own tick a client can believably be drawing others, for lag compensation. It can't be drawing
 ## anything newer than the snapshot it last acknowledged, and it can't be further behind that than the interpolation limit.
 ## Acknowledgements only ever move forward, and one older than the rewind cap gets no rewind. A client that deliberately
@@ -421,14 +391,13 @@ func limit_view_ticks_behind(peer: int, claimed: float, tick: int) -> float:
 ## a release: stamp the build number when exporting, and only builds with the same number play together. Also use it if
 ## the same project on different operating systems refuses itself, since line endings can differ.
 func content_hash() -> int:
-	if _hash_is_cached and _cached_hash_salt == content_hash_salt:
+	if _hash_is_cached:
 		return _cached_hash
 	var parts := PackedStringArray()
 	parts.append(str(NetPackets.PROTOCOL_VERSION))
 	parts.append(str(TagRegistry.content_hash()))
 	# Claude 2026-11-06: navigation now has its own tags, and machines must agree on those bits too.
 	parts.append(str(NavTags.content_hash()))
-	parts.append(str(content_hash_salt))
 	parts.append(String(Engine.get_version_info()["hash"]))
 	parts.append(str(_driver.get_tick_rate() if _driver else 0))
 	var setting_names: Array[String] = []
@@ -451,7 +420,6 @@ func content_hash() -> int:
 				parts.append_array(child.get_schema())
 		instance.free()
 	_cached_hash = hash("|".join(parts))
-	_cached_hash_salt = content_hash_salt
 	_hash_is_cached = true
 	return _cached_hash
 
@@ -543,25 +511,6 @@ func _on_owner_changed(peer: int, bytes: PackedByteArray) -> void:
 	var entity: NetworkEntity = _entities.get(entity_id, null)
 	if entity:
 		_apply_owner(entity, new_owner)
-
-
-## Claude 2026-11-07: client: asks the server for a pawn. 0 means let go. The server can say no.
-func request_possession(entity_id: int) -> void:
-	if _mode != Mode.CLIENT:
-		return
-	var buffer := NetPackets.new_buffer()
-	buffer.put_u8(NetPackets.Type.POSSESS_REQUEST)
-	buffer.put_u32(entity_id)
-	_send(1, buffer.data_array, true)
-
-
-func _on_possess_request(peer: int, bytes: PackedByteArray) -> void:
-	if _mode != Mode.SERVER or not _peers.has(peer) or not _peers[peer]["welcomed"] or bytes.size() != 5:
-		stats["bad_packets"] += 1
-		return
-	var buffer := NetPackets.reader(bytes)
-	buffer.get_u8()
-	possession_requested.emit(peer, buffer.get_u32())
 
 
 func get_entity(entity_id: int) -> NetworkEntity:
@@ -660,9 +609,7 @@ func _spawn_packet(entity: NetworkEntity) -> PackedByteArray:
 func _send(peer: int, bytes: PackedByteArray, reliable: bool) -> void:
 	stats["bytes_sent"] += bytes.size()
 	stats["packets_sent"] += 1
-	if fake.is_active():
-		fake.submit(peer, bytes, reliable, Time.get_ticks_usec())
-	else:
+	if packet_filter == null or not packet_filter.hold_outgoing(peer, bytes, reliable):
 		_send_now(peer, bytes, reliable)
 
 
@@ -687,9 +634,7 @@ func _on_packet(peer: int, bytes: PackedByteArray) -> void:
 	if _mode == Mode.SERVER and not _within_limits(peer, bytes):
 		stats["packets_over_limit"] += 1
 		return
-	if fake_in.is_active():
-		fake_in.submit(peer, bytes, _is_reliable_type(int(bytes[0])), Time.get_ticks_usec())
-	else:
+	if packet_filter == null or not packet_filter.hold_incoming(peer, bytes):
 		_handle_packet(peer, bytes, true)
 
 
@@ -715,10 +660,6 @@ func _within_limits(peer: int, bytes: PackedByteArray) -> bool:
 	return max_bytes_per_second <= 0 or int(info["limit_bytes"]) <= max_bytes_per_second
 
 
-func _is_reliable_type(type: int) -> bool:
-	return type != NetPackets.Type.INPUT and type != NetPackets.Type.SNAPSHOT and type != NetPackets.Type.PING and type != NetPackets.Type.PONG
-
-
 func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 	match int(bytes[0]):
 		NetPackets.Type.HELLO:
@@ -735,14 +676,12 @@ func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 			_on_spawn(peer, bytes)
 		NetPackets.Type.DESPAWN:
 			_on_despawn(peer, bytes)
-		NetPackets.Type.DEBUG_SWITCH:
-			_on_debug_switch(peer, bytes)
 		NetPackets.Type.WORLD_MESSAGE:
 			_on_world_message(peer, bytes)
 		NetPackets.Type.OWNER_CHANGED:
 			_on_owner_changed(peer, bytes)
-		NetPackets.Type.POSSESS_REQUEST:
-			_on_possess_request(peer, bytes)
+		NetPackets.Type.CLIENT_MESSAGE:
+			_on_client_message(peer, bytes)
 		NetPackets.Type.INPUT, NetPackets.Type.SNAPSHOT:
 			var from_peer: int = _inbox_counts.get(peer, 0)
 			if not _driver.active:
@@ -754,22 +693,6 @@ func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 				_inbox.append([peer, bytes])
 		_:
 			stats["bad_packets"] += 1
-
-
-## Server: a client's test switch. Refused unless this is a debug build and the game allows it, and only for SERVER_FEATURES.
-func _on_debug_switch(peer: int, bytes: PackedByteArray) -> void:
-	if _mode != Mode.SERVER or not allow_debug_commands or not OS.is_debug_build() or not _peers.has(peer) or not _peers[peer]["welcomed"]:
-		stats["bad_packets"] += 1
-		return
-	var buffer := NetPackets.reader(bytes)
-	buffer.get_u8()
-	var feature: Variant = NetPackets.read_value(buffer)
-	var on: Variant = NetPackets.read_value(buffer)
-	if feature is String and SERVER_FEATURES.has(feature) and on is bool:
-		set(feature, on)
-		_refresh_entities() # Claude 2026-11-05
-	else:
-		stats["bad_packets"] += 1
 
 
 # --- Handshake ---------------------------------------------------------------------------------
@@ -1034,6 +957,43 @@ func _deliver_world_messages() -> void:
 			channel["receive"].call(bytes.slice(5))
 
 
+# --- Client messages ---------------------------------------------------------------------------
+# Claude 2026-11-07: the other direction, for a client asking the server for something, so that the session needn't know what. Reliable
+# and in order, and handled as they arrive. A client can send anything, so whatever receives these has to check it.
+
+## Sets up a channel. receive(peer, bytes) runs on the server.
+func register_client_channel(channel: String, receive: Callable) -> void:
+	_client_channels[hash(channel)] = receive
+
+
+func unregister_client_channel(channel: String) -> void:
+	_client_channels.erase(hash(channel))
+
+
+## Client: sends bytes to the server on a channel. Does nothing anywhere else.
+func send_to_server(channel: String, bytes: PackedByteArray) -> void:
+	if _mode != Mode.CLIENT:
+		return
+	var buffer := NetPackets.new_buffer()
+	buffer.put_u8(NetPackets.Type.CLIENT_MESSAGE)
+	buffer.put_u32(hash(channel))
+	buffer.put_data(bytes)
+	_send(1, buffer.data_array, true)
+
+
+func _on_client_message(peer: int, bytes: PackedByteArray) -> void:
+	if _mode != Mode.SERVER or not _peers.has(peer) or not _peers[peer]["welcomed"] or bytes.size() < 5:
+		stats["bad_packets"] += 1
+		return
+	var buffer := NetPackets.reader(bytes)
+	buffer.get_u8()
+	var receive: Callable = _client_channels.get(buffer.get_u32(), Callable())
+	if receive.is_valid():
+		receive.call(peer, bytes.slice(5))
+	else:
+		stats["bad_packets"] += 1
+
+
 # --- Once per tick -----------------------------------------------------------------------------
 
 func _on_before_tick(_dt: float, tick: int) -> void:
@@ -1234,7 +1194,7 @@ func _send_snapshots(tick: int) -> void:
 		_send(peer, packet.data_array, false)
 
 
-## Client: the features the server decides are whatever it says, so the test panel can't show something that isn't so.
+## Client: the features the server decides are whatever it says. default_predicted changes roles here, so this matters in a real game too.
 func _apply_server_features(mask: int) -> void:
 	var changed := false
 	for i in SERVER_FEATURES.size():

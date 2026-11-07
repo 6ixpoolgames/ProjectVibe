@@ -334,11 +334,15 @@ func _test_offline() -> void:
 	_check(holder.want == Vector3.ONE and holder.amount == 2.0, "input: not-a-number and infinity are dropped")
 
 	_test_content_hash(session)
+	# Claude 2026-11-07: a different build's name, since the test-only salt is gone.
 	var hash_first := session.content_hash()
-	session.content_hash_salt = 5
-	var hash_salted := session.content_hash()
-	session.content_hash_salt = 0
-	_check(hash_first != hash_salted and session.content_hash() == hash_first, "content hash: stays the same, and changes when it should, even though it's cached")
+	_check(session.content_hash() == hash_first, "content hash: stays the same")
+	ProjectSettings.set_setting(NetworkSessionSingleton.BUILD_ID_SETTING, "a test build")
+	session._hash_is_cached = false
+	var hash_named := session.content_hash()
+	ProjectSettings.set_setting(NetworkSessionSingleton.BUILD_ID_SETTING, "")
+	session._hash_is_cached = false
+	_check(hash_first != hash_named and session.content_hash() == hash_first, "content hash: and changes when it should")
 
 	_test_bench(session)
 	var following := TickStateComponent.new()
@@ -443,29 +447,32 @@ func _test_offline() -> void:
 	session.max_bytes_per_second = limits_before[1]
 	session.max_packet_bytes = limits_before[2]
 
-	session.allow_debug_commands = true
-	var switch_packet := NetPackets.new_buffer()
-	switch_packet.put_u8(NetPackets.Type.DEBUG_SWITCH)
-	NetPackets.write_value(switch_packet, "lag_compensation_enabled", StateEncoding.RAW)
-	NetPackets.write_value(switch_packet, false, StateEncoding.RAW)
+	# Claude 2026-11-07: a switch is a client message to NetDebugModule now.
+	var debug := NetDebugModule.on(session)
+	debug.allow_debug_commands = true
+	var switch_packet := _client_message(NetDebugModule.CHANNEL, debug.switch_message("lag_compensation_enabled", false))
 	session._peers[77]["welcomed"] = false
-	session._on_debug_switch(77, switch_packet.data_array)
+	session._on_client_message(77, switch_packet)
 	_check(session.lag_compensation_enabled, "switches: a client that hasn't passed the handshake can't change anything")
 	session._peers[77]["welcomed"] = true
-	session._on_debug_switch(77, switch_packet.data_array)
+	session._on_client_message(77, switch_packet)
 	_check(not session.lag_compensation_enabled, "switches: one that has can, if allowed")
+	debug.allow_debug_commands = false
+	session.lag_compensation_enabled = true
+	var bad_before: int = session.stats["bad_packets"]
+	session._on_client_message(77, switch_packet)
+	_check(session.lag_compensation_enabled and session.stats["bad_packets"] == bad_before + 1, "switches: if not allowed, it's a bad packet")
+	session._on_client_message(77, _client_message("no such channel", PackedByteArray([1])))
+	_check(session.stats["bad_packets"] == bad_before + 2, "client messages: an unknown channel is a bad packet")
+	debug.allow_debug_commands = true
 	session.lag_compensation_enabled = true
 	# Claude 2026-11-05: the server only saves inputs when clients predicting the entity need them.
 	session._refresh_entities()
 	_check(target.state.skip_input_capture, "input saving: a server skips it")
-	var predicted_packet := NetPackets.new_buffer()
-	predicted_packet.put_u8(NetPackets.Type.DEBUG_SWITCH)
-	NetPackets.write_value(predicted_packet, "default_predicted", StateEncoding.RAW)
-	NetPackets.write_value(predicted_packet, true, StateEncoding.RAW)
-	session._on_debug_switch(77, predicted_packet.data_array)
+	session._on_client_message(77, _client_message(NetDebugModule.CHANNEL, debug.switch_message("default_predicted", true)))
 	_check(not target.state.skip_input_capture, "input saving: unless clients are predicting, even when switched on live")
 	session.default_predicted = false
-	session.allow_debug_commands = false
+	debug.allow_debug_commands = false
 	session._mode = was_mode
 	session._peers.erase(77)
 	session._refresh_entities()
@@ -545,43 +552,43 @@ func _test_content_hash(session: NetworkSessionSingleton) -> void:
 func _test_bench(session: NetworkSessionSingleton) -> void:
 	var bench := NetTestBench.new()
 	add_child(bench)
-	_check(bench.handle_key(KEY_BRACKETRIGHT) and is_equal_approx(session.fake.latency_ms, 5.0) and is_equal_approx(session.fake_in.latency_ms, 5.0), "bench: ] raises the ping, half each way")
+	_check(bench.handle_key(KEY_BRACKETRIGHT) and is_equal_approx(NetDebugModule.on(session).fake.latency_ms, 5.0) and is_equal_approx(NetDebugModule.on(session).fake_in.latency_ms, 5.0), "bench: ] raises the ping, half each way")
 	bench.handle_key(KEY_BRACKETLEFT)
 	bench.handle_key(KEY_BRACKETLEFT)
-	_check(session.fake.latency_ms == 0.0, "bench: [ lowers it, and it can't go below zero")
+	_check(NetDebugModule.on(session).fake.latency_ms == 0.0, "bench: [ lowers it, and it can't go below zero")
 	bench.handle_key(KEY_EQUAL)
-	_check(is_equal_approx(session.fake.jitter_ms, 2.5), "bench: = raises jitter")
+	_check(is_equal_approx(NetDebugModule.on(session).fake.jitter_ms, 2.5), "bench: = raises jitter")
 	bench.handle_key(KEY_MINUS)
-	_check(session.fake.jitter_ms == 0.0, "bench: - lowers it")
+	_check(NetDebugModule.on(session).fake.jitter_ms == 0.0, "bench: - lowers it")
 	bench.handle_key(KEY_PERIOD)
-	_check(is_equal_approx(session.fake.loss, 0.005), "bench: . raises loss")
+	_check(is_equal_approx(NetDebugModule.on(session).fake.loss, 0.005), "bench: . raises loss")
 	bench.handle_key(KEY_COMMA)
-	_check(is_equal_approx(session.fake.loss, 0.0), "bench: , lowers it")
+	_check(is_equal_approx(NetDebugModule.on(session).fake.loss, 0.0), "bench: , lowers it")
 	bench.handle_key(KEY_APOSTROPHE)
-	_check(is_equal_approx(session.fake.jitter_variation, 0.1), "bench: ' makes jitter wander more")
+	_check(is_equal_approx(NetDebugModule.on(session).fake.jitter_variation, 0.1), "bench: ' makes jitter wander more")
 	bench.handle_key(KEY_SEMICOLON)
-	_check(is_equal_approx(session.fake.jitter_variation, 0.0), "bench: ; makes it wander less")
+	_check(is_equal_approx(NetDebugModule.on(session).fake.jitter_variation, 0.0), "bench: ; makes it wander less")
 	bench.handle_key(KEY_F5)
-	_check(is_equal_approx(session.fake.latency_ms, 125.0) and is_equal_approx(session.fake_in.latency_ms, 125.0) and bench.preset_name == "worst", "bench: F5 is the worst case preset")
+	_check(is_equal_approx(NetDebugModule.on(session).fake.latency_ms, 125.0) and is_equal_approx(NetDebugModule.on(session).fake_in.latency_ms, 125.0) and bench.preset_name == "worst", "bench: F5 is the worst case preset")
 	bench.handle_key(KEY_F1)
-	_check(not session.fake.is_active(), "bench: F1 turns it all off")
+	_check(not NetDebugModule.on(session).fake.is_active(), "bench: F1 turns it all off")
 	bench.handle_key(KEY_B)
-	_check(session.fake.is_in_burst(Time.get_ticks_usec()), "bench: B starts a burst")
+	_check(NetDebugModule.on(session).fake.is_in_burst(Time.get_ticks_usec()), "bench: B starts a burst")
 	bench.handle_key(KEY_N)
-	_check(session.fake.is_in_spike(Time.get_ticks_usec()), "bench: N starts a spike")
-	session.fake.clear()
-	session.fake_in.clear()
-	session.fake.apply_preset("off")
-	session.fake_in.apply_preset("off")
-	var was_on := session.is_feature_on("prediction_enabled")
+	_check(NetDebugModule.on(session).fake.is_in_spike(Time.get_ticks_usec()), "bench: N starts a spike")
+	NetDebugModule.on(session).fake.clear()
+	NetDebugModule.on(session).fake_in.clear()
+	NetDebugModule.on(session).fake.apply_preset("off")
+	NetDebugModule.on(session).fake_in.apply_preset("off")
+	var was_on := NetDebugModule.on(session).is_feature_on("prediction_enabled")
 	bench.handle_key(KEY_1)
-	_check(session.is_feature_on("prediction_enabled") != was_on, "bench: 1 switches the first feature")
+	_check(NetDebugModule.on(session).is_feature_on("prediction_enabled") != was_on, "bench: 1 switches the first feature")
 	bench.handle_key(KEY_1)
-	_check(session.is_feature_on("prediction_enabled") == was_on, "bench: and back")
+	_check(NetDebugModule.on(session).is_feature_on("prediction_enabled") == was_on, "bench: and back")
 	_check(not bench.handle_key(KEY_Z), "bench: other keys are left alone")
 	_check(bench.status_text().contains("time_dilation_enabled"), "bench: the panel lists the features")
-	session.set_feature("not_a_feature", true)
-	_check(not session.is_feature_on("not_a_feature"), "switches: an unknown feature is ignored")
+	NetDebugModule.on(session).set_feature("not_a_feature", true)
+	_check(not NetDebugModule.on(session).is_feature_on("not_a_feature"), "switches: an unknown feature is ignored")
 	bench.free()
 
 
@@ -624,7 +631,7 @@ func _test_connecting(run_name: String) -> void:
 func _test_refused(run_name: String) -> void:
 	var results := await NetRun.run(self, run_name, {
 		"server": {"role": "server", "seconds": 4},
-		"wrong": {"role": "client", "seconds": 3, "salt": 99},
+		"wrong": {"role": "client", "seconds": 3, "build-id": "another build"},
 	}, _port)
 	var server: Dictionary = results["server"]
 	var wrong: Dictionary = results["wrong"]
@@ -1010,6 +1017,15 @@ func _test_interpolation_off(run_name: String) -> void:
 	print("        drawn %.1f ticks behind, largest step %.1f cm in one tick" % [view["behind_ticks"], 100.0 * view["largest_step"]])
 	_check(view["behind_ticks"] < 12.0, "interpolation off: remote pawns are drawn less far in the past")
 	_check(view["largest_step"] > 0.13, "interpolation off: and they visibly jump from snapshot to snapshot")
+
+
+## Claude 2026-11-07: a client message as it arrives at the server.
+func _client_message(channel: String, body: PackedByteArray) -> PackedByteArray:
+	var buffer := NetPackets.new_buffer()
+	buffer.put_u8(NetPackets.Type.CLIENT_MESSAGE)
+	buffer.put_u32(hash(channel))
+	buffer.put_data(body)
+	return buffer.data_array
 
 
 func _test_live_switches(run_name: String) -> void:

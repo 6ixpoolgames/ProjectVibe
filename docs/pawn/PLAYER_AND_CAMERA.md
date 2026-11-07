@@ -24,7 +24,8 @@ AUTOLOADS
 LEVEL
 ├─ Terrain                         the main terrain coordinator
 │  ├─ ChunkStreamer                optional: without it, a fixed block
-│  └─ TerrainEditLog               optional: without it, edits don't outlast a chunk
+│  ├─ TerrainEditLog               optional: without it, edits don't outlast a chunk or reach clients
+│  └─ TerrainBodyLifter            optional: moves bodies onto ground an edit raises above them
 └─ Pawn                            possessable flag, velocity, the one move_and_slide
    ├─ GroundMovement               a placeholder until abilities exist
    ├─ StreamingSource              only when possessed, or when the AI bool is on
@@ -73,7 +74,10 @@ LEVEL
 
 - **Every request goes to `PossessionModule`,** and the pawn's `possessable` flag is the check. This is the simplest version, chosen by the owner. `GameMode.possession.possess(pawn)` asks on this machine, and `possess_for(peer, pawn)` is the server's own call. In multiplayer the server decides, and a client's call is only a request.
 - A pawn with `possessable` off refuses. A pawn another player holds refuses.
-- **AI uses the same system.** When there's an `AIController`, it asks `PossessionModule` too. Not built. Until then, nothing has decided whether the flag stops an AI controller as well as a player.
+- **`possessable` is on by default,** the owner's choice. Off would leave people with no idea why their pawn doesn't work. Something has to ask for a possession, so a wrong one is a clear bug that gets looked at.
+- **`possessable` only stops new possessions.** Turning it off doesn't evict whoever has the pawn. `release_pawn(pawn)` is the separate call for that.
+- **Tier 0 is for designers.** Protection against cheating and modified clients comes later, so requests have only the checks above.
+- **AI uses the same system.** When there's an `AIController`, it asks `PossessionModule` too. Not built.
 - **A controller doesn't come with a pawn.** Creating a `PlayerController` spawns nothing, and neither does a player joining. A game spawns what it wants, when it wants. The samples and tests spawn a pawn per player only for their own convenience.
 - A possessed pawn's `owner_peer` is its player. Letting go sets it to 0, so the server runs it.
 - **What a pawn does once it's let go is the controller manager's job, which isn't built yet.** Its AI controller takes over at once if it has one, as in an autobattler where a player jumps into a unit and back out. With no AI controller, the pawn stands idle, which is what most games want. Tier -1 only does the idle half: the pawn's input is cleared, and it stands still until something else writes to it.
@@ -120,7 +124,7 @@ These are the same within the noise between runs, except bandwidth, because the 
 - **Rollback:** replaying 20 ticks on hills with jumps lands in exactly the same place: 0.0000 m and 0.0000 m/s.
 - **One pawn alone:** within 0.1 cm of the server at 50 and 150 ms, walking about 120 m.
 - **200 pawns walking,** offline on a flat floor: 8.8 ms a tick.
-- **10,000 AI pawns checked** by `AIActivityModule`: 1 ms a frame, spread across 6 frames, with stub pawns, not real ones.
+- **10,000 AI pawns checked** by `AIActivityModule`: 1 ms a frame, spread across 6 frames, with stub pawns, not real ones. That's the checks only. A real pawn that's off also has to stop its `NetworkEntity` and `TickStateComponent`, which `NetworkEntity.set_paused` does.
 
 **Not tested:** playing by hand, a real network, real low-end machines, and the mouse look and edge-of-screen modes, which need a real window and mouse.
 

@@ -171,7 +171,9 @@ func _test_click_to_move() -> void:
 	terrain.chunk_size = 64.0
 	terrain.chunk_resolution = 11
 	terrain.chunk_radius = 2
-	terrain.nav_hooks = NavHooks.new()
+	var link := WorldNavLink.new() # Claude 2026-11-07: a terrain feeds nav through this now
+	link.nav_hooks = NavHooks.new()
+	terrain.add_child(link)
 	add_child(terrain)
 	var interest := NavServer.add_interest(Vector3.ZERO, 80.0, 90.0, 1)
 	_settle()

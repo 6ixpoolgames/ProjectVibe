@@ -1,5 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: switches AI pawns off when the ground around them isn't loaded, and back on
-## when it is. So a horde costs nothing where no player is, and nothing walks off the edge of the world.
+## when it is. So a horde costs almost nothing where no player is, and nothing walks off the edge of the world. Claude 2026-11-07:
+## a Pawn stops its NetworkEntity and TickState too, which leaves only this module's checks, and it's left out of snapshots while off.
 ##
 ## The rule: an AI pawn runs only while every chunk within edge_margin of it is built. In other words, it's near enough to a
 ## source. A pawn with its own active source has ground wherever it goes, so it's never switched off.

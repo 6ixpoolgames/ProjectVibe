@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-06: an example of a terrain whose chunks announce their own markers.
 ## Copy this to give your own terrain links and points of interest. terrain_marker_sample.tscn shows it working, and
-## its test is terrain_markers_selftest.
+## its test is terrain_markers_selftest. A WorldNavLink is what announces them.
 ##
 ## It puts a seat in the middle of every chunk, and scatters cover points across it. Nothing here is random: which
 ## spots get cover comes from the grid point's number, so every machine and every reload gets the same markers.

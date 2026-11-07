@@ -9,7 +9,7 @@
 | Use | When | Example |
 |---|---|---|
 | **Script extension** | A test creates the node itself | `streaming/tests/SlowChunkStreamer.gd` extends `ChunkStreamer` |
-| **Module** | The thing being tested is an autoload, because a test scene can't swap an autoload for an extension. The module is an optional child, and without it nothing changes | `NetDebugModule` for `NetworkSession` (planned) |
+| **Module** | The thing being tested is an autoload, because a test scene can't swap an autoload for an extension. The module is an optional child, and without it nothing changes | `netcode/debug/NetDebugModule.gd` for `NetworkSession` |
 
 Folders: `tests/` for tests, `samples/` for samples, and `debug/` for tools used while playing a debug build.
 
@@ -24,25 +24,22 @@ A base class may offer one empty slot for a module to fill, such as a packet fil
 
 ## How to check it
 
-Release exports leave out `tests/`, `samples/` and `debug/`. Any base code that still names something from those folders then breaks loudly. To test this, delete those folders from a temporary copy and check that the project still loads.
+Release exports should leave out `tests/`, `samples/` and `debug/`. Any base code that still names something from those folders then breaks loudly. To test this, delete those folders from a temporary copy and check that the project still runs.
 
-**Status:** planned. No export preset leaves those folders out yet, and this check hasn't been run.
+**Status:** that check was run by hand on 2026-11-07, on Linux, with a real host and client. It isn't automated, and no export preset leaves those folders out yet, because the project has no release export.
 
-## Netcode: planned
-
-Agreed with the owner on 2026-11-07, not built yet. `NetworkSession` still holds these tools (netcode spec section 17, row 34).
+## Netcode
 
 | Piece | Where | Why |
 |---|---|---|
-| Fake network (`fake`, `fake_in`, `NetFakeConditions`), `NetTestBench` | `NetDebugModule` | The session keeps one empty slot for a packet filter, checked on send and receive |
-| `set_feature`, `FEATURES`, `allow_debug_commands`, the `DEBUG_SWITCH` packet | `NetDebugModule` | Live switching is only for testing, and a release protocol shouldn't carry a debug packet. The client-to-server switch would try an RPC owned by the module |
+| Fake network (`fake`, `fake_in`, `NetFakeConditions`), `NetTestBench` | `netcode/debug/` | The session keeps one empty slot, `packet_filter`, checked on send and receive |
+| `set_feature`, `FEATURES`, `allow_debug_commands` | `NetDebugModule` | Live switching is only for testing. It uses the client message channel, so the protocol has no debug packet |
 | The ten feature settings, such as `prediction_enabled` | Stay for now | They're plain settings, and removing them means rewriting the comparison tests. Prune them later |
-| `content_hash_salt` | Probably removed | It only exists to force a refused join. Check first whether `--build-id` can do that |
-
-**Not checked yet:** snapshots also carry the server's feature settings (`SERVER_FEATURES`), and that code hasn't been read closely. It could change this plan.
+| `SERVER_FEATURES` in snapshots | Stays | `default_predicted` changes roles on clients, so it's needed in a real game |
 
 ## Done so far
 
+- The netcode tools above moved out of `NetworkSession`, and `content_hash_salt` is gone: a refused join is tested with `--build-id`.
 - `simulate_slower_cpu` and `reset_worst_times` moved from `ChunkStreamer` to `SlowChunkStreamer`.
 - The ray counter and aiming at the middle of the screen moved from `WorldCursor` to a test class in `player/tests/world_cursor_selftest.gd`.
 - `"headless"` checks removed from `PlayerController` and `WorldCursor`.

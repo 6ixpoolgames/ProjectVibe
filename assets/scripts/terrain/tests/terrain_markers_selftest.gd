@@ -64,6 +64,7 @@ func _add_terrain(terrain_name := "Terrain") -> OneMarkerTerrain:
 	terrain.chunk_size = 20.0
 	terrain.chunk_radius = 1
 	terrain.build_collision = false
+	terrain.add_child(WorldNavLink.new()) # Claude 2026-11-07: this announces a terrain's markers now
 	add_child(terrain)
 	NavWorld.flush()
 	return terrain
@@ -83,25 +84,22 @@ func _test_settings_are_registered() -> void:
 	terrain.name = "Terrain"
 	terrain.chunk_resolution = 4
 	terrain.chunk_size = 20.0
-	terrain.noise_seed = 99
-	terrain.frequency = 0.05
-	terrain.noise_scale = Vector2(2, 3)
 	terrain.position = Vector3(100, 5, -40)
 	terrain.build_collision = false
+	terrain.add_child(WorldNavLink.new())
 	add_child(terrain)
 	var id := NavWorld.scene_marker_id(str(terrain.get_path()))
 	var settings := NavWorld.get_terrain_settings(id)
 	_check(settings != null, "settings: a terrain registers itself with NavWorld")
-	_check(settings.noise_seed == 99 and settings.frequency == 0.05 and settings.noise_scale == Vector2(2, 3), "settings: NavWorld holds its noise settings")
-	_check(settings.chunk_size == 20.0 and settings.chunk_resolution == 4 and settings.origin == Vector3(100, 5, -40), "settings: and its size and position")
+	_check(settings.chunk_size == 20.0 and settings.origin == Vector3(100, 5, -40), "settings: NavWorld holds its size and position")
 	_check(NavWorld.chunk_of(id, Vector3(100, 0, -40)) == Vector2i.ZERO, "chunks: a terrain's corner is chunk 0,0")
 	_check(NavWorld.chunk_of(id, Vector3(125, 0, -41)) == Vector2i(1, -1), "chunks: positions work out to the right chunk, negatives included")
 	_check(NavWorld.chunk_of(id, Vector3(100000, 0, 0)) == Vector2i(4995, 2), "chunks: a chunk doesn't have to be loaded")
 	_check(NavWorld.chunk_of(12345, Vector3(100, 0, 100)) == Vector2i.ZERO, "chunks: an unknown terrain gives zero, with no error")
-	terrain.noise_seed = 100
-	_check(NavWorld.get_terrain_settings(id).noise_seed == 99, "settings: it's a copy, so changing the terrain changes nothing until it registers again")
+	terrain.chunk_size = 30.0
+	_check(NavWorld.get_terrain_settings(id).chunk_size == 20.0, "settings: it's a copy, so changing the terrain changes nothing until it registers again")
 	terrain.generate()
-	_check(NavWorld.get_terrain_settings(id).noise_seed == 100, "settings: generating registers the new settings")
+	_check(NavWorld.get_terrain_settings(id).chunk_size == 30.0, "settings: generating registers the new settings")
 	terrain.free()
 	_check(NavWorld.get_terrain_settings(id) == null, "settings: a terrain leaving the scene takes them away")
 
@@ -112,6 +110,7 @@ func _test_plain_terrain_announces_nothing() -> void:
 	terrain.name = "Plain"
 	terrain.chunk_resolution = 4
 	terrain.chunk_size = 20.0
+	terrain.add_child(WorldNavLink.new())
 	add_child(terrain)
 	NavWorld.flush()
 	_check(NavWorld.get_marker_count() == 0, "plain terrain: announces no markers")
@@ -146,6 +145,7 @@ func _test_positions_follow_the_node() -> void:
 	terrain.build_collision = false
 	terrain.grid_jitter = 0.0
 	terrain.position = Vector3(500, 10, 300)
+	terrain.add_child(WorldNavLink.new())
 	add_child(terrain)
 	NavWorld.flush()
 	var id := NavWorld.chunk_marker_id(NavWorld.scene_marker_id(str(terrain.get_path())), Vector2i.ZERO, 0)
@@ -272,6 +272,7 @@ func _test_example_terrain() -> void:
 	example.name = "Example"
 	example.chunk_radius = 0
 	example.build_collision = false
+	example.add_child(WorldNavLink.new())
 	add_child(example)
 	NavWorld.flush()
 	var seats := NavWorld.find_in_radius(&"use.seat", Vector3.ZERO, 100000.0)

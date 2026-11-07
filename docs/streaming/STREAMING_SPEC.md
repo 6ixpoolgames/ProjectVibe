@@ -2,7 +2,7 @@
 
 # Chunk Streaming
 
-**Status:** built for one terrain, offline and in multiplayer, with edits that outlast their chunks and reach every machine. Edits aren't saved to a file yet.
+**Status:** built for one terrain, offline and in multiplayer, with edits that outlast their chunks and reach every machine. Edits aren't saved to a file yet. `ChunkStreamer` is now part of a `WorldCoordinator`, and only streams chunks: `WorldNavLink` ticks nav and manages its interests. See `docs/world/WORLD_SPEC.md`.
 
 ## 1. How it works
 

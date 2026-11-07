@@ -1,5 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-04: pretends the network is bad, for testing (netcode spec section 16).
-## Packets wait here before really being sent or handled. NetworkSession has two of these: `fake` for what it sends and
+## Packets wait here before really being sent or handled. NetDebugModule has two of these: `fake` for what it sends and
 ## `fake_in` for what it receives, so one window can set its whole ping. Off unless a value is set. Every setting can
 ## change while running, and a fixed seed makes a run repeatable.
 ##

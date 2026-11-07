@@ -38,6 +38,7 @@ const CONTROLLER_SCENE_SETTING := "project_base/game_mode/player_controller_scen
 ## How offline play refers to its one player, since it has no network peer number.
 const OFFLINE_PEER := -1
 const CHANNEL := "possession"
+const REQUEST_CHANNEL := "possession_request" # Claude 2026-11-07: a client asking the server
 # What's in a possession message.
 const MESSAGE_ONE := 1
 const MESSAGE_ALL := 2
@@ -61,7 +62,7 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 	if _session:
 		_session.register_world_channel(CHANNEL, _on_network_message, _catch_up_message)
 		_session.entity_spawned.connect(_on_entity_spawned)
-		_session.possession_requested.connect(_on_possession_requested)
+		_session.register_client_channel(REQUEST_CHANNEL, _on_request)
 		_session.player_leaving.connect(_on_player_leaving) # Claude 2026-11-07
 	if not OS.has_feature("dedicated_server"):
 		controller = _make_controller()
@@ -73,7 +74,7 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	if _session:
 		_session.unregister_world_channel(CHANNEL)
 		_session.entity_spawned.disconnect(_on_entity_spawned)
-		_session.possession_requested.disconnect(_on_possession_requested)
+		_session.unregister_client_channel(REQUEST_CHANNEL)
 		_session.player_leaving.disconnect(_on_player_leaving) # Claude 2026-11-07
 	for peer: int in _by_peer.keys():
 		_clear(peer)
@@ -90,7 +91,7 @@ func possess(pawn: Pawn) -> bool:
 		if entity == null:
 			refused.emit(_local_peer(), pawn, "it isn't a networked entity")
 			return false
-		_session.request_possession(entity.entity_id)
+		_ask_server(entity.entity_id)
 		return true
 	return possess_for(_local_peer(), pawn)
 
@@ -98,7 +99,7 @@ func possess(pawn: Pawn) -> bool:
 ## Lets go of this machine's pawn. On a client it's a request.
 func release() -> void:
 	if _is_client():
-		_session.request_possession(0)
+		_ask_server(0)
 	else:
 		release_for(_local_peer())
 
@@ -134,6 +135,14 @@ func release_for(peer: int) -> void:
 	if _is_server() and is_instance_valid(entity):
 		_session.set_entity_owner(entity.entity_id, 0)
 	_tell_clients(peer, null)
+
+
+## Claude 2026-11-07: server or offline: whoever has this pawn lets go of it. This is the only way to evict someone. Turning possessable
+## off doesn't: it only stops new possessions.
+func release_pawn(pawn: Pawn) -> void:
+	var peer := get_peer_of(pawn)
+	if peer != 0:
+		release_for(peer)
 
 
 ## Which pawn a player has. With no peer given, this machine's player.
@@ -304,8 +313,20 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 			_assign(peer, pawn)
 
 
-## Server: a client asks for a pawn, by id. 0 means let go. A client can ask for anything, so the usual checks apply.
-func _on_possession_requested(peer: int, entity_id: int) -> void:
+## Client: asks the server for a pawn, by id. 0 means let go. The server can say no.
+func _ask_server(entity_id: int) -> void:
+	var buffer := StreamPeerBuffer.new()
+	buffer.put_u32(entity_id)
+	_session.send_to_server(REQUEST_CHANNEL, buffer.data_array)
+
+
+## Server: a client asks for a pawn. A client can send anything, so the size is checked and the usual checks apply.
+func _on_request(peer: int, bytes: PackedByteArray) -> void:
+	if bytes.size() != 4:
+		return
+	var buffer := StreamPeerBuffer.new()
+	buffer.data_array = bytes
+	var entity_id := buffer.get_u32()
 	if entity_id == 0:
 		release_for(peer)
 		return

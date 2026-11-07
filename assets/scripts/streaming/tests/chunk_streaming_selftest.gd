@@ -171,12 +171,13 @@ func _test_markers_load_and_unload() -> void:
 	terrain.chunk_resolution = 4
 	terrain.chunk_size = 32.0
 	terrain.build_collision = false
+	terrain.add_child(WorldNavLink.new()) # Claude 2026-11-07: this announces a terrain's markers now
 	add_child(terrain)
 	terrain.load_chunk(Vector2i(0, 0))
 	terrain.load_chunk(Vector2i(1, 0))
 	NavWorld.flush()
 	_check(NavWorld.get_marker_count() == 2, "each loaded chunk announces its markers (%d)" % NavWorld.get_marker_count())
-	var id := NavWorld.chunk_marker_id(terrain._terrain_id, Vector2i(1, 0), 0)
+	var id := NavWorld.chunk_marker_id(NavWorld.scene_marker_id(str(terrain.get_path())), Vector2i(1, 0), 0)
 	_check(NavWorld.get_marker(id) != null, "with the id that chunk's position gives")
 	terrain.unload_chunk(Vector2i(1, 0))
 	NavWorld.flush()
@@ -554,6 +555,7 @@ func _test_markers_follow_the_source() -> void:
 	terrain.chunk_resolution = 4
 	terrain.chunk_size = 32.0
 	terrain.build_collision = false
+	terrain.add_child(WorldNavLink.new()) # Claude 2026-11-07: this announces a terrain's markers now
 	add_child(terrain)
 	var streamer := _make_streamer(terrain)
 	var source := _make_source(Vector3(16.0, 0.0, 16.0), 8.0)

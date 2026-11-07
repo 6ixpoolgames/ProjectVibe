@@ -305,19 +305,29 @@ func _test_bodies_stay_above() -> void:
 	var ground := terrain.height_at(spot.x, spot.y)
 	var body := Node3D.new()
 	body.position = Vector3(spot.x, ground, spot.y)
-	body.add_to_group(Terrain.STAY_ABOVE_GROUP)
+	body.add_to_group(TerrainBodyLifter.GROUP)
 	add_child(body)
 	var stranger := Node3D.new()
 	stranger.position = Vector3(spot.x, ground, spot.y)
 	add_child(stranger)
 	var above := Node3D.new()
 	above.position = Vector3(spot.x, ground + 50.0, spot.y)
-	above.add_to_group(Terrain.STAY_ABOVE_GROUP)
+	above.add_to_group(TerrainBodyLifter.GROUP)
 	add_child(above)
 	var far := Node3D.new()
 	far.position = Vector3(spot.x + 8.0, -20.0, spot.y)
-	far.add_to_group(Terrain.STAY_ABOVE_GROUP)
+	far.add_to_group(TerrainBodyLifter.GROUP)
 	add_child(far)
+
+	# Claude 2026-11-07: an optional module now. Without it, the terrain moves nothing.
+	terrain.edit(Vector3(spot.x, 0.0, spot.y), 2.0, 0.5)
+	_check(is_equal_approx(body.position.y, ground), "with no lifter, nothing is moved")
+	ground = terrain.height_at(spot.x, spot.y)
+	body.position.y = ground
+	stranger.position.y = ground
+	above.position.y = ground + 50.0
+	var lifter := TerrainBodyLifter.new()
+	terrain.add_child(lifter)
 
 	terrain.edit(Vector3(spot.x, 0.0, spot.y), 2.0, 6.0)
 	var raised := terrain.height_at(spot.x, spot.y)
@@ -367,7 +377,7 @@ func _measure() -> void:
 		var pick := RandomNumberGenerator.new()
 		pick.seed = 7
 		for i in edits_on_chunk:
-			edit_log.record(pick.randf_range(0.0, 128.0), pick.randf_range(0.0, 128.0), 6.0, 0.1, 0)
+			edit_log.record(pick.randf_range(0.0, 128.0), pick.randf_range(0.0, 128.0), 6.0, 0.1)
 		terrain.unload_chunk(KEY_A)
 		var started := Time.get_ticks_usec()
 		terrain.load_chunk(KEY_A)

@@ -114,6 +114,15 @@ func _test_refusals() -> void:
 	_possession.release_for(7)
 	_check(not _possession.possess(null), "nothing at all is refused too")
 	_possession.refused.disconnect(on_refused)
+
+	# Claude 2026-11-07: the flag only stops new possessions. Removing someone is its own call.
+	_check(_possession.possess(pawn), "(possessed again)")
+	pawn.possessable = false
+	_check(_controller.pawn == pawn and _possession.get_pawn_of() == pawn, "turning possessable off doesn't evict whoever has the pawn")
+	_possession.release_pawn(pawn)
+	_check(_controller.pawn == null and _possession.get_peer_of(pawn) == 0, "release_pawn does")
+	_possession.release_pawn(pawn)
+	_check(_possession.get_pawn_of() == null, "and on a pawn nobody has, it does nothing")
 	pawn.free()
 
 

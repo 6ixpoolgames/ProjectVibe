@@ -18,6 +18,9 @@
 ## To see it working, open terrain_sample.tscn. The test is tests/terrain_selftest.tscn.
 ## For a world that loads around the player instead of one fixed block, see ChunkStreamer and streaming_sample.tscn.
 ##
+## Claude 2026-11-07: it knows nothing about nav, networks or streaming. It says when a chunk is built or removed, and a WorldNavLink, if
+## there is one, feeds nav from that. So it stands alone, and works with or without a WorldCoordinator. See docs/world/WORLD_SPEC.md.
+##
 ## How to read this file, if you're getting back into GDScript: "GDScript note:" comments explain a language feature
 ## the first time it comes up. The other comments explain what this terrain does and why.
 ##
@@ -40,6 +43,13 @@ extends Node3D
 signal collision_built(chunk: Vector2i, collision_node: CollisionShape3D)
 ## Sent when a chunk has just been removed. Claude 2026-11-07: AI on it needs to know before its next tick.
 signal chunk_removed(chunk: Vector2i)
+## Sent when an edit has just raised the ground. center is the middle of the patch in the world, seen from above, as X and Z.
+## Claude 2026-11-07: TerrainBodyLifter uses it, so moving bodies isn't this script's job.
+signal ground_raised(center: Vector2, radius: float)
+## Sent when a chunk has been built or rebuilt, with its triangles, measured from this node. Claude 2026-11-07: WorldNavLink uses it.
+signal chunk_built(chunk: Vector2i, triangles: PackedVector3Array)
+## Sent when generate() or start_empty() begins, with the settings it's about to use already in place.
+signal generation_started
 
 # GDScript note: a const is a value that never changes.
 # How far a point can move at full jitter, as a share of one grid square. Any further, and a triangle could flip inside
@@ -109,20 +119,12 @@ const NO_GROUND := INF
 ## Makes the ground solid, so bodies can walk on it. It's skipped in the editor preview.
 @export var build_collision := true
 
-@export_group("Navigation")
-## Give this a NavHooks resource to make the nav system see this terrain. Leave it empty to keep it invisible to nav.
-# Claude 2026-11-05: typed as Resource instead of NavHooks, and NavServer is looked up by name in _connect_to_nav.
-# Writing either name directly would stop this script compiling on a build without the nav DLL. This way, a terrain
-# that doesn't use nav always works.
-# GDScript note: @export_custom sets the inspector hint by hand. This one offers only NavHooks in the picker.
-@export_custom(PROPERTY_HINT_RESOURCE_TYPE, "NavHooks") var nav_hooks: Resource
-
 @export_group("Streaming")
 ## On: the terrain builds its chunk_radius block when it starts. Off: it starts empty, and something else asks for
 ## chunks, which is normally a ChunkStreamer. The editor preview always builds the block, so you can see the ground.
 # Claude 2026-11-06: added for ChunkStreamer. On is the default, so every existing scene behaves as before.
 @export var build_on_start := true
-## Off: no meshes are built, only collision, nav and markers, which saves time and memory on a machine nobody looks at.
+## Off: no meshes are built, only collision, which saves time and memory on a machine nobody looks at.
 ## A build exported with Godot's dedicated_server feature never builds meshes, whatever this says.
 # Claude 2026-11-07: added for multiplayer streaming. A mesh was about 1.9 ms of the 6.5 ms a 256 m chunk cost.
 @export var build_meshes := true
@@ -142,9 +144,6 @@ var _points := {} # Vector2i -> PackedVector3Array, with (chunk_resolution + 1)^
 var _mesh_nodes := {} # Vector2i -> MeshInstance3D
 var _collision_nodes := {} # Vector2i -> CollisionShape3D, each one inside its own StaticBody3D
 var _plain_material := StandardMaterial3D.new() # used when the material setting is empty
-var _nav: Object = null # the NavServer, or null when this terrain isn't using nav
-var _nav_layer := -1 # our layer's number in the NavServer, or -1 for none
-var _terrain_id := 0 # our id in NavWorld, or 0 when not registered, such as in the editor preview
 var _has_generated := false
 # Claude 2026-11-06: the next three are for building and unloading one chunk at a time.
 var _building := {} # Vector2i -> _ChunkBuild, the chunks that are partly built
@@ -153,7 +152,6 @@ var _warned_about_lost_edits := false
 # Claude 2026-11-07: the two below are for TerrainEditLog, an optional module.
 var _edit_log: TerrainEditLog = null
 var _rebuild_queue: Array[Vector2i] = [] # chunks to rebuild, one per frame, because the log changed
-var _warned_about_network_edit := false
 
 
 ## Everything a half-built chunk needs to remember between steps.
@@ -188,7 +186,7 @@ class _MeshData:
 
 
 # The order a chunk's build goes through, one stage at a time.
-enum Stage { POINTS, EDITS, MESH_ROWS, MESH_NODE, COLLISION, NAV_AND_MARKERS }
+enum Stage { POINTS, EDITS, MESH_ROWS, MESH_NODE, COLLISION, ANNOUNCE }
 # How much one build step does. Measured 2026-11-06 at about 0.4 ms on a fast desktop, so slower machines stay near
 # their budget too. Collision can't be split, so it's the largest single step.
 const POINTS_PER_STEP := 350
@@ -200,9 +198,6 @@ const EDITS_PER_STEP := 20
 
 ## Every Terrain joins this Godot group, which is how other systems find them.
 const GROUP := &"terrains"
-## A body in this Godot group gets moved up onto the ground if an edit raises the ground above it, because the surface is
-## one-sided, and it would otherwise fall forever. Its position has to be at its feet. Claude 2026-11-07: netcode to-do 17.
-const STAY_ABOVE_GROUP := &"stays_above_terrain"
 
 
 # --- Godot calls these by itself ---
@@ -219,16 +214,13 @@ func _ready() -> void:
 		start_empty()
 
 
-# If this node is taken out of the scene and put back, _exit_tree has removed it from nav, and _ready won't run again.
+# If this node is taken out of the scene and put back, _ready won't run again.
 func _enter_tree() -> void:
 	add_to_group(GROUP) # Claude 2026-11-07: see GROUP
 	if _has_generated:
-		_connect_to_nav()
-		_register_with_nav_world()
 		# GDScript note: looping over a Dictionary gives you its keys.
 		for key in _points:
 			_rebuild_solid(key)
-			_announce_markers(key)
 
 
 # Claude 2026-11-07: a change to the edit log rebuilds chunks a few at a time, so it doesn't stall a frame.
@@ -237,16 +229,6 @@ func _process(_delta: float) -> void:
 		set_process(false)
 		return
 	_rebuild_chunk_now(_rebuild_queue.pop_back())
-
-
-func _exit_tree() -> void:
-	if _nav and _nav_layer >= 0:
-		_nav.remove_input_layer(_nav_layer)
-	_nav_layer = -1
-	_release_all_markers()
-	if _terrain_id != 0:
-		NavWorld.unregister_terrain(_terrain_id)
-		_terrain_id = 0
 
 
 # --- Things other scripts can call ---
@@ -271,7 +253,6 @@ func _build_block() -> void:
 	for key in _points:
 		_rebuild_mesh(key)
 		_rebuild_solid(key)
-		_announce_markers(key)
 	_has_generated = true
 
 
@@ -379,11 +360,10 @@ func build_chunk_step(key: Vector2i) -> bool:
 			build.triangles = _chunk_triangles(key)
 			if build_collision and not Engine.is_editor_hint():
 				_rebuild_collision(key, build.triangles)
-			build.stage = Stage.NAV_AND_MARKERS
-		Stage.NAV_AND_MARKERS:
-			_submit_to_nav(key, build.triangles)
-			_announce_markers(key)
+			build.stage = Stage.ANNOUNCE
+		Stage.ANNOUNCE:
 			_building.erase(key)
+			chunk_built.emit(key, build.triangles)
 			return true
 	return false
 
@@ -404,9 +384,19 @@ func unload_chunk(key: Vector2i) -> void:
 	_forget_chunk(key)
 
 
-## True if this terrain is feeding the nav system right now.
-func uses_nav() -> bool:
-	return _nav != null and _nav_layer >= 0
+## A built chunk's triangles, measured from this node. Claude 2026-11-07: for something that arrives after the chunk was built.
+func get_chunk_triangles(key: Vector2i) -> PackedVector3Array:
+	return _chunk_triangles(key) if _points.has(key) else PackedVector3Array()
+
+
+## A chunk's markers, placed in the world. See _make_chunk_markers. Claude 2026-11-07: WorldNavLink announces them.
+func get_chunk_markers(key: Vector2i) -> Array[NavMarker]:
+	var markers := _make_chunk_markers(key)
+	var origin := _terrain_origin()
+	for marker in markers:
+		if marker != null: # NavWorld refuses a null one and warns, so it's left in the list for that
+			marker.position += origin
+	return markers
 
 
 ## The ground's height at a position in the world, read from the same triangles as the mesh, collision and nav.
@@ -448,9 +438,11 @@ func raycast(origin: Vector3, direction: Vector3, max_distance := 600.0) -> Vari
 ## Raises (amount above 0) or digs (amount below 0) a round patch centred on a position in the world, then rebuilds
 ## only the chunks it touched. The middle moves by the full amount, and the outer half of the radius fades to nothing.
 ## With a TerrainEditLog child, the edit outlasts its chunk. Without one, it's gone when the chunk unloads.
-## In multiplayer, only the server can edit, and it needs a TerrainEditLog, which is what tells the clients.
+## In multiplayer, add a TerrainEditLog: it tells the clients, and keeps them from editing on their own. Without one, an edit stays on
+## the machine that made it, and machines end up on different ground.
+# Claude 2026-11-07: the network rule moved to TerrainEditLog, so this script doesn't need to know about networks.
 func edit(center: Vector3, radius: float, amount: float) -> void:
-	if radius <= 0.0 or _edit_refused_by_network():
+	if radius <= 0.0 or (_edit_log != null and _edit_log.refuses_edit()):
 		return
 	# Claude 2026-11-06: a half-built chunk would finish with a mesh made from the heights before this edit, so finish
 	# them first. It costs a stutter only if an edit lands while a chunk is loading.
@@ -460,27 +452,8 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 	# Claude 2026-11-07: rounded to 32 bits first, the same as what the log stores, so that every machine gets identical ground.
 	var rounded := PackedFloat32Array([local_center.x, local_center.z, radius, amount])
 	if _edit_log != null:
-		_edit_log.record(rounded[0], rounded[1], rounded[2], rounded[3], _current_tick())
+		_edit_log.record(rounded[0], rounded[1], rounded[2], rounded[3])
 	_apply_edit_to_loaded_chunks(rounded[0], rounded[1], rounded[2], rounded[3])
-
-
-## Claude 2026-11-07: every machine has to end up with the same ground, so only the server decides, and only if it can tell
-## everyone. Without this, a client or a server with no log would quietly end up on different ground.
-func _edit_refused_by_network() -> bool:
-	var session: Node = get_node_or_null("/root/NetworkSession") if is_inside_tree() else null
-	if session == null:
-		return false
-	if session.is_client():
-		if not _warned_about_network_edit:
-			_warned_about_network_edit = true
-			push_warning("Terrain: a client can't edit the ground. Ask the server to. Shown once.")
-		return true
-	if session.is_server() and _edit_log == null:
-		if not _warned_about_network_edit:
-			_warned_about_network_edit = true
-			push_warning("Terrain: in multiplayer, editing needs a TerrainEditLog child, so that clients get the edit. Shown once.")
-		return true
-	return false
 
 
 ## An edit from the server has reached this client, and the log has it already.
@@ -522,10 +495,9 @@ func _apply_edit_to_loaded_chunks(x: float, z: float, radius: float, amount: flo
 		_rebuild_mesh(key)
 	for key in changed_chunks:
 		_rebuild_solid(key)
-		# Claude 2026-11-06: the ground moved, so the chunk announces its markers again, or they'd float or get buried.
-		_announce_markers(key)
 	if amount > 0.0:
-		_lift_bodies_above_ground(flat_center, radius)
+		var origin := _terrain_origin()
+		ground_raised.emit(Vector2(flat_center.x + origin.x, flat_center.y + origin.z), radius)
 
 
 ## Adds one edit to a list of grid points, and returns true if any of them moved. Its position is measured from the terrain.
@@ -572,9 +544,9 @@ func _shape_height(_x: float, _z: float, noise_height: float) -> float:
 
 
 ## Change this to give a chunk its links and points of interest. Copy tests/terrain_marker_example.gd to see how.
-## This terrain announces them to NavWorld when the chunk is built and after an edit, and releases them when it's gone.
-## By default a chunk has none and pays nothing. Rules for what you return:
-##   - Make new markers every time, because this terrain moves them into place.
+## A WorldNavLink announces them to NavWorld when the chunk is built and after an edit, so they can't float or get buried, and
+## releases them when it's gone. By default a chunk has none and pays nothing. Rules for what you return:
+##   - Make new markers every time, because get_chunk_markers moves them into place.
 ##   - Set each marker's position measured from this node, as _shape_height does. _point_at gives grid points.
 ##   - Build the list from the chunk's numbers, not random numbers, so every machine gets the same list. A marker's
 ##     id comes from its place in the list. That's also why an edit shouldn't change the list, only the heights,
@@ -583,32 +555,6 @@ func _shape_height(_x: float, _z: float, noise_height: float) -> float:
 # Claude 2026-11-06: the nav spec's section 21.6. The generator knows its own terrain, so it says what's there.
 func _make_chunk_markers(_key: Vector2i) -> Array[NavMarker]:
 	return []
-
-
-# --- Building: the grid points ---
-
-
-## Moves any body in STAY_ABOVE_GROUP up onto the ground, if this patch has just left it underneath.
-func _lift_bodies_above_ground(flat_center: Vector2, radius: float) -> void:
-	if not is_inside_tree():
-		return
-	var origin := _terrain_origin()
-	for node in get_tree().get_nodes_in_group(STAY_ABOVE_GROUP):
-		var body := node as Node3D
-		if body == null:
-			continue
-		var at := body.global_position
-		if Vector2(at.x - origin.x, at.z - origin.z).distance_to(flat_center) > radius + _square_size():
-			continue
-		var ground := _ground_at(at.x, at.z)
-		if ground != NO_GROUND and at.y < ground:
-			body.global_position = Vector3(at.x, ground, at.z)
-
-
-## The current tick, for the log's records. It's only informative, so 0 is fine with no tick driver.
-func _current_tick() -> int:
-	var driver: Node = get_node_or_null("/root/NetworkTime") if is_inside_tree() else null
-	return driver.tick if driver else 0
 
 
 # --- The edit log module ---
@@ -652,7 +598,6 @@ func _rebuild_chunk_now(key: Vector2i) -> void:
 	_generate_points(key)
 	_rebuild_mesh(key)
 	_rebuild_solid(key)
-	_announce_markers(key)
 	if smooth_shading:
 		for neighbour: Vector2i in [key + Vector2i.LEFT, key + Vector2i.RIGHT, key + Vector2i.UP, key + Vector2i.DOWN]:
 			if has_chunk(neighbour):
@@ -663,6 +608,9 @@ func _rebuild_chunk_now(key: Vector2i) -> void:
 func finish_rebuilds() -> void:
 	while not _rebuild_queue.is_empty():
 		_rebuild_chunk_now(_rebuild_queue.pop_back())
+
+
+# --- Building: the grid points ---
 
 
 func _generate_points(key: Vector2i) -> void:
@@ -931,22 +879,15 @@ func _smooth_normal(world_x_number: int, world_z_number: int) -> Vector3:
 	return total.normalized()
 
 
-# --- Building: what you stand on, and what nav walks on ---
+# --- Building: what you stand on ---
 
 
-## Sends a chunk's triangles to collision and nav together, so they can't disagree.
+## Makes a chunk's collision, and announces its triangles, so that collision and anything listening can't disagree.
 func _rebuild_solid(key: Vector2i) -> void:
 	var triangles := _chunk_triangles(key)
 	if build_collision and not Engine.is_editor_hint():
 		_rebuild_collision(key, triangles)
-	_submit_to_nav(key, triangles)
-
-
-func _submit_to_nav(key: Vector2i, triangles: PackedVector3Array) -> void:
-	if _nav and _nav_layer >= 0:
-		# Nav works in world positions, so it's told where this node is. If the node moves later, nav won't know until
-		# the next generate() or edit().
-		_nav.submit_mesh(_nav_layer, _nav_mesh_id(key), triangles, global_transform)
+	chunk_built.emit(key, triangles)
 
 
 func _rebuild_collision(key: Vector2i, triangles: PackedVector3Array) -> void:
@@ -962,80 +903,6 @@ func _rebuild_collision(key: Vector2i, triangles: PackedVector3Array) -> void:
 	# GDScript note: "as" converts the type, here so that set_faces is known to exist on the shape.
 	(collision_node.shape as ConcavePolygonShape3D).set_faces(triangles)
 	collision_built.emit(key, collision_node)
-
-
-func _connect_to_nav() -> void:
-	# No hooks means nav isn't wanted. The editor preview never uses it either.
-	if nav_hooks == null or Engine.is_editor_hint():
-		return
-	if not Engine.has_singleton("NavServer"):
-		push_warning("Terrain: nav_hooks is set, but the nav library isn't loaded. Nav won't see this terrain.")
-		return
-	_nav = Engine.get_singleton("NavServer")
-	# Mesh input, not heightmap input: nav's heightmap input needs a regular grid, and jitter moves the points off it.
-	# Measured 2026-11-05 on 25 chunks of 1 m squares: the first build takes about the same as heightmap input (about
-	# 95 ms against 90 ms), and rebuilding after an edit takes about twice as long (17 ms against 8 ms).
-	var adapter := ClassDB.class_get_integer_constant("NavServer", "ADAPTER_MESH")
-	_nav_layer = _nav.add_input_layer(self, nav_hooks, adapter)
-
-
-# --- Markers: telling NavWorld what's in each chunk ---
-# Claude 2026-11-06: added for nav spec section 21.6. NavWorld is plain GDScript, so all of this works without the
-# nav library. It stays out of the editor preview, because the autoload only exists while the game runs.
-
-
-## Gives NavWorld a copy of this terrain's settings, and gets the id its chunks' markers use.
-func _register_with_nav_world() -> void:
-	if Engine.is_editor_hint() or not is_inside_tree():
-		return
-	_terrain_id = NavWorld.register_terrain(str(get_path()), _make_nav_settings())
-
-
-func _make_nav_settings() -> TerrainSettings:
-	var settings := TerrainSettings.new()
-	settings.origin = _terrain_origin()
-	settings.chunk_size = chunk_size
-	settings.chunk_resolution = chunk_resolution
-	settings.height_scale = height_scale
-	settings.noise_seed = noise_seed
-	settings.noise_scale = noise_scale
-	settings.noise_type = noise_type
-	settings.frequency = frequency
-	settings.fractal_type = fractal_type
-	settings.fractal_octaves = fractal_octaves
-	settings.fractal_gain = fractal_gain
-	settings.fractal_lacunarity = fractal_lacunarity
-	return settings
-
-
-## Replaces whatever this chunk has announced with a fresh list. Takes effect on NavWorld's next tick.
-func _announce_markers(key: Vector2i) -> void:
-	if _terrain_id == 0:
-		return
-	NavWorld.release_markers(_terrain_id, key)
-	var markers := _make_chunk_markers(key)
-	if markers.is_empty():
-		return
-	if String(name).begins_with("@"):
-		push_warning("Terrain: %s has an automatic name, so machines may disagree on its marker ids. Give it a name of its own." % get_path())
-	var origin := _terrain_origin()
-	for marker in markers:
-		if marker != null: # NavWorld refuses a null one and warns, so it's left in the list for that
-			marker.position += origin
-	NavWorld.request_markers(_terrain_id, key, markers)
-
-
-func _release_all_markers() -> void:
-	if _terrain_id == 0:
-		return
-	for key in _points:
-		NavWorld.release_markers(_terrain_id, key)
-
-
-## Nav knows each mesh by one number, so this packs the chunk's two grid numbers into one. Adding 2^20 keeps negative
-## chunk numbers positive, and "<<" slides the first number along so the two don't overlap.
-func _nav_mesh_id(key: Vector2i) -> int:
-	return ((key.x + (1 << 20)) << 21) | (key.y + (1 << 20))
 
 
 # --- Reading the ground ---
@@ -1111,9 +978,7 @@ func _prepare() -> void:
 	_apply_noise_settings()
 	_plain_material.albedo_color = Color(0.46, 0.43, 0.37)
 	_plain_material.roughness = 1.0
-	if _nav_layer < 0:
-		_connect_to_nav()
-	_register_with_nav_world()
+	generation_started.emit()
 
 
 func _clear() -> void:
@@ -1138,12 +1003,7 @@ func _forget_chunk(key: Vector2i) -> void:
 		remove_child(body)
 		body.queue_free()
 		_collision_nodes.erase(key)
-	if _points.has(key):
-		if _nav and _nav_layer >= 0:
-			_nav.remove_mesh(_nav_layer, _nav_mesh_id(key))
-		if _terrain_id != 0:
-			NavWorld.release_markers(_terrain_id, key)
-		_points.erase(key)
+	_points.erase(key)
 	_edited_chunks.erase(key)
 	chunk_removed.emit(key)
 

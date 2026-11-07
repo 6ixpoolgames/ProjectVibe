@@ -39,6 +39,7 @@ var _by_chunk := {} # Vector2i -> PackedInt32Array of positions in the lists abo
 var _terrain: Terrain = null
 var _session: Node = null
 var _channel := ""
+var _warned_about_client_edit := false
 
 
 func _enter_tree() -> void:
@@ -83,9 +84,20 @@ func clear() -> void:
 	_by_chunk.clear()
 
 
+## Claude 2026-11-07: true if this machine mustn't edit the ground. Every machine has to end up with the same ground, so in multiplayer
+## only the server edits, and this tells everyone.
+func refuses_edit() -> bool:
+	if _session == null or not _session.is_client():
+		return false
+	if not _warned_about_client_edit:
+		_warned_about_client_edit = true
+		push_warning("TerrainEditLog: a client can't edit the ground. Ask the server to. Shown once.")
+	return true
+
+
 ## Adds an edit, positioned relative to the terrain, and returns its position in the log.
-func record(x: float, z: float, radius: float, amount: float, tick: int) -> int:
-	var index := _add(x, z, radius, amount, tick)
+func record(x: float, z: float, radius: float, amount: float) -> int:
+	var index := _add(x, z, radius, amount, _current_tick())
 	if _session and _session.is_server():
 		var bytes := edit_as_bytes(index)
 		bytes.insert(0, MESSAGE_ONE_EDIT)
@@ -231,6 +243,12 @@ func _add(x: float, z: float, radius: float, amount: float, tick: int) -> int:
 			list.append(index)
 			_by_chunk[key] = list
 	return index
+
+
+## The current tick, for the records. It's only informative, so 0 is fine with no tick driver.
+func _current_tick() -> int:
+	var driver: Node = get_node_or_null("/root/NetworkTime") if is_inside_tree() else null
+	return driver.tick if driver else 0
 
 
 ## A number that changes if the settings that decide the ground change.

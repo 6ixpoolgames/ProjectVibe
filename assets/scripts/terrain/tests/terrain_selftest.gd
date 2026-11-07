@@ -391,17 +391,21 @@ func _test_moved_node() -> void:
 	moved.free()
 
 
+## Claude 2026-11-07: a terrain feeds nav through a WorldNavLink now.
+func _add_nav_link(terrain: Terrain) -> void:
+	var link := WorldNavLink.new()
+	link.nav_hooks = NavHooks.new()
+	terrain.add_child(link)
+
+
 func _test_nav() -> void:
-	var quiet := _make_terrain(0)
-	_check(quiet._nav_layer == -1, "no nav_hooks means no nav layer")
-	quiet.free()
 
 	NavServer.configure({"worker_threads": 4})
 	var interest := NavServer.add_interest(Vector3.ZERO, 70.0, 90.0, 1)
 	var terrain: Terrain = COURSE.new()
 	_use_plain_grid(terrain)
 	terrain.chunk_radius = 2
-	terrain.nav_hooks = NavHooks.new()
+	_add_nav_link(terrain)
 	add_child(terrain)
 	_tick_nav_until_idle()
 
@@ -434,7 +438,7 @@ func _test_nav() -> void:
 	# Default look: coarse grid, jitter, gentle hills. Nav has to walk the same triangles as everything else.
 	var jittered := Terrain.new()
 	jittered.build_collision = false
-	jittered.nav_hooks = NavHooks.new()
+	_add_nav_link(jittered)
 	add_child(jittered)
 	_tick_nav_until_idle()
 	# This ground isn't flat, so start and end on it. Nav only looks a little above and below for the nearest ground.
@@ -454,7 +458,7 @@ func _test_nav() -> void:
 	var moved: Terrain = COURSE.new()
 	_use_plain_grid(moved)
 	moved.chunk_radius = 2
-	moved.nav_hooks = NavHooks.new()
+	_add_nav_link(moved)
 	moved.position = Vector3(20.0, 0.0, 10.0)
 	add_child(moved)
 	_tick_nav_until_idle()
@@ -475,7 +479,7 @@ func _measure_nav_inputs() -> void:
 		mesh_terrain.chunk_radius = 2
 		mesh_terrain.fractal_octaves = 4
 		mesh_terrain.height_scale = 10.0
-		mesh_terrain.nav_hooks = NavHooks.new()
+		_add_nav_link(mesh_terrain)
 		var started := Time.get_ticks_msec()
 		add_child(mesh_terrain)
 		var ready_mesh := Time.get_ticks_msec()

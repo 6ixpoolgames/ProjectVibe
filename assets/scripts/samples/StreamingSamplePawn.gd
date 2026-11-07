@@ -60,7 +60,7 @@ func _init() -> void:
 
 
 func _enter_tree() -> void:
-	add_to_group(Terrain.STAY_ABOVE_GROUP)
+	add_to_group(TerrainBodyLifter.GROUP)
 	_update_ai_activity()
 
 

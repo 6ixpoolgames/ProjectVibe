@@ -52,6 +52,7 @@ var _root: Node = null
 var _hit_ticks := PackedInt64Array()
 var _hit_positions := PackedVector3Array()
 var _live_position := Vector3.ZERO
+var _paused := false # Claude 2026-11-07: see set_paused
 
 
 ## Called by NetworkSession before the entity enters the tree, so everything below it can see its role from the start.
@@ -138,14 +139,38 @@ func refresh_input_saving() -> void:
 		state.skip_input_capture = role == Role.AUTHORITY and session != null and session.is_server() and not (is_predicted or session.default_predicted)
 
 
+## Claude 2026-11-07: stops every tick this entity causes, or starts them again: its parent's, its TickState's and its own. All of its
+## state stays as it is. While paused it records nothing, so snapshots leave it out, and clients hold it where they last saw it. Only
+## for an entity on the machine that decides, such as a server's AI pawn out of reach of every player.
+func set_paused(paused: bool) -> void:
+	if paused != _paused:
+		_paused = paused
+		_apply_role_to_driver()
+
+
+func is_paused() -> bool:
+	return _paused
+
+
+## Claude 2026-11-07: the one place that decides which of this entity's parts tick, so nothing else has to undo it. It registers them
+## in the order they'd normally join: the parent first, because _tick_input below runs after the parent's.
 ## Something placed from snapshots must not also simulate itself. Your own unpredicted pawn still decides its input, in _tick_input below.
 func _apply_role_to_driver() -> void:
-	if _driver == null or _root == null:
+	if _driver == null or _root == null or not is_inside_tree():
+		return
+	if _paused:
+		_driver.unregister(_root)
+		_driver.unregister(self)
+		if state:
+			_driver.unregister(state)
 		return
 	if follows_snapshots():
 		_driver.unregister(_root)
 	else:
 		_driver.register(_root)
+	if state:
+		_driver.register(state)
+	_driver.register(self)
 
 
 # --- Called by the tick driver -----------------------------------------------------------------

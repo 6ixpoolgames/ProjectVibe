@@ -219,14 +219,26 @@ func _test_ai_with_no_ground() -> void:
 	terrain.name = "EmptyTerrain"
 	terrain.build_on_start = false
 	add_child(terrain)
+	var driver: Node = get_node("/root/NetworkTime")
+	var participants_before: int = driver.get_participant_count()
 	var pawn := _make_pawn(Vector3(5.0, 40.0, 5.0))
 	pawn.apply_player_input(Vector3(1.0, 0.0, 0.0), 0.0, 0.0, false, false)
 	await _ticks(30)
 	_check(not pawn.is_simulation_active(), "an AI pawn with no ground is switched off")
 	_check(is_equal_approx(pawn.position.y, 40.0) and is_equal_approx(pawn.position.x, 5.0), "so it stays exactly where it is")
+	# Claude 2026-11-07: the bug this guards against: its entity and TickState kept ticking, so a pawn that was off still cost a lot.
+	var entity: NetworkEntity = pawn.get_node("NetworkEntity")
+	var state: TickStateComponent = pawn.get_node("TickState")
+	_check(not driver.is_registered(pawn) and not driver.is_registered(entity) and not driver.is_registered(state), "and nothing of it ticks")
 	pawn.set_has_player(true)
 	_check(pawn.is_simulation_active(), "a player taking it switches it on")
+	_check(driver.is_registered(pawn) and driver.is_registered(entity) and driver.is_registered(state), "and all of it ticks again")
+	pawn.set_has_player(false)
+	await _ticks(2)
+	_check(not pawn.is_simulation_active(), "(it's off again)")
 	pawn.free()
+	await get_tree().process_frame
+	_check(driver.get_participant_count() == participants_before, "and a pawn freed while it's off leaves nothing behind")
 	terrain.free()
 
 

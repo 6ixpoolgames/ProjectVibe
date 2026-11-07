@@ -16,9 +16,9 @@ const PORT := 24895
 const PAWN_SCENE := preload("res://assets/scenes/pawn/pawn.tscn")
 const AI_PAWNS := 3
 
-@onready var _terrain: Terrain = $Terrain
-@onready var _streamer: ChunkStreamer = $Terrain/ChunkStreamer
-@onready var _edit_log: TerrainEditLog = $Terrain/TerrainEditLog
+@onready var _terrain: Terrain = $World/Terrain
+@onready var _streamer: ChunkStreamer = $World/ChunkStreamer
+@onready var _edit_log: TerrainEditLog = $World/Terrain/TerrainEditLog
 @onready var _status: Label = $Display/Status
 @onready var _menu: Control = $Display/Menu
 @onready var _address: LineEdit = $Display/Menu/Box/Address

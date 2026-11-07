@@ -27,7 +27,9 @@ extends CharacterBody3D
 ## Sent when a player takes this pawn, or lets it go.
 signal possession_changed(pawn: Pawn, has_player: bool)
 
-## Whether a player may take control of this pawn.
+## Whether a player may take control of this pawn. Turn it off on pawns players should never control.
+# Claude 2026-11-07: on by default, the owner's choice. Off, people would be left wondering why their pawn doesn't work. Something
+# still has to ask for a possession, so a wrong one is a clear bug that gets looked at.
 @export var possessable := true
 ## On: an AI pawn keeps the world loaded around it, as a player's pawn always does. Off, it's switched off wherever no
 ## source keeps the ground loaded, which is what you want for a horde.
@@ -84,18 +86,19 @@ func _init() -> void:
 
 
 func _enter_tree() -> void:
-	add_to_group(Terrain.STAY_ABOVE_GROUP)
+	add_to_group(TerrainBodyLifter.GROUP)
 	_driver = get_node_or_null("/root/NetworkTime")
 	if _driver:
 		_driver.register(self)
 
 
 func _exit_tree() -> void:
-	if _driver:
-		_driver.unregister(self)
+	# Claude 2026-11-07: this first, because leaving the list can switch the pawn back on, which would register it again.
 	var ai := _ai_activity()
 	if ai:
 		ai.remove_pawn(self)
+	if _driver:
+		_driver.unregister(self)
 
 
 func _ready() -> void:
@@ -189,17 +192,20 @@ func get_default_view() -> VirtualCamera:
 
 
 ## AIActivityModule calls this. Everything about the pawn stays as it is, and it simply stops ticking.
+# Claude 2026-11-07: through the NetworkEntity, because it decides what ticks. This only stopped the pawn itself, and left its entity and
+# TickState running: 2,000 pawns that were off still cost 53 ms a tick.
 func set_simulation_active(active: bool) -> void:
 	if _simulating == active:
 		return
 	_simulating = active
-	if _driver:
-		if active:
-			_driver.register(self)
-		else:
-			_driver.unregister(self)
-	else:
+	if _driver == null:
 		set_physics_process(active)
+	elif _entity:
+		_entity.set_paused(not active)
+	elif active:
+		_driver.register(self)
+	else:
+		_driver.unregister(self)
 
 
 func is_simulation_active() -> bool:
@@ -275,9 +281,6 @@ func _on_network_role(entity: NetworkEntity) -> void:
 	if is_node_ready():
 		_refresh_source()
 		_refresh_ai_activity()
-		# A role change registers this pawn for ticks again, so a pawn that's switched off has to go back to being off.
-		if not _simulating and _driver:
-			_driver.unregister(self)
 
 
 ## On the server: a client's input is never trusted. Wrong types are replaced, and direction is limited to full speed.
