@@ -166,12 +166,12 @@ func _test_no_camera() -> void:
 
 func _test_click_to_move() -> void:
 	NavServer.configure({"worker_threads": 4})
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.name = "ClickTerrain"
 	terrain.chunk_size = 64.0
 	terrain.chunk_resolution = 11
 	terrain.chunk_radius = 2
-	var link := WorldNavLink.new() # Claude 2026-11-07: a terrain feeds nav through this now
+	var link := TerrainNavFeeder.new() # Claude 2026-11-07: a terrain feeds nav through this now
 	link.nav_hooks = NavHooks.new()
 	terrain.add_child(link)
 	add_child(terrain)

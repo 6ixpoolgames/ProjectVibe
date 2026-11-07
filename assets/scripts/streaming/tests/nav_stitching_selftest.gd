@@ -32,7 +32,7 @@ var _failures := 0
 
 func _ready() -> void:
 	print("--- Nav stitching self-test ---")
-	NavWorld.report_quiet_seconds = 1000000.0
+	NavMarkerManager.report_quiet_seconds = 1000000.0
 	Engine.max_fps = 60
 	NavServer.configure({"worker_threads": 4})
 	print("        nav tiles are %.1f m" % (float(NavServer.get_config().tile_size_cells) * NavServer.get_config().cell_size))
@@ -52,8 +52,8 @@ func _ready() -> void:
 	_test_edit_on_a_border()
 	await _test_pawn_follows_nav()
 
-	NavWorld.report_quiet_seconds = 2.0
-	NavWorld.reset()
+	NavMarkerManager.report_quiet_seconds = 2.0
+	NavMarkerManager.reset()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -117,7 +117,7 @@ func _test_borders(chunk_size: float, chunk_resolution: int, offset: Vector3) ->
 
 
 ## A short path across a line: does it exist, reach its end, and stay short?
-func _hop_works(terrain: Terrain, offset: Vector3, from: Vector2, to: Vector2) -> bool:
+func _hop_works(terrain: TerrainGenerator, offset: Vector3, from: Vector2, to: Vector2) -> bool:
 	var start := _on_ground(terrain, offset, from)
 	var end := _on_ground(terrain, offset, to)
 	var path := NavServer.find_path_now(start, end, TIER_SMALLEST)
@@ -126,7 +126,7 @@ func _hop_works(terrain: Terrain, offset: Vector3, from: Vector2, to: Vector2) -
 	return _path_length(path) < start.distance_to(end) * 1.5 + 1.0
 
 
-func _check_long_path(terrain: Terrain, offset: Vector3, from: Vector2, to: Vector2, tier: int, label: String) -> void:
+func _check_long_path(terrain: TerrainGenerator, offset: Vector3, from: Vector2, to: Vector2, tier: int, label: String) -> void:
 	var start := _on_ground(terrain, offset, from)
 	var end := _on_ground(terrain, offset, to)
 	var path := NavServer.find_path_now(start, end, tier)
@@ -259,7 +259,7 @@ func _test_pawn_follows_nav() -> void:
 	var streamer := ChunkStreamer.new()
 	streamer.terrain = terrain
 	add_child(streamer)
-	terrain.get_node("WorldNavLink").tick_nav = true # Claude 2026-11-07: it moved here from the streamer
+	terrain.get_node("TerrainNavFeeder").tick_nav = true # Claude 2026-11-07: it moved here from the streamer
 	var pawn := StreamingSamplePawn.new()
 	pawn.terrain = terrain
 	pawn.speed = 10.0
@@ -323,16 +323,16 @@ func _test_pawn_follows_nav() -> void:
 # --- Helpers ---
 
 
-func _make_terrain(chunk_size: float, chunk_resolution: int, offset: Vector3, with_nav := true) -> Terrain:
-	var terrain := Terrain.new()
+func _make_terrain(chunk_size: float, chunk_resolution: int, offset: Vector3, with_nav := true) -> TerrainGenerator:
+	var terrain := TerrainGenerator.new()
 	terrain.name = "Terrain"
 	terrain.build_on_start = false
 	terrain.chunk_size = chunk_size
 	terrain.chunk_resolution = chunk_resolution
 	terrain.build_collision = false
-	if with_nav: # Claude 2026-11-07: a terrain feeds nav through a WorldNavLink now
-		var link := WorldNavLink.new()
-		link.name = "WorldNavLink"
+	if with_nav: # Claude 2026-11-07: a terrain feeds nav through a TerrainNavFeeder now
+		var link := TerrainNavFeeder.new()
+		link.name = "TerrainNavFeeder"
 		link.nav_hooks = NavHooks.new()
 		terrain.add_child(link)
 	terrain.position = offset
@@ -341,7 +341,7 @@ func _make_terrain(chunk_size: float, chunk_resolution: int, offset: Vector3, wi
 
 
 ## A position on the ground, measured from where four chunks meet.
-func _on_ground(terrain: Terrain, offset: Vector3, flat: Vector2) -> Vector3:
+func _on_ground(terrain: TerrainGenerator, offset: Vector3, flat: Vector2) -> Vector3:
 	var x := offset.x + flat.x
 	var z := offset.z + flat.y
 	return Vector3(x, terrain.height_at(x, z), z)
@@ -367,7 +367,7 @@ func _path_length(points: PackedVector3Array) -> float:
 ## down as y. Up or down can't be read from the path itself: Detour only gives corners where a path turns, so the
 ## straight line between two corners can pass through a hill, even though it's right when seen from above. Whatever
 ## follows a path has to walk on the ground and take only the direction from it, as StreamingSamplePawn does.
-func _worst_off_nav(terrain: Terrain, path: PackedVector3Array, tier: int) -> Vector2:
+func _worst_off_nav(terrain: TerrainGenerator, path: PackedVector3Array, tier: int) -> Vector2:
 	var worst := Vector2.ZERO
 	for i in range(1, path.size()):
 		var samples := maxi(1, int(_flat_distance(path[i - 1], path[i])))
@@ -399,7 +399,7 @@ func _sorted_triangles(corners: PackedVector3Array) -> PackedStringArray:
 	return triangles
 
 
-func _borders_match(terrain: Terrain) -> bool:
+func _borders_match(terrain: TerrainGenerator) -> bool:
 	var left: PackedVector3Array = terrain._points[Vector2i(-1, 0)]
 	var right: PackedVector3Array = terrain._points[Vector2i(0, 0)]
 	var n: int = terrain._points_per_edge()

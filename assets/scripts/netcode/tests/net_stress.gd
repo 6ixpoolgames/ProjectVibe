@@ -47,7 +47,7 @@ func _ready() -> void:
 	await _row("two_bad", GOOD + [{"name": "ping400", "bench-ping": 400}, {"name": "worst", "preset": "worst", "conditions-seed": 41}], {})
 	await _row("client_hitches", [GOOD[0], GOOD[1], GOOD[2], GOOD[3], {"name": "ping100_hitch", "bench-ping": 100, "hitch": "4:250"}], {})
 	await _row("server_hitches", GOOD, {"hitch": "4:150"})
-	# Claude 2026-11-07: the same crowd on Terrain, first as one fixed block and then loaded around each player.
+	# Claude 2026-11-07: the same crowd on TerrainGenerator, first as one fixed block and then loaded around each player.
 	await _row("terrain_fixed", _with(GOOD, FIXED_BLOCK), FIXED_BLOCK)
 	await _row("terrain_streamed", _with(GOOD, STREAMED), _merged(STREAMED, {"ai-loads": 1}))
 	# Claude 2026-11-07: the same again with the real motor and cameras: each client possesses one of its pawns.

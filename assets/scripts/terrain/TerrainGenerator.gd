@@ -1,5 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-05: one terrain generator with the features of procgen_tile.gd and
 ## nav_test_terrain.gd, built alongside them. Both originals stay as they are.
+## Claude 2026-11-07: renamed from Terrain, so that the name says what it does. Scene nodes may still be called "Terrain".
 ##
 ## The look it goes for is low poly without a visible square grid. The four settings that shape that are noise_scale,
 ## grid_jitter, chunk_resolution (how fine the grid is) and chunk_size (how big a chunk is in metres), plus smooth_shading.
@@ -18,7 +19,7 @@
 ## To see it working, open terrain_sample.tscn. The test is tests/terrain_selftest.tscn.
 ## For a world that loads around the player instead of one fixed block, see ChunkStreamer and streaming_sample.tscn.
 ##
-## Claude 2026-11-07: it knows nothing about nav, networks or streaming. It says when a chunk is built or removed, and a WorldNavLink, if
+## Claude 2026-11-07: it knows nothing about nav, networks or streaming. It says when a chunk is built or removed, and a TerrainNavFeeder, if
 ## there is one, feeds nav from that. So it stands alone, and works with or without a WorldCoordinator. See docs/world/WORLD_SPEC.md.
 ##
 ## How to read this file, if you're getting back into GDScript: "GDScript note:" comments explain a language feature
@@ -30,9 +31,9 @@
 # GDScript note: @tool makes this script run inside the editor as well as in the game. That's what lets the terrain
 # appear in the 3D view and the Generate button work. Engine.is_editor_hint() tells the two cases apart.
 @tool
-# GDScript note: class_name makes "Terrain" a global name. Other scripts can use it as a type, and it appears
+# GDScript note: class_name makes "TerrainGenerator" a global name. Other scripts can use it as a type, and it appears
 # in the editor's Add Node list.
-class_name Terrain
+class_name TerrainGenerator
 # GDScript note: extends says what this script builds on. A Node3D has a position in the world and can have children.
 extends Node3D
 
@@ -46,7 +47,7 @@ signal chunk_removed(chunk: Vector2i)
 ## Sent when an edit has just raised the ground. center is the middle of the patch in the world, seen from above, as X and Z.
 ## Claude 2026-11-07: TerrainBodyLifter uses it, so moving bodies isn't this script's job.
 signal ground_raised(center: Vector2, radius: float)
-## Sent when a chunk has been built or rebuilt, with its triangles, measured from this node. Claude 2026-11-07: WorldNavLink uses it.
+## Sent when a chunk has been built or rebuilt, with its triangles, measured from this node. Claude 2026-11-07: TerrainNavFeeder uses it.
 signal chunk_built(chunk: Vector2i, triangles: PackedVector3Array)
 ## Sent when generate() or start_empty() begins, with the settings it's about to use already in place.
 signal generation_started
@@ -196,7 +197,7 @@ const SMOOTH_POINTS_PER_STEP := 120
 const EDITS_PER_STEP := 20
 
 
-## Every Terrain joins this Godot group, which is how other systems find them.
+## Every TerrainGenerator joins this Godot group, which is how other systems find them.
 const GROUP := &"terrains"
 
 
@@ -278,7 +279,7 @@ func has_chunk(key: Vector2i) -> bool:
 
 ## True if every chunk within margin metres of this position is completely built. Quick, because AI checks it often:
 ## a position in the middle of a chunk only needs that one chunk.
-# Claude 2026-11-07: added for AIActivityModule.
+# Claude 2026-11-07: added for AIActivationManager.
 func has_ground_around(world_position: Vector3, margin: float) -> bool:
 	var origin := _terrain_origin()
 	var x := (world_position.x - origin.x) / chunk_size
@@ -389,12 +390,12 @@ func get_chunk_triangles(key: Vector2i) -> PackedVector3Array:
 	return _chunk_triangles(key) if _points.has(key) else PackedVector3Array()
 
 
-## A chunk's markers, placed in the world. See _make_chunk_markers. Claude 2026-11-07: WorldNavLink announces them.
+## A chunk's markers, placed in the world. See _make_chunk_markers. Claude 2026-11-07: TerrainNavFeeder announces them.
 func get_chunk_markers(key: Vector2i) -> Array[NavMarker]:
 	var markers := _make_chunk_markers(key)
 	var origin := _terrain_origin()
 	for marker in markers:
-		if marker != null: # NavWorld refuses a null one and warns, so it's left in the list for that
+		if marker != null: # NavMarkerManager refuses a null one and warns, so it's left in the list for that
 			marker.position += origin
 	return markers
 
@@ -544,7 +545,7 @@ func _shape_height(_x: float, _z: float, noise_height: float) -> float:
 
 
 ## Change this to give a chunk its links and points of interest. Copy tests/terrain_marker_example.gd to see how.
-## A WorldNavLink announces them to NavWorld when the chunk is built and after an edit, so they can't float or get buried, and
+## A TerrainNavFeeder announces them to NavMarkerManager when the chunk is built and after an edit, so they can't float or get buried, and
 ## releases them when it's gone. By default a chunk has none and pays nothing. Rules for what you return:
 ##   - Make new markers every time, because get_chunk_markers moves them into place.
 ##   - Set each marker's position measured from this node, as _shape_height does. _point_at gives grid points.

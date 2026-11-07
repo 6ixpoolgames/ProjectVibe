@@ -1,11 +1,11 @@
-## Written by Claude (claude-opus-5-5), 2026-11-05: Terrain with the same test course as nav_test_terrain.gd:
+## Written by Claude (claude-opus-5-5), 2026-11-05: TerrainGenerator with the same test course as nav_test_terrain.gd:
 ## a flat plaza in the middle and a 3 m wall with a gap. The test uses it to compare the two generators, and it's the
 ## example to copy for shaping terrain beyond the noise.
-extends Terrain
+extends TerrainGenerator
 
 
-# GDScript note: this replaces the _shape_height in Terrain, because this script extends it. Everything else
-# in Terrain still runs as written, and calls this version when it needs a height.
+# GDScript note: this replaces the _shape_height in TerrainGenerator, because this script extends it. Everything else
+# in TerrainGenerator still runs as written, and calls this version when it needs a height.
 func _shape_height(x: float, z: float, noise_height: float) -> float:
 	# Flat within about 10 m of the origin, fading in to the full noise by 30 m.
 	var flat := smoothstep(10.0, 30.0, Vector2(x, z).length())

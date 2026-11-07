@@ -4,6 +4,15 @@
 
 # Pawn Architecture Spec (draft 1)
 
+<!-- Claude 2026-11-07: the owner's decision -->
+> **A guide, not canon (owner, 2026-11-07).** Borrow from this spec, but don't treat its plans as decided. A new pawn spec gets written as the rebuild is agreed. Decided since, and overriding what's below:
+> - **No nexus layer.** Working components attach directly to the pawn. One shared `PawnInitializer`, a `GameMode` module, adds what's missing when a pawn enters the tree. The starting list is the parts the old `PawnNexusComponent` lists.
+> - **One node per part.** Abilities, states and behaviours are each a node on the pawn, not shared code with per-pawn data. A part only talks to its manager or the pawn, outside code only calls managers, and only the initializer assembles parts.
+> - **The intent system below is scrapped as written.** Intent lives on the controller.
+> - **Controllers have a common base class.**
+> - **`AIContext` keeps its other shared data,** without intent.
+> - **No separate motor layer** (section 9 has the current direction).
+
 **Status (2026-11-07):** `docs/pawn/PLAYER_AND_CAMERA.md` replaces this spec's controller placement: `PlayerController` now lives outside the pawn and survives without one. <!-- Claude 2026-11-07 -->
 
 **Status:** design draft, **not locked**. Written from the design discussion of 2026-11-03/04. Sections marked **(built)** describe code that exists; everything else is a proposal. Function signatures are GDScript sketches, not final.
@@ -191,7 +200,7 @@ Full rules in `docs/netcode/NETCODE_SPEC.md`. What they mean here:
 - **Intent and request targets are entity ids or points** once networked, never node references. Locally the context may resolve ids to nodes for convenience.
 - **Predicted state** of the pawn: motor (position, velocity, grounded), the active locomotion, each running ability (phase, elapsed ticks, "ready at" tick, charges), the ability manager's buffer and `locked_mask`, predicted stats (stamina). Health and other server-only stats are **sync** state.
 - **The AI runs only on the authority.** Clients never run sensing, memory, states or behaviours; AI pawns are interpolated remote pawns to them.
-- **Cosmetic effects** in abilities check `NetworkTime.is_resimulating()`.
+- **Cosmetic effects** in abilities check `TickDriver.is_resimulating()`.
 
 ---
 
@@ -446,7 +455,7 @@ Each step is testable on its own, with a headless test like the AI ones.
 
 1. **Tag registry + category masks.** Static class, declared categories in fixed order, parent bits, a test. **Built 2026-11-04.**
 2. **Tick driver, offline** (netcode spec step 1). **Built 2026-11-04.** New pawn parts register with it as they're built.
-3. **Networked state contract + offline rollback test** (netcode spec steps 2–3). **Built 2026-11-04:** `TickStateComponent`, `StateEncoding`, `NetworkTime.rollback`.
+3. **Networked state contract + offline rollback test** (netcode spec steps 2–3). **Built 2026-11-04:** `TickStateComponent`, `StateEncoding`, `TickDriver.rollback`.
 4. **Motor primitives** on the pawn, with save/load state. No behaviour change.
 5. **AbilityBase + ability manager:** lockouts, buffer, cooldowns, costs, all in ticks, with save/load state. Tested with scripted test abilities, including a forced rollback.
 6. **Walk + Sprint + intent fields + input commands + controller manager control.** Player WASD and AI `move_to` both drive Walk.

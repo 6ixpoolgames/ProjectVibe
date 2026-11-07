@@ -2,7 +2,7 @@
 ## unloads the ones nothing needs any more, without stalling the game.
 ##
 ## How to use it:
-##   1. On the Terrain, turn build_on_start off.
+##   1. On the TerrainGenerator, turn build_on_start off.
 ##   2. Add this node to the scene and set its terrain.
 ##   3. Add a StreamingSource to whatever should keep the world loaded.
 ## To see it working, open streaming_sample.tscn. The tests and stress test are in tests/.
@@ -11,7 +11,7 @@
 ## ignore the budget. That costs a few milliseconds at most, and only when something has appeared or teleported somewhere new.
 ## Everything further out comes through the budget below. So a pawn with a source has ground on its very first tick.
 ##
-## How it stays smooth: building a chunk is split into small steps (Terrain.build_chunk_step), and each frame
+## How it stays smooth: building a chunk is split into small steps (TerrainGenerator.build_chunk_step), and each frame
 ## this runs steps until max_ms_per_frame is used up. A slower machine finishes chunks later, but its frames stay short.
 ##
 ## In multiplayer, each machine runs its own streamer and loads what it needs: the server around every player, and a client
@@ -27,7 +27,7 @@
 ##     changing pawns shouldn't make the world vanish.
 ##   - More chunks wanted than the limit: the nearest ones win, and it warns once.
 ##   - A slow chunk: at least one step runs every frame, however small the budget.
-##   - No NetworkTime: the ground check still runs once per physics frame.
+##   - No TickDriver: the ground check still runs once per physics frame.
 ##
 ## Not handled yet:
 ##   - It serves one terrain. Props or other things that load by chunk would need it to serve more.
@@ -40,7 +40,7 @@ signal chunk_loaded(key: Vector2i)
 signal chunk_unloaded(key: Vector2i)
 
 ## The terrain to load chunks for. If it's empty and this node's parent is a terrain, it uses the parent.
-@export var terrain: Terrain
+@export var terrain: TerrainGenerator
 ## How long this may spend per frame, in milliseconds. At least one step always runs, so one step can go over.
 @export_range(0.0, 16.0, 0.1, "or_greater") var max_ms_per_frame := 2.0
 ## How far past load_distance a chunk stays loaded, in metres, so that hovering around the edge doesn't rebuild it.
@@ -80,17 +80,17 @@ var _driver: Node = null
 
 
 func _init() -> void:
-	# Claude 2026-11-07: before NetworkTime's -100, so ground exists before anything ticks in a physics frame.
+	# Claude 2026-11-07: before TickDriver's -100, so ground exists before anything ticks in a physics frame.
 	process_physics_priority = -200
 
 
 func _ready() -> void:
 	if terrain == null:
 		# GDScript note: "as" gives null when the parent isn't a terrain, rather than an error.
-		terrain = get_parent() as Terrain
+		terrain = get_parent() as TerrainGenerator
 	# Claude 2026-11-07: a snapshot can teleport a pawn during before_tick. This connects after NetworkSession, so it runs
 	# after that and before the tick's movement.
-	_driver = get_node_or_null("/root/NetworkTime")
+	_driver = get_node_or_null("/root/TickDriver")
 	if _driver:
 		_driver.before_tick.connect(_on_before_tick)
 		_driver.rollback_state_loaded.connect(_on_rollback_state_loaded)

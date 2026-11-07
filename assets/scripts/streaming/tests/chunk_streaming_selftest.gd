@@ -1,4 +1,4 @@
-## Written by Claude (claude-opus-5-5), 2026-11-06: headless self-test for chunk streaming: Terrain's one-chunk
+## Written by Claude (claude-opus-5-5), 2026-11-06: headless self-test for chunk streaming: TerrainGenerator's one-chunk
 ## functions, ChunkStreamer, StreamingSource, and StreamingSamplePawn walking around. Nav is in nav_stitching_selftest.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/streaming/tests/chunk_streaming_selftest.tscn"
@@ -6,7 +6,7 @@ extends Node
 
 
 ## An example terrain with exactly one marker per chunk, so counts are easy to check.
-class OneMarkerTerrain extends Terrain:
+class OneMarkerTerrain extends TerrainGenerator:
 	func _make_chunk_markers(key: Vector2i) -> Array[NavMarker]:
 		var marker := NavPoint.new()
 		marker.tag = &"point.cover"
@@ -21,7 +21,7 @@ var _failures := 0
 func _ready() -> void:
 	print("--- Chunk streaming self-test ---")
 	Engine.max_fps = 60 # so a frame is about as long as a real one, and budgets mean what they would in a game
-	NavWorld.report_quiet_seconds = 1000000.0
+	NavMarkerManager.report_quiet_seconds = 1000000.0
 	await _test_terrain_starts_empty()
 	_test_chunk_of()
 	_test_steps_match_generate()
@@ -46,8 +46,8 @@ func _ready() -> void:
 	await _test_markers_follow_the_source()
 	await _test_pawn_walks()
 	await _test_ai_pawn_rules()
-	NavWorld.report_quiet_seconds = 2.0
-	NavWorld.reset()
+	NavMarkerManager.report_quiet_seconds = 2.0
+	NavMarkerManager.reset()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -64,7 +64,7 @@ func _test_terrain_starts_empty() -> void:
 	_check(terrain.get_loaded_chunks().is_empty(), "and nothing builds by itself")
 	terrain.free()
 
-	var fixed := Terrain.new()
+	var fixed := TerrainGenerator.new()
 	fixed.chunk_resolution = 4
 	fixed.chunk_size = 20.0
 	fixed.chunk_radius = 1
@@ -85,7 +85,7 @@ func _test_chunk_of() -> void:
 
 func _test_steps_match_generate() -> void:
 	for smooth in [false, true]:
-		var block := Terrain.new()
+		var block := TerrainGenerator.new()
 		block.chunk_size = 64.0
 		block.chunk_resolution = 16
 		block.chunk_radius = 1
@@ -128,7 +128,7 @@ func _test_half_built_chunks() -> void:
 	terrain.build_chunk_step(key)
 	_check(not terrain.has_chunk(key), "a half-built chunk isn't reported as loaded")
 	_check(terrain.get_loaded_chunks().is_empty(), "and isn't in the list")
-	_check(terrain._ground_at(10.0, 10.0) == Terrain.NO_GROUND, "and height_at can't read its half-finished points")
+	_check(terrain._ground_at(10.0, 10.0) == TerrainGenerator.NO_GROUND, "and height_at can't read its half-finished points")
 	terrain.unload_chunk(key)
 	_check(not terrain._building.has(key), "unloading a half-built chunk drops it")
 	terrain.load_chunk(key)
@@ -164,30 +164,30 @@ func _test_collision_and_unload() -> void:
 
 
 func _test_markers_load_and_unload() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var terrain := OneMarkerTerrain.new()
 	terrain.name = "MarkerTerrain"
 	terrain.build_on_start = false
 	terrain.chunk_resolution = 4
 	terrain.chunk_size = 32.0
 	terrain.build_collision = false
-	terrain.add_child(WorldNavLink.new()) # Claude 2026-11-07: this announces a terrain's markers now
+	terrain.add_child(TerrainNavFeeder.new()) # Claude 2026-11-07: this announces a terrain's markers now
 	add_child(terrain)
 	terrain.load_chunk(Vector2i(0, 0))
 	terrain.load_chunk(Vector2i(1, 0))
-	NavWorld.flush()
-	_check(NavWorld.get_marker_count() == 2, "each loaded chunk announces its markers (%d)" % NavWorld.get_marker_count())
-	var id := NavWorld.chunk_marker_id(NavWorld.scene_marker_id(str(terrain.get_path())), Vector2i(1, 0), 0)
-	_check(NavWorld.get_marker(id) != null, "with the id that chunk's position gives")
+	NavMarkerManager.flush()
+	_check(NavMarkerManager.get_marker_count() == 2, "each loaded chunk announces its markers (%d)" % NavMarkerManager.get_marker_count())
+	var id := NavMarkerManager.chunk_marker_id(NavMarkerManager.scene_marker_id(str(terrain.get_path())), Vector2i(1, 0), 0)
+	_check(NavMarkerManager.get_marker(id) != null, "with the id that chunk's position gives")
 	terrain.unload_chunk(Vector2i(1, 0))
-	NavWorld.flush()
-	_check(NavWorld.get_marker_count() == 1 and NavWorld.get_marker(id) == null, "unloading releases them")
+	NavMarkerManager.flush()
+	_check(NavMarkerManager.get_marker_count() == 1 and NavMarkerManager.get_marker(id) == null, "unloading releases them")
 	terrain.load_chunk(Vector2i(1, 0))
-	NavWorld.flush()
-	_check(NavWorld.get_marker(id) != null, "and loading again brings back the same id")
+	NavMarkerManager.flush()
+	_check(NavMarkerManager.get_marker(id) != null, "and loading again brings back the same id")
 	terrain.free()
-	NavWorld.flush()
-	_check(NavWorld.get_marker_count() == 0, "and freeing the terrain releases them all")
+	NavMarkerManager.flush()
+	_check(NavMarkerManager.get_marker_count() == 0, "and freeing the terrain releases them all")
 
 
 func _test_edits() -> void:
@@ -209,7 +209,7 @@ func _test_edits() -> void:
 	half.chunk_size = 256.0
 	half.chunk_resolution = 43
 	half.load_chunk(Vector2i(-1, 0))
-	while half._building.is_empty() or half._building[Vector2i.ZERO].stage != Terrain.Stage.MESH_ROWS:
+	while half._building.is_empty() or half._building[Vector2i.ZERO].stage != TerrainGenerator.Stage.MESH_ROWS:
 		half.build_chunk_step(Vector2i.ZERO)
 	half.edit(Vector3(100.0, 0.0, 100.0), 40.0, 9.0)
 	_check(half.has_chunk(Vector2i.ZERO), "an edit finishes half-built chunks first")
@@ -223,7 +223,7 @@ func _test_edits() -> void:
 
 
 func _test_outside_the_scene() -> void:
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.chunk_resolution = 4
 	terrain.chunk_size = 20.0
 	terrain.build_on_start = false
@@ -539,7 +539,7 @@ func _test_turning_back_mid_build() -> void:
 	terrain.free()
 
 
-func _make_budget_terrain() -> Terrain:
+func _make_budget_terrain() -> TerrainGenerator:
 	var terrain := _make_terrain()
 	terrain.chunk_size = 256.0
 	terrain.chunk_resolution = 43
@@ -548,28 +548,28 @@ func _make_budget_terrain() -> Terrain:
 
 
 func _test_markers_follow_the_source() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var terrain := OneMarkerTerrain.new()
 	terrain.name = "FollowTerrain"
 	terrain.build_on_start = false
 	terrain.chunk_resolution = 4
 	terrain.chunk_size = 32.0
 	terrain.build_collision = false
-	terrain.add_child(WorldNavLink.new()) # Claude 2026-11-07: this announces a terrain's markers now
+	terrain.add_child(TerrainNavFeeder.new()) # Claude 2026-11-07: this announces a terrain's markers now
 	add_child(terrain)
 	var streamer := _make_streamer(terrain)
 	var source := _make_source(Vector3(16.0, 0.0, 16.0), 8.0)
 	await _until_done(streamer)
-	NavWorld.flush()
-	_check(NavWorld.get_marker_count() == terrain.get_loaded_chunks().size(), "one marker per streamed chunk (%d)" % NavWorld.get_marker_count())
+	NavMarkerManager.flush()
+	_check(NavMarkerManager.get_marker_count() == terrain.get_loaded_chunks().size(), "one marker per streamed chunk (%d)" % NavMarkerManager.get_marker_count())
 	source.position = Vector3(500.0, 0.0, 500.0)
 	await _until_done(streamer)
-	NavWorld.flush()
-	_check(NavWorld.get_marker_count() == terrain.get_loaded_chunks().size(), "and they follow when the source moves (%d)" % NavWorld.get_marker_count())
+	NavMarkerManager.flush()
+	_check(NavMarkerManager.get_marker_count() == terrain.get_loaded_chunks().size(), "and they follow when the source moves (%d)" % NavMarkerManager.get_marker_count())
 	source.free()
 	streamer.free()
 	terrain.free()
-	NavWorld.flush()
+	NavMarkerManager.flush()
 
 
 # --- The ground guarantee ---
@@ -577,7 +577,7 @@ func _test_markers_follow_the_source() -> void:
 
 ## Runs after the streamer and before anything else in a physics frame's own work: says what a pawn would find this frame.
 class GroundProbe extends Node:
-	var terrain: Terrain
+	var terrain: TerrainGenerator
 	var spot := Vector3.ZERO
 	var frames := 0
 	var first_chunk_frame := -1
@@ -706,13 +706,13 @@ func _test_ai_pawn_rules() -> void:
 	await _frames(5)
 	await _physics_frames(10)
 	_check(terrain.get_loaded_chunks().is_empty(), "an AI pawn alone with the bool off loads nothing")
-	_check(not GameMode.ai_activity.is_active(player), "and it's switched off, so it doesn't fall")
+	_check(not GameMode.ai_activation_manager.is_active(player), "and it's switched off, so it doesn't fall")
 	_check(player.global_position.y > 29.9, "(it's still at %.1f m)" % player.global_position.y)
 	player.ai_loads_chunks = true
 	await _until_done(streamer)
 	await _physics_frames(30)
 	_check(terrain.has_chunk(Vector2i.ZERO), "with the bool on, it loads chunks")
-	_check(GameMode.ai_activity.is_active(player), "and it's back on")
+	_check(GameMode.ai_activation_manager.is_active(player), "and it's back on")
 	_check(player.global_position.y < 29.0, "and now it falls to the ground")
 
 	# Taking over a pawn: the rule follows who controls it.
@@ -729,7 +729,7 @@ func _test_ai_pawn_rules() -> void:
 	walker.speed = 6.0
 	walker.set_route(PackedVector3Array([Vector3(400.0, 0.0, 16.0)]))
 	await _physics_frames(240)
-	_check(not GameMode.ai_activity.is_active(walker), "an AI pawn with the bool off goes off at the edge of the loaded ground")
+	_check(not GameMode.ai_activation_manager.is_active(walker), "an AI pawn with the bool off goes off at the edge of the loaded ground")
 	_check(walker.ticks_without_ground == 0, "before it ever stands over nothing (%d ticks)" % walker.ticks_without_ground)
 	_check(walker.worst_below_ground < 0.5, "and it hasn't dropped through")
 	var stopped_at := walker.global_position
@@ -740,7 +740,7 @@ func _test_ai_pawn_rules() -> void:
 	# A player arrives, so ground comes back and the pawn carries on from where it was.
 	player.global_position = stopped_at + Vector3(0.0, 3.0, 4.0) # beside it, so it doesn't land on it
 	await _physics_frames(30)
-	_check(GameMode.ai_activity.is_active(walker), "when a player's source brings the ground back, it comes back on")
+	_check(GameMode.ai_activation_manager.is_active(walker), "when a player's source brings the ground back, it comes back on")
 	await _physics_frames(30)
 	_check(walker.global_position.x > stopped_at.x + 1.0, "and carries on walking (%.1f m further)" % (walker.global_position.x - stopped_at.x))
 	walker.free()
@@ -753,8 +753,8 @@ func _test_ai_pawn_rules() -> void:
 
 
 ## A small, quick streamed terrain with no collision unless a test turns it on.
-func _make_terrain() -> Terrain:
-	var terrain := Terrain.new()
+func _make_terrain() -> TerrainGenerator:
+	var terrain := TerrainGenerator.new()
 	terrain.name = "Terrain"
 	terrain.build_on_start = false
 	terrain.chunk_resolution = 4
@@ -764,7 +764,7 @@ func _make_terrain() -> Terrain:
 	return terrain
 
 
-func _make_streamer(terrain: Terrain) -> SlowChunkStreamer: # Claude 2026-11-07: the test version, which can reset its timings
+func _make_streamer(terrain: TerrainGenerator) -> SlowChunkStreamer: # Claude 2026-11-07: the test version, which can reset its timings
 	var streamer := SlowChunkStreamer.new()
 	streamer.terrain = terrain
 	streamer.refresh_seconds = 0.0 # every frame, so tests don't have to wait
@@ -780,7 +780,7 @@ func _make_source(at: Vector3, load_distance: float) -> StreamingSource:
 	return source
 
 
-func _make_pawn(terrain: Terrain, at: Vector3) -> StreamingSamplePawn:
+func _make_pawn(terrain: TerrainGenerator, at: Vector3) -> StreamingSamplePawn:
 	var pawn := StreamingSamplePawn.new()
 	pawn.terrain = terrain
 	pawn.position = at
@@ -789,7 +789,7 @@ func _make_pawn(terrain: Terrain, at: Vector3) -> StreamingSamplePawn:
 
 
 ## Every chunk within a distance of a position, worked out the slow, obvious way to compare against the streamer.
-func _chunks_within(terrain: Terrain, at: Vector3, distance: float) -> Array[Vector2i]:
+func _chunks_within(terrain: TerrainGenerator, at: Vector3, distance: float) -> Array[Vector2i]:
 	var chunks: Array[Vector2i] = []
 	var size := terrain.chunk_size
 	for z in range(-20, 21):

@@ -39,27 +39,27 @@ var _failures := 0
 func _ready() -> void:
 	print("--- Chunk stress test ---")
 	Engine.max_fps = 60
-	NavWorld.report_quiet_seconds = 1000000.0
+	NavMarkerManager.report_quiet_seconds = 1000000.0
 	NavServer.configure({"worker_threads": NAV_WORKERS})
 	print("cpu  chunk  scenario   | start s  KB/chunk | worst frame  worst step  avg frame | chunks  backlog  no ground | late frames | nav tiles  nav backlog")
 	for slowdown in [1.0, SLOWER_CPU]:
 		for size in SIZES:
 			for scenario in SCENARIOS:
 				await _run_row(slowdown, size[0], size[1], scenario)
-	NavWorld.report_quiet_seconds = 2.0
-	NavWorld.reset()
+	NavMarkerManager.report_quiet_seconds = 2.0
+	NavMarkerManager.reset()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
 
 func _run_row(slowdown: float, chunk_size: float, chunk_resolution: int, scenario: Array) -> void:
 	var memory_before := Performance.get_monitor(Performance.MEMORY_STATIC)
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.name = "Terrain"
 	terrain.build_on_start = false
 	terrain.chunk_size = chunk_size
 	terrain.chunk_resolution = chunk_resolution
-	var link := WorldNavLink.new() # Claude 2026-11-07: a terrain feeds nav through this now, and it ticks nav
+	var link := TerrainNavFeeder.new() # Claude 2026-11-07: a terrain feeds nav through this now, and it ticks nav
 	link.nav_hooks = NavHooks.new()
 	link.tick_nav = true
 	terrain.add_child(link)

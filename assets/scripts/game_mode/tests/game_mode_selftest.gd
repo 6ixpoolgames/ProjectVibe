@@ -1,4 +1,4 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for the GameMode shell and AIActivityModule.
+## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for the GameMode shell and AIActivationManager.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/game_mode/tests/game_mode_selftest.tscn"
 extends Node
@@ -51,8 +51,8 @@ func _ready() -> void:
 
 func _test_defaults() -> void:
 	_check(GameMode is GameModeSingleton, "GameMode is an autoload")
-	_check(GameMode.ai_activity != null, "AIActivityModule starts by default")
-	_check(GameMode.get_module(AIActivityModule) == GameMode.ai_activity, "and can be found by its script")
+	_check(GameMode.ai_activation_manager != null, "AIActivationManager starts by default")
+	_check(GameMode.get_module(AIActivationManager) == GameMode.ai_activation_manager, "and can be found by its script")
 	_check(not GameMode.is_processing() and not GameMode.is_physics_processing(), "the shell itself does no per-frame work")
 
 
@@ -94,7 +94,7 @@ func _test_empty_settings() -> void:
 	ProjectSettings.set_setting(GameModeSingleton.MODULES_SETTING, [])
 	var other := GameModeSingleton.new()
 	add_child(other)
-	_check(other.get_modules().is_empty() and other.ai_activity == null, "an empty list starts no modules, and nothing breaks")
+	_check(other.get_modules().is_empty() and other.ai_activation_manager == null, "an empty list starts no modules, and nothing breaks")
 	ProjectSettings.set_setting(GameModeSingleton.MODULES_SETTING, null)
 	other.free()
 
@@ -102,8 +102,8 @@ func _test_empty_settings() -> void:
 func _test_no_terrain() -> void:
 	var pawn := _make_pawn(Vector3.ZERO)
 	await _physics_frames(10)
-	_check(pawn.active and GameMode.ai_activity.is_active(pawn), "with no terrain in the scene, AI stays on")
-	GameMode.ai_activity.remove_pawn(pawn)
+	_check(pawn.active and GameMode.ai_activation_manager.is_active(pawn), "with no terrain in the scene, AI stays on")
+	GameMode.ai_activation_manager.remove_pawn(pawn)
 	pawn.free()
 
 
@@ -116,8 +116,8 @@ func _test_rule() -> void:
 	var deactivated := [0]
 	var on_activated := func(_p: Node3D) -> void: activated[0] += 1
 	var on_deactivated := func(_p: Node3D) -> void: deactivated[0] += 1
-	GameMode.ai_activity.ai_activated.connect(on_activated)
-	GameMode.ai_activity.ai_deactivated.connect(on_deactivated)
+	GameMode.ai_activation_manager.ai_activated.connect(on_activated)
+	GameMode.ai_activation_manager.ai_deactivated.connect(on_deactivated)
 	await _physics_frames(10)
 	_check(pawn.active, "when its chunk is built, it comes back on")
 	_check(activated[0] == 1 and deactivated[0] == 0, "and says so once")
@@ -134,23 +134,23 @@ func _test_rule() -> void:
 	terrain.load_chunk(Vector2i(1, 0))
 	await _physics_frames(10)
 	_check(pawn.active, "and comes on once that chunk is there too")
-	GameMode.ai_activity.ai_activated.disconnect(on_activated)
-	GameMode.ai_activity.ai_deactivated.disconnect(on_deactivated)
-	GameMode.ai_activity.remove_pawn(pawn)
+	GameMode.ai_activation_manager.ai_activated.disconnect(on_activated)
+	GameMode.ai_activation_manager.ai_deactivated.disconnect(on_deactivated)
+	GameMode.ai_activation_manager.remove_pawn(pawn)
 	pawn.free()
 	terrain.free()
 
 
 func _test_on_a_client() -> void:
 	var terrain := _make_terrain()
-	var real_session: Node = GameMode.ai_activity._session
+	var real_session: Node = GameMode.ai_activation_manager._session
 	var fake := FakeClientSession.new()
-	GameMode.ai_activity._session = fake
+	GameMode.ai_activation_manager._session = fake
 	var pawn := _make_pawn(Vector3(16.0, 5.0, 16.0))
 	await _physics_frames(10)
 	_check(pawn.active, "on a client it does nothing, because AI only runs on the server")
-	GameMode.ai_activity._session = real_session
-	GameMode.ai_activity.remove_pawn(pawn)
+	GameMode.ai_activation_manager._session = real_session
+	GameMode.ai_activation_manager.remove_pawn(pawn)
 	pawn.free()
 	fake.free()
 	terrain.free()
@@ -158,12 +158,12 @@ func _test_on_a_client() -> void:
 
 func _test_freed_pawns() -> void:
 	var terrain := _make_terrain()
-	var before := GameMode.ai_activity.get_watched_count()
+	var before := GameMode.ai_activation_manager.get_watched_count()
 	var pawn := _make_pawn(Vector3(16.0, 5.0, 16.0))
 	pawn.free()
 	await _physics_frames(10)
-	_check(GameMode.ai_activity.get_watched_count() == before, "a freed pawn is dropped from the list")
-	_check(GameMode.ai_activity.get_inactive_count() == 0, "including from the ones that are off")
+	_check(GameMode.ai_activation_manager.get_watched_count() == before, "a freed pawn is dropped from the list")
+	_check(GameMode.ai_activation_manager.get_inactive_count() == 0, "including from the ones that are off")
 	terrain.free()
 
 
@@ -171,11 +171,11 @@ func _test_module_removed() -> void:
 	var terrain := _make_terrain()
 	var pawn := _make_pawn(Vector3(16.0, 5.0, 16.0))
 	_check(not pawn.active, "(off, with no ground)")
-	GameMode.remove_module(GameMode.ai_activity)
+	GameMode.remove_module(GameMode.ai_activation_manager)
 	_check(pawn.active, "removing the module puts every pawn back on")
-	_check(GameMode.ai_activity == null, "and its line on GameMode is cleared")
-	GameMode.add_module(AIActivityModule.new())
-	_check(GameMode.ai_activity != null, "and it can be added back")
+	_check(GameMode.ai_activation_manager == null, "and its line on GameMode is cleared")
+	GameMode.add_module(AIActivationManager.new())
+	_check(GameMode.ai_activation_manager != null, "and it can be added back")
 	pawn.free()
 	terrain.free()
 
@@ -191,19 +191,19 @@ func _measure_a_horde() -> void:
 		pawn.position = Vector3(5.0 + (i % 20), 0.0, 5.0 + (i % 20))
 		add_child(pawn)
 		pawns.append(pawn)
-		GameMode.ai_activity._pawns.append(pawn) # skips the duplicate check, which is a slow way to add 10,000
+		GameMode.ai_activation_manager._pawns.append(pawn) # skips the duplicate check, which is a slow way to add 10,000
 	print("        making 10,000 stub pawns: %d ms" % ((Time.get_ticks_usec() - started) / 1000))
 	var worst := 0
 	var total := 0
 	for i in 12:
 		started = Time.get_ticks_usec()
-		GameMode.ai_activity._physics_process(1.0 / 60.0)
+		GameMode.ai_activation_manager._physics_process(1.0 / 60.0)
 		var spent := Time.get_ticks_usec() - started
 		total += spent
 		worst = maxi(worst, spent)
 	print("        checking 10,000 pawns, a sixth per frame: %.2f ms a frame on average, %.2f ms at worst" % [total / 12000.0, worst / 1000.0])
-	GameMode.ai_activity._pawns.clear()
-	GameMode.ai_activity._inactive.clear()
+	GameMode.ai_activation_manager._pawns.clear()
+	GameMode.ai_activation_manager._inactive.clear()
 	for pawn in pawns:
 		pawn.free()
 	terrain.free()
@@ -213,8 +213,8 @@ func _measure_a_horde() -> void:
 # --- Helpers ---
 
 
-func _make_terrain() -> Terrain:
-	var terrain := Terrain.new()
+func _make_terrain() -> TerrainGenerator:
+	var terrain := TerrainGenerator.new()
 	terrain.name = "Terrain"
 	terrain.build_on_start = false
 	terrain.chunk_size = 32.0
@@ -228,7 +228,7 @@ func _make_pawn(at: Vector3) -> StubPawn:
 	var pawn := StubPawn.new()
 	pawn.position = at
 	add_child(pawn)
-	GameMode.ai_activity.add_pawn(pawn)
+	GameMode.ai_activation_manager.add_pawn(pawn)
 	return pawn
 
 

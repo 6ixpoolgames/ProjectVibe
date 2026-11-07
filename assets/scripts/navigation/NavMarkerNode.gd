@@ -38,7 +38,7 @@ func get_marker_id() -> int:
 ## Switches this node's marker on or off. The change takes effect on the next tick.
 func set_marker_enabled(enabled: bool) -> void:
 	if _marker_id != 0:
-		NavWorld.set_enabled(_marker_id, enabled)
+		NavMarkerManager.set_enabled(_marker_id, enabled)
 
 
 ## What the editor shows as a warning triangle on this node. An empty list means no warning.
@@ -74,10 +74,10 @@ func _register() -> void:
 		push_warning("[NavMarkerNode] %s has an automatic name, so machines may disagree on its marker's id. Give it a name of its own." % get_path())
 	var copy: NavMarker = marker.duplicate()
 	copy.place_at(global_transform)
-	_marker_id = NavWorld.request_scene_marker(str(get_path()), copy)
+	_marker_id = NavMarkerManager.request_scene_marker(str(get_path()), copy)
 
 
 func _unregister() -> void:
 	if _marker_id != 0:
-		NavWorld.remove_scene_marker(_marker_id)
+		NavMarkerManager.remove_scene_marker(_marker_id)
 		_marker_id = 0

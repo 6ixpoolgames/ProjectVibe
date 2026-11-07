@@ -2,8 +2,8 @@
 
 # Netcode Spec (draft 1)
 
-**Status:** design draft, **not locked**. Written from the design discussion of 2026-11-04. **Built:** the tick driver, rollback state, stage v0 multiplayer, dynamic time dilation and the test bench (section 16). Code: `assets/scripts/singletons/NetworkTime.gd` and `NetworkSession.gd`, and `assets/scripts/netcode/`. Tests: `singletons/tests/tick_driver_selftest`, `netcode/tests/tick_state_selftest`, `netcode/tests/net_selftest`. Playable: `net_sample.tscn`. Projectiles and packet stages v1 and v2 are still proposals.
-**Scope:** everything engine-wide about multiplayer: the tick driver every simulated entity runs on, how state is saved and rolled back, prediction, interpolation, lag compensation, and what goes over the wire. The pawn-specific parts (abilities, input buffer, intent) live in `docs/pawn/PAWN_ARCHITECTURE.md`, which follows the rules here.
+**Status:** design draft, **not locked**. Written from the design discussion of 2026-11-04. **Built:** the tick driver, rollback state, stage v0 multiplayer, dynamic time dilation and the test bench (section 16). Code: `assets/scripts/singletons/TickDriver.gd` and `NetworkSession.gd`, and `assets/scripts/netcode/`. Tests: `singletons/tests/tick_driver_selftest`, `netcode/tests/tick_state_selftest`, `netcode/tests/net_selftest`. Playable: `net_sample.tscn`. Projectiles and packet stages v1 and v2 are still proposals.
+**Scope:** everything engine-wide about multiplayer: the tick driver every simulated entity runs on, how state is saved and rolled back, prediction, interpolation, lag compensation, and what goes over the wire. The pawn-specific parts (abilities, input buffer, intent) live in `docs/pawn/PAWN_ARCHITECTURE.md`, which follows the rules here. *(Claude 2026-11-07: that spec is now a guide, not canon.)*
 **Approach:** our own implementation, **modelled on the netfox addon's concepts** (a network clock, rollback driven by declared state and input properties, tick interpolation for visuals). We study netfox; we don't depend on it. Unreal and Overwatch are studied the same way: we copy principles, never code.
 **Numbers** are ballpark estimates, not measurements.
 
@@ -58,9 +58,9 @@ Single player is just "no network": the same code runs, the local machine is the
 
 ## 3. The tick driver
 
-**(built, offline, 2026-11-04)** `NetworkTime.gd`, class `NetworkTimeSingleton`, autoload `NetworkTime`. Participants implement any of `_tick_input(dt, tick)`, `_tick_simulate(dt, tick)`, `_tick_record(tick)`; all rules and corner cases are at the top of the script.
+**(built, offline, 2026-11-04)** `TickDriver.gd`, class `TickDriverSingleton`, autoload `TickDriver`. Participants implement any of `_tick_input(dt, tick)`, `_tick_simulate(dt, tick)`, `_tick_record(tick)`; all rules and corner cases are at the top of the script.
 
-One autoload (working name `NetworkTime`). **Every machine runs it**, server and clients, online and offline. Everything that changes gameplay state runs inside it; nothing gameplay-relevant runs in its own `_process` / `_physics_process`.
+One autoload (working name `TickDriver`). **Every machine runs it**, server and clients, online and offline. Everything that changes gameplay state runs inside it; nothing gameplay-relevant runs in its own `_process` / `_physics_process`.
 
 ### 3.1 Why a registered list, not signals
 
@@ -126,7 +126,7 @@ rollback(from_tick):
 
 The driver owns order and timing only. **History data lives with each entity** (section 6).
 
-**(built 2026-11-04)** `NetworkTime.rollback(from_tick)`. A participant is predicted if it has `_rollback_load`, `_rollback_input`, `_rollback_simulate` and `_tick_record`; `TickStateComponent` provides all four. During a replay `NetworkTime.tick` reads as the replayed tick. It's allowed between ticks and from `before_tick`, and refused during a tick's phases or another replay. When two or more participants replay together, each one's `_sync_collision()` runs after loading and after each replayed tick (section 5.2). Once the replay is over, each one's optional `_rollback_finished()` runs (section 6.5).
+**(built 2026-11-04)** `TickDriver.rollback(from_tick)`. A participant is predicted if it has `_rollback_load`, `_rollback_input`, `_rollback_simulate` and `_tick_record`; `TickStateComponent` provides all four. During a replay `TickDriver.tick` reads as the replayed tick. It's allowed between ticks and from `before_tick`, and refused during a tick's phases or another replay. When two or more participants replay together, each one's `_sync_collision()` runs after loading and after each replayed tick (section 5.2). Once the replay is over, each one's optional `_rollback_finished()` runs (section 6.5).
 
 ---
 
@@ -280,13 +280,13 @@ Mispredictions come from things the client couldn't know: being shoved, stunned 
 
 ### 6.3 Side effects during replay
 
-- `NetworkTime.is_resimulating()` is true while replaying. **Cosmetic effects** (sound, particles, camera shake) only fire when it's false.
+- `TickDriver.is_resimulating()` is true while replaying. **Cosmetic effects** (sound, particles, camera shake) only fire when it's false.
 - Predicted events are labelled with their tick, so an event re-triggered by replay is recognised and not played twice.
 - A predicted event the server's state contradicts (the Dash you predicted, but you were stunned at 499) disappears in the rollback; its effects are cancelled or faded.
 
 ### 6.4 Re-runnable code
 
-Predicted code must give the same result from the same state and input. That means: fixed `tick_dt`; **ticks for all gameplay timing** (cooldowns, buffer windows, durations); **seeded randomness** per entity per tick (`NetworkTime.tick_rng(key, salt)`, no global `randf()`; the rolls depend only on key, tick and salt, so there's no generator state to save); no reading wall-clock time.
+Predicted code must give the same result from the same state and input. That means: fixed `tick_dt`; **ticks for all gameplay timing** (cooldowns, buffer windows, durations); **seeded randomness** per entity per tick (`TickDriver.tick_rng(key, salt)`, no global `randf()`; the rolls depend only on key, tick and salt, so there's no generator state to save); no reading wall-clock time.
 
 **Queries of outside systems** *(2026-11-05)*: anything that can give a different answer later, such as a nav path while tiles are changing, must not be asked during a replay. Ask once in the input phase, and either save the result as state or let it become inputs, which a replay reuses. The test walkers do this: they path in the input phase and send plain directions. The nav server's answers aren't tied to a tick, so one asked during a replay gets today's mesh for an old tick. Section 4.2 of the pawn spec reads as if Walk asks each update, which would break this if it ran during a replay, so that's one to settle when the pawn is designed.
 
@@ -521,7 +521,7 @@ The server never trusts a client:
 
 ## 13. Authority and local-only things
 
-- **`context.is_authority()` / `NetworkTime.is_server()`**, defaulting to true offline (the escape clause). AI, state changes, ability resolution, damage and stat writes run only where it's true. Non-authoritative copies display.
+- **`context.is_authority()` / `TickDriver.is_server()`**, defaulting to true offline (the escape clause). AI, state changes, ability resolution, damage and stat writes run only where it's true. Non-authoritative copies display.
 - **Entity ids:** the nexus gives each entity an id at spawn, the same on every peer. Anything that refers to another entity over the network (intent targets, memory facts, ability targets) uses the id, never a node reference.
 - **Tag registry bits are assigned in a fixed order** (declared categories, sorted) at startup, so bitmasks agree across peers.
 - **Local-only, never networked:** camera, cursor, UI, debug drawing, the player controller's raw device reading. Only the owning client has a player controller for its pawn; the server reconstructs intent from input commands.
@@ -534,7 +534,7 @@ The server never trusts a client:
 - `move_and_slide` can run several times in one frame for replay. Other bodies stay where they are during the replay, the standard accepted inaccuracy.
 - Godot physics isn't deterministic across machines. Fine here, because the server corrects clients; it only rules out lockstep.
 - **Physics engine** *(decided 2026-11-05)*: the project runs on **Jolt**, for the measurements in section 14.1. Godot's own physics still passes the multiplayer tests, using a temporary `override.cfg`, for a game that prefers it. Notes before 2026-11-05 saying "tested with Jolt" were wrong, because the setting was still `DEFAULT` and they were written from the tuning values in `project.godot`. The real pawn in `test scene.tscn` has only had a headless smoke check on Jolt: how it feels can only be judged by playing it.
-- **Tests need separate processes.** `NetworkTime` is a single autoload, so one process can't hold both a server clock and a client clock.
+- **Tests need separate processes.** `TickDriver` is a single autoload, so one process can't hold both a server clock and a client clock.
 - **New scripts need registering.** A script with a new `class_name` needs an editor open or `--headless --import` once before headless runs can see it.
 - **RigidBody props** are server-authoritative and interpolated at tier 0 (Godot can't step them on demand for replay).
 - **C++:** see the profile below. New code would go into a GDExtension like navcore, behind the same interfaces.
@@ -757,8 +757,8 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | 13 | **No crowd control.** Pawns follow paths and physically bump, with no avoidance. `CrowdSystem` is planned in the nav spec, not built. It would normally run on the server, and a predicted pawn can't predict it, which adds to the mismatch | Wanted eventually |
 | 14 | **Bandwidth at scale.** 44 pawns take about 44 KB/s down per client and 200 KB/s up from the server, and each pawn's input is its own packet | Delta compression and relevancy (section 16); bundle a client's inputs |
 | 15 | **Who paths a player's pawn?** The stress test has clients path their own walkers and send directions, to test prediction. Whether a click sends a target for the server to path is part of the intent question in the pawn spec | Owner is thinking about the pawn architecture |
-| 17 | **Pawns could fall through the world** when ground was raised above them. **Fixed 2026-11-07 for `Terrain`:** with a `TerrainBodyLifter` on the terrain, a body in its `GROUP` is moved onto ground an edit raises above it (`net_streaming_selftest`, `raised_ground`). Nothing yet catches anything falling for another reason | The older test terrain still has the bug, and is only used by tests |
-| 18 | **Terrain edits over the network. Built 2026-11-07 for `Terrain`:** only the server edits, and `TerrainEditLog` sends each edit and catches up late joiners. A client applies an edit when it arrives, about half its ping after the server, so its prediction can differ for that moment and gets corrected. Client-side prediction of edits isn't built | The older test terrain still applies edits by tick number on every machine |
+| 17 | **Pawns could fall through the world** when ground was raised above them. **Fixed 2026-11-07 for `TerrainGenerator`:** with a `TerrainBodyLifter` on the terrain, a body in its `GROUP` is moved onto ground an edit raises above it (`net_streaming_selftest`, `raised_ground`). Nothing yet catches anything falling for another reason | The older test terrain still has the bug, and is only used by tests |
+| 18 | **Terrain edits over the network. Built 2026-11-07 for `TerrainGenerator`:** only the server edits, and `TerrainEditLog` sends each edit and catches up late joiners. A client applies an edit when it arrives, about half its ping after the server, so its prediction can differ for that moment and gets corrected. Client-side prediction of edits isn't built | The older test terrain still applies edits by tick number on every machine |
 | 19 | **A client over the packet limits only gets dropped, not disconnected.** It still costs the server a little per packet | Disconnect after a sustained flood; pick the numbers from real play |
 | 20 | **Custom state goes to every client,** including those who only draw that entity and ignore it | With relevancy (section 14.1, step 4) |
 | 21 | **Entities spawned or removed during a replay** aren't tested | From the 2026-11-05 audit. Matters once abilities spawn things |

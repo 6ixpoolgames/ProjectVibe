@@ -17,8 +17,8 @@ Folders: `tests/` for tests, `samples/` for samples, and `debug/` for tools used
 
 Small diagnostics that cost very little, and that moving would cost more than it gains:
 - `get_stats` on `ChunkStreamer`, and `stats` on `NetworkSession`
-- `profile_enabled` on `NetworkTime`
-- `NetworkTime.step()`
+- `profile_enabled` on `TickDriver`
+- `TickDriver.step()`
 
 A base class may offer one empty slot for a module to fill, such as a packet filter. It should never name a debug class.
 

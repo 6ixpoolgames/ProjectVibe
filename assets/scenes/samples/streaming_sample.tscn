@@ -1,10 +1,10 @@
 [gd_scene load_steps=11 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/samples/StreamingSample.gd" id="1_sample"]
-[ext_resource type="Script" path="res://assets/scripts/terrain/Terrain.gd" id="2_terrain"]
+[ext_resource type="Script" path="res://assets/scripts/terrain/TerrainGenerator.gd" id="2_terrain"]
 [ext_resource type="Script" path="res://assets/scripts/streaming/tests/SlowChunkStreamer.gd" id="3_streamer"]
 [ext_resource type="Script" path="res://assets/scripts/world/WorldCoordinator.gd" id="4_world"]
-[ext_resource type="Script" path="res://assets/scripts/world/WorldNavLink.gd" id="5_link"]
+[ext_resource type="Script" path="res://assets/scripts/world/TerrainNavFeeder.gd" id="5_link"]
 
 [sub_resource type="NavHooks" id="Hooks"]
 
@@ -36,7 +36,7 @@ script = ExtResource("2_terrain")
 [node name="ChunkStreamer" type="Node" parent="World"]
 script = ExtResource("3_streamer")
 
-[node name="WorldNavLink" type="Node" parent="World"]
+[node name="TerrainNavFeeder" type="Node" parent="World"]
 script = ExtResource("5_link")
 nav_hooks = SubResource("Hooks")
 tick_nav = true

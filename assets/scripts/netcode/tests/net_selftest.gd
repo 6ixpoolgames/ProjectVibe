@@ -238,7 +238,7 @@ func _test_fake_conditions() -> void:
 ## Offline: entities spawn with no connection, and lag compensation works on its own.
 func _test_offline() -> void:
 	var session: NetworkSessionSingleton = get_node("/root/NetworkSession")
-	var driver: NetworkTimeSingleton = get_node("/root/NetworkTime")
+	var driver: TickDriverSingleton = get_node("/root/TickDriver")
 	var world := Node3D.new()
 	add_child(world)
 	var floor_body := StaticBody3D.new()

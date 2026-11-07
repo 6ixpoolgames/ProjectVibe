@@ -1,12 +1,12 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-04: headless self-test for rollback (netcode spec build steps 2-3).
-## Covers StateEncoding, TickStateComponent and NetworkTime.rollback, first with plain scripted entities, then with a real
+## Covers StateEncoding, TickStateComponent and TickDriver.rollback, first with plain scripted entities, then with a real
 ## CharacterBody3D walking, jumping and hitting a wall under real physics. The key question: does replaying from a saved
 ## tick reproduce exactly what happened? No network involved. Exits 0 on success, 1 on failure. Run from the project folder:
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/netcode/tests/tick_state_selftest.tscn"
 extends Node
 
 var _failures := 0
-var nt: NetworkTimeSingleton
+var nt: TickDriverSingleton
 var _replayed_from_air := false
 var _replayed_from_ground := false
 
@@ -30,7 +30,7 @@ class Mover extends Node3D:
 	func _tick_simulate(dt: float, t: int) -> void:
 		simulate_calls += 1
 		pos += want * dt
-		var driver: NetworkTimeSingleton = get_node("/root/NetworkTime")
+		var driver: TickDriverSingleton = get_node("/root/TickDriver")
 		var roll := driver.tick_rng(7).randf()
 		if rolls.has(t) and rolls[t] != roll:
 			rolls_repeat = false
@@ -121,7 +121,7 @@ class LoadHookEntity extends Node:
 	var other_value_during_load := -1
 
 	func _on_state_loaded(_t: int) -> void:
-		flag_during_load = (get_node("/root/NetworkTime") as NetworkTimeSingleton).is_resimulating()
+		flag_during_load = (get_node("/root/TickDriver") as TickDriverSingleton).is_resimulating()
 		if other:
 			other_value_during_load = other.value
 
@@ -192,7 +192,7 @@ class ScriptedPawn extends TickSamplePawn:
 
 func _ready() -> void:
 	print("--- Tick state and rollback self-test ---")
-	nt = get_node("/root/NetworkTime")
+	nt = get_node("/root/TickDriver")
 	nt.active = false # the plain tests drive ticks by hand
 	_test_encodings()
 	_test_declarations()
@@ -341,7 +341,7 @@ func _test_rollback() -> void:
 	_check(m.simulate_calls - sims == 20, "simulated once per replayed tick")
 	_check(m.input_calls == inputs, "input phase doesn't run during replay; saved inputs are restored")
 	_check(m.effects == effects, "cosmetic effects don't replay")
-	_check(m.replay_ticks == range(from + 1, now + 1), "is_resimulating is on, and NetworkTime.tick reads the replayed tick")
+	_check(m.replay_ticks == range(from + 1, now + 1), "is_resimulating is on, and TickDriver.tick reads the replayed tick")
 	_check(not nt.is_resimulating(), "is_resimulating is off afterwards")
 	_check(m.rolls_repeat, "tick_rng gives the same rolls in a replay")
 	_check(other.simulate_calls == bystander, "participants with no rollback state aren't replayed")

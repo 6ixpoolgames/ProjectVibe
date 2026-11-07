@@ -1,4 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: switches AI pawns off when the ground around them isn't loaded, and back on
+## Claude 2026-11-07: renamed from AIActivityModule, and reached as GameMode.ai_activation_manager, so that the name says what it does.
 ## when it is. So a horde costs almost nothing where no player is, and nothing walks off the edge of the world. Claude 2026-11-07:
 ## a Pawn stops its NetworkEntity and TickState too, which leaves only this module's checks, and it's left out of snapshots while off.
 ##
@@ -10,7 +11,7 @@
 ## pawns some cheaper way while they're off. None of that exists yet.
 ##
 ## What a pawn needs:
-##   - to call GameMode.ai_activity.add_pawn(self) when it's an AI pawn, and remove_pawn(self) when it stops being one
+##   - to call GameMode.ai_activation_manager.add_pawn(self) when it's an AI pawn, and remove_pawn(self) when it stops being one
 ##   - a method set_simulation_active(active: bool), which stops and restarts its ticks and leaves all its state as it is
 ##
 ## What happens in odd cases (all checked in game_mode/tests/game_mode_selftest.gd):
@@ -18,7 +19,7 @@
 ##   - On a client: this does nothing, because AI only runs on the server.
 ##   - A pawn that's freed: it's dropped from the list.
 ##   - The module is removed: every pawn it switched off goes back on.
-class_name AIActivityModule
+class_name AIActivationManager
 extends GameModeModule
 
 ## Sent when a pawn is switched off, because the ground around it isn't loaded.
@@ -39,23 +40,23 @@ var _pawns: Array[Node3D] = []
 var _inactive: Dictionary = {} # pawn -> true
 var _next_pawn := 0
 var _session: Node = null
-var _terrains: Array[Terrain] = []
-var _connected_terrains := {} # Terrain -> true
+var _terrains: Array[TerrainGenerator] = []
+var _connected_terrains := {} # TerrainGenerator -> true
 var _check_everyone := false
 
 
 func _init() -> void:
-	# After ChunkStreamer's -200, so new ground counts, and before NetworkTime's -100, so nothing ticks over ground that's gone.
+	# After ChunkStreamer's -200, so new ground counts, and before TickDriver's -100, so nothing ticks over ground that's gone.
 	process_physics_priority = -150
 
 
 func _on_module_added(game_mode: GameModeSingleton) -> void:
-	game_mode.ai_activity = self
+	game_mode.ai_activation_manager = self
 	_session = get_node_or_null("/root/NetworkSession")
 
 
 func _on_module_removed(game_mode: GameModeSingleton) -> void:
-	game_mode.ai_activity = null
+	game_mode.ai_activation_manager = null
 	for pawn: Node3D in _inactive.keys():
 		if is_instance_valid(pawn):
 			_set_active(pawn, true)
@@ -143,8 +144,8 @@ func _has_ground_around(at: Vector3) -> bool:
 ## Finds the terrains again, and listens for chunks going away on any new ones.
 func _refresh_terrains() -> void:
 	_terrains.clear()
-	for node in get_tree().get_nodes_in_group(Terrain.GROUP):
-		var terrain := node as Terrain
+	for node in get_tree().get_nodes_in_group(TerrainGenerator.GROUP):
+		var terrain := node as TerrainGenerator
 		if terrain != null:
 			_terrains.append(terrain)
 			if not _connected_terrains.has(terrain):

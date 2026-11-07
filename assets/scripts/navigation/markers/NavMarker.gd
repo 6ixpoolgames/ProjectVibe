@@ -3,16 +3,16 @@
 ## It's plain data with no behaviour. Modules hold the code that acts on markers, so a marker nothing
 ## handles is simply ignored.
 ##
-## A marker is INPUT. When it's registered, NavWorld copies its position, tag and enabled state into its own
+## A marker is INPUT. When it's registered, NavMarkerManager copies its position, tag and enabled state into its own
 ## rows, so changing those here afterwards does nothing. To switch a marker on or off during play, call
-## NavWorld.set_enabled(id, value).
+## NavMarkerManager.set_enabled(id, value).
 ##
 # GDScript note: a Resource is a data object Godot can edit in the inspector and save to a file.
 # It's much lighter than a node, because it isn't in the scene tree and gets no per-frame calls.
 class_name NavMarker
 extends Resource
 
-## What this marker is, such as &"link.jump". Must be declared for NavTags, or NavWorld refuses the marker.
+## What this marker is, such as &"link.jump". Must be declared for NavTags, or NavMarkerManager refuses the marker.
 @export var tag: StringName
 ## How close counts as "at it".
 @export var radius := 1.0

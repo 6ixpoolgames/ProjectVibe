@@ -4,7 +4,7 @@
 ##
 ## Stage v0, fixed lead: a client runs ahead of the server by half the round trip plus a safety margin, set when it
 ## starts ticking. It's only set again if the client has drifted well away, after a hitch say. Stage v1 will use these
-## numbers to nudge NetworkTime.tick_factor gently instead of jumping.
+## numbers to nudge TickDriver.tick_factor gently instead of jumping.
 class_name NetClock
 extends RefCounted
 

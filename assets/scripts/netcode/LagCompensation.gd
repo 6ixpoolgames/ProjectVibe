@@ -61,7 +61,7 @@ static func _rewind_others(shooter: NetworkEntity, view_ticks_behind: float) -> 
 	var session: Node = shooter.session
 	if session == null or not session.lag_compensation_enabled:
 		return rewound
-	var driver: Node = shooter.get_node_or_null("/root/NetworkTime")
+	var driver: Node = shooter.get_node_or_null("/root/TickDriver")
 	if driver == null:
 		return rewound
 	var cap: float = session.rewind_cap_seconds * driver.get_tick_rate()

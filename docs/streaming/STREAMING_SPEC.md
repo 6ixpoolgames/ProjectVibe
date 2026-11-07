@@ -2,7 +2,7 @@
 
 # Chunk Streaming
 
-**Status:** built for one terrain, offline and in multiplayer, with edits that outlast their chunks and reach every machine. Edits aren't saved to a file yet. `ChunkStreamer` is now part of a `WorldCoordinator`, and only streams chunks: `WorldNavLink` ticks nav and manages its interests. See `docs/world/WORLD_SPEC.md`.
+**Status:** built for one terrain, offline and in multiplayer, with edits that outlast their chunks and reach every machine. Edits aren't saved to a file yet. `ChunkStreamer` is now part of a `WorldCoordinator`, and only streams chunks: `TerrainNavFeeder` ticks nav and manages its interests. See `docs/world/WORLD_SPEC.md`.
 
 ## 1. How it works
 
@@ -10,7 +10,7 @@
 |---|---|
 | `StreamingSource` | A node that says "keep the world loaded around me". Add it as a child of a pawn or a camera. "Streaming source" is the usual engine term. |
 | `ChunkStreamer` | Finds the active sources, loads chunks near them and unloads the rest, within a time budget per frame. |
-| `Terrain` | Builds one chunk in small steps (`build_chunk_step`), or removes one (`unload_chunk`). With `build_on_start` off, it starts empty. |
+| `TerrainGenerator` | Builds one chunk in small steps (`build_chunk_step`), or removes one (`unload_chunk`). With `build_on_start` off, it starts empty. |
 
 **The trigger rule, from the owner:** a player controller keeps the world loaded by default, and an AI controller needs a bool. The source is its own node instead of a setting on the controller, so things with no pawn controller can use it, such as an RTS camera or a spectator. `StreamingSamplePawn` shows the rule. The real controllers don't have it yet, because the owner is still thinking about the pawn.
 
@@ -20,7 +20,7 @@
 
 **The ground guarantee:** the chunks under a source, and any it could step into before the next check, are built immediately, right before each tick and before any rollback replay, ignoring the budget. A pawn with a source never has a tick without ground, even on its first or after a teleport. Measured: a new chunk is solid in the same physics frame it's built. Speed isn't a limit in practice: about 75 chunks a second on the test PC, or 25 on the slowed CPU, which is about 1,600 m/s or 530 m/s at 320 m load distance.
 
-**AI with no source** gets switched off by `AIActivityModule` before reaching ground that isn't there (`game_mode/`). Nothing in the motor deals with missing ground. A later layer can simulate those pawns out of sight, using its `ai_deactivated` and `ai_activated` signals.
+**AI with no source** gets switched off by `AIActivationManager` before reaching ground that isn't there (`game_mode/`). Nothing in the motor deals with missing ground. A later layer can simulate those pawns out of sight, using its `ai_deactivated` and `ai_activated` signals.
 
 ## 2. Performance target
 
@@ -58,7 +58,7 @@ Windows, Godot 4.7.2, a 5900X, 2026-11-06. Every row has collision and nav on, a
 
 **Reading it:**
 - **Chunk size mostly sets the worst single step.** Collision can't be split, so its cost lands in one frame. At x3 that's about 7 ms at 256 m and 2 ms at 128 m. Average cost per area is about the same at any size.
-- **128 m is the most comfortable at the target,** so the owner made it `Terrain`'s default, with `chunk_resolution` 21, on 2026-11-06.
+- **128 m is the most comfortable at the target,** so the owner made it `TerrainGenerator`'s default, with `chunk_resolution` 21, on 2026-11-06.
 - **64 m with 8 players went over the limit,** at 11.77 ms. That's most likely the refresh, which isn't split and has the most chunks to score there. It's not a target row. Traced by reasoning only.
 - **Start-up with no loading screen takes seconds with 8 players,** because 2 ms a frame is a low budget. A loading screen could raise `max_ms_per_frame` while it's up.
 

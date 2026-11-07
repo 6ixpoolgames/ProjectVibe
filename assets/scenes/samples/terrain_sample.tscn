@@ -1,6 +1,6 @@
 [gd_scene load_steps=6 format=3]
 
-[ext_resource type="Script" path="res://assets/scripts/terrain/Terrain.gd" id="1_terrain"]
+[ext_resource type="Script" path="res://assets/scripts/terrain/TerrainGenerator.gd" id="1_terrain"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_mat"]
 

@@ -36,7 +36,7 @@
 ##   - correct_state for a tick that's gone can't replay, so it snaps the entity to the given values and warns.
 ##   - Replay with an input missing for a tick: the last input stays in place.
 ##   - Only values that changed are written back after rounding, so setters don't run needlessly.
-##   - No NetworkTime autoload: stays idle.
+##   - No TickDriver autoload: stays idle.
 ##
 ## Following the server (Claude 2026-11-04, netcode spec section 6.5). rollback_mode decides what a rollback does with this entity:
 ##   RESIMULATE (default)  it's put back and its _tick_simulate runs again. For what this machine predicts: your own pawn.
@@ -148,7 +148,7 @@ var _input_values: Array = []
 
 
 func _enter_tree() -> void:
-	_driver = get_node_or_null("/root/NetworkTime")
+	_driver = get_node_or_null("/root/TickDriver")
 	if _driver:
 		_driver.register(self)
 
@@ -537,7 +537,7 @@ func matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 
 
 ## Overwrites saved list entries for a tick with what the authority says was true, then follow with
-## NetworkTime.rollback(tick) to replay from them. Entries not given stay as predicted. Returns true if the history took it.
+## TickDriver.rollback(tick) to replay from them. Entries not given stay as predicted. Returns true if the history took it.
 ## If that tick has already fallen out of the history, a replay is impossible, so this snaps the entity straight to the
 ## given values and warns, and returns false (netcode spec section 15). A tick that hasn't happened yet changes nothing.
 ## Claude 2026-11-05: custom corrects what save_state saved. The replay's first step then hands it to load_state.

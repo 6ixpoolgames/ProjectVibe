@@ -1,4 +1,4 @@
-## Written by Claude (claude-opus-5-5), 2026-11-05: headless test for Terrain. It checks the merged features, and
+## Written by Claude (claude-opus-5-5), 2026-11-05: headless test for TerrainGenerator. It checks the merged features, and
 ## that each bug found in procgen_tile.gd stays fixed. Exits 0 on success, 1 on failure. Run from the project folder:
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/terrain/tests/terrain_selftest.tscn"
 extends Node
@@ -13,7 +13,7 @@ var _failures := 0
 # GDScript note: a function that uses "await" pauses there and carries on later, while the game keeps running. Calling
 # such a function with await waits for it to finish. Physics needs that, since it only updates between frames.
 func _ready() -> void:
-	print("--- Terrain self-test ---")
+	print("--- TerrainGenerator self-test ---")
 	_test_same_heights_as_nav_test_terrain()
 	_test_noise_type_is_what_it_says()
 	_test_fractal_settings_do_something()
@@ -39,7 +39,7 @@ func _ready() -> void:
 
 func _test_same_heights_as_nav_test_terrain() -> void:
 	# With no jitter and the same settings and course, they should give the same ground everywhere.
-	var merged: Terrain = COURSE.new()
+	var merged: TerrainGenerator = COURSE.new()
 	_use_plain_grid(merged)
 	merged.chunk_radius = 2
 	merged.fractal_octaves = 4
@@ -108,7 +108,7 @@ func _test_noise_scale() -> void:
 func _test_size_settings() -> void:
 	# The bug in procgen_tile.gd: the size set in a scene was ignored at runtime. Settings here are made before the
 	# node enters the scene, which is the same order a scene file uses.
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.chunk_radius = 0
 	terrain.chunk_resolution = 50
 	terrain.chunk_size = 150.0
@@ -189,7 +189,7 @@ func _test_jitter() -> void:
 		if distance > 0.0:
 			moved += 1
 	_check(moved == regular_points.size(), "jitter moves the grid points (%d of %d)" % [moved, regular_points.size()])
-	_check(furthest <= Terrain.MAX_JITTER_REACH + 0.000001 and furthest > 0.2, "no further than the limit (%.3f of a square)" % furthest)
+	_check(furthest <= TerrainGenerator.MAX_JITTER_REACH + 0.000001 and furthest > 0.2, "no further than the limit (%.3f of a square)" % furthest)
 
 	# Worst case: full jitter on a coarse grid. Seen from above, every triangle has to keep facing up, or the ground
 	# would fold over itself.
@@ -333,7 +333,7 @@ func _test_regenerate() -> void:
 
 
 func _test_bad_settings() -> void:
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.chunk_resolution = 0
 	terrain.chunk_size = 0.0
 	terrain.chunk_radius = -1
@@ -377,7 +377,7 @@ func _test_moved_node() -> void:
 	var at_origin := _make_terrain(0)
 	var height := at_origin.height_at(4.2, 6.6)
 	at_origin.free()
-	var moved := Terrain.new()
+	var moved := TerrainGenerator.new()
 	_use_plain_grid(moved)
 	moved.build_collision = true
 	moved.position = Vector3(100.0, 5.0, -50.0)
@@ -391,9 +391,9 @@ func _test_moved_node() -> void:
 	moved.free()
 
 
-## Claude 2026-11-07: a terrain feeds nav through a WorldNavLink now.
-func _add_nav_link(terrain: Terrain) -> void:
-	var link := WorldNavLink.new()
+## Claude 2026-11-07: a terrain feeds nav through a TerrainNavFeeder now.
+func _add_nav_link(terrain: TerrainGenerator) -> void:
+	var link := TerrainNavFeeder.new()
 	link.nav_hooks = NavHooks.new()
 	terrain.add_child(link)
 
@@ -402,7 +402,7 @@ func _test_nav() -> void:
 
 	NavServer.configure({"worker_threads": 4})
 	var interest := NavServer.add_interest(Vector3.ZERO, 70.0, 90.0, 1)
-	var terrain: Terrain = COURSE.new()
+	var terrain: TerrainGenerator = COURSE.new()
 	_use_plain_grid(terrain)
 	terrain.chunk_radius = 2
 	_add_nav_link(terrain)
@@ -436,7 +436,7 @@ func _test_nav() -> void:
 	_tick_nav_until_idle()
 
 	# Default look: coarse grid, jitter, gentle hills. Nav has to walk the same triangles as everything else.
-	var jittered := Terrain.new()
+	var jittered := TerrainGenerator.new()
 	jittered.build_collision = false
 	_add_nav_link(jittered)
 	add_child(jittered)
@@ -455,7 +455,7 @@ func _test_nav() -> void:
 	_tick_nav_until_idle()
 
 	# Nav follows a moved node, which its heightmap input couldn't.
-	var moved: Terrain = COURSE.new()
+	var moved: TerrainGenerator = COURSE.new()
 	_use_plain_grid(moved)
 	moved.chunk_radius = 2
 	_add_nav_link(moved)
@@ -474,7 +474,7 @@ func _test_nav() -> void:
 func _measure_nav_inputs() -> void:
 	var interest := NavServer.add_interest(Vector3.ZERO, 70.0, 90.0, 1)
 	for run in 2:
-		var mesh_terrain: Terrain = COURSE.new()
+		var mesh_terrain: TerrainGenerator = COURSE.new()
 		_use_plain_grid(mesh_terrain)
 		mesh_terrain.chunk_radius = 2
 		mesh_terrain.fractal_octaves = 4
@@ -518,7 +518,7 @@ func _measure_nav_inputs() -> void:
 
 
 ## One-metre squares with no jitter, which makes positions in these tests easy to work out.
-func _use_plain_grid(terrain: Terrain) -> void:
+func _use_plain_grid(terrain: TerrainGenerator) -> void:
 	terrain.chunk_radius = 0
 	terrain.chunk_size = 32.0
 	terrain.chunk_resolution = 32
@@ -527,15 +527,15 @@ func _use_plain_grid(terrain: Terrain) -> void:
 
 
 ## A terrain on the plain grid, already in the scene and generated.
-func _make_terrain(radius: int) -> Terrain:
-	var terrain := Terrain.new()
+func _make_terrain(radius: int) -> TerrainGenerator:
+	var terrain := TerrainGenerator.new()
 	_use_plain_grid(terrain)
 	terrain.chunk_radius = radius
 	add_child(terrain)
 	return terrain
 
 
-func _same_ground(a: Terrain, b: Terrain) -> bool:
+func _same_ground(a: TerrainGenerator, b: TerrainGenerator) -> bool:
 	for z in range(1, 32, 3):
 		for x in range(1, 32, 3):
 			if not is_equal_approx(a.height_at(x, z), b.height_at(x, z)):
@@ -543,7 +543,7 @@ func _same_ground(a: Terrain, b: Terrain) -> bool:
 	return true
 
 
-func _borders_match(terrain: Terrain) -> bool:
+func _borders_match(terrain: TerrainGenerator) -> bool:
 	var n: int = terrain._points_per_edge()
 	var left: PackedVector3Array = terrain._points[Vector2i(0, 0)]
 	var right: PackedVector3Array = terrain._points[Vector2i(1, 0)]
@@ -555,12 +555,12 @@ func _borders_match(terrain: Terrain) -> bool:
 
 
 ## What was really built for this chunk, from its mesh and not from a fresh calculation.
-func _built_mesh_arrays(terrain: Terrain, key: Vector2i) -> Array:
+func _built_mesh_arrays(terrain: TerrainGenerator, key: Vector2i) -> Array:
 	var mesh_node: MeshInstance3D = terrain._mesh_nodes[key]
 	return mesh_node.mesh.surface_get_arrays(0)
 
 
-func _border_normals_match(terrain: Terrain, n: int) -> bool:
+func _border_normals_match(terrain: TerrainGenerator, n: int) -> bool:
 	var left: PackedVector3Array = _built_mesh_arrays(terrain, Vector2i(0, 0))[Mesh.ARRAY_NORMAL]
 	var right: PackedVector3Array = _built_mesh_arrays(terrain, Vector2i(1, 0))[Mesh.ARRAY_NORMAL]
 	var below: PackedVector3Array = _built_mesh_arrays(terrain, Vector2i(0, 1))[Mesh.ARRAY_NORMAL]
@@ -574,7 +574,7 @@ func _border_normals_match(terrain: Terrain, n: int) -> bool:
 	return true
 
 
-func _collision_matches_heights(terrain: Terrain) -> bool:
+func _collision_matches_heights(terrain: TerrainGenerator) -> bool:
 	for z in range(-30, 60, 7):
 		for x in range(-30, 60, 7):
 			var hit := _ray_down(terrain, Vector3(x + 0.31, 100.0, z + 0.47))
@@ -584,7 +584,7 @@ func _collision_matches_heights(terrain: Terrain) -> bool:
 
 
 ## One number that changes if any point's position changes at all, for comparing two systems by eye.
-func _fingerprint(terrain: Terrain) -> int:
+func _fingerprint(terrain: TerrainGenerator) -> int:
 	return hash(terrain._points[Vector2i.ZERO])
 
 

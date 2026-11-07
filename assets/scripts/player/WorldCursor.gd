@@ -3,11 +3,11 @@
 ##
 ## Two ways to use it:
 ##   One answer, right now, such as on a click:
-##     var hit := controller.cursor.query_now()
+##     var hit := controller.world_cursor.query_now()
 ##   Watching, such as a hover highlight or a placement preview, at a rate you choose:
-##     controller.cursor.acquire(self, 20.0)   # 20 times a second. 0 means every frame
-##     controller.cursor.hit_changed.connect(...)
-##     controller.cursor.release(self)         # or just get freed or leave the scene, which counts as releasing
+##     controller.world_cursor.acquire(self, 20.0)   # 20 times a second. 0 means every frame
+##     controller.world_cursor.hit_changed.connect(...)
+##     controller.world_cursor.release(self)         # or just get freed or leave the scene, which counts as releasing
 ##
 ## With several users, the fastest rate anyone asked for wins. When the last one is gone, it stops by itself.
 ##

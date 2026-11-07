@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-04: the multiplayer session, stage v0 (netcode spec sections 4, 6, 10, 11).
 ## Autoload "NetworkSession". Connects machines, spawns entities on all of them, and moves inputs and snapshots between them.
-## Everything happens inside NetworkTime's ticks. Nothing here is needed offline: with no session, entities play as single player.
+## Everything happens inside TickDriver's ticks. Nothing here is needed offline: with no session, entities play as single player.
 ##
 ## The model is the standard one for competitive action games:
 ##   - The server is the authority. Clients send it inputs only, never positions or results.
@@ -39,7 +39,7 @@
 ##   - A snapshot older than the newest one seen is dropped. Input for a tick the server has already run is dropped, and the
 ##     client gets corrected. The server repeats the last input when one is missing, and never rewinds for movement.
 ##   - A client that joins late gets everything that exists. Entities still owned by a client that leaves are removed. Claude
-##     2026-11-07: player_leaving fires first, so something can take back what it wants to keep. PossessionModule does this
+##     2026-11-07: player_leaving fires first, so something can take back what it wants to keep. PossessionCoordinator does this
 ##     for a possessed pawn, which stays in the world with no owner.
 extends Node
 class_name NetworkSessionSingleton
@@ -189,9 +189,9 @@ var _snapshot_jitter_usec := 0.0
 func _ready() -> void:
 	process_priority = -200
 	process_physics_priority = -200
-	_driver = get_node_or_null("/root/NetworkTime")
+	_driver = get_node_or_null("/root/TickDriver")
 	if _driver == null:
-		push_warning("[NetworkSession] no NetworkTime autoload; multiplayer won't run")
+		push_warning("[NetworkSession] no TickDriver autoload; multiplayer won't run")
 		set_process(false)
 		return
 	_driver.before_tick.connect(_on_before_tick)

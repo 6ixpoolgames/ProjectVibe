@@ -1,5 +1,5 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: headless self-test for the tick driver (NetworkTime.gd).
-## Checks the rules listed at the top of NetworkTime.gd. Exits 0 on success, 1 on failure. Run from the project folder:
+## Written by Claude (claude-opus-5-5), 2026-11-04: headless self-test for the tick driver (TickDriver.gd).
+## Checks the rules listed at the top of TickDriver.gd. Exits 0 on success, 1 on failure. Run from the project folder:
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/singletons/tests/tick_driver_selftest.tscn"
 extends Node
 
@@ -45,8 +45,8 @@ func _ready() -> void:
 	get_tree().quit(0 if _failures == 0 else 1)
 
 
-func _driver() -> NetworkTimeSingleton:
-	var d := NetworkTimeSingleton.new()
+func _driver() -> TickDriverSingleton:
+	var d := TickDriverSingleton.new()
 	d.active = false # the test drives advance()/step() itself
 	d.tick_rate = 60
 	add_child(d)
@@ -178,8 +178,8 @@ func _test_helpers() -> void:
 
 
 func _test_autoload() -> void:
-	var n = get_node_or_null("/root/NetworkTime")
-	_check(n is NetworkTimeSingleton, "NetworkTime autoload exists")
+	var n = get_node_or_null("/root/TickDriver")
+	_check(n is TickDriverSingleton, "TickDriver autoload exists")
 	if n:
 		_check(n.get_tick_rate() == Engine.physics_ticks_per_second, "autoload defaults to one tick per physics frame")
 

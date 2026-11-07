@@ -6,7 +6,7 @@ extends Node
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 
 var _failures := 0
-var _possession: PossessionModule
+var _possession: PossessionCoordinator
 var _controller: PlayerController
 
 
@@ -35,7 +35,7 @@ class ScriptedController extends PlayerController:
 
 func _ready() -> void:
 	print("--- Possession and camera self-test ---")
-	_possession = GameMode.possession
+	_possession = GameMode.possession_coordinator
 	_controller = _possession.controller
 	await _test_new_scene_camera_works()
 	_test_starts_ready()
@@ -80,7 +80,7 @@ func _test_possessing() -> void:
 	_check(_possession.possess(pawn), "a pawn can be possessed")
 	_possession.possessed.disconnect(on_possessed)
 	_check(heard[0] == 1, "and it's announced")
-	_check(_possession.get_pawn_of() == pawn and _possession.get_peer_of(pawn) == PossessionModule.OFFLINE_PEER, "and it's recorded")
+	_check(_possession.get_pawn_of() == pawn and _possession.get_peer_of(pawn) == PossessionCoordinator.OFFLINE_PEER, "and it's recorded")
 	_check(_controller.pawn == pawn, "and the controller has it")
 	_check(pawn.has_player(), "and the pawn knows")
 	_check(pawn.get_node_or_null("StreamingSource") != null, "and it has a source now")
@@ -391,7 +391,7 @@ func _test_camera_arm() -> void:
 
 
 func _test_streaming_and_ai() -> void:
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.name = "PossessionTerrain"
 	terrain.build_on_start = false
 	terrain.chunk_size = 32.0
@@ -431,15 +431,15 @@ func _test_scene_camera_left_alone() -> void:
 
 
 func _test_no_module() -> void:
-	var module := GameMode.possession
+	var module := GameMode.possession_coordinator
 	GameMode.remove_module(module)
-	_check(GameMode.possession == null, "with the module removed, GameMode.possession is null")
+	_check(GameMode.possession_coordinator == null, "with the module removed, GameMode.possession_coordinator is null")
 	var pawn := _make_pawn(Vector3.ZERO)
 	await _ticks(5)
 	_check(is_instance_valid(pawn), "and pawns carry on")
 	pawn.free()
-	GameMode.add_module(PossessionModule.new())
-	_check(GameMode.possession != null and GameMode.possession.controller != null, "and it can come back, with a new controller")
+	GameMode.add_module(PossessionCoordinator.new())
+	_check(GameMode.possession_coordinator != null and GameMode.possession_coordinator.controller != null, "and it can come back, with a new controller")
 
 
 # --- Helpers ---

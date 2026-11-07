@@ -5,7 +5,7 @@ class_name GameModeModule
 extends Node
 
 
-## Just added. Fill in your line on GameMode here, if you have one, such as game_mode.ai_activity = self.
+## Just added. Fill in your line on GameMode here, if you have one, such as game_mode.ai_activation_manager = self.
 func _on_module_added(_game_mode: GameModeSingleton) -> void:
 	pass
 

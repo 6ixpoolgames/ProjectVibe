@@ -12,7 +12,7 @@ var _failures := 0
 
 
 func _ready() -> void:
-	print("--- Terrain edit log self-test ---")
+	print("--- TerrainGenerator edit log self-test ---")
 	_test_surviving_an_unload()
 	_test_border_with_an_unbuilt_chunk()
 	_test_same_result_in_any_order()
@@ -355,7 +355,7 @@ func _test_long_edit_lists() -> void:
 	var steps := 1
 	while not terrain.build_chunk_step(KEY_A):
 		steps += 1
-	_check(steps >= 100 / Terrain.EDITS_PER_STEP, "a chunk with 100 edits spreads them across steps (%d steps)" % steps)
+	_check(steps >= 100 / TerrainGenerator.EDITS_PER_STEP, "a chunk with 100 edits spreads them across steps (%d steps)" % steps)
 	var direct := _make_terrain()
 	var direct_log := _add_log(direct)
 	direct_log.from_bytes(edit_log.to_bytes())
@@ -367,7 +367,7 @@ func _test_long_edit_lists() -> void:
 
 ## Not a pass or fail, just numbers.
 func _measure() -> void:
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.build_on_start = false
 	terrain.build_collision = false
 	add_child(terrain)
@@ -388,8 +388,8 @@ func _measure() -> void:
 # --- Helpers ---
 
 
-func _make_terrain() -> Terrain:
-	var terrain := Terrain.new()
+func _make_terrain() -> TerrainGenerator:
+	var terrain := TerrainGenerator.new()
 	terrain.name = "Terrain"
 	terrain.build_on_start = false
 	terrain.chunk_size = 32.0
@@ -399,14 +399,14 @@ func _make_terrain() -> Terrain:
 	return terrain
 
 
-func _add_log(terrain: Terrain) -> TerrainEditLog:
+func _add_log(terrain: TerrainGenerator) -> TerrainEditLog:
 	var edit_log := TerrainEditLog.new()
 	terrain.add_child(edit_log)
 	return edit_log
 
 
 ## The last row of points across chunk A, against the first row of chunk B.
-func _shared_border_matches(terrain: Terrain) -> bool:
+func _shared_border_matches(terrain: TerrainGenerator) -> bool:
 	var a: PackedVector3Array = terrain._points[KEY_A]
 	var b: PackedVector3Array = terrain._points[KEY_B]
 	var n: int = terrain._points_per_edge()

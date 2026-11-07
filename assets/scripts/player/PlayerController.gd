@@ -1,5 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: one player's controls. It's a placeholder for now: enough to drive a pawn and aim a
-## camera. It survives with no pawn, as Unreal's does, and PossessionModule creates it and tells it which pawn it has.
+## camera. It survives with no pawn, as Unreal's does, and PossessionCoordinator creates it and tells it which pawn it has.
 ##
 ## What it does:
 ##   - reads the player's devices, on this machine only
@@ -41,7 +41,7 @@ var pawn: Pawn = null
 ## The real camera. It holds where it is while there's no view to follow.
 var camera: PlayerCamera = null
 ## What the mouse or crosshair points at. It's off until something asks it.
-var cursor: WorldCursor = null
+var world_cursor: WorldCursor = null # Claude 2026-11-07: renamed from cursor, to match its class
 ## Where the player is looking, in radians.
 var look_yaw := 0.0
 var look_pitch := 0.0
@@ -59,10 +59,10 @@ func _ready() -> void:
 	# child would come before any level's camera, taking over from cameras that don't ask to be current.
 	camera = PlayerCamera.new()
 	camera.name = "PlayerCamera"
-	cursor = WorldCursor.new()
-	cursor.name = "WorldCursor"
-	add_child(cursor)
-	_driver = get_node_or_null("/root/NetworkTime")
+	world_cursor = WorldCursor.new()
+	world_cursor.name = "WorldCursor"
+	add_child(world_cursor)
+	_driver = get_node_or_null("/root/TickDriver")
 
 
 func _exit_tree() -> void:
@@ -72,10 +72,10 @@ func _exit_tree() -> void:
 		camera.free() # it isn't our child yet, so nothing else would
 
 
-# --- Called by PossessionModule ---
+# --- Called by PossessionCoordinator ---
 
 
-## Takes this pawn, and lets go of any other. Null means none. Nothing else should call this: ask PossessionModule.
+## Takes this pawn, and lets go of any other. Null means none. Nothing else should call this: ask PossessionCoordinator.
 func take_pawn(new_pawn: Pawn) -> void:
 	if pawn == new_pawn:
 		return
@@ -187,7 +187,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		# So a player can always get the mouse back.
 		_show_mouse()
 	elif click_to_move and is_instance_valid(pawn) and InputMap.has_action(&"left_click") and event.is_action_pressed(&"left_click"):
-		var hit := cursor.query_now()
+		var hit := world_cursor.query_now()
 		if not hit.is_empty():
 			move_to(hit["position"])
 	elif event is InputEventMouseButton and event.pressed and is_instance_valid(pawn):

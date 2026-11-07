@@ -19,8 +19,8 @@
 ## smoothly per rendered frame, and hides corrections by fading them out. Anything on screen hangs from it.
 ##
 ## What happens in odd cases (all checked in tests/pawn_selftest.gd):
-##   - No NetworkTime: it ticks itself from _physics_process.
-##   - AI pawn in unloaded ground: AIActivityModule stops its ticks, and it keeps all its state.
+##   - No TickDriver: it ticks itself from _physics_process.
+##   - AI pawn in unloaded ground: AIActivationManager stops its ticks, and it keeps all its state.
 class_name Pawn
 extends CharacterBody3D
 
@@ -87,14 +87,14 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	add_to_group(TerrainBodyLifter.GROUP)
-	_driver = get_node_or_null("/root/NetworkTime")
+	_driver = get_node_or_null("/root/TickDriver")
 	if _driver:
 		_driver.register(self)
 
 
 func _exit_tree() -> void:
 	# Claude 2026-11-07: this first, because leaving the list can switch the pawn back on, which would register it again.
-	var ai := _ai_activity()
+	var ai := _ai_activation_manager()
 	if ai:
 		ai.remove_pawn(self)
 	if _driver:
@@ -132,7 +132,7 @@ func has_player() -> bool:
 	return _has_player
 
 
-## PossessionModule tells the pawn. Nothing else should call this.
+## PossessionCoordinator tells the pawn. Nothing else should call this.
 func set_has_player(value: bool) -> void:
 	if _has_player == value:
 		return
@@ -191,7 +191,7 @@ func get_default_view() -> VirtualCamera:
 	return _find_view(self)
 
 
-## AIActivityModule calls this. Everything about the pawn stays as it is, and it simply stops ticking.
+## AIActivationManager calls this. Everything about the pawn stays as it is, and it simply stops ticking.
 # Claude 2026-11-07: through the NetworkEntity, because it decides what ticks. This only stopped the pawn itself, and left its entity and
 # TickState running: 2,000 pawns that were off still cost 53 ms a tick.
 func set_simulation_active(active: bool) -> void:
@@ -356,7 +356,7 @@ func _is_simulated_here() -> bool:
 
 ## An AI pawn is switched off where there's no ground. A pawn with a source always has ground, so it's never watched.
 func _refresh_ai_activity() -> void:
-	var ai := _ai_activity()
+	var ai := _ai_activation_manager()
 	if ai == null:
 		return
 	if _source != null or _has_player or not _is_simulated_here():
@@ -365,6 +365,6 @@ func _refresh_ai_activity() -> void:
 		ai.add_pawn(self)
 
 
-func _ai_activity() -> AIActivityModule:
+func _ai_activation_manager() -> AIActivationManager: # Claude 2026-11-07: renamed with the module
 	var game_mode: Node = get_node_or_null("/root/GameMode") if is_inside_tree() else null
-	return game_mode.ai_activity if game_mode else null
+	return game_mode.ai_activation_manager if game_mode else null

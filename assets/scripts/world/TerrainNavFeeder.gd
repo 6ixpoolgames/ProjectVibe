@@ -1,20 +1,21 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: connects a Terrain to nav, so that neither has to know the other exists. Spec:
-## docs/world/WORLD_SPEC.md. Terrain says when a chunk is built or removed. This hands its triangles to NavServer and announces its markers
-## to NavWorld. It also keeps nav built around every StreamingSource, and can tick NavServer.
+## Claude 2026-11-07: renamed from WorldNavLink, so that the name says what it does: it feeds nav from a terrain generator.
+## Written by Claude (claude-opus-5-5), 2026-11-07: connects a TerrainGenerator to nav, so that neither has to know the other exists. Spec:
+## docs/world/WORLD_SPEC.md. TerrainGenerator says when a chunk is built or removed. This hands its triangles to NavServer and announces its markers
+## to NavMarkerManager. It also keeps nav built around every StreamingSource, and can tick NavServer.
 ##
-## How to use it: normally it's a child of a WorldCoordinator, which tells it which terrain to use. It also works as a child of a Terrain
+## How to use it: normally it's a child of a WorldCoordinator, which tells it which terrain to use. It also works as a child of a TerrainGenerator
 ## with no coordinator at all. Give it a NavHooks to feed nav. With none, it only announces markers, which need no C++ library.
 ##
 ## What happens in odd cases (all checked in world/tests/world_coordinator_selftest.gd):
 ##   - No terrain: it warns and does nothing.
 ##   - It arrives after chunks are built: it catches up on them.
 ##   - The nav library isn't loaded: it warns, and markers still work.
-##   - It leaves the scene: nav and NavWorld forget everything it told them, and it tells them again if it comes back.
-class_name WorldNavLink
+##   - It leaves the scene: nav and NavMarkerManager forget everything it told them, and it tells them again if it comes back.
+class_name TerrainNavFeeder
 extends Node
 
 ## The terrain to feed from. If it's empty and this node's parent is a terrain, it uses the parent.
-@export var terrain: Terrain
+@export var terrain: TerrainGenerator
 ## Give this a NavHooks resource to feed nav. Leave it empty to keep the terrain invisible to nav.
 # Typed as Resource instead of NavHooks, and NavServer is looked up by name below. Writing either name directly would stop this script
 # compiling on a build without the nav DLL. This way, a game that doesn't use nav always works.
@@ -29,23 +30,23 @@ extends Node
 
 var _nav: Object = null # the NavServer, or null when this isn't feeding nav
 var _nav_layer := -1 # our layer's number in the NavServer, or -1 for none
-var _terrain_id := 0 # our id in NavWorld, or 0 when not registered
-var _fed := {} # Vector2i -> true, the chunks nav and NavWorld have been told about
+var _terrain_id := 0 # our id in NavMarkerManager, or 0 when not registered
+var _fed := {} # Vector2i -> true, the chunks nav and NavMarkerManager have been told about
 var _nav_interests := {} # a source's instance id -> its interest id in NavServer
 var _refresh_timer := 0.0
-var _listening_to: Terrain = null
+var _listening_to: TerrainGenerator = null
 
 
 func _init() -> void:
-	# The same as ChunkStreamer: before NetworkTime's -100, so nav is up to date before anything ticks in a physics frame.
+	# The same as ChunkStreamer: before TickDriver's -100, so nav is up to date before anything ticks in a physics frame.
 	process_physics_priority = -200
 
 
 func _enter_tree() -> void:
 	if terrain == null:
-		terrain = get_parent() as Terrain # GDScript note: "as" gives null when the parent isn't a terrain, rather than an error
+		terrain = get_parent() as TerrainGenerator # GDScript note: "as" gives null when the parent isn't a terrain, rather than an error
 	if terrain == null:
-		push_warning("WorldNavLink: no terrain to feed from, so this does nothing. Set its terrain.")
+		push_warning("TerrainNavFeeder: no terrain to feed from, so this does nothing. Set its terrain.")
 		return
 	_listening_to = terrain
 	terrain.chunk_built.connect(_on_chunk_built)
@@ -70,8 +71,8 @@ func _exit_tree() -> void:
 	_nav_layer = -1
 	if _terrain_id != 0:
 		for key: Vector2i in _fed:
-			NavWorld.release_markers(_terrain_id, key)
-		NavWorld.unregister_terrain(_terrain_id)
+			NavMarkerManager.release_markers(_terrain_id, key)
+		NavMarkerManager.unregister_terrain(_terrain_id)
 		_terrain_id = 0
 	_fed.clear()
 
@@ -117,7 +118,7 @@ func _on_chunk_removed(key: Vector2i) -> void:
 	if uses_nav():
 		_nav.remove_mesh(_nav_layer, _nav_mesh_id(key))
 	if _terrain_id != 0:
-		NavWorld.release_markers(_terrain_id, key)
+		NavMarkerManager.release_markers(_terrain_id, key)
 
 
 ## Nav knows each mesh by one number, so this packs the chunk's two grid numbers into one. Adding 2^20 keeps negative chunk numbers
@@ -130,7 +131,7 @@ func _connect_to_nav() -> void:
 	if nav_hooks == null:
 		return
 	if not Engine.has_singleton("NavServer"):
-		push_warning("WorldNavLink: nav_hooks is set, but the nav library isn't loaded. Nav won't see this terrain.")
+		push_warning("TerrainNavFeeder: nav_hooks is set, but the nav library isn't loaded. Nav won't see this terrain.")
 		return
 	_nav = Engine.get_singleton("NavServer")
 	# Mesh input, not heightmap input: nav's heightmap input needs a regular grid, and jitter moves the points off it. It also fills each
@@ -141,11 +142,11 @@ func _connect_to_nav() -> void:
 	_nav_layer = _nav.add_input_layer(terrain, nav_hooks, adapter)
 
 
-# --- Markers: telling NavWorld what's in each chunk ---
-# NavWorld is plain GDScript, so all of this works without the nav library.
+# --- Markers: telling NavMarkerManager what's in each chunk ---
+# NavMarkerManager is plain GDScript, so all of this works without the nav library.
 
 
-## Gives NavWorld a copy of where the terrain is and how big its chunks are, and gets the id its chunks' markers use. The id comes from
+## Gives NavMarkerManager a copy of where the terrain is and how big its chunks are, and gets the id its chunks' markers use. The id comes from
 ## the terrain's path, so it matches on every machine.
 func _register_terrain() -> void:
 	if not terrain.is_inside_tree():
@@ -153,20 +154,20 @@ func _register_terrain() -> void:
 	var settings := TerrainSettings.new()
 	settings.origin = terrain.global_position
 	settings.chunk_size = terrain.chunk_size
-	_terrain_id = NavWorld.register_terrain(str(terrain.get_path()), settings)
+	_terrain_id = NavMarkerManager.register_terrain(str(terrain.get_path()), settings)
 
 
-## Replaces whatever this chunk has announced with a fresh list. Takes effect on NavWorld's next tick.
+## Replaces whatever this chunk has announced with a fresh list. Takes effect on NavMarkerManager's next tick.
 func _announce_markers(key: Vector2i) -> void:
 	if _terrain_id == 0:
 		return
-	NavWorld.release_markers(_terrain_id, key)
+	NavMarkerManager.release_markers(_terrain_id, key)
 	var markers := terrain.get_chunk_markers(key)
 	if markers.is_empty():
 		return
 	if String(terrain.name).begins_with("@"):
-		push_warning("WorldNavLink: %s has an automatic name, so machines may disagree on its marker ids. Give it a name of its own." % terrain.get_path())
-	NavWorld.request_markers(_terrain_id, key, markers)
+		push_warning("TerrainNavFeeder: %s has an automatic name, so machines may disagree on its marker ids. Give it a name of its own." % terrain.get_path())
+	NavMarkerManager.request_markers(_terrain_id, key, markers)
 
 
 # --- Keeping nav built around sources ---

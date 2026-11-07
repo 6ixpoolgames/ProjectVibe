@@ -1,5 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-06: the nav singleton's GDScript layer (nav spec section 21.5).
-## Autoload "NavWorld". It stores every nav marker, gives each a stable id, and answers searches like
+## Claude 2026-11-07: renamed from NavWorld, so that the name says what it does. It manages markers and doesn't find paths.
+## Autoload "NavMarkerManager". It stores every nav marker, gives each a stable id, and answers searches like
 ## "the nearest point.cover within 20 m". It needs no C++ library, so it works even where nav itself doesn't.
 ##
 ## It also keeps the list of modules, tells them when markers change, and reports types nothing handles.
@@ -22,7 +23,7 @@
 ## _next_in_cell gives the row after each one. That makes adding and removing a marker instant, and
 ## it keeps everything in flat arrays.
 ##
-## What happens in odd cases (all checked in tests/nav_world_selftest.gd):
+## What happens in odd cases (all checked in tests/nav_marker_manager_selftest.gd):
 ##   - A duplicate id, an undeclared tag or a null marker: refused, with one warning for the whole list.
 ##   - An unknown id: harmless. get_marker gives null, and set_enabled warns and does nothing.
 ##   - Releasing a chunk that isn't registered: nothing happens.
@@ -97,7 +98,7 @@ var _automatic_report_count := 0
 
 func _ready() -> void:
 	# GDScript note: signal.connect(function) means "call this function whenever the signal fires".
-	NetworkTime.before_tick.connect(_on_before_tick)
+	TickDriver.before_tick.connect(_on_before_tick)
 
 
 # GDScript note: the leading underscore marks an argument this function has to accept but doesn't use.
@@ -156,7 +157,7 @@ func request_markers(terrain: int, chunk: Vector2i, markers: Array[NavMarker]) -
 		new_rows.append(_write_row(markers[index], id, true))
 		new_ids.append(id)
 	if refused > 0:
-		push_warning("[NavWorld] chunk %s refused %d of %d markers. First reason: %s" % [chunk, refused, markers.size(), first_reason])
+		push_warning("[NavMarkerManager] chunk %s refused %d of %d markers. First reason: %s" % [chunk, refused, markers.size(), first_reason])
 	if new_rows.is_empty():
 		return 0
 	var key := _chunk_key(terrain, chunk)
@@ -176,7 +177,7 @@ func request_scene_marker(scene_path: String, marker: NavMarker) -> int:
 	var id := scene_marker_id(scene_path)
 	var reason := _why_refused(marker, id)
 	if reason != "":
-		push_warning("[NavWorld] scene marker %s refused: %s" % [scene_path, reason])
+		push_warning("[NavMarkerManager] scene marker %s refused: %s" % [scene_path, reason])
 		return 0
 	var rows := PackedInt32Array()
 	rows.append(_write_row(marker, id, false))
@@ -205,7 +206,7 @@ func remove_scene_marker(id: int) -> void:
 	if row == NO_ROW:
 		return
 	if _from_chunk[row] == 1:
-		push_warning("[NavWorld] marker %d belongs to a chunk; use release_markers" % id)
+		push_warning("[NavMarkerManager] marker %d belongs to a chunk; use release_markers" % id)
 		return
 	_row_of_id.erase(id)
 	var rows := PackedInt32Array()
@@ -218,7 +219,7 @@ func remove_scene_marker(id: int) -> void:
 func set_enabled(id: int, enabled: bool) -> void:
 	var row: int = _row_of_id.get(id, NO_ROW)
 	if row == NO_ROW:
-		push_warning("[NavWorld] set_enabled: no marker with id %d" % id)
+		push_warning("[NavMarkerManager] set_enabled: no marker with id %d" % id)
 		return
 	if _from_chunk[row] == 1:
 		if enabled == _markers[row].starts_enabled:
@@ -345,7 +346,7 @@ func get_automatic_report_count() -> int:
 ## Prints the same list on demand, in any build.
 func print_report() -> void:
 	var unhandled := get_unhandled_types()
-	print("[NavWorld] every marker type has a module" if unhandled.is_empty() else "[NavWorld] no module handles: " + _describe_types(unhandled))
+	print("[NavMarkerManager] every marker type has a module" if unhandled.is_empty() else "[NavMarkerManager] no module handles: " + _describe_types(unhandled))
 
 
 func _note_change() -> void:
@@ -370,7 +371,7 @@ func _update_report(dt: float) -> void:
 			new_types[_type_name(type_index)] = _type_counts[type_index]
 	if not new_types.is_empty():
 		_automatic_report_count += 1
-		push_warning("[NavWorld] no module handles: " + _describe_types(new_types))
+		push_warning("[NavMarkerManager] no module handles: " + _describe_types(new_types))
 
 
 ## True if a module that counts for the report handles this type.

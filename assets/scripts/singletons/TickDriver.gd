@@ -1,11 +1,12 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-04: the tick driver (netcode spec section 3), offline version.
-## Autoload "NetworkTime". Every machine runs it, online and offline. All gameplay simulation runs inside its
+## Claude 2026-11-07: renamed from NetworkTime, to the name the netcode spec already used. It drives ticks online and offline.
+## Autoload "TickDriver". Every machine runs it, online and offline. All gameplay simulation runs inside its
 ## numbered, fixed-length ticks, in a fixed phase order, instead of in each node's own _process/_physics_process.
 ## Nothing is networked yet; this is the foundation the abilities and, later, the netcode are built on.
 ##
 ## How an entity takes part:
-##   NetworkTime.register(self)    # usually done by the nexus at spawn
-##   NetworkTime.unregister(self)  # or just get freed; freed participants are dropped automatically
+##   TickDriver.register(self)    # usually done by the nexus at spawn
+##   TickDriver.unregister(self)  # or just get freed; freed participants are dropped automatically
 ## and implements any of these (all optional; a participant only gets the calls it has):
 ##   func _tick_input(dt: float, tick: int) -> void      # phase 1: controllers write this tick's input command
 ##   func _tick_capture_input(tick: int) -> void         # phase 2: save the input for replay (usually TickStateComponent)
@@ -44,7 +45,7 @@
 ## they ended from_tick, then replays every later tick up to the last finished one. A participant is predicted if it has
 ## _rollback_load(tick) -> bool, _rollback_input(tick), _rollback_simulate(dt, tick) and _tick_record(tick).
 ## TickStateComponent provides all four, so entities normally just add that node. Rules, also tested:
-##   - While replaying: is_resimulating() is true (cosmetic effects must check it), NetworkTime.tick reads as the tick
+##   - While replaying: is_resimulating() is true (cosmetic effects must check it), TickDriver.tick reads as the tick
 ##     being replayed, and the tick_rng() rolls repeat exactly. Input phases don't run; saved inputs are restored instead.
 ##   - Everything not predicted stays where it is during the replay, the standard accepted inaccuracy. The exception is
 ##     an entity in FOLLOW_SERVER mode with follows_during_rollback on: it stands on server data, extrapolates past it on its
@@ -63,7 +64,7 @@
 ##   - A participant that no longer has from_tick keeps its current state and sits the replay out.
 ##   - Returns false if nothing could be loaded or from_tick is in the future. No side effects then.
 extends Node
-class_name NetworkTimeSingleton
+class_name TickDriverSingleton
 
 signal before_tick_loop
 signal before_tick(dt: float, tick: int)
@@ -226,7 +227,7 @@ func ticks_to_seconds(ticks: int) -> float:
 ## tick. Not allowed during a tick. Saved history stays valid, because each slot remembers which tick it holds.
 func set_tick(new_tick: int) -> void:
 	if _in_tick or _resimulating:
-		push_warning("[NetworkTime] set_tick(%d) ignored: not allowed during a tick or a replay" % new_tick)
+		push_warning("[TickDriver] set_tick(%d) ignored: not allowed during a tick or a replay" % new_tick)
 		return
 	tick = new_tick
 	_accumulator = 0.0
@@ -249,7 +250,7 @@ func tick_rng(key: int, salt: int = 0) -> RandomNumberGenerator:
 ## finished tick. See the rules at the top of this file. Returns true if a replay happened.
 func rollback(from_tick: int) -> bool:
 	if _in_phases or _resimulating:
-		push_warning("[NetworkTime] rollback(%d) ignored: not allowed during a tick's phases or another replay" % from_tick)
+		push_warning("[TickDriver] rollback(%d) ignored: not allowed during a tick's phases or another replay" % from_tick)
 		return false
 	var profile_started := Time.get_ticks_usec() if profile_enabled else 0
 	var real_tick := tick

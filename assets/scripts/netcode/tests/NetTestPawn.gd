@@ -21,9 +21,9 @@ static var path_usec: int = 0
 ## Above 0, every walker throws away its path this often, in ticks, to load the nav system with queries.
 static var repath_every: int = 0
 static var path_calls: int = 0
-## Claude 2026-11-07: for testing on Terrain. When set, walkers head outward from where they are instead of staying
+## Claude 2026-11-07: for testing on TerrainGenerator. When set, walkers head outward from where they are instead of staying
 ## near the middle.
-static var roam_terrain: Terrain = null
+static var roam_terrain: TerrainGenerator = null
 
 ## Ticks simulated with no chunk built underneath. It should stay 0.
 var ticks_without_ground := 0
@@ -52,23 +52,23 @@ var _has_last_position := false
 
 
 ## Claude 2026-11-07: a pawn nobody owns is AI, so it's switched off where no source keeps the ground loaded. It only applies on
-## a Terrain: AIActivityModule doesn't know about the other test terrains.
+## a TerrainGenerator: AIActivationManager doesn't know about the other test terrains.
 func _ready() -> void:
 	super()
 	add_to_group(TerrainBodyLifter.GROUP)
 	var game_mode: Node = get_node_or_null("/root/GameMode")
-	if _nobody_owns and game_mode and game_mode.ai_activity:
-		game_mode.ai_activity.add_pawn(self)
+	if _nobody_owns and game_mode and game_mode.ai_activation_manager:
+		game_mode.ai_activation_manager.add_pawn(self)
 
 
 func _exit_tree() -> void:
 	super()
 	var game_mode: Node = get_node_or_null("/root/GameMode")
-	if _nobody_owns and game_mode and game_mode.ai_activity:
-		game_mode.ai_activity.remove_pawn(self)
+	if _nobody_owns and game_mode and game_mode.ai_activation_manager:
+		game_mode.ai_activation_manager.remove_pawn(self)
 
 
-## AIActivityModule calls this. Everything about the pawn stays as it is, and it simply stops ticking.
+## AIActivationManager calls this. Everything about the pawn stays as it is, and it simply stops ticking.
 func set_simulation_active(active: bool) -> void:
 	if _driver == null:
 		return

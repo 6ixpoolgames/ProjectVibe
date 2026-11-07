@@ -9,9 +9,9 @@ var _smooth := true
 
 
 func _process(_delta: float) -> void:
-	var nt = get_node_or_null("/root/NetworkTime")
+	var nt = get_node_or_null("/root/TickDriver")
 	if nt == null:
-		text = "No NetworkTime autoload: pawns tick from _physics_process"
+		text = "No TickDriver autoload: pawns tick from _physics_process"
 		return
 	var player := _find_player()
 	var speed := ""
@@ -23,7 +23,7 @@ func _process(_delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	var nt = get_node_or_null("/root/NetworkTime")
+	var nt = get_node_or_null("/root/TickDriver")
 	if nt == null or not (event is InputEventKey) or not event.pressed or event.echo:
 		return
 	match event.keycode:

@@ -76,7 +76,7 @@ How to read this:
 | `CrowdSystem` | Path following, local avoidance (ORCA), crowd unit integration. |
 | `ObstacleSystem` | Non-navigating dynamic objects: carve / avoid / cost. |
 | `EventBus` | Tile changed, link reached, path invalidated, etc. Read by agents and the coordinator. |
-| `NavWorld` | GDScript layer over `NavServer`: stores tagged marker data (links, areas, points) and searches it. Modules hold the code for each kind. Section 21. <!-- Claude 2026-11-06 --> |
+| `NavMarkerManager` | GDScript layer over `NavServer`: stores tagged marker data (links, areas, points) and searches it. Modules hold the code for each kind. Section 21. <!-- Claude 2026-11-06 --> |
 | `WorkerPool` | Background threads for tile builds and sliced path searches. |
 
 ---
@@ -1104,7 +1104,7 @@ func _on_link_reached(id, link_id, tags, start, end, payload) -> void:
 
 Phases 1–3 are the everyday core. Everything after is additive.
 
-Markers (section 21) aren't a phase of their own, and section 21.10 gives their build order. `NavWorld`, the data classes, `NavMarkerNode`, module base, debug module and report are GDScript and don't need the library, so they can be built at any time. Each other module waits for the system it talks to, as section 21.4 lists. <!-- Claude 2026-11-06 -->
+Markers (section 21) aren't a phase of their own, and section 21.10 gives their build order. `NavMarkerManager`, the data classes, `NavMarkerNode`, module base, debug module and report are GDScript and don't need the library, so they can be built at any time. Each other module waits for the system it talks to, as section 21.4 lists. <!-- Claude 2026-11-06 -->
 
 ---
 
@@ -1142,13 +1142,13 @@ The split is the one an entity component system uses: plain data, with separate 
 
 | Part | What it is | Job |
 |---|---|---|
-| `NavWorld` | GDScript autoload, the nav singleton's public layer | The one door for markers, tags, terrain settings and modules. Uses `NavServer` when the library is there |
+| `NavMarkerManager` | GDScript autoload, the nav singleton's public layer | The one door for markers, tags, terrain settings and modules. Uses `NavServer` when the library is there |
 | `NavMarker` and subclasses | Data objects (`Resource`) | Say what a marker is, when it's registered and for its less-used data |
 | `NavMarkerModule` and subclasses | Nodes, added to or left out of each level | All the code for specific kinds of marker |
 | `NavMarkerNode` | Thin node | Places a marker by hand. Generators skip it |
 | `NavTags` | Static class, like `TagRegistry` | Nav's own tag names and bits |
 
-`NavWorld` is global and belongs to no chunk. Chunks ask it to register things, and what it stores outlives them (section 21.6).
+`NavMarkerManager` is global and belongs to no chunk. Chunks ask it to register things, and what it stores outlives them (section 21.6).
 
 **Without the library,** markers, search, modules and the report all still work, because they're GDScript. Paths and links need `NavServer`, and estimates need the C++ module (section 21.8).
 
@@ -1168,7 +1168,7 @@ var position := Vector3.ZERO       ## set by NavMarkerNode or the generator befo
 var facing := Vector3.FORWARD      ## for cover direction, seats, and so on
 ```
 
-A marker is **input**. Registering copies its position, tag and enabled state into `NavWorld`'s rows (section 21.5), so changing those on the object afterwards does nothing. To change one, call `NavWorld.set_enabled(id, value)`. That keeps a single source of truth and lets changes be batched.
+A marker is **input**. Registering copies its position, tag and enabled state into `NavMarkerManager`'s rows (section 21.5), so changing those on the object afterwards does nothing. To change one, call `NavMarkerManager.set_enabled(id, value)`. That keeps a single source of truth and lets changes be batched.
 
 Left out of the base on purpose:
 
@@ -1210,7 +1210,7 @@ class_name NavMarkerModule extends Node
 func handled_types() -> Array[Script]:
 	return []
 
-# Each is one call per batch, not one per marker. Use NavWorld.get_marker(id) for the data.
+# Each is one call per batch, not one per marker. Use NavMarkerManager.get_marker(id) for the data.
 func _markers_added(_ids: PackedInt64Array) -> void:
 	pass
 func _markers_changed(_ids: PackedInt64Array) -> void:
@@ -1221,15 +1221,15 @@ func _markers_removed(_ids: PackedInt64Array) -> void:
 # _notification runs at every level of inheritance, so a subclass with its own _enter_tree can't stop this.
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_ENTER_TREE:
-		NavWorld.add_module(self)
+		NavMarkerManager.add_module(self)
 	elif what == NOTIFICATION_EXIT_TREE:
-		NavWorld.remove_module(self)
+		NavMarkerManager.remove_module(self)
 ```
 
 Rules:
 1. **Load order doesn't matter.** A module joins on the next tick, so its `_ready` has run first. It's handed every matching marker already applied, and later ones as they arrive. Leaving happens straight away, because the module may not exist by the next tick.
 2. **Several modules can handle one type,** such as debug drawing and `NavLinkModule`.
-3. **Cleanup covers only a module's own work.** A module tracks what it made and undoes exactly that when it leaves, through a final `_markers_removed`. Markers belong to `NavWorld`, so a module never deletes them, and removing one module can't affect another using the same type.
+3. **Cleanup covers only a module's own work.** A module tracks what it made and undoes exactly that when it leaves, through a final `_markers_removed`. Markers belong to `NavMarkerManager`, so a module never deletes them, and removing one module can't affect another using the same type.
 4. **Only one module does each job on a shared system.** Two modules both adding a marker's link to nav would make two links. Nothing enforces this in tier 0.
 5. **Gameplay changes run on the tick,** like everything else (netcode spec section 3).
 
@@ -1244,7 +1244,7 @@ Rules:
 
 Markers can be placed before their module exists. They just do nothing until then.
 
-### 21.5 NavWorld, and getting ready for C++
+### 21.5 NavMarkerManager, and getting ready for C++
 
 ```gdscript
 ## SKETCH for the spec only. Not a real file yet.
@@ -1274,7 +1274,7 @@ func print_report() -> void
 
 These rules apply from the first line of code:
 
-1. **One door.** Everything outside goes through `NavWorld`'s public functions, and those stay the same when the insides move. Existing code that calls `NavServer` for tiles and paths stays as it is.
+1. **One door.** Everything outside goes through `NavMarkerManager`'s public functions, and those stay the same when the insides move. Existing code that calls `NavServer` for tiles and paths stays as it is.
 2. **Plain types through the door.** Ints, floats, vectors, `StringName`s and packed arrays. Searches return ids, not objects, and `get_marker(id)` fetches the full data only when needed.
 3. **Rows, not objects, for what searches read.** Position, tag mask, enabled and type sit in packed arrays (`PackedVector3Array`, `PackedInt64Array`, `PackedByteArray`), one row per marker. Moving this to C++ is then close to retyping it. The `Resource` holds only the less-used data, such as a link's end point.
 4. **Batches.** A chunk registers its whole list in one call, and modules get one call per batch. No per-marker signals, because that's the cost that hurts at scale.
@@ -1287,9 +1287,9 @@ These rules apply from the first line of code:
 
 ### 21.6 Chunks announce their markers
 
-1. A generator gives `NavWorld` a copy of its settings with `register_terrain`. These are plain values: seed, noise settings, chunk size, grid size and height scale. Changing the generator afterwards means registering again.
-2. A chunk generates and builds its list of links and POIs, because it knows its own terrain. In `Terrain` this is `_make_chunk_markers(key)`, which a subclass overrides, as with `_shape_height`. By default a chunk has none and pays nothing. The list must come from the chunk's numbers, not random numbers, so every machine gets the same one. `tests/terrain_marker_example.gd` shows how.
-3. It calls `request_markers`. `NavWorld` refuses duplicate ids and undeclared tags with a warning, and accepts the rest.
+1. A generator gives `NavMarkerManager` a copy of its settings with `register_terrain`. These are plain values: seed, noise settings, chunk size, grid size and height scale. Changing the generator afterwards means registering again.
+2. A chunk generates and builds its list of links and POIs, because it knows its own terrain. In `TerrainGenerator` this is `_make_chunk_markers(key)`, which a subclass overrides, as with `_shape_height`. By default a chunk has none and pays nothing. The list must come from the chunk's numbers, not random numbers, so every machine gets the same one. `tests/terrain_marker_example.gd` shows how.
+3. It calls `request_markers`. `NavMarkerManager` refuses duplicate ids and undeclared tags with a warning, and accepts the rest.
 4. When the chunk unloads, the generator calls `release_markers` beside `release_chunk`. Modules clean up through `_markers_removed`.
 5. After an edit, a changed chunk announces again, so its markers don't float or get buried. Ids stay the same as long as the list's order does, so an edit should change heights, not the list.
 
@@ -1297,20 +1297,20 @@ These rules apply from the first line of code:
 
 **Links crossing a chunk border** belong to the chunk holding their start. `NavLinkModule` keeps one inactive until both ends are loaded.
 
-**`NavWorld` keeps what changed.** When a marker from an unloaded chunk had been changed, such as a door being disabled, it keeps that change by id and re-applies it when the chunk announces again. It keeps only changes, not every marker, so memory doesn't grow with the size of the world.
+**`NavMarkerManager` keeps what changed.** When a marker from an unloaded chunk had been changed, such as a door being disabled, it keeps that change by id and re-applies it when the chunk announces again. It keeps only changes, not every marker, so memory doesn't grow with the size of the world.
 
 **Terrain settings are used for** ids, knowing which chunk a position is in, and the estimator (section 21.8).
 
-**Chunk size.** About 128 m, as a setting, with chunks loaded around each player. `Terrain`'s defaults are `chunk_size` 128 and `chunk_resolution` 21, which keeps squares of about 6 m, at about 880 triangles a chunk. The owner lowered this from 256 m on 2026-11-06, after the stress test in `docs/streaming/STREAMING_SPEC.md`. <!-- Claude 2026-11-06 --> **Measured 2026-11-06 at 256 m,** with collision and no nav: generating takes 10.7 ms a chunk on Windows and 8.2 ms on Linux, and an edit rebuilding one chunk takes about 8.4 ms and 6.4 ms. Both are on the main thread. An edit is fine now and then, and takes a large share of a 16.7 ms frame if it happens constantly, so a game with constant digging would want smaller chunks. At 1 m squares a chunk has about 131,000 triangles, roughly 35 times the work, so that needs worker threads or smaller chunks. The physics frame's slowdown after an edit (netcode spec section 14.1) isn't included in these times. *Later on 2026-11-06, for chunk streaming:* building meshes from arrays instead of `SurfaceTool` brought these down to 6.3 ms and 4.0 ms on Windows and 5.4 ms and 3.7 ms on Linux, and 128 m chunks came out most comfortable on slower machines, so they became the default. See `docs/streaming/STREAMING_SPEC.md`, which also covers nav across chunk borders.
+**Chunk size.** About 128 m, as a setting, with chunks loaded around each player. `TerrainGenerator`'s defaults are `chunk_size` 128 and `chunk_resolution` 21, which keeps squares of about 6 m, at about 880 triangles a chunk. The owner lowered this from 256 m on 2026-11-06, after the stress test in `docs/streaming/STREAMING_SPEC.md`. <!-- Claude 2026-11-06 --> **Measured 2026-11-06 at 256 m,** with collision and no nav: generating takes 10.7 ms a chunk on Windows and 8.2 ms on Linux, and an edit rebuilding one chunk takes about 8.4 ms and 6.4 ms. Both are on the main thread. An edit is fine now and then, and takes a large share of a 16.7 ms frame if it happens constantly, so a game with constant digging would want smaller chunks. At 1 m squares a chunk has about 131,000 triangles, roughly 35 times the work, so that needs worker threads or smaller chunks. The physics frame's slowdown after an edit (netcode spec section 14.1) isn't included in these times. *Later on 2026-11-06, for chunk streaming:* building meshes from arrays instead of `SurfaceTool` brought these down to 6.3 ms and 4.0 ms on Windows and 5.4 ms and 3.7 ms on Linux, and 128 m chunks came out most comfortable on slower machines, so they became the default. See `docs/streaming/STREAMING_SPEC.md`, which also covers nav across chunk borders.
 
 **Clusters.** A cluster is a group of chunks, the size of a playable area. It's a possible tier above chunks, for things like area settings or grouped saved changes, and isn't being built yet. It can be added later because a chunk's cluster is just its coordinates divided by the cluster size. **Ids and saved data must use chunk coordinates, never cluster ones,** so that adding clusters changes nothing. The name avoids "region", which Recast already uses.
 
 ### 21.7 Debug report
 
-`NavWorld` compares each marker's type with what modules announced in `handled_types()`:
+`NavMarkerManager` compares each marker's type with what modules announced in `handled_types()`:
 
 ```
-[NavWorld] no module handles: NavLink (12 markers), NavSmartObject (3 markers)
+[NavMarkerManager] no module handles: NavLink (12 markers), NavSmartObject (3 markers)
 ```
 
 - **When:** after registrations have gone quiet for a couple of seconds, since a module may just not have arrived yet.
@@ -1327,7 +1327,7 @@ A module that only looks at markers, such as `NavMarkerDebugModule`, returns fal
 **Job:** answer "roughly what's in this chunk?" for chunks that haven't generated, so long paths can be planned across them. This is the `estimate` in sections 5 and 9. The word "prediction" is avoided because the netcode spec uses it for something else.
 
 - **Written in C++,** as `NavTerrainEstimator`, so it can run on worker threads.
-- **`NavWorld` loads `NavEstimatorModule` onto itself by default at startup.** That thin GDScript module owns the C++ object. If the library is missing, it skips itself with one line in the report, and estimate calls return nothing. A setting turns it off, and a game can replace it.
+- **`NavMarkerManager` loads `NavEstimatorModule` onto itself by default at startup.** That thin GDScript module owns the C++ object. If the library is missing, it skips itself with one line in the report, and estimate calls return nothing. A setting turns it off, and a game can replace it.
 - **It only works on demand.** It sits idle until a path's goal lies beyond the loaded chunks, then estimates only the unloaded chunks along that route and caches the results. Paths inside the loaded area never touch it, and the trigger is "this chunk isn't loaded" rather than a fixed distance, so it adjusts as the number of loaded chunks changes.
 - **Same noise as the generator.** It uses Godot's `FastNoiseLite` with the settings from `register_terrain`.
 - **It's only ever approximate.** It can't run a `_shape_height` override, which is GDScript, and it ignores grid jitter and terrain edits. The real chunk always replaces the estimate (provisional tiles, section 9).
@@ -1340,7 +1340,7 @@ func estimate_tile(terrain: int, area: Rect2) -> Dictionary  # height range and 
 
 **What uses it:** the coarse planner in phase 5, which isn't built, so until then only its test does. Filling in provisional tile borders may be an earlier use.
 
-**Test:** with no jitter and no override, estimated heights must match `Terrain.height_at`.
+**Test:** with no jitter and no override, estimated heights must match `TerrainGenerator.height_at`.
 
 ### 21.9 Multiplayer
 
@@ -1351,10 +1351,10 @@ func estimate_tile(terrain: int, area: Rect2) -> Dictionary  # height range and 
 ### 21.10 Build order
 
 1. `NavTags`. **Built 2026-11-06:** `assets/scripts/navigation/NavTags.gd`, with the tier 0 tags declared in `resources/nav_tag_declarations.tres` (22 of the 64 bits). Test: `navigation/tests/nav_tags_selftest`.
-2. `NavWorld` core: rows, ids, search and requests, with a test at 100,000 markers. **Built 2026-11-06:** `assets/scripts/singletons/NavWorld.gd`, `navigation/markers/NavMarker.gd`. Test: `navigation/tests/nav_world_selftest`. `register_terrain` and the type row aren't in yet, since nothing uses them until the steps below.
-3. Marker subclasses, the module base and the debug report. **Built 2026-11-06:** `navigation/markers/`, `navigation/modules/NavMarkerModule.gd`, and additions to `NavWorld.gd`. Test: `navigation/tests/nav_markers_selftest`. Applying 100,000 markers takes about 48 ms with no modules and 97 ms with two. A module leaving with 100,000 registered takes about 13 ms, because it checks every row.
+2. `NavMarkerManager` core: rows, ids, search and requests, with a test at 100,000 markers. **Built 2026-11-06:** `assets/scripts/singletons/NavMarkerManager.gd`, `navigation/markers/NavMarker.gd`. Test: `navigation/tests/nav_marker_manager_selftest`. `register_terrain` and the type row aren't in yet, since nothing uses them until the steps below.
+3. Marker subclasses, the module base and the debug report. **Built 2026-11-06:** `navigation/markers/`, `navigation/modules/NavMarkerModule.gd`, and additions to `NavMarkerManager.gd`. Test: `navigation/tests/nav_markers_selftest`. Applying 100,000 markers takes about 48 ms with no modules and 97 ms with two. A module leaving with 100,000 registered takes about 13 ms, because it checks every row.
 4. `NavMarkerNode` and `NavMarkerDebugModule`. **Built 2026-11-06:** `navigation/NavMarkerNode.gd`, `navigation/modules/NavMarkerDebugModule.gd`. Sample: `nav_marker_sample.tscn`. Test: `navigation/tests/nav_marker_node_selftest`.
-5. Claude 2026-11-07: a `WorldNavLink` now does this for a `Terrain`. `Terrain` registers its settings and announces and releases its chunks' markers, with the new chunk defaults. **Built 2026-11-06:** `terrain/TerrainSettings.gd`, additions to `NavWorld.gd` and `Terrain.gd`. Sample: `terrain_marker_sample.tscn`. Test: `terrain/tests/terrain_markers_selftest`. Streaming now uses this hook: `ChunkStreamer`, in `docs/streaming/STREAMING_SPEC.md`.
+5. Claude 2026-11-07: a `TerrainNavFeeder` now does this for a `TerrainGenerator`. `TerrainGenerator` registers its settings and announces and releases its chunks' markers, with the new chunk defaults. **Built 2026-11-06:** `terrain/TerrainSettings.gd`, additions to `NavMarkerManager.gd` and `TerrainGenerator.gd`. Sample: `terrain_marker_sample.tscn`. Test: `terrain/tests/terrain_markers_selftest`. Streaming now uses this hook: `ChunkStreamer`, in `docs/streaming/STREAMING_SPEC.md`.
 6. `NavTerrainEstimator` in C++, and `NavEstimatorModule`. **On hold, the owner's decision 2026-11-06:** its only real user is the coarse planner in phase 5, which isn't built. Build it when something needs it.
 
 **Measured 2026-11-06,** 100,000 markers in 400 chunks of 250, Godot 4.7.2, GDScript:
@@ -1364,7 +1364,7 @@ func estimate_tile(terrain: int, area: Rect2) -> Dictionary  # height range and 
 | Making the marker objects | 164 ms, 119 MB, about 1,250 bytes each | 158 ms, 121 MB, about 1,270 bytes each |
 | Requesting them all | 981 ms, about 2.5 ms a chunk | 784 ms, about 2 ms a chunk |
 | Applying them on the tick | 58 ms | 49 ms |
-| `NavWorld`'s own memory | 24.8 MB | 24.8 MB |
+| `NavMarkerManager`'s own memory | 24.8 MB | 24.8 MB |
 | `find_nearest`, 500 m reach | 15 µs | 14 µs |
 | `find_in_radius`, 50 m | 8 µs | 7 µs |
 | `find_nearest`, 20 km reach, nothing to find | 30 ms | 30 ms |
@@ -1374,7 +1374,7 @@ Each other module comes when the system it talks to exists (section 21.4).
 
 ### 21.11 Open points
 
-1. **Sending changes to generated markers.** `NavWorld` remembers them across unloads, but a marker with no node has no `NetworkEntity` to carry a change to other machines. This needs the same answer as terrain edits (netcode spec, to-do 18).
+1. **Sending changes to generated markers.** `NavMarkerManager` remembers them across unloads, but a marker with no node has no `NetworkEntity` to carry a change to other machines. This needs the same answer as terrain edits (netcode spec, to-do 18).
 2. **The ability-to-capability table.** Waits for the pawn design.
 3. **Sharing code with `TagRegistry`.** Settled 2026-11-06: `NavTags` is a separate copy, because `TagRegistry` is working and shouldn't be put at risk for this. A fix to one may need making in the other.
 4. **Reusing surface types per level** would need a reset call, because names stay registered once used. `surface_index` also numbers names in the order they first appear, so every machine has to register them in the same order.

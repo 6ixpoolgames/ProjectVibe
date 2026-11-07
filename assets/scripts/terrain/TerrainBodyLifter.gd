@@ -1,12 +1,12 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: moves bodies up onto the ground when an edit raises it above them. An optional module:
-## add it as a child of a Terrain. The ground's surface is one-sided, so a body left underneath would fall forever. A game that never
+## add it as a child of a TerrainGenerator. The ground's surface is one-sided, so a body left underneath would fall forever. A game that never
 ## raises the ground doesn't need this.
 ##
-## How to use it: add this as a child of the Terrain, and put each body that needs it in the Godot group GROUP. Pawn joins by itself.
+## How to use it: add this as a child of the TerrainGenerator, and put each body that needs it in the Godot group GROUP. Pawn joins by itself.
 ## A body's position has to be at its feet. Digging moves nothing, because a body just falls into the hole.
 ##
 ## What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
-##   - The parent isn't a Terrain: it warns and does nothing.
+##   - The parent isn't a TerrainGenerator: it warns and does nothing.
 ##   - A body over a chunk that isn't built: left alone, because there's no ground there to compare with.
 class_name TerrainBodyLifter
 extends Node
@@ -14,13 +14,13 @@ extends Node
 ## A body in this Godot group gets moved up if an edit leaves the ground above it.
 const GROUP := &"stays_above_terrain"
 
-var _terrain: Terrain = null
+var _terrain: TerrainGenerator = null
 
 
 func _enter_tree() -> void:
-	_terrain = get_parent() as Terrain
+	_terrain = get_parent() as TerrainGenerator
 	if _terrain == null:
-		push_warning("TerrainBodyLifter: its parent isn't a Terrain, so it does nothing.")
+		push_warning("TerrainBodyLifter: its parent isn't a TerrainGenerator, so it does nothing.")
 		return
 	_terrain.ground_raised.connect(_on_ground_raised)
 

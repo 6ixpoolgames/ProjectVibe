@@ -7,7 +7,7 @@ extends Node
 const CORNER_REACHED := 0.7
 
 ## The terrain to walk on. With none, it stands still.
-static var terrain: Terrain = null
+static var terrain: TerrainGenerator = null
 ## What it does: "walk" or "idle".
 var mode := "walk"
 
@@ -34,7 +34,7 @@ var _has_last_position := false
 func _ready() -> void:
 	name = "WalkerBrain"
 	_pawn = get_parent() as Pawn
-	_driver = get_node_or_null("/root/NetworkTime")
+	_driver = get_node_or_null("/root/TickDriver")
 	if _pawn and _pawn.has_meta(&"network_entity"):
 		_entity = _pawn.get_meta(&"network_entity")
 		_key = _entity.entity_id

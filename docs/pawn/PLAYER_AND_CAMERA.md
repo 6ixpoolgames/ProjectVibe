@@ -6,20 +6,20 @@
 
 **Where this stands against the pawn spec:** `docs/pawn/PAWN_ARCHITECTURE.md` still describes the full pawn. This replaces its controller placement: `PlayerController` is no longer a child of the pawn. "Tier -1" means only the motor and a placeholder controller, with no nexus, managers or abilities, so that cameras can be tested with nav and netcode. The old pawn, old camera and `test scene.tscn` are untouched.
 
-**Rule:** legacy files are never modified. New systems get new names beside them, which is why this has `PlayerCamera` next to the old `PlayerCamera3D`, and `PossessionModule` next to the old `PossessionManager.gd` stub.
+**Rule:** legacy files are never modified. New systems get new names beside them, which is why this has `PlayerCamera` next to the old `PlayerCamera3D`, and `PossessionCoordinator` next to the old `PossessionManager.gd` stub.
 
 ## 1. Hierarchy
 
 ```
 AUTOLOADS
-├─ NetworkTime, NetworkSession
-├─ NavWorld
+├─ TickDriver, NetworkSession
+├─ NavMarkerManager
 └─ GameMode                        holds optional modules, does nothing itself
-   ├─ PossessionModule             creates the PlayerController, tracks who controls what
+   ├─ PossessionCoordinator             creates the PlayerController, tracks who controls what
    │  └─ PlayerController          survives with no pawn; reads input, holds look direction
    │     ├─ PlayerCamera           the one real camera
    │     └─ WorldCursor            off by default
-   └─ AIActivityModule             switches AI off where no source keeps the ground loaded
+   └─ AIActivationManager             switches AI off where no source keeps the ground loaded
 
 LEVEL
 ├─ Terrain                         the main terrain coordinator
@@ -39,7 +39,7 @@ LEVEL
 | Module | Responsible for | Not responsible for | Unreal equivalent |
 |---|---|---|---|
 | `GameMode` | Holding modules | Rules of its own | `GameMode` |
-| `PossessionModule` | Who controls which pawn, approving requests, announcing changes, creating the controller | Input, cameras | Part of `GameMode` |
+| `PossessionCoordinator` | Who controls which pawn, approving requests, announcing changes, creating the controller | Input, cameras | Part of `GameMode` |
 | `PlayerController` | Reading input, look direction, passing input to its pawn | Moving anything | `PlayerController` |
 | `PlayerCamera` | Following the current `VirtualCamera` | Input, cursor, possession | `PlayerCameraManager` |
 | `VirtualCamera` | Being a position plus settings | Logic | `CameraComponent` |
@@ -48,7 +48,7 @@ LEVEL
 | `WorldCursor` | What the mouse or crosshair points at | What a click means | `GetHitResultUnderCursor` |
 | `Pawn` | The `possessable` flag, input it's given, physics step, smoothed visual position | Reading devices | `APawn` |
 | `GroundMovement` (placeholder) | Accelerating, turning, gravity, jump impulse, until Walk, Jump and the pawn take these over | Choosing where to go | Part of `CharacterMovementComponent` |
-| `AIActivityModule` | Turning AI ticks off and on, with signals | Simulating AI out of sight | None |
+| `AIActivationManager` | Turning AI ticks off and on, with signals | Simulating AI out of sight | None |
 
 ## 3. Camera rules
 
@@ -72,12 +72,12 @@ LEVEL
 
 ## 5. Possession
 
-- **Every request goes to `PossessionModule`,** and the pawn's `possessable` flag is the check. This is the simplest version, chosen by the owner. `GameMode.possession.possess(pawn)` asks on this machine, and `possess_for(peer, pawn)` is the server's own call. In multiplayer the server decides, and a client's call is only a request.
+- **Every request goes to `PossessionCoordinator`,** and the pawn's `possessable` flag is the check. This is the simplest version, chosen by the owner. `GameMode.possession_coordinator.possess(pawn)` asks on this machine, and `possess_for(peer, pawn)` is the server's own call. In multiplayer the server decides, and a client's call is only a request.
 - A pawn with `possessable` off refuses. A pawn another player holds refuses.
 - **`possessable` is on by default,** the owner's choice. Off would leave people with no idea why their pawn doesn't work. Something has to ask for a possession, so a wrong one is a clear bug that gets looked at.
 - **`possessable` only stops new possessions.** Turning it off doesn't evict whoever has the pawn. `release_pawn(pawn)` is the separate call for that.
 - **Tier 0 is for designers.** Protection against cheating and modified clients comes later, so requests have only the checks above.
-- **AI uses the same system.** When there's an `AIController`, it asks `PossessionModule` too. Not built.
+- **AI uses the same system.** When there's an `AIController`, it asks `PossessionCoordinator` too. Not built.
 - **A controller doesn't come with a pawn.** Creating a `PlayerController` spawns nothing, and neither does a player joining. A game spawns what it wants, when it wants. The samples and tests spawn a pawn per player only for their own convenience.
 - A possessed pawn's `owner_peer` is its player. Letting go sets it to 0, so the server runs it.
 - **What a pawn does once it's let go is the controller manager's job, which isn't built yet.** Its AI controller takes over at once if it has one, as in an autobattler where a player jumps into a unit and back out. With no AI controller, the pawn stands idle, which is what most games want. Tier -1 only does the idle half: the pawn's input is cleared, and it stands still until something else writes to it.
@@ -85,7 +85,7 @@ LEVEL
 - A possessed pawn being removed leaves the controller with no pawn, and the camera holding still.
 - In multiplayer the server decides, and sends who has what to every client, including late joiners. A client's request can be refused.
 - **Swapping mid-game** changes the entity's owner on every machine (`NetworkSession.set_entity_owner`). The new pawn was being drawn in the past on that client, so the first correction is up to about the distance it travelled in that time: measured 1.0 m at 50 ms and 1.8 m at 200 ms. It's faded on screen, and then error drops to about 0.
-- **A player leaving only lets go.** Their possessed pawn stays in the world with no owner, the same as a release. If its ground unloads, `AIActivityModule` switches it off like any pawn with no player. Respawning or removing it belongs to the game, which can listen to `released`, then to `NetworkSession.player_left`.
+- **A player leaving only lets go.** Their possessed pawn stays in the world with no owner, the same as a release. If its ground unloads, `AIActivationManager` switches it off like any pawn with no player. Respawning or removing it belongs to the game, which can listen to `released`, then to `NetworkSession.player_left`.
 - **Anything else a leaving player owns is removed,** as `NetworkSession` always has. That includes a pawn they own but don't possess. A game that wants to keep more can give those entities a new owner from `NetworkSession.player_leaving`, which fires before anything's removed.
 
 ## 6. World cursor
@@ -124,7 +124,7 @@ These are the same within the noise between runs, except bandwidth, because the 
 - **Rollback:** replaying 20 ticks on hills with jumps lands in exactly the same place: 0.0000 m and 0.0000 m/s.
 - **One pawn alone:** within 0.1 cm of the server at 50 and 150 ms, walking about 120 m.
 - **200 pawns walking,** offline on a flat floor: 8.8 ms a tick.
-- **10,000 AI pawns checked** by `AIActivityModule`: 1 ms a frame, spread across 6 frames, with stub pawns, not real ones. That's the checks only. A real pawn that's off also has to stop its `NetworkEntity` and `TickStateComponent`, which `NetworkEntity.set_paused` does.
+- **10,000 AI pawns checked** by `AIActivationManager`: 1 ms a frame, spread across 6 frames, with stub pawns, not real ones. That's the checks only. A real pawn that's off also has to stop its `NetworkEntity` and `TickStateComponent`, which `NetworkEntity.set_paused` does.
 
 **Not tested:** playing by hand, a real network, real low-end machines, and the mouse look and edge-of-screen modes, which need a real window and mouse.
 

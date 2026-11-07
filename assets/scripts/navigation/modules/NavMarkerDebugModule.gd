@@ -130,11 +130,11 @@ func get_line_count() -> int:
 
 
 func _draw_marker(id: int) -> void:
-	var marker := NavWorld.get_marker(id)
+	var marker := NavMarkerManager.get_marker(id)
 	if marker == null:
 		return
-	var center := NavWorld.get_marker_position(id)
-	var color := _color_of(marker) if NavWorld.is_marker_enabled(id) else DISABLED_COLOR
+	var center := NavMarkerManager.get_marker_position(id)
+	var color := _color_of(marker) if NavMarkerManager.is_marker_enabled(id) else DISABLED_COLOR
 	_add_cross(center, marker.radius, color)
 	_add_line(center, center + marker.facing * FACING_LENGTH, color)
 	# GDScript note: "marker" is declared as a plain NavMarker, so each branch copies it into a variable of the

@@ -1,12 +1,12 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: chunk streaming over real connections, between separate Godot processes
-## on this machine, each with its own streamer. Pawns walk nav paths on Terrain and keep crossing into new chunks.
+## on this machine, each with its own streamer. Pawns walk nav paths on TerrainGenerator and keep crossing into new chunks.
 ##
 ## The rules being checked:
 ##   - The server keeps the world loaded around every player. A client only keeps it around its own pawns.
 ##   - Every machine builds exactly the same ground, without sending any of it.
 ##   - Streaming doesn't make prediction meaningfully worse than the same terrain as one fixed block.
 ##   - A late joiner far away, or a player leaving, works.
-##   - Terrain edits reach every client and every late joiner, and all the ground still matches.
+##   - TerrainGenerator edits reach every client and every late joiner, and all the ground still matches.
 ##   - Raising the ground under pawns doesn't drop them through it.
 ##   - AI with no source stops at the edge of the loaded ground, and comes back on when ground returns.
 ##   - A pawn with a source has ground on every tick, from its first one, and after being teleported somewhere new.

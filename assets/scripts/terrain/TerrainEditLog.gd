@@ -1,5 +1,5 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: remembers every edit to a Terrain, so that a chunk built later still has them.
-## An optional module: add it as a child of the Terrain, and edits survive unloading.
+## Written by Claude (claude-opus-5-5), 2026-11-07: remembers every edit to a TerrainGenerator, so that a chunk built later still has them.
+## An optional module: add it as a child of the TerrainGenerator, and edits survive unloading.
 ##
 ## Without it, the ground goes back to how it was generated whenever a chunk unloads. If this node is deleted while the game
 ## runs, or its saved data won't load, the world simply goes back to its default state. Nothing else depends on it.
@@ -17,14 +17,14 @@
 ##   - from_bytes given broken data: it's refused, and the log stays as it was.
 ##   - from_bytes given data from a terrain with different settings: it's refused, because those edits were meant for other
 ##     ground. The world stays as it is.
-##   - The parent isn't a Terrain: it warns and does nothing.
+##   - The parent isn't a TerrainGenerator: it warns and does nothing.
 ##   - A chunk with a very long list costs more to build. Nothing merges old edits yet.
 class_name TerrainEditLog
 extends Node
 
 const FORMAT_VERSION := 1
 # Each edit is five values: x, z, radius, amount and tick. The first four are 32-bit floats in the bytes, so every machine
-# reads back the very same numbers. Terrain applies what comes back from here, even on the machine that made the edit.
+# reads back the very same numbers. TerrainGenerator applies what comes back from here, even on the machine that made the edit.
 const BYTES_PER_EDIT := 20
 # The first byte of what goes over the network.
 const MESSAGE_ONE_EDIT := 1
@@ -36,16 +36,16 @@ var _radius := PackedFloat32Array()
 var _amount := PackedFloat32Array()
 var _tick := PackedInt32Array()
 var _by_chunk := {} # Vector2i -> PackedInt32Array of positions in the lists above, oldest first
-var _terrain: Terrain = null
+var _terrain: TerrainGenerator = null
 var _session: Node = null
 var _channel := ""
 var _warned_about_client_edit := false
 
 
 func _enter_tree() -> void:
-	_terrain = get_parent() as Terrain
+	_terrain = get_parent() as TerrainGenerator
 	if _terrain == null:
-		push_warning("TerrainEditLog: its parent isn't a Terrain, so it does nothing.")
+		push_warning("TerrainEditLog: its parent isn't a TerrainGenerator, so it does nothing.")
 		return
 	_terrain._edit_log_arrived(self)
 	_session = get_node_or_null("/root/NetworkSession")
@@ -74,7 +74,7 @@ func get_chunk_edit_count(key: Vector2i) -> int:
 	return list.size()
 
 
-## Forgets every edit. Doesn't change any ground that's already built, so Terrain.generate() does this before it rebuilds.
+## Forgets every edit. Doesn't change any ground that's already built, so TerrainGenerator.generate() does this before it rebuilds.
 func clear() -> void:
 	_x.clear()
 	_z.clear()
@@ -116,7 +116,7 @@ func apply_some_to_chunk(key: Vector2i, points: PackedVector3Array, from: int, c
 	var end := mini(from + count, list.size())
 	for i in range(from, end):
 		var index := list[i]
-		Terrain.apply_edit_to_points(points, _x[index], _z[index], _radius[index], _amount[index])
+		TerrainGenerator.apply_edit_to_points(points, _x[index], _z[index], _radius[index], _amount[index])
 	return end
 
 
@@ -127,7 +127,7 @@ func apply_to_point(key: Vector2i, point: Vector3) -> Vector3:
 		return point
 	var one := PackedVector3Array([point])
 	for index in list:
-		Terrain.apply_edit_to_points(one, _x[index], _z[index], _radius[index], _amount[index])
+		TerrainGenerator.apply_edit_to_points(one, _x[index], _z[index], _radius[index], _amount[index])
 	return one[0]
 
 
@@ -247,7 +247,7 @@ func _add(x: float, z: float, radius: float, amount: float, tick: int) -> int:
 
 ## The current tick, for the records. It's only informative, so 0 is fine with no tick driver.
 func _current_tick() -> int:
-	var driver: Node = get_node_or_null("/root/NetworkTime") if is_inside_tree() else null
+	var driver: Node = get_node_or_null("/root/TickDriver") if is_inside_tree() else null
 	return driver.tick if driver else 0
 
 

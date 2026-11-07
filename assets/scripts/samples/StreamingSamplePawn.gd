@@ -8,7 +8,7 @@ class_name StreamingSamplePawn
 extends CharacterBody3D
 
 ## The terrain it walks on. Without one, it stands still.
-@export var terrain: Terrain
+@export var terrain: TerrainGenerator
 ## Walking speed, in metres per second.
 @export var speed := 6.0
 ## How strongly it falls, in metres per second per second.
@@ -66,11 +66,11 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
 	var game_mode: Node = get_node_or_null("/root/GameMode")
-	if game_mode and game_mode.ai_activity:
-		game_mode.ai_activity.remove_pawn(self)
+	if game_mode and game_mode.ai_activation_manager:
+		game_mode.ai_activation_manager.remove_pawn(self)
 
 
-## GameMode's AIActivityModule calls this. Everything about the pawn stays as it is, and it simply stops moving.
+## GameMode's AIActivationManager calls this. Everything about the pawn stays as it is, and it simply stops moving.
 func set_simulation_active(active: bool) -> void:
 	set_physics_process(active)
 
@@ -122,12 +122,12 @@ func _update_ai_activity() -> void:
 	if not is_inside_tree():
 		return
 	var game_mode: Node = get_node_or_null("/root/GameMode")
-	if game_mode == null or game_mode.ai_activity == null:
+	if game_mode == null or game_mode.ai_activation_manager == null:
 		return
 	if is_player_controlled:
-		game_mode.ai_activity.remove_pawn(self)
+		game_mode.ai_activation_manager.remove_pawn(self)
 	else:
-		game_mode.ai_activity.add_pawn(self)
+		game_mode.ai_activation_manager.add_pawn(self)
 
 
 func _update_source() -> void:

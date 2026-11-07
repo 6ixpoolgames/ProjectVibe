@@ -16,7 +16,7 @@ const PORT := 24895
 const PAWN_SCENE := preload("res://assets/scenes/pawn/pawn.tscn")
 const AI_PAWNS := 3
 
-@onready var _terrain: Terrain = $World/Terrain
+@onready var _terrain: TerrainGenerator = $World/Terrain
 @onready var _streamer: ChunkStreamer = $World/ChunkStreamer
 @onready var _edit_log: TerrainEditLog = $World/Terrain/TerrainEditLog
 @onready var _status: Label = $Display/Status
@@ -63,7 +63,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 func _start_offline() -> void:
 	_menu.hide()
 	var pawn := _spawn_pawn(0)
-	GameMode.possession.possess(pawn)
+	GameMode.possession_coordinator.possess(pawn)
 	_spawn_ai_pawns()
 
 
@@ -84,7 +84,7 @@ func _join(address: String) -> void:
 
 ## Server: a player has arrived, so they get a pawn.
 func _on_player_connected(peer: int) -> void:
-	GameMode.possession.possess_for(peer, _spawn_pawn(peer))
+	GameMode.possession_coordinator.possess_for(peer, _spawn_pawn(peer))
 
 
 func _spawn_ai_pawns() -> void:
@@ -118,17 +118,17 @@ func _swap_to_next_pawn() -> void:
 	var pawns: Array[Pawn] = []
 	for entity: NetworkEntity in NetworkSession.get_entities():
 		var pawn := entity.get_parent() as Pawn
-		if pawn and GameMode.possession.get_peer_of(pawn) == 0:
+		if pawn and GameMode.possession_coordinator.get_peer_of(pawn) == 0:
 			pawns.append(pawn)
 	if not pawns.is_empty():
-		GameMode.possession.possess(pawns[randi() % pawns.size()])
+		GameMode.possession_coordinator.possess(pawns[randi() % pawns.size()])
 
 
 func _edit_ground_ahead(amount: float) -> void:
-	var pawn := GameMode.possession.get_pawn_of()
+	var pawn := GameMode.possession_coordinator.get_pawn_of()
 	if pawn == null or NetworkSession.is_client():
 		return
-	var ahead := Basis(Vector3.UP, GameMode.possession.controller.look_yaw) * Vector3(0.0, 0.0, -6.0)
+	var ahead := Basis(Vector3.UP, GameMode.possession_coordinator.controller.look_yaw) * Vector3(0.0, 0.0, -6.0)
 	_terrain.edit(pawn.global_position + ahead, 6.0, amount)
 
 
@@ -142,11 +142,11 @@ func _status_text() -> String:
 		mode = "hosting"
 	elif NetworkSession.is_client():
 		mode = "client, ping %d ms" % int(NetworkSession.get_rtt_ms())
-	var pawn := GameMode.possession.get_pawn_of() if GameMode.possession else null
+	var pawn := GameMode.possession_coordinator.get_pawn_of() if GameMode.possession_coordinator else null
 	var lines := PackedStringArray()
 	lines.append("%s    %d fps" % [mode, Engine.get_frames_per_second()])
 	lines.append("chunks %d    waiting %d    built at once %d    worst step %.2f ms" % [_terrain.get_loaded_chunks().size(), stats.queued, stats.urgent_builds, stats.worst_step_ms])
-	lines.append("AI switched off %d of %d    edits %d" % [GameMode.ai_activity.get_inactive_count(), GameMode.ai_activity.get_watched_count(), _edit_log.get_edit_count()])
+	lines.append("AI switched off %d of %d    edits %d" % [GameMode.ai_activation_manager.get_inactive_count(), GameMode.ai_activation_manager.get_watched_count(), _edit_log.get_edit_count()])
 	if pawn:
 		lines.append("speed %.1f m/s    %s" % [Vector2(pawn.velocity.x, pawn.velocity.z).length(), "on the ground" if pawn.grounded else "in the air"])
 	lines.append("WASD, Shift, Space, mouse, wheel    Esc: free the mouse    Tab: next pawn    F / G: raise or dig")

@@ -3,14 +3,14 @@
 ## costs nothing, and each piece of a game's rules can be swapped or left out on its own.
 ##
 ## Modules so far:
-##   PossessionModule   creates the PlayerController, and tracks who controls which pawn
-##   AIActivityModule   switches AI pawns off when no source keeps the ground under them loaded
+##   PossessionCoordinator   creates the PlayerController, and tracks who controls which pawn
+##   AIActivationManager     switches AI pawns off when no source keeps the ground under them loaded
 ##
 ## How to use it:
-##   GameMode.possession             # a module, or null if this game doesn't have it, so check first
-##   GameMode.ai_activity            # the same
-##   GameMode.get_module(SomeScript) # any module by its script
-##   GameMode.add_module(node)       # a game's own modules, which extend GameModeModule
+##   GameMode.possession_coordinator   # a module, or null if this game doesn't have it, so check first
+##   GameMode.ai_activation_manager    # the same
+##   GameMode.get_module(SomeScript)   # any module by its script
+##   GameMode.add_module(node)         # a game's own modules, which extend GameModeModule
 ##
 ## Which modules start with the game comes from the project setting "project_base/game_mode/modules", a list of script paths.
 ## With no setting, it starts the ones in DEFAULT_MODULES. An empty list starts none, and the game still runs.
@@ -26,14 +26,15 @@ signal module_removed(module: GameModeModule)
 
 const MODULES_SETTING := "project_base/game_mode/modules"
 const DEFAULT_MODULES: Array[String] = [
-	"res://assets/scripts/game_mode/PossessionModule.gd",
-	"res://assets/scripts/game_mode/AIActivityModule.gd",
+	"res://assets/scripts/game_mode/PossessionCoordinator.gd",
+	"res://assets/scripts/game_mode/AIActivationManager.gd",
 ]
 
 ## The module that switches AI pawns off, or null without one. Each module fills in its own line when it starts.
-var ai_activity: AIActivityModule = null
+# Claude 2026-11-07: renamed from ai_activity and possession, so that each name says what the module does.
+var ai_activation_manager: AIActivationManager = null
 ## Who controls which pawn, or null without one.
-var possession: PossessionModule = null
+var possession_coordinator: PossessionCoordinator = null
 
 var _modules: Array[GameModeModule] = []
 

@@ -10,7 +10,7 @@ const PLAN_AHEAD := 48.0
 const CAMERA_OFFSET := Vector3(0.0, 620.0, 540.0)
 
 # GDScript note: $Name finds a child node by its name. @onready waits until the node is ready, when children exist.
-@onready var _terrain: Terrain = $World/Terrain
+@onready var _terrain: TerrainGenerator = $World/Terrain
 @onready var _streamer: SlowChunkStreamer = $World/ChunkStreamer # Claude 2026-11-07: the test version, for the slower-CPU key
 @onready var _camera: Camera3D = $Camera
 @onready var _label: Label = $Display/Label

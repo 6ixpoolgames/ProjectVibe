@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-04: one machine in a multiplayer test, run as its own Godot process.
 ## net_selftest.gd and net_measure.gd start several of these with command-line settings. Each one builds a small arena, plays
-## its part for a set time, writes what happened to a JSON file, and quits. NetworkTime is a single autoload, so a server and
+## its part for a set time, writes what happened to a JSON file, and quits. TickDriver is a single autoload, so a server and
 ## a client can't share one process.
 ##
 ## Settings, after "--" on the command line:
@@ -22,13 +22,13 @@
 ##   --preset=worst      this machine sends and receives through a NetFakeConditions preset
 ##   --bench-ping=120    sets the round trip through NetTestBench, the same way its keys do
 ##   --terrain           hills with collision and nav, instead of the flat arena. The same on every machine
-##   --streaming         with --terrain: Terrain, loaded around each player by a ChunkStreamer. Claude 2026-11-07
-##   --fixed-block         with --terrain: the same Terrain as one fixed block, to compare against --streaming
+##   --streaming         with --terrain: TerrainGenerator, loaded around each player by a ChunkStreamer. Claude 2026-11-07
+##   --fixed-block         with --terrain: the same TerrainGenerator as one fixed block, to compare against --streaming
 ##   --spread=1000       with either: how far apart each client's pawns start, in metres
 ##   --load-distance=96 --nav-distance=64 --unload-margin=32   with --streaming: the streaming distances, in metres
 ##   --ai-loads          with --streaming: the server's AI pawns keep the world loaded too
 ##   --real-pawn         the tier -1 Pawn with GroundMovement and PawnWalkerBrain, instead of NetTestPawn. Claude 2026-11-07
-##   --possess           with --real-pawn: the server gives each client its first pawn through GameMode.possession
+##   --possess           with --real-pawn: the server gives each client its first pawn through GameMode.possession_coordinator
 ##   --look-at=5:1.25    client: after this many seconds, the PlayerController looks this way, in radians
 ##   --swap-at=8         client: after this many seconds, asks to possess the first pawn nobody owns
 ##   --ask-for-taken-at=4  client: after this many seconds, asks for a pawn another player has, and for nonsense
@@ -67,7 +67,7 @@ const EDITS_FROM_TICK := 300
 var settings: Dictionary = {}
 var session: NetworkSessionSingleton
 var debug: NetDebugModule # Claude 2026-11-07: the fake network and the switches moved here from the session
-var driver: NetworkTimeSingleton
+var driver: TickDriverSingleton
 var started_usec := 0
 var log_positions: Dictionary = {}      # entity id -> {tick: [x, y, z]}
 var log_views: Dictionary = {}          # entity id -> {tick: [render tick, x, y, z]}
@@ -122,7 +122,7 @@ var _summaries: Dictionary = {}          # entity id -> latest summary, kept aft
 func _ready() -> void:
 	session = get_node("/root/NetworkSession")
 	debug = NetDebugModule.on(session)
-	driver = get_node("/root/NetworkTime")
+	driver = get_node("/root/TickDriver")
 	_read_settings()
 	if settings.has("terrain"):
 		_build_terrain()
@@ -172,15 +172,15 @@ func _ready() -> void:
 	NetTestPawn.ai_mode = settings.get("ai-mode", "idle")
 	NetTestPawn.repath_every = int(settings.get("repath-every", 0))
 	# Claude 2026-11-07: a record of who got what and when, for reading a run afterwards.
-	if settings.has("real-pawn") and GameMode.possession:
+	if settings.has("real-pawn") and GameMode.possession_coordinator:
 		result["possession_log"] = []
-		GameMode.possession.possessed.connect(func(peer: int, pawn: Pawn) -> void: result["possession_log"].append(["got", driver.tick, peer, pawn.get_meta(&"network_entity").entity_id]))
-		GameMode.possession.released.connect(func(peer: int, _pawn: Pawn) -> void: result["possession_log"].append(["lost", driver.tick, peer]))
-		GameMode.possession.refused.connect(func(peer: int, _pawn: Pawn, why: String) -> void: result["possession_log"].append(["refused", driver.tick, peer, why]))
+		GameMode.possession_coordinator.possessed.connect(func(peer: int, pawn: Pawn) -> void: result["possession_log"].append(["got", driver.tick, peer, pawn.get_meta(&"network_entity").entity_id]))
+		GameMode.possession_coordinator.released.connect(func(peer: int, _pawn: Pawn) -> void: result["possession_log"].append(["lost", driver.tick, peer]))
+		GameMode.possession_coordinator.refused.connect(func(peer: int, _pawn: Pawn, why: String) -> void: result["possession_log"].append(["refused", driver.tick, peer, why]))
 		# Claude 2026-11-07: which pawns were switched off for having no ground.
 		result["switched_off"] = []
-		if GameMode.ai_activity:
-			GameMode.ai_activity.ai_deactivated.connect(func(pawn: Node3D) -> void: result["switched_off"].append(pawn.get_meta(&"network_entity").entity_id))
+		if GameMode.ai_activation_manager:
+			GameMode.ai_activation_manager.ai_deactivated.connect(func(pawn: Node3D) -> void: result["switched_off"].append(pawn.get_meta(&"network_entity").entity_id))
 	session.joined.connect(func() -> void:
 		result["joined"] = true
 		result["peer_when_joined"] = session.get_local_peer())
@@ -266,9 +266,9 @@ func _process(_delta: float) -> void:
 			if entity.owner_peer != 0:
 				var body: Node3D = entity.get_parent()
 				var spot: Vector3 = body.position + Vector3(distance, 0.0, 0.0)
-				if _terrain is Terrain:
-					(_terrain as Terrain).load_chunk((_terrain as Terrain).chunk_of(spot))
-					spot.y = (_terrain as Terrain).height_at(spot.x, spot.z) + 0.3
+				if _terrain is TerrainGenerator:
+					(_terrain as TerrainGenerator).load_chunk((_terrain as TerrainGenerator).chunk_of(spot))
+					spot.y = (_terrain as TerrainGenerator).height_at(spot.x, spot.z) + 0.3
 				body.position = spot
 	# Claude 2026-11-07: clients quit before the server, and it then unloads their chunks, so this looks while they're still here.
 	if settings.has("snapshot-at") and not result.has("streaming_snapshot") and elapsed >= float(settings["snapshot-at"]):
@@ -352,7 +352,7 @@ func _on_player_connected(peer: int) -> void:
 		if first_pawn == null:
 			first_pawn = spawned
 	if settings.has("possess") and first_pawn is Pawn:
-		GameMode.possession.possess_for(peer, first_pawn)
+		GameMode.possession_coordinator.possess_for(peer, first_pawn)
 	if not _ai_spawned:
 		_ai_spawned = true
 		for i in int(settings.get("ai", 0)):
@@ -365,11 +365,11 @@ func _next_spawn_point() -> Vector3:
 	var index := _next_slot
 	_next_slot += 1
 	# Claude 2026-11-07: the server has no ground there yet, so it builds that one chunk first to find the height.
-	if _terrain is Terrain:
+	if _terrain is TerrainGenerator:
 		var angle := index * 2.4
 		var radius := 3.0 + sqrt(float(index)) * 3.0
 		var spot := _spawn_base + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
-		var new_terrain: Terrain = _terrain
+		var new_terrain: TerrainGenerator = _terrain
 		new_terrain.load_chunk(new_terrain.chunk_of(spot))
 		spot.y = new_terrain.height_at(spot.x, spot.z) + 0.3
 		return spot
@@ -398,8 +398,8 @@ func _on_loop_finished() -> void:
 func _on_before_tick(_dt: float, tick: int) -> void:
 	var edit_every := int(settings.get("edit-every", 0))
 	# From a fixed tick, so every machine makes the same edits and has the same ground.
-	# Claude 2026-11-07: Terrain's edits come from the server only. The older test terrain edits on every machine, by tick number.
-	if edit_every > 0 and _terrain and not (_terrain is Terrain and session.is_client()) and tick % edit_every == 0 and tick >= EDITS_FROM_TICK and tick <= int(settings.get("edit-until", 1000000)):
+	# Claude 2026-11-07: TerrainGenerator's edits come from the server only. The older test terrain edits on every machine, by tick number.
+	if edit_every > 0 and _terrain and not (_terrain is TerrainGenerator and session.is_client()) and tick % edit_every == 0 and tick >= EDITS_FROM_TICK and tick <= int(settings.get("edit-until", 1000000)):
 		var pick := RandomNumberGenerator.new()
 		pick.seed = tick
 		var started := Time.get_ticks_usec()
@@ -463,8 +463,8 @@ func _start_measuring() -> void:
 	result["bytes_sent_start"] = session.stats["bytes_sent"]
 	result["bytes_received_start"] = session.stats["bytes_received"]
 	result["measure_start_usec"] = Time.get_ticks_usec()
-	if _terrain is Terrain: # Claude 2026-11-07
-		result["chunks_at_measure_start"] = (_terrain as Terrain).get_loaded_chunks().size()
+	if _terrain is TerrainGenerator: # Claude 2026-11-07
+		result["chunks_at_measure_start"] = (_terrain as TerrainGenerator).get_loaded_chunks().size()
 	result["corrections_start"] = session.stats["corrections"]
 	result["correction_total_start"] = session.stats["correction_total"]
 	result["jump_total_start"] = session.stats["jump_total"]
@@ -540,7 +540,7 @@ func _capture_summary() -> void:
 func _run_possession_script(elapsed: float) -> void:
 	if not settings.has("real-pawn"):
 		return
-	var possession: PossessionModule = GameMode.possession
+	var possession: PossessionCoordinator = GameMode.possession_coordinator
 	if settings.has("look-at") and possession.controller and not result.has("looked") and elapsed >= float(String(settings["look-at"]).split(":")[0]):
 		result["looked"] = true
 		possession.controller.look_yaw = float(String(settings["look-at"]).split(":")[1])
@@ -570,9 +570,9 @@ func _run_possession_script(elapsed: float) -> void:
 
 ## Claude 2026-11-07: how far the real camera moves in a frame, and how far it gets from where it should be.
 func _watch_camera() -> void:
-	if not settings.has("real-pawn") or measure_from_tick < 0 or GameMode.possession == null or GameMode.possession.controller == null:
+	if not settings.has("real-pawn") or measure_from_tick < 0 or GameMode.possession_coordinator == null or GameMode.possession_coordinator.controller == null:
 		return
-	var controller := GameMode.possession.controller
+	var controller := GameMode.possession_coordinator.controller
 	if not is_instance_valid(controller.pawn) or not controller.camera.is_inside_tree():
 		return
 	var at := controller.camera.global_position
@@ -590,7 +590,7 @@ func _watch_camera() -> void:
 func _capture_possession() -> void:
 	if not settings.has("real-pawn"):
 		return
-	var possession: PossessionModule = GameMode.possession
+	var possession: PossessionCoordinator = GameMode.possession_coordinator
 	var map := {}
 	for peer: int in possession._by_peer:
 		var pawn: Pawn = possession._by_peer[peer]
@@ -621,9 +621,9 @@ func _count_arms() -> int:
 
 
 func _capture_streaming() -> void:
-	if not (_terrain is Terrain):
+	if not (_terrain is TerrainGenerator):
 		return
-	var new_terrain: Terrain = _terrain
+	var new_terrain: TerrainGenerator = _terrain
 	var fingerprints := {}
 	for key in new_terrain.get_loaded_chunks():
 		fingerprints["%d,%d" % [key.x, key.y]] = hash(new_terrain._points[key])
@@ -638,9 +638,9 @@ func _capture_streaming() -> void:
 
 ## Which chunks are loaded right now, and whether each pawn has ground under it right now.
 func _capture_streaming_snapshot() -> void:
-	if not (_terrain is Terrain):
+	if not (_terrain is TerrainGenerator):
 		return
-	var new_terrain: Terrain = _terrain
+	var new_terrain: TerrainGenerator = _terrain
 	var pawns := []
 	for entity: NetworkEntity in session.get_entities():
 		var at: Vector3 = entity.get_parent().position
@@ -736,15 +736,15 @@ func _read_settings() -> void:
 		settings[parts[0]] = parts[1] if parts.size() > 1 else "true"
 
 
-## Claude 2026-11-07: Terrain on this machine, either streamed or as a fixed block. The name is the same on every
+## Claude 2026-11-07: TerrainGenerator on this machine, either streamed or as a fixed block. The name is the same on every
 ## machine, because marker ids come from it. Nobody looks at the server, so it builds no meshes, as a real one wouldn't.
 func _build_new_terrain() -> void:
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.name = "NetworkTerrain"
 	if settings.has("edit-log"):
 		terrain.add_child(TerrainEditLog.new())
 		terrain.add_child(TerrainBodyLifter.new()) # Claude 2026-11-07: an optional module now
-	var link := WorldNavLink.new() # Claude 2026-11-07: a terrain feeds nav through this now
+	var link := TerrainNavFeeder.new() # Claude 2026-11-07: a terrain feeds nav through this now
 	link.nav_hooks = NavHooks.new()
 	link.unload_margin = float(settings.get("unload-margin", 32))
 	terrain.add_child(link)
@@ -763,9 +763,9 @@ func _build_new_terrain() -> void:
 		_streamer.unload_margin = float(settings.get("unload-margin", 32))
 		add_child(_streamer)
 	var game_mode: Node = get_node_or_null("/root/GameMode")
-	if game_mode and game_mode.ai_activity:
-		game_mode.ai_activity.ai_deactivated.connect(func(_pawn: Node3D) -> void: result["ai_deactivated"] = int(result.get("ai_deactivated", 0)) + 1)
-		game_mode.ai_activity.ai_activated.connect(func(_pawn: Node3D) -> void: result["ai_activated"] = int(result.get("ai_activated", 0)) + 1)
+	if game_mode and game_mode.ai_activation_manager:
+		game_mode.ai_activation_manager.ai_deactivated.connect(func(_pawn: Node3D) -> void: result["ai_deactivated"] = int(result.get("ai_deactivated", 0)) + 1)
+		game_mode.ai_activation_manager.ai_activated.connect(func(_pawn: Node3D) -> void: result["ai_activated"] = int(result.get("ai_activated", 0)) + 1)
 
 
 func _build_terrain() -> void:

@@ -1,11 +1,12 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: who controls which pawn. A module of GameMode, reached as GameMode.possession.
+## Written by Claude (claude-opus-5-5), 2026-11-07: who controls which pawn. A module of GameMode, reached as GameMode.possession_coordinator.
 ## It creates this machine's PlayerController at the start, which then lasts for the whole game, with or without a pawn.
+## Claude 2026-11-07: renamed from PossessionModule, so that the name says what it does.
 ##
 ## How to use it:
-##   GameMode.possession.possess(pawn)              # offline, or a client asking the server for this pawn
-##   GameMode.possession.possess_for(peer, pawn)    # server: gives this player this pawn
-##   GameMode.possession.release()                  # lets go. Offline or a client's own, or release_for(peer) on the server
-##   GameMode.possession.controller                 # this machine's PlayerController
+##   GameMode.possession_coordinator.possess(pawn)              # offline, or a client asking the server for this pawn
+##   GameMode.possession_coordinator.possess_for(peer, pawn)    # server: gives this player this pawn
+##   GameMode.possession_coordinator.release()                  # lets go. Offline or a client's own, or release_for(peer) on the server
+##   GameMode.possession_coordinator.controller                 # this machine's PlayerController
 ##
 ## Every request comes here, and the pawn's possessable flag is the check. Claude 2026-11-07: the simplest version, as the owner
 ## asked. An AI controller will ask here too, when there is one. In multiplayer the server decides, and a client's call is only a
@@ -23,7 +24,7 @@
 ##   - A player leaves: they let go of their pawn, and it stays in the world. Anything else they own is removed by NetworkSession.
 ##   - No module at all: the game runs with no controller, and a scene's own camera carries on working.
 ##   - A client asking for something broken: the server ignores it.
-class_name PossessionModule
+class_name PossessionCoordinator
 extends GameModeModule
 
 ## A player has a pawn now. On a client, this fires for every player, not only this one.
@@ -57,7 +58,7 @@ func _init() -> void:
 
 
 func _on_module_added(game_mode: GameModeSingleton) -> void:
-	game_mode.possession = self
+	game_mode.possession_coordinator = self
 	_session = get_node_or_null("/root/NetworkSession")
 	if _session:
 		_session.register_world_channel(CHANNEL, _on_network_message, _catch_up_message)
@@ -70,7 +71,7 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 
 
 func _on_module_removed(game_mode: GameModeSingleton) -> void:
-	game_mode.possession = null
+	game_mode.possession_coordinator = null
 	if _session:
 		_session.unregister_world_channel(CHANNEL)
 		_session.entity_spawned.disconnect(_on_entity_spawned)
@@ -170,7 +171,7 @@ func _make_controller() -> PlayerController:
 		var made: Variant = scene.instantiate() if scene is PackedScene else null
 		if made is PlayerController:
 			return made
-		push_warning("PossessionModule: '%s' isn't a PlayerController scene, so this uses the default." % path)
+		push_warning("PossessionCoordinator: '%s' isn't a PlayerController scene, so this uses the default." % path)
 		if made is Node:
 			made.free()
 	var default_controller := PlayerController.new()
@@ -336,6 +337,6 @@ func _on_request(peer: int, bytes: PackedByteArray) -> void:
 
 
 ## Claude 2026-11-07: server: a player has gone. Letting go sets the pawn's owner to 0, so NetworkSession doesn't remove it with
-## the rest of what they owned. AIActivityModule switches it off if its ground unloads, like any pawn with no player.
+## the rest of what they owned. AIActivationManager switches it off if its ground unloads, like any pawn with no player.
 func _on_player_leaving(peer: int) -> void:
 	release_for(peer)

@@ -8,7 +8,7 @@
 ## of C++, to compare.
 ##
 ## How to read the tables: "whole physics frame" is everything in a physics frame, including the physics engine's own step. "Tick work"
-## is NetworkTime's ticks inside that. All of it has to fit in 16.7 ms at 60 ticks/s. The rest of the frame is rendering, which a
+## is TickDriver's ticks inside that. All of it has to fit in 16.7 ms at 60 ticks/s. The rest of the frame is rendering, which a
 ## headless server doesn't have and a real client does.
 extends Node
 
@@ -76,7 +76,7 @@ func _micro_timings() -> void:
 	var entity: NetworkEntity = body.get_node("NetworkEntity")
 	for i in 30:
 		await get_tree().physics_frame
-	var tick: int = (get_node("/root/NetworkTime") as NetworkTimeSingleton).tick
+	var tick: int = (get_node("/root/TickDriver") as TickDriverSingleton).tick
 
 	print("")
 	print("Microseconds per call, one pawn on hills, in GDScript unless it says otherwise:")

@@ -1,14 +1,14 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: sample pawn showing how to hook gameplay onto the tick driver (NetworkTime).
+## Written by Claude (claude-opus-5-5), 2026-11-04: sample pawn showing how to hook gameplay onto the tick driver (TickDriver).
 ## A teaching example, deliberately all in one script. The real pawn splits these jobs across the controller,
 ## abilities (Walk, Jump) and the motor (pawn spec), but the tick pattern is exactly this.
 ##
 ## What it shows:
-##   - registering with NetworkTime, and an escape clause when the autoload is missing
+##   - registering with TickDriver, and an escape clause when the autoload is missing
 ##   - _tick_input: deciding what the pawn WANTS this tick (player keys, or a seeded random wander), as plain data
 ##   - _tick_simulate: acting on it with the fixed tick dt (steer, turn, gravity, jump, move_and_slide)
 ##   - rollback: the TickState child node (TickStateComponent) lists move_dir, position, velocity and so on in the
 ##     inspector, and handles saving, rounding and replaying them. The pawn needs no rollback code. # Claude 2026-11-04
-##   - repeatable randomness with NetworkTime.tick_rng, and a cosmetic effect that doesn't replay # Claude 2026-11-04
+##   - repeatable randomness with TickDriver.tick_rng, and a cosmetic effect that doesn't replay # Claude 2026-11-04
 ##   - timers in ticks, seconds only in the inspector
 ##   - latching a key press between rendered frames and ticks, so a press is never lost or doubled
 ##   - smoothing the visible model between ticks with the interpolation fraction
@@ -57,7 +57,7 @@ var yaw := 0.0
 ## How many jump effects have played. Stands in for a sound or particle: only counts real jumps, not replayed ones.
 var jump_effects_played := 0
 
-var _driver: Node = null         # the NetworkTime autoload, or null (escape clause: we tick ourselves)
+var _driver: Node = null         # the TickDriver autoload, or null (escape clause: we tick ourselves)
 var _fallback_tick := 0
 var _jump_latched := false       # set per rendered frame, consumed by the next tick
 var _rng := RandomNumberGenerator.new() # only used without the tick driver
@@ -73,11 +73,11 @@ var _correction_offset := Vector3.ZERO # Claude 2026-11-04: the visible model's 
 
 func _enter_tree() -> void:
 	add_to_group(&"tick_sample_pawns") # so the sample HUD can find us
-	_driver = get_node_or_null("/root/NetworkTime")
+	_driver = get_node_or_null("/root/TickDriver")
 	if _driver:
 		_driver.register(self)
 	else:
-		push_warning("[TickSamplePawn] no NetworkTime autoload; ticking from _physics_process instead")
+		push_warning("[TickSamplePawn] no TickDriver autoload; ticking from _physics_process instead")
 
 
 func _exit_tree() -> void:

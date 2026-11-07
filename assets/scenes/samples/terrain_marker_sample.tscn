@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://assets/scripts/terrain/tests/terrain_marker_example.gd" id="1_terrain"]
 [ext_resource type="Script" path="res://assets/scripts/navigation/modules/NavMarkerDebugModule.gd" id="2_debug"]
-[ext_resource type="Script" path="res://assets/scripts/world/WorldNavLink.gd" id="3_link"]
+[ext_resource type="Script" path="res://assets/scripts/world/TerrainNavFeeder.gd" id="3_link"]
 
 [sub_resource type="ProceduralSkyMaterial" id="Sky_mat"]
 
@@ -23,7 +23,7 @@ script = ExtResource("2_debug")
 [node name="Terrain" type="Node3D" parent="."]
 script = ExtResource("1_terrain")
 
-[node name="WorldNavLink" type="Node" parent="Terrain"]
+[node name="TerrainNavFeeder" type="Node" parent="Terrain"]
 script = ExtResource("3_link")
 
 [node name="Camera" type="Camera3D" parent="."]

@@ -1,4 +1,4 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: headless check that the tick driver sample scene actually runs on NetworkTime.
+## Written by Claude (claude-opus-5-5), 2026-11-04: headless check that the tick driver sample scene actually runs on TickDriver.
 ## Loads tick_pawn_sample.tscn, lets real physics frames pass, and checks the pawns tick, move, record history,
 ## and move the same distance per second at different tick rates. Exits 0 on success, 1 on failure. Run from the project folder:
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/samples/tests/tick_sample_selftest.tscn"
@@ -9,7 +9,7 @@ var _failures := 0
 
 func _ready() -> void:
 	print("--- Tick sample self-test ---")
-	var nt: NetworkTimeSingleton = get_node("/root/NetworkTime")
+	var nt: TickDriverSingleton = get_node("/root/TickDriver")
 	# Claude 2026-11-06: the sample scenes moved to assets/scenes/samples.
 	var sample: Node3D = load("res://assets/scenes/samples/tick_pawn_sample.tscn").instantiate()
 	add_child(sample)
@@ -17,7 +17,7 @@ func _ready() -> void:
 	var wanderer: TickSamplePawn = sample.get_node("WandererA")
 	var wanderer_start := wanderer.global_position
 
-	_check(nt.is_registered(player) and nt.is_registered(wanderer), "pawns register with NetworkTime on entering the tree")
+	_check(nt.is_registered(player) and nt.is_registered(wanderer), "pawns register with TickDriver on entering the tree")
 	_check(not player.is_physics_processing(), "their own _physics_process is off (the driver calls them)")
 
 	await _frames(30) # settle on the floor
@@ -47,7 +47,7 @@ func _ready() -> void:
 	nt.active = false
 	var paused_at := nt.tick
 	await _frames(10)
-	_check(nt.tick == paused_at, "NetworkTime.active = false pauses all pawns")
+	_check(nt.tick == paused_at, "TickDriver.active = false pauses all pawns")
 	nt.active = true
 
 	sample.queue_free()
@@ -106,7 +106,7 @@ func _add_wanderers_on_platform(sample: Node3D, at: Vector3, label: String, look
 	return pawns
 
 
-func _walk_one_second(nt: NetworkTimeSingleton, pawn: TickSamplePawn, rate: int) -> float:
+func _walk_one_second(nt: TickDriverSingleton, pawn: TickSamplePawn, rate: int) -> float:
 	nt.tick_rate = rate
 	await _frames(40) # let it come to rest
 	var start := pawn.global_position

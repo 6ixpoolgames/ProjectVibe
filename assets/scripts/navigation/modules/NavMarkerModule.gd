@@ -8,7 +8,7 @@
 ##       return [NavLink]
 ##   func _markers_added(ids: PackedInt64Array) -> void:
 ##       for id in ids:
-##           var link: NavLink = NavWorld.get_marker(id)
+##           var link: NavLink = NavMarkerManager.get_marker(id)
 ##           ...
 ##
 ## Rules, all checked in tests/nav_markers_selftest.gd:
@@ -17,13 +17,13 @@
 ##   - A module handles subclasses of its types too, so a modder's subclass of NavLink just works.
 ##   - Several modules can handle one type.
 ##   - When a module leaves, it gets a final _markers_removed straight away, so it can undo exactly what it did.
-##     Markers belong to NavWorld and stay registered, so other modules aren't affected.
+##     Markers belong to NavMarkerManager and stay registered, so other modules aren't affected.
 ##   - Requests made during a call wait for the next tick.
 class_name NavMarkerModule
 extends Node
 
 
-## Announces which types this module works on. NavWorld asks once, when the module joins.
+## Announces which types this module works on. NavMarkerManager asks once, when the module joins.
 ## Return [NavMarker] to get every kind of marker.
 func handled_types() -> Array[Script]:
 	return []
@@ -35,12 +35,12 @@ func counts_for_report() -> bool:
 	return true
 
 
-## Markers arrived. NavWorld.get_marker(id) gives their full data.
+## Markers arrived. NavMarkerManager.get_marker(id) gives their full data.
 func _markers_added(_ids: PackedInt64Array) -> void:
 	pass
 
 
-## Markers were switched on or off. NavWorld.is_marker_enabled(id) gives the new state.
+## Markers were switched on or off. NavMarkerManager.is_marker_enabled(id) gives the new state.
 func _markers_changed(_ids: PackedInt64Array) -> void:
 	pass
 
@@ -56,6 +56,6 @@ func _markers_removed(_ids: PackedInt64Array) -> void:
 # its own _enter_tree or _exit_tree and can't accidentally stop the module from registering.
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_ENTER_TREE:
-		NavWorld.add_module(self)
+		NavMarkerManager.add_module(self)
 	elif what == NOTIFICATION_EXIT_TREE:
-		NavWorld.remove_module(self)
+		NavMarkerManager.remove_module(self)

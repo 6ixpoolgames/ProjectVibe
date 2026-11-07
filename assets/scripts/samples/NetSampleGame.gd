@@ -16,7 +16,7 @@ const SPAWN_POINTS := [Vector3(-4, 0.1, 0), Vector3(4, 0.1, 0), Vector3(0, 0.1, 
 @export var wanderers: int = 2
 
 var _session: NetworkSessionSingleton
-var _driver: NetworkTimeSingleton
+var _driver: TickDriverSingleton
 var _status: Label
 var _menu: Control
 var _address: LineEdit
@@ -28,7 +28,7 @@ var _message := ""
 
 func _ready() -> void:
 	_session = get_node("/root/NetworkSession")
-	_driver = get_node("/root/NetworkTime")
+	_driver = get_node("/root/TickDriver")
 	_session.world_root = $Entities
 	_session.register_type("pawn", PAWN_SCENE)
 	_session.player_connected.connect(_spawn_player)

@@ -1,5 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-06: headless self-test for marker types, modules and the debug report.
-## The rules it checks are listed at the top of NavMarkerModule.gd and NavWorld.gd.
+## The rules it checks are listed at the top of NavMarkerModule.gd and NavMarkerManager.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/navigation/tests/nav_markers_selftest.tscn"
 ## It prints a few warnings on purpose, because the debug report is one of the things being tested.
@@ -69,7 +69,7 @@ var _failures := 0
 
 func _ready() -> void:
 	print("--- Nav markers self-test ---")
-	NavWorld.report_quiet_seconds = 1000000.0 # the automatic report stays quiet until its own test
+	NavMarkerManager.report_quiet_seconds = 1000000.0 # the automatic report stays quiet until its own test
 	_test_marker_types()
 	_test_modules_get_their_types()
 	_test_load_order()
@@ -86,8 +86,8 @@ func _ready() -> void:
 	_test_unhandled_list()
 	await _test_automatic_report()
 	_measure_with_modules()
-	NavWorld.report_quiet_seconds = 2.0
-	NavWorld.reset()
+	NavMarkerManager.report_quiet_seconds = 2.0
+	NavMarkerManager.reset()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -99,7 +99,7 @@ func _add_module(types: Array[Script]) -> RecordingModule:
 	var module := RecordingModule.new()
 	module.types = types
 	add_child(module)
-	NavWorld.flush()
+	NavMarkerManager.flush()
 	return module
 
 
@@ -111,11 +111,11 @@ func _free_module(module: Node) -> void:
 
 ## Registers these markers as one chunk's list and applies them. Returns their ids.
 func _add_chunk(chunk: Vector2i, markers: Array[NavMarker]) -> PackedInt64Array:
-	NavWorld.request_markers(TERRAIN, chunk, markers)
-	NavWorld.flush()
+	NavMarkerManager.request_markers(TERRAIN, chunk, markers)
+	NavMarkerManager.flush()
 	var ids := PackedInt64Array()
 	for index in markers.size():
-		ids.append(NavWorld.chunk_marker_id(TERRAIN, chunk, index))
+		ids.append(NavMarkerManager.chunk_marker_id(TERRAIN, chunk, index))
 	return ids
 
 
@@ -152,7 +152,7 @@ func _obstacle() -> NavObstacle:
 # --- Marker types ---------------------------------------------------------------------------------
 
 func _test_marker_types() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var link := _link()
 	link.position = Vector3(1, 2, 3)
 	link.end_offset = Vector3(0, 5, 0)
@@ -171,14 +171,14 @@ func _test_marker_types() -> void:
 	_check(copy.tag == &"link.jump", "types: a duplicate keeps the original's values")
 
 	var ids := _add_chunk(Vector2i(0, 0), [_link(), _point(), _smart_object(), _area(), _obstacle()])
-	_check(NavWorld.get_marker(ids[0]) is NavLink and NavWorld.get_marker(ids[2]) is NavSmartObject, "types: get_marker gives back the real type")
-	_check(NavWorld.find_nearest(&"use", Vector3.ZERO, 10.0) == ids[2], "types: search works by tag for every type")
+	_check(NavMarkerManager.get_marker(ids[0]) is NavLink and NavMarkerManager.get_marker(ids[2]) is NavSmartObject, "types: get_marker gives back the real type")
+	_check(NavMarkerManager.find_nearest(&"use", Vector3.ZERO, 10.0) == ids[2], "types: search works by tag for every type")
 
 
 # --- Modules ---------------------------------------------------------------------------------------
 
 func _test_modules_get_their_types() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var links := _add_module([NavLink])
 	var points := _add_module([NavPoint])
 	var both := _add_module([NavLink, NavArea])
@@ -199,94 +199,94 @@ func _test_modules_get_their_types() -> void:
 
 
 func _test_load_order() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var early := _add_chunk(Vector2i(0, 0), [_link(), _point()])
 	var late := _add_module([NavLink])
 	_check(late.added_calls == [PackedInt64Array([early[0]])], "load order: a module joining late gets the matching markers already there")
 	var later := _add_chunk(Vector2i(1, 0), [_link()])
 	_check(late.added_calls.size() == 2 and late.added_calls[1] == later, "load order: and new ones as they arrive")
 	# A marker requested but not yet applied must arrive exactly once, whichever way round things happen.
-	NavWorld.request_markers(TERRAIN, Vector2i(2, 0), [_link()] as Array[NavMarker])
+	NavMarkerManager.request_markers(TERRAIN, Vector2i(2, 0), [_link()] as Array[NavMarker])
 	var joining := RecordingModule.new()
 	joining.types = [NavLink]
 	add_child(joining)
-	NavWorld.flush()
+	NavMarkerManager.flush()
 	_check(joining.total_added() == 3, "load order: a marker applied in the same tick as a module joins arrives once")
 	_free_module(late)
 	_free_module(joining)
 
 
 func _test_module_is_ready_first() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	_add_chunk(Vector2i(0, 0), [_link()])
 	var module := RecordingModule.new()
 	module.types = [NavLink]
 	add_child(module)
 	_check(module.added_calls.is_empty(), "joining: nothing arrives until the next tick")
-	NavWorld.flush()
+	NavMarkerManager.flush()
 	_check(module.ready_before_first_call, "joining: so a module's _ready has run before its first call")
 	_free_module(module)
 
 
 func _test_batches() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var module := _add_module([NavLink])
 	var markers: Array[NavMarker] = []
 	for index in 250:
 		markers.append(_link())
 	_add_chunk(Vector2i(0, 0), markers)
 	_check(module.added_calls.size() == 1 and module.total_added() == 250, "batches: a chunk of 250 is one call, not 250")
-	NavWorld.release_markers(TERRAIN, Vector2i(0, 0))
-	NavWorld.flush()
+	NavMarkerManager.release_markers(TERRAIN, Vector2i(0, 0))
+	NavMarkerManager.flush()
 	_check(module.removed_calls.size() == 1 and module.total_removed() == 250, "batches: and leaving is one call too")
 	_free_module(module)
 
 
 func _test_changes() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var links := _add_module([NavLink])
 	var points := _add_module([NavPoint])
 	var ids := _add_chunk(Vector2i(0, 0), [_link(), _link(), _point()])
-	NavWorld.set_enabled(ids[0], false)
-	NavWorld.set_enabled(ids[1], false)
-	NavWorld.set_enabled(ids[2], false)
+	NavMarkerManager.set_enabled(ids[0], false)
+	NavMarkerManager.set_enabled(ids[1], false)
+	NavMarkerManager.set_enabled(ids[2], false)
 	_check(links.changed_calls.is_empty(), "changes: nothing until the tick")
-	NavWorld.flush()
+	NavMarkerManager.flush()
 	_check(links.changed_calls == [PackedInt64Array([ids[0], ids[1]])], "changes: switches in a row become one call")
 	_check(points.changed_calls == [PackedInt64Array([ids[2]])], "changes: and each module hears only about its own")
-	NavWorld.set_enabled(ids[0], false)
-	NavWorld.flush()
+	NavMarkerManager.set_enabled(ids[0], false)
+	NavMarkerManager.flush()
 	_check(links.changed_calls.size() == 1, "changes: setting the same value isn't a change")
-	NavWorld.set_enabled(ids[0], true)
-	NavWorld.flush()
-	_check(links.changed_calls.size() == 2 and NavWorld.is_marker_enabled(ids[0]), "changes: a real change is reported, and modules can read the new state")
+	NavMarkerManager.set_enabled(ids[0], true)
+	NavMarkerManager.flush()
+	_check(links.changed_calls.size() == 2 and NavMarkerManager.is_marker_enabled(ids[0]), "changes: a real change is reported, and modules can read the new state")
 	# A marker switched off and removed in one tick: told of the change first, then the removal.
-	NavWorld.set_enabled(ids[0], false)
-	NavWorld.release_markers(TERRAIN, Vector2i(0, 0))
-	NavWorld.flush()
+	NavMarkerManager.set_enabled(ids[0], false)
+	NavMarkerManager.release_markers(TERRAIN, Vector2i(0, 0))
+	NavMarkerManager.flush()
 	_check(links.changed_calls.size() == 3 and links.total_removed() == 2, "changes: a switch and a removal in one tick arrive in order")
 	_free_module(links)
 	_free_module(points)
 
 
 func _test_removal_and_chunk_return() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var module := _add_module([NavLink])
 	var ids := _add_chunk(Vector2i(0, 0), [_link()])
-	NavWorld.release_markers(TERRAIN, Vector2i(0, 0))
-	NavWorld.request_markers(TERRAIN, Vector2i(0, 0), [_link()] as Array[NavMarker])
-	NavWorld.flush()
+	NavMarkerManager.release_markers(TERRAIN, Vector2i(0, 0))
+	NavMarkerManager.request_markers(TERRAIN, Vector2i(0, 0), [_link()] as Array[NavMarker])
+	NavMarkerManager.flush()
 	_check(module.removed_calls == [ids] and module.added_calls == [ids, ids], "chunk return: leaving and coming back in one tick is removed, then added")
-	var scene_id := NavWorld.request_scene_marker("/root/Level/Ladder", _link())
-	NavWorld.flush()
-	NavWorld.remove_scene_marker(scene_id)
-	NavWorld.flush()
+	var scene_id := NavMarkerManager.request_scene_marker("/root/Level/Ladder", _link())
+	NavMarkerManager.flush()
+	NavMarkerManager.remove_scene_marker(scene_id)
+	NavMarkerManager.flush()
 	_check(module.removed_calls[-1] == PackedInt64Array([scene_id]), "removal: hand-placed markers tell modules too")
 	_free_module(module)
 
 
 func _test_module_leaving() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var first := _add_module([NavLink])
 	var second := _add_module([NavLink])
 	var ids := _add_chunk(Vector2i(0, 0), [_link(), _point()])
@@ -294,51 +294,51 @@ func _test_module_leaving() -> void:
 	remove_child(first)
 	_check(first_removed == [PackedInt64Array([ids[0]])], "leaving: a module gets a final call straight away, for exactly what it handled")
 	_check(second.removed_calls.is_empty(), "leaving: another module sharing the type hears nothing")
-	_check(NavWorld.get_marker(ids[0]) != null, "leaving: the markers stay registered")
-	_check(NavWorld.find_nearest(&"link", Vector3.ZERO, 10.0) == ids[0], "leaving: and can still be found")
+	_check(NavMarkerManager.get_marker(ids[0]) != null, "leaving: the markers stay registered")
+	_check(NavMarkerManager.find_nearest(&"link", Vector3.ZERO, 10.0) == ids[0], "leaving: and can still be found")
 	first.free()
 	var later := _add_chunk(Vector2i(1, 0), [_link()])
 	_check(second.added_calls[-1] == later, "leaving: everything carries on for the other module")
 	# A pending removal mustn't reach a module that has already said goodbye.
 	var third := _add_module([NavLink])
-	NavWorld.release_markers(TERRAIN, Vector2i(1, 0))
+	NavMarkerManager.release_markers(TERRAIN, Vector2i(1, 0))
 	var third_removed := third.removed_calls
 	remove_child(third)
 	var count_at_leaving := third.total_removed()
-	NavWorld.flush()
+	NavMarkerManager.flush()
 	_check(third.total_removed() == count_at_leaving and third_removed.size() == 1, "leaving: a module gets no calls after it leaves")
 	third.free()
 	_free_module(second)
 
 
 func _test_module_leaving_before_joining() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var module := RecordingModule.new()
 	module.types = [NavLink]
 	add_child(module)
 	_free_module(module) # gone before the tick came
 	_add_chunk(Vector2i(0, 0), [_link()]) # this flush would crash if it tried to use the freed module
-	_check(NavWorld.get_marker_count() == 1, "leaving early: a module that leaves before joining causes no trouble")
+	_check(NavMarkerManager.get_marker_count() == 1, "leaving early: a module that leaves before joining causes no trouble")
 
 
 func _test_module_requests_wait() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var module := _add_module([NavLink])
 	var requested := {"done": false}
 	# GDScript note: a Dictionary is shared with the small function below, so the function can change it.
 	module.on_added = func(_ids: PackedInt64Array) -> void:
 		if not requested["done"]:
 			requested["done"] = true
-			NavWorld.request_markers(TERRAIN, Vector2i(9, 9), [_link()] as Array[NavMarker])
+			NavMarkerManager.request_markers(TERRAIN, Vector2i(9, 9), [_link()] as Array[NavMarker])
 	_add_chunk(Vector2i(0, 0), [_link()])
-	_check(requested["done"] and NavWorld.get_pending_count() == 1, "requests in a call: wait for the next tick")
-	NavWorld.flush()
+	_check(requested["done"] and NavMarkerManager.get_pending_count() == 1, "requests in a call: wait for the next tick")
+	NavMarkerManager.flush()
 	_check(module.total_added() == 2, "requests in a call: and then arrive normally")
 	_free_module(module)
 
 
 func _test_module_removing_another() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var victim: RecordingModule # declared here so the function below can see it
 	var first := _add_module([NavLink])
 	victim = _add_module([NavLink])
@@ -353,10 +353,10 @@ func _test_module_removing_another() -> void:
 
 
 func _test_reset() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var module := _add_module([NavLink])
 	var ids := _add_chunk(Vector2i(0, 0), [_link(), _link()])
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	_check(module.removed_calls == [ids], "reset: modules are told their markers have gone")
 	var later := _add_chunk(Vector2i(1, 0), [_link()])
 	_check(module.added_calls[-1] == later, "reset: modules stay and keep working")
@@ -364,18 +364,18 @@ func _test_reset() -> void:
 	var waiting := RecordingModule.new()
 	waiting.types = [NavLink]
 	add_child(waiting)
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	_add_chunk(Vector2i(2, 0), [_link()])
 	_check(waiting.total_added() == 1, "reset: a module waiting to join still joins")
 	_free_module(waiting)
 
 
 func _test_forgotten_super() -> void:
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var module := ForgetfulModule.new()
 	module.types = [NavLink]
 	add_child(module)
-	NavWorld.flush()
+	NavMarkerManager.flush()
 	_add_chunk(Vector2i(0, 0), [_link()])
 	_check(module.total_added() == 1, "forgotten super: a module with its own _enter_tree still joins")
 	var removed := module.removed_calls
@@ -387,69 +387,69 @@ func _test_forgotten_super() -> void:
 # --- The debug report ------------------------------------------------------------------------------
 
 func _test_unhandled_list() -> void:
-	NavWorld.reset()
-	_check(NavWorld.get_unhandled_types().is_empty(), "report: no markers, nothing to report")
+	NavMarkerManager.reset()
+	_check(NavMarkerManager.get_unhandled_types().is_empty(), "report: no markers, nothing to report")
 	_add_chunk(Vector2i(0, 0), [_link(), _link(), _point(), _smart_object()])
-	_check(NavWorld.get_unhandled_types() == {"NavLink": 2, "NavPoint": 1, "NavSmartObject": 1}, "report: lists each unclaimed type with its count")
+	_check(NavMarkerManager.get_unhandled_types() == {"NavLink": 2, "NavPoint": 1, "NavSmartObject": 1}, "report: lists each unclaimed type with its count")
 	var points := _add_module([NavPoint])
-	_check(NavWorld.get_unhandled_types() == {"NavLink": 2}, "report: a NavPoint module claims smart objects too")
+	_check(NavMarkerManager.get_unhandled_types() == {"NavLink": 2}, "report: a NavPoint module claims smart objects too")
 	var everything := _add_module([NavMarker])
-	_check(NavWorld.get_unhandled_types().is_empty(), "report: a module for NavMarker claims the lot")
+	_check(NavMarkerManager.get_unhandled_types().is_empty(), "report: a module for NavMarker claims the lot")
 	_free_module(everything)
-	_check(NavWorld.get_unhandled_types() == {"NavLink": 2}, "report: a type is unclaimed again when its module leaves")
-	NavWorld.release_markers(TERRAIN, Vector2i(0, 0))
-	NavWorld.flush()
-	_check(NavWorld.get_unhandled_types().is_empty(), "report: a type with no markers left isn't listed")
+	_check(NavMarkerManager.get_unhandled_types() == {"NavLink": 2}, "report: a type is unclaimed again when its module leaves")
+	NavMarkerManager.release_markers(TERRAIN, Vector2i(0, 0))
+	NavMarkerManager.flush()
+	_check(NavMarkerManager.get_unhandled_types().is_empty(), "report: a type with no markers left isn't listed")
 	_free_module(points)
 	var file_only: NavMarker = load("res://assets/scripts/navigation/markers/NavMarker.gd").new()
 	file_only.tag = &"point.wander"
 	_add_chunk(Vector2i(1, 0), [file_only])
-	_check(NavWorld.get_unhandled_types() == {"NavMarker": 1}, "report: a plain NavMarker counts as its own type")
-	NavWorld.print_report()
+	_check(NavMarkerManager.get_unhandled_types() == {"NavMarker": 1}, "report: a plain NavMarker counts as its own type")
+	NavMarkerManager.print_report()
 
 
 ## Uses real ticks and a short quiet time, because timing is the point of this one.
 func _test_automatic_report() -> void:
 	const QUIET := 0.1
-	NavWorld.reset()
-	NavWorld.report_quiet_seconds = QUIET
+	NavMarkerManager.reset()
+	NavMarkerManager.report_quiet_seconds = QUIET
 	_add_chunk(Vector2i(0, 0), [_link()])
-	_check(NavWorld.get_automatic_report_count() == 0, "automatic: nothing straight away")
+	_check(NavMarkerManager.get_automatic_report_count() == 0, "automatic: nothing straight away")
 	await get_tree().create_timer(QUIET * 3.0).timeout
-	_check(NavWorld.get_automatic_report_count() == 1, "automatic: reports once things go quiet")
+	_check(NavMarkerManager.get_automatic_report_count() == 1, "automatic: reports once things go quiet")
 
 	_add_chunk(Vector2i(1, 0), [_link()])
 	await get_tree().create_timer(QUIET * 3.0).timeout
-	_check(NavWorld.get_automatic_report_count() == 1, "automatic: more of the same type doesn't report again, so streaming is quiet")
+	_check(NavMarkerManager.get_automatic_report_count() == 1, "automatic: more of the same type doesn't report again, so streaming is quiet")
 
 	_add_chunk(Vector2i(2, 0), [_point()])
 	await get_tree().create_timer(QUIET * 3.0).timeout
-	_check(NavWorld.get_automatic_report_count() == 2, "automatic: a new unclaimed type reports")
+	_check(NavMarkerManager.get_automatic_report_count() == 2, "automatic: a new unclaimed type reports")
 
 	var module := _add_module([NavLink])
 	await get_tree().create_timer(QUIET * 3.0).timeout
-	_check(NavWorld.get_automatic_report_count() == 2, "automatic: a type gaining a module doesn't report")
+	_check(NavMarkerManager.get_automatic_report_count() == 2, "automatic: a type gaining a module doesn't report")
 	_free_module(module)
 	await get_tree().create_timer(QUIET * 3.0).timeout
-	_check(NavWorld.get_automatic_report_count() == 3, "automatic: a type losing its last module reports again")
+	_check(NavMarkerManager.get_automatic_report_count() == 3, "automatic: a type losing its last module reports again")
 
 	# A module arriving before the quiet time is up means there's nothing to report.
-	NavWorld.reset()
-	NavWorld.report_quiet_seconds = QUIET
+	NavMarkerManager.reset()
+	NavMarkerManager.report_quiet_seconds = QUIET
 	_add_chunk(Vector2i(0, 0), [_link()])
 	var in_time := _add_module([NavLink])
 	await get_tree().create_timer(QUIET * 3.0).timeout
-	_check(NavWorld.get_automatic_report_count() == 0, "automatic: a module arriving in time means no report")
+	_check(NavMarkerManager.get_automatic_report_count() == 0, "automatic: a module arriving in time means no report")
 	_free_module(in_time)
 
-	NavWorld.reset()
-	NavWorld.report_unhandled = false
+	NavMarkerManager.reset()
+	NavMarkerManager.report_unhandled = false
 	_add_chunk(Vector2i(0, 0), [_link()])
 	await get_tree().create_timer(QUIET * 3.0).timeout
-	_check(NavWorld.get_automatic_report_count() == 0, "automatic: the off switch works")
-	_check(NavWorld.get_unhandled_types().size() == 1, "automatic: and the list is still there on demand")
-	NavWorld.report_unhandled = true
-	NavWorld.report_quiet_seconds = 1000000.0
+	_check(NavMarkerManager.get_automatic_report_count() == 0, "automatic: the off switch works")
+	_check(NavMarkerManager.get_unhandled_types().size() == 1, "automatic: and the list is still there on demand")
+	NavMarkerManager.report_unhandled = true
+	NavMarkerManager.report_quiet_seconds = 1000000.0
 
 
 # --- Cost ------------------------------------------------------------------------------------------
@@ -467,9 +467,9 @@ func _measure_with_modules() -> void:
 			markers.append(marker)
 		lists.append(markers)
 
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var no_modules := _timed_register(lists)
-	NavWorld.reset()
+	NavMarkerManager.reset()
 	var one := _add_module([NavLink])
 	var two := _add_module([NavMarker])
 	var with_modules := _timed_register(lists)
@@ -486,9 +486,9 @@ func _measure_with_modules() -> void:
 func _timed_register(lists: Array) -> float:
 	for chunk_number in lists.size():
 		var markers: Array[NavMarker] = lists[chunk_number]
-		NavWorld.request_markers(TERRAIN, Vector2i(chunk_number, 0), markers)
+		NavMarkerManager.request_markers(TERRAIN, Vector2i(chunk_number, 0), markers)
 	var start := Time.get_ticks_usec()
-	NavWorld.flush()
+	NavMarkerManager.flush()
 	return (Time.get_ticks_usec() - start) / 1000.0
 
 

@@ -74,7 +74,7 @@ func configure(new_id: int, new_type: String, new_owner: int, new_role: Role, lo
 
 
 func _enter_tree() -> void:
-	_driver = get_node_or_null("/root/NetworkTime")
+	_driver = get_node_or_null("/root/TickDriver")
 	if _driver:
 		_driver.register(self)
 

@@ -92,7 +92,7 @@ func _test_jumping() -> void:
 
 
 func _test_on_slopes() -> void:
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.name = "SlopeTerrain"
 	terrain.chunk_radius = 1
 	add_child(terrain)
@@ -118,7 +118,7 @@ func _test_on_slopes() -> void:
 
 ## The whole point of keeping movement in plain data. Load a past tick and run it again: it has to land in the same place.
 func _test_rollback_is_exact() -> void:
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.name = "RollbackTerrain"
 	terrain.chunk_radius = 1
 	add_child(terrain)
@@ -139,7 +139,7 @@ func _test_rollback_is_exact() -> void:
 		var real_position := pawn.position
 		var real_velocity := pawn.velocity
 		var real_grounded := pawn.grounded
-		var went_back: bool = NetworkTime.rollback(NetworkTime.tick - 20)
+		var went_back: bool = TickDriver.rollback(TickDriver.tick - 20)
 		replays += 1 if went_back else 0
 		if went_back:
 			worst = maxf(worst, pawn.position.distance_to(real_position))
@@ -215,11 +215,11 @@ func _test_source_rules() -> void:
 
 
 func _test_ai_with_no_ground() -> void:
-	var terrain := Terrain.new()
+	var terrain := TerrainGenerator.new()
 	terrain.name = "EmptyTerrain"
 	terrain.build_on_start = false
 	add_child(terrain)
-	var driver: Node = get_node("/root/NetworkTime")
+	var driver: Node = get_node("/root/TickDriver")
 	var participants_before: int = driver.get_participant_count()
 	var pawn := _make_pawn(Vector3(5.0, 40.0, 5.0))
 	pawn.apply_player_input(Vector3(1.0, 0.0, 0.0), 0.0, 0.0, false, false)
@@ -282,7 +282,7 @@ func _measure_a_crowd() -> void:
 	await _ticks(30)
 	var started := Time.get_ticks_usec()
 	for i in 60:
-		NetworkTime.step()
+		TickDriver.step()
 	print("        200 pawns walking: %.2f ms a tick" % ((Time.get_ticks_usec() - started) / 60000.0))
 	for pawn in pawns:
 		pawn.free()
