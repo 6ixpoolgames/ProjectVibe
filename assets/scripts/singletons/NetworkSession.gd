@@ -290,6 +290,7 @@ func leave() -> void:
 	_peers.clear()
 	_inbox.clear()
 	_inbox_counts.clear()
+	_world_inbox.clear() # Claude 2026-11-07, from the audit of 6df1464: world messages from the last session mustn't reach the next one
 	_reconcile_values.clear()
 	_reconcile_tick = -1
 	_clock.reset()
@@ -404,6 +405,9 @@ func content_hash() -> int:
 	parts.append(str(TagRegistry.content_hash()))
 	# Claude 2026-11-06: navigation now has its own tags, and machines must agree on those bits too.
 	parts.append(str(NavTags.content_hash()))
+	# Claude 2026-11-07, from the audit of 6df1464: the named actions too, in bit order, so peers agree on what each input bit means
+	# even when a build id replaces the file part below.
+	parts.append(",".join(InputActions.get_actions()))
 	parts.append(String(Engine.get_version_info()["hash"]))
 	parts.append(str(_driver.get_tick_rate() if _driver else 0))
 	var setting_names: Array[String] = []
@@ -1149,6 +1153,14 @@ func is_using_native_encoding() -> bool:
 	return _codec != null
 
 
+## Claude 2026-11-07, from the audit of 6df1464: whether an entity goes in this tick's snapshot. It does if it recorded this tick,
+## even with no state list at all: an entity whose only state is save_state() data used to be left out, because its list was empty.
+## A paused entity records nothing, so it's still left out.
+## Still not covered: an entity with only sync properties records no ticks, so it never goes in. That needs its own design.
+func _is_in_snapshot(entity: NetworkEntity, tick: int) -> bool:
+	return entity.is_replicated and entity.state != null and entity.state.has_state(tick)
+
+
 ## Server: sends the whole world to every client, with a note for each on how its input is arriving, for time dilation.
 func _send_snapshots(tick: int) -> void:
 	# Claude 2026-11-05: everything is gathered first and encoded in one call, so C++ is only called into once per snapshot.
@@ -1157,11 +1169,9 @@ func _send_snapshots(tick: int) -> void:
 	entries.resize(all_entities.size() * NetPackets.WORLD_ENTRY_SIZE)
 	var at := 0
 	for entity: NetworkEntity in all_entities:
-		if not entity.is_replicated or entity.state == null:
+		if not _is_in_snapshot(entity, tick):
 			continue
 		var values := entity.state.get_state_values(tick)
-		if values.is_empty():
-			continue
 		entries[at] = entity.entity_id
 		entries[at + 1] = values
 		entries[at + 2] = entity.state.get_state_encodings()

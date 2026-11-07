@@ -40,7 +40,9 @@ func _ready() -> void:
 		_entity = _pawn.get_meta(&"network_entity")
 		_key = _entity.entity_id
 	if _driver:
-		_driver.register(self, 0) # after a PlayerController's -10, so this wins while it's driving
+		# Claude 2026-11-07: order 1, after the pawn's own input phase (order 0), where it asks its controller. With the same order, a pawn
+		# that re-registers when its owner changes (taking a pawn mid-game) would run after this and overwrite the walking.
+		_driver.register(self, 1)
 
 
 func _exit_tree() -> void:

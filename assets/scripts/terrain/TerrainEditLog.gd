@@ -173,12 +173,27 @@ func from_bytes(bytes: PackedByteArray) -> bool:
 	var count := buffer.get_u32()
 	if bytes.size() != 9 + count * BYTES_PER_EDIT:
 		return false
+	# Claude 2026-11-07, from the audit of 6df1464: every record is checked before anything changes. This used to clear the log first,
+	# so one bad record left it empty while the built ground still had the old edits.
+	var incoming: Array[PackedFloat32Array] = []
+	var ticks := PackedInt32Array()
+	for i in count:
+		var x := buffer.get_float()
+		var z := buffer.get_float()
+		var radius := buffer.get_float()
+		var amount := buffer.get_float()
+		var tick := buffer.get_32()
+		if not _is_valid_edit(x, z, radius, amount):
+			return false
+		incoming.append(PackedFloat32Array([x, z, radius, amount]))
+		ticks.append(tick)
+	# All good: now it's replaced. Half-built chunks finish first, with the old log, and are rebuilt below like the others.
+	if _terrain != null:
+		_terrain._finish_building_chunks()
 	var chunks_before: Array = _by_chunk.keys()
 	clear()
-	for i in count:
-		if _read_edit(buffer) < 0:
-			clear()
-			return false
+	for i in incoming.size():
+		_add(incoming[i][0], incoming[i][1], incoming[i][2], incoming[i][3], ticks[i])
 	if _terrain != null:
 		_terrain._rebuild_chunks_for_log(chunks_before + _by_chunk.keys())
 	return true
@@ -193,12 +208,23 @@ func _on_network_message(bytes: PackedByteArray) -> void:
 		return
 	var body := bytes.slice(1)
 	if bytes[0] == MESSAGE_ONE_EDIT:
-		var index := record_from_bytes(body)
-		if index >= 0:
-			_terrain._apply_edit_from_log(_x[index], _z[index], _radius[index], _amount[index])
+		_receive_edit(body) # Claude 2026-11-07: split out, so a test can call it without a network
 	elif bytes[0] == MESSAGE_WHOLE_LOG and from_bytes(body):
 		# A joining pawn may be about to take its first tick here, so this can't wait for later frames.
 		_terrain.finish_rebuilds()
+
+
+## Claude 2026-11-07, from the audit of 6df1464: one edit from the server, applied exactly once. Half-built chunks are finished
+## before the edit is recorded, the same order edit() uses on the server. Recording first made a half-built chunk read the edit
+## from the log while finishing, then get it again from the loaded-chunk pass. Returns its position in the log, or -1 if broken.
+func _receive_edit(bytes: PackedByteArray) -> int:
+	if _terrain == null or bytes.size() != BYTES_PER_EDIT:
+		return -1
+	_terrain._finish_building_chunks()
+	var index := record_from_bytes(bytes)
+	if index >= 0:
+		_terrain._apply_edit_from_log(_x[index], _z[index], _radius[index], _amount[index])
+	return index
 
 
 ## Server: what a late joiner needs. Empty means nothing to send.
@@ -224,9 +250,14 @@ func _read_edit(buffer: StreamPeerBuffer) -> int:
 	var radius := buffer.get_float()
 	var amount := buffer.get_float()
 	var tick := buffer.get_32()
-	if not (is_finite(x) and is_finite(z) and is_finite(radius) and is_finite(amount)) or radius <= 0.0:
+	if not _is_valid_edit(x, z, radius, amount):
 		return -1
 	return _add(x, z, radius, amount, tick)
+
+
+## Claude 2026-11-07: the one check every edit from outside has to pass. Shared by single edits and whole logs.
+func _is_valid_edit(x: float, z: float, radius: float, amount: float) -> bool:
+	return is_finite(x) and is_finite(z) and is_finite(radius) and is_finite(amount) and radius > 0.0
 
 
 func _add(x: float, z: float, radius: float, amount: float, tick: int) -> int:

@@ -5,9 +5,17 @@
 ## How to use it: use assets/scenes/pawn/pawn.tscn as it is, or inherit from it. Something writes this pawn's input each tick,
 ## such as a PlayerController, or an AI script on the server. A GroundMovement child makes that into movement.
 ##
+## Claude 2026-11-07: parts and input, pawn spec steps 3 and 4.
+##   - When it enters the tree, GameMode's PawnInitializer adds the default parts its scene doesn't have: for now ControllerManager
+##     (with an AIController) and GroundMovement. fill_in_default_parts and skip_default_parts opt out.
+##   - Each tick, in its input phase, it asks its ControllerManager for input from whoever is in charge: this machine's player, or
+##     else its AI controller. It only asks where its input is decided here. A client's pawn on the server gets its input over the
+##     network instead.
+##
 ## What it needs in its scene, all optional:
-##   - a MovementModule child. With none, it stands still.
-##   - a TickStateComponent and a NetworkEntity child, for rollback and multiplayer. With none, it plays as single player.
+##   - a MovementModule child. With none, it stands still. Claude 2026-11-07: GroundMovement now comes from PawnInitializer.
+##   - a TickStateComponent and a NetworkEntity child, for rollback and multiplayer. With none, it plays as single player. These
+##     two stay in the scene, because NetworkSession reads them before the pawn joins the tree.
 ##   - a Node3D child called Visual, which the camera and the model hang from.
 ## pawn.tscn puts bodies on collision layer 2, and they collide with layers 1 and 2. The ground is on layer 1, so a camera arm
 ## can tell the ground from a pawn walking past.
@@ -58,6 +66,12 @@ signal possession_changed(pawn: Pawn, has_player: bool)
 @export_range(-1, 60, 1, "or_greater") var missing_input_hold_ticks := -1
 ## Then its direction fades to nothing over this many ticks. -1 uses NetworkSession's setting.
 @export_range(-1, 60, 1, "or_greater") var missing_input_fade_ticks := -1
+## Claude 2026-11-07: on, GameMode's PawnInitializer adds every default part this pawn's scene doesn't already have. Off, the pawn
+## gets only what its scene has.
+@export var fill_in_default_parts := true
+## Claude 2026-11-07: default parts to leave out, by name, such as &"GroundMovement". A part with that name in the scene is kept
+## either way.
+@export var skip_default_parts: Array[StringName] = []
 
 # This tick's input, as plain data. Listed in the TickState, so it goes over the network and rolls back.
 var move_input := Vector3.ZERO ## the direction to go, in world space, up to length 1
@@ -67,9 +81,9 @@ var look_yaw := 0.0 ## where the player is looking, which is often not where the
 var look_pitch := 0.0
 
 # State that affects the next tick. Listed in the TickState too.
-## Claude 2026-11-07: last tick's held_actions, so a press can be told from a hold. It isn't in the TickState's state list, because
-## every int costs 5 bytes per pawn in every snapshot (about 15% more traffic in the stress test). After a rollback, it's read back
-## from the input the TickState saved for that tick instead (_on_state_loaded).
+## Claude 2026-11-07: last tick's held_actions, so a press can be told from a hold. It's in the TickState's state list, so the
+## server's value reaches clients in snapshots and a correction fixes it, like position. From the audit of 6df1464: reading it back
+## from the client's own saved input instead went wrong when the server never got a press. Protocol 5 made it 2 bytes per pawn.
 var previous_held_actions := 0
 var yaw := 0.0
 ## Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
@@ -77,10 +91,11 @@ var grounded := false
 
 ## Which movement module runs. Set it to change how this pawn moves.
 var movement: MovementModule = null
+## Claude 2026-11-07: picks whose input this pawn follows. Null if the pawn has none, and then nothing writes its input for it.
+var controller_manager: ControllerManager = null
 
 var _driver: Node = null
 var _entity: NetworkEntity = null
-var _tick_state: TickStateComponent = null # Claude 2026-11-07: for reading back last tick's held actions after a rollback
 var _has_player := false
 var _source: StreamingSource = null
 var _visual: Node3D = null
@@ -106,6 +121,11 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	add_to_group(TerrainBodyLifter.GROUP)
+	# Claude 2026-11-07: default parts first, so they're children before anything below or any _ready looks for them. A node may
+	# add children to itself here: Godot enters them right after.
+	var game_mode: Node = get_node_or_null("/root/GameMode")
+	if game_mode and game_mode.pawn_initializer:
+		game_mode.pawn_initializer.initialize(self)
 	_driver = get_node_or_null("/root/TickDriver")
 	if _driver:
 		_driver.register(self)
@@ -129,8 +149,8 @@ func _ready() -> void:
 			movement = child
 		elif child is NetworkEntity:
 			_entity = child
-		elif child is TickStateComponent:
-			_tick_state = child
+		elif child is ControllerManager and controller_manager == null: # Claude 2026-11-07
+			controller_manager = child
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
 		_visual.top_level = true # it's placed by _process, between ticks, not by the body
@@ -159,7 +179,7 @@ func set_has_player(value: bool) -> void:
 		return
 	_has_player = value
 	# Claude 2026-11-07: with nobody driving it, a pawn stands idle. The last tick's input would otherwise repeat forever, which is
-	# what happened offline. A later controller manager will hand it to its AI controller here, if it has one.
+	# what happened offline. Claude 2026-11-07: from the next tick its ControllerManager hands it to its AI controller, if it has one.
 	if not value and _is_simulated_here():
 		_clear_input()
 	_refresh_source()
@@ -247,6 +267,16 @@ func is_simulation_active() -> bool:
 # --- Ticks ---
 
 
+## Claude 2026-11-07: the input phase. Asks the controller in charge for this tick's input, where this pawn's input is decided here.
+## A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
+func _tick_input(_dt: float, tick: int) -> void:
+	if controller_manager == null or not _decides_own_input():
+		return
+	var command := controller_manager.take_input_command(tick)
+	if command:
+		apply_input(command)
+
+
 func _tick_simulate(dt: float, _tick: int) -> void:
 	_previous_position = _current_position
 	_previous_yaw = _current_yaw
@@ -270,14 +300,8 @@ func _tick_simulate(dt: float, _tick: int) -> void:
 
 ## TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is
 ## doing now. Nothing can set it directly, so this makes the engine work it out again, then puts things back.
-func _on_state_loaded(tick: int) -> void:
-	# Claude 2026-11-07: the next tick replayed needs to know what was held on this one, to tell a press from a hold. That's this
-	# tick's saved input. If it's gone from the history, the value stays as it is.
-	if _tick_state:
-		var saved_input := _tick_state.get_input(tick)
-		var held: Variant = saved_input.get("held_actions")
-		if held is int:
-			previous_held_actions = held
+func _on_state_loaded(_tick: int) -> void:
+	# Claude 2026-11-07: previous_held_actions is restored by the TickState itself now, as rollback state.
 	var saved_position := position
 	var saved_velocity := velocity
 	var saved_snap := floor_snap_length
@@ -297,6 +321,7 @@ func _on_state_loaded(tick: int) -> void:
 
 func _physics_process(delta: float) -> void:
 	_fallback_tick += 1
+	_tick_input(delta, _fallback_tick) # Claude 2026-11-07
 	_tick_simulate(delta, _fallback_tick)
 
 
@@ -409,6 +434,12 @@ func _refresh_source() -> void:
 	elif not wanted and _source != null:
 		_source.queue_free()
 		_source = null
+
+
+## Claude 2026-11-07: true where this pawn's input is decided: offline, its owner's machine, or the server for a pawn nobody owns. False
+## on the server for a client's pawn, whose input arrives over the network, and on a client for anyone else's pawn.
+func _decides_own_input() -> bool:
+	return _entity == null or _entity.is_local or (_entity.role == NetworkEntity.Role.AUTHORITY and _entity.owner_peer == 0)
 
 
 ## False for a pawn on a client that belongs to someone else.

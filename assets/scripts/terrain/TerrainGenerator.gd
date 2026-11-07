@@ -447,8 +447,7 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 		return
 	# Claude 2026-11-06: a half-built chunk would finish with a mesh made from the heights before this edit, so finish
 	# them first. It costs a stutter only if an edit lands while a chunk is loading.
-	for key: Vector2i in _building.keys():
-		load_chunk(key)
+	_finish_building_chunks() # Claude 2026-11-07: moved into a helper, which the client's path uses too
 	var local_center := center - _terrain_origin()
 	# Claude 2026-11-07: rounded to 32 bits first, the same as what the log stores, so that every machine gets identical ground.
 	var rounded := PackedFloat32Array([local_center.x, local_center.z, radius, amount])
@@ -458,10 +457,19 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 
 
 ## An edit from the server has reached this client, and the log has it already.
+# Claude 2026-11-07, from the audit of 6df1464: the caller now finishes half-built chunks with _finish_building_chunks() BEFORE it
+# records the edit. Finishing them here, after recording, made them read the new edit from the log and then get it again below:
+# the ground ended up raised twice.
 func _apply_edit_from_log(x: float, z: float, radius: float, amount: float) -> void:
+	_apply_edit_to_loaded_chunks(x, z, radius, amount)
+
+
+## Claude 2026-11-07: finishes every half-built chunk right now. Called before an edit goes into the log, so that no chunk is
+## caught halfway: it either finished before the edit was recorded, and gets the edit from the loaded-chunk pass, or it starts
+## later and reads the edit from the log. Never both.
+func _finish_building_chunks() -> void:
 	for key: Vector2i in _building.keys():
 		load_chunk(key)
-	_apply_edit_to_loaded_chunks(x, z, radius, amount)
 
 
 ## Changes the heights of the chunks that are built, and rebuilds them. The log isn't touched here.

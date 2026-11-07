@@ -1,11 +1,12 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/pawn/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.3
+# Pawn Spec v0.4
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
 - v0.2 (2026-11-07): Sprint is its own ability, with a cooldown and a maximum duration. Heavy load (4.1). A missing input repeats for a few ticks, then its move fades, while held actions keep repeating (5). `ControllerBase` trimmed to what step 2 builds (6.1).
 - v0.3 (2026-11-07): step 2 built. After a review: `take_input_command` instead of `get_input_command`, because it uses up saved presses. The missing-input settings live on `NetworkSession` (5).
+- v0.4 (2026-11-07): steps 3 and 4 built: `ControllerManager`, the `AIController` placeholder and `PawnInitializer` (6.3, 6.4, 11). `TickStateComponent` and `NetworkEntity` stay in the pawn's scene, because `NetworkSession` reads them before the pawn joins the tree.
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -74,6 +75,7 @@ PlayerController (outside the pawn)        (built) reads devices; joins a pawn t
 
 - The parts are kept flat on the pawn, so a designer sees every part in one place.
 - The AI parts exist on every peer, but only tick on the server, because AI only runs there.
+- **Today (2026-11-07, after step 4):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`) and `GroundMovement`, the tier -1 placeholder that Walk, Jump and Sprint replace in step 6.
 
 ---
 
@@ -132,6 +134,7 @@ One small set of plain values per tick. Players and AI produce the same shape. I
 - Actions are names like `&"jump"`, `&"sprint"`, `&"primary"` and `&"ability_2"`.
 - Like tags, they're declared up front in a list, so each name gets the same bit on every peer.
 - A **press** is "held this tick, not held last tick". It's worked out where the input is used, so a press is never sent twice.
+- Last tick's held actions (`Pawn.previous_held_actions`) are rollback state, sent in snapshots like position, so a server correction also fixes which presses the client's replay sees. *(Claude 2026-11-07, from the audit of 6df1464: reading it back from the client's own saved input went wrong when the server never received a press. It costs 2 bytes per pawn per snapshot, about 6% more in the stress test.)*
 - The player controller maps keys to actions with Godot's input map. The AI controller sets them from behaviour calls.
 
 **A missing input over the network (v1):**
@@ -155,10 +158,11 @@ signal pawn_changed(pawn)
 var pawn: Pawn
 func take_input_command(tick: int) -> InputCommand   # this tick's command (section 5); idle by default
 ```
-Hooks for gaining and losing a pawn get added when the controller manager needs them (step 3).
+Step 3 didn't need hooks for gaining and losing a pawn: `ControllerManager.attach_player()` and `detach_player()` cover it.
 
-### 6.2 `PlayerController` (built, gets moved onto the base)
+### 6.2 `PlayerController` (built)
 - Lives outside the pawn and survives with no pawn **(built)**.
+- It doesn't tick on its own. When it takes a pawn it attaches to the pawn's `ControllerManager`, which asks it for input each tick **(built, step 3)**.
 - Reads keys, mouse and stick, rotates movement by the camera's yaw, and maps keys to actions.
 - **Click-to-move:**
   1. A click asks the world cursor for a point.
@@ -166,22 +170,32 @@ Hooks for gaining and losing a pawn get added when the controller manager needs 
   3. While a path is being followed, `move` comes from `navigation_manager.get_move_direction()`.
   4. WASD cancels the path. That's today's behaviour **(built)**.
 
-### 6.3 `AIController`
+### 6.3 `AIController` (placeholder built 2026-11-07, step 3)
 - A child of `ControllerManager`.
 - It decides nothing. It's the AI's hands: behaviours call it, and it builds the input command.
+- Everything it's told stays until changed, except `press()`, which lasts one tick.
 
 ```gdscript
-func move_to(point: Vector3) -> void      # passes on to NavigationManager
-func stop() -> void
-func look_at_point(point: Vector3) -> void
-func press(action: StringName) -> void    # pressed for one tick
-func hold(action: StringName, held: bool) -> void
+func move_in_direction(direction: Vector3) -> void   # built: walks that way until told otherwise
+func stop() -> void                                  # built
+func look_at_point(point: Vector3) -> void           # built. Until called, it keeps the pawn's own look, so a handover doesn't snap it
+func stop_looking() -> void                          # built: back to keeping the pawn's own look
+func press(action: StringName) -> void               # built: held for one tick
+func hold(action: StringName, held := true) -> void  # built
+func release_all() -> void                           # built: back to idle
+func move_to(point: Vector3) -> void                 # step 7: passes on to NavigationManager
 ```
 
-### 6.4 `ControllerManager`
-- Picks whose input counts. The rule is fixed and simple: the player if one has the pawn, otherwise the AI controller.
-- When the player lets go, the AI controller takes over, and the behaviour manager re-decides at once.
-- `PossessionCoordinator` already tells the pawn when a player joins or leaves **(built)**. The manager listens to that.
+### 6.4 `ControllerManager` (built 2026-11-07, step 3)
+- Picks whose input counts. The rule is fixed and simple:
+  - This machine's player controller is attached: it's in charge.
+  - A player on another machine has the pawn: nobody here is, because input arrives over the network.
+  - Nobody has the pawn: the AI controller is in charge.
+- The pawn asks `take_input_command()` once per tick, in its input phase. It only asks where its input is decided: offline, on its owner's machine, or on the server for a pawn nobody owns.
+- `PlayerController` attaches and detaches itself when it takes or lets go of a pawn.
+- When the player lets go, the AI controller takes over at once. From step 8, the behaviour manager also re-decides at once.
+- `controller_changed` is sent once at the end of the frame with the final answer, so listeners never see "nobody" halfway through a possession.
+- Test: `controllers/tests/controller_manager_selftest`.
 
 ---
 
@@ -371,14 +385,21 @@ func exit(context, reason) -> void
 
 ---
 
-## 11. `PawnInitializer`
+## 11. `PawnInitializer` (built 2026-11-07, step 4)
 
 - A `GameMode` module. The pawn calls `GameMode.pawn_initializer.initialize(self)` from its own `_enter_tree`.
-- It adds each default part the pawn doesn't already have. A part placed in the pawn's scene is kept as it is, so a designer can override any default by adding their own.
-- For t0 it holds only the current defaults, in one defaults file per game.
-- Parts get fixed names, and are added in a fixed order.
-- A pawn can opt out of the initializer, or out of single parts.
-- `pawn.tscn` stops being a second source of defaults.
+- It adds each default part the pawn doesn't already have. A part placed in the pawn's scene is kept as it is, so a designer can override any default by adding their own with the same name.
+- **The defaults file:**
+  - `resources/pawn_defaults.tres`, a `PawnDefaultsRes` listing part scenes. The project setting `project_base/game_mode/pawn_defaults` can name another.
+  - For t0 it lists today's parts: `scenes/pawn/parts/ControllerManager.tscn` (with its `AIController`) and `GroundMovement.tscn`.
+  - Each part is a small scene, so its settings can be changed in the editor.
+- A part's name is its scene's root node name. Parts are added in the list's order, the same on every machine.
+- **Ways out:**
+  - One pawn, every default: `Pawn.fill_in_default_parts` off.
+  - One pawn, some defaults: `Pawn.skip_default_parts`.
+  - The whole game: leave the module out of `GameMode`'s list.
+- **Never added by it:** `TickStateComponent` and `NetworkEntity`. `NetworkSession` reads them as soon as it creates a pawn, before the pawn joins the tree, so they stay in the pawn's scene, along with the network input and state lists. Everything else that was a default in `pawn.tscn` moved to the defaults file.
+- Test: `game_mode/tests/pawn_initializer_selftest`.
 
 ---
 
@@ -386,8 +407,8 @@ func exit(context, reason) -> void
 
 1. **This spec agreed.**
 2. **Inputs and controllers:** `ControllerBase`, `PlayerController` moved onto it, the input command with named actions, and the fading missing input. **(Built 2026-11-07.)**
-3. **`ControllerManager`.**
-4. **`PawnInitializer`** and the defaults file.
+3. **`ControllerManager`.** **(Built 2026-11-07, with an `AIController` placeholder.)**
+4. **`PawnInitializer`** and the defaults file. **(Built 2026-11-07.)**
 5. **`StatManager`** and stat nodes for movement.
 6. **`AbilityManager`, `AbilityBase`, Walk, Jump and Sprint**, replacing `GroundMovement`. The existing pawn, possession and network tests must still pass.
 7. **`NavigationManager`**, with click-to-move moved onto it, and nav phase 3.

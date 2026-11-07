@@ -1,0 +1,10 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/controllers/ControllerManager.gd" id="1_manager"]
+[ext_resource type="Script" path="res://assets/scripts/controllers/AIController.gd" id="2_ai"]
+
+[node name="ControllerManager" type="Node"]
+script = ExtResource("1_manager")
+
+[node name="AIController" type="Node" parent="."]
+script = ExtResource("2_ai")

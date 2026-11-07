@@ -18,6 +18,7 @@ func _ready() -> void:
 	await _test_on_slopes()
 	await _test_rollback_is_exact()
 	await _test_rollback_keeps_presses() # Claude 2026-11-07
+	await _test_server_corrects_held_history() # Claude 2026-11-07, from the audit of 6df1464
 	await _test_no_movement_module()
 	_test_bad_input()
 	await _test_swapping_movement()
@@ -124,7 +125,9 @@ func _test_holding_jump() -> void:
 ## Claude 2026-11-07: on the server, when a client's input goes missing, the last one repeats, then its direction fades out.
 func _test_missing_input_fades() -> void:
 	var floor_body := _make_floor()
-	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	# Claude 2026-11-07: no ControllerManager, like a client's pawn on the server: nothing here writes its input, so what the network
+	# left on it is what it uses.
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0), [&"ControllerManager"])
 	pawn.missing_input_hold_ticks = 3
 	pawn.missing_input_fade_ticks = 6
 	await _ticks(10)
@@ -263,12 +266,33 @@ func _test_rollback_keeps_presses() -> void:
 	floor_body.free()
 
 
+## Claude 2026-11-07, from the audit of 6df1464: the client held jump the whole time, but the server's correction says jump wasn't held
+## on the tick it corrects (its copy of that press never arrived). The replay must then treat the next held tick as a press, as the
+## server did. That only works because previous_held_actions is rollback state that corrections overwrite.
+func _test_server_corrects_held_history() -> void:
+	var floor_body := _make_floor()
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	var tick_state: TickStateComponent = pawn.get_node("TickState")
+	await _ticks(20)
+	_drive(pawn, Vector3.ZERO, false, true) # held from here on: one jump, then standing with it held
+	await _ticks(90)
+	await get_tree().physics_frame
+	_check(pawn.grounded and pawn.is_action_held(&"jump"), "(standing with jump held, after its one jump)")
+	var corrected_tick: int = TickDriver.tick - 3
+	var server_says := tick_state.get_state(corrected_tick)
+	_check(int(server_says.get("previous_held_actions", -1)) == InputActions.mask_of(&"jump"), "previous_held_actions is saved as rollback state")
+	server_says["previous_held_actions"] = 0
+	tick_state.correct_state(corrected_tick, server_says)
+	TickDriver.rollback(corrected_tick)
+	_check(pawn.velocity.y > 0.0 or pawn.position.y > 0.05, "a correction saying jump wasn't held makes the replay jump, as the server did (%.2f m up)" % pawn.position.y)
+	pawn.free()
+	floor_body.free()
+
+
 func _test_no_movement_module() -> void:
 	var floor_body := _make_floor()
-	var pawn: Pawn = load(PAWN_SCENE).instantiate()
-	pawn.get_node("GroundMovement").free()
-	pawn.position = Vector3(0.0, 0.01, 0.0)
-	add_child(pawn)
+	# Claude 2026-11-07: GroundMovement comes from PawnInitializer now, so it's left out by name rather than removed from the scene.
+	var pawn := _make_pawn(Vector3(0.0, 0.01, 0.0), [&"GroundMovement"])
 	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(30)
 	_check(absf(pawn.position.x) < 0.001, "with no movement module, a pawn stands still")
@@ -417,15 +441,26 @@ func _make_floor() -> StaticBody3D:
 	return body
 
 
-func _make_pawn(at: Vector3) -> Pawn:
+# Claude 2026-11-07: skip leaves out default parts by name, through the pawn's own skip_default_parts.
+func _make_pawn(at: Vector3, skip: Array[StringName] = []) -> Pawn:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
 	pawn.position = at
+	pawn.skip_default_parts = skip
 	add_child(pawn)
 	return pawn
 
 
 ## Claude 2026-11-07: gives the pawn one tick's input. It replaces the old apply_player_input(move, 0, 0, sprint, jump) calls.
+# Claude 2026-11-07: through the pawn's AI controller when it's in charge, since the pawn now asks it for input every tick and anything
+# written straight onto the pawn would be replaced. A pawn with no ControllerManager gets the input written onto it directly.
 func _drive(pawn: Pawn, move: Vector3, sprint := false, jump := false) -> void:
+	var manager := pawn.controller_manager
+	var ai := manager.ai_controller as AIController if manager else null
+	if ai and manager.get_controller_in_charge() == ai:
+		ai.move_in_direction(move)
+		ai.hold(&"sprint", sprint)
+		ai.hold(&"jump", jump)
+		return
 	var held: Array[StringName] = []
 	if sprint:
 		held.append(&"sprint")

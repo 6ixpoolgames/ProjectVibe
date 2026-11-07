@@ -21,6 +21,7 @@ func _ready() -> void:
 	await _test_deleted_module()
 	await _test_collision_after_reload()
 	_test_bytes()
+	_test_incoming_edit_during_a_build() # Claude 2026-11-07
 	await _test_from_bytes_rebuilds()
 	_test_generate_clears_it()
 	await _test_with_streaming()
@@ -222,7 +223,12 @@ func _test_bytes() -> void:
 	var wrong_version := bytes.duplicate()
 	wrong_version[0] = 200
 	_check(not other_log.from_bytes(wrong_version), "so is a different format version")
-	_check(other_log.get_edit_count() == 2 or other_log.get_edit_count() == 0, "(the log isn't left half loaded)")
+	# Claude 2026-11-07, from the audit of 6df1464: this used to accept a count of 2 or 0. A refused log must change nothing at all.
+	_check(other_log.to_bytes() == bytes, "a refused log leaves the old one exactly as it was")
+	var ground_before: PackedVector3Array = other._points[KEY_A].duplicate()
+	_check(not other_log.from_bytes(_with_nonsense_in_it(bytes)), "(a correctly sized log with a negative radius in it is refused)")
+	other.finish_rebuilds()
+	_check(other_log.to_bytes() == bytes and other._points[KEY_A] == ground_before, "and leaves the log and the ground as they were")
 
 	var different := _make_terrain()
 	different.noise_seed = 999
@@ -233,6 +239,52 @@ func _test_bytes() -> void:
 	other.free()
 	third.free()
 	different.free()
+
+
+## Claude 2026-11-07, from the audit of 6df1464: an edit arriving from the server while a chunk is half built is applied once, whatever
+## stage the build is at. The result must match the chunk built again from scratch with the same log.
+func _test_incoming_edit_during_a_build() -> void:
+	var server := _make_terrain()
+	var server_log := _add_log(server)
+	server.edit(Vector3(16.0, 0.0, 16.0), 20.0, 5.0)
+	var edit_bytes := server_log.edit_as_bytes(0)
+	var worst := 0.0
+	var stages_tried := 0
+	for steps_before in 40: # every stage, from just started to almost announced
+		var client := _make_terrain()
+		var client_log := _add_log(client)
+		var finished := false
+		for i in steps_before:
+			if client.build_chunk_step(KEY_A):
+				finished = true
+				break
+		if finished:
+			client.free()
+			break
+		stages_tried += 1
+		client_log._receive_edit(edit_bytes)
+		client.load_chunk(KEY_A) # anything still unfinished
+		var live: PackedVector3Array = client._points[KEY_A].duplicate()
+		client.unload_chunk(KEY_A)
+		client.load_chunk(KEY_A)
+		for p in live.size():
+			worst = maxf(worst, absf(live[p].y - client._points[KEY_A][p].y))
+		client.free()
+	_check(stages_tried > 5, "(an edit arrived at %d different points in a chunk's build)" % stages_tried)
+	_check(worst < 0.0001, "an edit arriving mid-build is applied exactly once (worst difference %.4f m)" % worst)
+	_check(_client_log_refuses_garbage(), "a broken edit from the server is refused, and changes nothing")
+	server.free()
+
+
+func _client_log_refuses_garbage() -> bool:
+	var terrain := _make_terrain()
+	var edit_log := _add_log(terrain)
+	terrain.load_chunk(KEY_A)
+	var before: PackedVector3Array = terrain._points[KEY_A].duplicate()
+	var refused := edit_log._receive_edit(PackedByteArray([1, 2, 3])) == -1
+	var same: bool = edit_log.get_edit_count() == 0 and terrain._points[KEY_A] == before
+	terrain.free()
+	return refused and same
 
 
 func _with_nonsense_in_it(bytes: PackedByteArray) -> PackedByteArray:

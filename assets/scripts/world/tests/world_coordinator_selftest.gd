@@ -91,6 +91,15 @@ func _test_whole_world() -> void:
 	await _until_settled(world)
 	_check(terrain.has_chunk(Vector2i(0, 0)) and terrain.has_chunk(Vector2i(1, 0)), "a source loads the chunks around it")
 	_check(world.nav_feeder.uses_nav() and world.nav_feeder._nav_interests.size() == 1, "and the link keeps nav built around it")
+	# Claude 2026-11-07, from the audit of 6df1464: changing a source's distance while running resizes its nav interest.
+	var source_id := source.get_instance_id()
+	var first_interest: int = world.nav_feeder._nav_interests[source_id]
+	source.nav_distance = 40.0
+	await _until_settled(world)
+	_check(world.nav_feeder._nav_interest_radius.get(source_id) == 40.0 and world.nav_feeder._nav_interests[source_id] != first_interest,
+			"changing a source's nav_distance while running gives it a nav interest of the new size")
+	source.nav_distance = 60.0
+	await _until_settled(world)
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker_count() == terrain.get_loaded_chunks().size(), "and each chunk's markers are announced (%d)" % NavMarkerManager.get_marker_count())
 

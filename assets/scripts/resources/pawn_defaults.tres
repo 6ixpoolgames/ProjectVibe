@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="PawnDefaultsRes" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/resources/PawnDefaults_resource.gd" id="1_defaults"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/ControllerManager.tscn" id="2_controllers"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/GroundMovement.tscn" id="3_movement"]
+
+[resource]
+script = ExtResource("1_defaults")
+parts = Array[PackedScene]([ExtResource("2_controllers"), ExtResource("3_movement")])

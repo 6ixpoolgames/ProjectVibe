@@ -27,7 +27,8 @@ LEVEL
 │  ├─ TerrainEditLog               optional: without it, edits don't outlast a chunk or reach clients
 │  └─ TerrainBodyLifter            optional: moves bodies onto ground an edit raises above them
 └─ Pawn                            possessable flag, velocity, the one move_and_slide
-   ├─ GroundMovement               a placeholder until abilities exist
+   ├─ GroundMovement               a placeholder until abilities exist (Claude 2026-11-07: added by PawnInitializer now)
+   ├─ ControllerManager            Claude 2026-11-07: picks the player's or the AI's input; added by PawnInitializer (PAWN_SPEC.md 6.4)
    ├─ StreamingSource              only when possessed, or when the AI bool is on
    └─ Visual                       the smoothed position, set each rendered frame
       ├─ Model

@@ -33,6 +33,7 @@ var _nav_layer := -1 # our layer's number in the NavServer, or -1 for none
 var _terrain_id := 0 # our id in NavMarkerManager, or 0 when not registered
 var _fed := {} # Vector2i -> true, the chunks nav and NavMarkerManager have been told about
 var _nav_interests := {} # a source's instance id -> its interest id in NavServer
+var _nav_interest_radius := {} # Claude 2026-11-07: a source's instance id -> the radius its interest was made with
 var _refresh_timer := 0.0
 var _listening_to: TerrainGenerator = null
 
@@ -185,16 +186,23 @@ func _update_nav_interests() -> void:
 			continue
 		var id := source.get_instance_id()
 		still_active[id] = true
+		# There's no ground to build nav on past load_distance, so it can't ask for more than that.
+		var load_radius := minf(source.nav_distance, source.load_distance)
+		# Claude 2026-11-07, from the audit of 6df1464: a source whose distances changed gets a new interest of the new size. Moving
+		# the old one kept its old size, so changing nav_distance or load_distance while running did nothing.
+		if _nav_interests.has(id) and _nav_interest_radius.get(id, -1.0) != load_radius:
+			_nav.remove_interest(_nav_interests[id])
+			_nav_interests.erase(id)
 		if _nav_interests.has(id):
 			_nav.move_interest(_nav_interests[id], source.global_position)
 		else:
-			# There's no ground to build nav on past load_distance, so it can't ask for more than that.
-			var load_radius := minf(source.nav_distance, source.load_distance)
 			_nav_interests[id] = _nav.add_interest(source.global_position, load_radius, load_radius + unload_margin, 1)
+			_nav_interest_radius[id] = load_radius
 	for id: int in _nav_interests.keys():
 		if not still_active.has(id):
 			_nav.remove_interest(_nav_interests[id])
 			_nav_interests.erase(id)
+			_nav_interest_radius.erase(id)
 
 
 func _remove_all_nav_interests() -> void:
@@ -204,3 +212,4 @@ func _remove_all_nav_interests() -> void:
 	for id: int in _nav_interests:
 		nav.remove_interest(_nav_interests[id])
 	_nav_interests.clear()
+	_nav_interest_radius.clear() # Claude 2026-11-07

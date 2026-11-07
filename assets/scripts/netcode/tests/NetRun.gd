@@ -27,7 +27,11 @@ static func run(owner: Node, run_name: String, machines: Dictionary, port: int) 
 		var out_path := "%s/%s.json" % [folder, machine_name]
 		DirAccess.remove_absolute(out_path)
 		outs[machine_name] = out_path
-		var arguments := PackedStringArray(["--headless", "--path", ProjectSettings.globalize_path("res://"), NODE_SCENE, "--"])
+		# Claude 2026-11-07, from the audit of 6df1464: each machine writes its own log file. On Windows a child's output never reaches
+		# this process, so script errors in a client or server went unseen.
+		var log_path := "%s/%s.log" % [folder, machine_name]
+		DirAccess.remove_absolute(log_path)
+		var arguments := PackedStringArray(["--headless", "--log-file", log_path, "--path", ProjectSettings.globalize_path("res://"), NODE_SCENE, "--"])
 		arguments.append("--name=%s" % machine_name)
 		arguments.append("--port=%d" % port)
 		arguments.append("--out=%s" % out_path)
@@ -58,7 +62,38 @@ static func run(owner: Node, run_name: String, machines: Dictionary, port: int) 
 			continue
 		var parsed: Variant = JSON.parse_string(file.get_as_text())
 		results[machine_name] = parsed if parsed is Dictionary else {"timed_out": true, "bad_output": true}
+	# Claude 2026-11-07: every machine's script errors, from its log file, into its result as "script_errors" and "script_error_lines".
+	for machine_name: String in results:
+		var errors := _script_errors_in("%s/%s.log" % [folder, machine_name])
+		results[machine_name]["script_errors"] = errors.size()
+		results[machine_name]["script_error_lines"] = errors.slice(0, 5)
+		# On Windows nobody would see these otherwise, so they're printed here, where the test's own log shows them. On Linux the
+		# child already printed them to this process's output.
+		if OS.get_name() == "Windows":
+			for line: String in errors.slice(0, 5):
+				print("  [%s] %s" % [machine_name, line])
 	return results
+
+
+## Claude 2026-11-07: every line of a machine's log that reports a script error. Empty if the log is missing.
+static func _script_errors_in(log_path: String) -> PackedStringArray:
+	var found := PackedStringArray()
+	var file := FileAccess.open(log_path, FileAccess.READ)
+	if file == null:
+		return found
+	while not file.eof_reached():
+		var line := file.get_line()
+		if line.contains("SCRIPT ERROR"):
+			found.append(line)
+	return found
+
+
+## Claude 2026-11-07: how many script errors all machines in a run's results had together. A test can check this is 0.
+static func total_script_errors(results: Dictionary) -> int:
+	var total := 0
+	for machine_name: String in results:
+		total += int(results[machine_name].get("script_errors", 0))
+	return total
 
 
 ## How far a predicted pawn was from the server on each tick, as first predicted, in metres. The result is

@@ -279,6 +279,9 @@ func _all_finished(results: Dictionary) -> bool:
 		if results[label].has("timed_out") or not results[label].has("summaries"):
 			_check(false, "%s finished" % label)
 			finished = false
+	# Claude 2026-11-07, from the audit of 6df1464: the machines' own logs, which Windows doesn't show here otherwise.
+	var errors := NetRun.total_script_errors(results)
+	_check(errors == 0, "no script errors on any machine (%d)" % errors)
 	return finished
 
 

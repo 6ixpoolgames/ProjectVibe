@@ -4,7 +4,8 @@
 ## What it does:
 ##   - reads the player's devices, on this machine only
 ##   - holds the look direction, and tells the current arm where to look
-##   - gives its pawn this tick's input, as plain data
+##   - gives its pawn this tick's input, as plain data. Claude 2026-11-07: the pawn's ControllerManager asks for it, with
+##     take_input_command(), so this no longer ticks on its own.
 ##
 ## What it doesn't do: move anything. The pawn's movement module does that, so an RTS or a flying pawn needs no special controller.
 ##
@@ -49,7 +50,6 @@ var world_cursor: WorldCursor = null # Claude 2026-11-07: renamed from cursor, t
 var look_yaw := 0.0
 var look_pitch := 0.0
 
-var _driver: Node = null
 # Claude 2026-11-07: replaces _jump_latched. Actions pressed since the last tick, as bits, so a tap shorter than a tick still counts.
 var _latched_actions := 0
 var _zoom_steps := 0.0
@@ -66,12 +66,12 @@ func _ready() -> void:
 	world_cursor = WorldCursor.new()
 	world_cursor.name = "WorldCursor"
 	add_child(world_cursor)
-	_driver = get_node_or_null("/root/TickDriver")
 
 
 func _exit_tree() -> void:
-	if _driver:
-		_driver.unregister(self)
+	# Claude 2026-11-07: no longer registered with the tick driver. It lets go of its pawn's ControllerManager instead.
+	if is_instance_valid(pawn) and pawn.controller_manager:
+		pawn.controller_manager.detach_player(self)
 	if is_instance_valid(camera) and not camera.is_inside_tree():
 		camera.free() # it isn't our child yet, so nothing else would
 
@@ -84,13 +84,15 @@ func take_pawn(new_pawn: Pawn) -> void:
 	if pawn == new_pawn:
 		return
 	_let_go_of_arm()
+	# Claude 2026-11-07: the pawn's ControllerManager asks this controller for input while it's attached, instead of this controller
+	# registering with the tick driver and pushing input.
+	if is_instance_valid(pawn) and pawn.controller_manager:
+		pawn.controller_manager.detach_player(self)
 	pawn = new_pawn
-	# Only ticks while it has a pawn, since there's nothing to do otherwise.
-	if _driver:
-		if pawn:
-			_driver.register(self, -10) # first, so the pawn's input is ready for the rest of the tick
-		else:
-			_driver.unregister(self)
+	if pawn and pawn.controller_manager:
+		pawn.controller_manager.attach_player(self)
+	elif pawn:
+		push_warning("PlayerController: %s has no ControllerManager, so this controller can't drive it. Check its skip_default_parts." % pawn.name)
 	if pawn == null:
 		camera.set_view(null)
 		_show_mouse()
@@ -111,14 +113,7 @@ func take_pawn(new_pawn: Pawn) -> void:
 	pawn_changed.emit(pawn)
 
 
-# --- Ticks ---
-
-
-## Gives the pawn its input for this tick. This runs on the machine that owns the pawn only, since only that machine has it here.
-func _tick_input(_dt: float, tick: int) -> void:
-	if not is_instance_valid(pawn):
-		return
-	pawn.apply_input(take_input_command(tick)) # Claude 2026-11-07: was apply_player_input, with sprint and jump as bools
+# --- Input for the pawn ---
 
 
 ## Claude 2026-11-07: this tick's input, from the devices. It uses up the presses saved since the last tick, so call it once per tick.

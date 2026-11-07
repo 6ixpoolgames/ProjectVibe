@@ -11,8 +11,10 @@
 ##   - No list file: a warning, and the list starts empty. Each action used is then added as it's first seen, with its own warning.
 ##     Claude 2026-11-07: there used to be a copy of the list in code for this case. It's gone, so the file is the only place the
 ##     list lives, and the two can't drift apart.
-##   - An action nobody listed, used at runtime: added at the end with a one-time warning. Fine offline, a desync risk online,
-##     which is what the warning is for. A typo such as &"Jump" shows up the same way.
+##   - An action nobody listed, used at runtime: added at the end with a one-time warning. A typo such as &"Jump" shows up the same way.
+##     Claude 2026-11-07, from the audit of 6df1464: only offline. While a network session is running it gets no bit (it's never
+##     held), with a one-time warning, because two machines adding names in a different order would disagree on what a bit means.
+##     The list itself is part of NetworkSession's content hash, so machines with different lists can't connect.
 ##   - Empty or blank name: no bit (0). Never an error.
 ##   - More than 64 actions: the extra ones get no bit, with a warning.
 ##
@@ -116,10 +118,20 @@ static func _add(action: StringName, late: bool) -> void:
 	if _actions.size() >= MAX_ACTIONS:
 		_warn_once(action, "InputActions: more than %d actions, so '%s' gets no bit and is never held." % [MAX_ACTIONS, action])
 		return
+	if late and _is_online():
+		_warn_once(action, "InputActions: '%s' isn't in %s, and a network session is running, so it gets no bit and is never held. Add it to the list. Check the spelling too." % [action, LIST_PATH])
+		return
 	if late:
-		_warn_once(action, "InputActions: '%s' isn't in %s, so it was added as bit %d. Add it to the list, or multiplayer peers may disagree. Check the spelling too." % [action, LIST_PATH, _actions.size()])
+		_warn_once(action, "InputActions: '%s' isn't in %s, so it was added as bit %d. Add it to the list, or it won't work online. Check the spelling too." % [action, LIST_PATH, _actions.size()])
 	_index_of[action] = _actions.size()
 	_actions.append(action)
+
+
+## Claude 2026-11-07: true while this machine is a server or a client. A static class has no node of its own, so it asks the tree.
+static func _is_online() -> bool:
+	var tree := Engine.get_main_loop() as SceneTree
+	var session: Node = tree.root.get_node_or_null("NetworkSession") if tree else null
+	return session != null and (session.is_server() or session.is_client())
 
 
 static func _clean(action: Variant) -> StringName:
