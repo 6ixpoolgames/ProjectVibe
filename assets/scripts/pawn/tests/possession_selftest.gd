@@ -19,10 +19,13 @@ class ScriptedController extends PlayerController:
 	func _read_move() -> Vector2:
 		return scripted_move
 
-	func _read_sprint() -> bool:
+	# Claude 2026-11-07: the controller now reads named actions, not sprint and jump on their own.
+	func _read_action_held(_action: StringName) -> bool:
 		return false
 
-	func _read_jump_pressed() -> bool:
+	func _read_action_pressed(action: StringName) -> bool:
+		if action != &"jump":
+			return false
 		var jump := scripted_jump
 		scripted_jump = false
 		return jump
@@ -130,9 +133,9 @@ func _test_refusals() -> void:
 func _test_letting_go_stops_the_pawn() -> void:
 	var pawn := _make_pawn(Vector3.ZERO)
 	_possession.possess(pawn)
-	pawn.apply_player_input(Vector3.FORWARD, 0.5, 0.2, true, true)
+	pawn.apply_input(InputCommand.make(Vector3.FORWARD, [&"sprint", &"jump"], 0.5, 0.2)) # Claude 2026-11-07: InputCommand
 	_possession.release()
-	_check(pawn.move_input == Vector3.ZERO and not pawn.wants_sprint and not pawn.wants_jump, "letting go leaves the pawn idle")
+	_check(pawn.move_input == Vector3.ZERO and pawn.held_actions == 0, "letting go leaves the pawn idle")
 	_check(is_equal_approx(pawn.look_yaw, 0.5), "and looking where it was")
 	pawn.free()
 	await get_tree().process_frame
@@ -149,7 +152,7 @@ func _test_jump_with_no_pawn() -> void:
 	controller.take_pawn(pawn)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	_check(not pawn.wants_jump, "a jump pressed with no pawn isn't saved for the next one")
+	_check(not pawn.is_action_held(&"jump"), "a jump pressed with no pawn isn't saved for the next one") # Claude 2026-11-07: named actions
 	controller.take_pawn(null)
 	controller.free()
 	pawn.free()

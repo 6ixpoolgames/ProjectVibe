@@ -5,7 +5,7 @@
 # Pawn Architecture Spec (draft 1)
 
 <!-- Claude 2026-11-07: the owner's decision -->
-> **A guide, not canon (owner, 2026-11-07).** Borrow from this spec, but don't treat its plans as decided. A new pawn spec gets written as the rebuild is agreed. Decided since, and overriding what's below:
+> **A guide, not canon (owner, 2026-11-07).** Borrow from this spec, but don't treat its plans as decided. The new spec is `docs/pawn/PAWN_SPEC.md` <!-- Claude 2026-11-07: pointer to the new spec -->, which also drops intent entirely in favour of inputs. Decided since, and overriding what's below:
 > - **No nexus layer.** Working components attach directly to the pawn. One shared `PawnInitializer`, a `GameMode` module, adds what's missing when a pawn enters the tree. The starting list is the parts the old `PawnNexusComponent` lists.
 > - **One node per part.** Abilities, states and behaviours are each a node on the pawn, not shared code with per-pawn data. A part only talks to its manager or the pawn, outside code only calls managers, and only the initializer assembles parts.
 > - **The intent system below is scrapped as written.** Intent lives on the controller.

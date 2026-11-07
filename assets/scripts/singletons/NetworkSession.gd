@@ -118,6 +118,12 @@ const MARGIN_LONG_WINDOW := 300
 ## How many inputs each input packet carries, the newest and some past ones, in case some are lost. Each extra one adds about
 ## 1.7 KB/s of upload. At 3, three packets in a row must be lost for an input to go missing.
 @export var input_redundancy: int = 3
+## Claude 2026-11-07: on the server, when a client's input goes missing, the last one repeats in full for this many ticks. Most losses
+## are a tick or two. An entity can use its own number instead; Pawn has missing_input_hold_ticks for that.
+@export var missing_input_hold_ticks: int = 3
+## Claude 2026-11-07: then its direction fades to nothing over this many ticks, so a pawn whose player lost connection doesn't walk on
+## forever. Pawn can override it with missing_input_fade_ticks.
+@export var missing_input_fade_ticks: int = 6
 ## Claude 2026-11-05: snapshots go through NetCodec in C++ when that library is here. Off, or with no library for this platform, they
 ## go through NetPackets instead. The bytes are the same, so machines of either kind can play together. Takes effect at host or join.
 @export var use_native_encoding: bool = true

@@ -10,14 +10,14 @@
 ##
 ## To drive it from a script, as a test or a replay viewer would, extend it and override the _read functions.
 ##
+## Claude 2026-11-07: now extends ControllerBase, which holds pawn and pawn_changed. Each tick it builds an InputCommand, with named
+## actions (jump, sprint, ...) mapped from keys by action_keys. Pawn spec sections 5 and 6.2.
+##
 ## What happens in odd cases (all checked in pawn/tests/possession_selftest.gd):
 ##   - No pawn: it keeps reading look input, and nothing moves.
 ##   - An action missing from the project's input map: treated as not pressed.
 class_name PlayerController
-extends Node
-
-## Sent when this controller gets a pawn or loses it. The pawn is null if it has none now.
-signal pawn_changed(pawn: Pawn)
+extends ControllerBase
 
 enum LookMode {
 	## The mouse is captured and turns the view, as in most action games.
@@ -35,9 +35,12 @@ enum LookMode {
 @export var edge_turn_speed := 150.0
 ## On: clicking the ground walks there, along a nav path. A placeholder, until there's a navigation manager.
 @export var click_to_move := false
+## Which key in the project's input map presses which named action. The left side is an action from InputActions, and the right is an
+## action in Project Settings > Input Map. An action with no key here is never pressed by the player.
+# Claude 2026-11-07: new, replacing the fixed reads of move_jump and move_sprint.
+# GDScript note: Dictionary[StringName, StringName] is a typed dictionary, so the inspector only accepts names on both sides.
+@export var action_keys: Dictionary[StringName, StringName] = {&"jump": &"move_jump", &"sprint": &"move_sprint"}
 
-## The pawn this controller has, or null.
-var pawn: Pawn = null
 ## The real camera. It holds where it is while there's no view to follow.
 var camera: PlayerCamera = null
 ## What the mouse or crosshair points at. It's off until something asks it.
@@ -47,7 +50,8 @@ var look_yaw := 0.0
 var look_pitch := 0.0
 
 var _driver: Node = null
-var _jump_latched := false
+# Claude 2026-11-07: replaces _jump_latched. Actions pressed since the last tick, as bits, so a tap shorter than a tick still counts.
+var _latched_actions := 0
 var _zoom_steps := 0.0
 var _arm: CameraArm = null
 var _move_path := PackedVector3Array()
@@ -90,7 +94,7 @@ func take_pawn(new_pawn: Pawn) -> void:
 	if pawn == null:
 		camera.set_view(null)
 		_show_mouse()
-		_jump_latched = false # Claude 2026-11-07: a press before letting go doesn't belong to the next pawn
+		_latched_actions = 0 # Claude 2026-11-07: a press before letting go doesn't belong to the next pawn
 	else:
 		_arm = pawn.get_camera_arm()
 		if _arm == null and pawn.get_default_view() == null:
@@ -111,18 +115,32 @@ func take_pawn(new_pawn: Pawn) -> void:
 
 
 ## Gives the pawn its input for this tick. This runs on the machine that owns the pawn only, since only that machine has it here.
-func _tick_input(_dt: float, _tick: int) -> void:
+func _tick_input(_dt: float, tick: int) -> void:
 	if not is_instance_valid(pawn):
 		return
+	pawn.apply_input(take_input_command(tick)) # Claude 2026-11-07: was apply_player_input, with sprint and jump as bools
+
+
+## Claude 2026-11-07: this tick's input, from the devices. It uses up the presses saved since the last tick, so call it once per tick.
+func take_input_command(_tick: int) -> InputCommand:
+	var command := InputCommand.new()
 	var wanted := _read_move()
 	# Godot's forward is -Z, and move input's Y is backward, the way Input.get_vector gives it.
-	var direction := Basis(Vector3.UP, look_yaw) * Vector3(wanted.x, 0.0, wanted.y)
+	command.move = Basis(Vector3.UP, look_yaw) * Vector3(wanted.x, 0.0, wanted.y)
 	# Keys take over from a click. A path left unfinished is dropped.
 	if wanted.length_squared() > 0.01:
 		_move_path = PackedVector3Array()
-	elif not _move_path.is_empty():
-		direction = _next_path_direction()
-	pawn.apply_player_input(direction, look_yaw, look_pitch, _read_sprint(), _take_jump())
+	elif not _move_path.is_empty() and is_instance_valid(pawn):
+		command.move = _next_path_direction()
+	command.look_yaw = look_yaw
+	command.look_pitch = look_pitch
+	# Held now, or pressed and let go again since the last tick.
+	command.held_actions = _latched_actions
+	_latched_actions = 0
+	for action: StringName in action_keys:
+		if _read_action_held(action):
+			command.held_actions |= InputActions.mask_of(action)
+	return command
 
 
 ## Walks the pawn to this place along a nav path, if there is one, and in a straight line if there's no nav here. False if
@@ -161,8 +179,12 @@ func _next_path_direction() -> Vector3:
 
 func _process(delta: float) -> void:
 	# Claude 2026-11-07: only with a pawn. A press with nothing to jump used to wait here, and jump the next pawn it got.
-	if _read_jump_pressed() and is_instance_valid(pawn):
-		_jump_latched = true # kept until a tick takes it, since a frame can have no ticks or several
+	# Claude 2026-11-07: now for every action in action_keys, not only jump.
+	# Every key is read every frame, pawn or not, so a press with no pawn is used up rather than left waiting.
+	var has_pawn := is_instance_valid(pawn)
+	for action: StringName in action_keys:
+		if _read_action_pressed(action) and has_pawn:
+			_latched_actions |= InputActions.mask_of(action) # kept until a tick takes it, since a frame can have no ticks or several
 	if look_mode == LookMode.SCREEN_EDGE:
 		look_yaw += _edge_turn(delta)
 	var extra := _read_look_extra()
@@ -204,12 +226,17 @@ func _read_move() -> Vector2:
 	return Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_backward")
 
 
-func _read_sprint() -> bool:
-	return InputMap.has_action(&"move_sprint") and Input.is_action_pressed(&"move_sprint")
+# Claude 2026-11-07: these two replace _read_sprint and _read_jump_pressed, and work for any named action.
+## True while the key for this named action is down.
+func _read_action_held(action: StringName) -> bool:
+	var key: StringName = action_keys.get(action, &"")
+	return key != &"" and InputMap.has_action(key) and Input.is_action_pressed(key)
 
 
-func _read_jump_pressed() -> bool:
-	return InputMap.has_action(&"move_jump") and Input.is_action_just_pressed(&"move_jump")
+## True on the rendered frame the key for this named action went down.
+func _read_action_pressed(action: StringName) -> bool:
+	var key: StringName = action_keys.get(action, &"")
+	return key != &"" and InputMap.has_action(key) and Input.is_action_just_pressed(key)
 
 
 ## Any turning this frame beyond the mouse, as yaw and pitch in radians. For scripts, and later for gamepads.
@@ -221,12 +248,6 @@ func _read_look_extra() -> Vector2:
 
 
 var _had_pawn := false
-
-
-func _take_jump() -> bool:
-	var jump := _jump_latched
-	_jump_latched = false
-	return jump
 
 
 func _has_actions(actions: Array[StringName]) -> bool:

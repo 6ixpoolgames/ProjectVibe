@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="InputActionsRes" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/resources/InputActions_resource.gd" id="1_actions"]
+
+[resource]
+script = ExtResource("1_actions")
+actions = Array[StringName]([&"jump", &"sprint", &"primary", &"secondary", &"ability_1", &"ability_2", &"ability_3", &"ability_4", &"interact"])

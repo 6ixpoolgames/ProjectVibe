@@ -28,6 +28,9 @@ enum Tag : uint8_t {
 	TAG_INT32,
 	TAG_INT64,
 	TAG_OTHER,
+	// Claude 2026-11-07: small ints in 1 or 2 bytes instead of 4. Added at the end so the numbers above don't move.
+	TAG_INT8,
+	TAG_INT16,
 };
 
 enum Encoding : uint8_t {
@@ -41,7 +44,7 @@ enum Encoding : uint8_t {
 	ENC_RAW,
 };
 
-const int64_t PROTOCOL_VERSION = 4; // the same as NetPackets.PROTOCOL_VERSION: bump both when the format changes
+const int64_t PROTOCOL_VERSION = 5; // the same as NetPackets.PROTOCOL_VERSION: bump both when the format changes. Claude 2026-11-07: 5 adds small ints
 const int64_t WORLD_ENTRY_SIZE = 8; // the same as NetPackets.WORLD_ENTRY_SIZE
 const int64_t MAX_LIST_SIZE = 255;
 const int64_t INT24_LIMIT = 8388607;
@@ -174,7 +177,14 @@ void NetCodec::put_angle_u16(double value) {
 }
 
 void NetCodec::put_int(int64_t value) {
-	if (value >= -2147483648LL && value <= 2147483647LL) {
+	// Claude 2026-11-07: the smallest size that holds it. Most networked ints (held actions, counters, small ids) fit in one byte.
+	if (value >= -128 && value <= 127) {
+		put_u8(TAG_INT8);
+		put_u8((uint8_t)(int8_t)value);
+	} else if (value >= -32768 && value <= 32767) {
+		put_u8(TAG_INT16);
+		put_u16((uint16_t)(int16_t)value);
+	} else if (value >= -2147483648LL && value <= 2147483647LL) {
 		put_u8(TAG_INT32);
 		put_u32((uint32_t)(int32_t)value);
 	} else {
@@ -407,6 +417,24 @@ bool NetCodec::read_value(Variant &out) {
 		case TAG_BOOL_TRUE:
 			out = true;
 			return true;
+		case TAG_INT8: { // Claude 2026-11-07
+			if (get_available_bytes() < 1) {
+				return false;
+			}
+			out = (int64_t)(int8_t)m_read[m_read_at];
+			m_read_at += 1;
+			return true;
+		}
+		case TAG_INT16: { // Claude 2026-11-07
+			if (get_available_bytes() < 2) {
+				return false;
+			}
+			int16_t value;
+			std::memcpy(&value, m_read + m_read_at, 2);
+			m_read_at += 2;
+			out = (int64_t)value;
+			return true;
+		}
 		case TAG_INT32: {
 			if (get_available_bytes() < 4) {
 				return false;

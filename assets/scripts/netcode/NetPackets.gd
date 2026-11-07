@@ -13,7 +13,7 @@ extends RefCounted
 
 ## Bump this when the wire format changes. It's part of the handshake's content hash.
 ## Claude 2026-11-05: native/src/net_codec.cpp holds its own copy of this format and this number, so bump and change both.
-const PROTOCOL_VERSION := 4 # Claude 2026-11-05: 4 adds custom state to snapshots
+const PROTOCOL_VERSION := 5 # Claude 2026-11-05: 4 adds custom state to snapshots. Claude 2026-11-07: 5 adds small ints (INT8, INT16)
 
 # Claude 2026-11-07: WORLD_MESSAGE, OWNER_CHANGED and CLIENT_MESSAGE added. NetCodec only handles inputs and snapshots, so it doesn't need to know.
 enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, WORLD_MESSAGE, OWNER_CHANGED, CLIENT_MESSAGE }
@@ -26,7 +26,8 @@ const INT24_LIMIT := 8388607
 ## input values, input encodings, custom values.
 const WORLD_ENTRY_SIZE := 8
 
-enum Tag { MISSING = 0, VECTOR3_MM, VECTOR3_CM, VECTOR2_MM, ANGLE_U16, ANGLE_BYTE, FLOAT32, BOOL_FALSE, BOOL_TRUE, INT32, INT64, OTHER }
+# Claude 2026-11-07: INT8 and INT16 added at the end, so the numbers before them don't move. An int takes the smallest that holds it.
+enum Tag { MISSING = 0, VECTOR3_MM, VECTOR3_CM, VECTOR2_MM, ANGLE_U16, ANGLE_BYTE, FLOAT32, BOOL_FALSE, BOOL_TRUE, INT32, INT64, OTHER, INT8, INT16 }
 
 
 static func new_buffer() -> StreamPeerBuffer:
@@ -119,6 +120,14 @@ static func read_value(buffer: StreamPeerBuffer) -> Variant:
 			return false
 		Tag.BOOL_TRUE:
 			return true
+		Tag.INT8: # Claude 2026-11-07
+			if not has_bytes(buffer, 1):
+				return BAD
+			return buffer.get_8()
+		Tag.INT16: # Claude 2026-11-07
+			if not has_bytes(buffer, 2):
+				return BAD
+			return buffer.get_16()
 		Tag.INT32:
 			if not has_bytes(buffer, 4):
 				return BAD
@@ -206,7 +215,14 @@ static func _write_plain(buffer: StreamPeerBuffer, value: Variant) -> void:
 		TYPE_BOOL:
 			buffer.put_u8(Tag.BOOL_TRUE if value else Tag.BOOL_FALSE)
 		TYPE_INT:
-			if value >= -2147483648 and value <= 2147483647:
+			# Claude 2026-11-07: 1 or 2 bytes for small ints. Most networked ints (held actions, counters, small ids) fit in one.
+			if value >= -128 and value <= 127:
+				buffer.put_u8(Tag.INT8)
+				buffer.put_8(value)
+			elif value >= -32768 and value <= 32767:
+				buffer.put_u8(Tag.INT16)
+				buffer.put_16(value)
+			elif value >= -2147483648 and value <= 2147483647:
 				buffer.put_u8(Tag.INT32)
 				buffer.put_32(value)
 			else:

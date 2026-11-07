@@ -25,7 +25,7 @@ var _project_gravity: float = ProjectSettings.get_setting("physics/3d/default_gr
 
 func simulate(pawn: Pawn, dt: float) -> void:
 	# Accelerate the horizontal velocity toward what's wanted.
-	var speed := max_speed * (sprint_multiplier if pawn.wants_sprint else 1.0)
+	var speed := max_speed * (sprint_multiplier if pawn.is_action_held(&"sprint") else 1.0) # Claude 2026-11-07: named actions
 	var target := pawn.move_input.limit_length(1.0) * speed
 	var horizontal := Vector3(pawn.velocity.x, 0.0, pawn.velocity.z)
 	var rate := acceleration if target.length_squared() > 0.0001 else deceleration
@@ -38,7 +38,7 @@ func simulate(pawn: Pawn, dt: float) -> void:
 	# Reads the pawn's own grounded, not is_on_floor(), so a replay starts from the restored value.
 	if not pawn.grounded:
 		pawn.velocity.y -= (gravity if gravity >= 0.0 else _project_gravity) * dt
-	elif pawn.wants_jump:
+	elif pawn.was_action_pressed(&"jump"): # Claude 2026-11-07: a press, so holding the key doesn't bounce
 		pawn.velocity.y = jump_velocity
 		pawn.grounded = false
 

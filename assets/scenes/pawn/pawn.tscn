@@ -30,7 +30,7 @@ script = ExtResource("2_movement")
 
 [node name="TickState" type="Node" parent="."]
 script = ExtResource("3_state")
-input_properties = Array[String](["move_input", "wants_sprint", "wants_jump", "look_yaw @angle_u16", "look_pitch @angle_u16"])
+input_properties = Array[String](["move_input", "held_actions", "look_yaw @angle_u16", "look_pitch @angle_u16"])
 state_properties = Array[String](["position", "velocity", "yaw @angle_u16", "grounded"])
 
 [node name="NetworkEntity" type="Node" parent="."]

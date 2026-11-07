@@ -29,6 +29,7 @@ var _progress_check_tick := 0
 var _progress_from := Vector3.ZERO
 var _last_position := Vector3.ZERO
 var _has_last_position := false
+var _command := InputCommand.new() # Claude 2026-11-07: reused every tick, so a big swarm doesn't make one per pawn per tick
 
 
 func _ready() -> void:
@@ -53,7 +54,7 @@ func _tick_input(_dt: float, tick: int) -> void:
 	if terrain != null and not terrain.has_chunk(terrain.chunk_of(_pawn.position)):
 		ticks_without_ground += 1
 	if mode != "walk":
-		_pawn.apply_player_input(Vector3.ZERO, _pawn.look_yaw, _pawn.look_pitch, false, false)
+		_drive(Vector3.ZERO, false)
 		return
 	_walk(tick)
 
@@ -96,7 +97,12 @@ func _walk(tick: int) -> void:
 
 func _drive(direction: Vector3, sprint: bool) -> void:
 	# The look direction stays whatever it is, so a PlayerController's reaches the server.
-	_pawn.apply_player_input(direction, _pawn.look_yaw, _pawn.look_pitch, sprint, false)
+	# Claude 2026-11-07: an InputCommand now, with sprint as a named action.
+	_command.move = direction
+	_command.look_yaw = _pawn.look_yaw
+	_command.look_pitch = _pawn.look_pitch
+	_command.held_actions = InputActions.mask_of(&"sprint") if sprint else 0
+	_pawn.apply_input(_command)
 
 
 func _find_new_path(tick: int) -> void:

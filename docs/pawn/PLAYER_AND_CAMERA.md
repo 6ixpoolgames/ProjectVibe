@@ -65,7 +65,7 @@ LEVEL
 
 ## 4. Movement
 
-- **`Pawn` holds input as plain data:** `move_input`, `wants_jump`, `wants_sprint`, `look_yaw`, `look_pitch`. All of it goes in the input command, which keeps replays possible later.
+- **`Pawn` holds input as plain data:** `move_input`, `held_actions`, `look_yaw`, `look_pitch`. All of it goes in the input command, which keeps replays possible later. *(Claude 2026-11-07: `held_actions` replaced `wants_jump` and `wants_sprint`. Controllers give an `InputCommand` to `apply_input()`; see `PAWN_SPEC.md` section 5.)*
 - **For now, a placeholder module does the moving.** A pawn with no module stands still. The current direction, which is work in progress and open to better ideas, has no motor layer and no movement modules: locomotion abilities such as Walk and Fly write velocity, and the pawn makes the one `move_and_slide` call. See `PAWN_ARCHITECTURE.md` section 9.
 - **Speeds are plain settings for now,** because there's no stat manager.
 - **The controller is a placeholder.** The steering decision moves to a `Walk` ability when abilities exist.

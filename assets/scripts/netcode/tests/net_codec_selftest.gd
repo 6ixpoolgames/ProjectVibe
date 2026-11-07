@@ -108,7 +108,9 @@ func _random_value() -> Variant:
 		11:
 			return _rng.randi_range(0, 1) == 0
 		12:
-			var ints: Array[int] = [0, 1, -1, 2147483647, -2147483648, 2147483648, -2147483649, 9223372036854775807, -9223372036854775807 - 1, _rng.randi()]
+			# Claude 2026-11-07: the edges of the new 1- and 2-byte sizes added (127/128, -128/-129, 32767/32768, -32768/-32769).
+			var ints: Array[int] = [0, 1, -1, 127, 128, -128, -129, 32767, 32768, -32768, -32769, 2147483647, -2147483648, 2147483648,
+					-2147483649, 9223372036854775807, -9223372036854775807 - 1, _rng.randi()]
 			return ints[_rng.randi_range(0, ints.size() - 1)]
 		13:
 			return null
@@ -257,7 +259,8 @@ func _check_oversized_list() -> void:
 
 
 func _check_world() -> void:
-	_check(_world_bytes.size() == PAWNS * 37, "the test world is 37 bytes a pawn")
+	# Claude 2026-11-07: was 37. Health (1 to 100) now takes 2 bytes instead of 5, as an INT8.
+	_check(_world_bytes.size() == PAWNS * 34, "the test world is 34 bytes a pawn")
 	_check(_write_per_list() == _world_bytes, "whole world, one call per list: same bytes")
 	_check(_write_native() == _world_bytes, "whole world, one call: same bytes")
 	_check(_tuned_write() == _world_bytes, "whole world, tuned GDScript: same bytes")
@@ -400,6 +403,14 @@ func _tuned_write_list(out: PackedByteArray, start: int, values: Array, kinds: P
 		elif kind == KIND_BOOL:
 			out.encode_u8(at, NetPackets.Tag.BOOL_TRUE if values[i] else NetPackets.Tag.BOOL_FALSE)
 			at += 1
+		elif values[i] >= -128 and values[i] <= 127: # Claude 2026-11-07: small ints, the same sizes NetPackets picks
+			out.encode_u8(at, NetPackets.Tag.INT8)
+			out.encode_s8(at + 1, values[i])
+			at += 2
+		elif values[i] >= -32768 and values[i] <= 32767:
+			out.encode_u8(at, NetPackets.Tag.INT16)
+			out.encode_s16(at + 1, values[i])
+			at += 3
 		else:
 			out.encode_u8(at, NetPackets.Tag.INT32)
 			out.encode_s32(at + 1, values[i])
@@ -469,6 +480,16 @@ func _tuned_read(data: PackedByteArray, count: int) -> Variant:
 					values[i] = true
 				elif tag == NetPackets.Tag.BOOL_FALSE:
 					values[i] = false
+				elif tag == NetPackets.Tag.INT8: # Claude 2026-11-07
+					if at + 1 > size:
+						return null
+					values[i] = data.decode_s8(at)
+					at += 1
+				elif tag == NetPackets.Tag.INT16: # Claude 2026-11-07
+					if at + 2 > size:
+						return null
+					values[i] = data.decode_s16(at)
+					at += 2
 				elif tag == NetPackets.Tag.INT32:
 					if at + 4 > size:
 						return null

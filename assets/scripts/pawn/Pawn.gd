@@ -18,9 +18,15 @@
 ## Why Visual exists: the body moves in ticks and gets corrected, and looks jerky if you watch it directly. Visual follows it
 ## smoothly per rendered frame, and hides corrections by fading them out. Anything on screen hangs from it.
 ##
+## Claude 2026-11-07: input is now an InputCommand, given with apply_input(). Actions such as jump and sprint are named, held as bits,
+## and a press is "held this tick, not last tick" (was_action_pressed). Pawn spec section 5.
+##
 ## What happens in odd cases (all checked in tests/pawn_selftest.gd):
 ##   - No TickDriver: it ticks itself from _physics_process.
 ##   - AI pawn in unloaded ground: AIActivationManager stops its ticks, and it keeps all its state.
+##   - On the server, a client's input goes missing: the last one repeats for missing_input_hold_ticks, then its direction fades out
+##     over missing_input_fade_ticks. Held actions keep repeating, so a key still held when input comes back isn't a new press. Both
+##     settings default to -1, which uses NetworkSession's settings of the same names.
 class_name Pawn
 extends CharacterBody3D
 
@@ -46,15 +52,25 @@ signal possession_changed(pawn: Pawn, has_player: bool)
 @export var streaming_nav_distance := 128.0
 ## The arm's settings, for a pawn that wants its own. Empty means the defaults.
 @export var camera_preset: CameraPreset
+## On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's
+## setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own.
+# Claude 2026-11-07: -1 by default, so the rule is set once per game on NetworkSession rather than on every pawn.
+@export_range(-1, 60, 1, "or_greater") var missing_input_hold_ticks := -1
+## Then its direction fades to nothing over this many ticks. -1 uses NetworkSession's setting.
+@export_range(-1, 60, 1, "or_greater") var missing_input_fade_ticks := -1
 
-# This tick's input: what the pawn wants, as plain data. Listed in the TickState, so it goes over the network and rolls back.
+# This tick's input, as plain data. Listed in the TickState, so it goes over the network and rolls back.
 var move_input := Vector3.ZERO ## the direction to go, in world space, up to length 1
-var wants_sprint := false
-var wants_jump := false
+# Claude 2026-11-07: replaces wants_sprint and wants_jump. Bits from InputActions.
+var held_actions := 0 ## which named actions are held this tick
 var look_yaw := 0.0 ## where the player is looking, which is often not where the pawn is facing
 var look_pitch := 0.0
 
 # State that affects the next tick. Listed in the TickState too.
+## Claude 2026-11-07: last tick's held_actions, so a press can be told from a hold. It isn't in the TickState's state list, because
+## every int costs 5 bytes per pawn in every snapshot (about 15% more traffic in the stress test). After a rollback, it's read back
+## from the input the TickState saved for that tick instead (_on_state_loaded).
+var previous_held_actions := 0
 var yaw := 0.0
 ## Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
 var grounded := false
@@ -64,6 +80,7 @@ var movement: MovementModule = null
 
 var _driver: Node = null
 var _entity: NetworkEntity = null
+var _tick_state: TickStateComponent = null # Claude 2026-11-07: for reading back last tick's held actions after a rollback
 var _has_player := false
 var _source: StreamingSource = null
 var _visual: Node3D = null
@@ -75,6 +92,8 @@ var _current_yaw := 0.0
 var _correction_offset := Vector3.ZERO # what's left of a correction, fading to nothing
 var _fallback_tick := 0
 var _simulating := true
+var _missing_input_ticks := 0 # on the server: how many ticks in a row a client's input has been missing
+var _input_missing_this_tick := false
 
 
 func _init() -> void:
@@ -110,6 +129,8 @@ func _ready() -> void:
 			movement = child
 		elif child is NetworkEntity:
 			_entity = child
+		elif child is TickStateComponent:
+			_tick_state = child
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
 		_visual.top_level = true # it's placed by _process, between ticks, not by the body
@@ -146,13 +167,24 @@ func set_has_player(value: bool) -> void:
 	possession_changed.emit(self, value)
 
 
-## What a PlayerController gives the pawn each tick. Direction is in world space.
-func apply_player_input(new_move: Vector3, new_look_yaw: float, new_look_pitch: float, new_sprint: bool, new_jump: bool) -> void:
-	move_input = new_move
-	look_yaw = new_look_yaw
-	look_pitch = new_look_pitch
-	wants_sprint = new_sprint
-	wants_jump = new_jump
+## What a controller gives the pawn each tick.
+# Claude 2026-11-07: replaces apply_player_input(move, yaw, pitch, sprint, jump).
+func apply_input(command: InputCommand) -> void:
+	move_input = command.move
+	look_yaw = command.look_yaw
+	look_pitch = command.look_pitch
+	held_actions = command.held_actions
+
+
+## True while this named action is held, such as &"sprint".
+func is_action_held(action: StringName) -> bool:
+	return held_actions & InputActions.mask_of(action) != 0
+
+
+## True on the one tick this named action became held, such as &"jump". Holding it down doesn't repeat it.
+func was_action_pressed(action: StringName) -> bool:
+	var bit := InputActions.mask_of(action)
+	return held_actions & bit != 0 and previous_held_actions & bit == 0
 
 
 ## The node that follows the body smoothly, for hanging things from. With no Visual, it's the body.
@@ -228,11 +260,24 @@ func _tick_simulate(dt: float, _tick: int) -> void:
 	grounded = is_on_floor()
 	_current_position = global_position
 	_current_yaw = yaw
+	# Claude 2026-11-07: what was held this tick, so the next tick can tell a press from a hold.
+	previous_held_actions = held_actions
+	# Claude 2026-11-07: a tick with real input ends a run of missing ones.
+	if not _input_missing_this_tick:
+		_missing_input_ticks = 0
+	_input_missing_this_tick = false
 
 
 ## TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is
 ## doing now. Nothing can set it directly, so this makes the engine work it out again, then puts things back.
-func _on_state_loaded(_tick: int) -> void:
+func _on_state_loaded(tick: int) -> void:
+	# Claude 2026-11-07: the next tick replayed needs to know what was held on this one, to tell a press from a hold. That's this
+	# tick's saved input. If it's gone from the history, the value stays as it is.
+	if _tick_state:
+		var saved_input := _tick_state.get_input(tick)
+		var held: Variant = saved_input.get("held_actions")
+		if held is int:
+			previous_held_actions = held
 	var saved_position := position
 	var saved_velocity := velocity
 	var saved_snap := floor_snap_length
@@ -288,8 +333,9 @@ func sanitize_network_input(values: Dictionary) -> Dictionary:
 	var clean := values.duplicate()
 	var wanted: Variant = values.get("move_input", Vector3.ZERO)
 	clean["move_input"] = wanted.limit_length(1.0) if wanted is Vector3 and wanted.is_finite() else Vector3.ZERO
-	clean["wants_sprint"] = values.get("wants_sprint", false) is bool and values.get("wants_sprint", false)
-	clean["wants_jump"] = values.get("wants_jump", false) is bool and values.get("wants_jump", false)
+	# Claude 2026-11-07: replaces the two bools. Bits for actions that aren't listed are thrown away.
+	var held: Variant = values.get("held_actions", 0)
+	clean["held_actions"] = held & InputActions.all_listed_mask() if held is int else 0
 	for angle: String in ["look_yaw", "look_pitch"]:
 		var value: Variant = values.get(angle, 0.0)
 		clean[angle] = value if value is float and is_finite(value) else 0.0
@@ -297,8 +343,22 @@ func sanitize_network_input(values: Dictionary) -> Dictionary:
 
 
 ## On the server: this tick's input never arrived, so the last one repeats. A held direction repeats fine, and a press doesn't.
+# Claude 2026-11-07: a press can't repeat any more, because a repeated hold isn't "newly held". New: after missing_input_hold_ticks,
+# the direction fades out. Held actions are left alone, so a key still held when input comes back doesn't count as a new press.
 func _network_input_missing() -> void:
-	wants_jump = false
+	_input_missing_this_tick = true
+	_missing_input_ticks += 1
+	# Claude 2026-11-07: -1 means NetworkSession's rule. With no session at all, 3 and 6, the same as its defaults.
+	var session: Node = get_node_or_null("/root/NetworkSession")
+	var hold: int = missing_input_hold_ticks if missing_input_hold_ticks >= 0 else (session.missing_input_hold_ticks if session else 3)
+	var fade: int = missing_input_fade_ticks if missing_input_fade_ticks >= 0 else (session.missing_input_fade_ticks if session else 6)
+	if _missing_input_ticks <= hold:
+		return
+	if fade <= 0:
+		move_input = Vector3.ZERO
+	else:
+		# A full-length direction reaches zero in "fade" ticks. A shorter one gets there sooner.
+		move_input = move_input.move_toward(Vector3.ZERO, 1.0 / fade)
 
 
 ## On a client, for a pawn someone else controls: it was just moved between snapshots, so Visual follows.
@@ -329,7 +389,9 @@ func _find_view(node: Node) -> VirtualCamera:
 
 
 func _clear_input() -> void:
-	apply_player_input(Vector3.ZERO, look_yaw, look_pitch, false, false)
+	# Claude 2026-11-07: keeps the look direction, as before.
+	move_input = Vector3.ZERO
+	held_actions = 0
 
 
 ## A pawn only has a source if something wants the world kept loaded around it, so a horde doesn't carry thousands of them.

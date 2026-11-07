@@ -13,8 +13,11 @@ func _ready() -> void:
 	await _test_on_flat_ground()
 	await _test_running_and_stopping()
 	await _test_jumping()
+	await _test_holding_jump() # Claude 2026-11-07: named actions
+	await _test_missing_input_fades() # Claude 2026-11-07
 	await _test_on_slopes()
 	await _test_rollback_is_exact()
+	await _test_rollback_keeps_presses() # Claude 2026-11-07
 	await _test_no_movement_module()
 	_test_bad_input()
 	await _test_swapping_movement()
@@ -44,7 +47,7 @@ func _test_running_and_stopping() -> void:
 	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
 	var movement: GroundMovement = pawn.movement
 	await _ticks(20)
-	pawn.apply_player_input(Vector3(1.0, 0.0, 0.0), 0.0, 0.0, false, false)
+	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(1)
 	_check(pawn.velocity.x > 0.0 and pawn.velocity.x < movement.max_speed, "it accelerates, not instantly (%.2f m/s after a tick)" % pawn.velocity.x)
 	await _ticks(30)
@@ -53,13 +56,13 @@ func _test_running_and_stopping() -> void:
 	var before := pawn.position.x
 	await _ticks(60)
 	_check(absf(pawn.position.x - before - movement.max_speed) < 0.05, "one second moves it its speed in metres (%.2f m)" % (pawn.position.x - before))
-	pawn.apply_player_input(Vector3(1.0, 0.0, 0.0), 0.0, 0.0, true, false)
+	_drive(pawn, Vector3(1.0, 0.0, 0.0), true)
 	await _ticks(60)
 	_check(is_equal_approx(pawn.velocity.x, movement.max_speed * movement.sprint_multiplier), "sprinting is faster (%.2f m/s)" % pawn.velocity.x)
-	pawn.apply_player_input(Vector3.ZERO, 0.0, 0.0, false, false)
+	_drive(pawn, Vector3.ZERO)
 	await _ticks(60)
 	_check(is_zero_approx(pawn.velocity.x), "and with no input, it stops")
-	pawn.apply_player_input(Vector3(100.0, 0.0, 0.0), 0.0, 0.0, false, false)
+	_drive(pawn, Vector3(100.0, 0.0, 0.0))
 	await _ticks(60)
 	_check(is_equal_approx(pawn.velocity.x, movement.max_speed), "input longer than 1 doesn't go faster")
 	pawn.free()
@@ -70,9 +73,9 @@ func _test_jumping() -> void:
 	var floor_body := _make_floor()
 	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
 	await _ticks(20)
-	pawn.apply_player_input(Vector3.ZERO, 0.0, 0.0, false, true)
+	_drive(pawn, Vector3.ZERO, false, true)
 	await _ticks(1)
-	pawn.apply_player_input(Vector3.ZERO, 0.0, 0.0, false, false)
+	_drive(pawn, Vector3.ZERO)
 	_check(not pawn.grounded and pawn.velocity.y > 0.0, "a jump leaves the ground")
 	var highest := 0.0
 	for i in 120:
@@ -81,12 +84,94 @@ func _test_jumping() -> void:
 	_check(highest > 0.5, "and rises (%.2f m)" % highest)
 	_check(pawn.grounded and absf(pawn.position.y) < 0.02, "and lands again")
 	# Held in the air: nothing happens until it's on the ground.
-	pawn.apply_player_input(Vector3.ZERO, 0.0, 0.0, false, true)
+	_drive(pawn, Vector3.ZERO, false, true)
 	await _ticks(1)
-	pawn.apply_player_input(Vector3(1.0, 0.0, 0.0), 0.0, 0.0, false, false)
+	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(5)
 	var air_speed := pawn.velocity.x
 	_check(air_speed < 30.0 * 0.3 * 6.0 / 60.0 + 0.01, "steering in the air is weaker (%.2f m/s)" % air_speed)
+	pawn.free()
+	floor_body.free()
+
+
+## Claude 2026-11-07: a press is "held this tick, not last tick", so holding the key down jumps once, not every time it lands.
+func _test_holding_jump() -> void:
+	var floor_body := _make_floor()
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	await _ticks(20)
+	_drive(pawn, Vector3.ZERO, false, true)
+	await _ticks(1)
+	_check(pawn.velocity.y > 0.0, "holding jump: the first tick jumps")
+	_check(pawn.is_action_held(&"jump") and pawn.previous_held_actions == pawn.held_actions, "and the pawn remembers it was held")
+	var jumps := 1
+	var was_grounded := false
+	for i in 150: # still held the whole time
+		await _ticks(1)
+		if was_grounded and pawn.velocity.y > 0.0:
+			jumps += 1
+		was_grounded = pawn.grounded
+	_check(jumps == 1 and pawn.grounded, "and landing with it still held doesn't jump again (%d jumps)" % jumps)
+	_drive(pawn, Vector3.ZERO)
+	await _ticks(1)
+	_drive(pawn, Vector3.ZERO, false, true)
+	await _ticks(1)
+	_check(pawn.velocity.y > 0.0, "letting go and pressing again jumps")
+	_check(not pawn.was_action_pressed(&"sprint") and not pawn.is_action_held(&"sprint"), "an action that isn't held reads as not held")
+	pawn.free()
+	floor_body.free()
+
+
+## Claude 2026-11-07: on the server, when a client's input goes missing, the last one repeats, then its direction fades out.
+func _test_missing_input_fades() -> void:
+	var floor_body := _make_floor()
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	pawn.missing_input_hold_ticks = 3
+	pawn.missing_input_fade_ticks = 6
+	await _ticks(10)
+	_drive(pawn, Vector3(1.0, 0.0, 0.0), true)
+	await _ticks(1)
+	# What NetworkEntity does each tick no input arrives. Calling it straight before a tick is the same.
+	var lengths: Array[float] = []
+	for i in 9:
+		pawn._network_input_missing()
+		await _ticks(1)
+		lengths.append(pawn.move_input.length())
+	_check(is_equal_approx(lengths[2], 1.0), "missing input: the last direction repeats in full for 3 ticks")
+	_check(lengths[3] < 1.0 and lengths[3] > lengths[4], "then fades")
+	_check(lengths[8] == 0.0, "and is gone after 6 more (%s)" % str(lengths))
+	_check(pawn.is_action_held(&"sprint"), "held actions keep repeating, so a key still held isn't a new press later")
+	_drive(pawn, Vector3(1.0, 0.0, 0.0), true)
+	await _ticks(1)
+	_check(pawn._missing_input_ticks == 0, "real input starts the count again")
+	pawn._network_input_missing()
+	await _ticks(1)
+	_check(is_equal_approx(pawn.move_input.length(), 1.0), "so the next missing tick repeats in full")
+	pawn.missing_input_hold_ticks = 0
+	pawn.missing_input_fade_ticks = 0
+	pawn._network_input_missing()
+	await _ticks(1)
+	_check(pawn.move_input == Vector3.ZERO, "with both set to 0, a missing input stops it at once")
+	# Claude 2026-11-07: -1, the default, uses NetworkSession's settings.
+	var session: Node = get_node("/root/NetworkSession")
+	var saved_hold: int = session.missing_input_hold_ticks
+	var saved_fade: int = session.missing_input_fade_ticks
+	session.missing_input_hold_ticks = 1
+	session.missing_input_fade_ticks = 0
+	pawn.missing_input_hold_ticks = -1
+	pawn.missing_input_fade_ticks = -1
+	_drive(pawn, Vector3(1.0, 0.0, 0.0))
+	await _ticks(1)
+	pawn._network_input_missing()
+	await _ticks(1)
+	var after_one := pawn.move_input.length()
+	pawn._network_input_missing()
+	await _ticks(1)
+	_check(is_equal_approx(after_one, 1.0) and pawn.move_input == Vector3.ZERO, "with -1, the pawn follows NetworkSession's settings")
+	session.missing_input_hold_ticks = saved_hold
+	session.missing_input_fade_ticks = saved_fade
+	var plain := Pawn.new()
+	_check(plain.missing_input_hold_ticks == -1 and plain.missing_input_fade_ticks == -1, "and -1 is the default, so the rule is set once per game")
+	plain.free()
 	pawn.free()
 	floor_body.free()
 
@@ -100,7 +185,7 @@ func _test_on_slopes() -> void:
 	var start := Vector3(5.0, terrain.height_at(5.0, 5.0) + 0.1, 5.0)
 	var pawn := _make_pawn(start)
 	await _ticks(20)
-	pawn.apply_player_input(Vector3(1.0, 0.0, 0.3).normalized(), 0.0, 0.0, false, false)
+	_drive(pawn, Vector3(1.0, 0.0, 0.3).normalized())
 	var worst := 0.0
 	var climbed := 0.0
 	var last_y := pawn.position.y
@@ -133,7 +218,7 @@ func _test_rollback_is_exact() -> void:
 	for round_number in 6:
 		for i in 25:
 			var angle := pick.randf() * TAU
-			pawn.apply_player_input(Vector3(cos(angle), 0.0, sin(angle)), 0.0, 0.0, pick.randf() < 0.3, pick.randf() < 0.06)
+			_drive(pawn, Vector3(cos(angle), 0.0, sin(angle)), pick.randf() < 0.3, pick.randf() < 0.06)
 			await _ticks(1)
 		await get_tree().physics_frame # the signal comes before this frame's tick, so this lets the last tick finish
 		var real_position := pawn.position
@@ -153,13 +238,38 @@ func _test_rollback_is_exact() -> void:
 	terrain.free()
 
 
+## Claude 2026-11-07: going back to a tick where jump wasn't held, with the press on the very next tick. The replay has to see that
+## press again. previous_held_actions isn't rollback state, so this checks it's read back from the saved input.
+func _test_rollback_keeps_presses() -> void:
+	var floor_body := _make_floor()
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	await _ticks(20)
+	_drive(pawn, Vector3.ZERO)
+	await _ticks(1)
+	await get_tree().physics_frame # so the tick above has surely finished
+	var released_tick: int = TickDriver.tick
+	_drive(pawn, Vector3.ZERO, false, true)
+	for i in 8: # held from here on
+		await _ticks(1)
+	await get_tree().physics_frame
+	var real_position := pawn.position
+	var real_velocity := pawn.velocity
+	_check(real_position.y > 0.05, "pressed after a release: it jumped (%.2f m up)" % real_position.y)
+	var went_back: bool = TickDriver.rollback(released_tick)
+	_check(went_back, "rolled back to the tick it was released")
+	_check(pawn.position.distance_to(real_position) < 0.0011 and pawn.velocity.distance_to(real_velocity) < 0.011,
+			"and the replay jumped again, the same way (%.4f m apart)" % pawn.position.distance_to(real_position))
+	pawn.free()
+	floor_body.free()
+
+
 func _test_no_movement_module() -> void:
 	var floor_body := _make_floor()
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
 	pawn.get_node("GroundMovement").free()
 	pawn.position = Vector3(0.0, 0.01, 0.0)
 	add_child(pawn)
-	pawn.apply_player_input(Vector3(1.0, 0.0, 0.0), 0.0, 0.0, false, false)
+	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(30)
 	_check(absf(pawn.position.x) < 0.001, "with no movement module, a pawn stands still")
 	pawn.free()
@@ -169,9 +279,12 @@ func _test_no_movement_module() -> void:
 func _test_bad_input() -> void:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
 	add_child(pawn)
-	var clean := pawn.sanitize_network_input({"move_input": Vector3(1000.0, 0.0, 0.0), "wants_jump": "yes", "look_yaw": INF, "look_pitch": "up"})
+	# Claude 2026-11-07: held_actions replaces the two bools.
+	var clean := pawn.sanitize_network_input({"move_input": Vector3(1000.0, 0.0, 0.0), "held_actions": "yes", "look_yaw": INF, "look_pitch": "up"})
 	_check(is_equal_approx(clean["move_input"].length(), 1.0), "the server limits a client's direction")
-	_check(clean["wants_jump"] == false and clean["wants_sprint"] == false, "and throws out wrong types")
+	_check(clean["held_actions"] == 0, "and throws out wrong types")
+	var made_up := pawn.sanitize_network_input({"held_actions": InputActions.mask_of(&"jump") | (1 << 62)})
+	_check(made_up["held_actions"] == InputActions.mask_of(&"jump"), "and bits for actions that aren't listed")
 	_check(clean["look_yaw"] == 0.0 and clean["look_pitch"] == 0.0, "and broken angles")
 	var nan_move := pawn.sanitize_network_input({"move_input": Vector3(NAN, 0.0, 0.0)})
 	_check(nan_move["move_input"] == Vector3.ZERO, "and broken directions")
@@ -222,7 +335,7 @@ func _test_ai_with_no_ground() -> void:
 	var driver: Node = get_node("/root/TickDriver")
 	var participants_before: int = driver.get_participant_count()
 	var pawn := _make_pawn(Vector3(5.0, 40.0, 5.0))
-	pawn.apply_player_input(Vector3(1.0, 0.0, 0.0), 0.0, 0.0, false, false)
+	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(30)
 	_check(not pawn.is_simulation_active(), "an AI pawn with no ground is switched off")
 	_check(is_equal_approx(pawn.position.y, 40.0) and is_equal_approx(pawn.position.x, 5.0), "so it stays exactly where it is")
@@ -277,7 +390,7 @@ func _measure_a_crowd() -> void:
 	var pawns: Array[Pawn] = []
 	for i in 200:
 		var pawn := _make_pawn(Vector3((i % 20) * 3.0 - 30.0, 0.1, (i / 20) * 3.0 - 15.0))
-		pawn.apply_player_input(Vector3(1.0, 0.0, 0.0), 0.0, 0.0, false, false)
+		_drive(pawn, Vector3(1.0, 0.0, 0.0))
 		pawns.append(pawn)
 	await _ticks(30)
 	var started := Time.get_ticks_usec()
@@ -309,6 +422,16 @@ func _make_pawn(at: Vector3) -> Pawn:
 	pawn.position = at
 	add_child(pawn)
 	return pawn
+
+
+## Claude 2026-11-07: gives the pawn one tick's input. It replaces the old apply_player_input(move, 0, 0, sprint, jump) calls.
+func _drive(pawn: Pawn, move: Vector3, sprint := false, jump := false) -> void:
+	var held: Array[StringName] = []
+	if sprint:
+		held.append(&"sprint")
+	if jump:
+		held.append(&"jump")
+	pawn.apply_input(InputCommand.make(move, held))
 
 
 func _ticks(count: int) -> void:
