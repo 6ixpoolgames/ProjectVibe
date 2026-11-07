@@ -9,7 +9,8 @@
 ## scene is starting up.
 ##
 ## The defaults file is resources/pawn_defaults.tres (a PawnDefaultsRes), or the one named by the project setting
-## "project_base/game_mode/pawn_defaults". For t0 it holds today's parts: ControllerManager (with its AIController) and GroundMovement.
+## "project_base/game_mode/pawn_defaults". For t0 it holds today's parts: ControllerManager (with its AIController), StatManager (with
+## movement stats) and AbilityManager (with Walk, Sprint and Jump). Claude 2026-11-07: GroundMovement was here until abilities replaced it.
 ##
 ## What it never adds: TickStateComponent and NetworkEntity. NetworkSession reads those as soon as it creates a pawn, before the pawn
 ## joins the tree, so they have to be in the pawn's scene.

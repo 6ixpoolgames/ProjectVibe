@@ -1,0 +1,18 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/abilities/AbilityManager.gd" id="1_manager"]
+[ext_resource type="Script" path="res://assets/scripts/abilities/WalkAbility.gd" id="2_walk"]
+[ext_resource type="Script" path="res://assets/scripts/abilities/JumpAbility.gd" id="3_jump"]
+[ext_resource type="Script" path="res://assets/scripts/abilities/SprintAbility.gd" id="4_sprint"]
+
+[node name="AbilityManager" type="Node"]
+script = ExtResource("1_manager")
+
+[node name="Walk" type="Node" parent="."]
+script = ExtResource("2_walk")
+
+[node name="Sprint" type="Node" parent="."]
+script = ExtResource("4_sprint")
+
+[node name="Jump" type="Node" parent="."]
+script = ExtResource("3_jump")

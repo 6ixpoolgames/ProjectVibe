@@ -1,5 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: the tier -1 pawn, possession and cameras over real connections, between separate Godot
-## processes on this machine. Pawns walk nav paths on streamed TerrainGenerator using the real GroundMovement.
+## processes on this machine. Pawns walk nav paths on streamed TerrainGenerator using the real abilities (Claude 2026-11-07: was GroundMovement).
 ##
 ## What it checks:
 ##   - The motor predicts well: a client's pawn stays close to the server's.

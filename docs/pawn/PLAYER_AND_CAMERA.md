@@ -27,7 +27,8 @@ LEVEL
 │  ├─ TerrainEditLog               optional: without it, edits don't outlast a chunk or reach clients
 │  └─ TerrainBodyLifter            optional: moves bodies onto ground an edit raises above them
 └─ Pawn                            possessable flag, velocity, the one move_and_slide
-   ├─ GroundMovement               a placeholder until abilities exist (Claude 2026-11-07: added by PawnInitializer now)
+   ├─ AbilityManager               Claude 2026-11-07: Walk, Sprint and Jump, which replaced GroundMovement (PAWN_SPEC.md section 8)
+   ├─ StatManager                  Claude 2026-11-07: the movement stats the abilities read (PAWN_SPEC.md section 9)
    ├─ ControllerManager            Claude 2026-11-07: picks the player's or the AI's input; added by PawnInitializer (PAWN_SPEC.md 6.4)
    ├─ StreamingSource              only when possessed, or when the AI bool is on
    └─ Visual                       the smoothed position, set each rendered frame
@@ -48,7 +49,7 @@ LEVEL
 | `CameraPreset` | Settings for an arm | Behaviour | None |
 | `WorldCursor` | What the mouse or crosshair points at | What a click means | `GetHitResultUnderCursor` |
 | `Pawn` | The `possessable` flag, input it's given, physics step, smoothed visual position | Reading devices | `APawn` |
-| `GroundMovement` (placeholder) | Accelerating, turning, gravity, jump impulse, until Walk, Jump and the pawn take these over | Choosing where to go | Part of `CharacterMovementComponent` |
+| `GroundMovement` (placeholder) | Accelerating, turning, gravity, jump impulse, until Walk, Jump and the pawn take these over. *(Claude 2026-11-07: done. Walk, Sprint and Jump in `AbilityManager` steer, and the pawn adds gravity; see `PAWN_SPEC.md` section 8.)* | Choosing where to go | Part of `CharacterMovementComponent` |
 | `AIActivationManager` | Turning AI ticks off and on, with signals | Simulating AI out of sight | None |
 
 ## 3. Camera rules

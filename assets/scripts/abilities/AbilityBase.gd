@@ -1,0 +1,108 @@
+## Written by Claude (claude-opus-5-5), 2026-11-07: the base for one thing a pawn can do, such as walk, jump or sprint. A child of the
+## pawn's AbilityManager. Pawn spec section 8.
+##
+## An ability is pressed like a skill in an MMO or MOBA: its trigger_action (a named action from InputActions, such as &"jump") starts
+## it. The player's keys and an AI behaviour press the same actions, so both reach the same ability through the same rules.
+##
+## Two kinds:
+##   LOCOMOTION   moves the pawn, every tick it's chosen. Exactly one runs each tick. The one with no trigger_action (Walk) is the
+##                default; one whose trigger_action is held (Sprint) runs instead while it can.
+##   ACTION       starts on a press. With no duration it happens at once (Jump); with a duration it runs for that long.
+##
+## How to make one: extend this, set what's needed in _init(), and override any of:
+##   can_start() -> bool    extra conditions, such as being on the ground. Cooldowns and lockouts are already checked
+##   start()                once, when it starts. An action with no duration does its whole job here
+##   tick(dt)               every tick it runs. A locomotion ability writes the pawn's velocity here
+##   stop()                 once, when it stops
+##   every_tick(dt)         every tick, running or not, for counters such as time off the ground
+## Times are set in seconds and kept in ticks, so they line up exactly between server and client.
+##
+## Rollback: what an ability keeps between ticks has to roll back. get_rollback_properties() names those properties, and the
+## AbilityManager registers them with the pawn's TickStateComponent. The base already handles its own: ticks_left (only with a
+## duration), cooldown_ticks_left (only with a cooldown) and buffer_ticks_left (only with a buffer window). They count down to 0, so
+## they're small numbers on the network. An ability with more state adds it to the list.
+class_name AbilityBase
+extends Node
+
+enum Kind { LOCOMOTION, ACTION }
+
+@export var kind := Kind.ACTION
+## The named action that starts it, such as &"jump". Empty: only the manager starts it, as the default locomotion.
+@export var trigger_action: StringName = &""
+## What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
+@export var category: StringName = &""
+## When several abilities share a trigger_action, the lowest priority that can start wins; then the first in the tree.
+@export var priority := 0
+## Seconds. For an action, 0 means it happens at once. For locomotion, 0 means it runs as long as it's wanted.
+@export_range(0.0, 60.0, 0.05, "or_greater") var duration := 0.0
+## Seconds after it stops before it can start again.
+@export_range(0.0, 60.0, 0.05, "or_greater") var cooldown := 0.0
+## Categories that can't start, or steer, while this runs, such as &"movement" for an attack that roots the pawn.
+@export var locks_out: Array[StringName] = []
+## Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
+@export_range(0.0, 2.0, 0.01, "or_greater") var buffer_window := 0.0
+
+# State that rolls back. See the top of the file.
+var ticks_left := 0 ## ticks left of a timed run. 0: not running a timed run
+var cooldown_ticks_left := 0 ## ticks until it can start again
+var buffer_ticks_left := 0 ## ticks a waiting press has left
+
+## Set by the AbilityManager.
+var manager: AbilityManager = null
+var pawn: Pawn = null
+## This ability's category as bits, with its parents' bits too. Worked out once by the manager.
+var category_mask := 0
+## locks_out as bits. Worked out once by the manager.
+var locks_out_mask := 0
+
+
+func _init() -> void:
+	set_process(false)
+	set_physics_process(false)
+
+
+## The properties on this node that roll back. Add to it with super() in an ability that keeps more.
+func get_rollback_properties() -> Array[String]:
+	var out: Array[String] = []
+	if duration > 0.0:
+		out.append("ticks_left")
+	if cooldown > 0.0:
+		out.append("cooldown_ticks_left")
+	if buffer_window > 0.0 and trigger_action != &"":
+		out.append("buffer_ticks_left")
+	return out
+
+
+## True while a timed run is going.
+func is_running_timed() -> bool:
+	return ticks_left > 0
+
+
+## A stat from the pawn's StatManager, or fallback if there's no such stat or no StatManager.
+func read_stat(stat_name: StringName, fallback: float) -> float:
+	if pawn and pawn.stat_manager:
+		return pawn.stat_manager.get_value(stat_name, fallback)
+	return fallback
+
+
+# --- Override these ---
+
+
+func can_start() -> bool:
+	return true
+
+
+func start() -> void:
+	pass
+
+
+func tick(_dt: float) -> void:
+	pass
+
+
+func stop() -> void:
+	pass
+
+
+func every_tick(_dt: float) -> void:
+	pass

@@ -167,26 +167,9 @@ func _ready() -> void:
 	for path in custom_state_nodes:
 		_custom_paths.append(path)
 	_custom_nodes.resize(_custom_paths.size())
-	# Claude 2026-11-04: FOLLOW_SERVER with nothing listed would silently do nothing, so a door can just set the mode. This is
-	# kept out of state_properties, which get_schema() reads, because the handshake compares it across machines and
-	# rollback_mode can differ between them.
-	var listed: Array[String] = state_properties
-	if rollback_mode == RollbackMode.FOLLOW_SERVER and state_properties.is_empty():
-		listed = ["position"]
-		if "velocity" in _root:
-			listed.append("velocity")
 	_inputs = _parse_list(input_properties)
-	_states = _parse_list(listed)
 	_syncs = _parse_list(sync_properties)
-	# Claude 2026-11-04: matched by the property's name, so a velocity kept on a part like the motor still counts.
-	for i in _states.size():
-		var p := _states[i]
-		var property_name := String(p.property)
-		if p.node_path == "" and (property_name == "position" or property_name == "global_position"):
-			if _position_index < 0:
-				_position_index = i
-		elif property_name == "velocity" and (_velocity_index < 0 or p.node_path == ""):
-			_velocity_index = i
+	_build_state_list() # Claude 2026-11-07: moved into a function, which add_state_properties() uses too
 	_state_ticks.resize(history_size)
 	_state_ticks.fill(-1)
 	_state_values.resize(history_size)
@@ -197,6 +180,49 @@ func _ready() -> void:
 	_authoritative_ticks.resize(history_size)
 	_authoritative_ticks.fill(-1)
 	_authoritative_values.resize(history_size)
+
+
+## Claude 2026-11-07: adds state entries for parts that arrive after the scene was made, such as abilities PawnInitializer adds. Pawn
+## spec step 6. Entries are written as in state_properties, with node paths relative to the parent ("AbilityManager/Sprint:time_left").
+## Only before the first tick is recorded, because every saved tick has to hold the same list. Every machine must add the same
+## entries in the same order, which holds when they come from the same parts. They aren't part of get_schema(), because that reads
+## the scene as made, so the handshake doesn't check them. False if refused.
+func add_state_properties(entries: Array[String]) -> bool:
+	if _newest_state_tick >= 0:
+		push_warning("[TickStateComponent] %s: state entries can only be added before the first tick is recorded, so %s won't roll back." % [_root.name if _root else name, str(entries)])
+		return false
+	var added: Array[String] = state_properties.duplicate() # a new array, so instances of one scene don't share a list
+	for entry in entries:
+		if not added.has(entry):
+			added.append(entry)
+	state_properties = added
+	if is_node_ready():
+		_build_state_list()
+	return true
+
+
+# Builds _states from state_properties, and finds position and velocity among them.
+func _build_state_list() -> void:
+	# Claude 2026-11-04: FOLLOW_SERVER with nothing listed would silently do nothing, so a door can just set the mode. This is
+	# kept out of state_properties, which get_schema() reads, because the handshake compares it across machines and
+	# rollback_mode can differ between them.
+	var listed: Array[String] = state_properties
+	if rollback_mode == RollbackMode.FOLLOW_SERVER and state_properties.is_empty():
+		listed = ["position"]
+		if "velocity" in _root:
+			listed.append("velocity")
+	_states = _parse_list(listed)
+	_position_index = -1
+	_velocity_index = -1
+	# Claude 2026-11-04: matched by the property's name, so a velocity kept on a part like the motor still counts.
+	for i in _states.size():
+		var p := _states[i]
+		var property_name := String(p.property)
+		if p.node_path == "" and (property_name == "position" or property_name == "global_position"):
+			if _position_index < 0:
+				_position_index = i
+		elif property_name == "velocity" and (_velocity_index < 0 or p.node_path == ""):
+			_velocity_index = i
 
 
 # --- Called by the tick driver -----------------------------------------------------------------

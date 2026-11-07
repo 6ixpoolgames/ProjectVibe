@@ -27,7 +27,7 @@
 ##   --spread=1000       with either: how far apart each client's pawns start, in metres
 ##   --load-distance=96 --nav-distance=64 --unload-margin=32   with --streaming: the streaming distances, in metres
 ##   --ai-loads          with --streaming: the server's AI pawns keep the world loaded too
-##   --real-pawn         the tier -1 Pawn with GroundMovement and PawnWalkerBrain, instead of NetTestPawn. Claude 2026-11-07
+##   --real-pawn         the tier -1 Pawn with its abilities and PawnWalkerBrain, instead of NetTestPawn. Claude 2026-11-07
 ##   --possess           with --real-pawn: the server gives each client its first pawn through GameMode.possession_coordinator
 ##   --look-at=5:1.25    client: after this many seconds, the PlayerController looks this way, in radians
 ##   --swap-at=8         client: after this many seconds, asks to possess the first pawn nobody owns

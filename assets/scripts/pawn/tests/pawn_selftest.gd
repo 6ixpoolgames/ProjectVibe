@@ -1,4 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for the tier -1 Pawn and GroundMovement, offline.
+## Claude 2026-11-07: GroundMovement is gone; the same checks now run through the Walk, Sprint and Jump abilities and the pawn's stats.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/pawn_selftest.tscn"
 extends Node
@@ -21,7 +22,6 @@ func _ready() -> void:
 	await _test_server_corrects_held_history() # Claude 2026-11-07, from the audit of 6df1464
 	await _test_no_movement_module()
 	_test_bad_input()
-	await _test_swapping_movement()
 	await _test_source_rules()
 	await _test_ai_with_no_ground()
 	await _test_no_arms_by_default()
@@ -46,26 +46,28 @@ func _test_on_flat_ground() -> void:
 func _test_running_and_stopping() -> void:
 	var floor_body := _make_floor()
 	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
-	var movement: GroundMovement = pawn.movement
+	# Claude 2026-11-07: the speeds come from the pawn's stats now, which Walk and Sprint read.
+	var walk_speed := pawn.stat_manager.get_value(&"MoveSpeed")
+	var sprint_speed := pawn.stat_manager.get_value(&"SprintSpeed")
 	await _ticks(20)
 	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(1)
-	_check(pawn.velocity.x > 0.0 and pawn.velocity.x < movement.max_speed, "it accelerates, not instantly (%.2f m/s after a tick)" % pawn.velocity.x)
+	_check(pawn.velocity.x > 0.0 and pawn.velocity.x < walk_speed, "it accelerates, not instantly (%.2f m/s after a tick)" % pawn.velocity.x)
 	await _ticks(30)
-	_check(is_equal_approx(pawn.velocity.x, movement.max_speed), "and reaches its speed (%.2f m/s)" % pawn.velocity.x)
+	_check(is_equal_approx(pawn.velocity.x, walk_speed), "and reaches its speed (%.2f m/s)" % pawn.velocity.x)
 	_check(absf(angle_difference(pawn.yaw, atan2(-1.0, 0.0))) < 0.01, "and turns to face where it's going")
 	var before := pawn.position.x
 	await _ticks(60)
-	_check(absf(pawn.position.x - before - movement.max_speed) < 0.05, "one second moves it its speed in metres (%.2f m)" % (pawn.position.x - before))
+	_check(absf(pawn.position.x - before - walk_speed) < 0.05, "one second moves it its speed in metres (%.2f m)" % (pawn.position.x - before))
 	_drive(pawn, Vector3(1.0, 0.0, 0.0), true)
 	await _ticks(60)
-	_check(is_equal_approx(pawn.velocity.x, movement.max_speed * movement.sprint_multiplier), "sprinting is faster (%.2f m/s)" % pawn.velocity.x)
+	_check(is_equal_approx(pawn.velocity.x, sprint_speed), "sprinting is faster (%.2f m/s)" % pawn.velocity.x)
 	_drive(pawn, Vector3.ZERO)
 	await _ticks(60)
 	_check(is_zero_approx(pawn.velocity.x), "and with no input, it stops")
 	_drive(pawn, Vector3(100.0, 0.0, 0.0))
 	await _ticks(60)
-	_check(is_equal_approx(pawn.velocity.x, movement.max_speed), "input longer than 1 doesn't go faster")
+	_check(is_equal_approx(pawn.velocity.x, walk_speed), "input longer than 1 doesn't go faster")
 	pawn.free()
 	floor_body.free()
 
@@ -291,11 +293,11 @@ func _test_server_corrects_held_history() -> void:
 
 func _test_no_movement_module() -> void:
 	var floor_body := _make_floor()
-	# Claude 2026-11-07: GroundMovement comes from PawnInitializer now, so it's left out by name rather than removed from the scene.
-	var pawn := _make_pawn(Vector3(0.0, 0.01, 0.0), [&"GroundMovement"])
+	# Claude 2026-11-07: abilities replaced the movement module, so it's the AbilityManager that's left out.
+	var pawn := _make_pawn(Vector3(0.0, 0.01, 0.0), [&"AbilityManager"])
 	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(30)
-	_check(absf(pawn.position.x) < 0.001, "with no movement module, a pawn stands still")
+	_check(absf(pawn.position.x) < 0.001, "with no AbilityManager, a pawn stands still")
 	pawn.free()
 	floor_body.free()
 
@@ -315,24 +317,8 @@ func _test_bad_input() -> void:
 	pawn.free()
 
 
-class StandStillMovement extends MovementModule:
-	var ran := 0
-
-	func simulate(_pawn: Pawn, _dt: float) -> void:
-		ran += 1
-
-
-func _test_swapping_movement() -> void:
-	var floor_body := _make_floor()
-	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
-	await _ticks(20)
-	var other := StandStillMovement.new()
-	pawn.add_child(other)
-	pawn.movement = other
-	await _ticks(5)
-	_check(other.ran == 5, "a pawn can swap its movement module")
-	pawn.free()
-	floor_body.free()
+# Claude 2026-11-07: _test_swapping_movement went with MovementModule. Choosing between locomotion abilities is tested in
+# abilities/tests/ability_selftest.gd.
 
 
 func _test_source_rules() -> void:

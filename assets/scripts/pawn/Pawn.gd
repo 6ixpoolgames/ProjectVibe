@@ -1,19 +1,22 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: the tier -1 pawn: a body something can possess, with movement in a module.
 ## No nexus, managers or abilities yet. This is enough to test cameras, nav and netcode with real ground movement. Spec:
-## docs/pawn/PLAYER_AND_CAMERA.md. The old CharacterPawn3D is untouched, and carries on working in test scene.tscn.
+## docs/pawn/PLAYER_AND_CAMERA.md. Claude 2026-11-07: it now has managers and abilities (docs/pawn/PAWN_SPEC.md); still no nexus. The old CharacterPawn3D is untouched, and carries on working in test scene.tscn.
 ##
 ## How to use it: use assets/scenes/pawn/pawn.tscn as it is, or inherit from it. Something writes this pawn's input each tick,
-## such as a PlayerController, or an AI script on the server. A GroundMovement child makes that into movement.
+## such as a PlayerController, or an AI script on the server. Its abilities make that into movement.
 ##
-## Claude 2026-11-07: parts and input, pawn spec steps 3 and 4.
-##   - When it enters the tree, GameMode's PawnInitializer adds the default parts its scene doesn't have: for now ControllerManager
-##     (with an AIController) and GroundMovement. fill_in_default_parts and skip_default_parts opt out.
+## Claude 2026-11-07: parts and input, pawn spec steps 3 to 6.
+##   - When it enters the tree, GameMode's PawnInitializer adds the default parts its scene doesn't have: ControllerManager (with an
+##     AIController), StatManager (with movement stats) and AbilityManager (with Walk, Jump and Sprint). fill_in_default_parts and
+##     skip_default_parts opt out.
 ##   - Each tick, in its input phase, it asks its ControllerManager for input from whoever is in charge: this machine's player, or
 ##     else its AI controller. It only asks where its input is decided here. A client's pawn on the server gets its input over the
 ##     network instead.
+##   - Each tick, its AbilityManager runs the abilities, which write velocity and facing. Then the pawn adds gravity and makes the one
+##     move_and_slide call. Claude 2026-11-07: this replaced GroundMovement and MovementModule, which are gone.
 ##
 ## What it needs in its scene, all optional:
-##   - a MovementModule child. With none, it stands still. Claude 2026-11-07: GroundMovement now comes from PawnInitializer.
+##   - an AbilityManager child. With none, nothing steers it, and it only falls. It comes from PawnInitializer by default.
 ##   - a TickStateComponent and a NetworkEntity child, for rollback and multiplayer. With none, it plays as single player. These
 ##     two stay in the scene, because NetworkSession reads them before the pawn joins the tree.
 ##   - a Node3D child called Visual, which the camera and the model hang from.
@@ -69,7 +72,10 @@ signal possession_changed(pawn: Pawn, has_player: bool)
 ## Claude 2026-11-07: on, GameMode's PawnInitializer adds every default part this pawn's scene doesn't already have. Off, the pawn
 ## gets only what its scene has.
 @export var fill_in_default_parts := true
-## Claude 2026-11-07: default parts to leave out, by name, such as &"GroundMovement". A part with that name in the scene is kept
+## Claude 2026-11-07: how strongly it falls, in metres per second per second. Below 0, the project's gravity setting. Moved here from
+## GroundMovement: the pawn adds gravity, and abilities only steer.
+@export var gravity := -1.0
+## Claude 2026-11-07: default parts to leave out, by name, such as &"AbilityManager". A part with that name in the scene is kept
 ## either way.
 @export var skip_default_parts: Array[StringName] = []
 
@@ -89,8 +95,10 @@ var yaw := 0.0
 ## Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
 var grounded := false
 
-## Which movement module runs. Set it to change how this pawn moves.
-var movement: MovementModule = null
+## Claude 2026-11-07: runs this pawn's abilities, which steer it. Null if it has none. Replaces the old movement module.
+var ability_manager: AbilityManager = null
+## Claude 2026-11-07: this pawn's stats, which abilities read. Null if it has none, and then abilities use their fallbacks.
+var stat_manager: StatManager = null
 ## Claude 2026-11-07: picks whose input this pawn follows. Null if the pawn has none, and then nothing writes its input for it.
 var controller_manager: ControllerManager = null
 
@@ -145,8 +153,10 @@ func _ready() -> void:
 	yaw = rotation.y # whatever the scene placed it at. From here on, the body itself stays unrotated
 	rotation = Vector3.ZERO
 	for child in get_children():
-		if child is MovementModule and movement == null:
-			movement = child
+		if child is AbilityManager and ability_manager == null: # Claude 2026-11-07: was the movement module
+			ability_manager = child
+		elif child is StatManager and stat_manager == null: # Claude 2026-11-07
+			stat_manager = child
 		elif child is NetworkEntity:
 			_entity = child
 		elif child is ControllerManager and controller_manager == null: # Claude 2026-11-07
@@ -280,8 +290,13 @@ func _tick_input(_dt: float, tick: int) -> void:
 func _tick_simulate(dt: float, _tick: int) -> void:
 	_previous_position = _current_position
 	_previous_yaw = _current_yaw
-	if movement:
-		movement.simulate(self, dt)
+	# Claude 2026-11-07: abilities steer, then gravity, then one move_and_slide. Gravity goes by whether it was on the ground when the
+	# tick began, as GroundMovement did, so a jump that starts this tick isn't pulled down in the same tick.
+	var was_grounded := grounded
+	if ability_manager:
+		ability_manager.tick_abilities(dt)
+	if not was_grounded:
+		velocity.y -= _gravity_strength() * dt
 	# move_and_slide uses Godot's physics delta. This scales it so that one tick moves velocity * tick dt.
 	var factor: float = _driver.get_physics_factor() if _driver else 1.0
 	velocity *= factor
@@ -434,6 +449,13 @@ func _refresh_source() -> void:
 	elif not wanted and _source != null:
 		_source.queue_free()
 		_source = null
+
+
+## Claude 2026-11-07: gravity in metres per second per second, from the gravity setting or else the project's.
+func _gravity_strength() -> float:
+	if gravity >= 0.0:
+		return gravity
+	return ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
 
 
 ## Claude 2026-11-07: true where this pawn's input is decided: offline, its owner's machine, or the server for a pawn nobody owns. False

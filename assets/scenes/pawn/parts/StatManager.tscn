@@ -1,0 +1,35 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/stats/StatManager.gd" id="1_manager"]
+[ext_resource type="Script" path="res://assets/scripts/stats/Stat.gd" id="2_stat"]
+
+[node name="StatManager" type="Node"]
+script = ExtResource("1_manager")
+
+[node name="MoveSpeed" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 5.0
+
+[node name="SprintSpeed" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 9.0
+
+[node name="Acceleration" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 30.0
+
+[node name="Deceleration" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 40.0
+
+[node name="AirControl" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 0.3
+
+[node name="TurnRate" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 720.0
+
+[node name="JumpVelocity" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 5.0

@@ -1,12 +1,13 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/pawn/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.4
+# Pawn Spec v0.5
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
 - v0.2 (2026-11-07): Sprint is its own ability, with a cooldown and a maximum duration. Heavy load (4.1). A missing input repeats for a few ticks, then its move fades, while held actions keep repeating (5). `ControllerBase` trimmed to what step 2 builds (6.1).
 - v0.3 (2026-11-07): step 2 built. After a review: `take_input_command` instead of `get_input_command`, because it uses up saved presses. The missing-input settings live on `NetworkSession` (5).
 - v0.4 (2026-11-07): steps 3 and 4 built: `ControllerManager`, the `AIController` placeholder and `PawnInitializer` (6.3, 6.4, 11). `TickStateComponent` and `NetworkEntity` stay in the pawn's scene, because `NetworkSession` reads them before the pawn joins the tree.
+- v0.5 (2026-11-07): steps 5 and 6 built: `StatManager` and `Stat` (9), `AbilityBase`, `AbilityManager`, Walk, Sprint and Jump (8.3 to 8.5). `GroundMovement` and `MovementModule` are gone. Ability state rolls back through `TickStateComponent.add_state_properties()`.
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -75,7 +76,7 @@ PlayerController (outside the pawn)        (built) reads devices; joins a pawn t
 
 - The parts are kept flat on the pawn, so a designer sees every part in one place.
 - The AI parts exist on every peer, but only tick on the server, because AI only runs there.
-- **Today (2026-11-07, after step 4):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`) and `GroundMovement`, the tier -1 placeholder that Walk, Jump and Sprint replace in step 6.
+- **Today (2026-11-07, after step 6):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`), `StatManager` (with the movement stats) and `AbilityManager` (with Walk, Sprint and Jump).
 
 ---
 
@@ -237,54 +238,71 @@ func has_arrived() -> bool
 - **A held action can switch locomotion.** For example, Sprint is a locomotion ability with `trigger_action = &"sprint"`, used while that action is held.
 - **The same path for player and AI.** The player's key presses `&"primary"`, and an AI behaviour presses `&"primary"`. Both reach the same ability through the same rules. That's why possession needs nothing extra.
 
-### 8.3 `AbilityBase` (sketch)
-Borrowed from the old guide, section 7.2. Its changes from that version are listed below the sketch.
+### 8.3 `AbilityBase` (built 2026-11-07, step 6)
+In `assets/scripts/abilities/`. Borrowed from the old guide, section 7.2, and simplified. The changes are listed below the code.
 
 ```gdscript
 class_name AbilityBase extends Node
 enum Kind { LOCOMOTION, ACTION }
-enum Status { RUNNING, SUCCEEDED, FAILED }
 
 @export var kind := Kind.ACTION
-@export var trigger_action: StringName = &""     # empty = only started by code, or the default locomotion
-@export var category: StringName = &""           # for lockouts and nav, e.g. movement.jump (tag registry, built)
+@export var trigger_action: StringName = &""     # empty = only the manager starts it, as the default locomotion
+@export var category: StringName = &""           # a tag, e.g. movement.jump, for lockouts (tag registry, built)
 @export var priority := 0                        # lower wins when several abilities share an action
-@export var cooldown := 0.0                      # seconds in the inspector, ticks at runtime
-@export var locks_out: Array[StringName] = []    # categories that can't start while this runs
-@export var bufferable := true
-@export var buffer_window := 0.15                # seconds a press waits
+@export var duration := 0.0                      # seconds. Action: 0 = at once. Locomotion: 0 = as long as wanted
+@export var cooldown := 0.0                      # seconds after it stops
+@export var locks_out: Array[StringName] = []    # categories that can't start or steer while this runs
+@export var buffer_window := 0.0                 # seconds a press waits if it can't start yet
 
-func can_start(context) -> bool                  # default: cooldown, cost, lockouts
-func start(context) -> void
-func tick(context, delta: float) -> Status       # delta is always the fixed tick
-func stop(context, reason) -> void
+# Rolls back: counts down to 0, so it's small on the network
+var ticks_left / cooldown_ticks_left / buffer_ticks_left
+
+func get_rollback_properties() -> Array[String]  # what to register with the pawn's TickState
+func can_start() -> bool                         # extra conditions; cooldowns and lockouts are checked already
+func start() / tick(dt) / stop() / every_tick(dt)
+func read_stat(stat_name, fallback) -> float
 ```
 
 What changed from the old guide:
 - Abilities are started by a **named action**, not by a category request.
-- Categories stay, but only for lockouts and for telling nav which links a pawn can use.
+- Categories stay, but only for lockouts and, later, for telling nav which links a pawn can use.
+- No context object. An ability reaches its pawn and manager directly.
+- No separate "bufferable" switch: a buffer window of 0 means a press is tried once.
+- **Rollback:** each ability names the properties it keeps between ticks, and the manager registers them with the pawn's `TickStateComponent` (`add_state_properties()`, added for this) before the first tick. A designer adding an ability doesn't edit any list. Timers count *down* to 0 rather than storing "ready at" ticks, so they stay small numbers on the network.
 
-### 8.4 `AbilityManager`
+### 8.4 `AbilityManager` (built 2026-11-07, step 6)
 
 ```gdscript
+func tick_abilities(dt)                      # the pawn calls this each tick, before gravity and move_and_slide
 func can_start(action: StringName) -> bool   # behaviours ask this before choosing to press
-func is_busy() -> bool                       # an action ability is running
+func is_busy() -> bool                       # a timed action is running
 func has_action(action: StringName) -> bool
 func cancel(action: StringName) -> void
-signal ability_started(ability) / ability_finished(ability, status)
+func is_locked(ability) -> bool
+signal ability_started(ability) / ability_finished(ability)
 ```
 
-Borrowed as they are from the old guide:
-- **Lockouts as bit masks** (section 7.4): one AND per check, recomputed only when an ability starts or stops.
-- **Cooldowns** stored as the tick they're ready again.
-- **The input buffer** (section 7.5), keyed by tick:
-  - First press wins.
-  - A press replaces an earlier one by default, so mashing doesn't queue presses.
-  - AI presses aren't buffered by default.
+**Each tick, in order:**
+1. Cooldowns and waiting presses count down, and every ability's `every_tick()` runs.
+2. Exactly one locomotion runs: one whose action is held and which can run, otherwise the default (no action, which is Walk).
+3. Running timed actions tick. A press starts the first ability bound to that action that can start; one that can't keeps the press for its buffer window. One press starts one ability.
 
-### 8.5 t0 abilities
-- **Walk** replaces `GroundMovement` **(built)**. It reads its numbers (speed, acceleration, turn rate) from the stat manager, with safe defaults when a stat is missing.
-- **Jump** includes the ground check and coyote time, and uses the buffer.
+**Lockouts as bit masks:**
+- One AND per check, worked out each tick from the running actions.
+- A locked-out locomotion stops steering, so the pawn slows to a stop.
+
+**Not built yet** from the old guide: the "stack" buffer mode, costs, and leaving AI presses unbuffered.
+
+Test: `abilities/tests/ability_selftest`.
+
+### 8.5 t0 abilities (built 2026-11-07, step 6)
+- **Walk** replaced `GroundMovement`, which is gone along with `MovementModule`.
+  - It reads speed, acceleration, deceleration, air control and turn rate from the stat manager, with the old values as fallbacks.
+  - The pawn adds gravity and makes the one `move_and_slide` call.
+- **Jump** happens at once.
+  - It starts from the ground, or within `coyote_time` (0.1 s) of walking off an edge.
+  - A press up to 0.15 s before landing waits and jumps on landing.
+  - The height comes from the JumpVelocity stat.
 - **Sprint** is its own locomotion ability, bound to `&"sprint"`.
   - It has faster numbers, a **maximum duration** and a **cooldown**. There's no stamina yet.
   - While `&"sprint"` is held and Sprint is ready, it runs instead of Walk. When its time runs out it ends, its cooldown starts, and Walk takes over even if the key is still held.
@@ -293,12 +311,15 @@ Borrowed as they are from the old guide:
 
 ---
 
-## 9. Stats
+## 9. Stats (built 2026-11-07, step 5)
 
-- `StatManager` holds stat nodes. One node per stat: Health, MoveSpeed, JumpStrength and so on.
-- Abilities and behaviours read stats through the manager by name, and each read has a fallback, so a missing stat is never a crash.
-- Stats that change during play (Health, Stamina) are rollback state.
-- Modifiers (buffs, debuffs) come later.
+- `StatManager` holds `Stat` nodes, in `assets/scripts/stats/`. One node per stat, named after it: MoveSpeed, JumpVelocity and so on.
+- Abilities and behaviours read stats through the manager by name (`get_value(&"MoveSpeed", 5.0)`), and each read has a fallback, so a missing stat is never a crash.
+- The default part `scenes/pawn/parts/StatManager.tscn` holds the movement stats `GroundMovement` used to hold, at the same values: MoveSpeed 5, SprintSpeed 9, Acceleration 30, Deceleration 40, AirControl 0.3, TurnRate 720 and JumpVelocity 5.
+- **Later:**
+  - Stats that change during play (Health, Stamina) will be rollback state. The movement stats don't change yet, so none roll back today.
+  - Modifiers (buffs, debuffs).
+- Test: `stats/tests/stat_selftest`.
 
 ---
 
@@ -409,8 +430,8 @@ func exit(context, reason) -> void
 2. **Inputs and controllers:** `ControllerBase`, `PlayerController` moved onto it, the input command with named actions, and the fading missing input. **(Built 2026-11-07.)**
 3. **`ControllerManager`.** **(Built 2026-11-07, with an `AIController` placeholder.)**
 4. **`PawnInitializer`** and the defaults file. **(Built 2026-11-07.)**
-5. **`StatManager`** and stat nodes for movement.
-6. **`AbilityManager`, `AbilityBase`, Walk, Jump and Sprint**, replacing `GroundMovement`. The existing pawn, possession and network tests must still pass.
+5. **`StatManager`** and stat nodes for movement. **(Built 2026-11-07.)**
+6. **`AbilityManager`, `AbilityBase`, Walk, Jump and Sprint**, replacing `GroundMovement`. The existing pawn, possession and network tests must still pass. **(Built 2026-11-07.)**
 7. **`NavigationManager`**, with click-to-move moved onto it, and nav phase 3.
 8. **AI:** `AIController`, sensing, memory, states, behaviours, the context with shared inputs, and the decision steps. Wander and Chase behaviours to prove it.
 9. **More abilities:** Dash, then MeleeAttack.

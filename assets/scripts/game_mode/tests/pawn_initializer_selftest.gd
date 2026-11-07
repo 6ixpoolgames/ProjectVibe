@@ -1,11 +1,13 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for PawnInitializer. Checks the odd cases at the top of
 ## PawnInitializer.gd, and every way out: per pawn, per part, and for the whole game.
+## Claude 2026-11-07: GroundMovement is gone; the defaults are now ControllerManager, StatManager and AbilityManager.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/game_mode/tests/pawn_initializer_selftest.tscn"
 extends Node
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-const MOVEMENT_PART := "res://assets/scenes/pawn/parts/GroundMovement.tscn"
+const STATS_PART := "res://assets/scenes/pawn/parts/StatManager.tscn"
+const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"StatManager", &"AbilityManager"]
 
 var _failures := 0
 
@@ -30,47 +32,60 @@ func _test_the_module_and_its_file() -> void:
 	var names: Array[StringName] = []
 	for scene in initializer.defaults.parts:
 		names.append(PawnInitializer.part_name_of(scene))
-	_check(names.size() == 2 and names[0] == &"ControllerManager" and names[1] == &"GroundMovement",
-			"which lists today's parts, by their scenes' root names (%s)" % str(names))
+	var same := names.size() == DEFAULT_PARTS.size()
+	for i in mini(names.size(), DEFAULT_PARTS.size()):
+		same = same and names[i] == DEFAULT_PARTS[i]
+	_check(same, "which lists today's parts, by their scenes' root names (%s)" % str(names))
 
 
 func _test_default_parts() -> void:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
-	_check(not pawn.has_node(^"GroundMovement") and not pawn.has_node(^"ControllerManager"), "pawn.tscn itself no longer holds the default parts")
+	var none_in_scene := true
+	for part_name in DEFAULT_PARTS:
+		none_in_scene = none_in_scene and not pawn.has_node(NodePath(String(part_name)))
+	_check(none_in_scene, "pawn.tscn itself holds none of the default parts")
 	add_child(pawn)
 	_check(pawn.get_node_or_null(^"ControllerManager") is ControllerManager, "entering the tree, the pawn gets a ControllerManager")
 	_check(pawn.get_node_or_null(^"ControllerManager/AIController") is AIController, "with its AIController")
-	_check(pawn.get_node_or_null(^"GroundMovement") is GroundMovement and pawn.movement is GroundMovement, "and GroundMovement, which the pawn uses")
+	_check(pawn.get_node_or_null(^"StatManager") is StatManager and pawn.stat_manager.has_stat(&"MoveSpeed"), "a StatManager with movement stats")
+	var abilities := pawn.get_node_or_null(^"AbilityManager") as AbilityManager
+	_check(abilities != null and pawn.ability_manager == abilities, "and an AbilityManager, which the pawn uses")
+	_check(abilities.get_node_or_null(^"Walk") is WalkAbility and abilities.get_node_or_null(^"Sprint") is SprintAbility and abilities.get_node_or_null(^"Jump") is JumpAbility,
+			"with Walk, Sprint and Jump")
 	_check(pawn.controller_manager == pawn.get_node(^"ControllerManager"), "and the pawn knows its ControllerManager")
-	var manager_index := pawn.get_node(^"ControllerManager").get_index()
-	_check(pawn.get_node(^"GroundMovement").get_index() == manager_index + 1, "in the list's order, after the scene's own children")
+	var first := pawn.get_node(^"ControllerManager").get_index()
+	_check(pawn.get_node(^"StatManager").get_index() == first + 1 and abilities.get_index() == first + 2, "in the list's order, after the scene's own children")
 	_check(pawn.get_node_or_null(^"TickState") != null and pawn.get_node_or_null(^"NetworkEntity") != null, "TickState and NetworkEntity stay in the scene")
 	pawn.free()
 
 
 func _test_a_designer_override() -> void:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
-	var own := GroundMovement.new()
-	own.name = "GroundMovement"
-	own.max_speed = 9.0
+	var own := StatManager.new()
+	own.name = "StatManager"
+	var speed := Stat.new()
+	speed.name = "MoveSpeed"
+	speed.base_value = 2.0
+	own.add_child(speed)
 	pawn.add_child(own)
 	add_child(pawn)
-	var all_movement := pawn.get_children().filter(func(child): return child is GroundMovement)
-	_check(all_movement.size() == 1 and all_movement[0] == own and pawn.movement == own, "a part with the same name in the pawn is kept, and no default is added")
-	_check(pawn.has_node(^"ControllerManager"), "the other defaults still are")
+	var all_stat_managers := pawn.get_children().filter(func(child): return child is StatManager)
+	_check(all_stat_managers.size() == 1 and all_stat_managers[0] == own and pawn.stat_manager == own, "a part with the same name in the pawn is kept, and no default is added")
+	_check(pawn.stat_manager.get_value(&"MoveSpeed") == 2.0 and not pawn.stat_manager.has_stat(&"SprintSpeed"), "so the pawn has only its own stats")
+	_check(pawn.has_node(^"ControllerManager") and pawn.has_node(^"AbilityManager"), "the other defaults still are")
 	pawn.free()
 
 
 func _test_ways_out() -> void:
 	var skipping: Pawn = load(PAWN_SCENE).instantiate()
-	skipping.skip_default_parts = [&"GroundMovement"]
+	skipping.skip_default_parts = [&"AbilityManager"]
 	add_child(skipping)
-	_check(not skipping.has_node(^"GroundMovement") and skipping.has_node(^"ControllerManager"), "skip_default_parts leaves out just those parts")
+	_check(not skipping.has_node(^"AbilityManager") and skipping.has_node(^"ControllerManager") and skipping.has_node(^"StatManager"), "skip_default_parts leaves out just those parts")
 	skipping.free()
 	var bare: Pawn = load(PAWN_SCENE).instantiate()
 	bare.fill_in_default_parts = false
 	add_child(bare)
-	_check(not bare.has_node(^"GroundMovement") and not bare.has_node(^"ControllerManager") and bare.controller_manager == null, "fill_in_default_parts off: no defaults at all")
+	_check(bare.controller_manager == null and bare.stat_manager == null and bare.ability_manager == null, "fill_in_default_parts off: no defaults at all")
 	bare.free()
 
 
@@ -94,10 +109,10 @@ func _test_odd_defaults() -> void:
 	initializer.initialize(pawn)
 	_check(pawn.get_child_count() == before, "no defaults loaded: nothing is added")
 	initializer.defaults = PawnDefaultsRes.new()
-	var parts: Array[PackedScene] = [null, load(MOVEMENT_PART)]
+	var parts: Array[PackedScene] = [null, load(STATS_PART)]
 	initializer.defaults.parts = parts
 	initializer.initialize(pawn)
-	_check(pawn.get_child_count() == before + 1 and pawn.has_node(^"GroundMovement"), "an empty slot in the list is skipped")
+	_check(pawn.get_child_count() == before + 1 and pawn.has_node(^"StatManager"), "an empty slot in the list is skipped")
 	initializer.initialize(null) # nothing to do, and nothing breaks
 	# The wrong kind of file, or none, through the project setting.
 	var had_setting := ProjectSettings.has_setting(PawnInitializer.DEFAULTS_SETTING)
@@ -120,7 +135,7 @@ func _test_without_the_module() -> void:
 	_check(GameMode.pawn_initializer == null, "removing the module clears GameMode.pawn_initializer")
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
 	add_child(pawn)
-	_check(not pawn.has_node(^"GroundMovement") and pawn.controller_manager == null, "without it, a pawn gets only its scene's parts")
+	_check(pawn.ability_manager == null and pawn.controller_manager == null, "without it, a pawn gets only its scene's parts")
 	await get_tree().physics_frame # and ticks without breaking
 	pawn.free()
 	GameMode.add_module(PawnInitializer.new())
