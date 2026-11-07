@@ -1,10 +1,11 @@
-[gd_resource type="Resource" script_class="PawnDefaultsRes" load_steps=5 format=3]
+[gd_resource type="Resource" script_class="PawnDefaultsRes" load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/resources/PawnDefaults_resource.gd" id="1_defaults"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/ControllerManager.tscn" id="2_controllers"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/NavigationManager.tscn" id="5_navigation"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/StatManager.tscn" id="3_stats"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AbilityManager.tscn" id="4_abilities"]
 
 [resource]
 script = ExtResource("1_defaults")
-parts = Array[PackedScene]([ExtResource("2_controllers"), ExtResource("3_stats"), ExtResource("4_abilities")])
+parts = Array[PackedScene]([ExtResource("2_controllers"), ExtResource("5_navigation"), ExtResource("3_stats"), ExtResource("4_abilities")])

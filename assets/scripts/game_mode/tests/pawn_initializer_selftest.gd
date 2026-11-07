@@ -1,13 +1,14 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for PawnInitializer. Checks the odd cases at the top of
 ## PawnInitializer.gd, and every way out: per pawn, per part, and for the whole game.
 ## Claude 2026-11-07: GroundMovement is gone; the defaults are now ControllerManager, StatManager and AbilityManager.
+## Claude 2026-11-08: NavigationManager added, second in the list.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/game_mode/tests/pawn_initializer_selftest.tscn"
 extends Node
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const STATS_PART := "res://assets/scenes/pawn/parts/StatManager.tscn"
-const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"StatManager", &"AbilityManager"]
+const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"AbilityManager"]
 
 var _failures := 0
 
@@ -47,6 +48,7 @@ func _test_default_parts() -> void:
 	add_child(pawn)
 	_check(pawn.get_node_or_null(^"ControllerManager") is ControllerManager, "entering the tree, the pawn gets a ControllerManager")
 	_check(pawn.get_node_or_null(^"ControllerManager/AIController") is AIController, "with its AIController")
+	_check(pawn.get_node_or_null(^"NavigationManager") is NavigationManager and pawn.navigation_manager == pawn.get_node(^"NavigationManager"), "a NavigationManager, which the pawn knows") # Claude 2026-11-08
 	_check(pawn.get_node_or_null(^"StatManager") is StatManager and pawn.stat_manager.has_stat(&"MoveSpeed"), "a StatManager with movement stats")
 	var abilities := pawn.get_node_or_null(^"AbilityManager") as AbilityManager
 	_check(abilities != null and pawn.ability_manager == abilities, "and an AbilityManager, which the pawn uses")
@@ -54,7 +56,9 @@ func _test_default_parts() -> void:
 			"with Walk, Sprint and Jump")
 	_check(pawn.controller_manager == pawn.get_node(^"ControllerManager"), "and the pawn knows its ControllerManager")
 	var first := pawn.get_node(^"ControllerManager").get_index()
-	_check(pawn.get_node(^"StatManager").get_index() == first + 1 and abilities.get_index() == first + 2, "in the list's order, after the scene's own children")
+	# Claude 2026-11-08: NavigationManager is second now.
+	_check(pawn.get_node(^"NavigationManager").get_index() == first + 1 and pawn.get_node(^"StatManager").get_index() == first + 2 and abilities.get_index() == first + 3,
+			"in the list's order, after the scene's own children")
 	_check(pawn.get_node_or_null(^"TickState") != null and pawn.get_node_or_null(^"NetworkEntity") != null, "TickState and NetworkEntity stay in the scene")
 	pawn.free()
 

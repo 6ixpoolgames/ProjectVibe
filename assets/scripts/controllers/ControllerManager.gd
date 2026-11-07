@@ -17,6 +17,7 @@
 ##   - Its parent isn't a Pawn: it warns, and nobody is ever in charge.
 ##   - No AIController child: an unpossessed pawn has nobody in charge, and its input stays as it is.
 ##   - A player's controller is freed while attached: it's ignored, as if it had let go.
+##   - Claude 2026-11-08: control changes hands while the pawn is following a path: the path is dropped.
 class_name ControllerManager
 extends Node
 
@@ -84,6 +85,7 @@ func take_input_command(tick: int) -> InputCommand:
 ## PlayerController calls this when it takes the pawn.
 func attach_player(controller: ControllerBase) -> void:
 	player_controller = controller
+	_stop_path()
 	_refresh()
 
 
@@ -91,11 +93,20 @@ func attach_player(controller: ControllerBase) -> void:
 func detach_player(controller: ControllerBase) -> void:
 	if player_controller == controller:
 		player_controller = null
+		_stop_path()
 		_refresh()
 
 
 func _on_possession_changed(_pawn: Pawn, _has_player: bool) -> void:
+	_stop_path()
 	_refresh()
+
+
+# Claude 2026-11-08: a path belongs to whoever asked for it. When someone else takes charge, it's dropped straight away, not at
+# the end of the frame like controller_changed, so the AI never walks the rest of a player's click, or the other way round.
+func _stop_path() -> void:
+	if pawn and pawn.navigation_manager:
+		pawn.navigation_manager.stop()
 
 
 ## Checks at the end of the frame whether who's in charge changed. Several changes in one frame give one check.

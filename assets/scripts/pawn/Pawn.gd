@@ -8,8 +8,8 @@
 ##
 ## Claude 2026-11-07: parts and input, pawn spec steps 3 to 6.
 ##   - When it enters the tree, GameMode's PawnInitializer adds the default parts its scene doesn't have: ControllerManager (with an
-##     AIController), StatManager (with movement stats) and AbilityManager (with Walk, Jump and Sprint). fill_in_default_parts and
-##     skip_default_parts opt out.
+##     AIController), NavigationManager (Claude 2026-11-08), StatManager (with movement stats) and AbilityManager (with Walk, Jump
+##     and Sprint). fill_in_default_parts and skip_default_parts opt out.
 ##   - Each tick, in its input phase, it asks its ControllerManager for input from whoever is in charge: this machine's player, or
 ##     else its AI controller. It only asks where its input is decided here. A client's pawn on the server gets its input over the
 ##     network instead.
@@ -102,6 +102,8 @@ var ability_manager: AbilityManager = null
 var stat_manager: StatManager = null
 ## Claude 2026-11-07: picks whose input this pawn follows. Null if the pawn has none, and then nothing writes its input for it.
 var controller_manager: ControllerManager = null
+## Claude 2026-11-08: finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
+var navigation_manager: NavigationManager = null
 
 var _driver: Node = null
 var _entity: NetworkEntity = null
@@ -162,6 +164,8 @@ func _ready() -> void:
 			_entity = child
 		elif child is ControllerManager and controller_manager == null: # Claude 2026-11-07
 			controller_manager = child
+		elif child is NavigationManager and navigation_manager == null: # Claude 2026-11-08
+			navigation_manager = child
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
 		_visual.top_level = true # it's placed by _process, between ticks, not by the body

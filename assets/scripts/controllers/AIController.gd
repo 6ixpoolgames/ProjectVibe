@@ -3,11 +3,12 @@
 ##
 ## It decides nothing. Something else tells it what to do, and it turns that into one InputCommand per tick, the same shape a
 ## player's controller makes. For now that something is a script or a test. From pawn spec step 8, it's the behaviour manager.
-## move_to(), which walks a nav path, comes with the navigation manager (step 7).
+## Claude 2026-11-08: move_to() walks a nav path, through the pawn's NavigationManager (step 7).
 ##
 ## How to use it:
-##   ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way until told otherwise
-##   ai.stop()                                # stands still
+##   ai.move_to(point)                        # walks there along a nav path; false if there's no way there
+##   ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way until told otherwise; drops any path
+##   ai.stop()                                # stands still; drops any path
 ##   ai.press(&"jump")                        # held for one tick, so the pawn sees one press
 ##   ai.hold(&"sprint", true)                 # held until hold(&"sprint", false)
 ##   ai.look_at_point(target)
@@ -31,14 +32,27 @@ var _pressed_once := 0 # bits held for the next command only
 var _command := InputCommand.new()
 
 
+## Claude 2026-11-08: walks to this point along a nav path, and stands still once there. Returns false if there's no way there,
+## or the pawn has no NavigationManager, and then the pawn stands still. pawn.navigation_manager.has_arrived() says when it's there.
+func move_to(point: Vector3) -> bool:
+	_move = Vector3.ZERO # once the path ends, it stands
+	var navigation := _navigation()
+	if navigation == null:
+		push_warning("AIController: %s has no NavigationManager, so move_to can't find a way. Check its skip_default_parts." % (pawn.name if pawn else "this pawn"))
+		return false
+	return navigation.move_to(point)
+
+
 ## Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
 func move_in_direction(direction: Vector3) -> void:
 	_move = direction.limit_length(1.0)
+	_stop_path() # Claude 2026-11-08
 
 
 ## Stands still. Held actions stay held.
 func stop() -> void:
 	_move = Vector3.ZERO
+	_stop_path() # Claude 2026-11-08
 
 
 ## Looks at a point in the world. Does nothing without a pawn, since there's nowhere to look from.
@@ -77,11 +91,18 @@ func release_all() -> void:
 	_move = Vector3.ZERO
 	_held = 0
 	_pressed_once = 0
+	_stop_path() # Claude 2026-11-08
 
 
 ## This tick's input. Uses up press(), so call it once per tick: ControllerManager does.
 func take_input_command(_tick: int) -> InputCommand:
-	_command.move = _move
+	# Claude 2026-11-08: while a path from move_to is being followed, the direction comes from it. ControllerManager drops a path
+	# when control changes hands, so any path here is this controller's own.
+	var navigation := _navigation()
+	if navigation and navigation.is_following_path():
+		_command.move = navigation.get_move_direction()
+	else:
+		_command.move = _move
 	if _look_set or pawn == null:
 		_command.look_yaw = _look_yaw
 		_command.look_pitch = _look_pitch
@@ -91,3 +112,14 @@ func take_input_command(_tick: int) -> InputCommand:
 	_command.held_actions = _held | _pressed_once
 	_pressed_once = 0
 	return _command
+
+
+# Claude 2026-11-08: the pawn's NavigationManager, or null.
+func _navigation() -> NavigationManager:
+	return pawn.navigation_manager if pawn else null
+
+
+func _stop_path() -> void:
+	var navigation := _navigation()
+	if navigation:
+		navigation.stop()

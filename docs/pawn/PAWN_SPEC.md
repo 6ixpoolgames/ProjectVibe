@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.5
+# Pawn Spec v0.6
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -8,6 +8,7 @@
 - v0.3 (2026-11-07): step 2 built. After a review: `take_input_command` instead of `get_input_command`, because it uses up saved presses. The missing-input settings live on `NetworkSession` (5).
 - v0.4 (2026-11-07): steps 3 and 4 built: `ControllerManager`, the `AIController` placeholder and `PawnInitializer` (6.3, 6.4, 11). `TickStateComponent` and `NetworkEntity` stay in the pawn's scene, because `NetworkSession` reads them before the pawn joins the tree.
 - v0.5 (2026-11-07): steps 5 and 6 built: `StatManager` and `Stat` (9), `AbilityBase`, `AbilityManager`, Walk, Sprint and Jump (8.3 to 8.5). `GroundMovement` and `MovementModule` are gone. Ability state rolls back through `TickStateComponent.add_state_properties()`.
+- v0.6 (2026-11-08): step 7, first half: `NavigationManager` built (7), with click-to-move and `AIController.move_to` on it (6.2, 6.3). Nav phase 3 (links) is split off as step 7b, still to agree (12).
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -76,7 +77,7 @@ PlayerController (outside the pawn)        (built) reads devices; joins a pawn t
 
 - The parts are kept flat on the pawn, so a designer sees every part in one place.
 - The AI parts exist on every peer, but only tick on the server, because AI only runs there.
-- **Today (2026-11-07, after step 6):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`), `StatManager` (with the movement stats) and `AbilityManager` (with Walk, Sprint and Jump).
+- **Today (2026-11-08, after step 7a):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`), `NavigationManager`, `StatManager` (with the movement stats) and `AbilityManager` (with Walk, Sprint and Jump).
 
 ---
 
@@ -165,11 +166,11 @@ Step 3 didn't need hooks for gaining and losing a pawn: `ControllerManager.attac
 - Lives outside the pawn and survives with no pawn **(built)**.
 - It doesn't tick on its own. When it takes a pawn it attaches to the pawn's `ControllerManager`, which asks it for input each tick **(built, step 3)**.
 - Reads keys, mouse and stick, rotates movement by the camera's yaw, and maps keys to actions.
-- **Click-to-move:**
+- **Click-to-move (built 2026-11-08, step 7a):**
   1. A click asks the world cursor for a point.
-  2. It calls `pawn.navigation_manager.move_to(point)`.
+  2. It calls `pawn.navigation_manager.move_to(point)`. A click with no way there does nothing.
   3. While a path is being followed, `move` comes from `navigation_manager.get_move_direction()`.
-  4. WASD cancels the path. That's today's behaviour **(built)**.
+  4. WASD cancels the path.
 
 ### 6.3 `AIController` (placeholder built 2026-11-07, step 3)
 - A child of `ControllerManager`.
@@ -184,7 +185,7 @@ func stop_looking() -> void                          # built: back to keeping th
 func press(action: StringName) -> void               # built: held for one tick
 func hold(action: StringName, held := true) -> void  # built
 func release_all() -> void                           # built: back to idle
-func move_to(point: Vector3) -> void                 # step 7: passes on to NavigationManager
+func move_to(point: Vector3) -> bool                 # built 2026-11-08: passes on to NavigationManager; false if there's no way there
 ```
 
 ### 6.4 `ControllerManager` (built 2026-11-07, step 3)
@@ -200,23 +201,31 @@ func move_to(point: Vector3) -> void                 # step 7: passes on to Navi
 
 ---
 
-## 7. Navigation manager
+## 7. Navigation manager (built 2026-11-08, step 7a)
 
-The pawn's only contact with navigation. Both controllers use it.
+The pawn's only contact with navigation. Both controllers use it. `assets/scripts/navigation/NavigationManager.gd`, part scene `scenes/pawn/parts/NavigationManager.tscn`. Test: `navigation/tests/navigation_manager_selftest`.
 
 ```gdscript
+signal arrived                           # once, at the end of a path
 func move_to(point: Vector3) -> bool     # false if there's no way there
 func stop() -> void
-func get_move_direction() -> Vector3     # which way to walk now; zero when there's no path
+func get_move_direction() -> Vector3     # which way to walk now; zero when there's no path. Once per tick: it also moves on to the next corner
 func is_following_path() -> bool
-func has_arrived() -> bool
+func has_arrived() -> bool               # true from reaching the end until the next move_to or stop()
+func get_path_corners() -> PackedVector3Array   # the corners ahead, for debug drawing
 ```
 
 - It asks `NavServer` for a path and follows the corners. The waypoints stay private.
-- With no nav at all, it walks in a straight line.
+- It never ticks on its own. The controller in charge asks it for a direction once per tick and puts it in the input command.
+- Settings: `corner_reached_distance` (0.5 m), `arrival_distance` (0.3 m), `nav_tier` (0).
+- With no nav at all, it walks in a straight line. That covers no navcore library, and no nav under the pawn (a level that feeds no nav).
+- A point nowhere near nav: `move_to` returns false. A point on nav it can't reach, such as an island: the path goes as close as it can.
+- `ControllerManager` drops the path whenever control changes hands, so the AI never walks the rest of a player's click.
+- The path is found at once, on the main thread (`find_path_now`), as the stress test already does. Asking in the background is there (`NavServer.find_path`) if a crowd's paths ever cost too much.
+- Not yet: noticing it's stuck, and finding a new path when nav changes.
 - **Over the network:** the client follows its own path and sends directions. The server never sees a path. The stress test already works this way **(built)**. This settles open question 15 in the netcode spec.
 - Borrowed for later from the old guide, section 8: repathing when tiles change, size tiers, domains.
-- Nav phase 3 (agents and links) arrives with this part.
+- Nav phase 3 (agents and links) is step 7b, below (12). Until then, a path never crosses a gap or uses a link.
 
 ---
 
@@ -412,7 +421,7 @@ func exit(context, reason) -> void
 - It adds each default part the pawn doesn't already have. A part placed in the pawn's scene is kept as it is, so a designer can override any default by adding their own with the same name.
 - **The defaults file:**
   - `resources/pawn_defaults.tres`, a `PawnDefaultsRes` listing part scenes. The project setting `project_base/game_mode/pawn_defaults` can name another.
-  - For t0 it lists today's parts: `scenes/pawn/parts/ControllerManager.tscn` (with its `AIController`) and `GroundMovement.tscn`.
+  - For t0 it lists today's parts: `scenes/pawn/parts/ControllerManager.tscn` (with its `AIController`), `NavigationManager.tscn`, `StatManager.tscn` and `AbilityManager.tscn`. *(Claude 2026-11-08: this line still named `GroundMovement`.)*
   - Each part is a small scene, so its settings can be changed in the editor.
 - A part's name is its scene's root node name. Parts are added in the list's order, the same on every machine.
 - **Ways out:**
@@ -432,7 +441,8 @@ func exit(context, reason) -> void
 4. **`PawnInitializer`** and the defaults file. **(Built 2026-11-07.)**
 5. **`StatManager`** and stat nodes for movement. **(Built 2026-11-07.)**
 6. **`AbilityManager`, `AbilityBase`, Walk, Jump and Sprint**, replacing `GroundMovement`. The existing pawn, possession and network tests must still pass. **(Built 2026-11-07.)**
-7. **`NavigationManager`**, with click-to-move moved onto it, and nav phase 3.
+7. **`NavigationManager`**, with click-to-move moved onto it. **(Built 2026-11-08 as 7a.)**
+   - **7b, nav phase 3 (links):** to agree before building. A link is a jump, drop or door between two points that nav can't walk. It needs C++ work in navcore (off-mesh connections in tiles, and paths that say where a link starts), `NavLinkModule` for the `NavLink` markers, and `NavigationManager` pressing the link's named action when it reaches one.
 8. **AI:** `AIController`, sensing, memory, states, behaviours, the context with shared inputs, and the decision steps. Wander and Chase behaviours to prove it.
 9. **More abilities:** Dash, then MeleeAttack.
 10. **Teams and the fight loop:** damage, death.

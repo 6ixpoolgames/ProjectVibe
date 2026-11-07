@@ -1,0 +1,264 @@
+## Written by Claude (claude-opus-5-5), 2026-11-08: headless self-test for NavigationManager (pawn spec section 7, step 7), and
+## AIController.move_to, which uses it. Checks the odd cases at the top of NavigationManager.gd.
+## Exits 0 on success, 1 on failure. Run from the project folder:
+##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/navigation/tests/navigation_manager_selftest.tscn"
+extends Node
+
+const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
+
+var _failures := 0
+
+
+## A player controller that presses nothing, so tests can hand the pawn to "a player" without real devices.
+class StillController extends PlayerController:
+	func _read_move() -> Vector2:
+		return Vector2.ZERO
+
+
+## Test code, kept out of NavigationManager: it follows corners it's given, so corner-by-corner following can be checked on a flat
+## floor, where a real nav path would be one straight line. Placed in the pawn's scene with the default part's name, so it also
+## shows a designer's own part replacing the default.
+class GivenCornersNavigation extends NavigationManager:
+	var given := PackedVector3Array()
+
+	func move_to(point: Vector3) -> bool:
+		stop()
+		if pawn == null:
+			return false
+		_corners = PackedVector3Array([pawn.global_position])
+		_corners.append_array(given)
+		_corners.append(point)
+		_next_corner = 1
+		return true
+
+
+func _ready() -> void:
+	print("--- Navigation manager self-test ---")
+	Engine.max_fps = 60
+	_test_not_on_a_pawn()
+	# The straight-line tests run first, while NavServer has no nav at all.
+	await _test_straight_line_with_no_nav()
+	await _test_without_a_navigation_manager()
+	await _test_corner_by_corner()
+	await _test_following_a_nav_path()
+	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
+	get_tree().quit(0 if _failures == 0 else 1)
+
+
+func _test_not_on_a_pawn() -> void:
+	var holder := Node.new()
+	var navigation := NavigationManager.new()
+	holder.add_child(navigation)
+	add_child(holder) # warns: its parent isn't a Pawn
+	_check(navigation.pawn == null, "on something that isn't a Pawn, it has no pawn")
+	_check(not navigation.move_to(Vector3(5, 0, 0)), "so move_to says there's no way")
+	_check(navigation.get_move_direction() == Vector3.ZERO and not navigation.is_following_path(), "and it never gives a direction")
+	holder.free()
+
+
+func _test_straight_line_with_no_nav() -> void:
+	var floor_body := _make_floor()
+	var pawn := _make_pawn(Vector3(0, 0.1, 0))
+	await _ticks(20)
+	var navigation := pawn.navigation_manager
+	_check(navigation != null and navigation.pawn == pawn, "a pawn gets a NavigationManager by default, which knows its pawn")
+	_check(navigation.get_move_direction() == Vector3.ZERO and not navigation.is_following_path() and not navigation.has_arrived(),
+			"with no path: no direction, not following, not arrived")
+
+	var arrivals := [0]
+	navigation.arrived.connect(func(): arrivals[0] += 1)
+	var ai: AIController = pawn.controller_manager.ai_controller
+	var target := Vector3(6.0, 0.0, 2.0)
+	_check(ai.move_to(target), "with no nav anywhere, AIController.move_to still works")
+	_check(navigation.get_path_corners().size() == 1, "as a straight line: one corner ahead, the point itself")
+	var ticks := await _walk_until_done(navigation, 600)
+	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
+	_check(navigation.has_arrived() and not navigation.is_following_path(), "it gets there (%d ticks)" % ticks)
+	_check(distance < navigation.arrival_distance + 0.4, "close to the point (%.2f m)" % distance)
+	_check(arrivals[0] == 1, "arrived is sent once (%d)" % arrivals[0])
+	await _ticks(30)
+	_check(pawn.velocity.length() < 0.05, "and the pawn stands still there")
+
+	# A direction from the manager is flat and length 1.
+	ai.move_to(Vector3(-4.0, 3.0, 0.0))
+	var direction := navigation.get_move_direction()
+	_check(is_zero_approx(direction.y) and is_equal_approx(direction.length(), 1.0), "its direction is flat and length 1")
+	_check(not navigation.has_arrived(), "a new move_to clears has_arrived")
+
+	# Telling the AI anything else drops the path.
+	ai.move_in_direction(Vector3(0, 0, 1))
+	_check(not navigation.is_following_path(), "AIController.move_in_direction drops the path")
+	ai.move_to(Vector3(-4.0, 0.0, 0.0))
+	ai.stop()
+	_check(not navigation.is_following_path(), "and so does stop()")
+	ai.move_to(Vector3(-4.0, 0.0, 0.0))
+	ai.release_all()
+	_check(not navigation.is_following_path(), "and release_all()")
+
+	# A player taking the pawn drops the AI's path, and letting go doesn't bring it back.
+	ai.move_to(Vector3(-8.0, 0.0, 0.0))
+	var player := StillController.new()
+	add_child(player)
+	pawn.set_has_player(true)
+	player.take_pawn(pawn)
+	_check(not navigation.is_following_path(), "a player taking the pawn drops the AI's path")
+	player.move_to(Vector3(-8.0, 0.0, 0.0))
+	_check(navigation.is_following_path(), "PlayerController.move_to uses the same manager")
+	player.take_pawn(null)
+	pawn.set_has_player(false)
+	_check(not navigation.is_following_path(), "letting go drops the player's path, so the AI doesn't walk the rest of it")
+	await _ticks(20)
+	_check(pawn.move_input.length() < 0.01, "and the AI stands where it was told to (still)")
+	player.free()
+	pawn.free()
+	floor_body.free()
+
+
+func _test_without_a_navigation_manager() -> void:
+	var floor_body := _make_floor()
+	var pawn: Pawn = load(PAWN_SCENE).instantiate()
+	pawn.skip_default_parts = [&"NavigationManager"]
+	pawn.position = Vector3(0, 0.1, 0)
+	add_child(pawn)
+	await _ticks(5)
+	_check(pawn.navigation_manager == null, "skip_default_parts can leave it out")
+	var ai: AIController = pawn.controller_manager.ai_controller
+	_check(not ai.move_to(Vector3(5, 0, 0)), "then AIController.move_to says no, with a warning")
+	await _ticks(10)
+	_check(pawn.move_input.length() < 0.01, "and the pawn stays put")
+	pawn.free()
+	floor_body.free()
+
+
+func _test_corner_by_corner() -> void:
+	var floor_body := _make_floor()
+	var pawn: Pawn = load(PAWN_SCENE).instantiate()
+	var own := GivenCornersNavigation.new()
+	own.name = "NavigationManager"
+	own.given = PackedVector3Array([Vector3(4, 0, 0), Vector3(4, 0, 4)])
+	pawn.add_child(own)
+	pawn.position = Vector3(0, 0.1, 0)
+	add_child(pawn)
+	await _ticks(10)
+	_check(pawn.navigation_manager == own, "a NavigationManager placed in the pawn's scene is used instead of the default")
+	var ai: AIController = pawn.controller_manager.ai_controller
+	var target := Vector3(0, 0, 4)
+	ai.move_to(target)
+	_check(own.get_path_corners().size() == 3, "a square path: three corners ahead")
+	var seen: Array[int] = [3]
+	var closest_to_corners: Array[float] = [INF, INF]
+	var ticks := 0
+	while own.is_following_path() and ticks < 900:
+		await get_tree().physics_frame
+		ticks += 1
+		var left := own.get_path_corners().size()
+		if left != seen[-1]:
+			seen.append(left)
+		for i in 2:
+			var flat := Vector2(pawn.position.x - own.given[i].x, pawn.position.z - own.given[i].z).length()
+			closest_to_corners[i] = minf(closest_to_corners[i], flat)
+	_check(seen == [3, 2, 1, 0], "it passes the corners one at a time, in order (%s)" % str(seen))
+	_check(closest_to_corners[0] < own.corner_reached_distance + 0.2 and closest_to_corners[1] < own.corner_reached_distance + 0.2,
+			"going round each corner, not cutting across (%.2f m, %.2f m)" % closest_to_corners)
+	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
+	_check(own.has_arrived() and distance < own.arrival_distance + 0.4, "and arrives at the end (%.2f m, %d ticks)" % [distance, ticks])
+	pawn.free()
+	floor_body.free()
+
+
+func _test_following_a_nav_path() -> void:
+	NavServer.configure({"worker_threads": 4})
+	var terrain := TerrainGenerator.new()
+	terrain.name = "PathTerrain"
+	terrain.chunk_size = 64.0
+	terrain.chunk_resolution = 11
+	terrain.chunk_radius = 2
+	var feeder := TerrainNavFeeder.new()
+	feeder.nav_hooks = NavHooks.new()
+	terrain.add_child(feeder)
+	add_child(terrain)
+	var interest := NavServer.add_interest(Vector3.ZERO, 80.0, 90.0, 1)
+	_settle()
+	await get_tree().physics_frame
+
+	var start := Vector3(5.0, terrain.height_at(5.0, 5.0) + 0.1, 5.0)
+	var pawn := _make_pawn(start)
+	await _ticks(10)
+	var navigation := pawn.navigation_manager
+	var ai: AIController = pawn.controller_manager.ai_controller
+	var target := Vector3(-40.0, 0.0, 30.0) # across a chunk border, over hills
+	target.y = terrain.height_at(target.x, target.z)
+	_check(ai.move_to(target), "with nav, move_to finds a path")
+	var corners_at_start := navigation.get_path_corners().size()
+	_check(corners_at_start >= 1, "with corners ahead (%d)" % corners_at_start)
+	# Rolling hills give a nearly straight path here; _test_corner_by_corner covers turning corners.
+	var ticks := 0
+	while navigation.is_following_path() and ticks < 900:
+		NavServer.tick(1.0 / 60.0)
+		await get_tree().physics_frame
+		ticks += 1
+	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
+	_check(navigation.has_arrived(), "it walks the path to the end (%d ticks)" % ticks)
+	_check(distance < 1.0, "and ends at the point (%.2f m away)" % distance)
+	_check(pawn.position.y > terrain.height_at(pawn.position.x, pawn.position.z) - 0.5, "on the ground")
+
+	# Somewhere nowhere near nav: no way there, and the path it had is dropped.
+	ai.move_to(Vector3(0.0, terrain.height_at(0.0, 0.0), 0.0))
+	_check(navigation.is_following_path(), "(walking again)")
+	_check(not ai.move_to(Vector3(5000.0, 0.0, 5000.0)), "a point nowhere near nav: move_to says no")
+	_check(not navigation.is_following_path(), "and the path it had is dropped, so it doesn't wander off on the old one")
+
+	pawn.free()
+	terrain.free()
+	NavServer.remove_interest(interest)
+	_settle()
+
+
+# --- Helpers ---
+
+
+func _walk_until_done(navigation: NavigationManager, limit: int) -> int:
+	var ticks := 0
+	while navigation.is_following_path() and ticks < limit:
+		await get_tree().physics_frame
+		ticks += 1
+	return ticks
+
+
+func _make_pawn(at: Vector3) -> Pawn:
+	var pawn: Pawn = load(PAWN_SCENE).instantiate()
+	pawn.position = at
+	add_child(pawn)
+	return pawn
+
+
+func _make_floor() -> StaticBody3D:
+	var body := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(200.0, 1.0, 200.0)
+	shape.shape = box
+	shape.position.y = -0.5
+	body.add_child(shape)
+	add_child(body)
+	return body
+
+
+func _settle() -> void:
+	for i in 4000:
+		NavServer.tick(1.0 / 60.0)
+		if i > 2 and NavServer.is_idle():
+			return
+		OS.delay_msec(2)
+	_check(false, "nav became idle within the time limit")
+
+
+func _ticks(count: int) -> void:
+	for i in count:
+		await get_tree().physics_frame
+
+
+func _check(passed: bool, what: String) -> void:
+	print("  %s %s" % ["ok  " if passed else "FAIL", what])
+	if not passed:
+		_failures += 1

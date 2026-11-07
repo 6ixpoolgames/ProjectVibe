@@ -34,7 +34,7 @@ enum LookMode {
 @export_range(0.01, 0.5, 0.01) var edge_zone := 0.125
 ## How fast the view turns at the very edge, in degrees per second, in SCREEN_EDGE mode.
 @export var edge_turn_speed := 150.0
-## On: clicking the ground walks there, along a nav path. A placeholder, until there's a navigation manager.
+## On: clicking the ground walks there, along a nav path. Claude 2026-11-08: the pawn's NavigationManager finds and follows it.
 @export var click_to_move := false
 ## Which key in the project's input map presses which named action. The left side is an action from InputActions, and the right is an
 ## action in Project Settings > Input Map. An action with no key here is never pressed by the player.
@@ -54,8 +54,6 @@ var look_pitch := 0.0
 var _latched_actions := 0
 var _zoom_steps := 0.0
 var _arm: CameraArm = null
-var _move_path := PackedVector3Array()
-var _move_path_index := 0
 
 
 func _ready() -> void:
@@ -123,10 +121,13 @@ func take_input_command(_tick: int) -> InputCommand:
 	# Godot's forward is -Z, and move input's Y is backward, the way Input.get_vector gives it.
 	command.move = Basis(Vector3.UP, look_yaw) * Vector3(wanted.x, 0.0, wanted.y)
 	# Keys take over from a click. A path left unfinished is dropped.
-	if wanted.length_squared() > 0.01:
-		_move_path = PackedVector3Array()
-	elif not _move_path.is_empty() and is_instance_valid(pawn):
-		command.move = _next_path_direction()
+	# Claude 2026-11-08: the path lives on the pawn's NavigationManager now, not here.
+	var navigation := _navigation()
+	if navigation:
+		if wanted.length_squared() > 0.01:
+			navigation.stop()
+		elif navigation.is_following_path():
+			command.move = navigation.get_move_direction()
 	command.look_yaw = look_yaw
 	command.look_pitch = look_pitch
 	# Held now, or pressed and let go again since the last tick.
@@ -138,35 +139,25 @@ func take_input_command(_tick: int) -> InputCommand:
 	return command
 
 
-## Walks the pawn to this place along a nav path, if there is one, and in a straight line if there's no nav here. False if
-## there's no pawn to move. Keys take over from it.
+## Walks the pawn to this place along a nav path, and in a straight line if there's no nav here. Keys take over from it.
+## Claude 2026-11-08: passes on to the pawn's NavigationManager. False if there's no pawn, it has no NavigationManager, or there's
+## no way there.
 func move_to(world_point: Vector3) -> bool:
-	if not is_instance_valid(pawn):
+	var navigation := _navigation()
+	if navigation == null:
 		return false
-	_move_path = PackedVector3Array([world_point])
-	_move_path_index = 0
-	if Engine.has_singleton(&"NavServer"):
-		var found: PackedVector3Array = Engine.get_singleton(&"NavServer").find_path_now(pawn.global_position, world_point, 0)
-		if found.size() >= 2:
-			_move_path = found
-			_move_path_index = 1
-	return true
+	return navigation.move_to(world_point)
 
 
 ## True while it's walking a path from move_to.
 func is_following_path() -> bool:
-	return not _move_path.is_empty()
+	var navigation := _navigation()
+	return navigation != null and navigation.is_following_path()
 
 
-func _next_path_direction() -> Vector3:
-	while _move_path_index < _move_path.size():
-		var to_corner := _move_path[_move_path_index] - pawn.global_position
-		to_corner.y = 0.0 # a path's height between corners isn't the ground, so only its direction counts
-		if to_corner.length() > 0.5:
-			return to_corner.normalized()
-		_move_path_index += 1
-	_move_path = PackedVector3Array()
-	return Vector3.ZERO
+# Claude 2026-11-08: the pawn's NavigationManager, or null. Replaces this controller's own path following.
+func _navigation() -> NavigationManager:
+	return pawn.navigation_manager if is_instance_valid(pawn) else null
 
 
 # --- Per rendered frame: never changes game state ---
@@ -206,7 +197,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif click_to_move and is_instance_valid(pawn) and InputMap.has_action(&"left_click") and event.is_action_pressed(&"left_click"):
 		var hit := world_cursor.query_now()
 		if not hit.is_empty():
-			move_to(hit["position"])
+			move_to(hit["position"]) # Claude 2026-11-08: a click with no way there now does nothing, rather than walking straight at it
 	elif event is InputEventMouseButton and event.pressed and is_instance_valid(pawn):
 		_capture_mouse()
 

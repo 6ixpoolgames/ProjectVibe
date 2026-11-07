@@ -97,7 +97,7 @@ LEVEL
 - **One answer:** `query_now()`, such as on a click.
 - **Watching:** `acquire(user, times_per_second)`, with the fastest rate winning across users. It stops when the last user calls `release`, or is freed, or leaves the scene.
 - **With no camera** it answers with nothing. A captured mouse points at the middle of the screen, and a free one where it is.
-- **Click-to-move** is a placeholder on `PlayerController` (`click_to_move`, `move_to`), walking a nav path until a key takes over. It moves to a navigation manager later.
+- **Click-to-move** is a placeholder on `PlayerController` (`click_to_move`, `move_to`), walking a nav path until a key takes over. It moves to a navigation manager later. *(Claude 2026-11-08: done. `PlayerController.move_to` passes on to the pawn's `NavigationManager`; see `PAWN_SPEC.md` section 7.)*
 
 ## 7. Keeping replays possible
 
