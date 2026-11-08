@@ -141,7 +141,7 @@ func forget_old(tick: int) -> PackedInt64Array:
 	while i >= 0: # backwards, so removing one doesn't move the ones still to check
 		var lasts := _certain_delay + _certain_fade.ends_after() if _certain[i] else _uncertain_delay + _uncertain_fade.ends_after()
 		var entity := entity_at(i)
-		if entity == null or tick - _last_seen[i] >= lasts:
+		if entity == null or _is_dead(entity) or tick - _last_seen[i] >= lasts:
 			if entity:
 				forgotten.append(_ids[i])
 			_remove(i)
@@ -224,7 +224,7 @@ func sight_check(observer: Node3D, eye_yaw: float, candidates: Array, tick: int)
 	var space: PhysicsDirectSpaceState3D = null
 	for candidate in candidates:
 		var target := candidate as Node3D
-		if target == null or target == observer or not target.is_inside_tree():
+		if target == null or target == observer or not target.is_inside_tree() or _is_dead(target):
 			continue
 		var ticks := clampi(ticks_since_checked(target, tick, _sense_interval), 0, _max_gain_ticks)
 		var target_position := target.global_position
@@ -247,6 +247,11 @@ func sight_check(observer: Node3D, eye_yaw: float, candidates: Array, tick: int)
 
 
 # --- Internals ---
+
+
+# Claude 2026-11-09, step 10: dead pawns aren't seen, and are forgotten.
+static func _is_dead(entity: Object) -> bool:
+	return entity.has_method(&"is_dead") and entity.is_dead()
 
 
 func _visibility(eye: Vector3, facing: Vector2, aim: Vector3, target: Node3D) -> float:

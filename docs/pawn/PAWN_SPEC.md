@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.13
+# Pawn Spec v0.14
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -23,6 +23,7 @@
 - v0.11 (2026-11-09): step 8b built (12). See 10.11 for what differs from the text above. Two changes reach back into the earlier sections: a floor only counts when its behaviour is available (10.8, step 3), and uncertain entries stay at full awareness for 5 s before fading (10.5). Later the same day: `spotted` was renamed `certain` (the owner's call), and the fade delays became their own settings on `AIMemory`.
 - v0.12 (2026-11-09): memory, sight checks, target scoring and the nearby-pawns query moved to C++, the owner's call, with every setting still on the GDScript nodes and a GDScript fallback (10.12). Behaviours tick every `tick_interval_ticks` (10.7).
 - v0.13 (2026-11-09): step 9 built: Dash, MeleeAttack, Knockback, ability interrupt priorities, lag compensation for melee, and the AI's Attack behaviour (8.6).
+- v0.14 (2026-11-09): step 10 built: Health as a stat that changes during play, damage, death as an ability, being hit as a state rule, threat from damage (8.7). The owner's call: no health manager.
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -429,11 +430,67 @@ Agreed with the owner before building; the decisions are in the step 9 notes bel
 - a goblin chasing, switching to Attack and landing the swing
 
 **Not built:**
-- damage, death, and being hit as a state rule (step 10)
+- damage, death, and being hit as a state rule (step 10) *(built, 8.7)*
 - invulnerability during a dash
 - cancel windows
 - combos
 - hit effects on clients
+
+### 8.7 Step 10: Health, damage and death (built 2026-11-09)
+
+The owner's call: there's no health manager. Health is a stat, and death is an ability.
+
+**Health:**
+- It's a `Stat` with the new `changes_during_play` setting. Its `value` (100) is its most, and its `current` goes from 0 up to that.
+- `current` starts full, is rollback state listed by `StatManager`, and reaches clients in snapshots.
+- Only the server changes it, with `StatManager.change_current(&"Health", amount)`. `Pawn.get_health()` reads it.
+
+**Damage:**
+- `HitInfo.damage`; MeleeAttack's `damage` is 20.
+- `Pawn.receive_hit()`, on the server, in this order:
+  1. The AI notes the hit (`AIContextComponent.note_hit`), which wakes a decision.
+  2. Memory adds threat to the attacker's entry: damage × `AIMemory.threat_per_damage` (0.01).
+  3. Health goes down. At 0 the pawn dies, and the rest is skipped.
+  4. Knockback starts.
+  5. `hit_received` goes out.
+- A dead pawn, and a client, ignore hits.
+
+**`DeathAbility`** (in the default `AbilityManager`):
+- **Started when Health reaches 0.**
+- **Locks out** movement, combat and utility, so Walk stops steering and the body slows to a stop.
+- **Interrupts:** priority 1000 cancels whatever was running, and threshold 1000 means nothing cancels it.
+- **It keeps itself running while Health is 0.** `Pawn.revive()` refills Health, and it ends on its next tick.
+- **While it runs, `Pawn.is_dead()` is true:**
+  - the pawn ignores its input and its AI, whose running behaviour stopped with the reason "died"
+  - other pawns' sight skips it, in both memory stores
+  - memories forget it on their next pass
+- **`Pawn.died(pawn, hit)`** goes out once.
+- **What the base doesn't decide:** the body stays where it falls. Removing it, a death animation or respawning are game rules.
+
+**Being hit, as a state rule** (10.6):
+- `AIAwarenessState` gained `hit_within_ticks` and `attacker` (`ANY`, `KNOWN`, `UNKNOWN`).
+  - Combat: hit within 120 ticks by an attacker in memory.
+  - Alert: hit within 300 ticks by one that isn't.
+- There's no damage sense and no memory entry for an unknown attacker: the context keeps `last_hit_from`. Look Toward and Investigate head there within `hit_memory_ticks` (300) when nothing in memory is half-noticed. Once the pawn looks, sight usually finds the attacker.
+
+**New:** the `status.dead` tag, added at the end of the list.
+
+**Tests:** `abilities/tests/fight_selftest` (22 checks):
+- Health and what rolls back
+- five hits kill, `died` goes out once, a hit on a dead pawn does nothing
+- a dead pawn ignores input and abilities
+- revive
+- a client ignores hits
+- an unknown attacker gives Alert, and Look Toward turns to see it
+- a known attacker gives Combat, and threat is added
+- a dead pawn is forgotten
+- a goblin fights an intruder to the death, then leaves Combat
+
+**Not built:**
+- other ways to take damage (a ranged attack, a hazard)
+- healing abilities
+- the base removing bodies
+- shields and resistances
 
 ---
 
@@ -443,7 +500,7 @@ Agreed with the owner before building; the decisions are in the step 9 notes bel
 - Abilities and behaviours read stats through the manager by name (`get_value(&"MoveSpeed", 5.0)`), and each read has a fallback, so a missing stat is never a crash.
 - The default part `scenes/pawn/parts/StatManager.tscn` holds the movement stats `GroundMovement` used to hold, at the same values: MoveSpeed 5, SprintSpeed 9, Acceleration 30, Deceleration 40, AirControl 0.3, TurnRate 720 and JumpVelocity 5.
 - **Later:**
-  - Stats that change during play (Health, Stamina) will be rollback state. The movement stats don't change yet, so none roll back today.
+  - Stats that change during play (Health, Stamina) will be rollback state. The movement stats don't change yet, so none roll back today. *(Claude 2026-11-09: built for Health, step 10: `changes_during_play`, 8.7.)*
   - Modifiers (buffs, debuffs).
 - Test: `stats/tests/stat_selftest`.
 
@@ -974,7 +1031,7 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
 
      Then a stress-test run with a few hundred AI pawns, to decide whether sensing and memory move to C++.
 9. **More abilities:** Dash, then MeleeAttack. **(Built 2026-11-09, see 8.6.)** Also Knockback, ability interrupt priorities, lag compensation for melee, and the AI's Attack behaviour.
-10. **Teams and the fight loop:** damage, death. Being hit becomes an Alert and Combat prerequisite (10.6), and damage adds threat for target selection (10.5).
+10. **Teams and the fight loop:** damage, death. Being hit becomes an Alert and Combat prerequisite (10.6), and damage adds threat for target selection (10.5). **(Built 2026-11-09, see 8.7.)**
 11. **Leftovers from t0:** pawns not stacking, saving terrain edits.
 12. **Playing by hand,** with real Host and Join windows.
 13. **t0 docs:** an overview, plus a reference for every class and function.
@@ -990,7 +1047,7 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
 | 3 | Combos: one ability with steps, or several abilities chained | One ability for now |
 | 4 | Facing: who turns the pawn | Walk faces the move direction; abilities may take over (aiming, attacks). *(2026-11-09: Dash faces its direction and MeleeAttack faces the look direction when they start, 8.6. Turning on the spot without an ability is still open.)* |
 | 5 | Teams | **Settled 2026-11-09:** a `team` number on the pawn, enough for sensing to tell friend from foe (10.4). Neutral pawns and factions later |
-| 6 | Death | Comes with the fight loop |
+| 6 | Death | **Settled 2026-11-09:** an ability, `DeathAbility`, started when the Health stat reaches 0 (8.7). The owner's call |
 | 7 | Animation: which part plays the Kenney Mini Characters' built-in animations (walk, sprint, jump, die, melee) | Probably a part that listens to the ability manager and `state_changed`. Not decided |
 | 8 | Whether `AIMemoryFact` is reused as is, or copied | **Settled 2026-11-09:** neither. Tier 0 uses no legacy code, and memory is packed arrays rather than an object per fact (10.5) |
 | 9 | Forced states: does a new force always replace the old one, or does each force carry a priority, so a weaker one can't override a stronger one? | **Settled 2026-11-09:** forces carry a priority, because behaviour interrupts need one (10.6, 10.7). Forced targets use the same rule (10.5) |

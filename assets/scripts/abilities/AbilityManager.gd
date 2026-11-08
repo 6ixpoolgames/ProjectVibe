@@ -122,6 +122,14 @@ func has_action(action: StringName) -> bool:
 	return false
 
 
+## Claude 2026-11-09: stops every running ability, which starts their cooldowns.
+func stop_all() -> void:
+	for ability in _abilities:
+		if ability.is_running_timed():
+			_finish(ability)
+	_recompute_locks()
+
+
 ## Stops whatever is running for this action, which starts its cooldown.
 func cancel(action: StringName) -> void:
 	for ability in _abilities:

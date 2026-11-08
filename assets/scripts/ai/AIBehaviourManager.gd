@@ -204,6 +204,11 @@ func tick_running(tick: int) -> void:
 	decide(tick)
 
 
+## Claude 2026-11-09: stops the running behaviour, if any; its exit() gets this reason. The pawn calls it when it dies.
+func stop_running(reason: String) -> void:
+	_stop_running(reason, _now())
+
+
 ## Moves a behaviour's persistence back along its fade by this many ticks, so it lasts longer. Negative: it ends sooner.
 func add_persistence_ticks(behaviour_name: StringName, ticks: float) -> void:
 	var behaviour := _find(behaviour_name)

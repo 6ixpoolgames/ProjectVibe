@@ -19,6 +19,11 @@
 using namespace godot;
 
 namespace {
+// Claude 2026-11-09, step 10: dead pawns aren't seen, and are forgotten. Pawn.is_dead() in GDScript.
+bool is_dead(Object *entity) {
+	return entity != nullptr && entity->has_method("is_dead") && bool(entity->call("is_dead"));
+}
+
 // FadeProfile.HALVINGS_UNTIL_NOTHING: 0.5^7 is about 0.8%, the first step below 1%.
 constexpr int64_t HALVINGS_UNTIL_NOTHING = 7;
 constexpr double EPSILON = 0.000001;
@@ -206,7 +211,7 @@ PackedInt64Array AIMemoryStore::forget_old(int64_t tick) {
 	for (int64_t i = int64_t(_ids.size()) - 1; i >= 0; --i) { // backwards, so removing one doesn't move the ones still to check
 		const Fade &fade = _certain[size_t(i)] ? _certain_fade : _uncertain;
 		Object *entity = instance_of(_ids[size_t(i)]);
-		if (entity == nullptr || tick - _last_seen[size_t(i)] >= fade.delay + ends_after(fade)) {
+		if (entity == nullptr || is_dead(entity) || tick - _last_seen[size_t(i)] >= fade.delay + ends_after(fade)) {
 			if (entity != nullptr) {
 				forgotten.push_back(int64_t(_ids[size_t(i)]));
 			}
@@ -315,7 +320,7 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 	const int64_t count = candidates.size();
 	for (int64_t c = 0; c < count; ++c) {
 		Node3D *target = Object::cast_to<Node3D>(candidates[c].operator Object *());
-		if (target == nullptr || target == observer || !target->is_inside_tree()) {
+		if (target == nullptr || target == observer || !target->is_inside_tree() || is_dead(target)) {
 			continue;
 		}
 		const int64_t ticks = std::clamp(ticks_since_checked(target, tick, _sense_interval), int64_t(0), _max_gain_ticks);

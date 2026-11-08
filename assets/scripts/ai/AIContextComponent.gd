@@ -147,6 +147,40 @@ func current_state_name() -> StringName:
 	return state.name if state else &""
 
 
+## Claude 2026-11-09, step 10: the last hit this pawn took, noted by Pawn.receive_hit on the server. State rules (AIAwarenessState)
+## and behaviours read it; the hit isn't turned into a memory entry, because there's no damage sense (the owner's call).
+var last_hit_tick := -1 # -1: never hit
+var last_attacker: Node3D = null
+var last_hit_from := Vector3.ZERO # where the attacker stood when it hit
+
+
+## Claude 2026-11-09: called by Pawn.receive_hit. Notes the hit and asks for a decision at once, so the pawn reacts this tick.
+func note_hit(hit: HitInfo) -> void:
+	last_hit_tick = hit.tick
+	last_attacker = hit.attacker
+	last_hit_from = hit.attacker.global_position if is_instance_valid(hit.attacker) else last_hit_from
+	request_decision()
+
+
+## Claude 2026-11-09: true if the pawn was hit within this many ticks.
+func was_hit_within(ticks: int) -> bool:
+	return last_hit_tick >= 0 and current_tick - last_hit_tick <= ticks
+
+
+## Claude 2026-11-09: true if the last attacker is in memory.
+func last_attacker_is_known() -> bool:
+	var remembered := memory
+	return remembered != null and is_instance_valid(last_attacker) and remembered.find(last_attacker) >= 0
+
+
+## Claude 2026-11-09: where an unknown attacker hit from, if that was within this many ticks; null otherwise. Look Toward and
+## Investigate head there when nothing else is half-noticed.
+func unknown_hit_point(within_ticks: int) -> Variant:
+	if was_hit_within(within_ticks) and not last_attacker_is_known():
+		return last_hit_from
+	return null
+
+
 ## True when there's a current target. Claude 2026-11-09: set by the target selector from step 8b.
 func has_target() -> bool:
 	return is_instance_valid(current_target)

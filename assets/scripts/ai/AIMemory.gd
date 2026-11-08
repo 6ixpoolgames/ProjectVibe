@@ -74,6 +74,10 @@ signal entity_forgotten(entity: Node3D)
 		continuous_sighting_ticks = value
 		_configure()
 
+## Claude 2026-11-09, step 10: threat added to an attacker's entry for each health point of damage it does to this pawn. Target
+## selection weighs threat, so whoever hurts the pawn most tends to become its target.
+@export var threat_per_damage := 0.01
+
 ## Claude 2026-11-09: off, every AIMemory made from now on uses the GDScript store even where the C++ library is available. For tests
 ## that compare the two, and for checking a suspected C++ problem. Read once, when each memory is made.
 static var use_native := true

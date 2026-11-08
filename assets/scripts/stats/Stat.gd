@@ -4,8 +4,11 @@
 ## The stat's name is this node's name, such as MoveSpeed or JumpVelocity. Abilities and behaviours ask the StatManager for a stat by
 ## that name, and use a fallback of their own if there's none, so a missing stat is never a crash.
 ##
-## For now a stat is a plain value. Later: modifiers (buffs and debuffs), and stats that change during play, such as Health, will
-## need to roll back.
+## For now a stat is a plain value. Later: modifiers (buffs and debuffs).
+##
+## Claude 2026-11-09, step 10: a stat that changes during play, such as Health, has changes_during_play on. Then it also has a
+## current value, from 0 up to its value, which starts full, rolls back (the StatManager lists it with the pawn's TickStateComponent)
+## and reaches clients in snapshots. Only the server changes it: StatManager.change_current().
 class_name Stat
 extends Node
 
@@ -18,6 +21,12 @@ extends Node
 
 ## The value right now. Starts as base_value.
 var value := 0.0
+
+## Claude 2026-11-09: on, this stat also has a current value that goes up and down during play, such as Health. value is then its
+## most.
+@export var changes_during_play := false
+## Claude 2026-11-09: with changes_during_play, how much there is now, from 0 to value. Starts full. Rolls back.
+var current := 0.0
 
 
 func _init() -> void:

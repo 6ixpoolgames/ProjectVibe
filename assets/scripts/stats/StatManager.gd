@@ -4,6 +4,8 @@
 ## How to use it:
 ##   pawn.stat_manager.get_value(&"MoveSpeed", 5.0)   # the value, or the fallback if there's no such stat
 ##   pawn.stat_manager.get_stat(&"Health")            # the Stat node, or null
+##   pawn.stat_manager.get_current(&"Health", 0.0)    # Claude 2026-11-09: how much a stat that changes during play has now
+##   pawn.stat_manager.change_current(&"Health", -20) # the server: adds, kept between 0 and the stat's value; returns the new amount
 ## A Stat's name is its node's name. Stats can be added and removed while running; the manager notices.
 ##
 ## What happens in odd cases (all checked in tests/stat_selftest.gd):
@@ -14,6 +16,7 @@ class_name StatManager
 extends Node
 
 var _stats := {} # StringName -> Stat
+var pawn: Pawn = null # Claude 2026-11-09
 
 
 func _init() -> void:
@@ -25,6 +28,41 @@ func _init() -> void:
 
 
 ## The stat's value right now, or fallback if this pawn has no such stat.
+func _enter_tree() -> void:
+	pawn = get_parent() as Pawn # Claude 2026-11-09
+
+
+# Claude 2026-11-09: stats that change during play start full, and their current values roll back. Before the first tick.
+func _ready() -> void:
+	var entries: Array[String] = []
+	for stat_name: StringName in _stats:
+		var stat: Stat = _stats[stat_name]
+		if stat.changes_during_play:
+			stat.current = stat.value
+			entries.append("%s:current" % String(pawn.get_path_to(stat)) if pawn else "")
+	if pawn and not entries.is_empty():
+		for child in pawn.get_children():
+			if child is TickStateComponent:
+				child.add_state_properties(entries)
+				break
+
+
+## Claude 2026-11-09: how much a stat that changes during play has now, or the fallback if there's no such stat.
+func get_current(stat_name: StringName, fallback := 0.0) -> float:
+	var stat: Stat = _stats.get(stat_name)
+	return stat.current if stat and stat.changes_during_play else fallback
+
+
+## Claude 2026-11-09: adds to a stat that changes during play (negative takes away), kept between 0 and its value. Returns the new
+## amount, or 0 if there's no such stat. Only the server should change it: clients get it in snapshots.
+func change_current(stat_name: StringName, amount: float) -> float:
+	var stat: Stat = _stats.get(stat_name)
+	if stat == null or not stat.changes_during_play:
+		return 0.0
+	stat.current = clampf(stat.current + amount, 0.0, stat.value)
+	return stat.current
+
+
 func get_value(stat_name: StringName, fallback := 0.0) -> float:
 	var stat: Stat = _stats.get(stat_name)
 	return stat.value if stat else fallback

@@ -4,4 +4,4 @@
 
 [resource]
 script = ExtResource("1_tagdecl")
-tags = Array[StringName]([&"movement.walk", &"movement.sprint", &"movement.jump", &"movement.dash", &"combat.melee", &"combat.ranged", &"combat.evade", &"utility.heal", &"utility.interact", &"combat.knockback"])
+tags = Array[StringName]([&"movement.walk", &"movement.sprint", &"movement.jump", &"movement.dash", &"combat.melee", &"combat.ranged", &"combat.evade", &"utility.heal", &"utility.interact", &"combat.knockback", &"status.dead"])

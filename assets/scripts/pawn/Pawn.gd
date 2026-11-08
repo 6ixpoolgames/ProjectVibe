@@ -46,8 +46,10 @@ extends CharacterBody3D
 
 ## Sent when a player takes this pawn, or lets it go.
 signal possession_changed(pawn: Pawn, has_player: bool)
-## Claude 2026-11-09: sent on the server when something hits this pawn, after its knockback starts. For effects; step 10 adds damage.
+## Claude 2026-11-09: sent on the server when something hits this pawn, after its knockback starts. For effects.
 signal hit_received(hit: HitInfo)
+## Claude 2026-11-09, step 10: sent once on the server when this pawn dies. hit is what did it, or null.
+signal died(pawn: Pawn, hit: HitInfo)
 
 ## Whether a player may take control of this pawn. Turn it off on pawns players should never control.
 # Claude 2026-11-07: on by default, the owner's choice. Off, people would be left wondering why their pawn doesn't work. Something
@@ -142,7 +144,9 @@ var ai_memory: AIMemory = null
 ## Claude 2026-11-09: picks the AI's current target from its memory. Null if the pawn has none.
 var ai_target_selector: AITargetSelector = null
 
+
 var _driver: Node = null
+var _death: DeathAbility = null # Claude 2026-11-09: found when ready
 var _entity: NetworkEntity = null
 var _has_player := false
 var _source: StreamingSource = null
@@ -219,6 +223,12 @@ func _ready() -> void:
 			ai_memory = child
 		elif child is AITargetSelector and ai_target_selector == null:
 			ai_target_selector = child
+
+	if ability_manager: # Claude 2026-11-09
+		for ability in ability_manager.get_abilities():
+			if ability is DeathAbility:
+				_death = ability
+				break
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
 		_visual.top_level = true # it's placed by _process, between ticks, not by the body
@@ -343,12 +353,46 @@ func is_authority() -> bool:
 	return _entity == null or _entity.role == NetworkEntity.Role.AUTHORITY
 
 
-## Claude 2026-11-09: something hit this pawn. Called on the server by the attacking ability, such as MeleeAttack (step 9). Starts
-## this pawn's own knockback, through its own AbilityManager, so the push moves it like its other movement and rolls back. Step 10
-## adds damage, threat in memory, and the "being hit" state rule.
-func receive_hit(hit: HitInfo) -> void:
-	if not is_authority() or hit == null:
+## Claude 2026-11-09, step 10: true while this pawn's Death ability runs: from Health reaching 0 until revive(). A pawn with no Death
+## ability never dies.
+func is_dead() -> bool:
+	return _death != null and _death.is_running_timed()
+
+
+## Claude 2026-11-09: how much Health this pawn has now, from its Health stat. A pawn with no such stat reports 0 and can't be hurt.
+func get_health() -> float:
+	return stat_manager.get_current(&"Health", 0.0) if stat_manager else 0.0
+
+
+## Claude 2026-11-09: brings a dead pawn back with full Health, on the server. Its Death ability ends on its next tick.
+func revive() -> void:
+	if not is_authority() or stat_manager == null:
 		return
+	var stat := stat_manager.get_stat(&"Health")
+	if stat and stat.changes_during_play:
+		stat.current = stat.value
+
+
+## Claude 2026-11-09: something hit this pawn. Called on the server by the attacking ability, such as MeleeAttack (step 9). In
+## order (step 10 added the first three):
+##   1. Its AI notes the hit (AIContextComponent.note_hit), for the "being hit" state rules, and wakes a decision.
+##   2. Its memory adds threat to the attacker's entry, if it has one: damage × AIMemory.threat_per_damage.
+##   3. It takes the damage from its Health stat. At 0 its Death ability starts, its AI stops, died goes out, and nothing below
+##      happens.
+##   4. Its own knockback starts, through its own AbilityManager, so the push moves it like its other movement and rolls back.
+##   5. hit_received goes out.
+func receive_hit(hit: HitInfo) -> void:
+	if not is_authority() or hit == null or is_dead():
+		return
+	if ai_context:
+		ai_context.note_hit(hit)
+	if ai_memory and is_instance_valid(hit.attacker):
+		ai_memory.add_threat(hit.attacker, hit.damage * ai_memory.threat_per_damage)
+	if stat_manager and hit.damage > 0 and stat_manager.has_stat(&"Health"):
+		if stat_manager.change_current(&"Health", -hit.damage) <= 0.0:
+			_die(hit)
+			hit_received.emit(hit)
+			return
 	if ability_manager and hit.knockback_speed > 0.0 and hit.knockback_ticks > 0:
 		for ability in ability_manager.get_abilities():
 			if ability is KnockbackAbility:
@@ -377,6 +421,9 @@ static func count_pawns_not_on_team(own_team: int) -> int:
 ## Claude 2026-11-07: the input phase. Asks the controller in charge for this tick's input, where this pawn's input is decided here.
 ## A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
 func _tick_input(_dt: float, tick: int) -> void:
+	if is_dead():
+		_clear_input() # Claude 2026-11-09: a dead pawn ignores its controllers and its AI
+		return
 	_tick_ai(tick) # Claude 2026-11-09: step 1 of pawn spec section 4, before the controller in charge is asked for input
 	if controller_manager == null or not _decides_own_input():
 		return
@@ -566,6 +613,20 @@ func _find_view(node: Node) -> VirtualCamera:
 		if found:
 			return found
 	return null
+
+
+# Claude 2026-11-09, step 10: Health reached 0. The Death ability locks out everything, which stops the pawn steering; the AI's
+# running behaviour stops and its hands let go.
+func _die(hit: HitInfo) -> void:
+	if _death == null or not ability_manager:
+		return
+	ability_manager.start_ability(_death)
+	if ai_behaviour_manager:
+		ai_behaviour_manager.stop_running("died")
+	var hands := controller_manager.ai_controller as AIController if controller_manager else null
+	if hands:
+		hands.release_all()
+	died.emit(self, hit)
 
 
 # Claude 2026-11-09: keeps the shared team counts in step with pawns entering and leaving the tree, and changing team.

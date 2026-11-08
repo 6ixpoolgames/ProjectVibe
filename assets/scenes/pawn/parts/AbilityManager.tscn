@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/abilities/AbilityManager.gd" id="1_manager"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/WalkAbility.gd" id="2_walk"]
@@ -7,6 +7,7 @@
 [ext_resource type="Script" path="res://assets/scripts/abilities/DashAbility.gd" id="5_dash"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/MeleeAttackAbility.gd" id="6_melee"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/KnockbackAbility.gd" id="7_knockback"]
+[ext_resource type="Script" path="res://assets/scripts/abilities/DeathAbility.gd" id="8_death"]
 
 [node name="AbilityManager" type="Node"]
 script = ExtResource("1_manager")
@@ -28,3 +29,6 @@ script = ExtResource("6_melee")
 
 [node name="Knockback" type="Node" parent="."]
 script = ExtResource("7_knockback")
+
+[node name="Death" type="Node" parent="."]
+script = ExtResource("8_death")

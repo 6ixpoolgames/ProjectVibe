@@ -12,7 +12,8 @@
 ##     carries view_ticks_behind, and the server limits it to what's believable. The AI's swings use 0.
 ##   - Each pawn is hit at most once per swing. Its own team is skipped unless hits_own_team is on.
 ##   - Each hit calls the target's Pawn.receive_hit() with a HitInfo, which starts the target's own knockback, and sends hit_landed
-##     here, for local effects such as sounds. Step 10 adds damage.
+##     here, for local effects such as sounds. Claude 2026-11-09: each hit also takes damage health points (step 10); dead pawns
+##     aren't hit.
 ## A rollback replay never hits again: hits are decided once, on the authority, outside replays.
 class_name MeleeAttackAbility
 extends AbilityBase
@@ -32,6 +33,8 @@ signal hit_landed(hit: HitInfo)
 @export_range(0.05, 10.0, 0.05, "or_greater") var hit_radius := 0.8
 ## The hit sphere's height above the pawn's feet, in metres: about the chest.
 @export var hit_height := 1.0
+## Claude 2026-11-09, step 10: health points each hit takes.
+@export_range(0, 10000, 1, "or_greater") var damage := 20
 ## How fast a hit pushes the target, in metres per second at the start.
 @export var knockback_speed := 6.0
 ## How many ticks a hit's push lasts.
@@ -101,7 +104,7 @@ func _check_hits(tick: int) -> void:
 	else:
 		targets = _plain_sphere(centre)
 	for target in targets:
-		if target == pawn or _hit_this_swing.has(target.get_instance_id()):
+		if target == pawn or target.is_dead() or _hit_this_swing.has(target.get_instance_id()):
 			continue
 		if target.team == pawn.team and not hits_own_team:
 			continue
@@ -114,6 +117,7 @@ func _check_hits(tick: int) -> void:
 		var away := target.global_position - pawn.global_position
 		away.y = 0.0
 		hit.direction = away.normalized() if away.length_squared() > 0.0001 else Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
+		hit.damage = damage
 		hit.knockback_speed = knockback_speed
 		hit.knockback_ticks = knockback_ticks
 		target.receive_hit(hit)
