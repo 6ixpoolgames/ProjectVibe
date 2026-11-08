@@ -1,0 +1,107 @@
+## Written by Claude (claude-opus-5-5), 2026-11-09: what whole pawns cost per tick at crowd sizes, to find the next bottleneck after
+## the AI (the owner asked for pawn physics diagnostics). Not a pass/fail test: it prints tables.
+##
+## Three scenes, each at 100, 200, 400 and 800 pawns on flat ground, one tick per physics frame:
+##   standing   the default parts, nobody moving: the floor cost of a pawn existing
+##   wandering  one team, every pawn wandering: movement and collisions, with sensing skipped (no other team)
+##   fighting   two teams mixed together, every pawn with the t0 behaviours: chasing, attacking, knockback, deaths
+## For each it prints TickDriver's phases per tick (input, which includes the AI; simulate, which is abilities, gravity and
+## move_and_slide; record, which saves rollback state), and Godot's whole physics frame, which adds the physics engine's own step.
+## (Claude 2026-11-09: the physics frame column is a median and is noisier than the others; see _measure.)
+##
+## Run from the project folder (takes a few minutes):
+##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/pawn_stress.tscn"
+## Add "-- --sizes=100,200" to choose the crowd sizes.
+extends Node
+
+const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
+const WARM_UP_TICKS := 60
+const MEASURED_TICKS := 240
+const AI_PARTS: Array[StringName] = [&"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
+
+var _sizes: Array[int] = [100, 200, 400, 800]
+
+
+func _ready() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--sizes="):
+			_sizes.clear()
+			for part in arg.trim_prefix("--sizes=").split(","):
+				_sizes.append(int(part))
+	var floor_body := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(1000, 1, 1000)
+	shape.shape = box
+	shape.position.y = -0.5
+	floor_body.add_child(shape)
+	add_child(floor_body)
+	print("--- Pawn stress: ms per tick (memory store: %s) ---" % ("C++" if ClassDB.class_exists(&"AIMemoryStore") else "GDScript"))
+	for scene in ["standing", "wandering", "fighting"]:
+		print("")
+		print("%s:" % scene)
+		print("pawns    input+AI   simulate     record   all phases   physics frame   per pawn (frame)")
+		for count in _sizes:
+			var row := await _measure(scene, count)
+			print("%5d   %8.2f   %8.2f   %8.2f   %10.2f   %13.2f   %16.4f" % [count, row.input, row.simulate, row.record, row.phases, row.frame, row.frame / count])
+	print("")
+	print("--- done ---")
+	get_tree().quit(0)
+
+
+func _measure(scene: String, count: int) -> Dictionary:
+	var per_row := ceili(sqrt(count))
+	var pawns: Array[Pawn] = []
+	for i in count:
+		var pawn: Pawn = load(PAWN_SCENE).instantiate()
+		pawn.name = "P%d" % i
+		pawn.position = Vector3((i % per_row) * 4.0 - per_row * 2.0, 0.1, (i / per_row) * 4.0 - per_row * 2.0)
+		match scene:
+			"standing":
+				pawn.skip_default_parts = AI_PARTS.duplicate()
+			"wandering":
+				pawn.team = 0
+				pawn.add_child(_behaviours([["Wander", AIWanderBehaviour]]))
+			"fighting":
+				pawn.team = i % 2
+				pawn.add_child(_behaviours([["Wander", AIWanderBehaviour], ["LookToward", AILookTowardBehaviour], ["Investigate", AIInvestigateBehaviour], ["Search", AISearchBehaviour], ["Chase", AIChaseBehaviour], ["Attack", AIAttackBehaviour]]))
+		add_child(pawn)
+		pawns.append(pawn)
+	for i in WARM_UP_TICKS:
+		await get_tree().physics_frame
+	TickDriver.reset_profile()
+	TickDriver.profile_enabled = true
+	# Claude 2026-11-09: the median, not the average. Godot's monitor adds up every physics step taken in one rendered frame, so
+	# when a frame runs late it reads double or more, and an average swung from 18 to 37 ms between two identical runs. The median
+	# ignores those frames. The TickDriver phase columns don't have this problem and are the numbers to trust.
+	var frame_times: Array[float] = []
+	for i in MEASURED_TICKS:
+		await get_tree().physics_frame
+		# GDScript note: TIME_PHYSICS_PROCESS is how long the last physics frame took, in seconds: our ticks and Godot's physics step.
+		frame_times.append(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS))
+	frame_times.sort()
+	TickDriver.profile_enabled = false
+	var profile: Dictionary = TickDriver.profile
+	var ticks: float = maxf(profile["ticks"], 1)
+	var row := {
+		"input": profile["input"] / 1000.0 / ticks,
+		"simulate": profile["simulate"] / 1000.0 / ticks,
+		"record": profile["record"] / 1000.0 / ticks,
+		"phases": (profile["before_tick"] + profile["input"] + profile["capture"] + profile["simulate"] + profile["record"] + profile["after_tick"]) / 1000.0 / ticks,
+		"frame": frame_times[frame_times.size() / 2] * 1000.0, # Claude 2026-11-09: the median, see above
+	}
+	for pawn in pawns:
+		pawn.free()
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	return row
+
+
+func _behaviours(list: Array) -> AIBehaviourManager:
+	var manager := AIBehaviourManager.new()
+	manager.name = "AIBehaviourManager"
+	for pair in list:
+		var behaviour: AIBehaviourBase = pair[1].new()
+		behaviour.name = pair[0]
+		manager.add_child(behaviour)
+	return manager

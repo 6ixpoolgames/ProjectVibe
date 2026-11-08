@@ -40,7 +40,7 @@ enum LookMode {
 ## action in Project Settings > Input Map. An action with no key here is never pressed by the player.
 # Claude 2026-11-07: new, replacing the fixed reads of move_jump and move_sprint.
 # GDScript note: Dictionary[StringName, StringName] is a typed dictionary, so the inspector only accepts names on both sides.
-# Claude 2026-11-09: dash (Left Alt) and primary (F, a melee swing) added, step 9.
+# Claude 2026-11-09: dash (Left Alt) and primary (the left mouse button, a melee swing) added, step 9.
 @export var action_keys: Dictionary[StringName, StringName] = {&"jump": &"move_jump", &"sprint": &"move_sprint", &"dash": &"move_dash", &"primary": &"attack_primary"}
 
 ## The real camera. It holds where it is while there's no view to follow.

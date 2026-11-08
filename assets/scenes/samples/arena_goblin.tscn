@@ -1,0 +1,40 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/pawn.tscn" id="1_pawn"]
+[ext_resource type="Script" path="res://assets/scripts/ai/AIBehaviourManager.gd" id="2_manager"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIWanderBehaviour.gd" id="3_wander"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AILookTowardBehaviour.gd" id="4_look"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIInvestigateBehaviour.gd" id="5_investigate"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AISearchBehaviour.gd" id="6_search"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIChaseBehaviour.gd" id="7_chase"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIAttackBehaviour.gd" id="8_attack"]
+
+[sub_resource type="StandardMaterial3D" id="Goblin_material"]
+albedo_color = Color(0.7, 0.22, 0.18, 1)
+
+[node name="ArenaGoblin" instance=ExtResource("1_pawn")]
+team = 1
+
+[node name="Body" parent="Visual/Model" index="0"]
+surface_material_override/0 = SubResource("Goblin_material")
+
+[node name="AIBehaviourManager" type="Node" parent="."]
+script = ExtResource("2_manager")
+
+[node name="Wander" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("3_wander")
+
+[node name="LookToward" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("4_look")
+
+[node name="Investigate" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("5_investigate")
+
+[node name="Search" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("6_search")
+
+[node name="Chase" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("7_chase")
+
+[node name="Attack" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("8_attack")
