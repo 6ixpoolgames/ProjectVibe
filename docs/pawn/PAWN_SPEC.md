@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.7
+# Pawn Spec v0.9
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -10,6 +10,15 @@
 - v0.5 (2026-11-07): steps 5 and 6 built: `StatManager` and `Stat` (9), `AbilityBase`, `AbilityManager`, Walk, Sprint and Jump (8.3 to 8.5). `GroundMovement` and `MovementModule` are gone. Ability state rolls back through `TickStateComponent.add_state_properties()`.
 - v0.6 (2026-11-08): step 7, first half: `NavigationManager` built (7), with click-to-move and `AIController.move_to` on it (6.2, 6.3). Nav phase 3 (links) is split off as step 7b, still to agree (12).
 - v0.7 (2026-11-08): step 7b built: links, placed and found automatically. `NavigationManager` crosses them and the controller presses the link's action (7).
+- v0.8 (2026-11-09): the AI agreed, from the owner's decisions of 2026-11-08 and 2026-11-09 (10, rewritten). Sensing with awareness and fading memory for basic stealth; states Idle, Alert and Combat picked by priority; behaviours scored with ranges, seeded jitter and persistence; `AIContextComponent`; a `while_possessed` setting; GDScript first, with C++ candidates flagged. Step 8 split into 8a and 8b (12). Open questions 5 and 8 settled, new ones added (13).
+- v0.9 (2026-11-09): the owner's review of v0.8. Approved, with these changes:
+  - Every fade is a tunable `FadeProfile`, with rules for tunable thresholds and lightweight data (10.2).
+  - Memory fades without a background loop (10.5).
+  - Target selection by priority, with taunts (10.5).
+  - Alert and Combat share one tunable `AIAwarenessState` (10.6).
+  - Forced states carry a priority (open question 9 settled).
+  - Interrupt thresholds and jitter per behaviour (10.7).
+  - Why AI pawns are already rolled back for hit checks while their decisions aren't (10.2), and why the behaviour manager isn't planned for C++ (10.1).
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -48,6 +57,15 @@ How to read this:
 | Each behaviour node holds its own checks, score and action. The behaviour manager only judges between them. It filters with cheap checks first and stops early using each behaviour's highest possible score | 2026-11-07 |
 | Everything that changes game state runs on `TickDriver`. Visuals, camera, UI, audio and debug readouts stay on normal frames | 2026-11-07 |
 | Order: finish the AI and add more abilities before fight testing | 2026-11-07 |
+| Basic stealth in t0: awareness that fills from sight and drains over time, with a last known position (10.4, 10.5) | 2026-11-08 |
+| `AIStateManager` picks the state by priority, from each state's prerequisites; the behaviour manager uses that state to filter behaviours. t0 states: Idle, Alert, Combat. Search is a behaviour, not a state (10.6) | 2026-11-09 |
+| Behaviours are scored with seeded jitter per score (default 0), optional random ties, ranges for pruning, and persistence that holds then halves, all in ticks (10.7, 10.8) | 2026-11-09 |
+| The AI treats players and NPCs the same. What it does while a player has the pawn is a setting, per game (10.2, 10.3) | 2026-11-09 |
+| No hearing and no damage sense in t0. Being hit is a state prerequisite (10.4, 10.6) | 2026-11-09 |
+| GDScript first; parts that probably want C++ later are flagged (10.1) | 2026-11-09 |
+| Fades, rates and thresholds are tunable without code, and painless to recode: `FadeProfile` resources and settings-driven states (10.2, 10.6) | 2026-11-09 |
+| Behaviours can lock out interrupts below a priority threshold, or entirely. Forced states carry a priority (10.6, 10.7) | 2026-11-09 |
+| Target selection by priority, where taunts act (10.5). Jitter is set per behaviour and can change at runtime (10.7) | 2026-11-09 |
 
 ---
 
@@ -66,12 +84,15 @@ Pawn (CharacterBody3D)                    (built, tier -1; gets reworked)
 │  └─ Jump                                 action
 ├─ StatManager                             holds stat nodes
 │  └─ stat nodes (Health, MoveSpeed, ...)
-├─ AISensingManager                        sees and hears; writes to memory
-├─ AIMemory                                facts that fade
-├─ AIStateManager                          picks the current state
-│  └─ state nodes (Idle, Alerted, ...)
-└─ AIBehaviourManager                      picks and runs a behaviour
-   └─ behaviour nodes (Wander, Chase, ...)
+├─ AISensingManager                        runs its senses; writes what they find to memory
+│  └─ SightSense
+├─ AIMemory                                one entry per sensed entity; awareness that fades
+├─ AITargetSelector                        picks the current target from memory, by priority
+├─ AIStateManager                          picks the current state by priority
+│  └─ state nodes (Idle, Alert, Combat)
+├─ AIBehaviourManager                      picks and runs a behaviour the state allows
+│  └─ behaviour nodes (Wander, Look Toward, Investigate, Search, Chase)
+└─ AIContextComponent                      shared data and settings for the AI; makes no decisions
 
 PlayerController (outside the pawn)        (built) reads devices; joins a pawn through PossessionCoordinator
 ```
@@ -98,7 +119,7 @@ The pawn registers with `TickDriver` once. Each tick it calls its managers in a 
 
 | Step | Who | What | Where |
 |---|---|---|---|
-| 1 | AI parts | On decision ticks only: sensing updates memory, states are checked, the behaviour manager decides. The running behaviour ticks and calls `AIController` | Server only. Paused while a player has the pawn, except sensing and memory |
+| 1 | AI parts | Sensing and memory on their turns. On decision ticks, the state is checked and the behaviour manager decides. Every tick, the running behaviour ticks and calls `AIController` (10.9) | Server only. While a player has the pawn, `while_possessed` says what runs (10.3) |
 | 2 | `ControllerManager` | Asks the controller in charge for this tick's input command | Everywhere the pawn is simulated |
 | 3 | `AbilityManager` | Turns presses into ability starts, ticks running abilities, and runs the locomotion ability, which writes horizontal velocity | Same |
 | 4 | `Pawn` | Adds gravity and calls `move_and_slide` | Same |
@@ -188,6 +209,7 @@ func hold(action: StringName, held := true) -> void  # built
 func release_all() -> void                           # built: back to idle
 func move_to(point: Vector3) -> bool                 # built 2026-11-08: passes on to NavigationManager; false if there's no way there
 ```
+- **From step 8a, while it isn't in charge** (a player has the pawn and `while_possessed` is `FULL`, 10.3): it keeps the last order it was given (a target point, held actions, a look target) without touching `NavigationManager`, so it can't overwrite the player's path. When it takes charge again, it carries out that order.
 
 ### 6.4 `ControllerManager` (built 2026-11-07, step 3)
 - Picks whose input counts. The rule is fixed and simple:
@@ -196,7 +218,7 @@ func move_to(point: Vector3) -> bool                 # built 2026-11-08: passes 
   - Nobody has the pawn: the AI controller is in charge.
 - The pawn asks `take_input_command()` once per tick, in its input phase. It only asks where its input is decided: offline, on its owner's machine, or on the server for a pawn nobody owns.
 - `PlayerController` attaches and detaches itself when it takes or lets go of a pawn.
-- When the player lets go, the AI controller takes over at once. From step 8, the behaviour manager also re-decides at once.
+- When the player lets go, the AI controller takes over at once. *(Claude 2026-11-09: the AI needs nothing special for this. Its next state check works from memory as usual, 10.3.)*
 - `controller_changed` is sent once at the end of the frame with the final answer, so listeners never see "nobody" halfway through a possession.
 - Test: `controllers/tests/controller_manager_selftest`.
 
@@ -334,86 +356,309 @@ Test: `abilities/tests/ability_selftest`.
 
 ---
 
-## 10. AI
+## 10. AI (agreed 2026-11-09, build step 8)
+
+*Claude 2026-11-09: rewritten from the owner's decisions of 2026-11-08 and 2026-11-09. The earlier sketch had a "mood" layer, a damage sense and sensing that paused with decisions; all three changed.*
+
+**The idea in one paragraph.** The AI is a brain and a pair of hands. The brain is the parts below: it notices things (sensing), remembers them (memory), works out the situation (states) and picks what to do about it (behaviours). The hands are `AIController` (6.3, built), which turns the brain's calls into the same input command a player's keys make. Abilities can't tell the two apart, so the AI can't cheat past cooldowns, and possession needs nothing extra.
 
 ### 10.1 The parts
 
-| Part | Job | Starts from |
+| Part | Job | C++ later? |
 |---|---|---|
-| `AISensingManager` | Sees (cone, line of sight) and hears; writes what it finds into memory | Legacy `AISensingComponent` |
-| `AIMemory` | Facts that fade over time | Legacy `AIMemoryComponent`, which is close to reusable |
-| `AIStateManager` + state nodes | Picks the current state by priority | Legacy `AIStateManagerComponent` |
-| `AIBehaviourManager` + behaviour nodes | Picks and runs one behaviour | Legacy `AIBehaviourManagerComponent` |
-| `AIDecisionContext` | Shared data for one pawn's AI: references, current state, scratch space, shared inputs (10.3) | Legacy `AIContext`, minus intent |
-| `AIController` | The AI's hands (6.3) | New |
+| `AISensingManager` | Runs its senses on their turn, gives them one shared list of nearby pawns, and writes what they find into memory. Each sense is a child node; t0 has only `SightSense` | **Yes, the first candidate** (10.4) |
+| `AIMemory` | One entry per sensed entity: where it was last seen, when, how aware of it the pawn is, whether it was ever fully spotted, and its threat. Entries fade and are forgotten | Maybe, with sensing. Fading costs nothing in the background (10.5) |
+| `AITargetSelector` | Picks the current target from memory by priority: awareness, distance, threat, and a bonus for keeping the current one. Taunts force it (10.5) | No |
+| `AIStateManager` + state nodes | Checks each state's prerequisites in priority order and moves the pawn to the first one that fits. t0 states: Idle, Alert, Combat | No |
+| `AIBehaviourManager` + behaviour nodes | Keeps the behaviours the current state allows, scores them, and runs the winner | Not planned (below) |
+| `AIContextComponent` | Shared data and settings for this pawn's AI: references to the other parts, the current state, the shared inputs (10.8), the random seed, and `while_possessed` (10.3). It makes no decisions | No |
+| `AIController` | The hands (6.3) **(built)** | No |
 
-These are new copies beside the legacy files, typed to the new `Pawn`. The legacy files stay as they are.
+**GDScript first.** Everything is written in GDScript. Parts marked "C++ later" are laid out so a port is mechanical: plain data in packed arrays, one array per field, rather than an object per fact. They move to C++ if the stress tests say so, behind the same functions, the way `NetCodec` was done with `NetPackets` kept as the fallback.
 
-What changes from the legacy AI:
+**Why the behaviour manager isn't planned for C++.** *(Claude 2026-11-09, from the owner's review.)* Its cost is mostly the designers' `score()` and `is_available()` functions, which are GDScript, and a C++ manager would still have to call them. Its own work is small: a few behaviours per pawn, a few times a second, gates and ranges that are just comparisons, and one hash per score. If a stress test ever shows it matters, that loop (gates, ranges, jitter, ties) can move to C++ while `score()` stays in GDScript. Until then, the cheap ways to keep it fast are the lightweight-data rules in 10.2, especially creating nothing per decision.
+
+**Class names.** Legacy files still declare global class names such as `InvestigateBehaviour`, `AlertedState` and `AIContext`, and two scripts can't share one. So the new classes are `FadeProfile`, `AITargetSelector`, `AIStateBase`, `AIBehaviourBase`, `AISenseBase`, `SightSense`, `AIIdleState`, `AIAwarenessState`, `AIWanderBehaviour`, `AILookTowardBehaviour`, `AIInvestigateBehaviour`, `AISearchBehaviour` and `AIChaseBehaviour`, none of which exist in legacy. Their nodes keep plain names (Idle, Wander), which are what `allowed_states`, the fixed order and the jitter hash read.
+
+**From the legacy AI.** The ideas come from the legacy `AISensingComponent`, `AIMemoryComponent`, `AIStateManagerComponent`, `AIBehaviourManagerComponent` and `AIContext`, but the code is new, with new names, typed to the new `Pawn`. Tier 0 uses no legacy code (open question 8). What changes:
 - **No AI core node.** The initializer assembles the parts.
-- **No `GlobalAICoordinator` autoload.** Decisions are spread across ticks inside the AI parts.
+- **No `GlobalAICoordinator` autoload.** Work is spread across ticks inside the parts (10.9).
 - **No timers or `_physics_process`.** Everything runs on the pawn's tick, server only.
+- **No intent.** Behaviours call the hands, which make inputs.
 
-### 10.2 While a player has the pawn
-- Sensing and memory keep running, so when the player lets go, the AI already knows what's going on.
-- States and behaviour decisions pause.
-- When `AIActivationManager` switches the pawn off, all of it stops with the pawn **(built)**.
+### 10.2 Rules that hold everywhere
 
-### 10.3 How the behaviour manager decides
-It works through cheap checks first, so code on each behaviour node only runs for the few that survive.
+- **Server only.** Clients never run the AI. They see the movement it makes, like any pawn's.
+- **The brain isn't rolled back; the pawn it drives is.** *(Claude 2026-11-09, from the owner's review.)* An AI pawn is a normal pawn: its position, velocity and ability timers are rollback state (`TickStateComponent`), and `LagCompensation.hitscan` and `melee` rewind it for hit checks like any other networked entity **(built)**. So hit detection against AI is already fair. What isn't rolled back is the decision-making: memory, states, behaviours. The server is the only one deciding, so there's nothing to correct. A game would only need the brain rolled back if clients predicted the AI's decisions, or for lockstep networking, as some RTS games use. Neither is t0 (section 14).
+- **Players and NPCs are treated the same.** Nothing in sensing, memory, states or behaviours asks who controls a pawn, only its team and what it's doing. A player possessing a goblin is on the goblins' team, so other goblins treat them as a friend.
+- **Ticks, not seconds.** Every AI duration is a number of ticks. Seconds in brackets below assume the project's 60 ticks a second.
+- **A fixed order.** States are sorted by priority, then name, and behaviours by name, when they register. Never by the order they were added, so the same scene always gives the same choices. A state or behaviour whose name starts with `@` (an automatic name from adding a node in code without naming it, which can differ between runs) gets a warning, because names also feed the random numbers (10.8).
+- **Tunable without code.** *(Claude 2026-11-09, from the owner's review.)* Every number in this section is an inspector setting: rates, ranges, angles, thresholds, intervals, weights. Prerequisites and scores read their thresholds from settings, never from numbers in code. When something does need code, it's one small function to override (below).
+- **Every fade is a `FadeProfile`.** A small `Resource` that says how a value fades over ticks, edited in the inspector and shareable as a `.tres` file, so one change tunes every behaviour that uses it. One profile, one curve, so designers never have to combine two kinds of fade in their heads:
 
-**Done by the manager, with no behaviour code running:**
-1. **State filter.** Each behaviour lists the states it's allowed in. The manager keeps a ready list per state, built when behaviours register, so this step costs nothing.
-2. **Cheap flags.** These are designer-set properties the manager can read directly:
-   - Cooldown not over yet.
-   - Needs a target, and there isn't one.
-   - The action it presses can't start right now.
-3. **Best possible score first.** Each behaviour declares `max_score`, the highest score it can ever return, counting its randomness and commitment bonus. The survivors are checked from highest `max_score` down.
+  | `mode` | Settings | The value, starting from full |
+  |---|---|---|
+  | `LINEAR` | `hold_ticks`, `fade_ticks` | full for `hold_ticks`, then falls in a straight line to nothing over `fade_ticks` |
+  | `HALF_LIFE` | `hold_ticks`, `half_life_ticks` | full for `hold_ticks`, then halves every `half_life_ticks`. Counts as nothing below 1%, which is after 7 halvings |
+  | `CURVE` | `hold_ticks`, `fade_ticks`, `curve` (a Godot `Curve`) | full for `hold_ticks`, then follows the drawn curve over `fade_ticks` |
 
-**Done by the behaviour, survivors only, best first:**
+  ```gdscript
+  class_name FadeProfile extends Resource
+  func value_at(ticks: int) -> float     # 1.0 at the start, falling to 0.0
+  func ends_after() -> int               # ticks until it's nothing, so ranges and memory know when it's gone
+  ```
+  A fade no mode covers is a script that extends `FadeProfile` and overrides those two functions. Every user picks it up with no other change. Used by memory and target selection (10.5) and by persistence (10.7).
+- **Lightweight data.** *(Claude 2026-11-09.)* In GDScript, every plain variable takes the same space however small the number, so small types don't save anything. What does is not creating objects while running. So:
+  - Anything there are many of (memory entries, candidates) is a packed array, one per field.
+  - Ticks are whole numbers.
+  - A decision creates no arrays or dictionaries; it reuses ones it keeps.
+  - A C++ port can then use small types (16-bit awareness, for example) behind the same functions.
+- **Mistakes are made obvious.** In debug builds, a warning names the node when:
+  - a behaviour's `score()` is above its `max_score` or below its `min_score`;
+  - a state has no behaviour that could run in it;
+  - no state's prerequisites hold (Idle always should);
+  - `force_state` is called on a client.
 
-4. `is_available(context)`: the behaviour's own yes or no.
-5. `score(context)`: reads the shared inputs.
-6. **Stop early.** As soon as the next behaviour's `max_score` can't beat the best score found so far, stop. The rest aren't asked.
+### 10.3 While a player has the pawn
 
-**Then the switch rules** decide whether the winner replaces the running behaviour (legacy, kept):
-- Minimum run time.
-- Interrupt policy.
-- Commitment bonus.
-- New: don't switch while the ability manager is busy, unless the interrupt policy allows it.
+`AIContextComponent.while_possessed` says what the AI does while a player has the pawn. Which is right depends on the game:
 
-**Shared inputs:**
-- Values many behaviours need: nearest enemy, distance to it, own health fraction, enemies nearby.
-- They're worked out once per decision, the first time something asks, and kept on the context until the next decision. So if no behaviour asks, they cost nothing.
+| Setting | What runs | For |
+|---|---|---|
+| `OFF` | Nothing | Games where possessed pawns don't need to know what happened |
+| `MEMORY_ONLY` (default) | Sensing and memory. States and behaviours pause | An "Agent Smith" mechanic: when the player lets go, the AI already knows what's around |
+| `FULL` | Everything | The AI keeps deciding. Its hands keep the last order without acting on it (6.3) |
 
-**Mistakes made obvious:** in debug builds, a `score()` above its `max_score` gives a warning naming the behaviour, because it would break step 6.
+- **Letting go needs no special code.** The next state check works from memory, as it always does.
+- When `AIActivationManager` switches the pawn off, all of the AI stops with it **(built)**.
 
-**Decision timing:**
-- A few times a second, spread across ticks so a crowd doesn't all decide on the same tick.
-- Also immediately when memory gets a fact a behaviour is watching (legacy `wake_on_facts`, kept).
+### 10.4 Sensing
 
-**Later:** scoring from response curves set in the inspector, with no code. The shared inputs in this section are the inputs those curves will read.
+- `AISensingManager` makes a **full pass** every `sense_interval_ticks` (10, a sixth of a second), on its turn (10.9).
+  - One shared query finds the pawns of other teams within the longest sense range, and each sense gets that list.
+  - Senses are child nodes that extend `AISenseBase`. t0 has only `SightSense`.
+- **Cheap refresh between passes.** Every `refresh_interval_ticks` (5), `SightSense` casts one line-of-sight ray to each entity already in memory, and a hit counts as seeing it. This keeps a tracked target fresh without a full pass.
+- **Teams.** Each pawn has a `team` number (open question 5). Sensing only puts pawns of other teams into memory. Neutral pawns and factions come later.
+- **No hearing in t0** (section 14). **No damage sense:** being hit is a state prerequisite instead (10.6), because the attacker is known.
+- **C++ later:** the pass grows with pawns × candidates (queries, angle and distance checks, rays, gain maths). It's the same kind of batch over plain data as `NavServer`, and the natural place for background threads later (14).
 
-### 10.4 Behaviour node (sketch)
+**How sight fills awareness.** For each other-team pawn in the list, on each pass or refresh:
+
+```
+if there's no line of sight: no gain
+gain = fill_rate × ticks_since_last_check × distance_factor × angle_factor × target.detectability
+```
+
+| Factor | Rule | Starting value |
+|---|---|---|
+| `fill_rate` | Awareness a fully visible target adds per tick | 1/30 (full in 30 ticks, half a second) |
+| `ticks_since_last_check` | Ticks since this target was last checked. It makes the checking rate not matter: a target checked every 10 ticks gets 10 ticks' worth | |
+| `distance_factor` | 1 inside `near_range`, falling in a straight line to 0 at `sight_range`. Measured at the check | 8 m and 25 m |
+| `angle_factor` | 1 inside the central cone, `periphery_multiplier` in the periphery, nothing outside it | central cone 90° wide, periphery out to 160°, multiplier 0.3 |
+| `target.detectability` | One number the target exposes. 1 is normal, lower is harder to detect, 0 is invisible | 1.0 |
+
+So someone close and in front is spotted in half a second, which is basically instant. Someone 20 m away at the edge of the periphery takes several seconds.
+
+**Detectability belongs to each game.** The pawn exposes `detectability`, defaulting to 1.0, and nothing in the base changes it. How it's worked out is a game rule, so it goes in an optional `GameMode` module that sets it every so often. A cloak giving +10 stealth might be a fixed percentage in one game and a DC roll in another. Light level and similar modifiers fold into the same number, so sensing never calls game code for each pair of pawns. t0 has no such module, so every pawn is at 1.0.
+
+### 10.5 Memory
+
+Each entry holds:
+- the entity (its id)
+- `last_known_position`, updated whenever it's seen
+- `last_seen_tick`
+- `awareness_when_seen`: awareness at the last sighting, from 0 to 1
+- `spotted`: set the first time awareness reaches 1, cleared when the entry is forgotten
+- `threat`: added to by game mechanics, 0 in t0 (target selection, below)
+
+Kept as packed arrays, one per field, so a port to C++ is mechanical (10.1).
+
+**How awareness moves:**
+- Sight adds gain (10.4), up to 1.
+- Seeing an entity that's already spotted refills it to 1 at once. A guard who knows you're there doesn't need to notice you again.
+- **While it isn't seen, it fades by a `FadeProfile`** (10.2): awareness now = `awareness_when_seen × profile.value_at(ticks since seen)`. There are two settings on `AIMemory`:
+  - `fade` for entries not spotted: default `LINEAR`, no hold, `fade_ticks` 300 (5 s)
+  - `spotted_fade`: default `LINEAR`, no hold, `fade_ticks` 1200 (20 s)
+
+  With the default straight line, an entry is forgotten that many ticks after it was last seen, whatever its awareness was. That's easy to predict. A designer wanting a slow start and a quick end draws a `CURVE` instead, with no code.
+- **Nothing drains in the background.** Awareness is worked out when something asks, from two stored numbers and the current tick, the same trick as persistence. An entry is forgotten once its profile's `ends_after()` has passed. So there's no loop over every entry each tick, which also takes memory draining off the C++ list.
+
+**What memory answers:** for any entry, its awareness now, whether it's spotted, ticks since seen, and last known position. Behaviours read these through the context's shared inputs (10.8).
+
+#### Target selection
+
+*(Claude 2026-11-09, from the owner's review: target selection needs priorities, and that's where mechanics like taunts act.)*
+
+`AITargetSelector`, a part beside memory, picks the pawn's **current target** from memory, and puts it on the context for behaviours (`needs_target`) and state prerequisites. It's the standard threat or aggro table from MMOs, kept small.
+
+- **Each candidate gets a target priority**, worked out at each decision:
+  ```
+  priority = awareness_weight × awareness
+           + distance_weight × (1 − distance / sight_range)
+           + threat_weight × threat
+           + current_target_bonus × current_target_fade   (only for the current target)
+  ```
+  - Every weight is a setting. The defaults are awareness 1.0, distance 0.5 and threat 1.0.
+  - Only entries at awareness 0.3 or more are candidates, also a setting, so a barely noticed shape isn't a target.
+- **The current target bonus** stops the pawn flicking between two close targets. It's a `FadeProfile` (10.2) counted from when the target was picked. The default is +0.3, held for 60 ticks, then fading over 60.
+- **Threat** is a number per entry that game mechanics add to, such as damage dealt to this pawn (step 10) or healing done near it. It's 0 in t0, and the hook is there.
+- **Forcing a target (taunts):** `target_selector.force_target(entity, hold_ticks, priority, reason)`. It overrides the choice for `hold_ticks`. A new force replaces the current one only if its priority is equal or higher, the same rule as forced states (10.6). On a client it does nothing and warns.
+- **Ties** go to the nearer entity, then the lower id.
+- `target_changed(old_target, new_target, reason)` is sent once, for the debug readout and animation.
+- **Recoding:** a game with its own targeting rules extends `AITargetSelector` and overrides `target_priority(entry)`. Everything else stays.
+
+**Memory wakes a decision early** (10.9) when a new entity is added or an entry becomes spotted, so a pawn reacts the moment it spots someone rather than at its next decision tick.
+
+### 10.6 States
+
+**How a state is picked.** At each decision (10.9), the state manager checks each state's prerequisites in priority order and moves the pawn to the first state whose prerequisites hold. That's all: no separate rules for staying, and no minimum time in a state. It works the same way `AbilityManager` picks a locomotion ability. Smoothness comes from memory, which rises and fades steadily. If testing shows a pawn flickering between states, the fix goes in that state's prerequisites, not in a new mechanism.
+
+```gdscript
+class_name AIStateBase extends Node
+@export var priority := 0                         # higher is checked first
+func prerequisites_met(context) -> bool          # the state's own rule
+func enter(context) -> void
+func exit(context) -> void
+```
+
+**One tunable state script for awareness.** *(Claude 2026-11-09, from the owner's review: thresholds must be tunable.)* Alert and Combat aren't two scripts. They're two nodes running the same `AIAwarenessState`, with different settings. A designer makes a new awareness state, say a jumpy "Startled" one, by adding a node and filling in the settings, with no code:
+
+| Setting | Meaning |
+|---|---|
+| `looks_at` | `CURRENT_TARGET` (10.5) or `ANY_ENTRY` in memory |
+| `min_awareness` | awareness it needs, 0 to 1 |
+| `requires_spotted` | needs the spotted flag |
+| `max_ticks_since_seen` | seen within this many ticks; -1 = any |
+| *step 10:* `hit_within_ticks` | or was hit within this many ticks; -1 = off |
+| *step 10:* `attacker` | for the hit: `KNOWN` (in memory), `UNKNOWN` or `ANY` |
+
+A state with rules no settings cover is a script that extends `AIStateBase` and overrides `prerequisites_met`.
+
+**The t0 states**, highest priority first:
+
+| State | Script | Priority | Settings | Behaviours |
+|---|---|---|---|---|
+| **Combat** | `AIAwarenessState` | 20 | current target, spotted, seen within 120 ticks (2 s). *Step 10:* or hit within N ticks by a known attacker | Chase (Attack comes with MeleeAttack, step 9) |
+| **Alert** | `AIAwarenessState` | 10 | any entry at awareness 0.3 or more. *Step 10:* or hit within N ticks by an unknown attacker | Look Toward, Investigate, Search |
+| **Idle** | `AIIdleState` | 0 | none: always fits | Wander |
+
+**How it plays:**
+1. A goblin glimpses the player at the edge of its vision. Awareness creeps to 0.3: **Alert**. Look Toward and Investigate score highest, so it turns and walks over.
+2. The player stays visible. Awareness reaches 1 and the entry is spotted: **Combat**. It chases.
+3. The player ducks behind a rock. After 2 s unseen, Combat's prerequisites fail: back to **Alert**. The spotted entry fades slowly, so the goblin stays Alert for a while, and Search scores highest because the entry is spotted but stale. It runs to the last known position and searches.
+4. If the player peeks out, awareness refills to 1 at once: **Combat**.
+5. If the player stays hidden for about 20 s, the entry is forgotten: **Idle**. It wanders off.
+
+**Changing state:**
+- `state_changed(old_state, new_state, reason)` is sent once, for the debug readout and later for animation.
+- The running behaviour stops if the new state doesn't allow it, unless its interrupt threshold holds it (10.7). Its `exit` gets the reason "state changed", and the behaviour manager decides at once.
+
+**Forcing a state:**
+1. **One way in:** `state_manager.force_state(&"Combat", hold_ticks, priority, reason)`. The normal check is skipped for `hold_ticks`, or until `release_forced_state()`, and then it takes over again.
+2. **Forces carry a priority** *(Claude 2026-11-09: settles open question 9, because behaviour interrupts need one too, 10.7)*. A new force replaces the current one only if its priority is equal or higher. A weaker one is refused, and a debug build logs both, so a designer sees when two scripts are fighting.
+3. **At once.** A forced state takes effect on the same tick, without waiting for a decision tick.
+4. **Server only.** On a client, `force_state` does nothing and warns.
+
+**Later:** a state's priority fading down to a minimum while it's active (section 14). It would reuse the persistence countdown (10.7).
+
+### 10.7 Behaviours
 
 ```gdscript
 class_name AIBehaviourBase extends Node
+enum Status { RUNNING, SUCCEEDED, FAILED }
+
 @export var allowed_states: Array[StringName] = []  # empty = any state
-@export var base_score := 0.5
-@export var max_score := 0.5           # the highest score() can return, counting randomness and commitment
+@export var max_score := 0.5           # the highest score() can return
+@export var min_score := -INF          # optional: the lowest score() can return. Unset, it can't help pruning (10.8)
 @export var needs_target := false
 @export var presses_action: StringName = &""   # if set, skipped while that action can't start
-@export var cooldown := 0.0
-@export var min_run_time := 0.0
-@export var interrupt_policy := InterruptPolicy.NEVER_UNTIL_DONE
-@export var wake_on_facts: Array[StringName] = []
+@export var cooldown_ticks := 0        # hard gate: can't be chosen this long after it ends
+@export var min_run_ticks := 0         # once chosen, normal decisions can't replace it for this long
+@export var interrupt_threshold := 0   # while it runs, only events of this priority or higher can replace it (below)
+@export var cannot_be_interrupted := false   # runs until it finishes, whatever happens
+@export var score_jitter := -1.0       # ± random offset on its score; -1 = the manager's default_score_jitter
+@export var persistence := 0.0         # signed, added to the score. + tends to keep it chosen, - prefers others
+@export var persistence_fade: FadeProfile   # how persistence fades (10.2); empty = no persistence
 
 func is_available(context) -> bool
 func score(context) -> float
 func enter(context) -> void
-func tick(context, delta: float) -> Status    # calls context.controller.move_to / press / ...
+func tick(context) -> Status          # calls context.controller.move_to / press / hold / look_at_point
 func exit(context, reason) -> void
 ```
+
+**Persistence.**
+- When a behaviour is chosen, its persistence starts: the score gets `persistence × persistence_fade.value_at(ticks along)`. The profile (10.2) sets the shape. The default suggestion is `HALF_LIFE` with a hold, but a straight line or a drawn curve works just as well. Once the profile's `ends_after()` has passed it adds nothing, so its range (10.8) has an end.
+- Positive `persistence` makes the AI tend to stick with a choice. Negative makes it prefer something else for a while, which gives variety.
+- **Only three numbers are stored:** how far along the profile it was at the last change, the tick of that change, and a speed (1.0 normally). The amount is worked out at decision time, so nothing runs every tick and replays are exact.
+- **Modifiers** change those numbers, through the behaviour manager (section 3, rule 2):
+  - `add_persistence_ticks(&"Chase", 60)`, say after landing a hit, moves it back along the profile.
+  - `set_persistence_speed(&"Chase", 0.5)` makes it fade at half speed from where it is now.
+- Persistence flags are tabled.
+
+**Interrupts.** *(Claude 2026-11-09, from the owner's review: a behaviour must be able to lock out others, except high-priority forces, or everything.)* Each event that could replace the running behaviour has a priority:
+
+| Event | Priority |
+|---|---|
+| A normal decision | 0 |
+| A state change | the new state's priority |
+| A forced state | the force's priority (10.6) |
+
+While a behaviour runs, an event replaces it only if all three hold:
+- it isn't `cannot_be_interrupted`;
+- the event's priority is `interrupt_threshold` or higher;
+- for a normal decision, `min_run_ticks` has passed.
+
+So, with the t0 states:
+- The default (threshold 0, no minimum run time) can be replaced by anything.
+- **Threshold 15** ignores normal decisions and a drop back to Alert (10), but gives way to Combat (20) and to strong forces. Good for a heavy attack that shouldn't be cancelled by a passing thought.
+- **`cannot_be_interrupted`** runs until it returns SUCCEEDED or FAILED, even if its state no longer allows it. Use it sparingly. Only the pawn being removed or the AI being switched off (10.3) still ends it, and `exit` gets that reason.
+
+Code can change a behaviour's threshold while it's running, through `behaviour_manager.set_interrupt_threshold(&"Chase", 25)`, such as a berserk effect.
+
+**Hard gates stay separate.** `cooldown_ticks` and `min_run_ticks` are promises a designer can rely on, not tendencies. They're checked before any scoring, and they read the same start and end ticks as persistence. The minimum run time also stops a behaviour with negative persistence from swapping back and forth every decision.
+
+**Jitter per behaviour.** *(Claude 2026-11-09, from the owner's review.)* Each behaviour has its own `score_jitter`. -1, the default, uses the manager's `default_score_jitter`, which is 0. Code can change it while running, with `behaviour_manager.set_score_jitter(&"Wander", 0.2)`, for a confused or drunk effect, say.
+
+**t0 behaviours:**
+
+| Behaviour | States | What it does | Step |
+|---|---|---|---|
+| Wander | Idle | Walks to a random reachable point nearby with `move_to`, pauses, and picks another | 8a |
+| Look Toward | Alert | Stops and faces the last known position of the most aware entry | 8b |
+| Investigate | Alert | Walks, without sprinting, to the last known position. Scores highest for an entry that isn't spotted | 8b |
+| Search | Alert | Runs to the last known position, then walks to a few random points around it. Scores highest for an entry that's spotted but stale | 8b |
+| Chase | Combat | Follows the current target (10.5), holding `&"sprint"`, finding a new path every so often rather than every tick | 8b |
+
+Because they all move with `move_to`, they cross nav links (jumps and drops) for free (section 7).
+
+### 10.8 How the behaviour manager picks
+
+At each decision:
+0. **Interrupts:** if the running behaviour can't be replaced by this decision's event (10.7: its interrupt threshold, `cannot_be_interrupted`, or its minimum run time), it keeps running and the decision stops here.
+1. **Valid behaviours:** the ones the current state allows.
+2. **Hard gates,** with no behaviour code run: drop any on cooldown, needing a target when there's none, or whose `presses_action` can't start.
+3. **Ranges.** Each remaining behaviour's result can only land in a range:
+   - ceiling: `max_score + persistence now + its score_jitter`
+   - floor: `min_score + persistence now − its score_jitter`, when `min_score` is set
+
+   A behaviour whose ceiling is below the highest floor can't win, so it's dropped. That's 2n comparisons, still with no behaviour code run.
+4. **Scoring,** highest ceiling first. Each survivor's `is_available` and `score` run, and its persistence and jitter are added. As soon as the next ceiling can't beat the best result so far, the rest are skipped. A behaviour that doesn't set `min_score` gets its floor from this step, from real scores, so a behaviour scoring below its max never prunes one that would have won.
+5. **Jitter:** each behaviour gets its own offset at each decision, within ± its own `score_jitter` (10.7). The offset is a hash of (seed, pawn id, tick, behaviour name), so it doesn't depend on order or on which behaviours were skipped. The seed comes from the world seed, so a replay makes the same choices.
+6. **Ties:** results within a small margin are a tie. With `randomize_ties` (default off) one is picked by the same hash. Otherwise the fixed order decides.
+7. **Switching:** if the winner isn't the running behaviour, the old one's `exit` runs, then the new one's `enter`, and its persistence countdown starts.
+
+Between decisions, only the running behaviour's `tick` runs, once per tick. When it returns SUCCEEDED or FAILED, the manager decides at once.
+
+**Shared inputs** on the context: values many behaviours read, such as the current target, its distance, whether it's spotted and how stale it is, and the most aware entry. Later, own health fraction and the last hit. They're worked out the first time something asks during a decision and kept until the next one, so if nothing asks, they cost nothing.
+
+### 10.9 Timing and load
+
+- **Decisions:** every `decision_interval_ticks` (15, four a second). In t0, each pawn is offset by its id, so a crowd doesn't all decide on the same tick. Whether a central queue with a budget replaces this is open question 11.
+- **Woken early,** on the same tick: a new entity in memory, an entry becoming spotted, a state change, a forced state, or the running behaviour finishing.
+- **Sensing:** a full pass every 10 ticks and the cheap refresh every 5 (10.4), offset by pawn id the same way.
+- **The running behaviour** ticks every tick. It should stay cheap: Chase finds a new path every so often, not every tick.
+- **Later:** background threads for sensing and pathfinding (section 14). The main thread copies plain data, a worker does the work, and the result is used the next tick. The AI runs only on the server and is never rolled back, so a tick of delay costs nothing.
 
 ---
 
@@ -445,9 +690,26 @@ func exit(context, reason) -> void
 6. **`AbilityManager`, `AbilityBase`, Walk, Jump and Sprint**, replacing `GroundMovement`. The existing pawn, possession and network tests must still pass. **(Built 2026-11-07.)**
 7. **`NavigationManager`**, with click-to-move moved onto it. **(Built 2026-11-08 as 7a.)**
    - **7b, nav phase 3 (links):** **(Built 2026-11-08.)** Both kinds, the owner's choice: placed (`NavLink` markers through `NavLinkModule`) and found automatically at ledges and gaps. `NavigationManager` presses each link's action. Nav spec section 19.1.
-8. **AI:** `AIController`, sensing, memory, states, behaviours, the context with shared inputs, and the decision steps. Wander and Chase behaviours to prove it.
+8. **AI** (section 10, agreed 2026-11-09), in two parts:
+   - **8a, deciding:**
+     - `FadeProfile`
+     - `AIContextComponent` with `while_possessed`
+     - `AIStateManager` with priority picking and forced states with priorities
+     - `AIBehaviourManager` with interrupts, gates, ranges, jitter per behaviour, ties, the fixed order and persistence
+     - `AIController` keeping its last order while not in charge
+
+     An Idle state and Wander prove it, with no senses. Decisions offset by pawn id.
+   - **8b, noticing:**
+     - the `team` number and `detectability` on the pawn
+     - `AISensingManager` with `SightSense` and the cheap refresh
+     - `AIMemory` with awareness that fades by profile
+     - `AITargetSelector` with `force_target`
+     - Alert and Combat as `AIAwarenessState` nodes
+     - Look Toward, Investigate, Search and Chase
+
+     Then a stress-test run with a few hundred AI pawns, to decide whether sensing and memory move to C++.
 9. **More abilities:** Dash, then MeleeAttack.
-10. **Teams and the fight loop:** damage, death.
+10. **Teams and the fight loop:** damage, death. Being hit becomes an Alert and Combat prerequisite (10.6), and damage adds threat for target selection (10.5).
 11. **Leftovers from t0:** pawns not stacking, saving terrain edits.
 12. **Playing by hand,** with real Host and Join windows.
 13. **t0 docs:** an overview, plus a reference for every class and function.
@@ -462,10 +724,17 @@ func exit(context, reason) -> void
 | 2 | Where the action list is declared | A resource, like the tag declarations |
 | 3 | Combos: one ability with steps, or several abilities chained | One ability for now |
 | 4 | Facing: who turns the pawn | Walk faces the move direction; abilities may take over (aiming, attacks) |
-| 5 | Teams | A team number on the pawn, enough for sensing to tell friend from foe |
+| 5 | Teams | **Settled 2026-11-09:** a `team` number on the pawn, enough for sensing to tell friend from foe (10.4). Neutral pawns and factions later |
 | 6 | Death | Comes with the fight loop |
-| 7 | Animation: which part plays the Kenney Mini Characters' built-in animations (walk, sprint, jump, die, melee) | Probably a part that listens to the ability manager. Not decided |
-| 8 | Whether `AIMemoryFact` is reused as is, or copied | It doesn't depend on the old pawn, so reuse is possible |
+| 7 | Animation: which part plays the Kenney Mini Characters' built-in animations (walk, sprint, jump, die, melee) | Probably a part that listens to the ability manager and `state_changed`. Not decided |
+| 8 | Whether `AIMemoryFact` is reused as is, or copied | **Settled 2026-11-09:** neither. Tier 0 uses no legacy code, and memory is packed arrays rather than an object per fact (10.5) |
+| 9 | Forced states: does a new force always replace the old one, or does each force carry a priority, so a weaker one can't override a stronger one? | **Settled 2026-11-09:** forces carry a priority, because behaviour interrupts need one (10.6, 10.7). Forced targets use the same rule (10.5) |
+| 10 | A debug readout above each AI pawn: state, awareness bars, the top three scores | Claude suggests it early in step 8a, as a debug module outside shipping code: utility AI is hard to tune blind. Not agreed yet |
+| 11 | Spreading AI work: each pawn offset by its id, or a central queue that runs at most N decisions and sensing passes per tick (an `AIUpdateScheduler` `GameMode` module), so a struggling host reacts later instead of dropping frames | t0 starts with offsets. Claude suggests the queue, with a count budget rather than milliseconds, so results match across machines. Not agreed yet |
+| 12 | A cap on sensing: at most N rays per pass, nearest first | Claude suggests it with the 8b stress test. Not agreed yet |
+| 13 | A switch that turns stealth off for a game (awareness fills at once), so autobattler fights start straight away | The default numbers already make close sight nearly instant. Not agreed yet |
+| 14 | `personality_jitter`: a fixed score offset per pawn and behaviour, so one goblin is a bit more aggressive than another | Claude's suggestion; could wait. Not agreed yet |
+| 15 | The target's value is called `detectability` (1 = normal, lower = harder to detect) rather than "stealth factor" | Claude's suggestion, so the name says what it does. Easy to rename |
 
 ---
 
@@ -477,3 +746,11 @@ func exit(context, reason) -> void
 - Stat modifiers.
 - Anti-cheat.
 - `TerrainBodyLifter` folding into the terrain edit manager (t1).
+- **AI, from the 2026-11-09 decisions:**
+  - Hearing and sounds. Sounds with unknown sources would set AIs investigating friendly or neutral AIs once factions exist, and need too many safeguards for t0. Noted for deeper simulation later.
+  - Persistence flags (such as counting from when a behaviour ends, clearing on a state change, flipping on failure).
+  - A state's priority fading down to a minimum while it's active.
+  - Running sensing, pathfinding and other heavy work on background cores.
+  - Partial cover (several rays per target) and a ramp that speeds up awareness under a steady gaze.
+  - The AI behaving differently because a player has the pawn, built only if a game needs it.
+  - Rolling back the AI's decisions, for games where clients predict the AI or use lockstep networking (10.2). The pawns it drives already roll back.
