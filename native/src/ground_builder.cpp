@@ -1,6 +1,6 @@
 // Written by Claude (claude-opus-5-5), 2026-11-03: ground tile build pipeline, input spans -> Detour tile (spec 8.2).
-// Step numbers match the spec. Steps 3 (obstacle carving), 8 (auto links), 10 (portals) and
-// 11 (cached spans) belong to later phases and are marked as such below.
+// Step numbers match the spec. Steps 3 (obstacle carving), 10 (portals) and 11 (cached spans) belong to later phases and are
+// marked as such below. Claude 2026-11-08: step 8 (links, placed and found automatically) is built, for phase 3.
 #include "ground_builder.h"
 
 #include "providers.h"
@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <unordered_set>
 #include <vector>
 
 namespace navcore {
@@ -156,6 +157,165 @@ bool compute_clearance_tiers(rcContext &ctx, const NavConfig &cfg, rcCompactHeig
 	return true;
 }
 
+// Claude 2026-11-08: step 8, auto links. Finds where a pawn could drop off a ledge or jump a gap, from the compact heightfield
+// this build already made, so it costs nothing extra to gather. The same idea as Unreal's and Unity's link generators.
+//
+// For each walkable span inside the tile (not the borrowed border, which belongs to the neighbour), in each of the 4 directions:
+//   1. Walk outward through the strip that erosion and the ledge filter made unwalkable. If the walkable area just continues,
+//      this span isn't at an edge. If the spans stop (no connection), there's an edge there.
+//   2. Look further out, column by column, up to link_reach_cells, for a walkable span to land on: no higher than
+//      link_jump_height above, and no lower than link_drop_height below.
+//   3. Check the columns in between hold nothing solid above the higher end, where the jump has to pass.
+//   4. A landing lower down and within link_drop_reach is a DROP: walk off. Anything else is a JUMP.
+// Links are one way. Each side of a gap finds its own, so a level gap ends up with one each way, and a ledge gets a drop down
+// from the top and a jump up from the bottom if it's low enough.
+//
+// Only spans the compact heightfield keeps are seen. Steep slopes and walls aren't in it, so a column with no spans counts as
+// open air. That can let a link through over a steep obstacle; walls with a flat top are seen and do block.
+void find_auto_links(const rcCompactHeightfield &chf, const NavConfig &cfg, std::vector<LinkDef> &out) {
+	constexpr size_t MAX_AUTO_LINKS_PER_TILE = 256;
+	const int w = chf.width;
+	const int h = chf.height;
+	const int border = cfg.border_cells();
+	const float cs = chf.cs;
+	const float ch = chf.ch;
+	const float climb = cfg.agent_max_climb;
+	const int max_inward = cfg.link_rim_cells(); // erosion, plus the ledge filter's cell, plus a little slack
+	const int reach = cfg.link_reach_cells();
+	const int drop_reach = int(std::ceil(cfg.link_drop_reach / cs)) + cfg.link_rim_cells(); // edge to edge, plus the landing's rim
+	const int spacing = std::max(1, int(std::lround(cfg.link_spacing / cs)));
+	const float clearance = 1.0f; // room needed above the higher end, for the arc of a jump
+
+	auto top_of = [&](const rcCompactSpan &s) { return chf.bmin[1] + float(s.y) * ch; };
+	// Is there anything solid between heights low and high in this column? Solid is what lies below each span's floor and above
+	// the open space under the next span.
+	auto blocked = [&](int x, int z, float low, float high) {
+		const rcCompactCell &c = chf.cells[x + z * w];
+		float open_from = -1.0e30f;
+		for (unsigned int j = c.index; j < c.index + c.count; ++j) {
+			const float floor_y = top_of(chf.spans[j]);
+			if (open_from < high && floor_y > low) {
+				return true; // solid from open_from up to floor_y overlaps low..high
+			}
+			open_from = floor_y + float(chf.spans[j].h) * ch;
+		}
+		// Above the last span: Recast stores 255 when the open space is that tall or has no ceiling at all, so anything less is
+		// a real ceiling.
+		if (c.count > 0 && chf.spans[c.index + c.count - 1].h < 255 && open_from < high) {
+			return true;
+		}
+		return false;
+	};
+
+	std::unordered_set<uint64_t> taken; // one link per square, direction and kind
+	for (int z = border; z < h - border; ++z) {
+		for (int x = border; x < w - border; ++x) {
+			const rcCompactCell &cell = chf.cells[x + z * w];
+			for (unsigned int i = cell.index; i < cell.index + cell.count; ++i) {
+				if (chf.areas[i] == RC_NULL_AREA) {
+					continue;
+				}
+				const float start_top = top_of(chf.spans[i]);
+				for (int dir = 0; dir < 4; ++dir) {
+					// 1. Find the edge.
+					int ex = x, ez = z;
+					unsigned int si = i;
+					bool at_edge = false;
+					for (int step = 0; step <= max_inward; ++step) {
+						const rcCompactSpan &cur = chf.spans[si];
+						if (rcGetCon(cur, dir) == RC_NOT_CONNECTED) {
+							at_edge = true;
+							break;
+						}
+						const int nx = ex + rcGetDirOffsetX(dir);
+						const int nz = ez + rcGetDirOffsetY(dir);
+						const unsigned int ni = chf.cells[nx + nz * w].index + unsigned(rcGetCon(cur, dir));
+						if (chf.areas[ni] != RC_NULL_AREA) {
+							break; // walkable again: this span isn't the last one before an edge
+						}
+						ex = nx;
+						ez = nz;
+						si = ni;
+					}
+					if (!at_edge) {
+						continue;
+					}
+					// 2. Look for a landing.
+					int land_k = -1;
+					float land_top = 0.0f;
+					for (int k = 1; k <= reach; ++k) {
+						const int lx = ex + rcGetDirOffsetX(dir) * k;
+						const int lz = ez + rcGetDirOffsetY(dir) * k;
+						if (lx < 0 || lz < 0 || lx >= w || lz >= h) {
+							break;
+						}
+						const rcCompactCell &lc = chf.cells[lx + lz * w];
+						float best = 0.0f;
+						bool found = false;
+						for (unsigned int j = lc.index; j < lc.index + lc.count; ++j) {
+							const float t = top_of(chf.spans[j]);
+							const float rise = t - start_top;
+							if (chf.areas[j] == RC_NULL_AREA || rise > cfg.link_jump_height || rise < -cfg.link_drop_height) {
+								continue;
+							}
+							if (!found || t > best) {
+								best = t; // the highest place to land, so a bridge wins over the ground under it
+								found = true;
+							}
+						}
+						if (found) {
+							land_k = k;
+							land_top = best;
+							break;
+						}
+						// Nowhere to land here. Something solid higher than a jump is a wall, and the search stops at it. Lower solid,
+						// such as the unwalkable rim of a ledge it could jump onto, doesn't stop it.
+						if (blocked(lx, lz, start_top + cfg.link_jump_height, start_top + cfg.link_jump_height + clearance)) {
+							break;
+						}
+					}
+					if (land_k < 0) {
+						continue;
+					}
+					// 3. Nothing in the way. A jump clears both its ends, so only solid above the higher end, by more than a climb,
+					// gets in the way. The rim of the ledge being landed on, or a pit's floor, doesn't.
+					const float low = std::fmax(start_top, land_top) + climb;
+					const float high = std::fmax(start_top, land_top) + clearance;
+					bool clear = true;
+					for (int k = 1; k < land_k && clear; ++k) {
+						clear = !blocked(ex + rcGetDirOffsetX(dir) * k, ez + rcGetDirOffsetY(dir) * k, low, high);
+					}
+					if (!clear) {
+						continue;
+					}
+					// 4. Which kind, and one per square.
+					const bool drop = land_top < start_top - climb && land_k <= drop_reach;
+					const AutoLinkKind kind = drop ? AutoLinkKind::DROP : AutoLinkKind::JUMP;
+					const uint64_t key = (uint64_t(x / spacing) << 40) | (uint64_t(z / spacing) << 16) | (uint64_t(dir) << 4) | uint64_t(kind);
+					if (!taken.insert(key).second) {
+						continue;
+					}
+					const int lx = ex + rcGetDirOffsetX(dir) * land_k;
+					const int lz = ez + rcGetDirOffsetY(dir) * land_k;
+					LinkDef link;
+					link.start[0] = chf.bmin[0] + (float(x) + 0.5f) * cs;
+					link.start[1] = start_top;
+					link.start[2] = chf.bmin[2] + (float(z) + 0.5f) * cs;
+					link.end[0] = chf.bmin[0] + (float(lx) + 0.5f) * cs;
+					link.end[1] = land_top;
+					link.end[2] = chf.bmin[2] + (float(lz) + 0.5f) * cs;
+					link.two_way = false;
+					link.id = auto_link_id(kind);
+					out.push_back(link);
+					if (out.size() >= MAX_AUTO_LINKS_PER_TILE) {
+						return;
+					}
+				}
+			}
+		}
+	}
+}
+
 } // namespace
 
 std::unique_ptr<TileBuildResult> build_ground_tile(const TileBuildInput &in) {
@@ -284,7 +444,29 @@ std::unique_ptr<TileBuildResult> build_ground_tile(const TileBuildInput &in) {
 		rs.pmesh->flags[i] = flags;
 	}
 
-	// ---- 8. (Spec step 8) Auto links: phase 3.
+	// ---- 8. Links. Claude 2026-11-08: placed links that start in this tile, plus the ones found at ledges and gaps (phase 3).
+	std::vector<LinkDef> links = in.placed_links;
+	const size_t placed_count = links.size();
+	if (cfg.auto_links) {
+		find_auto_links(*rs.chf, cfg, links);
+	}
+	std::vector<float> link_verts;
+	std::vector<float> link_radii;
+	std::vector<unsigned short> link_flags;
+	std::vector<unsigned char> link_areas;
+	std::vector<unsigned char> link_dirs;
+	std::vector<unsigned int> link_ids;
+	// How close a link's ends must be to the nav mesh for Detour to join them to it, sideways. Up and down it allows the climb.
+	const float link_radius = std::fmax(cfg.agent_radius, 2.0f * cfg.cell_size);
+	for (const LinkDef &link : links) {
+		link_verts.insert(link_verts.end(), link.start, link.start + 3);
+		link_verts.insert(link_verts.end(), link.end, link.end + 3);
+		link_radii.push_back(link_radius);
+		link_flags.push_back(POLYFLAG_WALK | POLYFLAG_LINK); // tier 0 only for now, and excludable as a link
+		link_areas.push_back(make_area(0, SURFACE_DEFAULT));
+		link_dirs.push_back(link.two_way ? DT_OFFMESH_CON_BIDIR : 0);
+		link_ids.push_back(link.id);
+	}
 
 	// ---- 9. Pack the Detour tile.
 	dtNavMeshCreateParams params = {};
@@ -311,11 +493,23 @@ std::unique_ptr<TileBuildResult> build_ground_tile(const TileBuildInput &in) {
 	params.cs = cfg.cell_size;
 	params.ch = cfg.cell_height;
 	params.buildBvTree = true;
+	// Claude 2026-11-08: the links from step 8. Detour keeps only those whose start lies inside this tile.
+	params.offMeshConCount = int(links.size());
+	if (!links.empty()) {
+		params.offMeshConVerts = link_verts.data();
+		params.offMeshConRad = link_radii.data();
+		params.offMeshConFlags = link_flags.data();
+		params.offMeshConAreas = link_areas.data();
+		params.offMeshConDir = link_dirs.data();
+		params.offMeshConUserID = link_ids.data();
+	}
 	if (!dtCreateNavMeshData(&params, &result->nav_data, &result->nav_data_size)) {
 		result->error = "dtCreateNavMeshData failed";
 		return finish();
 	}
 	result->poly_count = rs.pmesh->npolys;
+	result->link_count = int(links.size());
+	result->auto_link_count = int(links.size() - placed_count);
 
 	// ---- 10. (Spec step 10) Portals for the coarse graph: phase 5.
 	// ---- 11. (Spec step 11) Cached spans for fast obstacle re-carving: phase 4.

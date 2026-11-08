@@ -123,15 +123,20 @@ func take_input_command(_tick: int) -> InputCommand:
 	# Keys take over from a click. A path left unfinished is dropped.
 	# Claude 2026-11-08: the path lives on the pawn's NavigationManager now, not here.
 	var navigation := _navigation()
+	var link_press := 0
 	if navigation:
 		if wanted.length_squared() > 0.01:
 			navigation.stop()
 		elif navigation.is_following_path():
 			command.move = navigation.get_move_direction()
+			# Claude 2026-11-08: a link the path just reached may need an action, such as jump, pressed for this tick.
+			var action := navigation.take_link_action()
+			if action != &"":
+				link_press = InputActions.mask_of(action)
 	command.look_yaw = look_yaw
 	command.look_pitch = look_pitch
 	# Held now, or pressed and let go again since the last tick.
-	command.held_actions = _latched_actions
+	command.held_actions = _latched_actions | link_press
 	_latched_actions = 0
 	for action: StringName in action_keys:
 		if _read_action_held(action):

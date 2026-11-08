@@ -16,12 +16,15 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace godot {
@@ -68,9 +71,25 @@ public:
 	void cancel_path(int request_id);
 	PackedVector3Array find_path_now(const Vector3 &from, const Vector3 &to, int tier); // sync, for tests/tools
 	Variant closest_point(const Vector3 &p, int tier); // Vector3, or null if no nav nearby
+	// Claude 2026-11-08: like find_path_now, but the path may cross links. Returns {points, link_ids, partial}: link_ids has one
+	// entry per point, not 0 where that point starts a link, which ends at the next point. points is empty if there's no way.
+	// find_path_now and find_path never cross links, so code written before links existed gets the same paths as before.
+	Dictionary find_path_now_with_links(const Vector3 &from, const Vector3 &to, int tier);
+
+	// ---- links (spec section 10, phase 3) ---------------------------------------------------
+	// Claude 2026-11-08: placed links, such as a door, a ladder or a jump a designer marked. The tile holding the start rebuilds
+	// to include it, on the next ticks. action is the named action a pawn presses at the start, or empty to just walk across.
+	int add_link(const Vector3 &start, const Vector3 &end, bool two_way, const StringName &action);
+	bool remove_link(int link_id);
+	// The action for a link id from a path: a placed link's own, "jump" (auto_link_jump_action) for a jump the build found,
+	// and empty for a drop, which is walked off.
+	StringName get_link_action(int64_t link_id) const;
+	bool is_auto_link(int64_t link_id) const;
 
 	// ---- debug / stats ---------------------------------------------------------------------
 	Dictionary get_debug_triangles(const AABB &area);
+	// Claude 2026-11-08: the live links in an area, for drawing and tests: {starts, ends, link_ids, two_way}.
+	Dictionary get_debug_links(const AABB &area) const;
 	// Claude 2026-11-05: for tests only: see GroundDomain.
 	void debug_fail_tile_commits(int count) { m_ground.debug_fail_commits(count); }
 	void debug_limit_path_corners(int limit) { m_ground.debug_limit_corners(limit); }
@@ -96,6 +115,11 @@ private:
 	int m_next_interest = 1;
 	std::vector<std::string> m_surface_names; // index = surface id
 	std::vector<navcore::WorldRect> m_pending_dirty;
+	// Claude 2026-11-08: placed links, and the action each one presses.
+	std::vector<navcore::LinkDef> m_links;
+	std::unordered_map<uint32_t, StringName> m_link_actions;
+	uint32_t m_next_link = 1;
+	StringName m_auto_jump_action = StringName("jump");
 	bool m_started = false;
 	uint64_t m_ticks = 0;
 	double m_last_tick_ms = 0.0, m_max_tick_ms = 0.0;

@@ -2,9 +2,9 @@
 
 # Navigation System Spec (draft 1)
 
-**Status:** phases 1 and 2 of section 19 are built, along with the marker steps in section 21.10. The rest is design. Function signatures for anything not built are proposals, written as C++ headers (GDExtension, godot-cpp) and a little GDScript for the pawn side. <!-- Claude 2026-11-06: this line still said no code exists -->
+**Status:** phases 1 and 2 of section 19 are built, along with the marker steps in section 21.10. *(Claude 2026-11-08: phase 3's links are built too, placed and found automatically; the pawn side is `NavigationManager`, not section 17's `NavAgentComponent`. See section 19.1.)* The rest is design. Function signatures for anything not built are proposals, written as C++ headers (GDExtension, godot-cpp) and a little GDScript for the pawn side. <!-- Claude 2026-11-06: this line still said no code exists -->
 **Scope:** flat-plane worlds, constant gravity (−Y). Solid spans on the nav grid are the universal input; any terrain generator (heightmap, blocks, density, meshes) opts in through an optional **NavHooks** resource and is stacked with the others (section 5).
-**Revisions:** 2026-11-03 (Claude): section 5 rewritten from a single voxel source to the NavHooks / provider model; pipeline, API, walkthroughs and phases updated to match. 2026-11-06 (Claude): section 21 added, nav markers and modules.
+**Revisions:** 2026-11-03 (Claude): section 5 rewritten from a single voxel source to the NavHooks / provider model; pipeline, API, walkthroughs and phases updated to match. 2026-11-06 (Claude): section 21 added, nav markers and modules. 2026-11-08 (Claude): phase 3 links built, section 19.1.
 **Performance numbers** are ballpark estimates, not measurements. Phase 0 is a benchmark spike to replace them.
 
 How to read this:
@@ -646,6 +646,8 @@ public:
 
 Link traversal flow is in section 16, scenario D.
 
+*Claude 2026-11-08: built differently from the sketch above, see section 19.1. A link names the input action to press (`press_action`, from `InputActions`), not a tag, and search leaves links in or out with one flag bit rather than per-tag capabilities.*
+
 ---
 
 ## 11. Dynamic obstacles (ObstacleSystem)
@@ -1095,7 +1097,7 @@ func _on_link_reached(id, link_id, tags, start, end, payload) -> void:
 | 0 | Benchmark spike | Recast built as a GDExtension; one heightmap tile built from spans; numbers measured and section 18 updated |
 | 1 | Ground domain, static | NavHooks + InputStore + HeightmapAdapter + MeshAdapter + composite; tiles built async; `find_path` works; debug draw of polys and tiers |
 | 2 | Dynamic tiles | Edits, streaming interests, versions, atomic swap, LRU; digging under a pawn reroutes it without a hitch |
-| 3 | Agents + links | `NavAgentComponent`, path following, auto links → `try_action_by_tags`; a pawn jumps a gap by itself |
+| 3 | Agents + links | `NavAgentComponent`, path following, auto links → `try_action_by_tags`; a pawn jumps a gap by itself. *(Claude 2026-11-08: links built, and a pawn jumps a gap by itself, section 19.1. Agents in C++ aren't: the pawn follows its own path, `NavigationManager`.)* |
 | 4 | Crowd + obstacles | ORCA, crowd units, carve/avoid/cost; 1000 crowd units walking at 60 fps |
 | 5 | Hierarchy + swarm hooks | L2/L3 graph, estimated tiles, corridor-only queries, flow fields, bulk APIs |
 | 6 | Air domain | Flyers path through caves and around towers; take-off/land links |
@@ -1103,6 +1105,41 @@ func _on_link_reached(id, link_id, tags, start, end, payload) -> void:
 | 8 | Surface domain | Wall walkers (optional) |
 
 Phases 1–3 are the everyday core. Everything after is additive.
+
+### 19.1 Phase 3 links, as built (Claude 2026-11-08)
+
+Built for pawn spec step 7b. The owner chose both kinds of link for t0: placed ones and ones found automatically.
+
+**Links are Detour off-mesh connections, baked into tiles.** The tile holding a link's start stores it, and Detour joins its far end when that tile loads. So a link into ground that isn't built yet is simply unused until it is, with no extra code.
+
+**Links found automatically** (step 8 of the build, `find_auto_links` in `ground_builder.cpp`). The same idea as Unreal's and Unity's link generators. From the compact heightfield each build already makes:
+1. Each walkable span inside the tile walks outward, in 4 directions, through the strip that erosion and the ledge filter made unwalkable. If the spans stop, there's an edge.
+2. Past the edge it looks, column by column, for walkable ground to land on: up to `link_jump_height` higher, down to `link_drop_height` lower, within `link_jump_distance`, edge to edge.
+3. Solid above the higher end, in the columns between, blocks it. A column with something taller than a jump stops the search.
+4. Lower ground within `link_drop_reach` is a **drop**, with no action: the pawn walks off. Anything else is a **jump**, pressing `auto_link_jump_action` ("jump").
+5. One link per `link_spacing` square, direction and kind. Links are one way; each side finds its own.
+
+| Setting (`NavServer.configure`) | Default | Why |
+|---|---|---|
+| `auto_links` | on | |
+| `link_jump_distance` | 2.0 m | Every extra metre widens each tile's border by 1 m. The t0 pawn could clear about 4 m |
+| `link_jump_height` | 1.0 m | Jump's 5 m/s reaches about 1.27 m |
+| `link_drop_height` | 4.0 m | |
+| `link_drop_reach` | 1.0 m | |
+| `link_spacing` | 1.6 m | |
+| `auto_link_jump_action` | "jump" | |
+
+**Placed links:** `NavServer.add_link(start, end, two_way, action)` and `remove_link(id)`. A build gets a copy of the placed links that start in its tile. `NavLinkModule` (section 21.4) does this for `NavLink` markers.
+
+**Paths:** `find_path_now_with_links(from, to, tier)` returns `{points, link_ids, partial}`, with a link's id at the corner where it starts. `get_link_action(id)` gives the action to press. **`find_path_now` and `find_path` never cross links,** so code from before links, such as the stress test's walkers, gets the same paths as before. Links carry `POLYFLAG_LINK`, which those searches exclude.
+
+**Debug:** `get_debug_links(area)` lists live links, and `get_tile_states()` counts them per tile. Not drawn by `nav_debug_draw.gd` yet.
+
+**Cost, measured on Windows** with the default 128 m terrain, 224 tiles: the tile border grows from 11 to 20 cells, and a tile build from about 3.0 to 3.3 ms to about 4.1 to 4.3 ms, 25 to 40% more. Builds run on worker threads, so this slows how fast nav appears around a moving player, not the frame. That terrain got 633 links, around its steeper patches. `auto_links` off brings the old border and times back.
+
+**Not built:** per-link cost (`NavLink.extra_cost`), links for tiers above 0, telling a pawn that can jump from one that can't beyond the `use_links` switch, the async `find_path` with links, and drawing links.
+
+**Tests:** `navigation/tests/nav_links_selftest` (the C++ side, on a course of boxes with a gap, a ledge and a step), `nav_link_module_selftest`, and `navigation_manager_selftest` (a real pawn crossing each).
 
 Markers (section 21) aren't a phase of their own, and section 21.10 gives their build order. `NavMarkerManager`, the data classes, `NavMarkerNode`, module base, debug module and report are GDScript and don't need the library, so they can be built at any time. Each other module waits for the system it talks to, as section 21.4 lists. <!-- Claude 2026-11-06 -->
 
@@ -1184,7 +1221,7 @@ Left out of the base on purpose:
 
 | Class | Industry term | Data beyond the base | Example tags |
 |---|---|---|---|
-| `NavLink` | Off-mesh link | End point, one or two way, cost, `action_tag` | `link.jump`, `link.climb`, `link.door`, `link.teleport` |
+| `NavLink` | Off-mesh link | End point, one or two way, cost, `press_action` *(Claude 2026-11-08: was `action_tag`)* | `link.jump`, `link.climb`, `link.door`, `link.teleport` |
 | `NavArea` | Nav modifier volume | Box size, surface name. It names a surface instead of storing a cost, because each kind of agent holds its own cost per surface (`NavFilter`, section 4) | `area.road`, `area.hazard`, `area.water`, `area.forbidden` |
 | `NavObstacle` | Dynamic obstacle | Mode: carve, avoid or cost (section 11), box size, cost surface | `obstacle.crate`, `obstacle.vehicle` |
 | `NavPoint` | Tactical point, POI | None yet | `point.cover`, `point.patrol`, `point.ambush`, `point.wander` |
@@ -1196,7 +1233,7 @@ Types are the guard: `marker is NavLink` works on every marker, generated or han
 
 **`NavTags` follows `TagRegistry`'s rules with its own 64 bits and its own declarations file.** Names are dotted, a mask includes its parents' bits, and tags are declared and numbered at startup so every machine agrees. A tag nobody declared gets a one-time warning. `NetworkSession.content_hash` must include it, as it does `TagRegistry`.
 
-**Handing off to the pawn.** A `NavLink` keeps its nav tag for pathfinding, and its `action_tag` (a `TagRegistry` name such as `movement.jump`) says which action plays when the pawn reaches it. A pawn also needs a small table from its abilities to its nav capabilities, which waits for the pawn design.
+**Handing off to the pawn.** A `NavLink` keeps its nav tag for pathfinding, and its `action_tag` (a `TagRegistry` name such as `movement.jump`) says which action plays when the pawn reaches it. A pawn also needs a small table from its abilities to its nav capabilities, which waits for the pawn design. *(Claude 2026-11-08: `action_tag` became `press_action`, a named input action such as `jump`, because pawns start abilities by pressing named actions. It defaults to `jump`. The table isn't built; `NavigationManager.use_links` turns all links off for a pawn that can't use them.)*
 
 **Surface types:** 16 is accepted (15 plus the default), and allocating them is the designers' job. Stacking works today through layer `order`, where the higher one wins. Changing a region's surface rebuilds the tiles under it. A mix of two surfaces needs a surface type of its own.
 
@@ -1237,7 +1274,7 @@ Rules:
 |---|---|---|
 | `NavMarkerDebugModule` | Nothing | First |
 | `NavEstimatorModule` (loaded by default, section 21.8) | The library | After the markers |
-| `NavLinkModule` (calls `NavServer.add_link`, keeps a link inactive until both ends are loaded) | Agents and links | Phase 3 |
+| `NavLinkModule` (calls `NavServer.add_link`, keeps a link inactive until both ends are loaded) | Agents and links | Phase 3. **Built 2026-11-08:** `navigation/modules/NavLinkModule.gd`. Detour already leaves a link unused until its far end loads (section 19.1) |
 | `NavAreaModule` | Surface input (section 5) | With the first game that needs it |
 | `NavObstacleModule` | `ObstacleSystem` | Phase 4 |
 | `NavPointModule`, `NavSmartObjectModule` | The AI side of the pawn | With the pawn |

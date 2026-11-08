@@ -99,8 +99,13 @@ func take_input_command(_tick: int) -> InputCommand:
 	# Claude 2026-11-08: while a path from move_to is being followed, the direction comes from it. ControllerManager drops a path
 	# when control changes hands, so any path here is this controller's own.
 	var navigation := _navigation()
+	var link_press := 0
 	if navigation and navigation.is_following_path():
 		_command.move = navigation.get_move_direction()
+		# Claude 2026-11-08: a link it just reached may need an action, such as jump, pressed for this tick.
+		var action := navigation.take_link_action()
+		if action != &"":
+			link_press = InputActions.mask_of(action)
 	else:
 		_command.move = _move
 	if _look_set or pawn == null:
@@ -109,7 +114,7 @@ func take_input_command(_tick: int) -> InputCommand:
 	else:
 		_command.look_yaw = pawn.look_yaw
 		_command.look_pitch = pawn.look_pitch
-	_command.held_actions = _held | _pressed_once
+	_command.held_actions = _held | _pressed_once | link_press
 	_pressed_once = 0
 	return _command
 

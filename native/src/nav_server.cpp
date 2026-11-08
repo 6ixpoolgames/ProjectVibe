@@ -74,6 +74,18 @@ void NavServer::configure(const Dictionary &config) {
 	getf("edge_max_error", c.edge_max_error);
 	getf("detail_sample_dist", c.detail_sample_dist);
 	getf("detail_sample_max_error", c.detail_sample_max_error);
+	// Claude 2026-11-08: links the tile build finds by itself.
+	if (config.has("auto_links")) {
+		c.auto_links = bool(config["auto_links"]);
+	}
+	getf("link_jump_distance", c.link_jump_distance);
+	getf("link_jump_height", c.link_jump_height);
+	getf("link_drop_height", c.link_drop_height);
+	getf("link_drop_reach", c.link_drop_reach);
+	getf("link_spacing", c.link_spacing);
+	if (config.has("auto_link_jump_action")) {
+		m_auto_jump_action = StringName(config["auto_link_jump_action"]);
+	}
 	if (config.has("tier_radii")) {
 		PackedFloat32Array radii = config["tier_radii"];
 		c.tier_count = std::clamp(int(radii.size()), 1, navcore::MAX_TIERS);
@@ -88,6 +100,9 @@ void NavServer::configure(const Dictionary &config) {
 	c.cell_height = std::max(c.cell_height, 0.01f);
 	c.tile_size_cells = std::clamp(c.tile_size_cells, 16, 256);
 	c.max_builds_in_flight = std::max(c.max_builds_in_flight, 1);
+	c.link_jump_distance = std::clamp(c.link_jump_distance, 0.0f, 10.0f); // Claude 2026-11-08: the border grows with it
+	c.link_drop_reach = std::clamp(c.link_drop_reach, 0.0f, 10.0f);
+	c.link_spacing = std::max(c.link_spacing, c.cell_size);
 	c.tier_radii[0] = c.agent_radius; // tier 0 is by definition the smallest pawn
 	const float max_range = (navcore::MAX_SPAN_CELLS - 1) * c.cell_height;
 	if (c.world_ceiling_y - c.world_floor_y > max_range) {
@@ -130,6 +145,13 @@ Dictionary NavServer::get_config() const {
 	d["max_builds_in_flight"] = m_cfg.max_builds_in_flight;
 	d["worker_threads"] = m_cfg.worker_threads;
 	d["query_iterations_per_tick"] = m_cfg.query_iterations_per_tick;
+	d["auto_links"] = m_cfg.auto_links; // Claude 2026-11-08
+	d["link_jump_distance"] = m_cfg.link_jump_distance;
+	d["link_jump_height"] = m_cfg.link_jump_height;
+	d["link_drop_height"] = m_cfg.link_drop_height;
+	d["link_drop_reach"] = m_cfg.link_drop_reach;
+	d["link_spacing"] = m_cfg.link_spacing;
+	d["auto_link_jump_action"] = m_auto_jump_action;
 	return d;
 }
 
@@ -150,7 +172,7 @@ void NavServer::tick(double delta) {
 	m_tiles.commit_finished(m_ground, m_cfg.commit_budget_ms, changed);
 
 	// Phase 3: start new builds.
-	m_tiles.schedule(m_store, m_interests, m_pool);
+	m_tiles.schedule(m_store, m_interests, m_links, m_pool);
 
 	// Phase 4: path searches against the now-stable nav mesh.
 	std::vector<navcore::PathOutcome> outcomes;
@@ -360,6 +382,75 @@ PackedVector3Array NavServer::find_path_now(const Vector3 &from, const Vector3 &
 	return points;
 }
 
+Dictionary NavServer::find_path_now_with_links(const Vector3 &from, const Vector3 &to, int tier) {
+	ensure_started();
+	const float a[3] = { float(from.x), float(from.y), float(from.z) };
+	const float b[3] = { float(to.x), float(to.y), float(to.z) };
+	navcore::PathOutcome o;
+	PackedVector3Array points;
+	PackedInt64Array link_ids;
+	const bool ok = m_ground.find_path_now(a, b, tier, o, true);
+	if (ok) {
+		for (size_t i = 0; i + 2 < o.points.size(); i += 3) {
+			points.push_back(Vector3(o.points[i], o.points[i + 1], o.points[i + 2]));
+			const size_t corner = i / 3;
+			link_ids.push_back(corner < o.link_ids.size() ? int64_t(o.link_ids[corner]) : 0);
+		}
+	}
+	Dictionary d;
+	d["points"] = points;
+	d["link_ids"] = link_ids;
+	d["partial"] = ok && o.partial;
+	return d;
+}
+
+// ---- links ---------------------------------------------------------------------------------------
+
+int NavServer::add_link(const Vector3 &start, const Vector3 &end, bool two_way, const StringName &action) {
+	navcore::LinkDef link;
+	link.start[0] = float(start.x);
+	link.start[1] = float(start.y);
+	link.start[2] = float(start.z);
+	link.end[0] = float(end.x);
+	link.end[1] = float(end.y);
+	link.end[2] = float(end.z);
+	link.two_way = two_way;
+	link.id = m_next_link++;
+	if (m_next_link >= navcore::LINK_ID_AUTO) {
+		m_next_link = 1; // after two billion links; ids still in use would clash, which no game will reach
+	}
+	m_links.push_back(link);
+	m_link_actions[link.id] = action;
+	dirty(WorldRect{ link.start[0] - 0.01f, link.start[2] - 0.01f, link.start[0] + 0.01f, link.start[2] + 0.01f });
+	return int(link.id);
+}
+
+bool NavServer::remove_link(int link_id) {
+	for (size_t i = 0; i < m_links.size(); ++i) {
+		if (m_links[i].id == uint32_t(link_id)) {
+			const navcore::LinkDef link = m_links[i];
+			m_links.erase(m_links.begin() + long(i));
+			m_link_actions.erase(link.id);
+			dirty(WorldRect{ link.start[0] - 0.01f, link.start[2] - 0.01f, link.start[0] + 0.01f, link.start[2] + 0.01f });
+			return true;
+		}
+	}
+	return false;
+}
+
+StringName NavServer::get_link_action(int64_t link_id) const {
+	const uint32_t id = uint32_t(link_id);
+	if (navcore::link_id_is_auto(id)) {
+		return id == navcore::auto_link_id(navcore::AutoLinkKind::JUMP) ? m_auto_jump_action : StringName();
+	}
+	const auto it = m_link_actions.find(id);
+	return it != m_link_actions.end() ? it->second : StringName();
+}
+
+bool NavServer::is_auto_link(int64_t link_id) const {
+	return link_id != 0 && navcore::link_id_is_auto(uint32_t(link_id));
+}
+
 Variant NavServer::closest_point(const Vector3 &p, int tier) {
 	ensure_started();
 	const float a[3] = { float(p.x), float(p.y), float(p.z) };
@@ -389,6 +480,28 @@ Dictionary NavServer::get_debug_triangles(const AABB &area) {
 	return d;
 }
 
+Dictionary NavServer::get_debug_links(const AABB &area) const {
+	std::vector<float> ends;
+	std::vector<uint32_t> ids;
+	std::vector<uint8_t> two_way;
+	m_ground.debug_links(rect_from_aabb(area), ends, ids, two_way);
+	PackedVector3Array starts, finishes;
+	PackedInt64Array link_ids;
+	PackedByteArray both_ways;
+	for (size_t i = 0; i < ids.size(); ++i) {
+		starts.push_back(Vector3(ends[i * 6], ends[i * 6 + 1], ends[i * 6 + 2]));
+		finishes.push_back(Vector3(ends[i * 6 + 3], ends[i * 6 + 4], ends[i * 6 + 5]));
+		link_ids.push_back(int64_t(ids[i]));
+		both_ways.push_back(two_way[i]);
+	}
+	Dictionary d;
+	d["starts"] = starts;
+	d["ends"] = finishes;
+	d["link_ids"] = link_ids;
+	d["two_way"] = both_ways;
+	return d;
+}
+
 Array NavServer::get_tile_states() const {
 	std::vector<navcore::TileInfo> infos;
 	m_tiles.tile_infos(infos);
@@ -400,6 +513,8 @@ Array NavServer::get_tile_states() const {
 		d["provisional"] = t.provisional;
 		d["has_live"] = t.has_live;
 		d["polys"] = t.poly_count;
+		d["links"] = t.link_count; // Claude 2026-11-08
+		d["auto_links"] = t.auto_link_count;
 		d["build_ms"] = t.build_ms;
 		if (!t.error.empty()) {
 			d["error"] = String(t.error.c_str());
@@ -470,6 +585,13 @@ void NavServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("cancel_path", "request_id"), &NavServer::cancel_path);
 	ClassDB::bind_method(D_METHOD("find_path_now", "from", "to", "tier"), &NavServer::find_path_now, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("closest_point", "point", "tier"), &NavServer::closest_point, DEFVAL(0));
+	// Claude 2026-11-08: links.
+	ClassDB::bind_method(D_METHOD("find_path_now_with_links", "from", "to", "tier"), &NavServer::find_path_now_with_links, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("add_link", "start", "end", "two_way", "action"), &NavServer::add_link, DEFVAL(true), DEFVAL(StringName()));
+	ClassDB::bind_method(D_METHOD("remove_link", "link_id"), &NavServer::remove_link);
+	ClassDB::bind_method(D_METHOD("get_link_action", "link_id"), &NavServer::get_link_action);
+	ClassDB::bind_method(D_METHOD("is_auto_link", "link_id"), &NavServer::is_auto_link);
+	ClassDB::bind_method(D_METHOD("get_debug_links", "area"), &NavServer::get_debug_links);
 
 	ClassDB::bind_method(D_METHOD("get_debug_triangles", "area"), &NavServer::get_debug_triangles);
 	ClassDB::bind_method(D_METHOD("debug_fail_tile_commits", "count"), &NavServer::debug_fail_tile_commits);

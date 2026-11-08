@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace navcore {
 
@@ -16,6 +17,7 @@ struct TileBuildInput {
 	uint64_t generation = 0; // TileManager reset counter; results from before a reset are thrown away
 	NavConfig cfg;
 	InputSnapshot snapshot;
+	std::vector<LinkDef> placed_links; // Claude 2026-11-08: placed links that start inside this tile, copied when the build starts
 };
 
 struct TileBuildResult {
@@ -27,6 +29,8 @@ struct TileBuildResult {
 	bool empty = false; // nothing walkable: commit just removes the old tile
 	bool provisional = false; // some neighbour data was missing; rebuilt automatically when it arrives
 	int poly_count = 0;
+	int link_count = 0; // Claude 2026-11-08: placed and found links baked into this tile
+	int auto_link_count = 0; // Claude 2026-11-08: of those, how many the build found by itself
 	double build_ms = 0.0;
 	std::string error;
 

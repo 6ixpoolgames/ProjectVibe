@@ -145,6 +145,8 @@ void TileManager::commit_finished(GroundDomain &domain, double budget_ms, std::v
 		t.has_live = !r->empty;
 		t.provisional = r->provisional;
 		t.poly_count = r->poly_count;
+		t.link_count = r->link_count; // Claude 2026-11-08
+		t.auto_link_count = r->auto_link_count;
 		t.build_ms = r->build_ms;
 		++m_builds_committed;
 		m_build_ms_total += r->build_ms;
@@ -169,7 +171,7 @@ float TileManager::priority(const TileRecord &t, const std::vector<Interest> &in
 	return best;
 }
 
-void TileManager::schedule(const InputStore &store, const std::vector<Interest> &interests, WorkerPool &pool) {
+void TileManager::schedule(const InputStore &store, const std::vector<Interest> &interests, const std::vector<LinkDef> &links, WorkerPool &pool) {
 	int slots = m_cfg.max_builds_in_flight - m_in_flight;
 	if (slots <= 0) {
 		return;
@@ -195,6 +197,13 @@ void TileManager::schedule(const InputStore &store, const std::vector<Interest> 
 		input->generation = m_generation;
 		input->cfg = m_cfg;
 		store.snapshot(tile_build_rect(m_cfg, t.key), input->snapshot); // references, not copies
+		// Claude 2026-11-08: placed links starting in this tile. Copied, so a link removed mid-build can't change it.
+		const WorldRect own = tile_world_rect(m_cfg, t.key);
+		for (const LinkDef &link : links) {
+			if (link.start[0] >= own.min_x && link.start[0] < own.max_x && link.start[2] >= own.min_z && link.start[2] < own.max_z) {
+				input->placed_links.push_back(link);
+			}
+		}
 		t.in_flight_version = t.version;
 		++m_in_flight;
 		pool.submit([this, input]() {
@@ -258,6 +267,8 @@ void TileManager::tile_infos(std::vector<TileInfo> &out) const {
 		info.provisional = t.provisional;
 		info.has_live = t.has_live;
 		info.poly_count = t.poly_count;
+		info.link_count = t.link_count; // Claude 2026-11-08
+		info.auto_link_count = t.auto_link_count;
 		info.build_ms = t.build_ms;
 		info.error = t.error;
 		out.push_back(info);

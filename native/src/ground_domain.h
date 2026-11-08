@@ -23,6 +23,9 @@ struct PathOutcome {
 	// Claude 2026-11-05: also set when the path was too long to return whole.
 	bool partial = false; // goal not reached: path leads as close as it could get
 	std::vector<float> points; // x, y, z per corner
+	// Claude 2026-11-08: one per corner. Not 0 where that corner starts a link, which then ends at the next corner. Only searches
+	// that allow links fill it in; the others leave it empty.
+	std::vector<uint32_t> link_ids;
 	std::string reason; // why it failed
 };
 
@@ -42,7 +45,9 @@ public:
 	void remove_tile(const TileKey &key);
 
 	// ---- queries (synchronous) -------------------------------------------------------------
-	bool find_path_now(const float *from, const float *to, int tier, PathOutcome &out);
+	// Claude 2026-11-08: use_links lets the search cross links. Everything that searched before links existed passes false, so its
+	// paths are unchanged: a walker that can't jump is never sent over a gap.
+	bool find_path_now(const float *from, const float *to, int tier, PathOutcome &out, bool use_links = false);
 	bool closest_point(const float *p, int tier, float *out) const;
 
 	// ---- sliced queries (used by PathQueue, one at a time) ------------------------------------
@@ -55,6 +60,8 @@ public:
 	// Triangles of every tile overlapping r, in Godot winding, plus one colour per vertex (by tier).
 	void debug_triangles(const WorldRect &r, std::vector<float> &verts, std::vector<float> &colors) const;
 	int tile_count() const;
+	// Claude 2026-11-08: every link in the live tiles overlapping r: start and end (6 floats each), its id, and whether it's two way.
+	void debug_links(const WorldRect &r, std::vector<float> &ends, std::vector<uint32_t> &ids, std::vector<uint8_t> &two_way) const;
 	// Claude 2026-11-05: for tests only, to reach failures that are very hard to cause for real.
 	void debug_fail_commits(int count) { m_debug_fail_commits = count; } // the next count tiles get corrupted before they're added
 	void debug_limit_corners(int limit) { m_debug_corner_limit = limit; } // room for this many path corners; 0 = normal
@@ -68,15 +75,17 @@ private:
 		std::vector<dtPolyRef> polys;
 	};
 
-	const dtQueryFilter &filter_for(int tier) const;
-	bool snap_endpoints(dtNavMeshQuery *q, QueryState &state, const float *from, const float *to, int tier, PathOutcome &fail);
-	void straighten(dtNavMeshQuery *q, const QueryState &state, int npolys, bool partial, PathOutcome &out);
+	const dtQueryFilter &filter_for(int tier, bool use_links = false) const;
+	bool snap_endpoints(dtNavMeshQuery *q, QueryState &state, const float *from, const float *to, int tier, PathOutcome &fail,
+			bool use_links = false);
+	void straighten(dtNavMeshQuery *q, const QueryState &state, int npolys, bool partial, PathOutcome &out, bool want_links = false);
 
 	NavConfig m_cfg;
 	dtNavMesh *m_mesh = nullptr;
 	dtNavMeshQuery *m_sync_query = nullptr; // find_path_now / closest_point
 	dtNavMeshQuery *m_sliced_query = nullptr; // PathQueue's resumable searches
-	dtQueryFilter *m_filters = nullptr; // one per tier
+	dtQueryFilter *m_filters = nullptr; // one per tier. Claude 2026-11-08: these leave links out
+	dtQueryFilter *m_link_filters = nullptr; // Claude 2026-11-08: one per tier, links allowed
 
 	QueryState m_sync_state; // used only by find_path_now, and finished within the call
 	QueryState m_sliced_state; // lasts as long as PathQueue's current search

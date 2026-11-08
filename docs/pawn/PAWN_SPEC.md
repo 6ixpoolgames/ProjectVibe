@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.6
+# Pawn Spec v0.7
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -9,6 +9,7 @@
 - v0.4 (2026-11-07): steps 3 and 4 built: `ControllerManager`, the `AIController` placeholder and `PawnInitializer` (6.3, 6.4, 11). `TickStateComponent` and `NetworkEntity` stay in the pawn's scene, because `NetworkSession` reads them before the pawn joins the tree.
 - v0.5 (2026-11-07): steps 5 and 6 built: `StatManager` and `Stat` (9), `AbilityBase`, `AbilityManager`, Walk, Sprint and Jump (8.3 to 8.5). `GroundMovement` and `MovementModule` are gone. Ability state rolls back through `TickStateComponent.add_state_properties()`.
 - v0.6 (2026-11-08): step 7, first half: `NavigationManager` built (7), with click-to-move and `AIController.move_to` on it (6.2, 6.3). Nav phase 3 (links) is split off as step 7b, still to agree (12).
+- v0.7 (2026-11-08): step 7b built: links, placed and found automatically. `NavigationManager` crosses them and the controller presses the link's action (7).
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -223,9 +224,10 @@ func get_path_corners() -> PackedVector3Array   # the corners ahead, for debug d
 - `ControllerManager` drops the path whenever control changes hands, so the AI never walks the rest of a player's click.
 - The path is found at once, on the main thread (`find_path_now`), as the stress test already does. Asking in the background is there (`NavServer.find_path`) if a crowd's paths ever cost too much.
 - Not yet: noticing it's stuck, and finding a new path when nav changes.
+- **Links (built 2026-11-08, step 7b):** with `use_links` on (the default), a path may cross links: jumps and drops nav finds by itself, and links placed with `NavLink` markers. Reaching a link's start, `take_link_action()` gives the action to press, such as `jump`, and the controller presses it for one tick; a drop has none. If the pawn hasn't reached the far end within `link_timeout` (3 s), it finds one new path to the same place, and after a second miss it stops, neither following nor arrived. `is_crossing_link()` says when it's mid-link. Turn `use_links` off for a pawn that can't jump. See nav spec section 19.1.
 - **Over the network:** the client follows its own path and sends directions. The server never sees a path. The stress test already works this way **(built)**. This settles open question 15 in the netcode spec.
 - Borrowed for later from the old guide, section 8: repathing when tiles change, size tiers, domains.
-- Nav phase 3 (agents and links) is step 7b, below (12). Until then, a path never crosses a gap or uses a link.
+- Nav phase 3's links are step 7b, built. Agents in C++ aren't needed: the pawn follows its own path.
 
 ---
 
@@ -442,7 +444,7 @@ func exit(context, reason) -> void
 5. **`StatManager`** and stat nodes for movement. **(Built 2026-11-07.)**
 6. **`AbilityManager`, `AbilityBase`, Walk, Jump and Sprint**, replacing `GroundMovement`. The existing pawn, possession and network tests must still pass. **(Built 2026-11-07.)**
 7. **`NavigationManager`**, with click-to-move moved onto it. **(Built 2026-11-08 as 7a.)**
-   - **7b, nav phase 3 (links):** to agree before building. A link is a jump, drop or door between two points that nav can't walk. It needs C++ work in navcore (off-mesh connections in tiles, and paths that say where a link starts), `NavLinkModule` for the `NavLink` markers, and `NavigationManager` pressing the link's named action when it reaches one.
+   - **7b, nav phase 3 (links):** **(Built 2026-11-08.)** Both kinds, the owner's choice: placed (`NavLink` markers through `NavLinkModule`) and found automatically at ledges and gaps. `NavigationManager` presses each link's action. Nav spec section 19.1.
 8. **AI:** `AIController`, sensing, memory, states, behaviours, the context with shared inputs, and the decision steps. Wander and Chase behaviours to prove it.
 9. **More abilities:** Dash, then MeleeAttack.
 10. **Teams and the fight loop:** damage, death.

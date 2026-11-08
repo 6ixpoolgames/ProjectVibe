@@ -5,6 +5,7 @@
 extends Node
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
+const Course := preload("res://assets/scripts/navigation/tests/nav_links_selftest.gd") # Claude 2026-11-08: the links course
 
 var _failures := 0
 
@@ -41,6 +42,7 @@ func _ready() -> void:
 	await _test_without_a_navigation_manager()
 	await _test_corner_by_corner()
 	await _test_following_a_nav_path()
+	await _test_crossing_links()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -212,6 +214,91 @@ func _test_following_a_nav_path() -> void:
 	terrain.free()
 	NavServer.remove_interest(interest)
 	_settle()
+
+
+# Claude 2026-11-08: links. The course from nav_links_selftest, with collision: A, a 2 m gap, B, a 2 m drop to C, a 0.8 m step up
+# to D. A real pawn walks it, so the jumps must actually land.
+func _test_crossing_links() -> void:
+	NavServer.configure({"worker_threads": 4})
+	var layer := Course.build_course()
+	var bodies: Array[StaticBody3D] = []
+	for box: Array in Course.course_boxes():
+		bodies.append(_make_box(box[0], box[1]))
+	var interest: int = NavServer.add_interest(Vector3(4, 0, 0), 45.0, 60.0, 1)
+	_settle()
+	await get_tree().physics_frame
+
+	var pawn := _make_pawn(Vector3(-10, 0.1, 0))
+	await _ticks(10)
+	var navigation := pawn.navigation_manager
+	var ai: AIController = pawn.controller_manager.ai_controller
+
+	var across := await _walk_course_leg(pawn, ai, Vector3(6, 0, 0))
+	_check(across.crossed_link and across.fastest_up > 3.0 and across.highest > 0.3, "A to B: it reaches the gap and jumps (up to %.2f m)" % across.highest)
+	_check(navigation.has_arrived() and across.distance < 1.0 and absf(pawn.position.y) < 0.3, "and lands on B, at the goal (%.2f m, %d ticks)" % [across.distance, across.ticks])
+
+	var down := await _walk_course_leg(pawn, ai, Vector3(16, -2, 0))
+	_check(down.crossed_link and down.fastest_up < 1.0, "B to C: it walks off the ledge, with no jump")
+	_check(navigation.has_arrived() and down.distance < 1.0 and absf(pawn.position.y + 2.0) < 0.3, "and gets to the goal on C (%.2f m)" % down.distance)
+
+	var up := await _walk_course_leg(pawn, ai, Vector3(24, -1.2, 0))
+	_check(up.crossed_link and up.fastest_up > 3.0, "C to D: it jumps up the step (%.1f m/s upward)" % up.fastest_up)
+	_check(navigation.has_arrived() and up.distance < 1.0 and absf(pawn.position.y + 1.2) < 0.3, "and gets to the goal on D (%.2f m)" % up.distance)
+
+	# use_links off: a pawn that can't jump never leaves D, however far its goal.
+	navigation.use_links = false
+	var stays := await _walk_course_leg(pawn, ai, Vector3(-10, 0, 0))
+	_check(not stays.crossed_link and absf(pawn.position.y + 1.2) < 0.3, "use_links off: it goes only as far as it can walk, and stays on D")
+	navigation.use_links = true
+
+	# A link it can't cross: a placed ladder from C up to B that presses nothing. It tries, finds one new path, misses again, and
+	# gives up rather than trying forever.
+	await _walk_course_leg(pawn, ai, Vector3(16, -2, 0))
+	var ladder: int = NavServer.add_link(Vector3(13.5, -2, 0), Vector3(10.5, 0, 0), false, &"")
+	_settle()
+	navigation.link_timeout = 1.0
+	var stuck := await _walk_course_leg(pawn, ai, Vector3(6, 0, 0), 900)
+	_check(stuck.crossed_link and not navigation.is_following_path() and not navigation.has_arrived(),
+			"a link it can't cross: after one new path and a second miss, it stops, neither following nor arrived (%d ticks)" % stuck.ticks)
+	_check(absf(pawn.position.y + 2.0) < 0.3, "still down on C")
+	NavServer.remove_link(ladder)
+
+	pawn.free()
+	for body in bodies:
+		body.free()
+	NavServer.remove_interest(interest)
+	NavServer.remove_input_layer(layer)
+	_settle()
+
+
+## Walks the pawn to the goal with AIController.move_to, ticking nav as it goes, and reports what happened.
+func _walk_course_leg(pawn: Pawn, ai: AIController, goal: Vector3, limit := 600) -> Dictionary:
+	var navigation := pawn.navigation_manager
+	var report := {"crossed_link": false, "highest": pawn.position.y, "fastest_up": 0.0, "ticks": 0, "distance": INF}
+	if not ai.move_to(goal):
+		return report
+	while navigation.is_following_path() and report.ticks < limit:
+		NavServer.tick(1.0 / 60.0)
+		await get_tree().physics_frame
+		report.ticks += 1
+		report.crossed_link = report.crossed_link or navigation.is_crossing_link()
+		report.highest = maxf(report.highest, pawn.position.y)
+		report.fastest_up = maxf(report.fastest_up, pawn.velocity.y) # a jump starts at 5 m/s upward; walking uphill is far slower
+	await _ticks(20) # let it settle where it stopped
+	report.distance = Vector2(pawn.position.x - goal.x, pawn.position.z - goal.z).length()
+	return report
+
+
+func _make_box(lo: Vector3, hi: Vector3) -> StaticBody3D:
+	var body := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = hi - lo
+	shape.shape = box
+	body.position = (lo + hi) * 0.5
+	body.add_child(shape)
+	add_child(body)
+	return body
 
 
 # --- Helpers ---

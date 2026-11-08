@@ -22,9 +22,12 @@ const float SNAP_EXTENTS[3] = { 2.0f, 4.0f, 2.0f }; // how far from the nav mesh
 
 GroundDomain::GroundDomain() {
 	m_filters = new dtQueryFilter[MAX_TIERS];
+	m_link_filters = new dtQueryFilter[MAX_TIERS];
 	for (int t = 0; t < MAX_TIERS; ++t) {
 		m_filters[t].setIncludeFlags(tier_flag(t));
-		m_filters[t].setExcludeFlags(0);
+		m_filters[t].setExcludeFlags(POLYFLAG_LINK); // Claude 2026-11-08: was 0; links didn't exist
+		m_link_filters[t].setIncludeFlags(tier_flag(t));
+		m_link_filters[t].setExcludeFlags(0);
 	}
 }
 
@@ -33,6 +36,7 @@ GroundDomain::~GroundDomain() {
 	dtFreeNavMeshQuery(m_sliced_query);
 	dtFreeNavMesh(m_mesh);
 	delete[] m_filters;
+	delete[] m_link_filters;
 }
 
 bool GroundDomain::init(const NavConfig &cfg) {
@@ -122,12 +126,14 @@ void GroundDomain::remove_tile(const TileKey &key) {
 	}
 }
 
-const dtQueryFilter &GroundDomain::filter_for(int tier) const {
-	return m_filters[std::clamp(tier, 0, MAX_TIERS - 1)];
+const dtQueryFilter &GroundDomain::filter_for(int tier, bool use_links) const {
+	const int t = std::clamp(tier, 0, MAX_TIERS - 1);
+	return use_links ? m_link_filters[t] : m_filters[t];
 }
 
-bool GroundDomain::snap_endpoints(dtNavMeshQuery *q, QueryState &state, const float *from, const float *to, int tier, PathOutcome &fail) {
-	const dtQueryFilter &f = filter_for(tier);
+bool GroundDomain::snap_endpoints(dtNavMeshQuery *q, QueryState &state, const float *from, const float *to, int tier, PathOutcome &fail,
+		bool use_links) {
+	const dtQueryFilter &f = filter_for(tier, use_links);
 	dtPolyRef sref = 0, eref = 0;
 	q->findNearestPoly(from, SNAP_EXTENTS, &f, &sref, state.start_pos);
 	q->findNearestPoly(to, SNAP_EXTENTS, &f, &eref, state.end_pos);
@@ -144,7 +150,7 @@ bool GroundDomain::snap_endpoints(dtNavMeshQuery *q, QueryState &state, const fl
 	return true;
 }
 
-void GroundDomain::straighten(dtNavMeshQuery *q, const QueryState &state, int npolys, bool partial, PathOutcome &out) {
+void GroundDomain::straighten(dtNavMeshQuery *q, const QueryState &state, int npolys, bool partial, PathOutcome &out, bool want_links) {
 	float end[3];
 	dtVcopy(end, state.end_pos);
 	if (npolys > 0 && state.polys[size_t(npolys - 1)] != state.end_ref) {
@@ -155,7 +161,11 @@ void GroundDomain::straighten(dtNavMeshQuery *q, const QueryState &state, int np
 	std::vector<float> corners(MAX_STRAIGHT * 3);
 	int ncorners = 0;
 	const int max_corners = m_debug_corner_limit > 0 ? std::min(m_debug_corner_limit, MAX_STRAIGHT) : MAX_STRAIGHT;
-	const dtStatus s = q->findStraightPath(state.start_pos, end, state.polys.data(), npolys, corners.data(), nullptr, nullptr, &ncorners, max_corners, 0);
+	// Claude 2026-11-08: Detour marks the corner where a link starts, and gives its polygon, which holds the link's id.
+	std::vector<unsigned char> corner_flags(want_links ? MAX_STRAIGHT : 0);
+	std::vector<dtPolyRef> corner_refs(want_links ? MAX_STRAIGHT : 0);
+	const dtStatus s = q->findStraightPath(state.start_pos, end, state.polys.data(), npolys, corners.data(),
+			want_links ? corner_flags.data() : nullptr, want_links ? corner_refs.data() : nullptr, &ncorners, max_corners, 0);
 	// Claude 2026-11-05: Detour says when it ran out of room for corners. The path then stops short of the goal, so
 	// callers have to be told it isn't complete. This status used to be ignored.
 	if (dtStatusDetail(s, DT_BUFFER_TOO_SMALL)) {
@@ -164,27 +174,37 @@ void GroundDomain::straighten(dtNavMeshQuery *q, const QueryState &state, int np
 	out.ok = dtStatusSucceed(s) && ncorners > 0;
 	out.partial = partial;
 	out.points.assign(corners.begin(), corners.begin() + ncorners * 3);
+	out.link_ids.clear();
+	if (want_links && ncorners > 0) {
+		out.link_ids.assign(size_t(ncorners), 0u);
+		for (int i = 0; i < ncorners; ++i) {
+			if (corner_flags[size_t(i)] & DT_STRAIGHTPATH_OFFMESH_CONNECTION) {
+				const dtOffMeshConnection *link = m_mesh->getOffMeshConnectionByRef(corner_refs[size_t(i)]);
+				out.link_ids[size_t(i)] = link ? link->userId : 0u;
+			}
+		}
+	}
 	if (!out.ok) {
 		out.reason = "could not straighten path";
 	}
 }
 
-bool GroundDomain::find_path_now(const float *from, const float *to, int tier, PathOutcome &out) {
+bool GroundDomain::find_path_now(const float *from, const float *to, int tier, PathOutcome &out, bool use_links) {
 	if (!m_mesh) {
 		out.reason = "nav not initialised";
 		return false;
 	}
-	if (!snap_endpoints(m_sync_query, m_sync_state, from, to, tier, out)) {
+	if (!snap_endpoints(m_sync_query, m_sync_state, from, to, tier, out, use_links)) {
 		return false;
 	}
 	int npolys = 0;
-	const dtStatus s = m_sync_query->findPath(m_sync_state.start_ref, m_sync_state.end_ref, m_sync_state.start_pos, m_sync_state.end_pos, &filter_for(tier),
+	const dtStatus s = m_sync_query->findPath(m_sync_state.start_ref, m_sync_state.end_ref, m_sync_state.start_pos, m_sync_state.end_pos, &filter_for(tier, use_links),
 			m_sync_state.polys.data(), &npolys, MAX_PATH_POLYS);
 	if (dtStatusFailed(s) || npolys == 0) {
 		out.reason = "search failed";
 		return false;
 	}
-	straighten(m_sync_query, m_sync_state, npolys, (s & DT_PARTIAL_RESULT) != 0, out);
+	straighten(m_sync_query, m_sync_state, npolys, (s & DT_PARTIAL_RESULT) != 0, out, use_links);
 	return out.ok;
 }
 
@@ -277,6 +297,28 @@ void GroundDomain::debug_triangles(const WorldRect &r, std::vector<float> &verts
 					colors.push_back(col[2] * shade);
 				}
 			}
+		}
+	}
+}
+
+void GroundDomain::debug_links(const WorldRect &r, std::vector<float> &ends, std::vector<uint32_t> &ids, std::vector<uint8_t> &two_way) const {
+	if (!m_mesh) {
+		return;
+	}
+	const dtNavMesh *mesh = m_mesh;
+	for (int i = 0; i < mesh->getMaxTiles(); ++i) {
+		const dtMeshTile *tile = mesh->getTile(i);
+		if (!tile || !tile->header) {
+			continue;
+		}
+		for (int c = 0; c < tile->header->offMeshConCount; ++c) {
+			const dtOffMeshConnection &link = tile->offMeshCons[c];
+			if (link.pos[0] < r.min_x || link.pos[0] >= r.max_x || link.pos[2] < r.min_z || link.pos[2] >= r.max_z) {
+				continue;
+			}
+			ends.insert(ends.end(), link.pos, link.pos + 6);
+			ids.push_back(link.userId);
+			two_way.push_back((link.flags & DT_OFFMESH_CON_BIDIR) ? 1 : 0);
 		}
 	}
 }

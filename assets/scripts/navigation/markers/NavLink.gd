@@ -1,7 +1,8 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-06: a connection nav can't walk across (nav spec section 21.3).
 ## The usual term is an off-mesh link. A ladder, a jump, a door and a teleporter are all NavLinks, told apart
 ## by their tags (link.climb, link.jump, link.door, link.teleport), because they hold the same data.
-## NavLinkModule will hand these to nav. Until that exists they're registered and do nothing.
+## Claude 2026-11-08: NavLinkModule hands these to nav, so pawns' paths can use them. Without that module in the level they're
+## registered and do nothing.
 ##
 # GDScript note: "extends NavMarker" means a NavLink has everything a NavMarker has, plus what's below.
 # class_name also adds it to the inspector's list of types, and "marker is NavLink" works anywhere.
@@ -13,10 +14,12 @@ extends NavMarker
 ## True = usable in both directions. False = start to end only, such as dropping off a ledge.
 @export var two_way := true
 ## Added to a path's cost when it uses this link, so pawns prefer walking when the walk isn't much longer.
+## Claude 2026-11-08: not used yet. Links cost their length for now.
 @export var extra_cost := 0.0
-## The ability tag to play when a pawn reaches the link, such as &"movement.jump". This one goes through
-## TagRegistry, not NavTags, because abilities have their own tags.
-@export var action_tag: StringName
+## Claude 2026-11-08: the named action a pawn presses when it reaches the link, from InputActions, the same names a player's keys
+## press. Jump by default. Empty means it just walks across, such as dropping off a ledge or going through an open door.
+## Replaces action_tag, an ability tag, because pawns now start abilities by pressing named actions (pawn spec section 8.2).
+@export var press_action: StringName = &"jump"
 
 
 ## Where the link ends, in world space.

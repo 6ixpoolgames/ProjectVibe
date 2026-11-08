@@ -40,6 +40,8 @@ struct TileInfo {
 	bool provisional = false;
 	bool has_live = false;
 	int poly_count = 0;
+	int link_count = 0; // Claude 2026-11-08: links baked into the live tile, placed and found
+	int auto_link_count = 0;
 	double build_ms = 0.0;
 	std::string error;
 };
@@ -67,7 +69,8 @@ public:
 	// Tick phase 2: swap in finished builds until the time budget is used.
 	void commit_finished(GroundDomain &domain, double budget_ms, std::vector<TileKey> &changed);
 	// Tick phase 3: start builds for the most important tiles that need one.
-	void schedule(const InputStore &store, const std::vector<Interest> &interests, WorkerPool &pool);
+	// Claude 2026-11-08: links are the placed links; each build gets those starting in its tile.
+	void schedule(const InputStore &store, const std::vector<Interest> &interests, const std::vector<LinkDef> &links, WorkerPool &pool);
 
 	void stats(TileStats &out) const;
 	void tile_infos(std::vector<TileInfo> &out) const;
@@ -82,6 +85,8 @@ private:
 		bool has_live = false;
 		bool provisional = false;
 		int poly_count = 0;
+		int link_count = 0; // Claude 2026-11-08
+		int auto_link_count = 0;
 		double build_ms = 0.0;
 		std::string error;
 	};
