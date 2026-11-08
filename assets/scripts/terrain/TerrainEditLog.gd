@@ -10,8 +10,14 @@
 ##
 ## In multiplayer, the server's log is the one that counts. Clients get each edit as soon as it reaches them, which is after
 ## the server has applied it, by about half their ping. Prediction can differ for that moment, and normal corrections fix it.
-## A late joiner gets the whole log. Both use the same bytes as to_bytes, which will suit save files too. Saving to a file
-## isn't built yet.
+## A late joiner gets the whole log. Both use the same bytes as to_bytes, which will suit save files too.
+##
+## Claude 2026-11-09, saving (pawn spec step 11): save_to_file() and load_from_file() keep the log in a file, as a 4-byte "PBTE"
+## header and then to_bytes(). Saving writes a temporary file and renames it over the old one, so a crash mid-save never leaves a
+## broken save: at worst the temporary file is left, and loading falls back to it. For designers, three settings do it with no code:
+## save_path (empty: no file), load_on_start, and save_every_seconds (0: only when the log leaves the tree, such as on quit). Only
+## the server or an offline game saves and loads: in multiplayer the server's log is the one that counts, and clients get it over
+## the network.
 ##
 ## What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
 ##   - from_bytes given broken data: it's refused, and the log stays as it was.
@@ -19,6 +25,8 @@
 ##     ground. The world stays as it is.
 ##   - The parent isn't a TerrainGenerator: it warns and does nothing.
 ##   - A chunk with a very long list costs more to build. Nothing merges old edits yet.
+##   - Claude 2026-11-09: a save file that's missing, broken, or made for a terrain with different settings is refused, and the log
+##     and the ground stay as they were. Loading or saving on a client does nothing.
 class_name TerrainEditLog
 extends Node
 
@@ -29,6 +37,15 @@ const BYTES_PER_EDIT := 20
 # The first byte of what goes over the network.
 const MESSAGE_ONE_EDIT := 1
 const MESSAGE_WHOLE_LOG := 2
+# Claude 2026-11-09: the first four bytes of a save file, so a wrong file is refused before anything else is read.
+const FILE_HEADER := "PBTE"
+
+## Claude 2026-11-09: where edits are saved, such as "user://world_edits.tedits". Empty: no file.
+@export var save_path := ""
+## Claude 2026-11-09: on, the edits in save_path are loaded when this log enters the tree (on the server or offline).
+@export var load_on_start := true
+## Claude 2026-11-09: also save every this many seconds while running. 0: only when the log leaves the tree, such as on quit.
+@export_range(0.0, 3600.0, 1.0, "or_greater") var save_every_seconds := 0.0
 
 var _x := PackedFloat32Array()
 var _z := PackedFloat32Array()
@@ -40,6 +57,7 @@ var _terrain: TerrainGenerator = null
 var _session: Node = null
 var _channel := ""
 var _warned_about_client_edit := false
+var _since_save := 0.0 # Claude 2026-11-09: seconds since the last timed save
 
 
 func _enter_tree() -> void:
@@ -53,14 +71,64 @@ func _enter_tree() -> void:
 		# The path is the same on every machine, so this names the same terrain everywhere.
 		_channel = "terrain_edits:%s" % _terrain.get_path()
 		_session.register_world_channel(_channel, _on_network_message, _catch_up_message)
+	# Claude 2026-11-09: saving. Only timed saves need a per-frame check; saving isn't game state, so it runs on frames, not ticks.
+	set_process(save_every_seconds > 0.0)
+	if save_path != "" and load_on_start and _may_use_files() and _save_exists(save_path):
+		load_from_file(save_path)
 
 
 func _exit_tree() -> void:
+	# Claude 2026-11-09: save on the way out, while the terrain is still here.
+	if save_path != "" and _terrain != null and _may_use_files():
+		save_to_file(save_path)
 	if _session and _channel != "":
 		_session.unregister_world_channel(_channel)
 	_channel = ""
 	if _terrain != null:
 		_terrain._edit_log_left(self)
+
+
+## Claude 2026-11-09: saves the log to a file: a temporary file first, then renamed over the old one. OK, or why not. Does nothing
+## on a client.
+func save_to_file(path: String = save_path) -> Error:
+	if path == "" or not _may_use_files():
+		return ERR_UNAVAILABLE
+	var temporary := path + ".tmp"
+	var file := FileAccess.open(temporary, FileAccess.WRITE)
+	if file == null:
+		return FileAccess.get_open_error()
+	file.store_buffer(FILE_HEADER.to_ascii_buffer())
+	file.store_buffer(to_bytes())
+	file.close()
+	# GDScript note: DirAccess works on absolute paths; globalize_path turns "user://..." into the real folder on this computer.
+	var final_path := ProjectSettings.globalize_path(path)
+	if FileAccess.file_exists(path):
+		DirAccess.remove_absolute(final_path)
+	return DirAccess.rename_absolute(ProjectSettings.globalize_path(temporary), final_path)
+
+
+## Claude 2026-11-09: replaces the log with the one saved in a file, and rebuilds whatever changes. If the file is missing, its
+## temporary file from an interrupted save is used. False, with the log and the ground as they were, when there's no file, it's
+## broken, it was made for a terrain with different settings, or this is a client.
+func load_from_file(path: String = save_path) -> bool:
+	if path == "" or not _may_use_files():
+		return false
+	var source := path if FileAccess.file_exists(path) else path + ".tmp"
+	if not FileAccess.file_exists(source):
+		return false
+	var bytes := FileAccess.get_file_as_bytes(source)
+	if bytes.size() < 4 or bytes.slice(0, 4).get_string_from_ascii() != FILE_HEADER:
+		push_warning("TerrainEditLog: %s isn't a terrain edits file, so it was ignored." % source)
+		return false
+	return from_bytes(bytes.slice(4))
+
+
+func _process(delta: float) -> void:
+	# Claude 2026-11-09: timed saves. Only runs when save_every_seconds is above 0.
+	_since_save += delta
+	if save_every_seconds > 0.0 and _since_save >= save_every_seconds:
+		_since_save = 0.0
+		save_to_file(save_path)
 
 
 ## How many edits there are.
@@ -82,6 +150,15 @@ func clear() -> void:
 	_amount.clear()
 	_tick.clear()
 	_by_chunk.clear()
+
+
+# Claude 2026-11-09: saving and loading belong to the server, or an offline game.
+func _may_use_files() -> bool:
+	return _session == null or not _session.is_client()
+
+
+static func _save_exists(path: String) -> bool:
+	return FileAccess.file_exists(path) or FileAccess.file_exists(path + ".tmp")
 
 
 ## Claude 2026-11-07: true if this machine mustn't edit the ground. Every machine has to end up with the same ground, so in multiplayer

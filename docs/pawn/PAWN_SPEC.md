@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.14
+# Pawn Spec v0.15
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -24,6 +24,7 @@
 - v0.12 (2026-11-09): memory, sight checks, target scoring and the nearby-pawns query moved to C++, the owner's call, with every setting still on the GDScript nodes and a GDScript fallback (10.12). Behaviours tick every `tick_interval_ticks` (10.7).
 - v0.13 (2026-11-09): step 9 built: Dash, MeleeAttack, Knockback, ability interrupt priorities, lag compensation for melee, and the AI's Attack behaviour (8.6).
 - v0.14 (2026-11-09): step 10 built: Health as a stat that changes during play, damage, death as an ability, being hit as a state rule, threat from damage (8.7). The owner's call: no health manager.
+- v0.15 (2026-11-09): step 11, saving terrain edits: `TerrainEditLog` saves to and loads from a file (12).
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -1033,6 +1034,14 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
 9. **More abilities:** Dash, then MeleeAttack. **(Built 2026-11-09, see 8.6.)** Also Knockback, ability interrupt priorities, lag compensation for melee, and the AI's Attack behaviour.
 10. **Teams and the fight loop:** damage, death. Being hit becomes an Alert and Combat prerequisite (10.6), and damage adds threat for target selection (10.5). **(Built 2026-11-09, see 8.7.)**
 11. **Leftovers from t0:** pawns not stacking, saving terrain edits.
+   - **Saving terrain edits:** **(built 2026-11-09)**
+     - `TerrainEditLog.save_to_file()` and `load_from_file()` store the log as a "PBTE" header followed by its `to_bytes()`.
+     - A save writes a temporary file and renames it over the old one, so a crash mid-save never leaves a broken save; loading falls back to the temporary file.
+     - Designer settings: `save_path`, `load_on_start`, and `save_every_seconds` (0: only when the log leaves the tree).
+     - Only the server or an offline game saves and loads.
+     - Missing, broken, or different-ground files are refused, and nothing changes.
+     - Tests: in `terrain/tests/terrain_edit_selftest`.
+   - **Not built:** merging old edits, so a chunk edited many times builds more slowly. Pawns not stacking.
 12. **Playing by hand,** with real Host and Join windows.
 13. **t0 docs:** an overview, plus a reference for every class and function.
 

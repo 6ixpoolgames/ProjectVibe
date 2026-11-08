@@ -27,6 +27,7 @@ func _ready() -> void:
 	await _test_with_streaming()
 	await _test_bodies_stay_above()
 	_test_long_edit_lists()
+	_test_save_file() # Claude 2026-11-09
 	_measure()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -488,3 +489,64 @@ func _check(passed: bool, what: String) -> void:
 	print("  %s %s" % ["ok  " if passed else "FAIL", what])
 	if not passed:
 		_failures += 1
+
+
+# Claude 2026-11-09, step 11: saving the log to a file and loading it back.
+func _test_save_file() -> void:
+	var path := "user://terrain_edit_selftest.tedits"
+	_remove_save(path)
+	var terrain := _make_terrain()
+	var edit_log := _add_log(terrain)
+	terrain.edit(ON_BORDER, 16.0, 6.0)
+	terrain.edit(Vector3(5.0, 0.0, 5.0), 3.0, -1.0)
+	_check(edit_log.save_to_file(path) == OK and FileAccess.file_exists(path), "save_to_file writes the edits to a file")
+	_check(not FileAccess.file_exists(path + ".tmp"), "through a temporary file that's renamed away")
+	var other := _make_terrain()
+	var other_log := _add_log(other)
+	_check(other_log.load_from_file(path) and other_log.get_edit_count() == 2, "load_from_file reads them back")
+	terrain.load_chunk(KEY_A)
+	other.load_chunk(KEY_A)
+	_check(terrain._points[KEY_A] == other._points[KEY_A], "and gives exactly the same ground")
+	_check(not other_log.load_from_file("user://no_such_file.tedits"), "a missing file is refused")
+	var junk := FileAccess.open(path + ".junk", FileAccess.WRITE)
+	junk.store_buffer(PackedByteArray([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]))
+	junk.close()
+	_check(not other_log.load_from_file(path + ".junk") and other_log.get_edit_count() == 2, "a file that isn't a terrain edits file is refused, and nothing changes")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path + ".junk"))
+	var different := _make_terrain()
+	different.noise_seed = 999
+	var different_log := _add_log(different)
+	_check(not different_log.load_from_file(path), "edits saved for different ground are refused")
+	# An interrupted save: only the temporary file is there.
+	DirAccess.rename_absolute(ProjectSettings.globalize_path(path), ProjectSettings.globalize_path(path + ".tmp"))
+	var recovered := _make_terrain()
+	var recovered_log := _add_log(recovered)
+	_check(recovered_log.load_from_file(path) and recovered_log.get_edit_count() == 2, "after an interrupted save, the temporary file is loaded instead")
+	_remove_save(path)
+	terrain.free()
+	other.free()
+	different.free()
+	recovered.free()
+
+	# The settings, with no code: save when leaving the tree, load when entering.
+	var first := _make_terrain()
+	var auto_log := TerrainEditLog.new()
+	auto_log.save_path = path
+	first.add_child(auto_log)
+	first.edit(Vector3(5.0, 0.0, 5.0), 3.0, 2.0)
+	first.free() # the log leaves the tree, and saves
+	_check(FileAccess.file_exists(path), "save_path: the log saves itself when it leaves the tree")
+	var second := _make_terrain()
+	var second_log := TerrainEditLog.new()
+	second_log.save_path = path
+	second.add_child(second_log)
+	_check(second_log.get_edit_count() == 1, "and load_on_start loads it when a log with that save_path enters the tree")
+	second_log.save_path = "" # so freeing it doesn't save again
+	second.free()
+	_remove_save(path)
+
+
+func _remove_save(path: String) -> void:
+	for each in [path, path + ".tmp"]:
+		if FileAccess.file_exists(each):
+			DirAccess.remove_absolute(ProjectSettings.globalize_path(each))
