@@ -26,7 +26,7 @@ shape = SubResource("Capsule")
 
 [node name="TickState" type="Node" parent="."]
 script = ExtResource("3_state")
-input_properties = Array[String](["move_input", "held_actions", "look_yaw @angle_u16", "look_pitch @angle_u16"])
+input_properties = Array[String](["move_input", "held_actions", "look_yaw @angle_u16", "look_pitch @angle_u16", "view_ticks_behind @float"])
 state_properties = Array[String](["position", "velocity", "yaw @angle_u16", "grounded", "previous_held_actions"])
 
 [node name="NetworkEntity" type="Node" parent="."]

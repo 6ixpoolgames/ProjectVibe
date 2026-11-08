@@ -15,7 +15,7 @@ extends AIBehaviourBase
 ## How far, in metres, the target must move from where the path leads before a new path is found early.
 @export_range(0.1, 50.0, 0.1, "or_greater") var repath_distance := 1.5
 ## How close, in metres, it gets before stopping.
-@export_range(0.0, 20.0, 0.1, "or_greater") var stop_distance := 1.5
+@export_range(0.0, 20.0, 0.1, "or_greater") var stop_distance := 1.2 # Claude 2026-11-09: was 1.5; just inside MeleeAttack attack_range (1.8) minus Attack approach_margin (0.3)
 ## On: it holds sprint while chasing. Sprint's own cooldown decides when it actually sprints.
 @export var sprint := true
 

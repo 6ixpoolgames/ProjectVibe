@@ -4,4 +4,4 @@
 
 [resource]
 script = ExtResource("1_actions")
-actions = Array[StringName]([&"jump", &"sprint", &"primary", &"secondary", &"ability_1", &"ability_2", &"ability_3", &"ability_4", &"interact"])
+actions = Array[StringName]([&"jump", &"sprint", &"primary", &"secondary", &"ability_1", &"ability_2", &"ability_3", &"ability_4", &"interact", &"dash"])

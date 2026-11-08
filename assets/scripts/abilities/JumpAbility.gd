@@ -23,6 +23,7 @@ func _init() -> void:
 	trigger_action = &"jump"
 	category = &"movement.jump"
 	buffer_window = 0.15
+	interrupt_priority = 5 # Claude 2026-11-09: between Walk and Sprint
 
 
 func get_rollback_properties() -> Array[String]:

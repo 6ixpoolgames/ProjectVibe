@@ -18,6 +18,14 @@
 ## Lockouts: while an ability runs, the categories in its locks_out can't start, and a locked-out locomotion ability stops steering
 ## (the pawn slows to a stop). Categories are tags (TagRegistry), so locking &"movement" also locks &"movement.jump".
 ##
+## Claude 2026-11-09, cancelling (pawn spec 8.6): two abilities conflict when either one's locks_out covers the other's category. A
+## conflicting ability can start only if its interrupt_priority is at least the interrupt_threshold of every conflicting ability
+## running; then those are cancelled (they stop, and their cooldowns start) and it starts. Otherwise it's locked out, as before. So
+## Dash (20) cancels MeleeAttack (15) and Sprint (10) doesn't; moving cancels only actions with a threshold of 0. The rules live
+## here, not in the controllers, so a player and the AI cancel the same way and a rollback replays the same cancels.
+##   pawn.ability_manager.start_ability(ability)   # starts one that has no trigger action, such as Knockback, by the same rules
+##   ability_cancelled(ability, by)
+##
 ## What happens in odd cases (all checked in tests/ability_selftest.gd):
 ##   - Its parent isn't a Pawn: it warns and does nothing.
 ##   - No locomotion with an empty trigger_action: when nothing else runs, nothing steers, and the pawn keeps its velocity.
@@ -28,6 +36,8 @@ extends Node
 
 signal ability_started(ability: AbilityBase)
 signal ability_finished(ability: AbilityBase)
+## Claude 2026-11-09: sent when an ability is cancelled by another starting, after ability_finished for it.
+signal ability_cancelled(ability: AbilityBase, by: AbilityBase)
 
 var pawn: Pawn = null
 
@@ -62,10 +72,7 @@ func _ready() -> void:
 func tick_abilities(dt: float) -> void:
 	if pawn == null:
 		return
-	_locked_mask = 0
-	for ability in _actions:
-		if ability.is_running_timed():
-			_locked_mask |= ability.locks_out_mask
+	_recompute_locks()
 	for ability in _abilities:
 		if ability.cooldown_ticks_left > 0:
 			ability.cooldown_ticks_left -= 1
@@ -76,12 +83,27 @@ func tick_abilities(dt: float) -> void:
 	_run_actions(dt)
 
 
-## True if pressing this action now would start something.
+## True if pressing this action now would start something, counting abilities it would cancel. Asking changes nothing.
 func can_start(action: StringName) -> bool:
 	for ability in _abilities:
 		if ability.trigger_action == action and not ability.is_running_timed() and _is_ready(ability):
 			return true
 	return false
+
+
+## Claude 2026-11-09: starts an ability by the same rules as a press: its cooldown, can_start(), and cancelling what it conflicts
+## with. For abilities with no trigger action, started by code, such as Knockback from a hit. One already running starts again.
+## Returns false if it couldn't start.
+func start_ability(ability: AbilityBase) -> bool:
+	if ability == null or ability.manager != self:
+		return false
+	if ability.is_running_timed():
+		ability.ticks_left = 0 # starts again from the beginning, without a cooldown in between
+	if not _is_ready(ability):
+		return false
+	_clear_way(ability)
+	_start(ability)
+	return true
 
 
 ## True while a timed action is running, such as an attack's swing.
@@ -137,11 +159,15 @@ func _run_locomotion(dt: float) -> void:
 				break
 			_finish(ability) # let go, or locked out
 		elif wanted and _is_ready(ability):
+			_clear_way(ability) # Claude 2026-11-09
 			_start(ability)
 			chosen = ability
 			break
 	if chosen == null:
 		chosen = _default_locomotion
+		# Claude 2026-11-09: moving cancels a conflicting action that allows it (threshold 0, such as an emote).
+		if chosen and is_locked(chosen) and pawn.move_input.length_squared() > 0.0001 and _conflicts_allow(chosen):
+			_clear_way(chosen)
 	# Only one locomotion runs. Any other timed one still going stops.
 	for ability in _locomotions:
 		if ability != chosen and ability.is_running_timed():
@@ -170,6 +196,7 @@ func _run_actions(dt: float) -> void:
 		if not pressed and ability.buffer_ticks_left <= 0:
 			continue
 		if _is_ready(ability):
+			_clear_way(ability) # Claude 2026-11-09: cancels what it's strong enough to cancel
 			_start(ability)
 			used_actions[ability.trigger_action] = true
 		elif pressed and ability.buffer_window > 0.0:
@@ -180,13 +207,48 @@ func _run_actions(dt: float) -> void:
 			ability.buffer_ticks_left = 0
 
 
+# Claude 2026-11-09: "not locked out" became "every conflicting running ability can be cancelled by it", which is the same thing
+# when nothing can be cancelled.
 func _is_ready(ability: AbilityBase) -> bool:
-	return ability.cooldown_ticks_left <= 0 and not is_locked(ability) and ability.can_start()
+	return ability.cooldown_ticks_left <= 0 and _conflicts_allow(ability) and ability.can_start()
+
+
+# Claude 2026-11-09: two abilities conflict when either one's locks_out covers the other's category.
+func _conflicts(a: AbilityBase, b: AbilityBase) -> bool:
+	return a.locks_out_mask & b.category_mask != 0 or b.locks_out_mask & a.category_mask != 0
+
+
+# Claude 2026-11-09: true if every running ability that conflicts with this one would let it cancel them.
+func _conflicts_allow(ability: AbilityBase) -> bool:
+	for other in _abilities:
+		if other != ability and other.is_running_timed() and _conflicts(ability, other) and other.interrupt_threshold > ability.interrupt_priority:
+			return false
+	return true
+
+
+# Claude 2026-11-09: cancels every running ability that conflicts with this one. Call it only after _conflicts_allow said yes.
+func _clear_way(ability: AbilityBase) -> void:
+	var cancelled := false
+	for other in _abilities:
+		if other != ability and other.is_running_timed() and _conflicts(ability, other):
+			_finish(other)
+			ability_cancelled.emit(other, ability)
+			cancelled = true
+	if cancelled:
+		_recompute_locks()
+
+
+# Claude 2026-11-09: the categories locked out right now, from every running timed action.
+func _recompute_locks() -> void:
+	_locked_mask = 0
+	for ability in _actions:
+		if ability.is_running_timed():
+			_locked_mask |= ability.locks_out_mask
 
 
 func _start(ability: AbilityBase) -> void:
 	ability.buffer_ticks_left = 0
-	ability.ticks_left = ticks_for(ability.duration)
+	ability.ticks_left = ability.duration_ticks() # Claude 2026-11-09: was ticks_for(duration); MeleeAttack counts its phases
 	if ability.kind == AbilityBase.Kind.ACTION and ability.is_running_timed():
 		_locked_mask |= ability.locks_out_mask # later abilities this tick respect it at once
 	ability.start()

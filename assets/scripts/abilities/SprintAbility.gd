@@ -17,3 +17,4 @@ func _init() -> void:
 	fallback_speed = 9.0
 	duration = 3.0
 	cooldown = 4.0
+	interrupt_priority = 10 # Claude 2026-11-09: above Walk, so sprinting cancels actions with a threshold of 10 or less

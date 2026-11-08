@@ -40,7 +40,8 @@ enum LookMode {
 ## action in Project Settings > Input Map. An action with no key here is never pressed by the player.
 # Claude 2026-11-07: new, replacing the fixed reads of move_jump and move_sprint.
 # GDScript note: Dictionary[StringName, StringName] is a typed dictionary, so the inspector only accepts names on both sides.
-@export var action_keys: Dictionary[StringName, StringName] = {&"jump": &"move_jump", &"sprint": &"move_sprint"}
+# Claude 2026-11-09: dash (Left Alt) and primary (F, a melee swing) added, step 9.
+@export var action_keys: Dictionary[StringName, StringName] = {&"jump": &"move_jump", &"sprint": &"move_sprint", &"dash": &"move_dash", &"primary": &"attack_primary"}
 
 ## The real camera. It holds where it is while there's no view to follow.
 var camera: PlayerCamera = null
@@ -135,6 +136,9 @@ func take_input_command(_tick: int) -> InputCommand:
 				link_press = InputActions.mask_of(action)
 	command.look_yaw = look_yaw
 	command.look_pitch = look_pitch
+	# Claude 2026-11-09: how far behind this client draws others, so the server judges its swings against what it saw (step 9).
+	var session: Node = get_node_or_null("/root/NetworkSession")
+	command.view_ticks_behind = session.get_view_ticks_behind() if session else 0.0
 	# Held now, or pressed and let go again since the last tick.
 	command.held_actions = _latched_actions | link_press
 	_latched_actions = 0

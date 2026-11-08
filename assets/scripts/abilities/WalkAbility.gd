@@ -19,6 +19,10 @@ func _init() -> void:
 	super()
 	kind = Kind.LOCOMOTION
 	category = &"movement.walk"
+	# Claude 2026-11-09: moving cancels only actions with a threshold of 0, such as an emote. Locomotion never blocks an action:
+	# anything that conflicts with it stops it, as before.
+	interrupt_priority = 0
+	interrupt_threshold = 0
 
 
 func tick(dt: float) -> void:

@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.12
+# Pawn Spec v0.13
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -22,6 +22,7 @@
 - v0.10 (2026-11-09): step 8a built (12). See 10.10 for what differs from the text above.
 - v0.11 (2026-11-09): step 8b built (12). See 10.11 for what differs from the text above. Two changes reach back into the earlier sections: a floor only counts when its behaviour is available (10.8, step 3), and uncertain entries stay at full awareness for 5 s before fading (10.5). Later the same day: `spotted` was renamed `certain` (the owner's call), and the fade delays became their own settings on `AIMemory`.
 - v0.12 (2026-11-09): memory, sight checks, target scoring and the nearby-pawns query moved to C++, the owner's call, with every setting still on the GDScript nodes and a GDScript fallback (10.12). Behaviours tick every `tick_interval_ticks` (10.7).
+- v0.13 (2026-11-09): step 9 built: Dash, MeleeAttack, Knockback, ability interrupt priorities, lag compensation for melee, and the AI's Attack behaviour (8.6).
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -345,6 +346,95 @@ Test: `abilities/tests/ability_selftest`.
   - The AI uses it the same way: a behaviour such as Chase holds `&"sprint"`, and asks `can_start(&"sprint")` if it cares. So Sprint wins over Walk whenever it's ready, but the cooldown gives it downtime. That's what makes it testable.
 - After the AI is built, more abilities come before fights: Dash, then MeleeAttack.
 
+### 8.6 Step 9: Dash, MeleeAttack, knockback and cancelling (built 2026-11-09)
+
+Agreed with the owner before building; the decisions are in the step 9 notes below.
+
+**Cancelling: interrupt priorities for abilities.** It's the same scheme as behaviours (10.7).
+- **Conflict:** two abilities conflict when either one's `locks_out` covers the other's category.
+- **The rule:** a conflicting ability can start only if its `interrupt_priority` is at least the `interrupt_threshold` of every conflicting ability running. Those are cancelled (they stop and start their cooldowns, and `ability_cancelled(ability, by)` goes out), and it starts. Otherwise it's locked out, as before.
+- **Defaults:**
+
+  | Ability | `interrupt_priority` | `interrupt_threshold` |
+  |---|---|---|
+  | Walk | 0 | 0 |
+  | Jump | 5 | — |
+  | Sprint | 10 | 0 |
+  | MeleeAttack | 15 | 15 |
+  | Dash | 20 | 25 |
+  | Knockback | 30 | 100 |
+
+  100, the base default, means nothing in t0 can cancel it.
+- **What that gives:**
+  - Dash cancels a swing: the player's animation cancel.
+  - Sprint and Jump don't cancel a swing.
+  - Knockback staggers a swing or a dash.
+  - An action with threshold 10 or less (a reload, say) is cancelled by sprinting, like CoD's sprint cancel.
+  - An action with threshold 0 (an emote) is cancelled by just moving.
+- **Where the rules live:** in the abilities, checked by `AbilityManager`. Controllers only send the inputs, so a player and the AI cancel the same way, and a rollback replay gets the same cancels.
+- **`start_ability(ability)`** starts an ability with no trigger action, such as Knockback, by the same rules.
+- **Cancel windows** (cancellable only during some phases, such as recovery) are deferred (section 14).
+
+**`DashAbility`** (`&"dash"`, a new action, Left Alt for players):
+- **Speed and length:** the `DashSpeed` stat (18 m/s, a new stat) for 0.15 s, 9 ticks, about 2.7 m.
+- **Direction:** the way the pawn is moved, or the way it faces when standing still.
+- **Ground only:** no air dash.
+- **Locks out** walking, sprinting and jumping. Cooldown 1 s.
+- **Ending:** it cuts horizontal speed to `MoveSpeed` (`exit_speed_stat`), so it stops crisply. Without this, Walk eased 18 m/s down over several metres; it was measured at 10.6 m in all.
+- **Rollback:** its direction rolls back.
+
+**`MeleeAttackAbility`** (`&"primary"`, F for players):
+- **Phases, in ticks:** `windup_ticks` 8, `hit_ticks` 4, `recovery_ticks` 12. `duration_ticks()`, new on `AbilityBase`, lets an ability count its own ticks.
+- **Facing:** it faces the look direction at the start (open question 4), then holds still. Movement and other combat are locked out.
+- **`attack_range`** (1.8 m) is the real reach: the hit sphere (`hit_radius` 0.8, at `hit_height` 1.0) sits so its far edge is at that range. (The owner said "range, not reach"; a bare `range` clashes with GDScript's `range()`.)
+- **Hits are decided on the server only,** during the hit ticks, never during a rollback replay:
+  - each pawn at most once per swing
+  - its own team skipped unless `hits_own_team` is on
+  - in a network session, through `LagCompensation.melee`; offline, a plain sphere, since there's nobody to rewind
+- **Each hit:**
+  - The target's `Pawn.receive_hit(HitInfo)` is called directly. No handshake: the server alone decides.
+  - That starts the target's knockback, and `Pawn.hit_received` goes out.
+  - Then `hit_landed(hit)` goes out on the ability, for local cosmetics.
+- **`HitInfo`** holds the attacker, target, ability, tick, direction, knockback speed and knockback ticks. Step 10 adds damage.
+
+**`KnockbackAbility`**, on the pawn being hit (the owner's call):
+- **Started by** its `receive_hit()`.
+- **Movement:** it moves the pawn through the pawn's own movement, setting horizontal velocity to the push, fading in a straight line over the push's ticks, while movement and combat are locked out.
+- **Rollback:** the push rolls back, so a client whose pawn is knocked back is corrected and replays it.
+
+**Lag compensation (the owner asked for it from the start):**
+- **The input:** `view_ticks_behind` is in the pawn's input list (`pawn.tscn`). `PlayerController` fills it from `NetworkSession.get_view_ticks_behind()`, and the AI sends 0.
+- **On the server:** `sanitize_network_input` clamps it to 0 or more and finite, and `LagCompensation` limits how far back it really goes.
+
+**`AIAttackBehaviour`** (Combat):
+- **When:** it's available when the current target's last known position is within MeleeAttack's `attack_range` minus `approach_margin` (0.3 m). The AI steps a little closer than the real reach, and changing the range changes both.
+- **What it does:** it faces the target, presses `&"primary"`, and finishes when the swing is over.
+- **Score and interrupts:** score 0.9, above Chase's 0.8; interrupt threshold 15.
+- **Chase:** its `stop_distance` is now 1.2 m, inside 1.8 − 0.3.
+
+**Defaults:**
+- The default `AbilityManager.tscn` now holds Dash, MeleeAttack and Knockback, after Walk, Sprint and Jump.
+- `StatManager.tscn` has `DashSpeed`.
+- New entries go at the end of their lists, so earlier bits don't change: the `combat.knockback` tag and the `dash` action.
+- New input-map keys `move_dash` and `attack_primary`, both in `project.godot`.
+
+**Tests:** `abilities/tests/combat_selftest` (35 checks):
+- dash: speed, length, direction, ground only, cooldown, jump locked out
+- the cancel rules: sprint doesn't cancel a swing, dash does, knockback cancels a dash, walking cancels an emote, sprinting cancels a reload
+- hits: only in the hit ticks, once per target, not beyond range, not own team
+- knockback direction
+- what rolls back
+- no hits on a client, and none again in a replay
+- `view_ticks_behind` sanitizing
+- a goblin chasing, switching to Attack and landing the swing
+
+**Not built:**
+- damage, death, and being hit as a state rule (step 10)
+- invulnerability during a dash
+- cancel windows
+- combos
+- hit effects on clients
+
 ---
 
 ## 9. Stats (built 2026-11-07, step 5)
@@ -633,7 +723,8 @@ Code can change a behaviour's threshold while it's running, through `behaviour_m
 | Look Toward | Alert | Stops and faces the last known position of the most aware entry | 8b |
 | Investigate | Alert | Walks, without sprinting, to the last known position. Scores highest for an uncertain entry | 8b |
 | Search | Alert | Runs to the last known position, then walks to a few random points around it. Scores highest for a certain entry that's stale | 8b |
-| Chase | Combat | Follows the current target (10.5), holding `&"sprint"`, finding a new path every so often rather than every tick | 8b |
+| Chase | Combat | Follows the current target (10.5), holding `&"sprint"`, finding a new path every so often rather than every tick . Stops within 1.2 m (2026-11-09) | 8b |
+| Attack | Combat | Within MeleeAttack's `attack_range` minus `approach_margin`, faces the target and presses `&"primary"` (8.6) | 9 |
 
 Because they all move with `move_to`, they cross nav links (jumps and drops) for free (section 7).
 
@@ -882,7 +973,7 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
      - Look Toward, Investigate, Search and Chase
 
      Then a stress-test run with a few hundred AI pawns, to decide whether sensing and memory move to C++.
-9. **More abilities:** Dash, then MeleeAttack.
+9. **More abilities:** Dash, then MeleeAttack. **(Built 2026-11-09, see 8.6.)** Also Knockback, ability interrupt priorities, lag compensation for melee, and the AI's Attack behaviour.
 10. **Teams and the fight loop:** damage, death. Being hit becomes an Alert and Combat prerequisite (10.6), and damage adds threat for target selection (10.5).
 11. **Leftovers from t0:** pawns not stacking, saving terrain edits.
 12. **Playing by hand,** with real Host and Join windows.
@@ -897,7 +988,7 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
 | 1 | How many ticks a missing input takes to fade | A few ticks; to tune by playing |
 | 2 | Where the action list is declared | A resource, like the tag declarations |
 | 3 | Combos: one ability with steps, or several abilities chained | One ability for now |
-| 4 | Facing: who turns the pawn | Walk faces the move direction; abilities may take over (aiming, attacks) |
+| 4 | Facing: who turns the pawn | Walk faces the move direction; abilities may take over (aiming, attacks). *(2026-11-09: Dash faces its direction and MeleeAttack faces the look direction when they start, 8.6. Turning on the spot without an ability is still open.)* |
 | 5 | Teams | **Settled 2026-11-09:** a `team` number on the pawn, enough for sensing to tell friend from foe (10.4). Neutral pawns and factions later |
 | 6 | Death | Comes with the fight loop |
 | 7 | Animation: which part plays the Kenney Mini Characters' built-in animations (walk, sprint, jump, die, melee) | Probably a part that listens to the ability manager and `state_changed`. Not decided |
@@ -928,3 +1019,6 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
   - Partial cover (several rays per target) and a ramp that speeds up awareness under a steady gaze.
   - The AI behaving differently because a player has the pawn, built only if a game needs it.
   - Rolling back the AI's decisions, for games where clients predict the AI or use lockstep networking (10.2). The pawns it drives already roll back.
+- **Abilities, from step 9 (2026-11-09):**
+  - Cancel windows: an action cancellable only during some of its phases, such as recovery. Noted by the owner.
+  - Invulnerability during a dash, combos, and hit effects shown on clients.

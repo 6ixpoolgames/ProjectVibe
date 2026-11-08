@@ -41,6 +41,13 @@ enum Kind { LOCOMOTION, ACTION }
 @export var locks_out: Array[StringName] = []
 ## Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
 @export_range(0.0, 2.0, 0.01, "or_greater") var buffer_window := 0.0
+## Claude 2026-11-09: how strong this ability is at cancelling a running ability it conflicts with (pawn spec 8.6). Two abilities
+## conflict when either one's locks_out covers the other's category. Walk 0, Sprint 10, Jump 5, Dash 20, knockback 30.
+@export var interrupt_priority := 0
+## Claude 2026-11-09: while this runs, a conflicting ability whose interrupt_priority is at least this cancels it and starts; a
+## weaker one is locked out, as before. 100: nothing in t0 can cancel it. MeleeAttack uses 15, so Dash cancels a swing and Sprint
+## doesn't. An action meant to be cancelled by sprinting (a reload, say) uses 10 or less; by just moving, 0.
+@export var interrupt_threshold := 100
 
 # State that rolls back. See the top of the file.
 var ticks_left := 0 ## ticks left of a timed run. 0: not running a timed run
@@ -71,6 +78,12 @@ func get_rollback_properties() -> Array[String]:
 	if buffer_window > 0.0 and trigger_action != &"":
 		out.append("buffer_ticks_left")
 	return out
+
+
+## Claude 2026-11-09: how many ticks a timed run lasts. The default turns duration's seconds into ticks; an ability that thinks in
+## ticks, such as MeleeAttack with its phases, overrides this.
+func duration_ticks() -> int:
+	return manager.ticks_for(duration) if manager else 0
 
 
 ## True while a timed run is going.

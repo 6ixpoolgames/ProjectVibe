@@ -15,6 +15,9 @@ var look_pitch := 0.0
 ## Which named actions are held this tick, as bits from InputActions. A press is "held this tick, not held last tick", which the
 ## pawn works out, so a press is never sent twice.
 var held_actions := 0
+## Claude 2026-11-09: how many ticks behind its own tick the sender was drawing other pawns, for lag compensation (step 9). The
+## player's controller fills it from NetworkSession; the AI's stays 0.
+var view_ticks_behind := 0.0
 
 
 ## A command in one line. held is a list of action names, such as [&"jump", &"sprint"].

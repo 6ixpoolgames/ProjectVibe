@@ -46,6 +46,8 @@ extends CharacterBody3D
 
 ## Sent when a player takes this pawn, or lets it go.
 signal possession_changed(pawn: Pawn, has_player: bool)
+## Claude 2026-11-09: sent on the server when something hits this pawn, after its knockback starts. For effects; step 10 adds damage.
+signal hit_received(hit: HitInfo)
 
 ## Whether a player may take control of this pawn. Turn it off on pawns players should never control.
 # Claude 2026-11-07: on by default, the owner's choice. Off, people would be left wondering why their pawn doesn't work. Something
@@ -106,6 +108,9 @@ var move_input := Vector3.ZERO ## the direction to go, in world space, up to len
 var held_actions := 0 ## which named actions are held this tick
 var look_yaw := 0.0 ## where the player is looking, which is often not where the pawn is facing
 var look_pitch := 0.0
+## Claude 2026-11-09: how many ticks behind its own tick the controller was drawing other pawns, for lag compensation. In the input
+## list, so a client's swing reaches the server with it; the server limits it to what's believable (LagCompensation).
+var view_ticks_behind := 0.0
 
 # State that affects the next tick. Listed in the TickState too.
 ## Claude 2026-11-07: last tick's held_actions, so a press can be told from a hold. It's in the TickState's state list, so the
@@ -257,6 +262,7 @@ func apply_input(command: InputCommand) -> void:
 	look_yaw = command.look_yaw
 	look_pitch = command.look_pitch
 	held_actions = command.held_actions
+	view_ticks_behind = command.view_ticks_behind # Claude 2026-11-09
 
 
 ## True while this named action is held, such as &"sprint".
@@ -329,7 +335,26 @@ func is_simulation_active() -> bool:
 
 ## Claude 2026-11-09: true where this pawn's AI runs: offline, or on the server. The AI never runs on a client (pawn spec 10.2).
 func runs_ai_here() -> bool:
+	return is_authority()
+
+
+## Claude 2026-11-09: true where this pawn's state is decided: offline, or on the server. Hits are decided here.
+func is_authority() -> bool:
 	return _entity == null or _entity.role == NetworkEntity.Role.AUTHORITY
+
+
+## Claude 2026-11-09: something hit this pawn. Called on the server by the attacking ability, such as MeleeAttack (step 9). Starts
+## this pawn's own knockback, through its own AbilityManager, so the push moves it like its other movement and rolls back. Step 10
+## adds damage, threat in memory, and the "being hit" state rule.
+func receive_hit(hit: HitInfo) -> void:
+	if not is_authority() or hit == null:
+		return
+	if ability_manager and hit.knockback_speed > 0.0 and hit.knockback_ticks > 0:
+		for ability in ability_manager.get_abilities():
+			if ability is KnockbackAbility:
+				ability.push(hit.direction * hit.knockback_speed, hit.knockback_ticks)
+				break
+	hit_received.emit(hit)
 
 
 ## Claude 2026-11-09: this pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
@@ -488,6 +513,9 @@ func sanitize_network_input(values: Dictionary) -> Dictionary:
 	# Claude 2026-11-07: replaces the two bools. Bits for actions that aren't listed are thrown away.
 	var held: Variant = values.get("held_actions", 0)
 	clean["held_actions"] = held & InputActions.all_listed_mask() if held is int else 0
+	# Claude 2026-11-09: a number of ticks, never negative. LagCompensation limits how far back it really goes.
+	var behind: Variant = values.get("view_ticks_behind", 0.0)
+	clean["view_ticks_behind"] = maxf(behind, 0.0) if behind is float and is_finite(behind) else 0.0
 	for angle: String in ["look_yaw", "look_pitch"]:
 		var value: Variant = values.get(angle, 0.0)
 		clean[angle] = value if value is float and is_finite(value) else 0.0

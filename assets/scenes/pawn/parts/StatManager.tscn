@@ -33,3 +33,7 @@ base_value = 720.0
 [node name="JumpVelocity" type="Node" parent="."]
 script = ExtResource("2_stat")
 base_value = 5.0
+
+[node name="DashSpeed" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 18.0
