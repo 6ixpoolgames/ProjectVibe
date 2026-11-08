@@ -18,6 +18,12 @@
 ## Everything it's told stays until changed, except press(), which lasts one tick.
 ## Claude 2026-11-07: until look_at_point() is called, it keeps the pawn's own look, so taking over from a player doesn't snap the
 ## pawn's head to straight ahead.
+##
+## Claude 2026-11-09: while it isn't in charge (pawn spec 6.3 and 10.3). That happens when a player has the pawn and the AI keeps
+## deciding anyway (AIContextComponent.while_possessed FULL). Then move_to() only remembers the point, without touching the pawn's
+## NavigationManager, so it can't overwrite the player's path, and returns true. When it's in charge again, its next
+## take_input_command() starts that walk. stop(), move_in_direction() and release_all() forget it, and leave the player's path
+## alone. is_following_order() says whether its own last move_to is still under way, in charge or not.
 class_name AIController
 extends ControllerBase
 
@@ -30,17 +36,35 @@ var _pressed_once := 0 # bits held for the next command only
 # One command, reused every tick, so a crowd of AI pawns doesn't make thousands of new objects a second. The pawn copies its
 # values straight away, so reusing it is safe.
 var _command := InputCommand.new()
+# Claude 2026-11-09: a move_to given while not in charge, started when it's in charge again.
+var _waiting_point := Vector3.ZERO
+var _has_waiting_point := false
 
 
 ## Claude 2026-11-08: walks to this point along a nav path, and stands still once there. Returns false if there's no way there,
 ## or the pawn has no NavigationManager, and then the pawn stands still. pawn.navigation_manager.has_arrived() says when it's there.
+## Claude 2026-11-09: while not in charge, it remembers the point for later and returns true (see the top of the file).
 func move_to(point: Vector3) -> bool:
 	_move = Vector3.ZERO # once the path ends, it stands
 	var navigation := _navigation()
 	if navigation == null:
 		push_warning("AIController: %s has no NavigationManager, so move_to can't find a way. Check its skip_default_parts." % (pawn.name if pawn else "this pawn"))
 		return false
+	if not _is_in_charge():
+		_waiting_point = point
+		_has_waiting_point = true
+		return true
+	_has_waiting_point = false
 	return navigation.move_to(point)
+
+
+## Claude 2026-11-09: true while its own last move_to is under way: following its path when in charge, or waiting to start it when
+## not. False once it arrives, gives up, or is told to do something else.
+func is_following_order() -> bool:
+	if _has_waiting_point:
+		return true
+	var navigation := _navigation()
+	return navigation != null and _is_in_charge() and navigation.is_following_path()
 
 
 ## Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
@@ -99,6 +123,10 @@ func take_input_command(_tick: int) -> InputCommand:
 	# Claude 2026-11-08: while a path from move_to is being followed, the direction comes from it. ControllerManager drops a path
 	# when control changes hands, so any path here is this controller's own.
 	var navigation := _navigation()
+	# Claude 2026-11-09: being asked for input means it's in charge, so a walk it was given while it wasn't starts now.
+	if _has_waiting_point and navigation:
+		_has_waiting_point = false
+		navigation.move_to(_waiting_point)
 	var link_press := 0
 	if navigation and navigation.is_following_path():
 		_command.move = navigation.get_move_direction()
@@ -125,6 +153,15 @@ func _navigation() -> NavigationManager:
 
 
 func _stop_path() -> void:
+	_has_waiting_point = false # Claude 2026-11-09
 	var navigation := _navigation()
-	if navigation:
+	# Claude 2026-11-09: only its own path. While not in charge, the path belongs to whoever is.
+	if navigation and _is_in_charge():
 		navigation.stop()
+
+
+# Claude 2026-11-09: true when the pawn follows this controller's input. With no ControllerManager above it, it counts as in
+# charge, so a controller used on its own still works.
+func _is_in_charge() -> bool:
+	var manager := get_parent() as ControllerManager
+	return manager == null or manager.get_controller_in_charge() == self

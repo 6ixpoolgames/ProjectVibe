@@ -15,6 +15,8 @@
 ##     network instead.
 ##   - Each tick, its AbilityManager runs the abilities, which write velocity and facing. Then the pawn adds gravity and makes the one
 ##     move_and_slide call. Claude 2026-11-07: this replaced GroundMovement and MovementModule, which are gone.
+##   - Claude 2026-11-09: each tick, before asking for input, it runs its AI parts (AIContextComponent, AIStateManager,
+##     AIBehaviourManager) in a fixed order, offline or on the server only. See _tick_ai and pawn spec section 10.
 ##
 ## What it needs in its scene, all optional:
 ##   - an AbilityManager child. With none, nothing steers it, and it only falls. It comes from PawnInitializer by default.
@@ -104,6 +106,12 @@ var stat_manager: StatManager = null
 var controller_manager: ControllerManager = null
 ## Claude 2026-11-08: finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
 var navigation_manager: NavigationManager = null
+## Claude 2026-11-09: shared data and settings for this pawn's AI (pawn spec 10). Null if the pawn has no AI.
+var ai_context: AIContextComponent = null
+## Claude 2026-11-09: picks the AI's current state. Null if the pawn has none.
+var ai_state_manager: AIStateManager = null
+## Claude 2026-11-09: picks and runs the AI's behaviour. Null if the pawn has none.
+var ai_behaviour_manager: AIBehaviourManager = null
 
 var _driver: Node = null
 var _entity: NetworkEntity = null
@@ -166,6 +174,12 @@ func _ready() -> void:
 			controller_manager = child
 		elif child is NavigationManager and navigation_manager == null: # Claude 2026-11-08
 			navigation_manager = child
+		elif child is AIContextComponent and ai_context == null: # Claude 2026-11-09: the AI parts
+			ai_context = child
+		elif child is AIStateManager and ai_state_manager == null:
+			ai_state_manager = child
+		elif child is AIBehaviourManager and ai_behaviour_manager == null:
+			ai_behaviour_manager = child
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
 		_visual.top_level = true # it's placed by _process, between ticks, not by the body
@@ -279,17 +293,60 @@ func is_simulation_active() -> bool:
 	return _simulating
 
 
+## Claude 2026-11-09: true where this pawn's AI runs: offline, or on the server. The AI never runs on a client (pawn spec 10.2).
+func runs_ai_here() -> bool:
+	return _entity == null or _entity.role == NetworkEntity.Role.AUTHORITY
+
+
+## Claude 2026-11-09: this pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
+func get_network_entity() -> NetworkEntity:
+	return _entity
+
+
 # --- Ticks ---
 
 
 ## Claude 2026-11-07: the input phase. Asks the controller in charge for this tick's input, where this pawn's input is decided here.
 ## A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
 func _tick_input(_dt: float, tick: int) -> void:
+	_tick_ai(tick) # Claude 2026-11-09: step 1 of pawn spec section 4, before the controller in charge is asked for input
 	if controller_manager == null or not _decides_own_input():
 		return
 	var command := controller_manager.take_input_command(tick)
 	if command:
 		apply_input(command)
+
+
+## Claude 2026-11-09: the AI's step, in a fixed order (pawn spec sections 4 and 10.9). Runs only where the AI runs (offline or the
+## server), never while a rollback replays ticks, and, while a player has the pawn, only as far as the AI context's
+## while_possessed allows. Order:
+##   1. From step 8b: sensing and memory.
+##   2. On a decision tick, or when something asked for a decision: the state is checked, then the behaviour manager decides.
+##   3. The running behaviour ticks, which calls the AI controller.
+func _tick_ai(tick: int) -> void:
+	if ai_context == null or not runs_ai_here():
+		return
+	if _driver and _driver.is_resimulating():
+		return # the AI is never rolled back, so a replay must not run it again
+	ai_context.current_tick = tick
+	if _has_player and ai_context.while_possessed == AIContextComponent.WhilePossessed.OFF:
+		return
+	# Step 1, sensing and memory, comes with step 8b. MEMORY_ONLY stops after it.
+	if _has_player and ai_context.while_possessed == AIContextComponent.WhilePossessed.MEMORY_ONLY:
+		return
+	if ai_state_manager:
+		ai_state_manager.check_force_expiry(tick)
+	if ai_context.is_decision_tick(tick):
+		ai_context.request_decision()
+	if ai_context.has_decision_waiting():
+		if ai_state_manager:
+			ai_state_manager.update_state(tick) # a change asks for a decision with the new state's priority
+		if ai_behaviour_manager:
+			ai_behaviour_manager.decide(tick)
+		else:
+			ai_context.clear_decision()
+	if ai_behaviour_manager:
+		ai_behaviour_manager.tick_running(tick)
 
 
 func _tick_simulate(dt: float, _tick: int) -> void:

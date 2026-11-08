@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.9
+# Pawn Spec v0.10
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -19,6 +19,7 @@
   - Forced states carry a priority (open question 9 settled).
   - Interrupt thresholds and jitter per behaviour (10.7).
   - Why AI pawns are already rolled back for hit checks while their decisions aren't (10.2), and why the behaviour manager isn't planned for C++ (10.1).
+- v0.10 (2026-11-09): step 8a built (12). See 10.10 for what differs from the text above.
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -99,7 +100,7 @@ PlayerController (outside the pawn)        (built) reads devices; joins a pawn t
 
 - The parts are kept flat on the pawn, so a designer sees every part in one place.
 - The AI parts exist on every peer, but only tick on the server, because AI only runs there.
-- **Today (2026-11-08, after step 7a):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`), `NavigationManager`, `StatManager` (with the movement stats) and `AbilityManager` (with Walk, Sprint and Jump).
+- **Today (2026-11-09, after step 8a):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`), `NavigationManager`, `StatManager` (with the movement stats), `AbilityManager` (with Walk, Sprint and Jump), `AIContextComponent`, `AIStateManager` (with Idle) and an empty `AIBehaviourManager`.
 
 ---
 
@@ -404,7 +405,7 @@ Test: `abilities/tests/ability_selftest`.
 
   ```gdscript
   class_name FadeProfile extends Resource
-  func value_at(ticks: int) -> float     # 1.0 at the start, falling to 0.0
+  func value_at(ticks: float) -> float   # 1.0 at the start, falling to 0.0. A float, so a fade can run at another speed
   func ends_after() -> int               # ticks until it's nothing, so ranges and memory know when it's gone
   ```
   A fade no mode covers is a script that extends `FadeProfile` and overrides those two functions. Every user picks it up with no other change. Used by memory and target selection (10.5) and by persistence (10.7).
@@ -612,7 +613,7 @@ While a behaviour runs, an event replaces it only if all three hold:
 So, with the t0 states:
 - The default (threshold 0, no minimum run time) can be replaced by anything.
 - **Threshold 15** ignores normal decisions and a drop back to Alert (10), but gives way to Combat (20) and to strong forces. Good for a heavy attack that shouldn't be cancelled by a passing thought.
-- **`cannot_be_interrupted`** runs until it returns SUCCEEDED or FAILED, even if its state no longer allows it. Use it sparingly. Only the pawn being removed or the AI being switched off (10.3) still ends it, and `exit` gets that reason.
+- **`cannot_be_interrupted`** runs until it returns SUCCEEDED or FAILED, even if its state no longer allows it. Use it sparingly. Only the pawn being removed still ends it, and `exit` gets the reason "removed". While the AI is paused (10.3), it pauses with it and carries on afterwards. *(Claude 2026-11-09, as built: pausing doesn't end behaviours, so nothing needs to start again after a player lets go.)*
 
 Code can change a behaviour's threshold while it's running, through `behaviour_manager.set_interrupt_threshold(&"Chase", 25)`, such as a berserk effect.
 
@@ -660,6 +661,42 @@ Between decisions, only the running behaviour's `tick` runs, once per tick. When
 - **The running behaviour** ticks every tick. It should stay cheap: Chase finds a new path every so often, not every tick.
 - **Later:** background threads for sensing and pathfinding (section 14). The main thread copies plain data, a worker does the work, and the result is used the next tick. The AI runs only on the server and is never rolled back, so a tick of delay costs nothing.
 
+### 10.10 Step 8a, as built (Claude 2026-11-09)
+
+**Where things are:**
+- **Scripts:** `assets/scripts/ai/`:
+  - `FadeProfile.gd`, `AIContextComponent.gd`
+  - `AIStateManager.gd`, `AIStateBase.gd`, `states/AIIdleState.gd`
+  - `AIBehaviourManager.gd`, `AIBehaviourBase.gd`, `behaviours/AIWanderBehaviour.gd`
+- **Part scenes:** `assets/scenes/pawn/parts/AIContextComponent.tscn`, `AIStateManager.tscn` (with an Idle state) and `AIBehaviourManager.tscn` (empty), all three listed in `resources/pawn_defaults.tres`.
+- **The pawn's AI step:** `Pawn._tick_ai`, called at the start of the pawn's input phase. Also on `Pawn`:
+  - `runs_ai_here()`: offline, or on the server
+  - `get_network_entity()`
+  - `ai_context`, `ai_state_manager` and `ai_behaviour_manager`
+
+**What differs from, or adds to, the text above:**
+- **The default behaviour list is empty.** Every pawn gets the three AI parts, but no behaviours, so it stands still. That keeps everything that drives `AIController` directly working: samples, tests, and a game's own scripts. A pawn that should wander gets a Wander node, with the class `AIWanderBehaviour`, under its `AIBehaviourManager`.
+  - An empty behaviour manager does nothing at all.
+  - With behaviours but none able to run, the pawn stands still (`release_all`).
+- **Decisions are asked for through the context.** `AIContextComponent.request_decision(priority, normal)` combines every reason for a decision in one tick into one decision, using the strongest reason: a decision tick, a state change, a force, or a force ending. The behaviour manager uses it up.
+- **Random numbers:** `AIContextComponent.random_unit(salt)` is a small integer hash of (seed, pawn number, tick, salt), so nothing is stored between calls.
+  - The pawn number is its network `entity_id`, or a hash of its name offline.
+  - `random_seed` is a setting on the context, 0 by default, which a game can set from its world seed.
+- **A forced state that runs out** hands back to the normal check on that tick (`check_force_expiry`), not at the next decision.
+- **The AI controller:**
+  - While it isn't in charge, `move_to` remembers the point and returns true. `stop`, `move_in_direction` and `release_all` forget it, and none of them touch the player's path.
+  - `is_following_order()` says whether its own walk is still under way. Behaviours use it rather than reading `NavigationManager`, so they work the same whether or not the AI is in charge.
+- **`min_run_ticks` 0 means no minimum at all,** even for a decision at an earlier tick than the behaviour started.
+
+**Tests:** `ai/tests/`, 106 checks between them:
+- `fade_profile_selftest` (18)
+- `ai_state_manager_selftest` (24)
+- `ai_behaviour_manager_selftest` (64): every decision step, persistence, interrupts, Wander, the three `while_possessed` settings, clients, and rollback
+
+`game_mode/tests/pawn_initializer_selftest` lists the three new default parts.
+
+**Not built yet:** step 8b (10.4, 10.5, Alert and Combat, and the other behaviours), and the debug readout (open question 10).
+
 ---
 
 ## 11. `PawnInitializer` (built 2026-11-07, step 4)
@@ -668,7 +705,7 @@ Between decisions, only the running behaviour's `tick` runs, once per tick. When
 - It adds each default part the pawn doesn't already have. A part placed in the pawn's scene is kept as it is, so a designer can override any default by adding their own with the same name.
 - **The defaults file:**
   - `resources/pawn_defaults.tres`, a `PawnDefaultsRes` listing part scenes. The project setting `project_base/game_mode/pawn_defaults` can name another.
-  - For t0 it lists today's parts: `scenes/pawn/parts/ControllerManager.tscn` (with its `AIController`), `NavigationManager.tscn`, `StatManager.tscn` and `AbilityManager.tscn`. *(Claude 2026-11-08: this line still named `GroundMovement`.)*
+  - For t0 it lists today's parts: `scenes/pawn/parts/ControllerManager.tscn` (with its `AIController`), `NavigationManager.tscn`, `StatManager.tscn`, `AbilityManager.tscn`, and, from step 8a, `AIContextComponent.tscn`, `AIStateManager.tscn` (with an Idle state) and `AIBehaviourManager.tscn` (with no behaviours). *(Claude 2026-11-08: this line still named `GroundMovement`.)*
   - Each part is a small scene, so its settings can be changed in the editor.
 - A part's name is its scene's root node name. Parts are added in the list's order, the same on every machine.
 - **Ways out:**
@@ -691,7 +728,7 @@ Between decisions, only the running behaviour's `tick` runs, once per tick. When
 7. **`NavigationManager`**, with click-to-move moved onto it. **(Built 2026-11-08 as 7a.)**
    - **7b, nav phase 3 (links):** **(Built 2026-11-08.)** Both kinds, the owner's choice: placed (`NavLink` markers through `NavLinkModule`) and found automatically at ledges and gaps. `NavigationManager` presses each link's action. Nav spec section 19.1.
 8. **AI** (section 10, agreed 2026-11-09), in two parts:
-   - **8a, deciding:**
+   - **8a, deciding:** **(Built 2026-11-09, see 10.10.)**
      - `FadeProfile`
      - `AIContextComponent` with `while_possessed`
      - `AIStateManager` with priority picking and forced states with priorities

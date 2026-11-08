@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/ai/AIContextComponent.gd" id="1_context"]
+
+[node name="AIContextComponent" type="Node"]
+script = ExtResource("1_context")

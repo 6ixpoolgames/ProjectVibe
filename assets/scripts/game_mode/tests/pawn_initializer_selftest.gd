@@ -8,7 +8,8 @@ extends Node
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const STATS_PART := "res://assets/scenes/pawn/parts/StatManager.tscn"
-const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"AbilityManager"]
+# Claude 2026-11-09: the three AI parts joined the defaults (pawn spec step 8a).
+const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"AbilityManager", &"AIContextComponent", &"AIStateManager", &"AIBehaviourManager"]
 
 var _failures := 0
 

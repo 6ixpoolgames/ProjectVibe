@@ -1,0 +1,174 @@
+## Written by Claude (claude-opus-5-5), 2026-11-09: shared data and settings for one pawn's AI. A part on the pawn, added by
+## PawnInitializer. Pawn spec section 10.
+##
+## It makes no decisions. It holds what the other AI parts share, so they don't each look it up again:
+##   - references: the pawn, its AI controller (the hands), its state and behaviour managers
+##   - settings for the whole AI: while_possessed, decision_interval_ticks, random_seed
+##   - the decision waiting to happen this tick, if any, and how strong its reason is (the "event", pawn spec 10.7)
+##   - random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
+##   - from step 8b: the current target and the shared inputs behaviours read
+##
+## The pawn runs its AI from its own tick, in a fixed order (Pawn._tick_ai). Nothing here ticks on its own.
+##
+## How to use it (behaviours and states get it as their "context"):
+##   context.pawn, context.controller, context.state_manager, context.behaviour_manager
+##   context.current_tick                     # the tick the AI is running now
+##   context.current_state_name()             # &"Idle", or &"" before the first state is picked
+##   context.has_target()                     # false until step 8b adds target selection
+##   context.random_unit(salt)                # a number from 0 up to 1, the same on every run for this pawn and tick
+class_name AIContextComponent
+extends Node
+
+## What the AI does while a player has the pawn (pawn spec 10.3).
+enum WhilePossessed {
+	OFF, ## nothing runs
+	MEMORY_ONLY, ## sensing and memory run; states and behaviours pause. The default
+	FULL, ## everything runs. The AI controller keeps its last order without acting on it until it's in charge again
+}
+
+## What the AI does while a player has the pawn. Which is right depends on the game: MEMORY_ONLY suits possessing an NPC and
+## letting go, where the AI should already know what's around.
+@export var while_possessed := WhilePossessed.MEMORY_ONLY
+## How often the AI decides, in ticks: 15 is four times a second at 60 ticks a second. Each pawn is offset by its own number, so a
+## crowd doesn't all decide on the same tick. Some events wake a decision early (pawn spec 10.9).
+@export_range(1, 600, 1, "or_greater") var decision_interval_ticks := 15
+## Part of every random number this AI uses. Two pawns with the same seed still differ, because their own number goes in too.
+## A game can set it from its world seed, so a replay of the same world makes the same choices.
+@export var random_seed := 0
+
+## The pawn this AI belongs to, or null if its parent isn't one.
+var pawn: Pawn = null
+## The tick the AI is running now. Set by the pawn at the start of each AI step.
+var current_tick := 0
+## From step 8b: what the AI is focused on, picked by the target selector. Null in step 8a.
+var current_target: Node3D = null
+
+var _decision_waiting := false
+var _event_priority := 0 # the strongest reason for the waiting decision (pawn spec 10.7)
+var _event_is_normal := true # true when every reason was an ordinary decision tick
+
+
+func _init() -> void:
+	# GDScript note: nothing here runs per frame. The pawn calls into the AI parts on its tick.
+	set_process(false)
+	set_physics_process(false)
+
+
+func _enter_tree() -> void:
+	pawn = get_parent() as Pawn # GDScript note: "as" gives null when the parent isn't a Pawn, rather than an error
+	if pawn == null:
+		push_warning("AIContextComponent: its parent isn't a Pawn, so this AI has nothing to drive.")
+
+
+# --- References (read when needed, because the pawn finds its parts in its own _ready, after ours) ---
+
+
+## The AI's hands, or null if the pawn has no AI controller.
+var controller: AIController:
+	get:
+		if pawn and pawn.controller_manager:
+			return pawn.controller_manager.ai_controller as AIController
+		return null
+
+## The pawn's state manager, or null.
+var state_manager: AIStateManager:
+	get:
+		return pawn.ai_state_manager if pawn else null
+
+## The pawn's behaviour manager, or null.
+var behaviour_manager: AIBehaviourManager:
+	get:
+		return pawn.ai_behaviour_manager if pawn else null
+
+
+## The name of the current state, such as &"Idle", or &"" before the first state is picked.
+func current_state_name() -> StringName:
+	var states := state_manager
+	var state := states.get_current_state() if states else null
+	return state.name if state else &""
+
+
+## True when there's a current target. Always false in step 8a.
+func has_target() -> bool:
+	return is_instance_valid(current_target)
+
+
+# --- Decisions ---
+
+
+## True on this pawn's regular decision ticks, every decision_interval_ticks, offset by its own number.
+func is_decision_tick(tick: int) -> bool:
+	return posmod(tick + pawn_number(), decision_interval_ticks) == 0
+
+
+## Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state
+## change, a force's priority for a forced state. normal is true only for an ordinary decision, the one kind a behaviour's
+## min_run_ticks holds off. Several requests in one tick combine into one decision with the strongest reason.
+func request_decision(priority: int = 0, normal: bool = true) -> void:
+	if _decision_waiting:
+		_event_priority = maxi(_event_priority, priority)
+		_event_is_normal = _event_is_normal and normal
+	else:
+		_decision_waiting = true
+		_event_priority = priority
+		_event_is_normal = normal
+
+
+## True when a decision is waiting to happen.
+func has_decision_waiting() -> bool:
+	return _decision_waiting
+
+
+## The strongest reason for the waiting decision. Only meaningful while one is waiting.
+func waiting_event_priority() -> int:
+	return _event_priority
+
+
+## True when the waiting decision is only an ordinary one.
+func waiting_event_is_normal() -> bool:
+	return _event_is_normal
+
+
+## The behaviour manager calls this once it has made the decision.
+func clear_decision() -> void:
+	_decision_waiting = false
+	_event_priority = 0
+	_event_is_normal = true
+
+
+# --- Random numbers that replay the same ---
+
+
+## A number from 0 up to (not including) 1 for this tick. salt says what it's for, so two uses on one tick differ: a behaviour
+## uses its name's hash. The same seed, pawn, tick and salt always give the same number, on every machine and every run.
+func random_unit(salt: int) -> float:
+	return random_unit_at(current_tick, salt)
+
+
+## random_unit() for a given tick.
+func random_unit_at(tick: int, salt: int) -> float:
+	# GDScript note: ints are 64-bit. Each step keeps the value to 32 bits, so the multiplications never overflow, and the result
+	# is the same everywhere. This is a small integer hash, not a random generator: nothing is stored between calls, so skipping a
+	# call never changes the next one.
+	var h := (random_seed * 83492791) ^ (pawn_number() * 19349663) ^ (tick * 73856093) ^ salt
+	h &= 0xFFFFFFFF
+	h = ((h ^ (h >> 16)) * 0x45D9F3B) & 0xFFFFFFFF
+	h = ((h ^ (h >> 16)) * 0x45D9F3B) & 0xFFFFFFFF
+	h = h ^ (h >> 16)
+	return float(h & 0xFFFFFF) / 16777216.0 # 24 bits, so every value fits exactly in a float
+
+
+## A number from -1 to 1. See random_unit().
+func random_signed(salt: int) -> float:
+	return random_unit(salt) * 2.0 - 1.0
+
+
+## This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on
+## every machine, or else a hash of its name.
+func pawn_number() -> int:
+	if pawn == null:
+		return 0
+	var entity := pawn.get_network_entity()
+	if entity and entity.entity_id >= 0:
+		return entity.entity_id
+	return String(pawn.name).hash() & 0x7FFFFFFF
