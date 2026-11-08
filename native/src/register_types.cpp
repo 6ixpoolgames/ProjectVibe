@@ -1,4 +1,6 @@
 // Written by Claude (claude-opus-5-5), 2026-11-03: GDExtension entry point; registers NavHooks and the NavServer singleton.
+#include "ai_memory_store.h" // Claude 2026-11-09: AI memory and sight in C++, pawn spec 10.11
+#include "ai_pawn_grid.h" // Claude 2026-11-09
 #include "nav_hooks.h"
 #include "nav_server.h"
 #include "net_codec.h" // Claude 2026-11-05: packet encoding in C++, a measured test the game doesn't use yet
@@ -20,6 +22,8 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	GDREGISTER_CLASS(NavHooks);
 	GDREGISTER_CLASS(NavServer);
 	GDREGISTER_CLASS(NetCodec); // Claude 2026-11-05
+	GDREGISTER_CLASS(AIMemoryStore); // Claude 2026-11-09
+	GDREGISTER_CLASS(AIPawnGrid); // Claude 2026-11-09
 	g_nav_server = memnew(NavServer);
 	Engine::get_singleton()->register_singleton("NavServer", g_nav_server);
 }

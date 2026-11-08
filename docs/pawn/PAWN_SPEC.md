@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.11
+# Pawn Spec v0.12
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -21,6 +21,7 @@
   - Why AI pawns are already rolled back for hit checks while their decisions aren't (10.2), and why the behaviour manager isn't planned for C++ (10.1).
 - v0.10 (2026-11-09): step 8a built (12). See 10.10 for what differs from the text above.
 - v0.11 (2026-11-09): step 8b built (12). See 10.11 for what differs from the text above. Two changes reach back into the earlier sections: a floor only counts when its behaviour is available (10.8, step 3), and uncertain entries stay at full awareness for 5 s before fading (10.5). Later the same day: `spotted` was renamed `certain` (the owner's call), and the fade delays became their own settings on `AIMemory`.
+- v0.12 (2026-11-09): memory, sight checks, target scoring and the nearby-pawns query moved to C++, the owner's call, with every setting still on the GDScript nodes and a GDScript fallback (10.12). Behaviours tick every `tick_interval_ticks` (10.7).
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -775,7 +776,57 @@ Five fixes found with these measurements brought it down from 0.067 ms per pawn:
 - Chase only calls `stop()` when it isn't already standing, and looks up its hands and memory once, in `enter()`.
 - `AIMemory` looks entries up by id, not by searching. That barely changed these numbers, but it keeps lookups cheap for larger memories.
 
-What's left is mostly sensing and target selection, both loops over plain data. They're the C++ candidates, with every setting still exported on the GDScript nodes. A shared spatial grid would replace the nearby-pawns query. Fewer enemies in sight costs less, because sensing, target scoring and Alert's check all loop over what's in memory.
+What was left was mostly sensing and target selection, both loops over plain data, so they moved to C++ (10.12). Fewer enemies in sight costs less, because sensing, target scoring and Alert's check all loop over what's in memory.
+
+### 10.12 The C++ port (Claude 2026-11-09)
+
+The owner's rule: port code that isn't hard coded and stays tunable from GDScript. Settings stay exported on the GDScript nodes and are handed to C++, and C++ runs the loops. It follows the same pattern as `NetCodec`: C++ when the navcore library loads, and the same thing in GDScript otherwise.
+
+**What moved, in `native/src/`:**
+- **`AIMemoryStore`** (`ai_memory_store.h/.cpp`), one per pawn. It holds memory's entries and does:
+  - the awareness maths and fades. It reads each `FadeProfile`'s settings: mode, hold, fade, half-life and curve, sampled from the `Curve` itself. A profile whose script overrides `value_at()` is called instead, so a designer's own fade still works.
+  - forgetting
+  - the most aware entry
+  - target scoring, with `AITargetSelector`'s formula
+  - the sight check loop: angle, distance, detectability, rays and memory updates
+- **`AIPawnGrid`** (`ai_pawn_grid.h/.cpp`), one shared by every pawn. It's a grid of every pawn, rebuilt at most once a tick on the first query, and returns the nearest pawns of other teams first. That answers open question 12: the `max_candidates` cap keeps the nearest. It replaces the physics shape query.
+
+**The GDScript side:**
+- **`AIMemory`** keeps every setting, both signals and the functions it had, and passes calls to its store. It picks `AIMemoryStore` (C++) when the class exists, or **`AIMemoryStoreGD`**, the old code moved into the same functions.
+  - `AIMemory.use_native = false` forces GDScript for every memory made after it.
+  - Fade settings are handed over whenever one changes, and again on every full pass, so edits inside a profile while the game runs apply within a pass.
+- **`SightSense`** hands each pass to the store with its settings. `visibility_of()` and `has_line_of_sight()` stay in GDScript, for tests and debug readouts.
+- **`AISensingManager`** uses the grid when the C++ library is there (`track_pawn` and `untrack_pawn`, called from `Pawn`), or the physics query otherwise.
+- **`AITargetSelector`** has the store score every entry, unless its script overrides `target_priority()`. It notices that when ready, and then scores each entry in GDScript with the override, so a game's own rules always win.
+
+**Kept the same both ways:** `ai_perception_selftest` runs the C++ store by default, and with `-- --gdscript-store` the GDScript one. A new check gives both stores the same calls and compares every answer: awareness for curve, half-life and script-made fades; the most aware entry; the target; and what's forgotten. They match exactly. `ai_stealth_selftest` also passes on both.
+
+**Measured** (the same worst case, 200 pawns, 32 enemies each in sight):
+
+| | GDScript store | C++ store |
+|---|---|---|
+| AI per tick, 200 pawns | 6.0 ms | 3.2 ms |
+| Per pawn per tick | 0.030 ms | 0.016 ms |
+| 400 pawns | 12.0 ms | 7.1 ms |
+
+The C++ breakdown at 200 pawns, per tick:
+
+| Part | ms |
+|---|---|
+| Sensing | 2.2 |
+| …of which sight checks and rays | 1.0 |
+| …of which the grid query | 0.4 |
+| Chase | 0.7 |
+| Asking the AI controller for input | 0.6 |
+| Decisions | 0.4 |
+| States | 0.2 |
+| Target selection | 0.2, from 1.1 |
+
+What's left is spread thin: the GDScript calls into C++ each pass, behaviours, and decisions.
+
+**Not done:**
+- The Linux library hasn't been rebuilt. It waits for the full sweep, like the rest of navcore.
+- Background threads (section 14) are still later.
 
 **Not built yet:**
 - being hit as a prerequisite (step 10)

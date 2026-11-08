@@ -165,6 +165,7 @@ func _init() -> void:
 func _enter_tree() -> void:
 	add_to_group(TerrainBodyLifter.GROUP)
 	_count_team(team, 1) # Claude 2026-11-09
+	AISensingManager.track_pawn(self) # Claude 2026-11-09: the shared grid AI sensing reads (C++ only)
 	# Claude 2026-11-07: default parts first, so they're children before anything below or any _ready looks for them. A node may
 	# add children to itself here: Godot enters them right after.
 	var game_mode: Node = get_node_or_null("/root/GameMode")
@@ -177,6 +178,7 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
 	_count_team(team, -1) # Claude 2026-11-09
+	AISensingManager.untrack_pawn(self)
 	# Claude 2026-11-07: this first, because leaving the list can switch the pawn back on, which would register it again.
 	var ai := _ai_activation_manager()
 	if ai:

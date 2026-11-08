@@ -10,11 +10,11 @@
 ## Teams: only pawns on another team are candidates. When no pawn of another team is in the tree at all, the query is skipped,
 ## so a crowd that's all on one team, like the stress tests, costs almost nothing here.
 ##
-## The query is a physics shape query on the layers in candidate_mask (pawns are on layer 2), so it's cheap however many pawns
-## exist. It returns at most max_candidates, nearest not guaranteed.
-##
-## C++ later (pawn spec 10.1): this pass grows with pawns × candidates, so it's the first candidate for porting, and for background
-## threads after that.
+## Claude 2026-11-09: the query uses AIPawnGrid from the navcore C++ library when it's available: one grid of every pawn, rebuilt at
+## most once a tick and shared by every pawn, which returns the nearest max_candidates first. Pawns join it from Pawn._enter_tree
+## (track_pawn). Without the library, or with AIMemory.use_native off, it's a physics shape query on the layers in candidate_mask
+## (pawns are on layer 2), which returns at most max_candidates, nearest not guaranteed. The sight checks themselves run in the
+## pawn's memory store (pawn spec 10.11).
 class_name AISensingManager
 extends Node
 
@@ -29,7 +29,11 @@ extends Node
 
 var pawn: Pawn = null
 
+# Claude 2026-11-09: the grid every pawn shares, or null without the C++ library. Pawns join and leave it from Pawn.gd.
+static var _grid: Object = null
+
 var _senses: Array[AISenseBase] = []
+var _use_grid := false # decided once, when ready
 var _candidates: Array[Pawn] = [] # reused every pass
 # Reused for every query, so a pass makes no new query objects.
 var _query := PhysicsShapeQueryParameters3D.new()
@@ -55,6 +59,7 @@ func _ready() -> void:
 			child.pawn = pawn
 			_senses.append(child)
 	_query.shape = _sphere
+	_use_grid = _grid != null and AIMemory.use_native
 
 
 ## Every sense, in tree order.
@@ -76,7 +81,7 @@ func tick_sensing(tick: int) -> void:
 
 ## One full pass now. The pawn's tick calls it on schedule; tests may call it directly.
 func full_pass(tick: int) -> void:
-	_find_candidates()
+	_find_candidates(tick)
 	for sense in _senses:
 		sense.full_pass(_candidates, tick)
 	pawn.ai_memory.forget_old(tick)
@@ -90,12 +95,31 @@ func get_range() -> float:
 	return longest
 
 
-func _find_candidates() -> void:
+## Claude 2026-11-09: Pawn calls this when it enters the tree, so the shared grid knows it. Makes the grid on first use, when the C++
+## library is available.
+static func track_pawn(who: Node3D) -> void:
+	if _grid == null and ClassDB.class_exists(&"AIPawnGrid"):
+		_grid = ClassDB.instantiate(&"AIPawnGrid")
+	if _grid:
+		_grid.track(who)
+
+
+## Claude 2026-11-09: Pawn calls this when it leaves the tree.
+static func untrack_pawn(who: Node3D) -> void:
+	if _grid:
+		_grid.untrack(who)
+
+
+func _find_candidates(tick: int) -> void:
 	_candidates.clear()
 	if Pawn.count_pawns_not_on_team(pawn.team) == 0:
 		return # nobody on another team anywhere: nothing to find
 	var reach := get_range()
 	if reach <= 0.0 or not pawn.is_inside_tree():
+		return
+	if _use_grid:
+		# GDScript note: assign copies the grid's plain Array into the typed one, checking each item is a Pawn.
+		_candidates.assign(_grid.query(pawn.global_position, reach, pawn.team, pawn, max_candidates, tick))
 		return
 	_sphere.radius = reach
 	_query.transform = Transform3D(Basis.IDENTITY, pawn.global_position)

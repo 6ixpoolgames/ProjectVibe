@@ -21,6 +21,10 @@
 ## goblin sees where it's going.
 ##
 ## Refreshes check only the current target, the same way, so a tracked target stays fresh between full passes for one ray.
+##
+## Claude 2026-11-09: the checks themselves run in the pawn's memory store, AIMemoryStore in C++ when available (AIMemoryStoreGD
+## otherwise), with these settings handed over each pass. visibility_of() and has_line_of_sight() below are the same rules in
+## GDScript, for tests and debug readouts.
 class_name SightSense
 extends AISenseBase
 
@@ -47,16 +51,18 @@ extends AISenseBase
 
 # Reused for every ray, so checks create no new objects.
 var _ray := PhysicsRayQueryParameters3D.new()
+# Claude 2026-11-09: the settings handed to memory's store each pass, in the order AIMemoryStore.set_sight_settings takes them.
+var _settings := PackedFloat64Array()
+var _one_target: Array = [null] # reused for a refresh's single check
 
 
 func get_range() -> float:
 	return sight_range
 
 
+## Claude 2026-11-09: the whole pass runs in memory's store (C++ when available, else GDScript), with this sense's settings.
 func full_pass(candidates: Array[Pawn], tick: int) -> void:
-	_begin_checks()
-	for target in candidates:
-		_check(target, tick)
+	_check_all(candidates, tick)
 
 
 ## Claude 2026-11-09: only the current target, one ray. Refreshing every remembered entity cost more than the full passes in a crowd
@@ -65,8 +71,8 @@ func refresh(tick: int) -> void:
 	var context := pawn.ai_context if pawn else null
 	var target := context.current_target as Pawn if context else null
 	if target and target.is_inside_tree():
-		_begin_checks()
-		_check(target, tick)
+		_one_target[0] = target
+		_check_all(_one_target, tick)
 
 
 ## How strongly this pawn would see the target now, before line of sight and the time factor: distance × angle × detectability.
@@ -130,18 +136,26 @@ func _visibility(target: Pawn) -> float:
 	return distance_factor * angle_factor * target.detectability
 
 
-func _check(target: Pawn, tick: int) -> void:
-	var memory := pawn.ai_memory
-	if memory == null or target == pawn:
+# Claude 2026-11-09: hands the checks to memory's store, then lets memory wake a decision and send its signals.
+func _check_all(targets: Array, tick: int) -> void:
+	var memory := pawn.ai_memory if pawn else null
+	if memory == null:
 		return
-	var interval := manager.sense_interval_ticks if manager else 10
-	var ticks := clampi(memory.ticks_since_checked(target, tick, interval), 0, max_gain_ticks)
-	var visibility := _visibility(target)
-	# The ray is the expensive part, so it's only cast when the target could be seen at all.
-	if visibility > 0.0 and ticks > 0 and has_line_of_sight(target):
-		memory.record_sighting(target, fill_rate * ticks * visibility, tick, target.global_position)
-	else:
-		memory.record_check(target, tick)
+	var store: Object = memory.get_store()
+	_settings.resize(11)
+	_settings[0] = fill_rate
+	_settings[1] = near_range
+	_settings[2] = sight_range
+	_settings[3] = cos(deg_to_rad(central_cone_degrees * 0.5))
+	_settings[4] = cos(deg_to_rad(periphery_degrees * 0.5))
+	_settings[5] = periphery_multiplier
+	_settings[6] = max_gain_ticks
+	_settings[7] = eye_height
+	_settings[8] = target_height
+	_settings[9] = sight_blocking_mask
+	_settings[10] = manager.sense_interval_ticks if manager else 10
+	store.set_sight_settings(_settings)
+	memory.announce_sight_results(store.sight_check(pawn, _eye_yaw(), targets, tick))
 
 
 func _eye_yaw() -> float:

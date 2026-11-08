@@ -2,6 +2,7 @@
 ## with the default parts and all five t0 behaviours (Wander, Look Toward, Investigate, Search, Chase), and an intruder on another
 ## team that the test moves around. It checks each step of Idle → Alert → Combat → Alert (searching) → Idle, and that a pawn on its
 ## own team, or an invisible one, never alerts it.
+## Claude 2026-11-09: add "-- --gdscript-store" to check the GDScript memory store where the C++ one is available.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_stealth_selftest.tscn"
 extends Node
@@ -14,6 +15,9 @@ var _failures := 0
 
 func _ready() -> void:
 	print("--- AI stealth self-test ---")
+	# Claude 2026-11-09: "-- --gdscript-store" runs the same checks on the GDScript memory store, where the C++ one is available.
+	AIMemory.use_native = not OS.get_cmdline_user_args().has("--gdscript-store")
+	print("  memory store: %s" % ("C++" if AIMemory.use_native and ClassDB.class_exists(&"AIMemoryStore") else "GDScript"))
 	var floor_body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()

@@ -12,6 +12,7 @@
 ##   --no-behaviours   the AI parts and senses, but no behaviours
 ##   --no-refresh      full passes only, no refreshes between them
 ##   --breakdown       200 pawns with AI only, timing each AI part separately (test-only subclasses that wrap each call)
+##   --gdscript-store  the GDScript memory store and physics query, even where the C++ library is available (Claude 2026-11-09)
 extends Node
 
 var _no_sensing := false
@@ -39,9 +40,9 @@ class TimedSensing extends AISensingManager:
 		var started := Time.get_ticks_usec()
 		super(tick)
 		_note("sensing (passes, refreshes, memory)", started)
-	func _find_candidates() -> void:
+	func _find_candidates(tick: int) -> void:
 		var started := Time.get_ticks_usec()
-		super()
+		super(tick)
 		_note("  of which: nearby-pawns query", started)
 
 class TimedSight extends SightSense:
@@ -51,11 +52,10 @@ class TimedSight extends SightSense:
 		entry[0] += Time.get_ticks_usec() - started
 		entry[1] += 1
 		totals[part] = entry
-	func has_line_of_sight(target: Pawn) -> bool:
+	func _check_all(targets: Array, tick: int) -> void:
 		var started := Time.get_ticks_usec()
-		var clear := super(target)
-		_note("  of which: rays", started)
-		return clear
+		super(targets, tick)
+		_note("  of which: sight checks and rays (memory store)", started)
 
 class TimedHands extends AIController:
 	var totals: Dictionary
@@ -138,6 +138,8 @@ func _ready() -> void:
 	_no_behaviours = args.has("--no-behaviours")
 	_no_refresh = args.has("--no-refresh")
 	_breakdown = args.has("--breakdown")
+	AIMemory.use_native = not args.has("--gdscript-store")
+	print("memory store: %s" % ("C++ (AIMemoryStore, AIPawnGrid)" if AIMemory.use_native and ClassDB.class_exists(&"AIMemoryStore") else "GDScript (AIMemoryStoreGD, physics query)"))
 	print("switches: %s" % (" ".join(args) if not args.is_empty() else "none"))
 	var floor_body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()

@@ -2,6 +2,7 @@
 ## (pawn spec 10.4 and 10.5). Checks awareness filling and fading, spotting, forgetting, each part of sight's gain (distance, angle,
 ## line of sight, detectability, the time factor and its cap), which way the eyes face, teams, sensing on schedule and while
 ## possessed, and target selection with its bonus, threat and forced targets.
+## Claude 2026-11-09: add "-- --gdscript-store" to check the GDScript memory store where the C++ one is available.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_perception_selftest.tscn"
 extends Node
@@ -15,12 +16,16 @@ var _floor: StaticBody3D = null
 
 func _ready() -> void:
 	print("--- AI perception self-test ---")
+	# Claude 2026-11-09: "-- --gdscript-store" runs the same checks on the GDScript memory store, where the C++ one is available.
+	AIMemory.use_native = not OS.get_cmdline_user_args().has("--gdscript-store")
+	print("  memory store: %s" % ("C++" if AIMemory.use_native and ClassDB.class_exists(&"AIMemoryStore") else "GDScript"))
 	_floor = _make_box(Vector3(0, -0.5, 0), Vector3(200, 1, 200))
 	await _test_memory()
 	await _test_sight()
 	await _test_eyes()
 	await _test_scheduled_sensing()
 	await _test_target_selection()
+	await _test_stores_agree()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -225,6 +230,71 @@ func _test_target_selection() -> void:
 	observer.free()
 	far.free()
 	near.free()
+
+
+## A fade no mode covers, made by a script: a step from full to nothing at 50 ticks.
+class StepFade extends FadeProfile:
+	func value_at(ticks: float) -> float:
+		return 1.0 if ticks < 50.0 else 0.0
+
+	func ends_after() -> int:
+		return 50
+
+
+# Claude 2026-11-09: the C++ store and the GDScript store, given the same calls, give the same answers. Fades of every kind,
+# including a drawn curve and a script's own, delays, certainty, forgetting, most aware and target scoring.
+func _test_stores_agree() -> void:
+	if not ClassDB.class_exists(&"AIMemoryStore"):
+		print("  (no C++ library here, so there's no C++ store to compare)")
+		return
+	var native: Object = ClassDB.instantiate(&"AIMemoryStore")
+	var script_store := AIMemoryStoreGD.new()
+	var a := await _make_pawn(0, Vector3(0, 0, -5))
+	var b := await _make_pawn(0, Vector3(6, 0, -2))
+	var c := await _make_pawn(0, Vector3(-3, 0, -9))
+	var curve := Curve.new()
+	curve.add_point(Vector2(0.0, 1.0))
+	curve.add_point(Vector2(0.4, 0.8))
+	curve.add_point(Vector2(1.0, 0.0))
+	var drawn := FadeProfile.new()
+	drawn.mode = FadeProfile.Mode.CURVE
+	drawn.hold_ticks = 15
+	drawn.fade_ticks = 120
+	drawn.curve = curve
+	var halving := FadeProfile.new()
+	halving.mode = FadeProfile.Mode.HALF_LIFE
+	halving.hold_ticks = 10
+	halving.half_life_ticks = 25
+	var step: FadeProfile = StepFade.new()
+	var cases := [[drawn, false, halving, false], [step, true, drawn, false], [halving, false, step, true]]
+	var worst := 0.0
+	var same_choices := true
+	for case in cases:
+		for store in [native, script_store]:
+			store.clear()
+			store.configure_fades(case[0], 40, case[1], case[2], 20, case[3], 30)
+		for store in [native, script_store]:
+			store.record_sighting(a, 0.4, 100, a.global_position)
+			store.record_sighting(b, 0.7, 104, b.global_position)
+			store.record_sighting(c, 1.0, 108, c.global_position) # certain at once
+			store.record_check(a, 110)
+			store.record_sighting(a, 0.25, 118, a.global_position) # not in view all along: fades first
+			store.add_threat(b, 0.5)
+		for tick in range(100, 400, 7):
+			for i in native.entry_count():
+				worst = maxf(worst, absf(native.awareness_at(i, tick) - script_store.awareness_at(i, tick)))
+			same_choices = same_choices and native.most_aware_index(Vector3.ZERO, tick) == script_store.most_aware_index(Vector3.ZERO, tick)
+			same_choices = same_choices and native.best_target(Vector3.ZERO, 1.0, 0.5, 1.0, 25.0, 0.1, b.get_instance_id(), 0.2, tick) 					== script_store.best_target(Vector3.ZERO, 1.0, 0.5, 1.0, 25.0, 0.1, b.get_instance_id(), 0.2, tick)
+		var forgotten_native: PackedInt64Array = native.forget_old(260)
+		var forgotten_script: PackedInt64Array = script_store.forget_old(260)
+		forgotten_native.sort()
+		forgotten_script.sort()
+		same_choices = same_choices and forgotten_native == forgotten_script and native.entry_count() == script_store.entry_count()
+	_check(worst < 0.0001, "the C++ and GDScript stores give the same awareness, for curve, half-life and script-made fades (largest difference %.6f)" % worst)
+	_check(same_choices, "and the same most aware entry, target and forgotten entries at every tick checked")
+	a.free()
+	b.free()
+	c.free()
 
 
 # --- Helpers ---

@@ -18,6 +18,10 @@
 ##
 ## A game with its own targeting rules extends this and overrides target_priority().
 ##
+## Claude 2026-11-09: the scoring loop runs in the pawn's memory store (AIMemoryStore in C++ when available, pawn spec 10.11) with
+## the weights below. A script that overrides target_priority() is noticed when the selector is ready, and then every entry is scored
+## by that function in GDScript instead, so a game's own rules always win.
+##
 ## How to use it (outside code only talks to the selector):
 ##   pawn.ai_target_selector.get_current_target()
 ##   pawn.ai_target_selector.force_target(player_pawn, 180, 40, "taunt")
@@ -50,6 +54,7 @@ var _picked_tick := 0
 var _forced: Node3D = null
 var _force_priority := 0
 var _force_until_tick := -1
+var _custom_priority := false # Claude 2026-11-09: true when a script overrides target_priority()
 
 
 func _init() -> void:
@@ -69,6 +74,13 @@ func _ready() -> void:
 		current_target_fade.mode = FadeProfile.Mode.LINEAR
 		current_target_fade.hold_ticks = 60
 		current_target_fade.fade_ticks = 60
+	# GDScript note: a script's method list includes inherited methods, and an overridden one appears once per script that defines
+	# it, so more than one target_priority means something overrode it.
+	var definitions := 0
+	for method in get_script().get_script_method_list():
+		if method.name == "target_priority":
+			definitions += 1
+	_custom_priority = definitions > 1
 
 
 ## The current target, or null.
@@ -98,6 +110,13 @@ func update_target(tick: int) -> void:
 	var best_priority := -INF
 	var best_distance := INF
 	var best_id := 0
+	if memory and not _custom_priority:
+		# Claude 2026-11-09: the built-in formula, as one loop in memory's store.
+		var current_id := _current.get_instance_id() if is_instance_valid(_current) else 0
+		var bonus := current_target_bonus * current_target_fade.value_at(tick - _picked_tick) if current_id != 0 and current_target_fade else 0.0
+		var index: int = memory.get_store().best_target(pawn.global_position, awareness_weight, distance_weight, threat_weight, distance_range, min_awareness, current_id, bonus, tick)
+		_set_target(memory.entity_at(index) if index >= 0 else null, "priority", tick)
+		return
 	if memory:
 		for i in memory.entry_count():
 			if memory.awareness_at(i, tick) < min_awareness:
