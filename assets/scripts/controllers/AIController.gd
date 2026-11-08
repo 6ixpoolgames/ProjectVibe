@@ -97,6 +97,11 @@ func stop_looking() -> void:
 	_look_set = false
 
 
+## Claude 2026-11-09: true while it's looking at a point it was given. AI sight faces this way then (SightSense).
+func is_looking_at_point() -> bool:
+	return _look_set
+
+
 ## Holds this action for the next tick only, so the pawn sees one press.
 func press(action: StringName) -> void:
 	_pressed_once |= InputActions.mask_of(action)

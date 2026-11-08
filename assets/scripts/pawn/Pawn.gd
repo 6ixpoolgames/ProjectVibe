@@ -81,6 +81,24 @@ signal possession_changed(pawn: Pawn, has_player: bool)
 ## Claude 2026-11-07: default parts to leave out, by name, such as &"AbilityManager". A part with that name in the scene is kept
 ## either way.
 @export var skip_default_parts: Array[StringName] = []
+## Claude 2026-11-09: which side this pawn is on. AI sensing only notices pawns of other teams (pawn spec 10.4). A player who
+## possesses a pawn plays for its team.
+@export var team := 0:
+	set(value):
+		if team == value:
+			return
+		if is_inside_tree():
+			_count_team(team, -1)
+			_count_team(value, 1)
+		team = value
+## Claude 2026-11-09: how easy this pawn is for AI to see: 1 is normal, lower is harder, 0 is invisible. Sight multiplies its fill
+## rate by this (pawn spec 10.4). Nothing in the base changes it: how stealth, gear or light level turn into this number is a game
+## rule, for a GameMode module to set.
+@export_range(0.0, 4.0, 0.01, "or_greater") var detectability := 1.0
+
+# Claude 2026-11-09: how many pawns in the tree are on each team, so AI sensing can skip looking when there's nobody to find.
+# GDScript note: a static var belongs to the class, not to one pawn, so every pawn shares this one dictionary.
+static var _pawns_per_team := {}
 
 # This tick's input, as plain data. Listed in the TickState, so it goes over the network and rolls back.
 var move_input := Vector3.ZERO ## the direction to go, in world space, up to length 1
@@ -112,6 +130,12 @@ var ai_context: AIContextComponent = null
 var ai_state_manager: AIStateManager = null
 ## Claude 2026-11-09: picks and runs the AI's behaviour. Null if the pawn has none.
 var ai_behaviour_manager: AIBehaviourManager = null
+## Claude 2026-11-09: the AI's senses, which write into its memory. Null if the pawn has none.
+var ai_sensing_manager: AISensingManager = null
+## Claude 2026-11-09: what the AI has sensed, and how aware of each it is. Null if the pawn has none.
+var ai_memory: AIMemory = null
+## Claude 2026-11-09: picks the AI's current target from its memory. Null if the pawn has none.
+var ai_target_selector: AITargetSelector = null
 
 var _driver: Node = null
 var _entity: NetworkEntity = null
@@ -140,6 +164,7 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	add_to_group(TerrainBodyLifter.GROUP)
+	_count_team(team, 1) # Claude 2026-11-09
 	# Claude 2026-11-07: default parts first, so they're children before anything below or any _ready looks for them. A node may
 	# add children to itself here: Godot enters them right after.
 	var game_mode: Node = get_node_or_null("/root/GameMode")
@@ -151,6 +176,7 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
+	_count_team(team, -1) # Claude 2026-11-09
 	# Claude 2026-11-07: this first, because leaving the list can switch the pawn back on, which would register it again.
 	var ai := _ai_activation_manager()
 	if ai:
@@ -180,6 +206,12 @@ func _ready() -> void:
 			ai_state_manager = child
 		elif child is AIBehaviourManager and ai_behaviour_manager == null:
 			ai_behaviour_manager = child
+		elif child is AISensingManager and ai_sensing_manager == null:
+			ai_sensing_manager = child
+		elif child is AIMemory and ai_memory == null:
+			ai_memory = child
+		elif child is AITargetSelector and ai_target_selector == null:
+			ai_target_selector = child
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
 		_visual.top_level = true # it's placed by _process, between ticks, not by the body
@@ -303,6 +335,15 @@ func get_network_entity() -> NetworkEntity:
 	return _entity
 
 
+## Claude 2026-11-09: how many pawns in the tree are on a team other than this one. AI sensing skips looking when it's 0.
+static func count_pawns_not_on_team(own_team: int) -> int:
+	var total := 0
+	for each_team: int in _pawns_per_team:
+		if each_team != own_team:
+			total += _pawns_per_team[each_team]
+	return total
+
+
 # --- Ticks ---
 
 
@@ -320,8 +361,9 @@ func _tick_input(_dt: float, tick: int) -> void:
 ## Claude 2026-11-09: the AI's step, in a fixed order (pawn spec sections 4 and 10.9). Runs only where the AI runs (offline or the
 ## server), never while a rollback replays ticks, and, while a player has the pawn, only as far as the AI context's
 ## while_possessed allows. Order:
-##   1. From step 8b: sensing and memory.
-##   2. On a decision tick, or when something asked for a decision: the state is checked, then the behaviour manager decides.
+##   1. Sensing, which writes into memory (Claude 2026-11-09, step 8b).
+##   2. On a decision tick, or when something asked for a decision: the target is picked, the state is checked, then the
+##      behaviour manager decides.
 ##   3. The running behaviour ticks, which calls the AI controller.
 func _tick_ai(tick: int) -> void:
 	if ai_context == null or not runs_ai_here():
@@ -331,14 +373,20 @@ func _tick_ai(tick: int) -> void:
 	ai_context.current_tick = tick
 	if _has_player and ai_context.while_possessed == AIContextComponent.WhilePossessed.OFF:
 		return
-	# Step 1, sensing and memory, comes with step 8b. MEMORY_ONLY stops after it.
+	# Claude 2026-11-09: step 1, sensing writes into memory. MEMORY_ONLY stops after it.
+	if ai_sensing_manager:
+		ai_sensing_manager.tick_sensing(tick)
 	if _has_player and ai_context.while_possessed == AIContextComponent.WhilePossessed.MEMORY_ONLY:
 		return
 	if ai_state_manager:
 		ai_state_manager.check_force_expiry(tick)
+	if ai_target_selector:
+		ai_target_selector.check_force_expiry(tick)
 	if ai_context.is_decision_tick(tick):
 		ai_context.request_decision()
 	if ai_context.has_decision_waiting():
+		if ai_target_selector:
+			ai_target_selector.update_target(tick) # first, because states such as Combat look at the current target
 		if ai_state_manager:
 			ai_state_manager.update_state(tick) # a change asks for a decision with the new state's priority
 		if ai_behaviour_manager:
@@ -488,6 +536,15 @@ func _find_view(node: Node) -> VirtualCamera:
 		if found:
 			return found
 	return null
+
+
+# Claude 2026-11-09: keeps the shared team counts in step with pawns entering and leaving the tree, and changing team.
+static func _count_team(which_team: int, change: int) -> void:
+	var count: int = _pawns_per_team.get(which_team, 0) + change
+	if count <= 0:
+		_pawns_per_team.erase(which_team)
+	else:
+		_pawns_per_team[which_team] = count
 
 
 func _clear_input() -> void:

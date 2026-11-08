@@ -9,13 +9,16 @@
 ##   2. Hard rules, with no behaviour code run: drop any on cooldown, needing a target when there's none, or whose action can't start.
 ##   3. Ranges: each one's result can only land between floor = min_score + persistence - jitter and
 ##      ceiling = max_score + persistence + jitter. One whose ceiling is below the highest floor can't win, so it's dropped.
+##      Claude 2026-11-09: a floor is only certain if its behaviour is available, so the highest floor is taken from the first
+##      available behaviour, checking from the highest floor down (usually one is_available() call).
 ##   4. Scoring, highest ceiling first: is_available() and score() run, persistence and this decision's jitter are added. As soon as
 ##      the next ceiling can't beat the best result, the rest are skipped.
 ##   5. Jitter: each behaviour gets its own offset within ± its jitter, from the context's replayable random numbers.
 ##   6. Ties: results within tie_margin are a tie. With randomize_ties one is picked at random, otherwise the fixed order decides.
 ##   7. Switching: if the winner isn't the running one, the old one's exit() runs, then the new one's enter(), and its persistence
 ##      starts.
-## Between decisions only the running behaviour's tick() runs. When it returns SUCCEEDED or FAILED, the manager decides at once.
+## Between decisions only the running behaviour's tick() runs, every tick_interval_ticks (Claude 2026-11-09). When it returns
+## SUCCEEDED or FAILED, the manager decides at once.
 ##
 ## How to use it (outside code only talks to the manager):
 ##   pawn.ai_behaviour_manager.get_running_behaviour()
@@ -57,6 +60,8 @@ var _candidates: Array[AIBehaviourBase] = []
 var _ties: Array[AIBehaviourBase] = []
 var _by_ceiling := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 	return a.decision_ceiling > b.decision_ceiling or (a.decision_ceiling == b.decision_ceiling and a.decision_index < b.decision_index)
+var _by_floor := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
+	return a.decision_floor > b.decision_floor or (a.decision_floor == b.decision_floor and a.decision_index < b.decision_index)
 var _by_index := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 	return a.decision_index < b.decision_index
 var _warned_states := {} # state name -> true, for "no behaviour is allowed in this state"
@@ -110,7 +115,6 @@ func decide(tick: int) -> void:
 	# 1 and 2. Valid behaviours, and the hard rules.
 	var state_name := context.current_state_name()
 	var any_allowed := false
-	var highest_floor := -INF
 	_candidates.clear()
 	for behaviour in _behaviours:
 		if not behaviour.is_allowed_in(state_name):
@@ -128,12 +132,23 @@ func decide(tick: int) -> void:
 		behaviour.decision_persistence = behaviour.persistence_now(tick)
 		behaviour.decision_jitter = jitter * context.random_signed(behaviour.name_hash) if jitter > 0.0 else 0.0
 		behaviour.decision_ceiling = behaviour.max_score + behaviour.decision_persistence + jitter
-		if behaviour.min_score > -INF:
-			highest_floor = maxf(highest_floor, behaviour.min_score + behaviour.decision_persistence - jitter)
+		behaviour.decision_floor = behaviour.min_score + behaviour.decision_persistence - jitter if behaviour.min_score > -INF else -INF
+		behaviour.availability_checked = false
 		_candidates.append(behaviour)
 	if not any_allowed and not _warned_states.has(state_name):
 		_warned_states[state_name] = true
 		push_warning("AIBehaviourManager: no behaviour on %s is allowed in the state %s, so it stands still there." % [pawn.name, state_name])
+	# 3, continued. A floor is only certain if its behaviour is available, so the highest floor comes from the first available
+	# behaviour, checking from the highest floor down. (Claude 2026-11-09: found in step 8b. A behaviour with a fixed score that
+	# didn't apply right now, such as Search with nothing certain, would otherwise shut out ones that did.)
+	var highest_floor := -INF
+	_candidates.sort_custom(_by_floor)
+	for behaviour in _candidates:
+		if behaviour.decision_floor == -INF:
+			break # sorted, so no floors left
+		if _is_available(behaviour, context):
+			highest_floor = behaviour.decision_floor
+			break
 	# 4. Scoring, highest ceiling first.
 	_candidates.sort_custom(_by_ceiling)
 	var best: AIBehaviourBase = null
@@ -144,7 +159,7 @@ func decide(tick: int) -> void:
 			continue # can't beat a result some other behaviour is sure to reach
 		if best and behaviour.decision_ceiling < best_result - tie_margin:
 			break # sorted by ceiling, so nothing after this can win either
-		if not behaviour.is_available(context):
+		if not _is_available(behaviour, context):
 			continue
 		var raw := behaviour.score(context)
 		_check_score_range(behaviour, raw)
@@ -175,6 +190,10 @@ func decide(tick: int) -> void:
 ## The pawn calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 func tick_running(tick: int) -> void:
 	if _running == null or pawn == null:
+		return
+	# Claude 2026-11-09: only every tick_interval_ticks, counted from when it started (ai_stress: Chase ticking every tick was 1.8 ms
+	# of a 200-pawn crowd).
+	if _running.tick_interval_ticks > 1 and posmod(tick - _running.started_tick, _running.tick_interval_ticks) != 0:
 		return
 	var context := pawn.ai_context
 	var status := _running.tick(context)
@@ -249,6 +268,14 @@ func _stop_running(reason: String, tick: int) -> void:
 	old.exit(pawn.ai_context, reason)
 	old.ended_tick = tick
 	behaviour_changed.emit(old, null, reason)
+
+
+# is_available() once per decision: the floor check and the scoring may both ask.
+func _is_available(behaviour: AIBehaviourBase, context: AIContextComponent) -> bool:
+	if not behaviour.availability_checked:
+		behaviour.availability_checked = true
+		behaviour.decision_available = behaviour.is_available(context)
+	return behaviour.decision_available
 
 
 func _could_press(action: StringName) -> bool:

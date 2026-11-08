@@ -6,7 +6,7 @@
 ##   - settings for the whole AI: while_possessed, decision_interval_ticks, random_seed
 ##   - the decision waiting to happen this tick, if any, and how strong its reason is (the "event", pawn spec 10.7)
 ##   - random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
-##   - from step 8b: the current target and the shared inputs behaviours read
+##   - Claude 2026-11-09, step 8b: the current target, and shared inputs behaviours read (current_target_index, most_aware_index)
 ##
 ## The pawn runs its AI from its own tick, in a fixed order (Pawn._tick_ai). Nothing here ticks on its own.
 ##
@@ -40,8 +40,11 @@ enum WhilePossessed {
 var pawn: Pawn = null
 ## The tick the AI is running now. Set by the pawn at the start of each AI step.
 var current_tick := 0
-## From step 8b: what the AI is focused on, picked by the target selector. Null in step 8a.
-var current_target: Node3D = null
+## What the AI is focused on, picked by the target selector (Claude 2026-11-09). Null when there's none.
+var current_target: Node3D = null:
+	set(value):
+		current_target = value
+		refresh_shared_inputs() # the shared inputs depend on it
 
 var _decision_waiting := false
 var _event_priority := 0 # the strongest reason for the waiting decision (pawn spec 10.7)
@@ -80,6 +83,62 @@ var behaviour_manager: AIBehaviourManager:
 	get:
 		return pawn.ai_behaviour_manager if pawn else null
 
+## Claude 2026-11-09: the pawn's memory, or null.
+var memory: AIMemory:
+	get:
+		return pawn.ai_memory if pawn else null
+
+## Claude 2026-11-09: the pawn's target selector, or null.
+var target_selector: AITargetSelector:
+	get:
+		return pawn.ai_target_selector if pawn else null
+
+
+# --- Shared inputs (Claude 2026-11-09, pawn spec 10.8) ---
+# Values many states and behaviours read. Each is worked out the first time something asks in a tick, and kept for the rest of
+# that tick, so if nothing asks, it costs nothing. Memory indexes only change on a sensing pass, which comes before any reader.
+
+# Each one separately, so asking for the cheap one never pays for the other. ai_stress measured it: Chase asks for the target
+# every tick, and working out the most aware entry with it (a loop over every entry) cost more than the rest of the AI together.
+var _shared_tick := -1 # the tick the values below belong to; -1: none yet
+var _target_index := -1
+var _target_index_known := false
+var _most_aware := -1
+var _most_aware_known := false
+
+
+## The memory index of the current target, or -1.
+func current_target_index() -> int:
+	_start_shared_tick()
+	if not _target_index_known:
+		_target_index_known = true
+		var remembered := memory
+		_target_index = remembered.find(current_target) if remembered and has_target() else -1
+	return _target_index
+
+
+## The memory index of the entry with the highest awareness now, or -1.
+func most_aware_index() -> int:
+	_start_shared_tick()
+	if not _most_aware_known:
+		_most_aware_known = true
+		var remembered := memory
+		_most_aware = remembered.most_aware_index(current_tick) if remembered else -1
+	return _most_aware
+
+
+func _start_shared_tick() -> void:
+	if _shared_tick != current_tick:
+		refresh_shared_inputs()
+		_shared_tick = current_tick
+
+
+## Clears the shared inputs, so the next read works them out again. Setting current_target does it.
+func refresh_shared_inputs() -> void:
+	_shared_tick = -1
+	_target_index_known = false
+	_most_aware_known = false
+
 
 ## The name of the current state, such as &"Idle", or &"" before the first state is picked.
 func current_state_name() -> StringName:
@@ -88,7 +147,7 @@ func current_state_name() -> StringName:
 	return state.name if state else &""
 
 
-## True when there's a current target. Always false in step 8a.
+## True when there's a current target. Claude 2026-11-09: set by the target selector from step 8b.
 func has_target() -> bool:
 	return is_instance_valid(current_target)
 

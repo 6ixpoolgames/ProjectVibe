@@ -70,6 +70,7 @@ func _ready() -> void:
 	_test_persistence()
 	_test_interrupts()
 	await _test_finishing()
+	_test_tick_interval()
 	_test_odd_cases()
 	await _test_wander()
 	await _test_while_possessed()
@@ -364,6 +365,22 @@ func _test_finishing() -> void:
 	await _ticks(2)
 	_check(once.last_exit_reason == "failed" and _running_name(pawn) == &"After", "on its first tick it fails, and the manager decides at once")
 	_check(after.entered == 1 and after.ticks >= 1, "and the next one starts and ticks")
+	pawn.free()
+
+
+# Claude 2026-11-09: tick_interval_ticks.
+func _test_tick_interval() -> void:
+	var slow := _b("Slow", 0.5)
+	slow.tick_interval_ticks = 5
+	var pawn := _make_pawn([slow])
+	_decide(pawn, 100)
+	for t in range(100, 111):
+		pawn.ai_behaviour_manager.tick_running(t)
+	_check(slow.ticks == 3, "tick_interval_ticks 5: ticked on the tick it started, then every 5 (%d ticks in 11)" % slow.ticks)
+	slow.tick_interval_ticks = 1
+	for t in range(111, 116):
+		pawn.ai_behaviour_manager.tick_running(t)
+	_check(slow.ticks == 8, "1: every tick")
 	pawn.free()
 
 

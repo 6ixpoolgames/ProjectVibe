@@ -26,7 +26,7 @@ const PAUSE_SALT := 0x51A3
 var _home := Vector3.ZERO
 var _has_home := false
 var _walking := false # a walk was started and hasn't been seen to end
-var _pause_left := 0
+var _pause_until := -1 # the tick its current pause ends; -1: not pausing
 
 
 func _init() -> void:
@@ -35,6 +35,7 @@ func _init() -> void:
 	# GDScript note: a low, fixed score: Wander is what a pawn does when nothing more interesting can run.
 	max_score = 0.1
 	min_score = 0.1
+	tick_interval_ticks = 5 # Claude 2026-11-09: it only needs to notice when a walk or a pause ends
 
 
 func enter(_context: AIContextComponent) -> void:
@@ -42,22 +43,24 @@ func enter(_context: AIContextComponent) -> void:
 		_home = pawn.global_position
 		_has_home = true
 	_walking = false
-	_pause_left = 0
+	_pause_until = -1
 
 
 func tick(context: AIContextComponent) -> Status:
 	var hands := context.controller
 	if hands == null or pawn == null:
 		return Status.FAILED
-	if _pause_left > 0:
-		_pause_left -= 1
-		return Status.RUNNING
+	# Claude 2026-11-09: pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
+	if _pause_until >= 0:
+		if context.current_tick < _pause_until:
+			return Status.RUNNING
+		_pause_until = -1
 	if hands.is_following_order():
 		return Status.RUNNING
 	if _walking:
 		# The walk ended: it arrived, or nav gave up on it. Stand for a while either way.
 		_walking = false
-		_pause_left = min_pause_ticks + int(context.random_unit(PAUSE_SALT) * (maxi(max_pause_ticks - min_pause_ticks, 0) + 1))
+		_pause_until = context.current_tick + min_pause_ticks + int(context.random_unit(PAUSE_SALT) * (maxi(max_pause_ticks - min_pause_ticks, 0) + 1))
 		return Status.RUNNING
 	# GDScript note: sqrt makes points spread evenly over the circle; without it they'd bunch up near the middle.
 	var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
@@ -70,6 +73,6 @@ func tick(context: AIContextComponent) -> Status:
 
 func exit(context: AIContextComponent, _reason: String) -> void:
 	_walking = false
-	_pause_left = 0
+	_pause_until = -1
 	if context and context.controller:
 		context.controller.stop()

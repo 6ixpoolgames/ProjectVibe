@@ -1,0 +1,190 @@
+## Written by Claude (claude-opus-5-5), 2026-11-09: picks the AI's current target from its memory, by priority. A part on the pawn,
+## added by PawnInitializer. Pawn spec section 10.5, "Target selection". The standard threat or aggro table, kept small.
+##
+## At each decision, before the state is checked, every memory entry at awareness min_awareness or more is a candidate, with:
+##     priority = awareness_weight × awareness
+##              + distance_weight × (1 − distance / distance_range)     (distance to its last known position)
+##              + threat_weight × threat
+##              + current_target_bonus × current_target_fade's value    (only for the current target)
+## The highest wins; ties go to the nearer, then to the lower id. The winner goes on the context as current_target, where behaviours
+## that need a target and states such as Combat read it.
+##
+## The current target bonus stops the pawn flicking between two close targets. It fades by a FadeProfile counted from when the
+## target was picked: by default +0.3, held 60 ticks, gone 60 ticks later.
+##
+## Forcing a target, for taunts: force_target(entity, hold_ticks, priority, reason) overrides the choice for hold_ticks (-1: until
+## released). A new force replaces the current one only if its priority is equal or higher, the same rule as forced states. It asks
+## for a decision with that priority, so a strong taunt can interrupt the running behaviour. On a client it does nothing and warns.
+##
+## A game with its own targeting rules extends this and overrides target_priority().
+##
+## How to use it (outside code only talks to the selector):
+##   pawn.ai_target_selector.get_current_target()
+##   pawn.ai_target_selector.force_target(player_pawn, 180, 40, "taunt")
+##   target_changed(old_target, new_target, reason)
+class_name AITargetSelector
+extends Node
+
+## Sent once each time the current target changes. Either can be null.
+signal target_changed(old_target: Node3D, new_target: Node3D, reason: String)
+
+## How much awareness counts.
+@export var awareness_weight := 1.0
+## How much being near counts.
+@export var distance_weight := 0.5
+## How much threat counts.
+@export var threat_weight := 1.0
+## Distance, in metres, at which nearness counts for nothing. Usually the sight range.
+@export_range(0.5, 500.0, 0.5, "or_greater") var distance_range := 25.0
+## Entries below this awareness aren't targets, so a barely noticed shape isn't chased.
+@export_range(0.0, 1.0, 0.01) var min_awareness := 0.3
+## Added to the current target's priority, fading by current_target_fade.
+@export var current_target_bonus := 0.3
+## How the current target bonus fades. Empty: full for 60 ticks, then a straight line to nothing over 60 more.
+@export var current_target_fade: FadeProfile
+
+var pawn: Pawn = null
+
+var _current: Node3D = null
+var _picked_tick := 0
+var _forced: Node3D = null
+var _force_priority := 0
+var _force_until_tick := -1
+
+
+func _init() -> void:
+	set_process(false)
+	set_physics_process(false)
+
+
+func _enter_tree() -> void:
+	pawn = get_parent() as Pawn
+	if pawn == null:
+		push_warning("AITargetSelector: its parent isn't a Pawn, so it never picks a target.")
+
+
+func _ready() -> void:
+	if current_target_fade == null:
+		current_target_fade = FadeProfile.new()
+		current_target_fade.mode = FadeProfile.Mode.LINEAR
+		current_target_fade.hold_ticks = 60
+		current_target_fade.fade_ticks = 60
+
+
+## The current target, or null.
+func get_current_target() -> Node3D:
+	return _current if is_instance_valid(_current) else null
+
+
+## True while a forced target is holding.
+func is_target_forced() -> bool:
+	return _forced != null
+
+
+## The pawn calls this at each decision, before the state is checked.
+func update_target(tick: int) -> void:
+	if pawn == null:
+		return
+	if _forced and not is_instance_valid(_forced):
+		_end_force()
+	if _forced:
+		if _force_until_tick >= 0 and tick >= _force_until_tick:
+			_end_force()
+		else:
+			_set_target(_forced, "forced", tick)
+			return
+	var memory := pawn.ai_memory
+	var best: Node3D = null
+	var best_priority := -INF
+	var best_distance := INF
+	var best_id := 0
+	if memory:
+		for i in memory.entry_count():
+			if memory.awareness_at(i, tick) < min_awareness:
+				continue
+			var entity := memory.entity_at(i)
+			if entity == null:
+				continue
+			var priority := target_priority(memory, i, tick)
+			var distance := pawn.global_position.distance_squared_to(memory.last_known_position_at(i))
+			var id := entity.get_instance_id()
+			if priority > best_priority + 0.000001 \
+					or (absf(priority - best_priority) <= 0.000001 and (distance < best_distance or (distance == best_distance and id < best_id))):
+				best = entity
+				best_priority = priority
+				best_distance = distance
+				best_id = id
+	_set_target(best, "priority", tick)
+
+
+## This entry's target priority. Override for a game's own rules.
+func target_priority(memory: AIMemory, index: int, tick: int) -> float:
+	var distance := pawn.global_position.distance_to(memory.last_known_position_at(index))
+	var priority := awareness_weight * memory.awareness_at(index, tick) \
+			+ distance_weight * (1.0 - clampf(distance / distance_range, 0.0, 1.0)) \
+			+ threat_weight * memory.threat_at(index)
+	if memory.entity_at(index) == _current and current_target_fade:
+		priority += current_target_bonus * current_target_fade.value_at(tick - _picked_tick)
+	return priority
+
+
+## Makes this entity the target for hold_ticks (-1: until released). Returns false, and changes nothing, if a stronger force is
+## holding, the entity is gone, or this isn't where the AI runs.
+func force_target(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool:
+	if pawn == null or not is_instance_valid(entity):
+		return false
+	if not pawn.runs_ai_here():
+		push_warning("AITargetSelector: force_target on a client does nothing. The AI only runs on the server.")
+		return false
+	if _forced and priority < _force_priority:
+		if OS.is_debug_build():
+			print("AITargetSelector: %s refused a forced target (priority %d, \"%s\"): one is forced at priority %d." % [pawn.name, priority, reason, _force_priority])
+		return false
+	_forced = entity
+	_force_priority = priority
+	_force_until_tick = -1 if hold_ticks < 0 else _now() + hold_ticks
+	_set_target(entity, reason, _now())
+	if pawn.ai_context:
+		pawn.ai_context.request_decision(priority, false)
+	return true
+
+
+## Ends a forced target. The next decision picks by priority again.
+func release_forced_target() -> void:
+	if _forced:
+		_end_force()
+
+
+## The pawn calls this every tick, so a forced target that runs out hands back on time.
+func check_force_expiry(tick: int) -> void:
+	if _forced and _force_until_tick >= 0 and tick >= _force_until_tick:
+		_end_force()
+
+
+# --- Internals ---
+
+
+func _set_target(entity: Node3D, reason: String, tick: int) -> void:
+	if entity == _current:
+		return
+	var old := _current
+	_current = entity
+	_picked_tick = tick
+	if pawn.ai_context:
+		pawn.ai_context.current_target = entity
+	target_changed.emit(old, entity, reason)
+
+
+func _end_force() -> void:
+	_forced = null
+	_force_priority = 0
+	_force_until_tick = -1
+	if pawn and pawn.ai_context:
+		pawn.ai_context.request_decision()
+
+
+func _now() -> int:
+	var driver: Node = get_node_or_null("/root/TickDriver")
+	if driver:
+		return driver.tick
+	return pawn.ai_context.current_tick if pawn and pawn.ai_context else 0

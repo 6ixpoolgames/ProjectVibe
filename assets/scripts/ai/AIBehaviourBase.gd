@@ -45,6 +45,11 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 @export var cannot_be_interrupted := false
 ## ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
 @export var score_jitter := -1.0
+## Claude 2026-11-09: while it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after.
+## The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now and then. 1: every tick.
+## Pawns start behaviours on different ticks, so a crowd's ticks spread out by themselves. Count time in ticks with
+## context.current_tick, not by counting tick() calls, so a behaviour behaves the same at any interval.
+@export_range(1, 600, 1, "or_greater") var tick_interval_ticks := 1
 ## Added to its score from when it's chosen, times persistence_fade's value. +: tends to keep it chosen. -: prefers others for a while.
 @export var persistence := 0.0
 ## How persistence fades over ticks. Empty: no persistence.
@@ -63,6 +68,9 @@ var ended_tick := -1
 var decision_persistence := 0.0
 var decision_jitter := 0.0 # this decision's random offset
 var decision_ceiling := 0.0
+var decision_floor := 0.0 # -INF when min_score isn't set
+var decision_available := false # is_available()'s answer this decision, once availability_checked is true
+var availability_checked := false
 var decision_index := 0 # place in the fixed order
 var warned_score_range := false
 
