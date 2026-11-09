@@ -41,6 +41,39 @@ class Mover extends Node3D:
 			effects += 1
 
 
+## Claude 2026-11-09: one property of every kind the recorder handles, each changing by awkward amounts every tick, for comparing the
+## C++ and GDScript recording paths. It counts its own ticks, so two runs starting at different tick numbers do the same thing.
+class RecordedThing extends Node3D:
+	var n := 0
+	var pos := Vector3.ZERO           # auto: vector3_mm
+	var near := Vector3.ZERO          # vector3_cm
+	var heading := 0.0                # angle_u16, wrapping past PI
+	var dir := 0.0                    # angle_byte
+	var speed := 0.0                  # auto: float
+	var count := 0                    # auto: raw
+	var flag := false                 # auto: raw
+	var trail: Array = []             # auto: raw, copied deeply
+	var flat := Vector2.ZERO          # auto: vector2_mm
+
+	func _tick_simulate(_dt: float, _t: int) -> void:
+		n += 1
+		pos += Vector3(0.0123457 * n, -0.0004999, 0.3333333)
+		near += Vector3(0.00499, 0.015, -0.0051)
+		heading += 0.7123
+		dir -= 0.3001
+		speed = speed * 1.01 + 0.1234567
+		count += 3
+		flag = not flag
+		trail.append([n])
+		if trail.size() > 3:
+			trail.pop_front()
+		flat += Vector2(0.00049, -0.00151)
+		rotation.y += 0.0512345
+		var part := get_node_or_null("Part") # one check frees it on purpose
+		if part:
+			part.set("level", part.get("level") + 0.0617)
+
+
 ## Simulates, but has no rollback state: must not be replayed.
 class Bystander extends Node:
 	var simulate_calls := 0
@@ -194,7 +227,12 @@ func _ready() -> void:
 	print("--- Tick state and rollback self-test ---")
 	nt = get_node("/root/TickDriver")
 	nt.active = false # the plain tests drive ticks by hand
+	# Claude 2026-11-09: -- --gdscript-record runs every test here on the GDScript recording path instead of C++.
+	if OS.get_cmdline_user_args().has("--gdscript-record"):
+		TickStateComponent.use_native = false
+		print("        (recording in GDScript)")
 	_test_encodings()
+	_test_native_recording() # Claude 2026-11-09
 	_test_declarations()
 	_test_capture()
 	_test_rollback()
@@ -247,6 +285,129 @@ func _test_encodings() -> void:
 	print("        0.2 m/s for 1 s, rounded every tick: %.3f m in mm, %.3f m in cm" % [slow_mm, slow_cm])
 	_check(absf(slow_mm - 0.2) < 0.03, "1 mm: 0.2 m/s moves about 0.2 m in a second")
 	_check(slow_cm == 0.0, "1 cm would stall it completely")
+
+
+## Claude 2026-11-09: the C++ recorder (TickStateRecorder) against GDScript. First the rounding on its own, value by value, then whole
+## recordings of the same entity both ways, then the history interval (every Nth tick, or never) on both paths.
+func _test_native_recording() -> void:
+	if not ClassDB.class_exists(&"TickStateRecorder"):
+		print("        no C++ library here: only the GDScript path is tested")
+		return
+	var default_native := TickStateComponent.use_native
+	# Rounding: thousands of values, with the awkward ones on purpose: half steps, the wrap at PI, negatives, wrong types.
+	var recorder: Object = ClassDB.instantiate(&"TickStateRecorder")
+	var pick := RandomNumberGenerator.new()
+	pick.seed = 2026
+	var values: Array = [PI, -PI, PI + 0.000001, -PI - 0.000001, TAU, 0.0, -0.0, 5, true, "text", Vector3.ZERO, null]
+	for k in range(-40, 40):
+		values.append(k * 0.001 + 0.0005) # exactly half a millimetre: which way it rounds must match
+		values.append(Vector3(k * 0.001 + 0.0005, k * 0.01 + 0.005, -k * 0.0015))
+		values.append(Vector2(k * 0.001 + 0.0005, -k * 0.001 - 0.0005))
+		values.append(k * StateEncoding.U16_STEP * 0.5)
+		values.append(k * StateEncoding.BYTE_STEP * 0.5 + PI)
+	for i in 4000:
+		values.append(pick.randf_range(-20.0, 20.0))
+		values.append(Vector3(pick.randf_range(-1000, 1000), pick.randf_range(-5, 5), pick.randf_range(-0.01, 0.01)))
+		values.append(Vector2(pick.randf_range(-1000, 1000), pick.randf_range(-0.002, 0.002)))
+	var encodings: Array[StringName] = [StateEncoding.VECTOR3_MM, StateEncoding.VECTOR2_MM, StateEncoding.VECTOR3_CM, StateEncoding.ANGLE_U16, StateEncoding.ANGLE_BYTE, StateEncoding.FLOAT, StateEncoding.RAW]
+	var compared := 0
+	var different: Array = []
+	for value in values:
+		for encoding in encodings:
+			var by_gdscript: Variant = StateEncoding.quantize(value, encoding)
+			var by_cpp: Variant = recorder.quantize(value, encoding)
+			compared += 1
+			# typeof catches a value that comes back as another type, which == alone might let through (5 == 5.0).
+			if typeof(by_cpp) != typeof(by_gdscript) or by_cpp != by_gdscript:
+				if different.size() < 5:
+					different.append("%s %s: %s vs %s" % [encoding, value, by_gdscript, by_cpp])
+	_check(different.is_empty(), "C++ rounding gives exactly GDScript's values, %d values and encodings compared %s" % [compared, str(different)])
+
+	# Whole recordings: the same entity, recorded by each path, saves exactly the same states and ends up exactly the same.
+	var native := _record_thing(true, 1)
+	var gdscript := _record_thing(false, 1)
+	_check(native["fast"] and not gdscript["fast"], "the C++ path really recorded the first run, and GDScript the second")
+	_check(native["saved"] == gdscript["saved"] and native["saved"].size() == 40, "C++ and GDScript save exactly the same state, tick by tick (%d ticks, %d entries each)" % [native["saved"].size(), native["saved"][0].size()])
+	_check(native["final"] == gdscript["final"], "and leave the entity exactly the same")
+	var first_tick: Dictionary = native["saved"][0]
+	_check(first_tick["trail"] == [[1]] and native["saved"][2]["trail"] == [[1], [2], [3]], "containers are copied, so each tick keeps its own (%s, %s)" % [first_tick["trail"], native["saved"][2]["trail"]])
+
+	# The history interval: every 2nd tick saved, or none; values are rounded every tick either way. Both paths.
+	for use_cpp in [true, false]:
+		var path := "C++" if use_cpp else "GDScript"
+		var every_second := _record_thing(use_cpp, 2)
+		_check(every_second["kept_ticks_ok"], "%s: history every 2nd tick: only ticks that are multiples of 2 are saved" % path)
+		_check(every_second["final"] == native["final"], "%s: and the entity ends up exactly as when every tick is saved" % path)
+		var never := _record_thing(use_cpp, 0)
+		_check(never["saved_count"] == 0 and never["final"] == native["final"], "%s: history never: nothing is saved, and values are still rounded every tick (the same end state)" % path)
+
+	# A node that goes away mid-run: the C++ path hands over to GDScript, which skips that entry, with no error.
+	TickStateComponent.use_native = true
+	var thing := _make_recorded_thing(1)
+	var state: TickStateComponent = thing.get_node("TickState")
+	for i in 3:
+		nt.step()
+	var was_fast: bool = state._recorder_ready
+	var part := thing.get_node("Part")
+	thing.remove_child(part)
+	part.free()
+	nt.step()
+	var saved_after := state.get_state(nt.tick)
+	_check(was_fast and not state._recorder_ready and saved_after.has("pos") and not saved_after.has("Part:level"), "a freed node: C++ hands over to GDScript, which saves the rest and skips that entry")
+	thing.free()
+	TickStateComponent.use_native = default_native
+
+
+# Claude 2026-11-09: a RecordedThing with its Part and a TickStateComponent listing every kind of entry.
+func _make_recorded_thing(interval: int) -> RecordedThing:
+	var thing := RecordedThing.new()
+	thing.name = "RecordedThing"
+	var part := Node.new()
+	part.name = "Part"
+	# GDScript note: a plain Node has no "level" property, so the part gets a tiny script that declares one.
+	var script := GDScript.new()
+	script.source_code = "extends Node\nvar level := 0.0\n"
+	script.reload()
+	part.set_script(script)
+	thing.add_child(part)
+	var state := TickStateComponent.new()
+	state.name = "TickState"
+	state.state_properties = ["pos", "near @vector3_cm", "heading @angle_u16", "dir @angle_byte", "speed", "count", "flag", "trail", "flat", ":rotation:y @angle_u16", "Part:level"]
+	state.history_interval_ticks = interval
+	thing.add_child(state)
+	add_child(thing)
+	nt.register(thing) # so its _tick_simulate runs
+	return thing
+
+
+# Claude 2026-11-09: records a RecordedThing for 40 ticks on one path, and returns what it saved (by its own tick count), how it ended,
+# and whether the C++ path held the list.
+func _record_thing(use_cpp: bool, interval: int) -> Dictionary:
+	var default_native := TickStateComponent.use_native
+	TickStateComponent.use_native = use_cpp
+	var thing := _make_recorded_thing(interval)
+	var state: TickStateComponent = thing.get_node("TickState")
+	var saved: Array = []
+	var saved_count := 0
+	var kept_ticks_ok := true
+	for i in 40:
+		nt.step()
+		var kept := state.has_state(nt.tick)
+		if kept:
+			saved_count += 1
+			saved.append(state.get_state(nt.tick))
+		if interval > 0 and kept != (nt.tick % interval == 0):
+			kept_ticks_ok = false
+	var result := {
+		"saved": saved,
+		"saved_count": saved_count,
+		"kept_ticks_ok": kept_ticks_ok,
+		"fast": state._recorder_ready,
+		"final": [thing.pos, thing.near, thing.heading, thing.dir, thing.speed, thing.count, thing.flag, thing.trail, thing.flat, thing.rotation.y, thing.get_node("Part").get("level")],
+	}
+	thing.free()
+	TickStateComponent.use_native = default_native
+	return result
 
 
 func _creep(speed: float, encoding: StringName) -> float:

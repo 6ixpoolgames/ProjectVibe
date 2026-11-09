@@ -12,6 +12,12 @@
 ## Run from the project folder (takes a few minutes):
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/pawn_stress.tscn"
 ## Add "-- --sizes=100,200" to choose the crowd sizes.
+## Claude 2026-11-09, for the rollback recording work (pawn spec 12.1):
+##   --history=every|snapshots|never   which ticks each pawn saves: every (a client's own pawn, and the old default everywhere),
+##                                     snapshots (every 2nd, as a server does at 30 snapshots a second), never (offline)
+##   --gdscript-record                 record in GDScript instead of C++
+##   --breakdown                       also splits simulate per pawn into the abilities (locomotion, actions, counters) and the
+##                                     rest, which is mostly move_and_slide, through the test-only TimedAbilityManager
 extends Node
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
@@ -20,6 +26,8 @@ const MEASURED_TICKS := 240
 const AI_PARTS: Array[StringName] = [&"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 
 var _sizes: Array[int] = [100, 200, 400, 800]
+var _history_interval := 1 # Claude 2026-11-09: --history=
+var _breakdown := false # Claude 2026-11-09: --breakdown, simulate split into abilities and the rest (TimedAbilityManager)
 
 
 func _ready() -> void:
@@ -28,6 +36,13 @@ func _ready() -> void:
 			_sizes.clear()
 			for part in arg.trim_prefix("--sizes=").split(","):
 				_sizes.append(int(part))
+		# Claude 2026-11-09
+		elif arg.begins_with("--history="):
+			_history_interval = {"every": 1, "snapshots": 2, "never": 0}.get(arg.trim_prefix("--history="), 1)
+		elif arg == "--gdscript-record":
+			TickStateComponent.use_native = false
+		elif arg == "--breakdown":
+			_breakdown = true
 	var floor_body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
@@ -36,7 +51,10 @@ func _ready() -> void:
 	shape.position.y = -0.5
 	floor_body.add_child(shape)
 	add_child(floor_body)
-	print("--- Pawn stress: ms per tick (memory store: %s) ---" % ("C++" if ClassDB.class_exists(&"AIMemoryStore") else "GDScript"))
+	print("--- Pawn stress: ms per tick (memory store: %s; recording: %s, history %s) ---" % [
+		"C++" if ClassDB.class_exists(&"AIMemoryStore") else "GDScript",
+		"C++" if TickStateComponent.use_native and ClassDB.class_exists(&"TickStateRecorder") else "GDScript", # Claude 2026-11-09
+		["never", "every tick", "every 2nd tick"][_history_interval]])
 	for scene in ["standing", "wandering", "fighting"]:
 		print("")
 		print("%s:" % scene)
@@ -44,6 +62,9 @@ func _ready() -> void:
 		for count in _sizes:
 			var row := await _measure(scene, count)
 			print("%5d   %8.2f   %8.2f   %8.2f   %10.2f   %13.2f   %16.4f" % [count, row.input, row.simulate, row.record, row.phases, row.frame, row.frame / count])
+			if _breakdown: # Claude 2026-11-09: microseconds per pawn per tick
+				print("        simulate per pawn: %.1f us = abilities %.1f (locomotion %.1f, actions %.1f, counters and locks %.1f) + the rest %.1f (move_and_slide, gravity, bookkeeping)" % [
+					row.simulate * 1000.0 / count, row.abilities, row.locomotion, row.actions, row.abilities - row.locomotion - row.actions, row.simulate * 1000.0 / count - row.abilities])
 	print("")
 	print("--- done ---")
 	get_tree().quit(0)
@@ -56,6 +77,7 @@ func _measure(scene: String, count: int) -> Dictionary:
 		var pawn: Pawn = load(PAWN_SCENE).instantiate()
 		pawn.name = "P%d" % i
 		pawn.position = Vector3((i % per_row) * 4.0 - per_row * 2.0, 0.1, (i / per_row) * 4.0 - per_row * 2.0)
+		(pawn.get_node("TickState") as TickStateComponent).history_interval_ticks = _history_interval # Claude 2026-11-09
 		match scene:
 			"standing":
 				pawn.skip_default_parts = AI_PARTS.duplicate()
@@ -65,12 +87,20 @@ func _measure(scene: String, count: int) -> Dictionary:
 			"fighting":
 				pawn.team = i % 2
 				pawn.add_child(_behaviours([["Wander", AIWanderBehaviour], ["LookToward", AILookTowardBehaviour], ["Investigate", AIInvestigateBehaviour], ["Search", AISearchBehaviour], ["Chase", AIChaseBehaviour], ["Attack", AIAttackBehaviour]]))
+		if _breakdown:
+			# Claude 2026-11-09: the default AbilityManager part with the timed subclass as its script. Placed before the pawn enters
+			# the tree, so PawnInitializer keeps it instead of adding the default one.
+			var manager: Node = load("res://assets/scenes/pawn/parts/AbilityManager.tscn").instantiate()
+			manager.set_script(TimedAbilityManager)
+			manager.name = "AbilityManager"
+			pawn.add_child(manager)
 		add_child(pawn)
 		pawns.append(pawn)
 	for i in WARM_UP_TICKS:
 		await get_tree().physics_frame
 	TickDriver.reset_profile()
 	TickDriver.profile_enabled = true
+	TimedAbilityManager.reset_timings() # Claude 2026-11-09
 	# Claude 2026-11-09: the median, not the average. Godot's monitor adds up every physics step taken in one rendered frame, so
 	# when a frame runs late it reads double or more, and an average swung from 18 to 37 ms between two identical runs. The median
 	# ignores those frames. The TickDriver phase columns don't have this problem and are the numbers to trust.
@@ -89,6 +119,10 @@ func _measure(scene: String, count: int) -> Dictionary:
 		"record": profile["record"] / 1000.0 / ticks,
 		"phases": (profile["before_tick"] + profile["input"] + profile["capture"] + profile["simulate"] + profile["record"] + profile["after_tick"]) / 1000.0 / ticks,
 		"frame": frame_times[frame_times.size() / 2] * 1000.0, # Claude 2026-11-09: the median, see above
+		# Claude 2026-11-09: --breakdown, in microseconds per pawn per tick
+		"abilities": TimedAbilityManager.usec_all / ticks / count,
+		"locomotion": TimedAbilityManager.usec_locomotion / ticks / count,
+		"actions": TimedAbilityManager.usec_actions / ticks / count,
 	}
 	for pawn in pawns:
 		pawn.free()

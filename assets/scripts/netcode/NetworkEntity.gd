@@ -33,6 +33,13 @@ enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED, LOCA
 @export var is_replicated: bool = true
 ## On: other clients simulate this ahead instead of following the server. NetworkSession.default_predicted turns it on everywhere.
 @export var is_predicted: bool = false
+## Claude 2026-11-09: on: offline, keep a history of state and inputs every tick, for a single-player game that rolls back (a rewind
+## power, say). Off (the default): offline, values are still rounded every tick, exactly as online, but nothing is saved, because
+## nothing replays. Saving was the biggest cost per pawn (pawn spec 12.1). Online it changes nothing.
+@export var keep_history_offline: bool = false:
+	set(value):
+		keep_history_offline = value
+		refresh_input_saving()
 
 var entity_id: int = -1
 var type_name: String = ""
@@ -133,10 +140,24 @@ func _apply_role_to_state() -> void:
 
 
 ## Claude 2026-11-05: on a server, only entities that clients predict need their inputs saved, so they can go in snapshots.
-## Offline stays as it was, since a single-player game could still choose to roll back.
+## Claude 2026-11-09: and which ticks' state is saved (TickStateComponent.history_interval_ticks):
+##   - a server: only the ticks it sends snapshots on, the only ones it reads, since it never replays
+##   - offline, through NetworkSession: none, and no inputs either, unless keep_history_offline is on (this replaces "offline stays as
+##     it was": nothing offline replays, and saving was the biggest cost per pawn, pawn spec 12.1)
+##   - a client: every tick, for replays
+## An entity that NetworkSession never configured (made directly, as most tests do) keeps saving everything, as before.
 func refresh_input_saving() -> void:
-	if state:
-		state.skip_input_capture = role == Role.AUTHORITY and session != null and session.is_server() and not (is_predicted or session.default_predicted)
+	if state == null:
+		return
+	var offline: bool = session != null and not session.is_server() and not session.is_client()
+	var on_server: bool = role == Role.AUTHORITY and session != null and session.is_server()
+	state.skip_input_capture = (on_server and not (is_predicted or session.default_predicted)) or (offline and not keep_history_offline)
+	if on_server:
+		state.history_interval_ticks = session.get_snapshot_interval()
+	elif offline and not keep_history_offline:
+		state.history_interval_ticks = 0
+	else:
+		state.history_interval_ticks = 1
 
 
 ## Claude 2026-11-07: stops every tick this entity causes, or starts them again: its parent's, its TickState's and its own. All of its

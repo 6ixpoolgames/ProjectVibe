@@ -579,7 +579,7 @@ So now **about 70% of the server's time is already C++**, and about 30% is GDScr
 |---|---|---|---|
 | 1 | **Jolt** as the project's physics engine | **Done 2026-11-05.** About 2.2 times the pawns | Measured |
 | 2 | **Server saves no input history** | **Done 2026-11-05.** Saved about 16 µs per pawn, as estimated. The state history stayed: its rounding and current slot are still needed, so it saved nothing there | Measured |
-| 3 | **C++ for the data path:** state rounding and history, packet encoding and decoding, placing remote pawns | Server from about 190 pawns to perhaps 250. Client cost per remote pawn perhaps a fifth | Estimate. **Snapshot encoding done 2026-11-05**, measured below. State rounding and history, and placing remote pawns, are still GDScript |
+| 3 | **C++ for the data path:** state rounding and history, packet encoding and decoding, placing remote pawns | Server from about 190 pawns to perhaps 250. Client cost per remote pawn perhaps a fifth | Estimate. **Snapshot encoding done 2026-11-05**, measured below. *(Claude 2026-11-09: **state rounding and history done**, below.)* Placing remote pawns is still GDScript |
 | 4 | **Delta compression and relevancy** | About 0.9 KB/s per pawn per client today. Needed well before any swarm | Bandwidth measured, savings not |
 | 5 | **Swarms: crowd units with no `CharacterBody3D`** (nav spec) | 10,000 pawns at today's engine cost alone would take about 580 ms per tick, so C++ on its own can't do it. Needs bulk movement, and steps 3 and 4 | Arithmetic from measurements |
 
@@ -624,6 +624,12 @@ What this shows:
 - What's left on a client, per remote pawn per tick: placing it, about 8.1 µs; storing server state, about 3.5; building the dictionary, about 1.4. On a server: saving state, about 9.5; gathering lists for snapshots, about 2.5.
 
 All of this ran in the editor build of Godot with a debug C++ library, because no export templates are installed. A release build may be kinder to GDScript, so the gaps could narrow.
+
+**Step 3's second piece: state rounding and history** *(Claude 2026-11-09, pawn spec 12.1)*. With abilities and stats added, a pawn now lists 15 to 20 state entries, and saving state had grown to about 47 µs per pawn per tick, the biggest single cost. Two changes:
+- `TickStateRecorder` in `native/` runs the steady-state loop (read, round, write back, copy). `TickStateComponent.gd` keeps matching entries, settling encodings and warnings, and records whenever the C++ path can't. Rounding calls the engine's own `snapped`, `snappedf` and `wrapf`, so both paths give the same values; `tests/tick_state_selftest` compares 86,884 values and whole recordings, tick by tick.
+- `TickStateComponent.history_interval_ticks`: a server saves only snapshot ticks, offline saves nothing (and no inputs), unless `NetworkEntity.keep_history_offline`; a client saves every tick. Values are still rounded every tick everywhere, so offline plays exactly like online.
+
+Result: saving state went from about 47 to about 4.5 µs per pawn per tick, and a tick at 100 standing pawns from 8.4 to 3.9 ms. Most of what's left is reading and rounding, which every tick needs, so saving less adds little on top.
 
 ---
 

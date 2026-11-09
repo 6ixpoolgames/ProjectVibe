@@ -67,7 +67,14 @@ const MARGIN_SHORT_WINDOW := 30
 const MARGIN_LONG_WINDOW := 300
 
 ## Snapshots per second.
-@export var snapshot_rate: int = 30
+## Claude 2026-11-09: a server's entities save their state only on snapshot ticks (NetworkEntity.refresh_input_saving), so changing
+## this tells them.
+@export var snapshot_rate: int = 30:
+	set(value):
+		snapshot_rate = value
+		for entity in _entities.values():
+			if is_instance_valid(entity):
+				entity.refresh_input_saving()
 ## How far in the past remote entities are drawn. Enough to always have two snapshots to blend between.
 @export var interpolation_seconds: float = 0.1
 ## The most the adaptive version may draw in the past. Also limits how far back a client may claim to see.
@@ -1054,6 +1061,11 @@ func _profile_part(part: StringName, mark: int) -> int:
 
 func _snapshot_interval() -> int:
 	return maxi(1, roundi(float(_driver.get_tick_rate()) / maxi(1, snapshot_rate)))
+
+
+## Claude 2026-11-09: ticks between snapshots: a server sends one when the tick is a multiple of this. 1 without a tick driver.
+func get_snapshot_interval() -> int:
+	return _snapshot_interval() if _driver else 1
 
 
 # --- Inputs ------------------------------------------------------------------------------------

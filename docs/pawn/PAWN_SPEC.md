@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.16
+# Pawn Spec v0.18
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -26,6 +26,8 @@
 - v0.14 (2026-11-09): step 10 built: Health as a stat that changes during play, damage, death as an ability, being hit as a state rule, threat from damage (8.7). The owner's call: no health manager.
 - v0.15 (2026-11-09): step 11, saving terrain edits: `TerrainEditLog` saves to and loads from a file (12).
 - v0.16 (2026-11-09): the t0 test level, `arena_sample.tscn` (12, step 12, pulled forward at the owner's request). Attack moved to the left mouse button. What a whole pawn costs per tick, `pawn_stress` (12.1), with open question 16.
+- v0.18 (2026-11-09): rollback recording in C++ (`TickStateRecorder`) and saved only where it's read (`history_interval_ticks`), measured in 12.1. Open question 16 settled.
+- v0.17 (2026-11-09): debug shapes for swings and dashes (`AbilityDebugDraw`), `MeleeAttackAbility.hit_window_started`, Chase's `dash_to_close`, and the arena readout's last ability (8.6, 10.7, 12).
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
 
@@ -398,6 +400,13 @@ Agreed with the owner before building; the decisions are in the step 9 notes bel
   - The target's `Pawn.receive_hit(HitInfo)` is called directly. No handshake: the server alone decides.
   - That starts the target's knockback, and `Pawn.hit_received` goes out.
   - Then `hit_landed(hit)` goes out on the ability, for local cosmetics.
+- **Multi-hit** *(Claude 2026-11-09, the owner asked)*: one swing hits every pawn inside its sphere during its hit ticks, each at most once, and each gets its own damage and its own knockback. The attacker's team is skipped unless `hits_own_team` is on. Checked in `combat_selftest`. Damage and knockback are the only effects a hit carries; there's no general status effect system yet.
+- **`hit_window_started(centre, radius)`** *(Claude 2026-11-09)* goes out once per swing, on its first hit tick, on every machine that runs the swing (the server, offline, and a client predicting its own pawn), never in a replay. It says where the swing can hit, not whether it hit. For effects, sounds and debug drawing.
+- **The basic attack has no cooldown** (`cooldown` 0). The swing itself, 24 ticks (0.4 s), keeps another from starting until it ends; a press near the end waits for it (`buffer_window` 0.15 s). Dash's cooldown is 1 s. *(Claude 2026-11-09, the owner asked.)*
+- **Debug shapes,** `abilities/debug/AbilityDebugDraw.gd` *(Claude 2026-11-09, the owner's request)*. Not part of the base: a sample or test adds one and calls `watch(pawn)`. See-through shapes that fade out in a straight line:
+  - each swing's hit sphere, for `attack_seconds` (2 s). A swing that hits labels its sphere with each pawn it hit and the damage, one per line ("pawn_3 -20"), from `hit_landed`. Only where hits are decided: offline and on the server.
+  - each dash's trail, a copy of the pawn's capsule every physics frame, each for `dash_seconds` (1 s)
+  - Shown where the abilities run: every pawn offline and on the server, and a client's own pawn.
 - **`HitInfo`** holds the attacker, target, ability, tick, direction, knockback speed and knockback ticks. Step 10 adds damage.
 
 **`KnockbackAbility`**, on the pawn being hit (the owner's call):
@@ -782,7 +791,7 @@ Code can change a behaviour's threshold while it's running, through `behaviour_m
 | Look Toward | Alert | Stops and faces the last known position of the most aware entry | 8b |
 | Investigate | Alert | Walks, without sprinting, to the last known position. Scores highest for an uncertain entry | 8b |
 | Search | Alert | Runs to the last known position, then walks to a few random points around it. Scores highest for a certain entry that's stale | 8b |
-| Chase | Combat | Follows the current target (10.5), holding `&"sprint"`, finding a new path every so often rather than every tick . Stops within 1.2 m (2026-11-09) | 8b |
+| Chase | Combat | Follows the current target (10.5), holding `&"sprint"`, finding a new path every so often rather than every tick . Stops within 1.2 m (2026-11-09). *Claude 2026-11-09:* with `dash_to_close` on (off by default), it presses `&"dash"` when the target is 4 to 6 m away (`dash_to_distance`, `dash_from_distance`) and Dash can start | 8b |
 | Attack | Combat | Within MeleeAttack's `attack_range` minus `approach_margin`, faces the target and presses `&"primary"` (8.6) | 9 |
 
 Because they all move with `move_to`, they cross nav links (jumps and drops) for free (section 7).
@@ -1051,6 +1060,8 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
    - **The readout** over each goblin shows its state, its running behaviour, its awareness of your pawn and its Health. It's sample code; open question 10 is still the base's version.
    - **Deaths are this sample's rules:** bodies are removed after 3 s, and a dead player is revived where they fell after 3 s.
    - **Test:** `samples/tests/arena_sample_selftest`, a headless smoke test: a wave, noticing, a fight, the readouts, a kill, removal, another wave.
+   - *(Claude 2026-11-09, the owner's requests:)* debug shapes (`AbilityDebugDraw`, 8.6): swing spheres for 2 s and dash trails for 1 s, hidden with F3. Goblins have Chase's `dash_to_close` on, so a chase switches between Walk, Sprint, Dash and the swing. Each readout shows the goblin's last ability, marked "(running)" while it runs. The test checks the shapes appear and fade, and that chasing goblins sprint, dash and swing.
+   - *(Claude 2026-11-09, the owner's request:)* longer cooldowns in this level only (`ArenaSample.DEBUG_COOLDOWNS`), so the switching is easy to see: MeleeAttack 1.5 s, Jump 1 s, Dash 3 s, Sprint 8 s. Knockback and Death keep none: a cooldown on Death would make a revived pawn unkillable for a while. A timer that had no cooldown is registered for rollback when the pawn spawns (`TickStateComponent.add_state_properties`), the same on every machine.
 13. **t0 docs:** an overview, plus a reference for every class and function.
 
 ### 12.1 What a whole pawn costs (Claude 2026-11-09)
@@ -1081,9 +1092,40 @@ Measured on the owner's PC, Windows, C++ memory store, ms per tick. The budget a
 **What it shows:**
 - **A pawn costs about 0.1 ms per tick,** so about 150 fit in a 60 Hz tick on this PC, on one thread, with nothing else running. Fighting adds about a third.
 - **The physics engine itself is cheap:** Jolt's own step is the gap between the last two columns, 2 to 5 ms even at 400 pawns.
-- **Recording rollback state is the biggest single cost,** about 45 µs per pawn per tick, more than the abilities and `move_and_slide` together, and more than the AI even in a fight. Every pawn's `TickStateComponent` copies all its listed properties into the history each tick: position, velocity, every ability's timers and Health. It does this offline and on the server too, where nothing ever rolls back. Open question 16.
+- **Recording rollback state is the biggest single cost,** about 45 µs per pawn per tick, more than the abilities and `move_and_slide` together, and more than the AI even in a fight. Every pawn's `TickStateComponent` copies all its listed properties into the history each tick: position, velocity, every ability's timers and Health. It does this offline and on the server too, where nothing ever rolls back. *(Claude 2026-11-09, corrected: the server does read the history, but only the newest tick, and only on snapshot ticks, every 2nd tick at 30 snapshots a second. Recording also rounds the live values each tick, which the server needs so its simulation matches clients' predictions.)* Open question 16.
 - **Simulate** is about 20 µs per pawn standing and 30 µs fighting: the abilities in GDScript, and `move_and_slide`.
 - **The rest of the phases** (before the tick, capturing input, after the tick) is about 13 µs per pawn.
+
+**After: recording in C++, and saving only what's read** *(Claude 2026-11-09, the owner's call: open question 16, then C++)*. Two changes:
+- **`TickStateRecorder`** (`native/src/tick_state_recorder.*`) runs the recording loop: read each property, round it, write it back if rounding changed it, copy it into the history slot. It takes over once every entry is matched to a node and its encoding settled; `TickStateComponent.gd` keeps everything else (matching entries, picking encodings, warnings) and is the fallback where the library is missing. Rounding calls the engine's own `snapped`, `snappedf` and `wrapf`, the functions `StateEncoding.quantize` calls, so the two give the same values by construction. `tick_state_selftest` checks it: 86,884 values and encodings compared, and whole recordings of an entity with every kind of entry, tick by tick, all exactly equal. `TickStateComponent.use_native = false`, or `-- --gdscript-record` in that test, uses GDScript.
+- **`TickStateComponent.history_interval_ticks`** says which ticks are saved; the rest are only rounded, so the simulation is the same. `NetworkEntity` sets it: every tick on a client, only snapshot ticks on a server (`NetworkSession.get_snapshot_interval()`), and none offline, where no inputs are saved either. `NetworkEntity.keep_history_offline` turns offline saving back on, for a single-player game that rolls back. Entities `NetworkSession` never configured, as in most tests, save every tick as before.
+
+Measured with `pawn_stress -- --sizes=100,400` and its new `--history=` and `--gdscript-record` switches, ms per tick:
+
+| Scene, pawns | Record: GDScript, every tick (before) | Record: C++, every tick (a client) | C++, every 2nd tick (a server) | C++, never (offline) | All phases: before | All phases: C++, every tick |
+|---|---|---|---|---|---|---|
+| standing, 100 | 4.75 | 0.44 | 0.41 | 0.38 | 8.41 | 3.93 |
+| standing, 400 | 18.89 | 1.91 | 1.62 | 1.52 | 34.33 | 16.31 |
+| fighting, 100 | 4.49 | 0.52 | 0.47 | 0.44 | 11.31 | 7.40 |
+| fighting, 400 | 19.54 | 1.96 | 1.91 | 1.68 | 47.27 | 28.24 |
+
+- **Recording went from about 47 to about 4.5 µs per pawn per tick,** about 10 times faster. A whole tick at 100 standing pawns went from 8.4 to 3.9 ms; a fighting one from 11.3 to 7.4 ms.
+- **Saving less barely matters now:** what's left is reading and rounding each value, which every tick needs; copying it was the cheap part. The history setting is still worth having, since it's free.
+- **About 210 fighting pawns fit in a 60 Hz tick on this PC now,** against about 130 before, going by the whole physics frame at 400 (one thread, nothing else running). Standing pawns: about 360, against about 180.
+- **The biggest cost now is simulate,** about 19 µs per pawn standing and 29 fighting: the abilities in GDScript and `move_and_slide`.
+
+**Inside simulate** *(Claude 2026-11-09, the owner asked; `pawn_stress -- --breakdown`, through the test-only `TimedAbilityManager`)*. Microseconds per pawn per tick, at 400 pawns (100 was within about 10%):
+
+| Scene | Simulate | Abilities | …locomotion (Walk, Sprint) | …actions (checking presses, running ones) | …counters and locks | The rest: `move_and_slide`, gravity, bookkeeping |
+|---|---|---|---|---|---|---|
+| standing | 19.2 | 13.7 | 5.9 | 4.2 | 3.6 | 5.5 |
+| wandering | 24.3 | 14.1 | 6.2 | 4.2 | 3.7 | 10.1 |
+| fighting | 29.9 | 17.1 | 7.2 | 5.7 | 4.1 | 12.8 |
+
+- **The abilities' GDScript is most of simulate: 55 to 70%.** It costs about 14 µs even for a pawn standing still with nothing pressed, because every tick walks every ability: counting cooldowns and buffers down, calling `every_tick()`, rebuilding the locks, checking each action for a press, and Walk reading its stats.
+- **`move_and_slide` is the smaller part:** about 5 µs standing and 10 to 13 moving, and it's already engine C++.
+- The timing itself adds well under 1 µs per pawn.
+- **So the next gain is cheap GDScript work, not threads or C++:** skip what an idle ability doesn't need (counters only for abilities with a cooldown or buffer running, `every_tick()` only where an ability overrides it, the action loop only when something is pressed, buffered or running) and cache stat reads. A guess: abilities from about 14 to about 6 µs standing. Not built; it waits for the owner. Then the AI in a fight (about 22 µs), then the other phases (about 12 µs, mostly saving inputs, still GDScript, which `pawn_stress` pawns do because no session configures them; offline and on a server it's skipped).
 
 ---
 
@@ -1106,7 +1148,7 @@ Measured on the owner's PC, Windows, C++ memory store, ms per tick. The budget a
 | 13 | A switch that turns stealth off for a game (awareness fills at once), so autobattler fights start straight away | The default numbers already make close sight nearly instant. Not agreed yet |
 | 14 | `personality_jitter`: a fixed score offset per pawn and behaviour, so one goblin is a bit more aggressive than another | Claude's suggestion; could wait. Not agreed yet |
 | 15 | The target's value is called `detectability` (1 = normal, lower = harder to detect) rather than "stealth factor" | Claude's suggestion, so the name says what it does. Easy to rename |
-| 16 | Recording rollback state only where a rollback can happen: a client's predicted entities. Offline and on the server, nothing rolls back, yet recording is the biggest cost per pawn (12.1) | Claude suggests it as the first thing to try, before moving recording to C++. Lag compensation keeps its own position history in `NetworkEntity`, so it wouldn't be affected. It changes the netcode core, so it waits for the owner. Not agreed yet |
+| 16 | **Settled and built 2026-11-09** (12.1): recording runs in C++, and is saved only where it's read. The owner's call. Was: recording rollback state only where it's read: a client's predicted entities every tick, the server on snapshot ticks, and offline never. Recording is the biggest cost per pawn (12.1). *(Claude 2026-11-09: this said nothing on the server reads it; snapshots do, see 12.1.)* | Claude suggests it as the first thing to try, before moving recording to C++. Lag compensation keeps its own position history in `NetworkEntity`, so it wouldn't be affected. It changes the netcode core, so it waits for the owner. Not agreed yet |
 
 ---
 

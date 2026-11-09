@@ -37,6 +37,9 @@
 ##   - Replay with an input missing for a tick: the last input stays in place.
 ##   - Only values that changed are written back after rounding, so setters don't run needlessly.
 ##   - No TickDriver autoload: stays idle.
+##   - Claude 2026-11-09: history_interval_ticks says which ticks are saved; the rest are only rounded. NetworkEntity sets it: every
+##     tick on a client, snapshot ticks on a server, none offline. Recording runs in C++ (TickStateRecorder) once every entry is
+##     matched and its encoding settled, with exactly the same values as the GDScript path, which handles everything else.
 ##
 ## Following the server (Claude 2026-11-04, netcode spec section 6.5). rollback_mode decides what a rollback does with this entity:
 ##   RESIMULATE (default)  it's put back and its _tick_simulate runs again. For what this machine predicts: your own pawn.
@@ -100,6 +103,17 @@ var keep_input_history: bool = false
 ## Claude 2026-11-05: the server never replays, so it has no use for a record of what each tick's input turned out to be, unless
 ## clients predicting this entity need it sent to them. Inputs arriving from clients are still stored until their tick comes.
 var skip_input_capture: bool = false
+## Claude 2026-11-09: which ticks' state goes into the history (pawn spec 12.1, open question 16). Values are still rounded every
+## tick either way (quantize_each_tick), so the simulation is the same; only the saved copy is skipped. NetworkEntity sets it, like
+## skip_input_capture:
+##   1   every tick (the default): a client's predicted entities, which replay, and anything not in a network session
+##   N   only ticks that are a multiple of N: a server, which never replays and only reads the history to send snapshots
+##   0   never: offline, where nothing replays, unless NetworkEntity.keep_history_offline is on
+var history_interval_ticks: int = 1
+## Claude 2026-11-09: recording runs in C++ (TickStateRecorder, in native/) when the library is there, which gives exactly the same
+## values. Off: GDScript for every component, for comparing the two. Tests take -- --gdscript-record.
+## GDScript note: a static var belongs to the class, not to each component, so one switch covers them all.
+static var use_native: bool = true
 
 ## Stored in a history slot for a property that didn't exist that tick.
 const MISSING := &"__tick_state_missing__"
@@ -145,6 +159,10 @@ var _state_values: Array = []
 var _state_custom: Array = []
 var _input_ticks := PackedInt64Array()
 var _input_values: Array = []
+# Claude 2026-11-09: the C++ recorder (a TickStateRecorder), and whether it holds the current list. It's filled once every state entry
+# has a live node and a settled encoding; until then, and whenever a node goes away, the GDScript path records instead.
+var _recorder: Object = null
+var _recorder_ready := false
 
 
 func _enter_tree() -> void:
@@ -212,6 +230,7 @@ func _build_state_list() -> void:
 		if "velocity" in _root:
 			listed.append("velocity")
 	_states = _parse_list(listed)
+	_recorder_ready = false # Claude 2026-11-09: the list changed, so the C++ recorder is filled again
 	_position_index = -1
 	_velocity_index = -1
 	# Claude 2026-11-04: matched by the property's name, so a velocity kept on a part like the motor still counts.
@@ -243,12 +262,60 @@ func _tick_record(tick: int) -> void:
 	# Claude 2026-11-04: following uses the server's data, not its own, so it has nothing to save.
 	if rollback_mode == RollbackMode.FOLLOW_SERVER:
 		return
+	# Claude 2026-11-09: a tick whose state nobody will read is only rounded, not saved (history_interval_ticks).
+	if history_interval_ticks <= 0 or tick % history_interval_ticks != 0:
+		if quantize_each_tick and not _states.is_empty() and not _record_natively(null):
+			_round_in_place(_states)
+		return
 	var slot := tick % history_size
 	_state_ticks[slot] = tick
 	_newest_state_tick = maxi(_newest_state_tick, tick)
-	_state_values[slot] = _capture(_states, _state_values[slot])
+	# Claude 2026-11-09: C++ when it can, else GDScript; the same values either way.
+	var values: Array = _state_values[slot] if _state_values[slot] is Array else []
+	if _record_natively(values):
+		_state_values[slot] = values
+	else:
+		_state_values[slot] = _capture(_states, _state_values[slot])
 	if not _custom_paths.is_empty():
 		_state_custom[slot] = _save_customs()
+
+
+## Claude 2026-11-09: records the state list through the C++ recorder: into values, or with values null only rounds. False if it
+## can't right now (no library, use_native off, an entry not matched yet, an encoding not settled, or a node gone), and then the
+## caller does it in GDScript, which also matches entries, settles encodings and warns. The recorder is filled again next time.
+func _record_natively(values: Variant) -> bool:
+	if not _recorder_ready:
+		if not use_native or _states.is_empty() or not ClassDB.class_exists(&"TickStateRecorder"):
+			return false
+		for p in _states:
+			if not is_instance_valid(p.node) or p.encoding == StateEncoding.AUTO:
+				return false # the GDScript path matches it and settles its encoding first
+		if _recorder == null:
+			# GDScript note: made by name, so this script still runs where the C++ library isn't available.
+			_recorder = ClassDB.instantiate(&"TickStateRecorder")
+		_recorder.clear()
+		for p in _states:
+			if not _recorder.add(p.node, p.property, p.encoding):
+				return false
+		_recorder_ready = true
+	var store := values != null
+	if _recorder.capture(values if store else [], quantize_each_tick, store):
+		return true
+	_recorder_ready = false # a node went away: the GDScript path takes this tick and matches entries again
+	return false
+
+
+## Claude 2026-11-09: rounds each property and writes back the ones that changed, saving nothing. The GDScript path for a tick whose
+## state isn't kept, and the same steps as _capture without the copy.
+func _round_in_place(props: Array[Prop]) -> void:
+	for p in props:
+		if not _bind(p):
+			continue
+		var v: Variant = p.read()
+		_settle_encoding(p, v)
+		var q: Variant = StateEncoding.quantize(v, p.encoding)
+		if q != v:
+			p.write(q)
 
 
 ## Rollback step 1: put the entity back to how it ended this tick. False if there's nothing to restore for that tick,

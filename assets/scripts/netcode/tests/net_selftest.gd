@@ -469,6 +469,8 @@ func _test_offline() -> void:
 	# Claude 2026-11-05: the server only saves inputs when clients predicting the entity need them.
 	session._refresh_entities()
 	_check(target.state.skip_input_capture, "input saving: a server skips it")
+	# Claude 2026-11-09: and a server saves state only on the ticks it sends snapshots on (pawn spec 12.1).
+	_check(target.state.history_interval_ticks == session.get_snapshot_interval() and session.get_snapshot_interval() >= 1, "state saving: a server saves only snapshot ticks (every %d)" % target.state.history_interval_ticks)
 	session._on_client_message(77, _client_message(NetDebugModule.CHANNEL, debug.switch_message("default_predicted", true)))
 	_check(not target.state.skip_input_capture, "input saving: unless clients are predicting, even when switched on live")
 	session.default_predicted = false
@@ -476,7 +478,12 @@ func _test_offline() -> void:
 	session._mode = was_mode
 	session._peers.erase(77)
 	session._refresh_entities()
-	_check(not target.state.skip_input_capture, "input saving: offline keeps it")
+	# Claude 2026-11-09: this was "offline keeps it". Offline now saves no inputs and no state, since nothing replays (pawn spec 12.1),
+	# unless the entity's keep_history_offline is on.
+	_check(target.state.skip_input_capture and target.state.history_interval_ticks == 0, "history: offline saves no inputs and no state")
+	target.keep_history_offline = true
+	_check(not target.state.skip_input_capture and target.state.history_interval_ticks == 1, "history: unless keep_history_offline is on, then every tick")
+	target.keep_history_offline = false
 
 	var list_before: Array[NetworkEntity] = session.get_entities()
 	_check(session.get_entities() == list_before, "entity list: it's kept, not rebuilt each time")
