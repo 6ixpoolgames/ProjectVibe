@@ -65,6 +65,24 @@ func full_pass(candidates: Array[Pawn], tick: int) -> void:
 	_check_all(candidates, tick)
 
 
+## Claude 2026-11-09 (scaling spec step 2): the full pass with the sensing job's result: the job found the candidates and how visible
+## each is, on a worker thread; this casts the rays and records, the same as full_pass would. AISensingManager calls it.
+func full_pass_prepared(job: Object, tick: int) -> void:
+	var memory := pawn.ai_memory if pawn else null
+	if memory == null:
+		return
+	var store: Object = memory.get_store()
+	_fill_settings()
+	store.set_sight_settings(_settings)
+	memory.announce_sight_results(store.sight_check_prepared(job, pawn, tick))
+
+
+## Claude 2026-11-09 (step 2): asks the sensing job for next tick's full pass, with where the eyes face now and this sense's settings.
+func ask_job(job: Object, reach: float, max_candidates: int) -> void:
+	_fill_settings()
+	job.add_request(pawn, _eye_yaw(), reach, max_candidates, _settings)
+
+
 ## Claude 2026-11-09: only the current target, one ray. Refreshing every remembered entity cost more than the full passes in a crowd
 ## (measured with ai_stress), and keeping a tracked target fresh is what the refresh is for.
 func refresh(tick: int) -> void:
@@ -142,6 +160,13 @@ func _check_all(targets: Array, tick: int) -> void:
 	if memory == null:
 		return
 	var store: Object = memory.get_store()
+	_fill_settings() # Claude 2026-11-09 (step 2): moved into a function, which the job's request uses too
+	store.set_sight_settings(_settings)
+	memory.announce_sight_results(store.sight_check(pawn, _eye_yaw(), targets, tick))
+
+
+# Claude 2026-11-09 (step 2): the settings for memory's store and the sensing job, in AIMemoryStore.set_sight_settings' order.
+func _fill_settings() -> void:
 	_settings.resize(11)
 	_settings[0] = fill_rate
 	_settings[1] = near_range
@@ -154,8 +179,6 @@ func _check_all(targets: Array, tick: int) -> void:
 	_settings[8] = target_height
 	_settings[9] = sight_blocking_mask
 	_settings[10] = manager.sense_interval_ticks if manager else 10
-	store.set_sight_settings(_settings)
-	memory.announce_sight_results(store.sight_check(pawn, _eye_yaw(), targets, tick))
 
 
 func _eye_yaw() -> float:

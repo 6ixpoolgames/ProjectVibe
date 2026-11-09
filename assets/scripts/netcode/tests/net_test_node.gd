@@ -41,6 +41,10 @@
 ##   --walkers=4         server: gives each client this many pawns
 ##   --ai-mode=walk      server: what the --ai pawns do
 ##   --hitch=5:200       every 5 seconds, this machine freezes for 200 ms
+##   --stretch=1.6       Claude 2026-11-09 (scaling spec section 0): acts like a slower CPU: after each tick loop, waits so the loop took
+##                       this many times as long. Only the main thread; worker threads and the physics engine run at full speed
+##   --workers=3         Claude 2026-11-09 (scaling spec section 0): job worker threads (TickJobs.set_worker_count); 3 is the target
+##                       machine's dedicated server
 ##   --profile           time each tick phase, and the whole physics frame
 ##   --no-log            don't record every pawn's position, which takes time and memory at large counts
 ##   --measure-after=6   start measuring after this many seconds, instead of 2
@@ -124,6 +128,8 @@ func _ready() -> void:
 	debug = NetDebugModule.on(session)
 	driver = get_node("/root/TickDriver")
 	_read_settings()
+	if settings.has("workers"): # Claude 2026-11-09: see --workers
+		TickJobs.set_worker_count(int(settings["workers"]))
 	if settings.has("terrain"):
 		_build_terrain()
 	else:
@@ -385,6 +391,13 @@ func _next_spawn_point() -> Vector3:
 
 
 func _on_loop_finished() -> void:
+	# Claude 2026-11-09: --stretch, a slower main thread. The wait counts as tick work below, as it would on that machine.
+	var stretch := float(settings.get("stretch", 1.0))
+	if stretch > 1.0:
+		var work := Time.get_ticks_usec() - _loop_started_usec - _logging_usec
+		var until := Time.get_ticks_usec() + int(work * (stretch - 1.0))
+		while Time.get_ticks_usec() < until:
+			pass
 	# This test's own logging isn't part of what's being measured.
 	var spent := Time.get_ticks_usec() - _loop_started_usec - _logging_usec
 	_logging_usec = 0

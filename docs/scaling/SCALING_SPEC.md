@@ -1,8 +1,8 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-09: the tier 1 plan for running many more pawns on a server: plain data, worker threads and the owner's scheduler. From the 2026-11-09 discussion with the owner. A draft to agree, nothing built. -->
 
-# Scaling Spec v0.5 (tier 1, being built)
+# Scaling Spec v0.6 (tier 1, being built)
 
-**Status:** agreed by the owner on 2026-11-09 ("Ok. Proceed") and being built, step by step (section 10). **Built:** step 1, the pawn table (3.1). The groundwork it stands on is pawn spec 15.
+**Status:** agreed by the owner on 2026-11-09 ("Ok. Proceed") and being built, step by step (section 10). **Built:** step 1, the pawn table (3.1); step 2, the job scheduler, the table's columns and the sensing job (3.2, 4.2). The groundwork it stands on is pawn spec 15.
 **Scope:** how a server runs many more pawns: a shared table of plain pawn data, worker threads with the owner's scheduler, the AI on workers, simulating far-away pawns less often, crowd movement for AI units, and per-client network work. Clients change little.
 **Why:** on the owner's PC, which is above average, about 235 fighting pawns fit in a 60 Hz tick today (pawn spec 15.6), so about **145 on the target machine** (section 0). The owner's words: "My machine is above average and 250ish units networked is far from ideal."
 **Numbers** marked "guess" are estimates until a step is built and measured.
@@ -13,6 +13,7 @@
 - v0.3 (2026-11-09): the owner's answers. Tier 1 goes ahead. No crowd movement yet (8 moves after tier 1). Props block sight (6). Decisions one tick later is fine. The numbers are for a **dedicated server** on the target machine, aiming at **500 fighting units** (0.1).
 - v0.4 (2026-11-09): the owner's calls: the tick rate is **chosen before a match starts**, so every machine agrees; changing it during a match, and per-pawn rates for distant units, are for later rounds (7). Settings counted in ticks keep ticks, at a reference rate of 60 (7).
 - v0.5 (2026-11-09): agreed; step 1 built (3.1). The table is read at the first use in a tick, not in the record phase (3).
+- v0.6 (2026-11-09): step 2 built (4.2). The owner's calls: the table's fields are columns with automatic and manual switches, and a game can add its own (3.2); network replication stays declared in `TickStateComponent`, not flagged on the table (3.2). The main thread's budget and deferral move to step 5, where there's first main-only work to defer (4.2).
 
 ---
 
@@ -126,7 +127,7 @@ These extend the per-tick contract (pawn spec 15.1).
 
 One shared table of plain pawn data on the server, in C++ (`PawnTable`): **one array per field, one slot per pawn**, so slot 7 in every array is the same pawn.
 
-- **Fields, first version:** entity id, team, position, velocity, yaw, grounded, Health, detectability, and flags (dead, resting, possessed, relevant to a player).
+- **Fields, first version:** entity id, team, position, velocity, yaw, grounded, Health, detectability, and flags (dead, resting, possessed, relevant to a player). *(v0.6: every field past the core ones is a column that's switched on when something reads it, 3.2.)*
 - **Slots:** an entity id to slot map. A despawned pawn's slot is filled by the last one, so the arrays stay packed, then the slots are put back into entity-id order once a tick, so jobs and results walk pawns in a fixed order.
 - **Filled once a tick,** read from the pawns at the first use in a tick (`refresh(tick)`), before anything reads it. *(v0.5: this said "in the record phase", by the recorder's pass. Reading at the start of the tick instead means a pawn moved by code between ticks, a teleport or a test placing it, is seen at once, as the grid always saw it; reading in the record phase would show it a tick late. Tier 1's jobs gather at the start of a tick anyway.)*
 - **Read-only for jobs.** Jobs read the copy from the end of the previous tick (rule 3 of pawn spec 15.1).
@@ -139,6 +140,20 @@ One shared table of plain pawn data on the server, in C++ (`PawnTable`): **one a
 - **`AIPawnGrid`** now reads the table (`set_table`), rebuilding its cells when the table's version changes; `track` and `untrack` are gone, and `AISensingManager` makes the shared grid from the table. Equally distant pawns now come back in entity-id order; before, they came in hash order, which could differ between runs.
 - **Test:** `pawn/tests/pawn_table_selftest`: slot order and keys, reading once a tick, leaving and coming back, and the grid against a brute-force search (1,920 queries, nearest first, ties by entity id, all equal).
 - **Cost:** a refresh reads a pawn in about 0.3 µs on the owner's PC, against the step's budget of 1. `pawn_stress` at 400 fighting pawns: input and AI 9.05 ms, the same as before (9.06). Every other suite passes unchanged.
+
+### 3.2 Columns, switched on when they're needed *(v0.6, the owner's request; built with step 2)*
+
+The owner's words: "We want the array structure to be modular and extensible probably with flags for which to track per game", and "Can we have manual and automatic switches?" So the table's arrays are columns, made when something needs them, rather than a fixed list:
+
+- **Core columns, always there:** the key (entity id), the node, the position and the team. The table's order and the grid need them.
+- **Built-in optional columns:** velocity, yaw, grounded and detectability. Off until switched on: a column that's off holds nothing and isn't read, so it costs nothing.
+- **Switched on automatically** by a system that reads one: `require_column(name)`. The sensing job requires detectability, for example. Nobody has to remember to switch on what a system needs.
+- **Switched on by hand** with `enable_column(name)`, from a `GameMode` module or a game's own code, for its own readers or readouts. `disable_column(name)` undoes that, but a column a system requires stays on, with a warning: a game can't switch off what a system needs by mistake.
+- **A game's own columns:** `add_column(name, type, property, default)`, a number, whole number, true/false or Vector3, read from that property of each pawn, or the default where a pawn doesn't have it. No C++ needed. Added columns are on.
+- **Whenever:** a column can be switched on at any time; the next refresh fills it. Unknown names are refused with an error that lists the built-in ones.
+- **The table never changes under a job.** Before anything changes it (a pawn joining or leaving, a refresh that reads, a column switched), it calls a change guard, which the job scheduler sets to finish every job still running. So jobs can read it without locks.
+- **Not for the network** *(the owner asked whether replication needs a flag)*: the table is the server's own working data for jobs and doesn't go over the network. What's sent stays declared once, in each pawn's `TickStateComponent`, which the handshake compares between machines. If snapshots are later built from table columns (section 9), the choice of what's sent still comes from that declaration, so there's never a second list to disagree with it.
+- Readers in GDScript: `get_row(slot)` (every column that's on), `get_column(name)` (one column as a packed array), `get_column_names()`, `is_column_on(name)`.
 
 ---
 
@@ -153,6 +168,74 @@ The owner's design: the main thread runs ticks, and work that doesn't fit overfl
 - **The main thread's budget:** milliseconds per tick for main-only work, measured from the machine (4.1). Main-only work beyond it is deferred by count where it can be: AI decisions wait their turn (a queue in pawn-id order), far-away pawns simulate less often (7).
 - **Threads:** the existing `navcore` worker pool (`native/src/worker_pool.*`), grown to take a batch of jobs and wait for them. How many: 4.1.
 - **Determinism:** the thread count never changes a result: jobs write only their own slots, and results are applied in entity-id order.
+
+### 4.2 Step 2, as built *(Claude 2026-11-09)*
+
+**The scheduler** (`JobScheduler`, `native/src/job_scheduler.*`), one shared by every job kind (`TickJobs.get_scheduler()`, `assets/scripts/jobs/TickJobs.gd`, static, not an autoload):
+- A job kind starts a run: a number of items (pawns) and a function that does items *begin..end*. The scheduler cuts it into batches of about 100 µs of work each, sized from what that kind has been measured to cost (a running average per item), and puts them in one shared queue. Idle workers take the next batch.
+- When a result is needed, the job kind calls `finish()`: the main thread runs any batches nobody has taken, then waits for the rest. A run that wasn't done in time is counted as a wait.
+- **Workers:** sized to the machine (4.1): logical cores, minus one for the main thread, minus one more when the machine draws the game, at least 1, at most `max_workers` (8 by default). `TickJobs.set_worker_count()` fixes a number (tests do); 0 means none, and every batch runs on the main thread when it's needed, with the same answer. The threads start on the first run.
+- **Readout:** `get_stats()`: workers, and for each kind its runs, items, batches, batches the main thread ran, waits, and measured µs per item.
+- **Not built yet:** the main thread's budget and deferring work by count (rule 5, 4.1). There's no main-only work to defer until step 5 moves decisions to data, so it comes with step 5. *(v0.6)*
+- Nav's tile builds keep their own threads (`WorkerPool`): they're long and come in bursts, and would hold up sensing batches queued behind them. Sharing one pool is for later; on the target machine the two together can mean more threads than cores while tiles stream.
+
+**The first job kind, sensing** (`AISensingJob`, `native/src/ai_sensing_job.*`):
+- **What it does on a worker:** for each pawn whose full sensing pass is due, the "who's near me" search in the grid (now read-only, `AIPawnGrid.find_slots`, so many threads can search at once) and how visible each candidate is: distance × angle × detectability, from the one copy of that rule in `ai_sight_rules.h`, which the main-thread check uses too.
+- **What stays on the main thread:** the physics rays and recording what's seen (`AIMemoryStore.sight_check_prepared`), because physics rays can't safely run off the main thread. Step 4 moves line of sight into C++.
+- **When:** during tick T, each pawn whose full pass is on tick T+1 adds itself to a list (`AISensingManager.tick_sensing`). At the end of tick T (`TickDriver.after_tick`), each asks the job, with where its eyes face, and the job reads the table and starts. The workers have the time between the two ticks. On tick T+1, the pawn's pass takes its result. So this is rule 3 exactly: started on T, applied on T+1, from the copy at the end of T.
+- **The same answers:** because the job reads where tick T left every pawn, which is what the pass on T+1 always saw, the results are identical to the main-thread pass, not a tick older. The decision delay agreed in open question 3 isn't needed here. The one difference: something that moves a pawn between ticks (a teleport, a test placing a pawn) isn't seen by that pass.
+- **Fallbacks:** a pass with no result for its tick (a pawn that wasn't due, one just spawned, a test calling `full_pass` directly) runs the old way. A pawn that died after asking doesn't ask. Without the C++ library, with `AIMemory.use_native` off, or with `TickJobs.enabled` off, nothing changes from before.
+- **Test** (`ai/tests/ai_sensing_job_selftest`):
+  - 64 pawns in three teams, with walls and mixed detectability, over six passes: the job's answers equal the main-thread check's exactly, with 0, 1, 2, 3 and the machine's number of workers.
+  - A pawn leaving while the job runs waits for the job.
+  - A 240-tick fight of 24 goblins in three teams ends exactly the same with the job (3 workers) as without it: every goblin's place, Health and memory. It's first run twice without the job, to show the fight repeats at all.
+- **Stress tests** get the section 0 switches: `pawn_stress -- --workers=3 --stretch=1.6` (and `--no-jobs` to compare), `net_stress -- --workers=3 --stretch=1.6` for its server, and `ai_stress -- --no-jobs --workers=`. The stretch slows the main thread only; worker threads and the physics engine run at full speed, so it's a rough guide.
+- **Measured** (owner's PC): the job's search and visibility take about 3 to 5 µs a pawn on a worker. At 400 fighting pawns (`pawn_stress`), every sensing batch ran on a worker with no waits; the input phase, where the AI runs, went from 9.39 to 8.65 ms a tick, and all phases from 26.2 to 25.6 (that includes starting the job at the end of each tick). With `--workers=3 --stretch=1.6`: all phases 43.6 to 42.1. `ai_stress`, the AI per tick: 7.46 to 6.94 ms at 400 pawns, 3.52 to 3.19 at 200, about 7 to 9% less. That's what this step can take off: most of sensing that's left on the main thread is the physics rays (about 1.3 of the 2.7 ms at 200 pawns before, `ai_stress --breakdown`), which step 4 moves.
+
+### 4.3 Reference: step 2's classes and functions
+
+**`PawnTable`** (C++, additions; the rest is in 3.1)
+- `require_column(name)`: the automatic switch, for a system that reads the column. Stays on.
+- `enable_column(name)`, `disable_column(name)`: the manual switch. Disabling a required column warns and leaves it on.
+- `add_column(name, type, property, default_value)`: a game's own column: `TYPE_FLOAT`, `TYPE_INT`, `TYPE_BOOL` or `TYPE_VECTOR3`, read from `property`, on once added.
+- `is_column_on(name)`, `has_column(name)`, `get_column_names()`, `get_column(name)`: what there is, and one column's values as a packed array.
+- `get_row(slot)`: now the core values plus every column that's on.
+- For C++ readers: `column_index(name)`, `numbers(column)`, `whole_numbers(column)`, `vectors(column)`, `id_at(slot)`, `key_at(slot)`, and `set_change_guard(function)`, called before anything changes the table.
+
+**`AIPawnGrid`** (C++, additions)
+- `prepare(tick)`: on the main thread: refreshes the table for this tick and rebuilds the cells if it changed.
+- `find_slots(origin, radius, own_team, exclude_slot, max_results, found)`: read-only, for any number of threads at once: the nearest pawns' slots, ties by slot. `query()` is now `prepare` then `find_slots`, with the same answers.
+
+**`JobScheduler`** (C++, new)
+- `set_worker_count(count)`, `get_worker_count()`, `workers_for_machine()`, `set_max_workers(count)`, `get_max_workers()`: how many worker threads (above).
+- `finish_all()`: finishes every run still going.
+- `get_stats()`, `reset_stats()`: the readout.
+- For job kinds in C++: `kind(name, first_guess_usec)` (a kind's number), `start(kind, item_count, function)` (a run; returns a handle), `finish(handle)` (returns once it's done, helping on the main thread), `is_finished(handle)`.
+
+**`AISensingJob`** (C++, new)
+- `setup(scheduler, grid)`: what runs it and what it searches. Requires the table's detectability column and sets the table's change guard.
+- `add_request(observer, eye_yaw, reach, max_candidates, sight_settings)`: one pawn's pass for the tick after the next `start`.
+- `start(tick)`: reads the table and starts the work for the passes on tick + 1; drops the last tick's results.
+- `has_result(observer, tick)`, `get_candidates(observer, tick)`: whether there's a result, and its candidates as nodes, for senses other than sight.
+- `get_stats()`, `reset_stats()`: requests, results taken, and how many were asked for at the last start.
+- For C++: `take(observer, tick, count, eye)`, which `AIMemoryStore.sight_check_prepared` uses.
+
+**`AIMemoryStore`** (C++, addition)
+- `sight_check_prepared(job, observer, tick)`: the sight check with the job's candidates and visibility: the rays and the record, exactly as `sight_check` does them. Both share `check_one` and the rule in `ai_sight_rules.h` (`sight_rules::Settings`, `facing_from_yaw`, `visibility`).
+
+**`TickJobs`** (GDScript, new, static)
+- `enabled`: off means no jobs, everything the old way. Read when parts are ready.
+- `get_scheduler()`: the shared scheduler, or null without the library or with `enabled` off.
+- `set_worker_count(count)`, `get_worker_count_setting()`.
+
+**`AISensingManager`** (GDScript, additions)
+- `tick_sensing` now also adds the pawn to the list for the job when its next tick is a full pass, and `full_pass` takes the job's result when there is one.
+- `_shared_job()` (static): the shared job, made on first use. `_start_job(dt, tick)` (static, on `TickDriver.after_tick`): asks for every listed pawn and starts the job. `_ask_job()`: one pawn's request, skipped in the cases that would find nothing and for a dead pawn.
+
+**`SightSense`** (GDScript, additions)
+- `ask_job(job, reach, max_candidates)`: its request, with where the eyes face now.
+- `full_pass_prepared(job, tick)`: the full pass from the job's result.
+- `_fill_settings()`: its settings in the store's order, which both use.
 
 ### 4.1 Sharing the work out by machine *(the owner's request, v0.2)*
 
@@ -256,10 +339,10 @@ Each step ends with tests passing on Windows and Linux, and the measurement it n
 | # | Step | Must show |
 |---|---|---|
 | 1 | **Pawn table**, `AIPawnGrid` built from it (3). **Built 2026-11-09 (3.1)** | Nothing behaves differently: every suite passes; `pawn_stress` costs no more than 1 µs per pawn extra. *Measured: 0.3 µs per pawn; every suite passes* |
-| 2 | **Job system and scheduler** in `navcore`: batches, due ticks, cost estimates, the main thread's budget, late-job counting, sizing to the machine (4, 4.1). One job kind to start: the sight checks. `pawn_stress` and `net_stress` get the slower-CPU stretch and worker cap (section 0) | The same results with 0, 1, 2, 3 and N worker threads, compared exactly; `ai_stress` main-thread time down |
+| 2 | **Job system and scheduler** in `navcore`: batches, due ticks, cost estimates, the main thread's budget, late-job counting, sizing to the machine (4, 4.1). One job kind to start: the sight checks. `pawn_stress` and `net_stress` get the slower-CPU stretch and worker cap (section 0). **Built 2026-11-09 (4.2), with the table's columns (3.2); the budget moves to step 5** | The same results with 0, 1, 2, 3 and N worker threads, compared exactly; `ai_stress` main-thread time down. *Measured: identical with every worker count and in a whole fight; the AI's main-thread time 7 to 9% less (`ai_stress`); the rays, most of what's left, go in step 4* |
 | 3 | **Contract exceptions tidied** (5) | `ai_stealth_selftest`, taunt tests unchanged |
 | 4 | **Line of sight in C++, against the heightmap and props** (6) | Agrees with physics rays on a map with props, in a comparison test; sensing fully off the main thread |
-| 5 | **Considerations as data** for the built-in behaviours (6) | Scores equal to the GDScript ones on recorded situations; decisions off the main thread; ~235 → ~350 fighting pawns (guess) |
+| 5 | **Considerations as data** for the built-in behaviours (6), and the main thread's budget with deferral by count (4, 4.1; moved from step 2 in v0.6) | Scores equal to the GDScript ones on recorded situations; decisions off the main thread; ~235 → ~350 fighting pawns (guess) |
 | 6 | **Tick rate chosen per match** (7): the reference-rate conversion for the 38 tick settings, history sized in time, the rate in the handshake | Every suite and network test passes at 60 and at 30; converted settings last the same time at both |
 | 7 | **Interest management and per-client snapshots on workers** (9) | Bandwidth per client and server snapshot time in `net_stress` |
 | 8 | **Client batch placement** (9) | Client cost per remote pawn in `net_profile` |

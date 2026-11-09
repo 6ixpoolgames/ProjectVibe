@@ -39,6 +39,14 @@ public:
 	// the positions were read: the first query of a new tick refreshes the table and rebuilds the grid.
 	Array query(const Vector3 &origin, double radius, int64_t own_team, Object *exclude, int64_t max_results, int64_t tick);
 
+	// Claude 2026-11-09 (scaling spec step 2): for worker jobs. prepare() refreshes the table for this tick and rebuilds the cells if
+	// it changed, on the main thread. find_slots() then only reads, so any number of threads can run it at once: the table slots of
+	// pawns within radius of origin whose team isn't own_team, never exclude_slot, nearest first with ties by slot, at most
+	// max_results. They go in the first entries of found (the caller's own scratch), and the count is returned.
+	void prepare(int64_t tick);
+	size_t find_slots(const Vector3 &origin, double radius, int64_t own_team, int64_t exclude_slot, size_t max_results,
+			std::vector<std::pair<double, uint32_t>> &found) const;
+
 protected:
 	static void _bind_methods();
 

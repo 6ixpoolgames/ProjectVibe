@@ -42,16 +42,39 @@ void AIPawnGrid::rebuild() {
 	_built_version = _table->version();
 }
 
+// Claude 2026-11-09 (step 2): split into prepare() and find_slots(), which the worker jobs use; the answers are the same.
 Array AIPawnGrid::query(const Vector3 &origin, double radius, int64_t own_team, Object *exclude, int64_t max_results, int64_t tick) {
 	Array result;
 	if (_table.is_null()) {
 		return result;
 	}
-	_table->refresh(tick); // reads the rows once a tick; does nothing on later queries of the same tick
+	prepare(tick);
+	const int64_t exclude_slot = exclude ? _table->get_slot(exclude) : -1;
+	const size_t keep = find_slots(origin, radius, own_team, exclude_slot, size_t(std::max<int64_t>(max_results, 0)), _found);
+	result.resize(int64_t(keep));
+	for (size_t i = 0; i < keep; ++i) {
+		result[int64_t(i)] = _table->node_at(_found[i].second);
+	}
+	return result;
+}
+
+void AIPawnGrid::prepare(int64_t tick) {
+	if (_table.is_null()) {
+		return;
+	}
+	_table->refresh(tick); // reads the rows once a tick; does nothing on later calls in the same tick
 	if (_built_version != _table->version()) {
 		rebuild();
 	}
-	_found.clear();
+}
+
+size_t AIPawnGrid::find_slots(const Vector3 &origin, double radius, int64_t own_team, int64_t exclude_slot, size_t max_results,
+		std::vector<std::pair<double, uint32_t>> &found) const {
+	found.clear();
+	if (_table.is_null()) {
+		return 0;
+	}
+	const PawnTable *table = _table.ptr();
 	const double radius_squared = radius * radius;
 	const int64_t x0 = int64_t(std::floor((origin.x - radius) / _cell_size));
 	const int64_t x1 = int64_t(std::floor((origin.x + radius) / _cell_size));
@@ -64,24 +87,20 @@ Array AIPawnGrid::query(const Vector3 &origin, double radius, int64_t own_team, 
 				continue;
 			}
 			for (uint32_t slot : cell->second) {
-				if (_table->team_at(slot) == own_team || _table->node_at(slot) == exclude) {
+				if (table->team_at(slot) == own_team || int64_t(slot) == exclude_slot) {
 					continue;
 				}
-				const double distance_squared = origin.distance_squared_to(_table->position_at(slot));
+				const double distance_squared = origin.distance_squared_to(table->position_at(slot));
 				if (distance_squared <= radius_squared) {
-					_found.push_back({ distance_squared, slot });
+					found.push_back({ distance_squared, slot });
 				}
 			}
 		}
 	}
 	// Nearest first; ties by slot, which is entity-id order, so the order is the same on every machine.
-	const size_t keep = std::min(_found.size(), size_t(std::max<int64_t>(max_results, 0)));
-	std::partial_sort(_found.begin(), _found.begin() + keep, _found.end());
-	result.resize(int64_t(keep));
-	for (size_t i = 0; i < keep; ++i) {
-		result[int64_t(i)] = _table->node_at(_found[i].second);
-	}
-	return result;
+	const size_t keep = std::min(found.size(), max_results);
+	std::partial_sort(found.begin(), found.begin() + keep, found.end());
+	return keep;
 }
 
 void AIPawnGrid::_bind_methods() {

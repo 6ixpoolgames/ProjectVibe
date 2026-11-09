@@ -1,6 +1,7 @@
 // Written by Claude (claude-opus-5-5), 2026-11-09: see ai_memory_store.h. Every rule here mirrors AIMemoryStoreGD.gd and
 // SightSense.gd; a change to one goes in the other, and ai_perception_selftest runs both.
 #include "ai_memory_store.h"
+#include "ai_sensing_job.h" // Claude 2026-11-09 (scaling spec step 2)
 
 #include <godot_cpp/classes/collision_object3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
@@ -286,22 +287,11 @@ int64_t AIMemoryStore::best_target(const Vector3 &from, double awareness_weight,
 // --- Sight ---
 
 void AIMemoryStore::set_sight_settings(const PackedFloat64Array &s) {
-	if (s.size() < 11) {
-		return;
-	}
-	_fill_rate = s[0];
-	_near_range = s[1];
-	_sight_range = s[2];
-	_cos_central = s[3];
-	_cos_periphery = s[4];
-	_periphery_multiplier = s[5];
-	_max_gain_ticks = int64_t(s[6]);
-	_eye_height = s[7];
-	_target_height = s[8];
-	_blocking_mask = uint32_t(int64_t(s[9]));
-	_sense_interval = int64_t(s[10]);
+	_sight.read(s); // Claude 2026-11-09 (step 2): the shared struct; fewer than 11 numbers change nothing, as before
 }
 
+// Claude 2026-11-09 (scaling spec step 2): the visibility rule moved to ai_sight_rules.h and the ray and record to check_one, so that
+// sight_check_prepared does exactly the same with the job's numbers.
 Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const Array &candidates, int64_t tick) {
 	Array became_certain;
 	bool added = false;
@@ -312,9 +302,8 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 		result.push_back(became_certain);
 		return result;
 	}
-	const Vector3 eye = observer->get_global_position() + Vector3(0.0, _eye_height, 0.0);
-	const Vector2 facing(-std::sin(eye_yaw), -std::cos(eye_yaw)); // Godot's forward is -Z, so yaw 0 faces -Z
-	CollisionObject3D *observer_body = Object::cast_to<CollisionObject3D>(observer);
+	const Vector3 eye = observer->get_global_position() + Vector3(0.0, _sight.eye_height, 0.0);
+	const Vector2 facing = sight_rules::facing_from_yaw(eye_yaw);
 	PhysicsDirectSpaceState3D *space = nullptr;
 
 	const int64_t count = candidates.size();
@@ -323,71 +312,83 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 		if (target == nullptr || target == observer || !target->is_inside_tree() || is_dead(target)) {
 			continue;
 		}
-		const int64_t ticks = std::clamp(ticks_since_checked(target, tick, _sense_interval), int64_t(0), _max_gain_ticks);
 		const Vector3 target_position = target->get_global_position();
-		const Vector3 aim = target_position + Vector3(0.0, _target_height, 0.0);
-
+		const Vector3 aim = target_position + Vector3(0.0, _sight.target_height, 0.0);
 		// Visibility: distance × angle × detectability, as SightSense.visibility_of.
-		double visibility = 0.0;
-		const double distance = eye.distance_to(aim);
-		if (distance <= _sight_range) {
-			double distance_factor = 1.0;
-			if (distance > _near_range) {
-				distance_factor = 1.0 - (distance - _near_range) / std::max(_sight_range - _near_range, 0.001);
-			}
-			double angle_factor = 1.0;
-			const Vector2 flat(aim.x - eye.x, aim.z - eye.z);
-			bool outside = false;
-			if (flat.length_squared() > 0.0001) {
-				const double cosine = facing.dot(flat.normalized());
-				if (cosine < _cos_periphery) {
-					outside = true;
-				} else if (cosine < _cos_central) {
-					angle_factor = _periphery_multiplier;
-				}
-			}
-			if (!outside) {
-				visibility = distance_factor * angle_factor * double(target->get("detectability"));
-			}
-		}
-
-		bool seen = false;
-		// The ray is the expensive part, so it's only cast when the target could be seen at all.
-		if (visibility > 0.0 && ticks > 0) {
-			if (space == nullptr) {
-				space = observer->get_world_3d()->get_direct_space_state();
-			}
-			_ray->set_from(eye);
-			_ray->set_to(aim);
-			_ray->set_collision_mask(_blocking_mask);
-			CollisionObject3D *target_body = Object::cast_to<CollisionObject3D>(target);
-			const uint32_t layers = (observer_body ? observer_body->get_collision_layer() : 0) | (target_body ? target_body->get_collision_layer() : 0);
-			TypedArray<RID> exclude;
-			if (_blocking_mask & layers) {
-				if (observer_body) {
-					exclude.push_back(observer_body->get_rid());
-				}
-				if (target_body) {
-					exclude.push_back(target_body->get_rid());
-				}
-			}
-			_ray->set_exclude(exclude);
-			seen = space != nullptr && space->intersect_ray(_ray).is_empty();
-		}
-		if (seen) {
-			const int64_t bits = record_sighting(target, _fill_rate * double(ticks) * visibility, tick, target_position);
-			added = added || (bits & 1);
-			if (bits & 2) {
-				became_certain.push_back(target);
-			}
-		} else {
-			record_check(target, tick);
-		}
+		const double visibility = sight_rules::visibility(_sight, eye, facing, aim, double(target->get("detectability")));
+		check_one(observer, target, eye, aim, target_position, visibility, tick, space, added, became_certain);
 	}
 	Array result;
 	result.push_back(added);
 	result.push_back(became_certain);
 	return result;
+}
+
+Array AIMemoryStore::sight_check_prepared(Object *job_object, Object *observer_object, int64_t tick) {
+	Array became_certain;
+	bool added = false;
+	Array result;
+	AISensingJob *job = Object::cast_to<AISensingJob>(job_object);
+	Node3D *observer = Object::cast_to<Node3D>(observer_object);
+	int64_t count = 0;
+	Vector3 eye;
+	const AISensingJob::Candidate *candidates = (job && observer && observer->is_inside_tree()) ? job->take(observer, tick, count, eye) : nullptr;
+	if (candidates == nullptr) {
+		result.push_back(false);
+		result.push_back(became_certain);
+		return result;
+	}
+	PhysicsDirectSpaceState3D *space = nullptr;
+	for (int64_t c = 0; c < count; ++c) {
+		const AISensingJob::Candidate &candidate = candidates[c];
+		// The same checks sight_check makes before visibility: the job only knew the table, not whether a pawn has died or left.
+		Node3D *target = Object::cast_to<Node3D>(instance_of(candidate.id));
+		if (target == nullptr || target == observer || !target->is_inside_tree() || is_dead(target)) {
+			continue;
+		}
+		check_one(observer, target, eye, candidate.aim, candidate.position, candidate.visibility, tick, space, added, became_certain);
+	}
+	result.push_back(added);
+	result.push_back(became_certain);
+	return result;
+}
+
+void AIMemoryStore::check_one(Node3D *observer, Node3D *target, const Vector3 &eye, const Vector3 &aim, const Vector3 &target_position,
+		double visibility, int64_t tick, PhysicsDirectSpaceState3D *&space, bool &added, Array &became_certain) {
+	const int64_t ticks = std::clamp(ticks_since_checked(target, tick, _sight.sense_interval), int64_t(0), _sight.max_gain_ticks);
+	bool seen = false;
+	// The ray is the expensive part, so it's only cast when the target could be seen at all.
+	if (visibility > 0.0 && ticks > 0) {
+		if (space == nullptr) {
+			space = observer->get_world_3d()->get_direct_space_state();
+		}
+		_ray->set_from(eye);
+		_ray->set_to(aim);
+		_ray->set_collision_mask(_sight.blocking_mask);
+		CollisionObject3D *observer_body = Object::cast_to<CollisionObject3D>(observer);
+		CollisionObject3D *target_body = Object::cast_to<CollisionObject3D>(target);
+		const uint32_t layers = (observer_body ? observer_body->get_collision_layer() : 0) | (target_body ? target_body->get_collision_layer() : 0);
+		TypedArray<RID> exclude;
+		if (_sight.blocking_mask & layers) {
+			if (observer_body) {
+				exclude.push_back(observer_body->get_rid());
+			}
+			if (target_body) {
+				exclude.push_back(target_body->get_rid());
+			}
+		}
+		_ray->set_exclude(exclude);
+		seen = space != nullptr && space->intersect_ray(_ray).is_empty();
+	}
+	if (seen) {
+		const int64_t bits = record_sighting(target, _sight.fill_rate * double(ticks) * visibility, tick, target_position);
+		added = added || (bits & 1);
+		if (bits & 2) {
+			became_certain.push_back(target);
+		}
+	} else {
+		record_check(target, tick);
+	}
 }
 
 // --- Binding ---
@@ -416,4 +417,5 @@ void AIMemoryStore::_bind_methods() {
 			&AIMemoryStore::best_target);
 	ClassDB::bind_method(D_METHOD("set_sight_settings", "settings"), &AIMemoryStore::set_sight_settings);
 	ClassDB::bind_method(D_METHOD("sight_check", "observer", "eye_yaw", "candidates", "tick"), &AIMemoryStore::sight_check);
+	ClassDB::bind_method(D_METHOD("sight_check_prepared", "job", "observer", "tick"), &AIMemoryStore::sight_check_prepared); // Claude 2026-11-09
 }

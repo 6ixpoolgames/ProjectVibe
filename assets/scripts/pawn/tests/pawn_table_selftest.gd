@@ -17,6 +17,7 @@ func _ready() -> void:
 		get_tree().quit(0)
 		return
 	await _test_keys_and_order()
+	await _test_columns()
 	await _test_once_a_tick()
 	await _test_leaving()
 	await _test_grid_matches_brute_force()
@@ -41,6 +42,30 @@ func _test_keys_and_order() -> void:
 	_check(table.get_count() == 0, "every pawn that left is gone from the table")
 
 
+## Claude 2026-11-09 (scaling spec step 2): columns are off until switched on, by hand or by a system that requires them, and a game
+## can add its own.
+func _test_columns() -> void:
+	var pawn := _make_pawn(Vector3(1, 0, 2))
+	pawn.velocity = Vector3(3, 0, 4)
+	var table: Object = Pawn.get_table()
+	table.refresh(50)
+	var row: Dictionary = table.get_row(table.get_slot(pawn))
+	_check(not table.is_column_on(&"velocity") and not row.has("velocity") and row.has("position") and row.has("team"), "optional columns start off; key, position and team are always there (%s)" % str(row.keys()))
+	_check(table.enable_column(&"velocity") and table.is_column_on(&"velocity"), "switched on by hand")
+	table.refresh(50) # the same tick: switching a column on makes the next refresh read anyway
+	_check(table.get_row(table.get_slot(pawn)).get("velocity") == Vector3(3, 0, 4), "and the next refresh fills it, even in the same tick")
+	table.disable_column(&"velocity")
+	_check(not table.is_column_on(&"velocity") and not table.get_row(table.get_slot(pawn)).has("velocity"), "switched off by hand: gone")
+	table.require_column(&"grounded") # what a system that reads it does
+	table.disable_column(&"grounded") # warns: a system needs it
+	_check(table.is_column_on(&"grounded"), "a column a system requires stays on when switched off by hand (with a warning)")
+	_check(table.add_column(&"rest_ticks", TYPE_INT, &"rest_check_ticks", 0) and table.is_column_on(&"rest_ticks"), "a game's own column, read from a property, on once added")
+	table.refresh(51)
+	_check(table.get_row(table.get_slot(pawn)).get("rest_ticks") == pawn.rest_check_ticks and Array(table.get_column(&"rest_ticks")) == [pawn.rest_check_ticks], "its values, in a row and as a whole column")
+	_check(not table.add_column(&"rest_ticks", TYPE_INT, &"x", 0) and not table.enable_column(&"no_such_column"), "a name that's taken, or one that doesn't exist, is refused with an error")
+	pawn.free()
+
+
 ## Rows are read once a tick: moving a pawn and refreshing again in the same tick changes nothing; the next tick sees the move.
 func _test_once_a_tick() -> void:
 	var pawn := _make_pawn(Vector3(5, 0, 7))
@@ -49,6 +74,8 @@ func _test_once_a_tick() -> void:
 	pawn.yaw = 0.5
 	pawn.detectability = 0.25
 	var table: Object = Pawn.get_table()
+	for column in [&"velocity", &"yaw", &"detectability"]: # Claude 2026-11-09 (step 2): optional columns are off until switched on
+		table.enable_column(column)
 	_check(table.refresh(100), "the first refresh of a tick reads")
 	var row: Dictionary = table.get_row(table.get_slot(pawn))
 	_check(row["position"] == pawn.global_position and row["velocity"] == Vector3(1, 0, 2) and row["team"] == 3 and is_equal_approx(row["yaw"], 0.5) and is_equal_approx(row["detectability"], 0.25), "its row holds the pawn's values (%s)" % str(row))

@@ -18,6 +18,12 @@
 ##   --gdscript-record                 record in GDScript instead of C++
 ##   --breakdown                       also splits simulate per pawn into the abilities (locomotion, actions, counters) and the
 ##                                     rest, which is mostly move_and_slide, through the test-only TimedAbilityManager
+## Claude 2026-11-09, for tier 1 step 2 (scaling spec section 0):
+##   --workers=3                       job worker threads (TickJobs.set_worker_count): 3 is the target machine's dedicated server
+##   --stretch=1.6                     acts like the target machine's slower CPU: after each tick, waits so the tick took this many
+##                                     times as long. Only the main thread; worker threads and the physics engine run at full speed.
+##                                     The phase columns don't include the wait; "all phases" and the physics frame do
+##   --no-jobs                         no worker jobs (TickJobs.enabled off): the old main-thread way, to compare
 extends Node
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
@@ -28,6 +34,8 @@ const AI_PARTS: Array[StringName] = [&"AIContextComponent", &"AISensingManager",
 var _sizes: Array[int] = [100, 200, 400, 800]
 var _history_interval := 1 # Claude 2026-11-09: --history=
 var _breakdown := false # Claude 2026-11-09: --breakdown, simulate split into abilities and the rest (TimedAbilityManager)
+var _stretch := 1.0 # Claude 2026-11-09: --stretch
+var _tick_started_usec := 0
 
 
 func _ready() -> void:
@@ -43,6 +51,16 @@ func _ready() -> void:
 			TickStateComponent.use_native = false
 		elif arg == "--breakdown":
 			_breakdown = true
+		# Claude 2026-11-09 (step 2)
+		elif arg.begins_with("--workers="):
+			TickJobs.set_worker_count(int(arg.trim_prefix("--workers=")))
+		elif arg.begins_with("--stretch="):
+			_stretch = maxf(float(arg.trim_prefix("--stretch=")), 1.0)
+		elif arg == "--no-jobs":
+			TickJobs.enabled = false
+	if _stretch > 1.0:
+		TickDriver.before_tick.connect(func(_dt: float, _tick: int) -> void: _tick_started_usec = Time.get_ticks_usec())
+		TickDriver.after_tick.connect(_stretch_tick)
 	var floor_body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
@@ -55,6 +73,11 @@ func _ready() -> void:
 		"C++" if ClassDB.class_exists(&"AIMemoryStore") else "GDScript",
 		"C++" if TickStateComponent.use_native and ClassDB.class_exists(&"TickStateRecorder") else "GDScript", # Claude 2026-11-09
 		["never", "every tick", "every 2nd tick"][_history_interval]])
+	# Claude 2026-11-09 (step 2)
+	var scheduler: Object = TickJobs.get_scheduler()
+	print("jobs: %s; main thread stretched %.1f times" % [
+		"off" if scheduler == null else "on, %d worker threads (%s)" % [scheduler.workers_for_machine() if TickJobs.get_worker_count_setting() < 0 else TickJobs.get_worker_count_setting(), "sized to this machine" if TickJobs.get_worker_count_setting() < 0 else "fixed"],
+		_stretch])
 	for scene in ["standing", "wandering", "fighting"]:
 		print("")
 		print("%s:" % scene)
@@ -62,6 +85,8 @@ func _ready() -> void:
 		for count in _sizes:
 			var row := await _measure(scene, count)
 			print("%5d   %8.2f   %8.2f   %8.2f   %10.2f   %13.2f   %16.4f" % [count, row.input, row.simulate, row.record, row.phases, row.frame, row.frame / count])
+			if row.has("sensing_runs"): # Claude 2026-11-09 (step 2): where the sensing job's work ran
+				print("        sensing job: %.1f pawns a tick, %.1f µs each; batches %d, %d of them on the main thread; %d waits" % [row.sensing_items, row.sensing_usec, row.sensing_batches, row.sensing_on_main, row.sensing_waits])
 			if _breakdown: # Claude 2026-11-09: microseconds per pawn per tick
 				print("        simulate per pawn: %.1f us = abilities %.1f (locomotion %.1f, actions %.1f, counters and locks %.1f) + the rest %.1f (move_and_slide, gravity, bookkeeping)" % [
 					row.simulate * 1000.0 / count, row.abilities, row.locomotion, row.actions, row.abilities - row.locomotion - row.actions, row.simulate * 1000.0 / count - row.abilities])
@@ -100,6 +125,8 @@ func _measure(scene: String, count: int) -> Dictionary:
 		await get_tree().physics_frame
 	TickDriver.reset_profile()
 	TickDriver.profile_enabled = true
+	if TickJobs.get_scheduler(): # Claude 2026-11-09 (step 2)
+		TickJobs.get_scheduler().reset_stats()
 	TimedAbilityManager.reset_timings() # Claude 2026-11-09
 	# Claude 2026-11-09: the median, not the average. Godot's monitor adds up every physics step taken in one rendered frame, so
 	# when a frame runs late it reads double or more, and an average swung from 18 to 37 ms between two identical runs. The median
@@ -124,11 +151,28 @@ func _measure(scene: String, count: int) -> Dictionary:
 		"locomotion": TimedAbilityManager.usec_locomotion / ticks / count,
 		"actions": TimedAbilityManager.usec_actions / ticks / count,
 	}
+	# Claude 2026-11-09 (step 2): the sensing job's numbers, when it ran
+	var scheduler: Object = TickJobs.get_scheduler()
+	var sensing: Dictionary = scheduler.get_stats()["kinds"].get("sensing", {}) if scheduler else {}
+	if sensing.get("runs", 0) > 0:
+		row["sensing_runs"] = sensing["runs"]
+		row["sensing_items"] = float(sensing["items"]) / ticks
+		row["sensing_usec"] = sensing["usec_per_item"]
+		row["sensing_batches"] = sensing["batches"]
+		row["sensing_on_main"] = sensing["batches_on_main"]
+		row["sensing_waits"] = sensing["waits"]
 	for pawn in pawns:
 		pawn.free()
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	return row
+
+
+# Claude 2026-11-09: --stretch. Waits at the end of each tick so the tick took _stretch times as long, like a slower CPU's main thread.
+func _stretch_tick(_dt: float, _tick: int) -> void:
+	var until := Time.get_ticks_usec() + int((Time.get_ticks_usec() - _tick_started_usec) * (_stretch - 1.0))
+	while Time.get_ticks_usec() < until:
+		pass
 
 
 func _behaviours(list: Array) -> AIBehaviourManager:

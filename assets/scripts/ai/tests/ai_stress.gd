@@ -13,6 +13,8 @@
 ##   --no-refresh      full passes only, no refreshes between them
 ##   --breakdown       200 pawns with AI only, timing each AI part separately (test-only subclasses that wrap each call)
 ##   --gdscript-store  the GDScript memory store and physics query, even where the C++ library is available (Claude 2026-11-09)
+##   --no-jobs         no worker jobs (TickJobs.enabled off), so sensing searches on the main thread (Claude 2026-11-09, step 2)
+##   --workers=3       job worker threads (TickJobs.set_worker_count) (Claude 2026-11-09, step 2)
 extends Node
 
 var _no_sensing := false
@@ -139,6 +141,10 @@ func _ready() -> void:
 	_no_refresh = args.has("--no-refresh")
 	_breakdown = args.has("--breakdown")
 	AIMemory.use_native = not args.has("--gdscript-store")
+	TickJobs.enabled = not args.has("--no-jobs") # Claude 2026-11-09 (step 2)
+	for arg in args:
+		if arg.begins_with("--workers="):
+			TickJobs.set_worker_count(int(arg.trim_prefix("--workers=")))
 	print("memory store: %s" % ("C++ (AIMemoryStore, AIPawnGrid)" if AIMemory.use_native and ClassDB.class_exists(&"AIMemoryStore") else "GDScript (AIMemoryStoreGD, physics query)"))
 	print("switches: %s" % (" ".join(args) if not args.is_empty() else "none"))
 	var floor_body := StaticBody3D.new()

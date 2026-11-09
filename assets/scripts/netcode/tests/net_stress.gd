@@ -4,6 +4,8 @@
 ## it doesn't pass or fail. Takes several minutes.
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/netcode/tests/net_stress.tscn"
 ## Add -- --row=name to run one row.
+## Claude 2026-11-09 (scaling spec section 0): -- --stretch=1.6 makes the server act like the target machine's slower CPU (its main
+## thread only), and -- --workers=3 gives it the target machine's 3 job worker threads.
 ##
 ## The question to read it with: when someone else has a bad connection, do the good clients' numbers change? In a
 ## server-authoritative design they shouldn't, apart from that one pawn looking bad to everyone.
@@ -35,12 +37,17 @@ const STREAMED := {"streaming": 1, "load-distance": 320, "nav-distance": 96, "un
 
 var _port := NetRun.first_port()
 var _only := ""
+var _server_extra := {} # Claude 2026-11-09: --stretch and --workers, for the server
 
 
 func _ready() -> void:
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--row="):
 			_only = argument.trim_prefix("--row=")
+		elif argument.begins_with("--stretch="): # Claude 2026-11-09
+			_server_extra["stretch"] = float(argument.trim_prefix("--stretch="))
+		elif argument.begins_with("--workers="):
+			_server_extra["workers"] = int(argument.trim_prefix("--workers="))
 	print("--- Multiplayer stress test (physics engine: %s), %d walkers per client plus %d AI, %d s ---" % [ProjectSettings.get_setting("physics/3d/physics_engine", "DEFAULT"), WALKERS, AI_PAWNS, SECONDS])
 	await _row("within_limits", GOOD, {})
 	await _row("one_bad", GOOD + [{"name": "ping400", "bench-ping": 400}], {})
@@ -78,6 +85,7 @@ func _row(row_name: String, clients: Array, server_extra: Dictionary) -> void:
 	# Clients start a moment apart, so the server has to outlast the last of them.
 	var server: Dictionary = {"role": "server", "seconds": SECONDS + 4, "terrain": 1, "walkers": WALKERS, "ai": AI_PAWNS, "ai-mode": "walk"}
 	server.merge(server_extra)
+	server.merge(_server_extra) # Claude 2026-11-09
 	machines["server"] = server
 	for client: Dictionary in clients:
 		var settings: Dictionary = {"role": "client", "seconds": SECONDS, "terrain": 1, "mode": "walk"}

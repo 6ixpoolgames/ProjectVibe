@@ -6,6 +6,8 @@
 #include "net_codec.h" // Claude 2026-11-05: packet encoding in C++, a measured test the game doesn't use yet
 #include "tick_state_recorder.h" // Claude 2026-11-09: rollback recording in C++, pawn spec 12.1
 #include "pawn_table.h" // Claude 2026-11-09: the shared table of plain pawn data, scaling spec step 1
+#include "job_scheduler.h" // Claude 2026-11-09: worker threads for plain-data jobs, scaling spec step 2
+#include "ai_sensing_job.h" // Claude 2026-11-09: the first job kind, sensing, step 2
 
 #include <gdextension_interface.h>
 #include <godot_cpp/classes/engine.hpp>
@@ -27,6 +29,8 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	GDREGISTER_CLASS(AIMemoryStore); // Claude 2026-11-09
 	GDREGISTER_CLASS(PawnTable); // Claude 2026-11-09: before AIPawnGrid, which uses it
 	GDREGISTER_CLASS(AIPawnGrid); // Claude 2026-11-09
+	GDREGISTER_CLASS(JobScheduler); // Claude 2026-11-09, step 2
+	GDREGISTER_CLASS(AISensingJob); // Claude 2026-11-09, step 2: after the grid and the scheduler it uses
 	GDREGISTER_CLASS(TickStateRecorder); // Claude 2026-11-09
 	g_nav_server = memnew(NavServer);
 	Engine::get_singleton()->register_singleton("NavServer", g_nav_server);

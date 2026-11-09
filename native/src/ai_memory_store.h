@@ -13,6 +13,8 @@
 // here. A profile whose script overrides value_at() (a "custom" profile) is called instead, so a designer's own fade still works.
 #pragma once
 
+#include "ai_sight_rules.h" // Claude 2026-11-09 (scaling spec step 2): the visibility rule, shared with AISensingJob
+
 #include <godot_cpp/classes/curve.hpp>
 #include <godot_cpp/classes/physics_ray_query_parameters3d.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -29,6 +31,7 @@
 namespace godot {
 
 class Node3D;
+class PhysicsDirectSpaceState3D;
 
 class AIMemoryStore : public RefCounted {
 	GDCLASS(AIMemoryStore, RefCounted)
@@ -69,6 +72,10 @@ public:
 	// Checks each candidate (Pawns) from observer's eyes, facing eye_yaw, and records what's seen. Returns
 	// [a new entry was made (bool), entities that became certain (Array)].
 	Array sight_check(Object *observer, double eye_yaw, const Array &candidates, int64_t tick);
+	// Claude 2026-11-09 (scaling spec step 2): the same check, with the candidates and their visibility already found by an
+	// AISensingJob for this observer and tick (job is the AISensingJob). Casts the rays and records, exactly as sight_check does with
+	// the same candidates. Returns the same as sight_check; nothing happens if the job has no result for this observer and tick.
+	Array sight_check_prepared(Object *job, Object *observer, int64_t tick);
 
 protected:
 	static void _bind_methods();
@@ -89,6 +96,10 @@ private:
 	static double value_at(const Fade &fade, double ticks);
 	static int64_t ends_after(const Fade &fade);
 	double awareness_of(size_t i, int64_t tick) const;
+	// Claude 2026-11-09 (step 2): one candidate's check once its visibility is known: the ray if it could be seen, then the record.
+	// Both sight checks use it, so they record the same things in the same order.
+	void check_one(Node3D *observer, Node3D *target, const Vector3 &eye, const Vector3 &aim, const Vector3 &target_position,
+			double visibility, int64_t tick, PhysicsDirectSpaceState3D *&space, bool &added, Array &became_certain);
 	void remove(size_t i);
 
 	std::vector<uint64_t> _ids;
@@ -104,17 +115,8 @@ private:
 	Fade _certain_fade;
 	int64_t _continuous_ticks = 30;
 
-	double _fill_rate = 1.0 / 30.0;
-	double _near_range = 8.0;
-	double _sight_range = 25.0;
-	double _cos_central = 0.7071;
-	double _cos_periphery = 0.1736;
-	double _periphery_multiplier = 0.3;
-	int64_t _max_gain_ticks = 30;
-	double _eye_height = 1.6;
-	double _target_height = 1.0;
-	uint32_t _blocking_mask = 1;
-	int64_t _sense_interval = 10;
+	// Claude 2026-11-09 (scaling spec step 2): SightSense's settings, in the struct the sensing job shares (ai_sight_rules.h).
+	sight_rules::Settings _sight;
 	Ref<PhysicsRayQueryParameters3D> _ray;
 };
 
