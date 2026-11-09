@@ -112,6 +112,12 @@ var is_resting := false
 # Claude 2026-11-09: how many pawns in the tree are on each team, so AI sensing can skip looking when there's nobody to find.
 # GDScript note: a static var belongs to the class, not to one pawn, so every pawn shares this one dictionary.
 static var _pawns_per_team := {}
+# Claude 2026-11-09: the shared table of plain pawn data (a PawnTable from the navcore C++ library, scaling spec section 3), or null
+# without the library. Every pawn in the tree has a row, in entity-id order. Pawns NetworkSession never configured, as in most
+# tests, have no entity id; they get keys from TABLE_KEYS_WITHOUT_ID up, after every networked pawn, in the order they joined.
+static var _table: Object = null
+const TABLE_KEYS_WITHOUT_ID := 1 << 40
+static var _next_table_key := TABLE_KEYS_WITHOUT_ID
 # Claude 2026-11-09: hits queued during simulate, for every pawn, and the tick driver that delivers them (pawn spec 15.4).
 static var _queued_hits: Array = [] # [attacker's entity id, target's entity id, place in the queue, HitInfo]
 static var _hit_queue_driver: Node = null
@@ -186,7 +192,7 @@ func _init() -> void:
 func _enter_tree() -> void:
 	add_to_group(TerrainBodyLifter.GROUP)
 	_count_team(team, 1) # Claude 2026-11-09
-	AISensingManager.track_pawn(self) # Claude 2026-11-09: the shared grid AI sensing reads (C++ only)
+	_join_table() # Claude 2026-11-09: the shared table of plain pawn data, which AI sensing's grid reads (C++ only; scaling spec step 1)
 	# Claude 2026-11-07: default parts first, so they're children before anything below or any _ready looks for them. A node may
 	# add children to itself here: Godot enters them right after.
 	var game_mode: Node = get_node_or_null("/root/GameMode")
@@ -199,7 +205,8 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
 	_count_team(team, -1) # Claude 2026-11-09
-	AISensingManager.untrack_pawn(self)
+	if _table: # Claude 2026-11-09: leaves the shared table (scaling spec step 1)
+		_table.remove(self)
 	# Claude 2026-11-07: this first, because leaving the list can switch the pawn back on, which would register it again.
 	var ai := _ai_activation_manager()
 	if ai:
@@ -464,6 +471,30 @@ static func _deliver_queued_hits(_dt: float, _tick: int) -> void:
 		var hit: HitInfo = entry[3]
 		if is_instance_valid(hit.target):
 			hit.target._take_hit(hit)
+
+
+## Claude 2026-11-09: the shared table of plain pawn data (scaling spec section 3), or null without the C++ library. Read-only for
+## anyone but Pawn: pawns join and leave it themselves. Its rows are read from the pawns once a tick, at the first refresh(tick).
+static func get_table() -> Object:
+	return _table
+
+
+# Claude 2026-11-09: joins the shared table, making it on first use. The key is the entity id, which the NetworkEntity already has:
+# NetworkSession configures it before the pawn enters the tree. _entity isn't found until _ready, so the child is looked for here.
+func _join_table() -> void:
+	if _table == null:
+		if not ClassDB.class_exists(&"PawnTable"):
+			return
+		# GDScript note: made by name, so this script still runs where the C++ library isn't available.
+		_table = ClassDB.instantiate(&"PawnTable")
+	var key := -1
+	for child in get_children():
+		if child is NetworkEntity and child.entity_id >= 0:
+			key = child.entity_id
+	if key < 0:
+		key = _next_table_key
+		_next_table_key += 1
+	_table.add(self, key)
 
 
 ## Claude 2026-11-09: this pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.

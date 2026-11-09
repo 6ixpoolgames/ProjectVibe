@@ -5,6 +5,7 @@
 #include "nav_server.h"
 #include "net_codec.h" // Claude 2026-11-05: packet encoding in C++, a measured test the game doesn't use yet
 #include "tick_state_recorder.h" // Claude 2026-11-09: rollback recording in C++, pawn spec 12.1
+#include "pawn_table.h" // Claude 2026-11-09: the shared table of plain pawn data, scaling spec step 1
 
 #include <gdextension_interface.h>
 #include <godot_cpp/classes/engine.hpp>
@@ -24,6 +25,7 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	GDREGISTER_CLASS(NavServer);
 	GDREGISTER_CLASS(NetCodec); // Claude 2026-11-05
 	GDREGISTER_CLASS(AIMemoryStore); // Claude 2026-11-09
+	GDREGISTER_CLASS(PawnTable); // Claude 2026-11-09: before AIPawnGrid, which uses it
 	GDREGISTER_CLASS(AIPawnGrid); // Claude 2026-11-09
 	GDREGISTER_CLASS(TickStateRecorder); // Claude 2026-11-09
 	g_nav_server = memnew(NavServer);

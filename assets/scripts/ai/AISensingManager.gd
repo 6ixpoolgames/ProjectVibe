@@ -11,8 +11,9 @@
 ## so a crowd that's all on one team, like the stress tests, costs almost nothing here.
 ##
 ## Claude 2026-11-09: the query uses AIPawnGrid from the navcore C++ library when it's available: one grid of every pawn, rebuilt at
-## most once a tick and shared by every pawn, which returns the nearest max_candidates first. Pawns join it from Pawn._enter_tree
-## (track_pawn). Without the library, or with AIMemory.use_native off, it's a physics shape query on the layers in candidate_mask
+## most once a tick and shared by every pawn, which returns the nearest max_candidates first. Claude 2026-11-09 (scaling spec step 1):
+## the grid reads the shared PawnTable (Pawn.get_table()), which pawns join themselves, so ties come back in entity-id order.
+## Without the library, or with AIMemory.use_native off, it's a physics shape query on the layers in candidate_mask
 ## (pawns are on layer 2), which returns at most max_candidates, nearest not guaranteed. The sight checks themselves run in the
 ## pawn's memory store (pawn spec 10.11).
 class_name AISensingManager
@@ -29,7 +30,7 @@ extends Node
 
 var pawn: Pawn = null
 
-# Claude 2026-11-09: the grid every pawn shares, or null without the C++ library. Pawns join and leave it from Pawn.gd.
+# Claude 2026-11-09: the grid every pawn shares, built from Pawn's shared table, or null without the C++ library. See _shared_grid.
 static var _grid: Object = null
 
 var _senses: Array[AISenseBase] = []
@@ -59,7 +60,7 @@ func _ready() -> void:
 			child.pawn = pawn
 			_senses.append(child)
 	_query.shape = _sphere
-	_use_grid = _grid != null and AIMemory.use_native
+	_use_grid = _shared_grid() != null and AIMemory.use_native # Claude 2026-11-09: was _grid, made by track_pawn
 
 
 ## Every sense, in tree order.
@@ -95,19 +96,13 @@ func get_range() -> float:
 	return longest
 
 
-## Claude 2026-11-09: Pawn calls this when it enters the tree, so the shared grid knows it. Makes the grid on first use, when the C++
-## library is available.
-static func track_pawn(who: Node3D) -> void:
-	if _grid == null and ClassDB.class_exists(&"AIPawnGrid"):
+## Claude 2026-11-09 (scaling spec step 1): the shared grid, made on first use from Pawn's shared table, or null without the C++
+## library. It replaces track_pawn and untrack_pawn: pawns join the table themselves.
+static func _shared_grid() -> Object:
+	if _grid == null and ClassDB.class_exists(&"AIPawnGrid") and Pawn.get_table() != null:
 		_grid = ClassDB.instantiate(&"AIPawnGrid")
-	if _grid:
-		_grid.track(who)
-
-
-## Claude 2026-11-09: Pawn calls this when it leaves the tree.
-static func untrack_pawn(who: Node3D) -> void:
-	if _grid:
-		_grid.untrack(who)
+		_grid.set_table(Pawn.get_table())
+	return _grid
 
 
 func _find_candidates(tick: int) -> void:

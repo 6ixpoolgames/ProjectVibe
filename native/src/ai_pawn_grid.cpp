@@ -1,7 +1,6 @@
 // Written by Claude (claude-opus-5-5), 2026-11-09: see ai_pawn_grid.h.
 #include "ai_pawn_grid.h"
 
-#include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
 
@@ -10,65 +9,47 @@
 
 using namespace godot;
 
-void AIPawnGrid::track(Object *pawn) {
-	if (pawn != nullptr) {
-		_tracked.insert(pawn->get_instance_id());
-		_dirty = true;
-	}
+void AIPawnGrid::set_table(const Ref<PawnTable> &table) {
+	_table = table;
+	_built_version = -1;
 }
 
-void AIPawnGrid::untrack(Object *pawn) {
-	if (pawn != nullptr) {
-		_tracked.erase(pawn->get_instance_id());
-		_dirty = true;
-	}
-}
-
-int64_t AIPawnGrid::tracked_count() const {
-	return int64_t(_tracked.size());
+Ref<PawnTable> AIPawnGrid::get_table() const {
+	return _table;
 }
 
 void AIPawnGrid::set_cell_size(double size) {
 	_cell_size = std::max(size, 0.5);
-	_dirty = true;
+	_built_version = -1;
 }
 
 double AIPawnGrid::get_cell_size() const {
 	return _cell_size;
 }
 
-void AIPawnGrid::rebuild(int64_t tick) {
-	_entries.clear();
+// Claude 2026-11-09: from the table's rows, in slot order.
+void AIPawnGrid::rebuild() {
 	for (auto &cell : _cells) {
 		cell.second.clear(); // keep the vectors' memory for the next tick
 	}
-	std::vector<uint64_t> gone;
-	for (uint64_t id : _tracked) {
-		Node3D *node = Object::cast_to<Node3D>(ObjectDB::get_instance(id));
-		if (node == nullptr) {
-			gone.push_back(id); // freed without leaving the tree first
-			continue;
-		}
-		if (!node->is_inside_tree()) {
-			continue;
-		}
-		const Vector3 position = node->get_global_position();
-		const uint32_t index = uint32_t(_entries.size());
-		_entries.push_back({ node, position, int64_t(node->get("team")) });
+	const int64_t count = _table->slot_count();
+	for (int64_t slot = 0; slot < count; ++slot) {
+		const Vector3 &position = _table->position_at(slot);
 		const int64_t x = int64_t(std::floor(position.x / _cell_size));
 		const int64_t z = int64_t(std::floor(position.z / _cell_size));
-		_cells[cell_key(x, z)].push_back(index);
+		_cells[cell_key(x, z)].push_back(uint32_t(slot));
 	}
-	for (uint64_t id : gone) {
-		_tracked.erase(id);
-	}
-	_built_tick = tick;
-	_dirty = false;
+	_built_version = _table->version();
 }
 
 Array AIPawnGrid::query(const Vector3 &origin, double radius, int64_t own_team, Object *exclude, int64_t max_results, int64_t tick) {
-	if (_dirty || tick != _built_tick) {
-		rebuild(tick);
+	Array result;
+	if (_table.is_null()) {
+		return result;
+	}
+	_table->refresh(tick); // reads the rows once a tick; does nothing on later queries of the same tick
+	if (_built_version != _table->version()) {
+		rebuild();
 	}
 	_found.clear();
 	const double radius_squared = radius * radius;
@@ -82,33 +63,30 @@ Array AIPawnGrid::query(const Vector3 &origin, double radius, int64_t own_team, 
 			if (cell == _cells.end()) {
 				continue;
 			}
-			for (uint32_t index : cell->second) {
-				const Entry &entry = _entries[index];
-				if (entry.team == own_team || entry.node == exclude) {
+			for (uint32_t slot : cell->second) {
+				if (_table->team_at(slot) == own_team || _table->node_at(slot) == exclude) {
 					continue;
 				}
-				const double distance_squared = origin.distance_squared_to(entry.position);
+				const double distance_squared = origin.distance_squared_to(_table->position_at(slot));
 				if (distance_squared <= radius_squared) {
-					_found.push_back({ distance_squared, index });
+					_found.push_back({ distance_squared, slot });
 				}
 			}
 		}
 	}
-	// Nearest first; ties by index so the order never depends on hashing.
+	// Nearest first; ties by slot, which is entity-id order, so the order is the same on every machine.
 	const size_t keep = std::min(_found.size(), size_t(std::max<int64_t>(max_results, 0)));
 	std::partial_sort(_found.begin(), _found.begin() + keep, _found.end());
-	Array result;
 	result.resize(int64_t(keep));
 	for (size_t i = 0; i < keep; ++i) {
-		result[int64_t(i)] = _entries[_found[i].second].node;
+		result[int64_t(i)] = _table->node_at(_found[i].second);
 	}
 	return result;
 }
 
 void AIPawnGrid::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("track", "pawn"), &AIPawnGrid::track);
-	ClassDB::bind_method(D_METHOD("untrack", "pawn"), &AIPawnGrid::untrack);
-	ClassDB::bind_method(D_METHOD("tracked_count"), &AIPawnGrid::tracked_count);
+	ClassDB::bind_method(D_METHOD("set_table", "table"), &AIPawnGrid::set_table);
+	ClassDB::bind_method(D_METHOD("get_table"), &AIPawnGrid::get_table);
 	ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &AIPawnGrid::set_cell_size);
 	ClassDB::bind_method(D_METHOD("get_cell_size"), &AIPawnGrid::get_cell_size);
 	ClassDB::bind_method(D_METHOD("query", "origin", "radius", "own_team", "exclude", "max_results", "tick"), &AIPawnGrid::query);

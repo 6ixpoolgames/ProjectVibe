@@ -433,7 +433,14 @@ func _test_resting() -> void:
 	_check(not pawn.is_resting and pawn.velocity.x > 0.0, "a move input wakes it at once")
 	_drive(pawn, Vector3.ZERO)
 	await _ticks(60)
-	_check(pawn.is_resting, "and once it has stopped, it rests again")
+	# Claude 2026-11-09: counted over a check period, not looked at once, because one tick in rest_check_ticks is a full check tick,
+	# staggered by the pawn's instance id, which differs from run to run (this failed about 1 run in 15 on Linux).
+	var rested_again := 0
+	for i in pawn.rest_check_ticks:
+		await _ticks(1)
+		if pawn.is_resting:
+			rested_again += 1
+	_check(rested_again == pawn.rest_check_ticks - 1, "and once it has stopped, it rests again (%d of %d ticks)" % [rested_again, pawn.rest_check_ticks])
 	pawn.global_position += Vector3(0.0, 2.0, 0.0)
 	await _ticks(1)
 	_check(not pawn.is_resting, "moved by something else (a teleport into the air): it wakes")
