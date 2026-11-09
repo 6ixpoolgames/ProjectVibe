@@ -886,7 +886,7 @@ Between decisions, only the running behaviour's `tick` runs, once per tick. When
   `AIController.is_looking_at_point()` is new for this. Look Toward turns the eyes, not the body, so the model doesn't turn yet. Turning on the spot is open question 4 (facing).
 - **The sight ray:** from 1.6 m above the feet to 1.0 m above the target's feet. Only `sight_blocking_mask` blocks it: layer 1, the world, by default. Pawns don't hide each other.
 - **The time factor is capped at `max_gain_ticks` (30)**, so a long gap without checks doesn't give a huge gain at once.
-- **Memory fades only while unseen.** Sightings at most `continuous_sighting_ticks` (30) apart, with no unseen check between them, count as one continuous look, so awareness doesn't fade between them. Without this, a target in plain view filled about 3% slower.
+- **Memory fades only while unseen.** Sightings at most `continuous_sighting_ticks` (30) apart, with no unseen check between them, count as one continuous look, so awareness doesn't fade between them. Without this, a target in plain view filled about 3% slower. *(Claude 2026-11-09: reading awareness between checks follows the same rule: while the last check saw the entity, at most `continuous_sighting_ticks` ago, it's held, and an entry held that way isn't forgotten. It starts to fade, counted from when it was last seen, once a check misses it or once that long passes with no check. Before, a certain target in plain view drifted down a little between checks, which the arena's readout showed as 99% and 100% flickering; the owner asked for the fix.)*
 - **Uncertain entries stay at full awareness for 5 s before fading** (10.5, `uncertain_fade_delay_ticks`).
 - **The sensing query** is a physics sphere on layer 2, returning at most `max_candidates` (32). It's skipped entirely when no pawn of another team is in the tree. This goes part of the way on open question 12.
 - **Look Toward, Investigate and Search apply through `is_available()`, with fixed scores (min = max).**
@@ -1204,6 +1204,8 @@ One tick runs these phases, for every pawn, in a fixed order (`TickDriver`):
 **Known exceptions, for tier 1 to tidy:**
 - Sensing reads other pawns through the shared `AIPawnGrid`, built on the first query of a tick. It's read-only and rebuilt once a tick, so it already fits rule 3.
 - `AITargetSelector.force_target` (a taunt) writes into another pawn's AI immediately. It's rare and comes from game code, not from a phase.
+
+*Claude 2026-11-09 (scaling spec step 3, 5.1): both tidied. Sensing's search and visibility read the shared pawn table, on worker threads; what's left on nodes is read-only. A force or taunt asked for during a tick (`force_target`, `force_state` and their releases) is queued and applied at the start of that pawn's next AI step, in the order asked; between ticks it applies at once, as before.*
 
 ### 15.2 Gates and channels in abilities
 

@@ -21,6 +21,7 @@ func _ready() -> void:
 	print("  memory store: %s" % ("C++" if AIMemory.use_native and ClassDB.class_exists(&"AIMemoryStore") else "GDScript"))
 	_floor = _make_box(Vector3(0, -0.5, 0), Vector3(200, 1, 200))
 	await _test_memory()
+	await _test_held_in_view()
 	await _test_sight()
 	await _test_eyes()
 	await _test_scheduled_sensing()
@@ -74,6 +75,39 @@ func _test_memory() -> void:
 	b.free()
 	memory.forget_old(3001)
 	_check(memory.find(a) >= 0 and memory.entry_count() == 1, "a freed entity is forgotten on the next pass")
+	observer.free()
+	a.free()
+
+
+## Claude 2026-11-09: awareness doesn't fade while the target is in view: between checks that see it, it's held, and it only starts
+## to fade (counted from when it was last seen) once a check misses it, or once continuous_sighting_ticks pass with no check at all.
+## And an entry held in view isn't forgotten, even with a fade shorter than that. Both stores.
+func _test_held_in_view() -> void:
+	var observer := await _make_pawn(1, Vector3.ZERO)
+	var a := await _make_pawn(0, Vector3(0, 0, -5))
+	var memory := observer.ai_memory
+	memory.record_sighting(a, 1.0, 8000, a.global_position) # certain at once; a certain entry fades from the next tick
+	var i := memory.find(a)
+	_check(memory.awareness_at(i, 8004) == 1.0, "a certain target seen 4 ticks ago, with no check since: still exactly 1, not 0.997 (it's in view)")
+	memory.record_sighting(a, 0.01, 8005, a.global_position)
+	_check(memory.awareness_at(i, 8009) == 1.0 and memory.awareness_at(i, 8035) == 1.0, "seen again: held for up to continuous_sighting_ticks (30)")
+	_check(memory.awareness_at(i, 8036) < 1.0, "past that with no check at all, it fades, counted from when it was seen")
+	memory.record_check(observer, 8006) # a check of someone else changes nothing for a
+	memory.record_check(a, 8010) # a check that missed it
+	_check(is_equal_approx(memory.awareness_at(i, 8010), 1.0 - 5.0 / 1200.0), "a check that misses it: it fades from the last sighting, 5 ticks' worth (%.4f)" % memory.awareness_at(i, 8010))
+	for store in [ClassDB.instantiate(&"AIMemoryStore") if ClassDB.class_exists(&"AIMemoryStore") else null, AIMemoryStoreGD.new()]:
+		if store == null:
+			continue
+		var short := FadeProfile.new()
+		short.mode = FadeProfile.Mode.LINEAR
+		short.hold_ticks = 0
+		short.fade_ticks = 10
+		store.configure_fades(short, 0, false, short, 0, false, 30)
+		store.record_sighting(a, 1.0, 100, a.global_position)
+		store.forget_old(120)
+		var kept: bool = store.entry_count() == 1
+		store.forget_old(131)
+		_check(kept and store.entry_count() == 0, "%s store: a 10-tick fade isn't forgotten while held in view (20 ticks), and is once that ends" % ("C++" if store is not AIMemoryStoreGD else "GDScript"))
 	observer.free()
 	a.free()
 

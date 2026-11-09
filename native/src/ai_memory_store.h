@@ -96,6 +96,7 @@ private:
 	static double value_at(const Fade &fade, double ticks);
 	static int64_t ends_after(const Fade &fade);
 	double awareness_of(size_t i, int64_t tick) const;
+	bool in_view(size_t i, int64_t tick) const; // Claude 2026-11-09: held, not fading: the last check saw it, recently
 	// Claude 2026-11-09 (step 2): one candidate's check once its visibility is known: the ray if it could be seen, then the record.
 	// Both sight checks use it, so they record the same things in the same order.
 	void check_one(Node3D *observer, Node3D *target, const Vector3 &eye, const Vector3 &aim, const Vector3 &target_position,

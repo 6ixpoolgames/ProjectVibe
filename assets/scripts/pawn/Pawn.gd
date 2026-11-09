@@ -541,6 +541,12 @@ func _tick_ai(tick: int) -> void:
 	if _driver and _driver.is_resimulating():
 		return # the AI is never rolled back, so a replay must not run it again
 	ai_context.current_tick = tick
+	# Claude 2026-11-09 (scaling spec step 3): forces asked for during the last tick (a taunt from another pawn, say), in the order
+	# they were asked for. Before anything else, and even while possessed, as a force between ticks would have been.
+	if ai_state_manager:
+		ai_state_manager.apply_queued(tick)
+	if ai_target_selector:
+		ai_target_selector.apply_queued(tick)
 	if _has_player and ai_context.while_possessed == AIContextComponent.WhilePossessed.OFF:
 		return
 	# Claude 2026-11-09: step 1, sensing writes into memory. MEMORY_ONLY stops after it.

@@ -66,10 +66,19 @@ func entity_at(index: int) -> Object:
 
 
 func awareness_at(index: int, tick: int) -> float:
+	# Claude 2026-11-09: held while it's in view, the rule record_sighting already used: if the last check saw it, and that was at
+	# most continuous_sighting_ticks ago, it hasn't faded. Before, a target in plain view drifted down between checks.
+	if _in_view(index, tick):
+		return _awareness_when_seen[index]
 	# GDScript note: value_at of a negative tick count is full, so the delay needs no special case.
 	if _certain[index]:
 		return _awareness_when_seen[index] * _certain_fade.value_at(tick - _last_seen[index] - _certain_delay)
 	return _awareness_when_seen[index] * _uncertain_fade.value_at(tick - _last_seen[index] - _uncertain_delay)
+
+
+# Claude 2026-11-09: held, not fading: the last check saw it, and not too long ago.
+func _in_view(index: int, tick: int) -> bool:
+	return _last_checked[index] == _last_seen[index] and tick - _last_seen[index] <= _continuous_ticks
 
 
 func is_certain_at(index: int) -> bool:
@@ -109,8 +118,7 @@ func record_sighting(entity: Object, gain: float, tick: int, position: Vector3) 
 		_index_of[_ids[i]] = i
 		result |= 1
 	# Fading only counts while it isn't seen: sightings close together, with no unseen check between them, are one look.
-	var in_view_all_along := _last_checked[i] == _last_seen[i] and tick - _last_seen[i] <= _continuous_ticks
-	var before := _awareness_when_seen[i] if in_view_all_along else awareness_at(i, tick)
+	var before := awareness_at(i, tick) # Claude 2026-11-09: which now holds it while in view, as this line used to
 	var now := 1.0 if _certain[i] else minf(1.0, before + gain)
 	_last_known[i] = position
 	_last_seen[i] = tick
@@ -141,7 +149,9 @@ func forget_old(tick: int) -> PackedInt64Array:
 	while i >= 0: # backwards, so removing one doesn't move the ones still to check
 		var lasts := _certain_delay + _certain_fade.ends_after() if _certain[i] else _uncertain_delay + _uncertain_fade.ends_after()
 		var entity := entity_at(i)
-		if entity == null or _is_dead(entity) or tick - _last_seen[i] >= lasts:
+		# Claude 2026-11-09: never while it's held in view, even with a fade shorter than continuous_sighting_ticks.
+		var faded := not _in_view(i, tick) and tick - _last_seen[i] >= lasts
+		if entity == null or _is_dead(entity) or faded:
 			if entity:
 				forgotten.append(_ids[i])
 			_remove(i)

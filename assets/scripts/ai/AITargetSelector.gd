@@ -15,6 +15,10 @@
 ## Forcing a target, for taunts: force_target(entity, hold_ticks, priority, reason) overrides the choice for hold_ticks (-1: until
 ## released). A new force replaces the current one only if its priority is equal or higher, the same rule as forced states. It asks
 ## for a decision with that priority, so a strong taunt can interrupt the running behaviour. On a client it does nothing and warns.
+## Claude 2026-11-09 (scaling spec step 3): when it's called during a tick (by another pawn's ability or behaviour, say), it's queued
+## and applied at the start of this pawn's next AI step, in the order the calls were made, so the result never depends on which pawn
+## went first; it returns true for "queued", and a weaker force is refused (and logged) when it's applied. Called between ticks (game
+## code, a UI, a test), it applies at once, as before. release_forced_target() works the same way.
 ##
 ## A game with its own targeting rules extends this and overrides target_priority().
 ##
@@ -55,6 +59,9 @@ var _forced: Node3D = null
 var _force_priority := 0
 var _force_until_tick := -1
 var _custom_priority := false # Claude 2026-11-09: true when a script overrides target_priority()
+# Claude 2026-11-09 (scaling spec step 3): forces and releases asked for during a tick, applied at the pawn's next AI step.
+# Each is [entity, hold_ticks, priority, reason], or [] for a release.
+var _queued: Array = []
 
 
 func _init() -> void:
@@ -148,13 +155,46 @@ func target_priority(memory: AIMemory, index: int, tick: int) -> float:
 
 
 ## Makes this entity the target for hold_ticks (-1: until released). Returns false, and changes nothing, if a stronger force is
-## holding, the entity is gone, or this isn't where the AI runs.
+## holding, the entity is gone, or this isn't where the AI runs. Claude 2026-11-09 (step 3): during a tick it's queued instead (see
+## the top of this file) and returns true; the priority check happens when it's applied.
 func force_target(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool:
 	if pawn == null or not is_instance_valid(entity):
 		return false
 	if not pawn.runs_ai_here():
 		push_warning("AITargetSelector: force_target on a client does nothing. The AI only runs on the server.")
 		return false
+	if _during_tick():
+		_queued.append([entity, hold_ticks, priority, reason])
+		return true
+	return _apply_force(entity, hold_ticks, priority, reason)
+
+
+## Ends a forced target. The next decision picks by priority again. Claude 2026-11-09 (step 3): queued during a tick.
+func release_forced_target() -> void:
+	if _during_tick():
+		_queued.append([])
+		return
+	if _forced:
+		_end_force()
+
+
+## Claude 2026-11-09 (scaling spec step 3): the pawn calls this at the start of its AI step: applies the forces and releases queued
+## during the last tick, in the order they were asked for.
+func apply_queued(_tick: int) -> void:
+	if _queued.is_empty():
+		return
+	var queued := _queued
+	_queued = []
+	for request: Array in queued:
+		if request.is_empty():
+			if _forced:
+				_end_force()
+		elif is_instance_valid(request[0]):
+			_apply_force(request[0], request[1], request[2], request[3])
+
+
+# Claude 2026-11-09 (step 3): what force_target did, now shared by the queued way and the immediate one.
+func _apply_force(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool:
 	if _forced and priority < _force_priority:
 		if OS.is_debug_build():
 			print("AITargetSelector: %s refused a forced target (priority %d, \"%s\"): one is forced at priority %d." % [pawn.name, priority, reason, _force_priority])
@@ -166,12 +206,6 @@ func force_target(entity: Node3D, hold_ticks: int, priority: int, reason: String
 	if pawn.ai_context:
 		pawn.ai_context.request_decision(priority, false)
 	return true
-
-
-## Ends a forced target. The next decision picks by priority again.
-func release_forced_target() -> void:
-	if _forced:
-		_end_force()
 
 
 ## The pawn calls this every tick, so a forced target that runs out hands back on time.
@@ -200,6 +234,12 @@ func _end_force() -> void:
 	_force_until_tick = -1
 	if pawn and pawn.ai_context:
 		pawn.ai_context.request_decision()
+
+
+# Claude 2026-11-09 (step 3): true while a tick runs, when a request must wait for the pawn's next AI step.
+func _during_tick() -> bool:
+	var driver: Node = get_node_or_null("/root/TickDriver")
+	return driver != null and driver.is_in_tick()
 
 
 func _now() -> int:

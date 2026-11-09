@@ -15,7 +15,9 @@
 ##   - A sense adds gain each time it sees the entity (record_sighting), up to 1.
 ##   - Seeing an entity that's already certain refills it to 1 at once.
 ##   - Claude 2026-11-09: sightings close together (continuous_sighting_ticks) with no unseen check between them count as one look,
-##     so awareness doesn't fade between them; it only fades while the entity isn't seen.
+##     so awareness doesn't fade between them; it only fades while the entity isn't seen. Claude 2026-11-09: and reading it between
+##     checks says the same: while the last check saw it, at most continuous_sighting_ticks ago, it's held. It starts to fade (counted
+##     from when it was last seen) once a check misses it, or once that long passes with no check at all.
 ##   - While it isn't seen, it stays full for a delay, then fades by a FadeProfile:
 ##     awareness now = awareness_when_seen × uncertain_fade.value_at(ticks since seen − uncertain_fade_delay_ticks).
 ##     uncertain_fade and uncertain_fade_delay_ticks are for uncertain entries; certain_fade and certain_fade_delay_ticks for certain

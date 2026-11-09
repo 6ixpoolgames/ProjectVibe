@@ -19,6 +19,10 @@
 ##   - A new force replaces the current one only if its priority is equal or higher. A weaker one is refused and logged.
 ##   - It takes effect at once. The behaviour manager decides at the pawn's next AI step, which is this tick if that hasn't run yet.
 ##   - Server only: on a client it does nothing and warns.
+##   - Claude 2026-11-09 (scaling spec step 3): called during a tick (by another pawn's ability or behaviour, say), it's queued and
+##     applied at the start of this pawn's next AI step, in the order the calls were made, so the result never depends on which pawn
+##     went first. It returns true for "queued"; a missing state is still refused at once, and a weaker force is refused (and logged)
+##     when it's applied. Called between ticks (game code, a UI, a test), it applies at once, as before. Releases work the same way.
 ##
 ## The fixed order: states are sorted by priority, then name, once, when the manager is ready. Never by the order they were added.
 ##
@@ -41,6 +45,9 @@ var _forced: AIStateBase = null
 var _force_priority := 0
 var _force_until_tick := -1 # -1: until released
 var _warned_none_fits := false
+# Claude 2026-11-09 (scaling spec step 3): forces and releases asked for during a tick, applied at the pawn's next AI step. Each is
+# [state_name, hold_ticks, priority, reason], or [] for a release.
+var _queued: Array = []
 
 
 func _init() -> void:
@@ -111,6 +118,32 @@ func force_state(state_name: StringName, hold_ticks: int, priority: int, reason:
 	if state == null:
 		push_warning("AIStateManager: %s has no state called %s, so force_state did nothing." % [pawn.name, state_name])
 		return false
+	if _during_tick(): # Claude 2026-11-09 (step 3)
+		_queued.append([state_name, hold_ticks, priority, reason])
+		return true
+	return _apply_force(state, hold_ticks, priority, reason)
+
+
+## Claude 2026-11-09 (scaling spec step 3): the pawn calls this at the start of its AI step: applies the forces and releases queued
+## during the last tick, in the order they were asked for.
+func apply_queued(_tick: int) -> void:
+	if _queued.is_empty():
+		return
+	var queued := _queued
+	_queued = []
+	for request: Array in queued:
+		if request.is_empty():
+			if _forced:
+				_end_force()
+		else:
+			var state := _find(request[0])
+			if state:
+				_apply_force(state, request[1], request[2], request[3])
+
+
+# Claude 2026-11-09 (step 3): what force_state did after finding the state, shared by the queued way and the immediate one.
+func _apply_force(state: AIStateBase, hold_ticks: int, priority: int, reason: String) -> bool:
+	var state_name := state.name
 	if _forced and priority < _force_priority:
 		if OS.is_debug_build():
 			print("AIStateManager: %s refused a force to %s (priority %d, \"%s\"): %s is forced at priority %d." % [pawn.name, state_name, priority, reason, _forced.name, _force_priority])
@@ -125,10 +158,19 @@ func force_state(state_name: StringName, hold_ticks: int, priority: int, reason:
 	return true
 
 
-## Ends a forced state. The normal check picks the state again at once.
+## Ends a forced state. The normal check picks the state again at once. Claude 2026-11-09 (step 3): queued during a tick.
 func release_forced_state() -> void:
+	if _during_tick():
+		_queued.append([])
+		return
 	if _forced:
 		_end_force()
+
+
+# Claude 2026-11-09 (step 3): true while a tick runs, when a request must wait for the pawn's next AI step.
+func _during_tick() -> bool:
+	var driver: Node = get_node_or_null("/root/TickDriver")
+	return driver != null and driver.is_in_tick()
 
 
 # --- Internals ---

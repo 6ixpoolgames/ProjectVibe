@@ -1,8 +1,8 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-09: the tier 1 plan for running many more pawns on a server: plain data, worker threads and the owner's scheduler. From the 2026-11-09 discussion with the owner. A draft to agree, nothing built. -->
 
-# Scaling Spec v0.6 (tier 1, being built)
+# Scaling Spec v0.7 (tier 1, being built)
 
-**Status:** agreed by the owner on 2026-11-09 ("Ok. Proceed") and being built, step by step (section 10). **Built:** step 1, the pawn table (3.1); step 2, the job scheduler, the table's columns and the sensing job (3.2, 4.2). The groundwork it stands on is pawn spec 15.
+**Status:** agreed by the owner on 2026-11-09 ("Ok. Proceed") and being built, step by step (section 10). **Built:** step 1, the pawn table (3.1); step 2, the job scheduler, the table's columns and the sensing job (3.2, 4.2); step 3, the contract's exceptions (5.1). The groundwork it stands on is pawn spec 15.
 **Scope:** how a server runs many more pawns: a shared table of plain pawn data, worker threads with the owner's scheduler, the AI on workers, simulating far-away pawns less often, crowd movement for AI units, and per-client network work. Clients change little.
 **Why:** on the owner's PC, which is above average, about 235 fighting pawns fit in a 60 Hz tick today (pawn spec 15.6), so about **145 on the target machine** (section 0). The owner's words: "My machine is above average and 250ish units networked is far from ideal."
 **Numbers** marked "guess" are estimates until a step is built and measured.
@@ -14,6 +14,7 @@
 - v0.4 (2026-11-09): the owner's calls: the tick rate is **chosen before a match starts**, so every machine agrees; changing it during a match, and per-pawn rates for distant units, are for later rounds (7). Settings counted in ticks keep ticks, at a reference rate of 60 (7).
 - v0.5 (2026-11-09): agreed; step 1 built (3.1). The table is read at the first use in a tick, not in the record phase (3).
 - v0.6 (2026-11-09): step 2 built (4.2). The owner's calls: the table's fields are columns with automatic and manual switches, and a game can add its own (3.2); network replication stays declared in `TickStateComponent`, not flagged on the table (3.2). The main thread's budget and deferral move to step 5, where there's first main-only work to defer (4.2).
+- v0.7 (2026-11-09): step 3 built (5.1): forces and taunts asked for during a tick are queued for the pawn's next AI step.
 
 ---
 
@@ -260,6 +261,14 @@ Before AI work moves to threads, the two exceptions in pawn spec 15.1 go:
 - `AITargetSelector.force_target` (a taunt) writing into another pawn's AI at once becomes a queued request, applied in the input phase.
 - Sensing reads other pawns through the pawn table (3) instead of the nodes.
 
+### 5.1 Step 3, as built *(Claude 2026-11-09)*
+
+- **Forces asked for during a tick wait for the pawn's next AI step.** `AITargetSelector.force_target` (a taunt) and `release_forced_target`, and `AIStateManager.force_state` and `release_forced_state`, called while a tick runs (`TickDriver.is_in_tick()`, from before_tick to after_tick: another pawn's ability, behaviour or hit, say) are queued on that pawn. They're applied at the start of its next AI step (`Pawn._tick_ai`, `apply_queued`), before anything else and even while possessed, in the order they were asked for. So the result never depends on which pawn went first, and nothing writes into another pawn's AI while it, or a job, might be using it.
+- **Called between ticks** (game code, a UI, a test), they apply at once, as before: nothing is running then. So every existing use and test is unchanged.
+- **What a queued call returns:** true, meaning queued. A missing state is still refused at once; a weaker force is refused, and logged, when it's applied, as it would have been. *`force_state` wasn't listed in pawn spec 15.1's exceptions but had the same problem, so it's handled the same way.*
+- **Sensing** already reads other pawns through the table for its search and visibility (4.2). What it still reads from nodes on the main thread, whether a target is dead or in the tree and the physics rays, is read-only and sees last tick's results (rule 3 of pawn spec 15.1); step 4 takes the rays into C++.
+- **Test:** `ai_state_manager_selftest`'s `_test_forcing_during_a_tick`: forces, a taunt and releases asked for from after_simulate wait for the next AI step, and two equal forces apply in the order they were asked for. `ai_stealth_selftest`, `ai_perception_selftest`'s taunt checks and the other forcing checks pass unchanged.
+
 ---
 
 ## 6. The AI on worker threads
@@ -340,7 +349,7 @@ Each step ends with tests passing on Windows and Linux, and the measurement it n
 |---|---|---|
 | 1 | **Pawn table**, `AIPawnGrid` built from it (3). **Built 2026-11-09 (3.1)** | Nothing behaves differently: every suite passes; `pawn_stress` costs no more than 1 µs per pawn extra. *Measured: 0.3 µs per pawn; every suite passes* |
 | 2 | **Job system and scheduler** in `navcore`: batches, due ticks, cost estimates, the main thread's budget, late-job counting, sizing to the machine (4, 4.1). One job kind to start: the sight checks. `pawn_stress` and `net_stress` get the slower-CPU stretch and worker cap (section 0). **Built 2026-11-09 (4.2), with the table's columns (3.2); the budget moves to step 5** | The same results with 0, 1, 2, 3 and N worker threads, compared exactly; `ai_stress` main-thread time down. *Measured: identical with every worker count and in a whole fight; the AI's main-thread time 7 to 9% less (`ai_stress`); the rays, most of what's left, go in step 4* |
-| 3 | **Contract exceptions tidied** (5) | `ai_stealth_selftest`, taunt tests unchanged |
+| 3 | **Contract exceptions tidied** (5). **Built 2026-11-09 (5.1)** | `ai_stealth_selftest`, taunt tests unchanged. *Unchanged, and a new check of forces asked for during a tick* |
 | 4 | **Line of sight in C++, against the heightmap and props** (6) | Agrees with physics rays on a map with props, in a comparison test; sensing fully off the main thread |
 | 5 | **Considerations as data** for the built-in behaviours (6), and the main thread's budget with deferral by count (4, 4.1; moved from step 2 in v0.6) | Scores equal to the GDScript ones on recorded situations; decisions off the main thread; ~235 → ~350 fighting pawns (guess) |
 | 6 | **Tick rate chosen per match** (7): the reference-rate conversion for the 38 tick settings, history sized in time, the rate in the handshake | Every suite and network test passes at 60 and at 30; converted settings last the same time at both |

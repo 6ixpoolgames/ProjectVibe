@@ -101,8 +101,18 @@ void AIMemoryStore::configure_fades(const Ref<Resource> &uncertain, int64_t unce
 // --- Entries ---
 
 double AIMemoryStore::awareness_of(size_t i, int64_t tick) const {
+	// Claude 2026-11-09: held while it's in view, the rule record_sighting already used: if the last check saw it, and that was at
+	// most continuous_sighting_ticks ago, it hasn't faded. Before, a target in plain view drifted down between checks.
+	if (in_view(i, tick)) {
+		return _awareness_when_seen[i];
+	}
 	const Fade &fade = _certain[i] ? _certain_fade : _uncertain;
 	return _awareness_when_seen[i] * value_at(fade, double(tick - _last_seen[i] - fade.delay));
+}
+
+// Claude 2026-11-09: the last check saw it, and not too long ago.
+bool AIMemoryStore::in_view(size_t i, int64_t tick) const {
+	return _last_checked[i] == _last_seen[i] && tick - _last_seen[i] <= _continuous_ticks;
 }
 
 int64_t AIMemoryStore::entry_count() const {
@@ -165,8 +175,7 @@ int64_t AIMemoryStore::record_sighting(Object *entity, double gain, int64_t tick
 		i = size_t(found);
 	}
 	// Fading only counts while it isn't seen: sightings close together, with no unseen check between them, are one look.
-	const bool in_view_all_along = _last_checked[i] == _last_seen[i] && tick - _last_seen[i] <= _continuous_ticks;
-	const double before = in_view_all_along ? _awareness_when_seen[i] : awareness_of(i, tick);
+	const double before = awareness_of(i, tick); // Claude 2026-11-09: which now holds it while in view, as this line used to
 	const double now = _certain[i] ? 1.0 : std::min(1.0, before + gain);
 	_last_known[i] = position;
 	_last_seen[i] = tick;
@@ -212,7 +221,9 @@ PackedInt64Array AIMemoryStore::forget_old(int64_t tick) {
 	for (int64_t i = int64_t(_ids.size()) - 1; i >= 0; --i) { // backwards, so removing one doesn't move the ones still to check
 		const Fade &fade = _certain[size_t(i)] ? _certain_fade : _uncertain;
 		Object *entity = instance_of(_ids[size_t(i)]);
-		if (entity == nullptr || is_dead(entity) || tick - _last_seen[size_t(i)] >= fade.delay + ends_after(fade)) {
+		// Claude 2026-11-09: never while it's held in view, even with a fade shorter than continuous_sighting_ticks.
+		const bool faded = !in_view(size_t(i), tick) && tick - _last_seen[size_t(i)] >= fade.delay + ends_after(fade);
+		if (entity == nullptr || is_dead(entity) || faded) {
 			if (entity != nullptr) {
 				forgotten.push_back(int64_t(_ids[size_t(i)]));
 			}

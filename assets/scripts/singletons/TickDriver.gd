@@ -243,6 +243,12 @@ func is_resimulating() -> bool:
 	return _resimulating
 
 
+## Claude 2026-11-09 (scaling spec step 3): true while a tick runs, from before_tick to after_tick. A request aimed at another pawn's AI
+## made then is queued and applied at that pawn's next AI step (pawn spec 15.1), so it never depends on which pawn went first.
+func is_in_tick() -> bool:
+	return _in_tick
+
+
 ## Claude 2026-11-09: true while a tick's simulate phase runs (not a rollback's replay). An effect aimed at another entity during
 ## it is queued and delivered from after_simulate (pawn spec 15.1).
 func is_in_simulate() -> bool:

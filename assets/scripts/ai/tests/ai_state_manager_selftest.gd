@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless self-test for AIStateManager and AIStateBase. Checks picking by priority,
 ## the fixed order, forced states with priorities, running out and releasing, the signal, and the odd cases at the top of
-## AIStateManager.gd.
+## AIStateManager.gd. Claude 2026-11-09 (scaling spec step 3): and forces asked for during a tick, which wait for the next AI step.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_state_manager_selftest.tscn"
 extends Node
@@ -32,6 +32,7 @@ func _ready() -> void:
 	await _test_priority_order()
 	_test_fixed_order()
 	await _test_forcing()
+	await _test_forcing_during_a_tick()
 	_test_odd_cases()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -115,6 +116,49 @@ func _test_forcing() -> void:
 	_check(not states.force_state(&"Combat", 10, 99, "client"), "on a client: refused, with a warning")
 	pawn._entity = real_entity
 	client_entity.free()
+	pawn.free()
+
+
+## Claude 2026-11-09 (scaling spec step 3): a force or release asked for during a tick (here from after_simulate, as another pawn's
+## hit or ability would) waits for the pawn's next AI step, and queued ones apply in the order they were asked for. Forced targets
+## (taunts) work the same way.
+func _test_forcing_during_a_tick() -> void:
+	var combat := _state("Combat", 20)
+	var flee := _state("Flee", 30)
+	var pawn := _make_pawn([combat, flee])
+	var taunter: Pawn = load(PAWN_SCENE).instantiate()
+	taunter.team = 5
+	taunter.position = Vector3(30, 0, 0)
+	add_child(taunter)
+	var states := pawn.ai_state_manager
+	var selector := pawn.ai_target_selector
+	await _ticks(2)
+	var seen := {}
+	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
+		seen["state accepted"] = states.force_state(&"Combat", 60, 50, "during a tick")
+		seen["weaker accepted"] = states.force_state(&"Flee", 60, 40, "weaker, during a tick")
+		seen["target accepted"] = selector.force_target(taunter, 60, 10, "taunt during a tick")
+		seen["state right after"] = states.get_current_state().name
+		seen["target right after"] = selector.get_current_target(), CONNECT_ONE_SHOT)
+	await _ticks(1)
+	_check(seen.get("state accepted", false) and seen.get("weaker accepted", false) and seen.get("target accepted", false), "during a tick, forces are queued and return true")
+	_check(seen.get("state right after") == &"Idle" and seen.get("target right after") == null, "and change nothing yet")
+	await _ticks(2)
+	_check(states.get_current_state() == combat and states.is_state_forced(), "the pawn's next AI step applies them: Combat, forced")
+	_check(selector.get_current_target() == taunter and selector.is_target_forced(), "and the taunt: the target is forced")
+	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
+		states.release_forced_state()
+		selector.release_forced_target()
+		seen["still forced"] = states.is_state_forced() and selector.is_target_forced(), CONNECT_ONE_SHOT)
+	await _ticks(3)
+	_check(seen.get("still forced", false) and not states.is_state_forced() and not selector.is_target_forced() and states.get_current_state().name == &"Idle", "releases during a tick wait too, then hand back")
+	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
+		states.force_state(&"Combat", 60, 50, "first")
+		states.force_state(&"Flee", 60, 50, "second, as strong"), CONNECT_ONE_SHOT)
+	await _ticks(3)
+	_check(states.get_current_state() == flee, "queued forces apply in the order they were asked for: the second, as strong, replaces the first")
+	states.release_forced_state()
+	taunter.free()
 	pawn.free()
 
 
