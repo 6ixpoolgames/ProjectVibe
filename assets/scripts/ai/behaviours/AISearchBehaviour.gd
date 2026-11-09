@@ -73,7 +73,7 @@ func tick(context: AIContextComponent) -> Status:
 	if _going_to_centre:
 		_going_to_centre = false
 		hands.hold(&"sprint", false)
-	_pause_until = context.current_tick + maxi(pause_ticks, 1)
+	_pause_until = context.current_tick + maxi(TickDriver.ticks_at_rate(pause_ticks), 1) # Claude 2026-11-09 (step 6)
 	return Status.RUNNING
 
 

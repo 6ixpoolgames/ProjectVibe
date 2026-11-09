@@ -69,7 +69,7 @@ func tick(context: AIContextComponent) -> Status:
 			_hands.stop()
 		return Status.RUNNING
 	var now := context.current_tick
-	if _standing or now - _last_path_tick >= repath_ticks or last_known.distance_to(_goal) > repath_distance or not _hands.is_following_order():
+	if _standing or now - _last_path_tick >= TickDriver.ticks_at_rate(repath_ticks) or last_known.distance_to(_goal) > repath_distance or not _hands.is_following_order():
 		_standing = false
 		_goal = last_known
 		_last_path_tick = now

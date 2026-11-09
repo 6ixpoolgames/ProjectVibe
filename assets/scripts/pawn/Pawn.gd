@@ -628,7 +628,7 @@ func _can_rest(tick: int) -> bool:
 	if global_position != _current_position:
 		return false
 	var stagger: int = _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
-	if (tick + stagger) % rest_check_ticks == 0:
+	if (tick + stagger) % TickDriver.ticks_at_rate(rest_check_ticks) == 0: # Claude 2026-11-09 (scaling spec step 6)
 		return false
 	return ability_manager == null or ability_manager.can_rest()
 
@@ -715,6 +715,9 @@ func _network_input_missing() -> void:
 	var session: Node = get_node_or_null("/root/NetworkSession")
 	var hold: int = missing_input_hold_ticks if missing_input_hold_ticks >= 0 else (session.missing_input_hold_ticks if session else 3)
 	var fade: int = missing_input_fade_ticks if missing_input_fade_ticks >= 0 else (session.missing_input_fade_ticks if session else 6)
+	# Claude 2026-11-09 (scaling spec step 6): written for 60 ticks a second.
+	hold = TickDriver.ticks_at_rate(hold)
+	fade = TickDriver.ticks_at_rate(fade)
 	if _missing_input_ticks <= hold:
 		return
 	if fade <= 0:

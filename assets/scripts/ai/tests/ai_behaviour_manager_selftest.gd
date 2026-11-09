@@ -60,6 +60,9 @@ class SwitchState extends AIStateBase:
 
 
 func _ready() -> void:
+	# Claude 2026-11-09 (scaling spec step 6): these checks count exact ticks at the reference rate, 60 a second, so they pin it, even
+	# in a run at another rate (-- --tick-rate=30). tick_rate_selftest checks that converted settings last the same time at 30.
+	TickDriver.tick_rate = TickDriver.REFERENCE_RATE
 	print("--- AI behaviour manager self-test ---")
 	await _test_empty_manager()
 	_test_best_score_and_fixed_order()

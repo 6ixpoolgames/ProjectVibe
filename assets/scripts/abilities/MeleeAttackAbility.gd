@@ -62,8 +62,17 @@ func _init() -> void:
 	buffer_window = 0.15 # a press near the end of a dash waits for it
 
 
+# Claude 2026-11-09 (scaling spec step 6): the phases are written for 60 ticks a second, and converted to this match's rate.
 func duration_ticks() -> int:
-	return windup_ticks + hit_ticks + recovery_ticks
+	return _windup() + _hit() + TickDriver.ticks_at_rate(recovery_ticks)
+
+
+func _windup() -> int:
+	return TickDriver.ticks_at_rate(windup_ticks)
+
+
+func _hit() -> int:
+	return TickDriver.ticks_at_rate(hit_ticks)
 
 
 func get_rollback_properties() -> Array[String]:
@@ -81,12 +90,12 @@ func start() -> void:
 func tick(_dt: float) -> void:
 	# GDScript note: the manager counts ticks_left down after each tick, so on the first tick after starting, elapsed is 0.
 	var elapsed := duration_ticks() - ticks_left
-	if elapsed < windup_ticks or elapsed >= windup_ticks + hit_ticks:
+	if elapsed < _windup() or elapsed >= _windup() + _hit():
 		return
 	# Claude 2026-11-09: the replay check moved up, so hit_window_started can use it on every machine. The hit rules are unchanged.
 	var driver: Node = pawn.get_node_or_null("/root/TickDriver")
 	var replaying: bool = driver != null and driver.is_resimulating()
-	if elapsed == windup_ticks and not replaying:
+	if elapsed == _windup() and not replaying:
 		hit_window_started.emit(hit_centre(), hit_radius)
 	if not pawn.is_authority():
 		return # hits are decided on the server
@@ -129,7 +138,7 @@ func _check_hits(tick: int) -> void:
 		hit.direction = away.normalized() if away.length_squared() > 0.0001 else Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
 		hit.damage = damage
 		hit.knockback_speed = knockback_speed
-		hit.knockback_ticks = knockback_ticks
+		hit.knockback_ticks = TickDriver.ticks_at_rate(knockback_ticks) # Claude 2026-11-09 (step 6)
 		target.receive_hit(hit)
 		hit_landed.emit(hit)
 

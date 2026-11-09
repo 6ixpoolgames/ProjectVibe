@@ -10,6 +10,9 @@ var _failures := 0
 
 
 func _ready() -> void:
+	# Claude 2026-11-09 (scaling spec step 6): these checks count exact ticks at the reference rate, 60 a second, so they pin it, even
+	# in a run at another rate (-- --tick-rate=30). tick_rate_selftest checks that converted settings last the same time at 30.
+	TickDriver.tick_rate = TickDriver.REFERENCE_RATE
 	print("--- Pawn self-test ---")
 	await _test_on_flat_ground()
 	await _test_running_and_stopping()

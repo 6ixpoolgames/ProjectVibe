@@ -44,32 +44,36 @@ var _warned_no_curve := false
 
 ## The value this many ticks after the fade started: 1.0 at the start, falling to 0.0. ticks can be fractional, so a fade can run
 ## slower or faster than one step per tick.
+## Claude 2026-11-09 (scaling spec step 6): hold_ticks, fade_ticks and half_life_ticks are written for 60 ticks a second, and used at
+## the match's rate (TickDriver.ticks_at_rate); ticks here are real ticks at that rate.
 func value_at(ticks: float) -> float:
-	if ticks < hold_ticks:
+	var hold := TickDriver.ticks_at_rate(hold_ticks)
+	if ticks < hold:
 		return 1.0
 	if ticks >= ends_after():
 		return 0.0
-	var into_fade := ticks - hold_ticks
+	var into_fade := ticks - hold
+	var fade := TickDriver.ticks_at_rate(fade_ticks)
 	match mode:
 		Mode.HALF_LIFE:
 			# GDScript note: pow(0.5, n) halves n times; n can be fractional, which gives the smooth curve between halvings.
-			return pow(0.5, into_fade / half_life_ticks)
+			return pow(0.5, into_fade / TickDriver.ticks_at_rate(half_life_ticks))
 		Mode.CURVE:
 			if curve:
 				# GDScript note: sample_baked reads the curve at x from a table Godot precomputes, so it's cheap to call often.
-				return clampf(curve.sample_baked(into_fade / fade_ticks), 0.0, 1.0)
+				return clampf(curve.sample_baked(into_fade / fade), 0.0, 1.0)
 			if not _warned_no_curve:
 				_warned_no_curve = true
 				push_warning("FadeProfile: mode is CURVE but no curve is drawn, so it fades in a straight line instead.")
-			return 1.0 - into_fade / fade_ticks
+			return 1.0 - into_fade / fade
 		_:
-			return 1.0 - into_fade / fade_ticks
+			return 1.0 - into_fade / fade
 
 
 ## Ticks from the start until the value is nothing. From then on, value_at() gives exactly 0.0.
 func ends_after() -> int:
 	match mode:
 		Mode.HALF_LIFE:
-			return hold_ticks + half_life_ticks * HALVINGS_UNTIL_NOTHING
+			return TickDriver.ticks_at_rate(hold_ticks) + TickDriver.ticks_at_rate(half_life_ticks) * HALVINGS_UNTIL_NOTHING
 		_:
-			return hold_ticks + fade_ticks
+			return TickDriver.ticks_at_rate(hold_ticks) + TickDriver.ticks_at_rate(fade_ticks)

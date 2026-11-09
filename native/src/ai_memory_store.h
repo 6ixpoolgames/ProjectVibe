@@ -81,6 +81,9 @@ public:
 	// null for physics rays. Physics rays are still used for a check whose mask includes the observer's or the target's own layer,
 	// because pawns aren't in the geometry.
 	void set_sight_geometry(const Ref<SightGeometry> &geometry);
+	// Claude 2026-11-09 (scaling spec step 6): the match's tick rate. Fade profiles' hold, fade and half-life are written for 60 ticks a
+	// second and converted to it, exactly as TickDriver.ticks_at_rate does for FadeProfile in GDScript. Call before configure_fades.
+	void set_tick_rate(int64_t rate);
 
 protected:
 	static void _bind_methods();
@@ -97,7 +100,8 @@ private:
 		Ref<Resource> profile;
 	};
 
-	static void read_fade(Fade &into, const Ref<Resource> &profile, int64_t delay, bool custom);
+	void read_fade(Fade &into, const Ref<Resource> &profile, int64_t delay, bool custom) const;
+	int64_t at_rate(int64_t reference_ticks) const; // Claude 2026-11-09 (step 6): as TickDriver.ticks_at_rate
 	static double value_at(const Fade &fade, double ticks);
 	static int64_t ends_after(const Fade &fade);
 	double awareness_of(size_t i, int64_t tick) const;
@@ -125,6 +129,7 @@ private:
 	// Claude 2026-11-09 (scaling spec step 2): SightSense's settings, in the struct the sensing job shares (ai_sight_rules.h).
 	sight_rules::Settings _sight;
 	Ref<SightGeometry> _geometry; // Claude 2026-11-09 (step 4)
+	int64_t _tick_rate = 60; // Claude 2026-11-09 (scaling spec step 6): the match's rate, for the profiles' tick settings
 	Ref<PhysicsRayQueryParameters3D> _ray;
 };
 

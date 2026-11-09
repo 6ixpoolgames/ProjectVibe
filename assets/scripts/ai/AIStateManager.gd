@@ -152,7 +152,7 @@ func _apply_force(state: AIStateBase, hold_ticks: int, priority: int, reason: St
 		print("AIStateManager: %s: a force to %s (priority %d, \"%s\") replaces the force to %s (priority %d)." % [pawn.name, state_name, priority, reason, _forced.name, _force_priority])
 	_forced = state
 	_force_priority = priority
-	_force_until_tick = -1 if hold_ticks < 0 else _now() + hold_ticks
+	_force_until_tick = -1 if hold_ticks < 0 else _now() + TickDriver.ticks_at_rate(hold_ticks) # Claude 2026-11-09 (step 6): at 60 a second
 	if state != _current:
 		_change_to(state, reason, priority)
 	return true

@@ -43,7 +43,19 @@ AIMemoryStore::AIMemoryStore() {
 
 // --- Fades ---
 
-void AIMemoryStore::read_fade(Fade &into, const Ref<Resource> &profile, int64_t delay, bool custom) {
+// Claude 2026-11-09 (scaling spec step 6): round(ticks × rate ÷ 60), at least 1 above 0, as TickDriver.ticks_at_rate.
+int64_t AIMemoryStore::at_rate(int64_t reference_ticks) const {
+	if (reference_ticks <= 0 || _tick_rate == 60) {
+		return reference_ticks;
+	}
+	return std::max<int64_t>(1, std::llround(double(reference_ticks) * double(_tick_rate) / 60.0));
+}
+
+void AIMemoryStore::set_tick_rate(int64_t rate) {
+	_tick_rate = std::max<int64_t>(rate, 1);
+}
+
+void AIMemoryStore::read_fade(Fade &into, const Ref<Resource> &profile, int64_t delay, bool custom) const {
 	into = Fade();
 	into.delay = delay;
 	into.profile = profile;
@@ -55,9 +67,9 @@ void AIMemoryStore::read_fade(Fade &into, const Ref<Resource> &profile, int64_t 
 		return;
 	}
 	into.mode = int(profile->get("mode"));
-	into.hold = int64_t(profile->get("hold_ticks"));
-	into.fade = int64_t(profile->get("fade_ticks"));
-	into.half_life = int64_t(profile->get("half_life_ticks"));
+	into.hold = at_rate(int64_t(profile->get("hold_ticks"))); // Claude 2026-11-09 (step 6): at the match's rate
+	into.fade = at_rate(int64_t(profile->get("fade_ticks")));
+	into.half_life = at_rate(int64_t(profile->get("half_life_ticks")));
 	into.curve = profile->get("curve");
 }
 
@@ -446,4 +458,5 @@ void AIMemoryStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("sight_check", "observer", "eye_yaw", "candidates", "tick"), &AIMemoryStore::sight_check);
 	ClassDB::bind_method(D_METHOD("sight_check_prepared", "job", "observer", "tick"), &AIMemoryStore::sight_check_prepared); // Claude 2026-11-09
 	ClassDB::bind_method(D_METHOD("set_sight_geometry", "geometry"), &AIMemoryStore::set_sight_geometry); // Claude 2026-11-09, step 4
+	ClassDB::bind_method(D_METHOD("set_tick_rate", "rate"), &AIMemoryStore::set_tick_rate); // Claude 2026-11-09, step 6
 }

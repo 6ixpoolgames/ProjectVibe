@@ -193,7 +193,8 @@ func tick_running(tick: int) -> void:
 		return
 	# Claude 2026-11-09: only every tick_interval_ticks, counted from when it started (ai_stress: Chase ticking every tick was 1.8 ms
 	# of a 200-pawn crowd).
-	if _running.tick_interval_ticks > 1 and posmod(tick - _running.started_tick, _running.tick_interval_ticks) != 0:
+	var interval := TickDriver.ticks_at_rate(_running.tick_interval_ticks) # Claude 2026-11-09 (scaling spec step 6)
+	if interval > 1 and posmod(tick - _running.started_tick, interval) != 0:
 		return
 	var context := pawn.ai_context
 	var status := _running.tick(context)
@@ -248,7 +249,7 @@ func _can_replace_running(event_priority: int, event_is_normal: bool, tick: int)
 	if event_priority < _running.interrupt_threshold:
 		return false
 	# min_run_ticks 0 means no minimum at all, whatever the ticks say.
-	if event_is_normal and _running.min_run_ticks > 0 and tick - _running.started_tick < _running.min_run_ticks:
+	if event_is_normal and _running.min_run_ticks > 0 and tick - _running.started_tick < TickDriver.ticks_at_rate(_running.min_run_ticks): # Claude 2026-11-09 (step 6)
 		return false
 	return true
 

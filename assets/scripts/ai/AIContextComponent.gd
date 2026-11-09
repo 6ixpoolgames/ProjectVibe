@@ -163,8 +163,9 @@ func note_hit(hit: HitInfo) -> void:
 
 
 ## Claude 2026-11-09: true if the pawn was hit within this many ticks.
+## Claude 2026-11-09 (scaling spec step 6): ticks at the reference rate (60 a second), like every AI setting.
 func was_hit_within(ticks: int) -> bool:
-	return last_hit_tick >= 0 and current_tick - last_hit_tick <= ticks
+	return last_hit_tick >= 0 and current_tick - last_hit_tick <= TickDriver.ticks_at_rate(ticks)
 
 
 ## Claude 2026-11-09: true if the last attacker is in memory.
@@ -191,7 +192,7 @@ func has_target() -> bool:
 
 ## True on this pawn's regular decision ticks, every decision_interval_ticks, offset by its own number.
 func is_decision_tick(tick: int) -> bool:
-	return posmod(tick + pawn_number(), decision_interval_ticks) == 0
+	return posmod(tick + pawn_number(), TickDriver.ticks_at_rate(decision_interval_ticks)) == 0 # Claude 2026-11-09 (scaling spec step 6)
 
 
 ## Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state

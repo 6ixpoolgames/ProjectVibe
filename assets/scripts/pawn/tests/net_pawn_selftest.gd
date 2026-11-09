@@ -240,9 +240,11 @@ func _test_swap(ping: int) -> void:
 	_check(first_id != 0 or old_pawn.size() >= 1, "its old pawn goes back to the server")
 
 	# How the new pawn does once it has settled, from 3 seconds after asking, against the server on the same ticks.
-	var from_tick := int(client.get("swap_tick", 0)) + 180
+	# Claude 2026-11-09 (scaling spec step 6): in seconds, so a run at another rate (-- --tick-rate=30) asks the same: 3 s, then over 5 s.
+	var rate := TickDriver.get_tick_rate()
+	var from_tick := int(client.get("swap_tick", 0)) + 3 * rate
 	var average_and_count := _error_from(client, server, target, from_tick)
-	_check(int(average_and_count["ticks"]) > 300, "(compared %d ticks after settling)" % int(average_and_count["ticks"]))
+	_check(int(average_and_count["ticks"]) > 5 * rate, "(compared %d ticks after settling)" % int(average_and_count["ticks"]))
 	_check(float(average_and_count["average"]) < 0.25, "the new pawn predicts well (%.2f cm on average, %.1f cm at worst)" % [100.0 * float(average_and_count["average"]), 100.0 * float(average_and_count["worst"])])
 
 	# Right after the swap: how big the correction is. It's expected to be there, since it's drawn in the past until then.

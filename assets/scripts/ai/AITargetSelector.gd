@@ -201,7 +201,7 @@ func _apply_force(entity: Node3D, hold_ticks: int, priority: int, reason: String
 		return false
 	_forced = entity
 	_force_priority = priority
-	_force_until_tick = -1 if hold_ticks < 0 else _now() + hold_ticks
+	_force_until_tick = -1 if hold_ticks < 0 else _now() + TickDriver.ticks_at_rate(hold_ticks) # Claude 2026-11-09 (step 6): at 60 a second
 	_set_target(entity, reason, _now())
 	if pawn.ai_context:
 		pawn.ai_context.request_decision(priority, false)

@@ -80,14 +80,23 @@ signal after_rollback(from_tick: int, to_tick: int) # Claude 2026-11-04: rollbac
 signal rollback_state_loaded(from_tick: int)
 
 const TICK_RATE_SETTING := "project_base/network/tick_rate"
+## Claude 2026-11-09 (scaling spec step 6): settings counted in ticks are written for 60 ticks a second, whatever rate a game runs at,
+## so designers tune in the same numbers everywhere. ticks_at_rate() turns one into ticks at the rate this match runs at.
+const REFERENCE_RATE := 60
 
-## Ticks per second. 0 (default) = use the project's physics rate.
+## Ticks per second. 0 (default) = use the project's physics rate. Claude 2026-11-09 (scaling spec step 6): chosen before a match
+## starts and not changed during it: clients take the server's in the handshake, before anything spawns. Settings counted in ticks
+## are written for 60 a second and converted with ticks_at_rate().
 @export var tick_rate: int = 0:
 	set(value):
 		tick_rate = value
 		_refresh_rate()
 ## Most ticks one frame may run (stops a slow frame from causing ever more ticks).
 @export var max_ticks_per_frame: int = 6
+## Claude 2026-11-09 (scaling spec step 6): the autoload sets Godot's physics rate to the tick rate whenever the rate is chosen, so
+## there's one tick per physics step and the physics engine doesn't step twice for every tick at 30. Pawns are drawn between ticks
+## anyway (Visual's smoothing). Turn it off to keep physics at the project's rate with ticks at another.
+@export var physics_follows_tick_rate := true
 ## False pauses ticking.
 @export var active: bool = true
 
@@ -122,9 +131,18 @@ var _dirty := false
 var _seq := 0
 
 
+func _ready() -> void:
+	_apply_physics_rate() # Claude 2026-11-09 (step 6): _init runs before the autoload is in the tree
+
+
 func _init() -> void:
 	process_priority = -100 # tick before other nodes' own processing
 	process_physics_priority = -100
+	# Claude 2026-11-09 (scaling spec step 6): a dedicated server can choose its rate at start-up, with "-- --tick-rate=30" after
+	# Godot's own arguments. It wins over the project setting. Clients take the server's rate in the handshake anyway.
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--tick-rate="):
+			tick_rate = maxi(0, int(arg.trim_prefix("--tick-rate=")))
 	_refresh_rate()
 
 
@@ -196,6 +214,22 @@ func step() -> void:
 
 func get_tick_rate() -> int:
 	return _rate
+
+
+## Claude 2026-11-09 (scaling spec step 6): a setting counted in ticks at the reference rate (60 a second), as ticks at this match's
+## rate, so it lasts the same time: round(ticks × rate ÷ 60), and at least 1 where the setting is above 0. 0 and negative settings
+## (which usually mean "off" or "use the default") come back as they are. At 60 it changes nothing. An 8-tick wind-up is 8 ticks at
+## 60 and 4 at 30: 0.13 s either way. A setting that doesn't divide evenly is up to half a tick off.
+func ticks_at_rate(reference_ticks: int) -> int:
+	if reference_ticks <= 0 or _rate == REFERENCE_RATE:
+		return reference_ticks
+	return maxi(1, roundi(reference_ticks * float(_rate) / REFERENCE_RATE))
+
+
+## Claude 2026-11-09 (step 6): an amount added each tick at the reference rate (sight's fill_rate, say), as the amount each tick at
+## this match's rate adds, so the total over a second is the same: amount × 60 ÷ rate.
+func per_tick_at_rate(reference_amount: float) -> float:
+	return reference_amount * REFERENCE_RATE / float(_rate)
 
 
 ## Length of one tick in seconds.
@@ -479,3 +513,10 @@ func _refresh_rate() -> void:
 	if r <= 0:
 		r = Engine.physics_ticks_per_second
 	_rate = maxi(1, r)
+	_apply_physics_rate()
+
+
+# Claude 2026-11-09 (scaling spec step 6): only the autoload, never a test's own driver, and only when it's in the tree.
+func _apply_physics_rate() -> void:
+	if physics_follows_tick_rate and is_inside_tree() and get_parent() == get_tree().root and Engine.physics_ticks_per_second != _rate:
+		Engine.physics_ticks_per_second = _rate

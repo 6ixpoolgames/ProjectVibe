@@ -37,6 +37,11 @@ static func run(owner: Node, run_name: String, machines: Dictionary, port: int) 
 		arguments.append("--out=%s" % out_path)
 		for key: String in settings:
 			arguments.append("--%s=%s" % [key, str(settings[key])])
+		# Claude 2026-11-09 (scaling spec step 6): a test run with "-- --tick-rate=30" runs its machines at that rate too. The server
+		# chooses it; clients get it in the handshake anyway.
+		for user_argument in OS.get_cmdline_user_args():
+			if user_argument.begins_with("--tick-rate="):
+				arguments.append(user_argument)
 		longest = maxf(longest, float(settings.get("seconds", 8)) + float(settings.get("delay", 0)))
 		pids[machine_name] = OS.create_process(OS.get_executable_path(), arguments, false)
 		# The server has to be listening before anyone joins.

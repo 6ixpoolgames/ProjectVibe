@@ -14,6 +14,9 @@
 ##
 ## The behaviour's name is its node name, such as Wander. The fixed order and the random numbers read it, so give it a real name.
 ##
+## Claude 2026-11-09 (scaling spec step 6): every setting here counted in ticks is written for 60 ticks a second, and converted to
+## the match's rate where it's read (TickDriver.ticks_at_rate), so it lasts the same time at any rate.
+##
 ## Settings worth knowing (pawn spec 10.7):
 ##   - persistence, persistence_fade: from when it's chosen, its score gets persistence × the fade's value. + keeps it chosen, -
 ##     makes the AI prefer something else for a while. Empty fade: no persistence.
@@ -122,7 +125,7 @@ func is_allowed_in(state_name: StringName) -> bool:
 
 ## True while its cooldown hasn't finished.
 func is_cooling_down(tick: int) -> bool:
-	return cooldown_ticks > 0 and ended_tick >= 0 and tick - ended_tick < cooldown_ticks
+	return cooldown_ticks > 0 and ended_tick >= 0 and tick - ended_tick < TickDriver.ticks_at_rate(cooldown_ticks) # Claude 2026-11-09 (step 6)
 
 
 ## This behaviour's jitter amount: its own, or the manager's default when it's -1.

@@ -92,13 +92,14 @@ func tick_sensing(tick: int) -> void:
 	if pawn == null or pawn.ai_memory == null or _senses.is_empty():
 		return
 	var offset := pawn.ai_context.pawn_number() if pawn.ai_context else 0
-	if posmod(tick + offset, sense_interval_ticks) == 0:
+	var interval := TickDriver.ticks_at_rate(sense_interval_ticks) # Claude 2026-11-09 (scaling spec step 6): written for 60 a second
+	if posmod(tick + offset, interval) == 0:
 		full_pass(tick)
-	elif posmod(tick + offset, refresh_interval_ticks) == 0:
+	elif posmod(tick + offset, TickDriver.ticks_at_rate(refresh_interval_ticks)) == 0:
 		for sense in _senses:
 			sense.refresh(tick)
 	# Claude 2026-11-09 (scaling spec step 2): if next tick is a full pass, ask the sensing job for it at the end of this tick.
-	if _use_job and posmod(tick + 1 + offset, sense_interval_ticks) == 0:
+	if _use_job and posmod(tick + 1 + offset, interval) == 0:
 		_due_next.append(self)
 		if _job_driver == null and pawn._driver:
 			_job_driver = pawn._driver

@@ -31,7 +31,8 @@
 class_name SightSense
 extends AISenseBase
 
-## Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second.
+## Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Claude 2026-11-09 (scaling spec step 6):
+## per tick at 60 ticks a second, like every setting here counted in ticks; at another rate it's converted to fill at the same speed.
 @export_range(0.0, 1.0, 0.001, "or_greater") var fill_rate := 1.0 / 30.0
 ## Inside this distance, in metres, distance doesn't weaken sight at all.
 @export_range(0.0, 200.0, 0.5, "or_greater") var near_range := 8.0
@@ -175,17 +176,17 @@ func _check_all(targets: Array, tick: int) -> void:
 # Claude 2026-11-09 (step 2): the settings for memory's store and the sensing job, in AIMemoryStore.set_sight_settings' order.
 func _fill_settings() -> void:
 	_settings.resize(11)
-	_settings[0] = fill_rate
+	_settings[0] = TickDriver.per_tick_at_rate(fill_rate) # Claude 2026-11-09 (scaling spec step 6): per tick at 60, so the same per second
 	_settings[1] = near_range
 	_settings[2] = sight_range
 	_settings[3] = cos(deg_to_rad(central_cone_degrees * 0.5))
 	_settings[4] = cos(deg_to_rad(periphery_degrees * 0.5))
 	_settings[5] = periphery_multiplier
-	_settings[6] = max_gain_ticks
+	_settings[6] = TickDriver.ticks_at_rate(max_gain_ticks)
 	_settings[7] = eye_height
 	_settings[8] = target_height
 	_settings[9] = sight_blocking_mask
-	_settings[10] = manager.sense_interval_ticks if manager else 10
+	_settings[10] = TickDriver.ticks_at_rate(manager.sense_interval_ticks if manager else 10)
 
 
 func _eye_yaw() -> float:

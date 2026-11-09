@@ -15,6 +15,9 @@ var _floor: StaticBody3D = null
 
 
 func _ready() -> void:
+	# Claude 2026-11-09 (scaling spec step 6): these checks count exact ticks at the reference rate, 60 a second, so they pin it, even
+	# in a run at another rate (-- --tick-rate=30). tick_rate_selftest checks that converted settings last the same time at 30.
+	TickDriver.tick_rate = TickDriver.REFERENCE_RATE
 	print("--- AI perception self-test ---")
 	# Claude 2026-11-09: "-- --gdscript-store" runs the same checks on the GDScript memory store, where the C++ one is available.
 	AIMemory.use_native = not OS.get_cmdline_user_args().has("--gdscript-store")

@@ -225,8 +225,12 @@ func _announce(added: bool, became_certain: Array) -> void:
 func _configure() -> void:
 	if _store == null or uncertain_fade == null or certain_fade == null:
 		return
-	_store.configure_fades(uncertain_fade, uncertain_fade_delay_ticks, _is_custom(uncertain_fade),
-			certain_fade, certain_fade_delay_ticks, _is_custom(certain_fade), continuous_sighting_ticks)
+	# Claude 2026-11-09 (scaling spec step 6): the delays and continuous_sighting_ticks are written for 60 ticks a second, and go to
+	# the store at this match's rate. The C++ store converts the profiles' own tick settings the same way as FadeProfile does.
+	if _store.has_method(&"set_tick_rate"):
+		_store.set_tick_rate(TickDriver.get_tick_rate())
+	_store.configure_fades(uncertain_fade, TickDriver.ticks_at_rate(uncertain_fade_delay_ticks), _is_custom(uncertain_fade),
+			certain_fade, TickDriver.ticks_at_rate(certain_fade_delay_ticks), _is_custom(certain_fade), TickDriver.ticks_at_rate(continuous_sighting_ticks))
 
 
 # A profile whose script isn't FadeProfile itself may override value_at(), so the C++ store calls it rather than doing the maths.

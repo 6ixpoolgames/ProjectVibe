@@ -41,7 +41,7 @@ func enter(context: AIContextComponent) -> void:
 func tick(context: AIContextComponent) -> Status:
 	_look(context) # follow it if it moves while still in view
 	# Claude 2026-11-09: time since it started, in ticks, so it lasts the same at any tick_interval_ticks.
-	return Status.SUCCEEDED if context.current_tick - started_tick >= look_ticks else Status.RUNNING
+	return Status.SUCCEEDED if context.current_tick - started_tick >= TickDriver.ticks_at_rate(look_ticks) else Status.RUNNING
 
 
 func exit(context: AIContextComponent, _reason: String) -> void:

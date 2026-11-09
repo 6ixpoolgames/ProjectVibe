@@ -60,7 +60,10 @@ func tick(context: AIContextComponent) -> Status:
 	if _walking:
 		# The walk ended: it arrived, or nav gave up on it. Stand for a while either way.
 		_walking = false
-		_pause_until = context.current_tick + min_pause_ticks + int(context.random_unit(PAUSE_SALT) * (maxi(max_pause_ticks - min_pause_ticks, 0) + 1))
+		# Claude 2026-11-09 (scaling spec step 6): both written for 60 ticks a second.
+		var shortest := TickDriver.ticks_at_rate(min_pause_ticks)
+		var longest := TickDriver.ticks_at_rate(max_pause_ticks)
+		_pause_until = context.current_tick + shortest + int(context.random_unit(PAUSE_SALT) * (maxi(longest - shortest, 0) + 1))
 		return Status.RUNNING
 	# GDScript note: sqrt makes points spread evenly over the circle; without it they'd bunch up near the middle.
 	var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
