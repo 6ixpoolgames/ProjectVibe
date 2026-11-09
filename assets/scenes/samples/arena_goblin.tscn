@@ -35,6 +35,7 @@ script = ExtResource("6_search")
 
 [node name="Chase" type="Node" parent="AIBehaviourManager"]
 script = ExtResource("7_chase")
+dash_to_close = true
 
 [node name="Attack" type="Node" parent="AIBehaviourManager"]
 script = ExtResource("8_attack")

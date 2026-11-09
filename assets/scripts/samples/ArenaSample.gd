@@ -4,7 +4,10 @@
 ##
 ## Keys: WASD to move, Shift to sprint, Space to jump, Left Alt to dash, the left mouse button to swing, the mouse to look, the wheel
 ## to zoom. Esc frees the mouse, and a click takes it back. R sends a new wave of goblins. Tab possesses a goblin (then it fights for
-## you, on its team; Tab again goes back). F3 shows or hides the readout over each goblin.
+## you, on its team; Tab again goes back). F3 shows or hides the readout over each goblin, and the debug shapes.
+## Claude 2026-11-09: debug shapes (AbilityDebugDraw): each swing leaves its hit sphere for 2 s, and each dash a trail of
+## capsules for 1 s, fading. The readout also shows each goblin's last ability. Goblins sprint and dash while chasing. Cooldowns
+## are longer here than in the base (DEBUG_COOLDOWNS), so the switching is easy to see.
 ##
 ## What's in it:
 ##   - The same world as the pawn sample: terrain, streaming and nav.
@@ -15,7 +18,8 @@
 ##   - Death: a dead goblin is removed after 3 s. A dead player is revived where they fell after 3 s. Both are this sample's rules,
 ##     not the base's (pawn spec 8.7).
 ##
-## A scripted start also works, after "--" on the command line: --offline, --host, --join=127.0.0.1, --ping=100.
+## A scripted start also works, after "--" on the command line: --offline, --host, --join=127.0.0.1, --ping=100, and (Claude
+## 2026-11-09) --port=24900 for another port than PORT.
 extends Node3D
 
 const PORT := 24896
@@ -24,6 +28,10 @@ const GOBLIN_SCENE := preload("res://assets/scenes/samples/arena_goblin.tscn")
 const GOBLINS_PER_WAVE := 6
 const BODY_REMOVAL_SECONDS := 3.0
 const PLAYER_REVIVE_SECONDS := 3.0
+## Claude 2026-11-09: longer cooldowns in this level only, in seconds by ability name, so switching between abilities is easy to see
+## (the owner's request). The base's are MeleeAttack 0, Jump 0, Dash 1 and Sprint 4. Knockback and Death are left alone: a cooldown
+## on Death would make a revived pawn unkillable for a while, and one on Knockback would let a second hit go unstaggered.
+const DEBUG_COOLDOWNS := {"MeleeAttack": 1.5, "Jump": 1.0, "Dash": 3.0, "Sprint": 8.0}
 
 @onready var _terrain: TerrainGenerator = $World/Terrain
 @onready var _status: Label = $Display/Status
@@ -35,9 +43,15 @@ var _kills := 0
 var _deaths := 0
 var _readouts := {} # Pawn -> Label3D
 var _player_pawn: Pawn = null # the pawn this machine's player started with, to go back to after Tab
+var _last_ability := {} # Claude 2026-11-09: Pawn -> the AbilityBase it last started, for the readout
+var _debug_draw: AbilityDebugDraw = null # Claude 2026-11-09: swing spheres and dash trails
+var _port := PORT # Claude 2026-11-09: --port= changes it, so a scripted check doesn't land in a game already hosting on PORT
 
 
 func _ready() -> void:
+	_debug_draw = AbilityDebugDraw.new() # Claude 2026-11-09
+	_debug_draw.name = "AbilityDebugDraw"
+	add_child(_debug_draw)
 	NetworkSession.world_root = $Entities
 	NetworkSession.register_type("pawn", PAWN_SCENE)
 	NetworkSession.register_type("goblin", GOBLIN_SCENE)
@@ -66,6 +80,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_swap_pawn()
 		KEY_F3:
 			_show_readouts = not _show_readouts
+			_debug_draw.visible = _show_readouts # Claude 2026-11-09
 
 
 # --- Starting ---
@@ -79,7 +94,7 @@ func _start_offline() -> void:
 
 
 func _host() -> void:
-	var error := NetworkSession.host(PORT)
+	var error := NetworkSession.host(_port) # Claude 2026-11-09: was PORT; --port= can change it
 	if error != OK:
 		_status.text = "Couldn't host: error %d" % error
 		return
@@ -90,7 +105,7 @@ func _host() -> void:
 
 func _join(address: String) -> void:
 	_menu.hide()
-	NetworkSession.join(address if address != "" else "127.0.0.1", PORT)
+	NetworkSession.join(address if address != "" else "127.0.0.1", _port) # Claude 2026-11-09: was PORT
 
 
 ## Server: a player has arrived, so they get a pawn near the middle.
@@ -123,7 +138,13 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 	var pawn := entity.get_parent() as Pawn
 	if pawn == null:
 		return
+	_debug_draw.watch(pawn) # Claude 2026-11-09
+	_lengthen_cooldowns(pawn) # Claude 2026-11-09
 	if pawn.team == 1:
+		# Claude 2026-11-09: remember what each goblin last started, for its readout. Walk never "starts": it's what runs when
+		# nothing else does.
+		if pawn.ability_manager:
+			pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void: _last_ability[pawn] = ability)
 		var label := Label3D.new()
 		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		label.no_depth_test = true
@@ -135,6 +156,27 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 		_readouts[pawn] = label
 	if not NetworkSession.is_client():
 		pawn.died.connect(_on_pawn_died)
+
+
+## Claude 2026-11-09: every machine, for every pawn: sets DEBUG_COOLDOWNS. An ability that had no cooldown didn't list its cooldown
+## timer for rollback, so it's added here. That's allowed until the pawn's first tick is recorded, which hasn't happened yet when a
+## pawn is spawned, and every machine adds the same entries in the same order, so a client's prediction keeps matching the server.
+func _lengthen_cooldowns(pawn: Pawn) -> void:
+	if pawn.ability_manager == null:
+		return
+	var tick_state: TickStateComponent = null
+	for child in pawn.get_children():
+		if child is TickStateComponent:
+			tick_state = child
+	var new_entries: Array[String] = []
+	for ability in pawn.ability_manager.get_abilities():
+		if not DEBUG_COOLDOWNS.has(String(ability.name)):
+			continue
+		if ability.cooldown <= 0.0:
+			new_entries.append("%s:cooldown_ticks_left" % pawn.get_path_to(ability))
+		ability.cooldown = DEBUG_COOLDOWNS[String(ability.name)]
+	if tick_state and not new_entries.is_empty():
+		tick_state.add_state_properties(new_entries)
 
 
 # --- Deaths (this sample's rules) ---
@@ -179,6 +221,7 @@ func _update_readouts() -> void:
 		var label: Label3D = _readouts[pawn]
 		if not is_instance_valid(pawn) or not is_instance_valid(label):
 			_readouts.erase(pawn)
+			_last_ability.erase(pawn) # Claude 2026-11-09
 			continue
 		label.visible = _show_readouts
 		if not _show_readouts:
@@ -194,6 +237,12 @@ func _update_readouts() -> void:
 				if index >= 0:
 					var awareness := pawn.ai_memory.awareness_at(index, pawn.ai_context.current_tick)
 					lines.append("aware %d%%%s" % [int(awareness * 100.0), " (certain)" if pawn.ai_memory.is_certain_at(index) else ""])
+			# Claude 2026-11-09: the last ability it started, marked while it's still running (Sprint lasts up to 3 s).
+			var last: AbilityBase = _last_ability.get(pawn)
+			if is_instance_valid(last):
+				lines.append("last: %s%s" % [last.name, " (running)" if last.is_running_timed() else ""])
+			else:
+				lines.append("last: —")
 		lines.append("HP %d" % int(pawn.get_health()))
 		label.text = "\n".join(lines)
 		label.modulate = Color(1.0, 0.45, 0.4) if pawn.ai_context and pawn.ai_context.current_state_name() == &"Combat" else Color(1.0, 0.95, 0.8)
@@ -215,12 +264,14 @@ func _status_text() -> String:
 	if pawn:
 		lines.append("HP %d%s    speed %.1f m/s" % [int(pawn.get_health()), "  (dead: reviving)" if pawn.is_dead() else "", Vector2(pawn.velocity.x, pawn.velocity.z).length()])
 	lines.append("goblins %d    kills %d    deaths %d" % [alive, _kills, _deaths])
-	lines.append("WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: new wave    Tab: possess a goblin    F3: readouts    Esc: free the mouse")
+	lines.append("WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: new wave    Tab: possess a goblin    F3: readouts and debug shapes    Esc: free the mouse")
 	return "\n".join(lines)
 
 
 func _read_command_line() -> void:
 	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--port="): # Claude 2026-11-09: read before --host and --join, in this first loop
+			_port = int(argument.trim_prefix("--port="))
 		if argument.begins_with("--ping="):
 			var bench := NetTestBench.new()
 			add_child(bench)

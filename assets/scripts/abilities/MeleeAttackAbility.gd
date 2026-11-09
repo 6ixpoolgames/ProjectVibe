@@ -20,6 +20,10 @@ extends AbilityBase
 
 ## Sent on the server for each pawn this swing hits, after the target's receive_hit(). For effects, sounds and UI.
 signal hit_landed(hit: HitInfo)
+## Claude 2026-11-09: sent once per swing, on its first hit tick, with where the hit sphere is and its radius. Sent on every machine
+## that runs the swing (the server, offline, and a client predicting its own pawn), never during a rollback replay. For effects,
+## sounds and debug drawing (AbilityDebugDraw). It says where the swing can hit, not whether it hit anything: see hit_landed.
+signal hit_window_started(centre: Vector3, radius: float)
 
 ## Ticks from the start of the swing to when it can hit.
 @export_range(0, 120, 1, "or_greater") var windup_ticks := 8
@@ -77,10 +81,14 @@ func tick(_dt: float) -> void:
 	var elapsed := duration_ticks() - ticks_left
 	if elapsed < windup_ticks or elapsed >= windup_ticks + hit_ticks:
 		return
+	# Claude 2026-11-09: the replay check moved up, so hit_window_started can use it on every machine. The hit rules are unchanged.
+	var driver: Node = pawn.get_node_or_null("/root/TickDriver")
+	var replaying: bool = driver != null and driver.is_resimulating()
+	if elapsed == windup_ticks and not replaying:
+		hit_window_started.emit(hit_centre(), hit_radius)
 	if not pawn.is_authority():
 		return # hits are decided on the server
-	var driver: Node = pawn.get_node_or_null("/root/TickDriver")
-	if driver and driver.is_resimulating():
+	if replaying:
 		return # a replay never hits again
 	_check_hits(driver.tick if driver else 0)
 

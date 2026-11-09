@@ -33,6 +33,7 @@ func _ready() -> void:
 	await _test_dash()
 	await _test_interrupts()
 	await _test_melee_hits()
+	await _test_melee_multi_hit() # Claude 2026-11-09
 	await _test_server_only_and_replays()
 	_test_view_ticks_behind()
 	await _test_ai_attacks()
@@ -150,6 +151,32 @@ func _test_interrupts() -> void:
 	await _ticks(3)
 	_check(not reload.is_running_timed(), "but sprinting cancels it, like a CoD sprint cancel")
 	pawn.free()
+
+
+## Claude 2026-11-09: one swing hits every enemy inside its sphere, and each takes its own damage and its own knockback (the owner
+## asked whether melee is multi-hit). Placed off to the side, at x = 30, away from the other tests' pawns.
+func _test_melee_multi_hit() -> void:
+	var attacker := _make_pawn(Vector3(30, 0.1, 40))
+	attacker.team = 1
+	# Both 1.4 m in front and 0.5 m to either side: inside the sphere (centre 1 m ahead, radius 0.8) and not touching each other.
+	var left := _make_pawn(Vector3(29.5, 0.1, 38.6))
+	var right := _make_pawn(Vector3(30.5, 0.1, 38.6))
+	await _ticks(15)
+	var melee: MeleeAttackAbility = attacker.ability_manager.get_node("MeleeAttack")
+	var landed := []
+	melee.hit_landed.connect(func(hit): landed.append(hit))
+	var ai := _ai(attacker)
+	ai.look_at_point(Vector3(30, 1, 30))
+	await _ticks(2)
+	ai.press(&"primary")
+	await _ticks(16) # the 8-tick wind-up, the 4 hit ticks and the knockback's first ticks
+	var hit_both := landed.any(func(hit): return hit.target == left) and landed.any(func(hit): return hit.target == right)
+	_check(landed.size() == 2 and hit_both, "multi-hit: one swing hits both enemies inside its sphere, each once (%d hits)" % landed.size())
+	_check(left.get_health() == 100.0 - melee.damage and right.get_health() == 100.0 - melee.damage, "and each takes the damage (%d and %d HP)" % [int(left.get_health()), int(right.get_health())])
+	_check(left.global_position.x < 29.45 and right.global_position.x > 30.55, "and each is knocked back away from the attacker, to its own side (%.2f and %.2f m sideways)" % [left.global_position.x - 29.5, right.global_position.x - 30.5])
+	attacker.free()
+	left.free()
+	right.free()
 
 
 func _test_melee_hits() -> void:

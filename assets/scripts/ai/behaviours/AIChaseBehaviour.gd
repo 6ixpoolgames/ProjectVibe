@@ -4,6 +4,7 @@
 ## and looks at it the whole time, so the AI's eyes stay on the target. It finds a new path every repath_ticks, or sooner when the
 ## target has moved more than repath_distance from where the path leads, rather than every tick. Within stop_distance it stops and
 ## faces the target; the Attack behaviour that comes with MeleeAttack (step 9) takes over from there.
+## Claude 2026-11-09: with dash_to_close on, it also dashes to close the last few metres.
 ##
 ## It never finishes on its own. When the target is out of sight long enough, Combat's prerequisites fail and the state change
 ## replaces it.
@@ -18,6 +19,14 @@ extends AIBehaviourBase
 @export_range(0.0, 20.0, 0.1, "or_greater") var stop_distance := 1.2 # Claude 2026-11-09: was 1.5; just inside MeleeAttack attack_range (1.8) minus Attack approach_margin (0.3)
 ## On: it holds sprint while chasing. Sprint's own cooldown decides when it actually sprints.
 @export var sprint := true
+## Claude 2026-11-09: on: it presses dash to close in, when the target is between dash_to_distance and dash_from_distance away and
+## Dash can start (grounded, off cooldown, nothing it can't cancel running). Off by default; the arena's goblins turn it on, so the
+## owner can see the AI switch abilities. A dash goes the way the pawn is moving, which is along its path.
+@export var dash_to_close := false
+## Claude 2026-11-09: the farthest the target can be for a dash, in metres.
+@export_range(0.0, 50.0, 0.1, "or_greater") var dash_from_distance := 6.0
+## Claude 2026-11-09: the nearest the target can be for a dash, in metres. With Dash's default 2.7 m, 4 lands it about at stop_distance.
+@export_range(0.0, 50.0, 0.1, "or_greater") var dash_to_distance := 4.0
 
 var _goal := Vector3.ZERO
 var _last_path_tick := -1000000
@@ -65,6 +74,11 @@ func tick(context: AIContextComponent) -> Status:
 		_goal = last_known
 		_last_path_tick = now
 		_hands.move_to(last_known)
+	# Claude 2026-11-09: a dash to close in. Pressed only when it can start, so a press never waits in Dash's buffer.
+	if dash_to_close and pawn.ability_manager:
+		var distance_squared := offset.length_squared()
+		if distance_squared <= dash_from_distance * dash_from_distance and distance_squared >= dash_to_distance * dash_to_distance and pawn.ability_manager.can_start(&"dash"):
+			_hands.press(&"dash")
 	return Status.RUNNING
 
 
