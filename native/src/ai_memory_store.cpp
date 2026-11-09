@@ -20,9 +20,12 @@
 using namespace godot;
 
 namespace {
-// Claude 2026-11-09, step 10: dead pawns aren't seen, and are forgotten. Pawn.is_dead() in GDScript.
+// Claude 2026-11-09, step 10: dead pawns aren't seen, and are forgotten. Claude 2026-11-09 (scaling spec step 4): reads Pawn.dead, which
+// the Death ability keeps equal to Pawn.is_dead(), instead of calling is_dead() through GDScript, which was about a third of sensing's
+// cost. Anything without a dead property (not a pawn) is alive.
 bool is_dead(Object *entity) {
-	return entity != nullptr && entity->has_method("is_dead") && bool(entity->call("is_dead"));
+	static const StringName dead_name("dead");
+	return entity != nullptr && bool(entity->get(dead_name));
 }
 
 // FadeProfile.HALVINGS_UNTIL_NOTHING: 0.5^7 is about 0.8%, the first step below 1%.
@@ -297,6 +300,10 @@ int64_t AIMemoryStore::best_target(const Vector3 &from, double awareness_weight,
 
 // --- Sight ---
 
+void AIMemoryStore::set_sight_geometry(const Ref<SightGeometry> &geometry) {
+	_geometry = geometry;
+}
+
 void AIMemoryStore::set_sight_settings(const PackedFloat64Array &s) {
 	_sight.read(s); // Claude 2026-11-09 (step 2): the shared struct; fewer than 11 numbers change nothing, as before
 }
@@ -316,6 +323,9 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 	const Vector3 eye = observer->get_global_position() + Vector3(0.0, _sight.eye_height, 0.0);
 	const Vector2 facing = sight_rules::facing_from_yaw(eye_yaw);
 	PhysicsDirectSpaceState3D *space = nullptr;
+	if (_geometry.is_valid()) {
+		_geometry->sync(tick); // Claude 2026-11-09 (step 4): what changed since the last tick; nothing to do most ticks
+	}
 
 	const int64_t count = candidates.size();
 	for (int64_t c = 0; c < count; ++c) {
@@ -327,7 +337,7 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 		const Vector3 aim = target_position + Vector3(0.0, _sight.target_height, 0.0);
 		// Visibility: distance × angle × detectability, as SightSense.visibility_of.
 		const double visibility = sight_rules::visibility(_sight, eye, facing, aim, double(target->get("detectability")));
-		check_one(observer, target, eye, aim, target_position, visibility, tick, space, added, became_certain);
+		check_one(observer, target, eye, aim, target_position, visibility, tick, -1, space, added, became_certain);
 	}
 	Array result;
 	result.push_back(added);
@@ -357,7 +367,7 @@ Array AIMemoryStore::sight_check_prepared(Object *job_object, Object *observer_o
 		if (target == nullptr || target == observer || !target->is_inside_tree() || is_dead(target)) {
 			continue;
 		}
-		check_one(observer, target, eye, candidate.aim, candidate.position, candidate.visibility, tick, space, added, became_certain);
+		check_one(observer, target, eye, candidate.aim, candidate.position, candidate.visibility, tick, candidate.ray, space, added, became_certain);
 	}
 	result.push_back(added);
 	result.push_back(became_certain);
@@ -365,31 +375,37 @@ Array AIMemoryStore::sight_check_prepared(Object *job_object, Object *observer_o
 }
 
 void AIMemoryStore::check_one(Node3D *observer, Node3D *target, const Vector3 &eye, const Vector3 &aim, const Vector3 &target_position,
-		double visibility, int64_t tick, PhysicsDirectSpaceState3D *&space, bool &added, Array &became_certain) {
+		double visibility, int64_t tick, int ray, PhysicsDirectSpaceState3D *&space, bool &added, Array &became_certain) {
 	const int64_t ticks = std::clamp(ticks_since_checked(target, tick, _sight.sense_interval), int64_t(0), _sight.max_gain_ticks);
 	bool seen = false;
 	// The ray is the expensive part, so it's only cast when the target could be seen at all.
 	if (visibility > 0.0 && ticks > 0) {
-		if (space == nullptr) {
-			space = observer->get_world_3d()->get_direct_space_state();
-		}
-		_ray->set_from(eye);
-		_ray->set_to(aim);
-		_ray->set_collision_mask(_sight.blocking_mask);
 		CollisionObject3D *observer_body = Object::cast_to<CollisionObject3D>(observer);
 		CollisionObject3D *target_body = Object::cast_to<CollisionObject3D>(target);
 		const uint32_t layers = (observer_body ? observer_body->get_collision_layer() : 0) | (target_body ? target_body->get_collision_layer() : 0);
-		TypedArray<RID> exclude;
-		if (_sight.blocking_mask & layers) {
-			if (observer_body) {
-				exclude.push_back(observer_body->get_rid());
+		if (_geometry.is_valid() && (_sight.blocking_mask & layers) == 0) {
+			// Claude 2026-11-09 (scaling spec step 4): line of sight in C++. The sensing job may already have the answer (ray 0 or 1).
+			seen = ray >= 0 ? ray == 0 : !_geometry->blocked(eye, aim, _sight.blocking_mask);
+		} else {
+			// A physics ray: without the geometry, or when the mask includes the pawns' own layers (pawns aren't in the geometry).
+			if (space == nullptr) {
+				space = observer->get_world_3d()->get_direct_space_state();
 			}
-			if (target_body) {
-				exclude.push_back(target_body->get_rid());
+			_ray->set_from(eye);
+			_ray->set_to(aim);
+			_ray->set_collision_mask(_sight.blocking_mask);
+			TypedArray<RID> exclude;
+			if (_sight.blocking_mask & layers) {
+				if (observer_body) {
+					exclude.push_back(observer_body->get_rid());
+				}
+				if (target_body) {
+					exclude.push_back(target_body->get_rid());
+				}
 			}
+			_ray->set_exclude(exclude);
+			seen = space != nullptr && space->intersect_ray(_ray).is_empty();
 		}
-		_ray->set_exclude(exclude);
-		seen = space != nullptr && space->intersect_ray(_ray).is_empty();
 	}
 	if (seen) {
 		const int64_t bits = record_sighting(target, _sight.fill_rate * double(ticks) * visibility, tick, target_position);
@@ -429,4 +445,5 @@ void AIMemoryStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sight_settings", "settings"), &AIMemoryStore::set_sight_settings);
 	ClassDB::bind_method(D_METHOD("sight_check", "observer", "eye_yaw", "candidates", "tick"), &AIMemoryStore::sight_check);
 	ClassDB::bind_method(D_METHOD("sight_check_prepared", "job", "observer", "tick"), &AIMemoryStore::sight_check_prepared); // Claude 2026-11-09
+	ClassDB::bind_method(D_METHOD("set_sight_geometry", "geometry"), &AIMemoryStore::set_sight_geometry); // Claude 2026-11-09, step 4
 }

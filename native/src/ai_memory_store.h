@@ -13,7 +13,8 @@
 // here. A profile whose script overrides value_at() (a "custom" profile) is called instead, so a designer's own fade still works.
 #pragma once
 
-#include "ai_sight_rules.h" // Claude 2026-11-09 (scaling spec step 2): the visibility rule, shared with AISensingJob
+#include "ai_sight_rules.h"
+#include "sight_geometry.h" // Claude 2026-11-09 (scaling spec step 4): line of sight in C++ // Claude 2026-11-09 (scaling spec step 2): the visibility rule, shared with AISensingJob
 
 #include <godot_cpp/classes/curve.hpp>
 #include <godot_cpp/classes/physics_ray_query_parameters3d.hpp>
@@ -76,6 +77,10 @@ public:
 	// AISensingJob for this observer and tick (job is the AISensingJob). Casts the rays and records, exactly as sight_check does with
 	// the same candidates. Returns the same as sight_check; nothing happens if the job has no result for this observer and tick.
 	Array sight_check_prepared(Object *job, Object *observer, int64_t tick);
+	// Claude 2026-11-09 (scaling spec step 4): where line of sight is tested instead of physics rays: the shared SightGeometry, or
+	// null for physics rays. Physics rays are still used for a check whose mask includes the observer's or the target's own layer,
+	// because pawns aren't in the geometry.
+	void set_sight_geometry(const Ref<SightGeometry> &geometry);
 
 protected:
 	static void _bind_methods();
@@ -99,8 +104,9 @@ private:
 	bool in_view(size_t i, int64_t tick) const; // Claude 2026-11-09: held, not fading: the last check saw it, recently
 	// Claude 2026-11-09 (step 2): one candidate's check once its visibility is known: the ray if it could be seen, then the record.
 	// Both sight checks use it, so they record the same things in the same order.
+	// Claude 2026-11-09 (step 4): ray is what's already known about line of sight: -1 nothing (test it now), 0 clear, 1 blocked.
 	void check_one(Node3D *observer, Node3D *target, const Vector3 &eye, const Vector3 &aim, const Vector3 &target_position,
-			double visibility, int64_t tick, PhysicsDirectSpaceState3D *&space, bool &added, Array &became_certain);
+			double visibility, int64_t tick, int ray, PhysicsDirectSpaceState3D *&space, bool &added, Array &became_certain);
 	void remove(size_t i);
 
 	std::vector<uint64_t> _ids;
@@ -118,6 +124,7 @@ private:
 
 	// Claude 2026-11-09 (scaling spec step 2): SightSense's settings, in the struct the sensing job shares (ai_sight_rules.h).
 	sight_rules::Settings _sight;
+	Ref<SightGeometry> _geometry; // Claude 2026-11-09 (step 4)
 	Ref<PhysicsRayQueryParameters3D> _ray;
 };
 

@@ -8,6 +8,7 @@
 #include "pawn_table.h" // Claude 2026-11-09: the shared table of plain pawn data, scaling spec step 1
 #include "job_scheduler.h" // Claude 2026-11-09: worker threads for plain-data jobs, scaling spec step 2
 #include "ai_sensing_job.h" // Claude 2026-11-09: the first job kind, sensing, step 2
+#include "sight_geometry.h" // Claude 2026-11-09: line of sight in C++, step 4
 
 #include <gdextension_interface.h>
 #include <godot_cpp/classes/engine.hpp>
@@ -29,6 +30,7 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	GDREGISTER_CLASS(AIMemoryStore); // Claude 2026-11-09
 	GDREGISTER_CLASS(PawnTable); // Claude 2026-11-09: before AIPawnGrid, which uses it
 	GDREGISTER_CLASS(AIPawnGrid); // Claude 2026-11-09
+	GDREGISTER_CLASS(SightGeometry); // Claude 2026-11-09, step 4: before the job and the store, which use it
 	GDREGISTER_CLASS(JobScheduler); // Claude 2026-11-09, step 2
 	GDREGISTER_CLASS(AISensingJob); // Claude 2026-11-09, step 2: after the grid and the scheduler it uses
 	GDREGISTER_CLASS(TickStateRecorder); // Claude 2026-11-09

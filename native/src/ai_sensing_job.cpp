@@ -1,6 +1,7 @@
 // Written by Claude (claude-opus-5-5), 2026-11-09: see ai_sensing_job.h.
 #include "ai_sensing_job.h"
 
+#include <godot_cpp/classes/collision_object3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -40,6 +41,17 @@ void AISensingJob::setup(const Ref<JobScheduler> &scheduler, const Ref<AIPawnGri
 	table->set_change_guard([held]() { held->finish_all(); });
 }
 
+void AISensingJob::set_geometry(const Ref<SightGeometry> &geometry) {
+	if (_handle != 0 && _scheduler.is_valid()) {
+		_scheduler->finish(_handle);
+	}
+	_geometry = geometry;
+	if (_geometry.is_valid() && _scheduler.is_valid()) {
+		Ref<JobScheduler> held = _scheduler;
+		_geometry->set_change_guard([held]() { held->finish_all(); });
+	}
+}
+
 bool AISensingJob::add_request(Object *observer_object, double eye_yaw, double reach, int64_t max_candidates, const PackedFloat64Array &sight_settings) {
 	Node3D *observer = Object::cast_to<Node3D>(observer_object);
 	if (_scheduler.is_null() || observer == nullptr || !observer->is_inside_tree()) {
@@ -56,6 +68,10 @@ bool AISensingJob::add_request(Object *observer_object, double eye_yaw, double r
 	r.eye_yaw = eye_yaw;
 	r.reach = reach;
 	r.max_candidates = std::max<int64_t>(max_candidates, 0);
+	// Claude 2026-11-09 (step 4): as AIMemoryStore.check_one decides it, for the observer's side; the target's side is checked when
+	// the result is used.
+	CollisionObject3D *body = Object::cast_to<CollisionObject3D>(observer);
+	r.use_geometry = _geometry.is_valid() && (r.sight.blocking_mask & (body ? body->get_collision_layer() : 0)) == 0;
 	_pending.push_back(r);
 	return true;
 }
@@ -82,6 +98,9 @@ void AISensingJob::start(int64_t tick) {
 	table->mark_stale();
 	_grid->prepare(tick);
 	_table = table.ptr(); // for the workers, which mustn't touch Godot's reference counts
+	if (_geometry.is_valid()) {
+		_geometry->sync(tick); // Claude 2026-11-09 (step 4): on the main thread, before the workers read it
+	}
 	size_t places = 0;
 	for (size_t i = 0; i < _requests.size(); ++i) {
 		Request &r = _requests[i];
@@ -116,6 +135,8 @@ void AISensingJob::run_requests(int32_t begin, int32_t end) {
 			out.aim = out.position + Vector3(0.0, r.sight.target_height, 0.0);
 			const double detectability = _detectability >= 0 ? table->numbers(_detectability)[slot] : 1.0;
 			out.visibility = sight_rules::visibility(r.sight, r.eye, facing, out.aim, detectability);
+			// Claude 2026-11-09 (step 4): the ray too, when it could matter.
+			out.ray = (r.use_geometry && out.visibility > 0.0) ? (_geometry->blocked(r.eye, out.aim, r.sight.blocking_mask) ? 1 : 0) : -1;
 		}
 		r.found = int64_t(keep);
 	}
@@ -183,6 +204,7 @@ void AISensingJob::reset_stats() {
 
 void AISensingJob::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "scheduler", "grid"), &AISensingJob::setup);
+	ClassDB::bind_method(D_METHOD("set_geometry", "geometry"), &AISensingJob::set_geometry); // Claude 2026-11-09, step 4
 	ClassDB::bind_method(D_METHOD("add_request", "observer", "eye_yaw", "reach", "max_candidates", "sight_settings"), &AISensingJob::add_request);
 	ClassDB::bind_method(D_METHOD("start", "tick"), &AISensingJob::start);
 	ClassDB::bind_method(D_METHOD("has_result", "observer", "tick"), &AISensingJob::has_result);

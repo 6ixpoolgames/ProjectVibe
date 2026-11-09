@@ -15,6 +15,8 @@
 ##   --gdscript-store  the GDScript memory store and physics query, even where the C++ library is available (Claude 2026-11-09)
 ##   --no-jobs         no worker jobs (TickJobs.enabled off), so sensing searches on the main thread (Claude 2026-11-09, step 2)
 ##   --workers=3       job worker threads (TickJobs.set_worker_count) (Claude 2026-11-09, step 2)
+##   --physics-rays    line of sight with physics rays on the main thread instead of in C++ (SightGeometryFeeder.enabled off)
+##                     (Claude 2026-11-09, step 4)
 extends Node
 
 var _no_sensing := false
@@ -46,6 +48,10 @@ class TimedSensing extends AISensingManager:
 		var started := Time.get_ticks_usec()
 		super(tick)
 		_note("  of which: nearby-pawns query", started)
+	func full_pass(tick: int) -> void: # Claude 2026-11-09 (scaling spec step 4)
+		var started := Time.get_ticks_usec()
+		super(tick)
+		_note("  of which: full passes (all senses, then forgetting)", started)
 
 class TimedSight extends SightSense:
 	var totals: Dictionary
@@ -58,6 +64,10 @@ class TimedSight extends SightSense:
 		var started := Time.get_ticks_usec()
 		super(targets, tick)
 		_note("  of which: sight checks and rays (memory store)", started)
+	func full_pass_prepared(job: Object, tick: int) -> void: # Claude 2026-11-09 (scaling spec step 4)
+		var started := Time.get_ticks_usec()
+		super(job, tick)
+		_note("    of which: with the job's result (recording on the main thread)", started)
 
 class TimedHands extends AIController:
 	var totals: Dictionary
@@ -142,6 +152,7 @@ func _ready() -> void:
 	_breakdown = args.has("--breakdown")
 	AIMemory.use_native = not args.has("--gdscript-store")
 	TickJobs.enabled = not args.has("--no-jobs") # Claude 2026-11-09 (step 2)
+	SightGeometryFeeder.enabled = not args.has("--physics-rays") # Claude 2026-11-09 (step 4)
 	for arg in args:
 		if arg.begins_with("--workers="):
 			TickJobs.set_worker_count(int(arg.trim_prefix("--workers=")))

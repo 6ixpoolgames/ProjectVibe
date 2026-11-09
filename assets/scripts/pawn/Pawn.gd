@@ -165,6 +165,10 @@ var ai_target_selector: AITargetSelector = null
 
 var _driver: Node = null
 var _death: DeathAbility = null # Claude 2026-11-09: found when ready
+## Claude 2026-11-09 (scaling spec step 4): true while the Death ability runs, the same as is_dead(). Kept current by DeathAbility
+## (through its timer, so a rollback updates it too), and read directly by C++, which is much cheaper than calling is_dead().
+## Read it; don't set it.
+var dead := false
 var _entity: NetworkEntity = null
 var _has_player := false
 var _source: StreamingSource = null
@@ -373,9 +377,9 @@ func is_authority() -> bool:
 
 
 ## Claude 2026-11-09, step 10: true while this pawn's Death ability runs: from Health reaching 0 until revive(). A pawn with no Death
-## ability never dies.
+## ability never dies. Claude 2026-11-09 (scaling spec step 4): it returns dead, which the Death ability keeps current.
 func is_dead() -> bool:
-	return _death != null and _death.is_running_timed()
+	return dead
 
 
 ## Claude 2026-11-09: how much Health this pawn has now, from its Health stat. A pawn with no such stat reports 0 and can't be hurt.

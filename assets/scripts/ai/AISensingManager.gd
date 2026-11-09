@@ -16,7 +16,8 @@
 ## Claude 2026-11-09 (scaling spec step 2): with the library, the full pass's search and visibility run on worker threads, as the
 ## sensing job (AISensingJob, shared by every pawn). At the end of each tick, every pawn whose full pass is next tick asks the job,
 ## and the job reads the shared table and works while the next tick waits to start. On the pass's tick, the sight sense takes the
-## result and casts only the rays (step 4 moves those to C++ too). The answers are the same as the old way; only something that moves
+## result and casts only the rays (Claude 2026-11-09, step 4: now the job tests line of sight too, against SightGeometry, so a pass on
+## the main thread only records). The answers are the same as the old way; only something that moves
 ## a pawn between ticks isn't seen by that pass. A pass with no result (a pawn that wasn't due, a test calling full_pass) runs the
 ## old way. TickJobs.enabled off turns the job off.
 ## Without the library, or with AIMemory.use_native off, it's a physics shape query on the layers in candidate_mask
@@ -147,6 +148,7 @@ static func _shared_job() -> Object:
 	if _job == null and ClassDB.class_exists(&"AISensingJob") and _shared_grid() != null and TickJobs.get_scheduler() != null:
 		_job = ClassDB.instantiate(&"AISensingJob")
 		_job.setup(TickJobs.get_scheduler(), _grid)
+		_job.set_geometry(SightGeometryFeeder.get_geometry()) # Claude 2026-11-09 (step 4): rays on the workers too
 	return _job
 
 

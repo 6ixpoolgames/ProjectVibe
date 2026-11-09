@@ -1,5 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless self-test for the job scheduler and the sensing job (scaling spec step 2):
-## the job gives exactly the same answers as the main-thread sight check, with 0, 1, 2, 3 or the machine's number of worker threads;
+## the job gives exactly the same answers as the main-thread sight check, with 0, 1, 2, 3 or the machine's number of worker threads,
+## with physics rays and (Claude 2026-11-09, step 4) with line of sight in C++;
 ## a fight run with the job is the same, tick for tick, as one without it; and the scheduler's numbers say where the work ran.
 ## Needs the navcore C++ library; without it, it says so and passes.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
@@ -76,6 +77,23 @@ func _test_same_answers() -> void:
 	for workers in WORKER_COUNTS:
 		job_stores[workers] = _make_stores(pawns.size(), settings)
 		jobs[workers] = ClassDB.instantiate(&"AISensingJob")
+	# Claude 2026-11-09 (scaling spec step 4): the same again with line of sight in C++ (SightGeometry) instead of physics rays, for the
+	# main-thread check and for the job, which then tests the rays on the workers too.
+	var geometry: Object = ClassDB.instantiate(&"SightGeometry")
+	for child in get_children():
+		if child is StaticBody3D:
+			geometry.add_body(child) # the floor
+	for wall in walls.get_children():
+		geometry.add_body(wall)
+	geometry.sync(1)
+	var inline_geometry_stores: Array = _make_stores(pawns.size(), settings, geometry)
+	var geometry_job_stores := {}
+	var geometry_jobs := {}
+	for workers in WORKER_COUNTS:
+		geometry_job_stores[workers] = _make_stores(pawns.size(), settings, geometry)
+		geometry_jobs[workers] = ClassDB.instantiate(&"AISensingJob")
+	var geometry_differ := 0
+	var geometry_unlike_physics := 0
 	var differ := 0
 	var seen := 0
 	var yaws: Array[float] = []
@@ -90,6 +108,25 @@ func _test_same_answers() -> void:
 			var candidates: Array = grid.query(p.global_position, reach, p.team, p, max_candidates, tick + 1)
 			inline_stores[i].sight_check(p, yaws[i], candidates, tick + 1)
 		var expected := _snapshot(inline_stores, pawns, tick + 1)
+		# Claude 2026-11-09 (step 4): with the geometry, on the main thread and in the job.
+		for i in pawns.size():
+			var p := pawns[i]
+			inline_geometry_stores[i].sight_check(p, yaws[i], grid.query(p.global_position, reach, p.team, p, max_candidates, tick + 1), tick + 1)
+		var expected_with_geometry := _snapshot(inline_geometry_stores, pawns, tick + 1)
+		if expected_with_geometry != expected:
+			geometry_unlike_physics += 1
+		for workers in WORKER_COUNTS:
+			TickJobs.set_worker_count(workers)
+			var geometry_job: Object = geometry_jobs[workers]
+			geometry_job.setup(TickJobs.get_scheduler(), grid)
+			geometry_job.set_geometry(geometry)
+			for i in pawns.size():
+				geometry_job.add_request(pawns[i], yaws[i], reach, max_candidates, settings)
+			geometry_job.start(tick)
+			for i in pawns.size():
+				geometry_job_stores[workers][i].sight_check_prepared(geometry_job, pawns[i], tick + 1)
+			if _snapshot(geometry_job_stores[workers], pawns, tick + 1) != expected_with_geometry:
+				geometry_differ += 1
 		for workers in WORKER_COUNTS:
 			TickJobs.set_worker_count(workers)
 			var job: Object = jobs[workers]
@@ -108,10 +145,12 @@ func _test_same_answers() -> void:
 			pawn.global_position = Vector3(pick.randf_range(-22, 22), 0.1, pick.randf_range(-22, 22))
 	_check(seen > 200, "the checks see plenty: %d entries over the passes, some through gaps between walls" % seen)
 	_check(differ == 0, "the job's answers equal the main-thread check's with 0, 1, 2, 3 and the machine's number of workers (%d of %d passes differ)" % [differ, 6 * WORKER_COUNTS.size()])
+	_check(geometry_differ == 0, "with line of sight in C++ on the workers too, the same: equal to the main-thread check with the geometry (%d of %d differ)" % [geometry_differ, 6 * WORKER_COUNTS.size()])
+	_check(geometry_unlike_physics == 0, "and line of sight in C++ remembers exactly what physics rays did, over all six passes (%d differ)" % geometry_unlike_physics)
 	var stats: Dictionary = TickJobs.get_scheduler().get_stats()
 	var sensing: Dictionary = stats["kinds"].get("sensing", {})
 	print("        scheduler: %d workers on this machine; sensing: %d runs, %d batches, %d on the main thread, %.1f µs per pawn" % [TickJobs.get_scheduler().workers_for_machine(), sensing.get("runs", 0), sensing.get("batches", 0), sensing.get("batches_on_main", 0), sensing.get("usec_per_item", 0.0)])
-	_check(sensing.get("runs", 0) == 6 * WORKER_COUNTS.size() and sensing.get("items", 0) == 6 * WORKER_COUNTS.size() * pawns.size(), "every run and every pawn counted once")
+	_check(sensing.get("runs", 0) == 12 * WORKER_COUNTS.size() and sensing.get("items", 0) == 12 * WORKER_COUNTS.size() * pawns.size(), "every run and every pawn counted once")
 	# A table change while a job is reading waits for it: free a pawn right after a start, then take the results.
 	TickJobs.set_worker_count(2)
 	var job: Object = jobs[2]
@@ -125,7 +164,7 @@ func _test_same_answers() -> void:
 	for p in pawns:
 		if job.has_result(p, 20001):
 			taken += 1
-	_check(taken == pawns.size() and TickJobs.get_scheduler().get_stats()["kinds"]["sensing"]["runs"] == 6 * WORKER_COUNTS.size() + 1, "a pawn leaving while the job runs waits for the job, and every result is still there")
+	_check(taken == pawns.size() and TickJobs.get_scheduler().get_stats()["kinds"]["sensing"]["runs"] == 12 * WORKER_COUNTS.size() + 1, "a pawn leaving while the job runs waits for the job, and every result is still there")
 	for pawn in pawns:
 		pawn.free()
 	walls.free()
@@ -184,11 +223,12 @@ func _run_fight(use_job: bool, workers: int) -> Dictionary:
 	return {"state": state, "count": goblins.size(), "requests": stats["requests"], "taken": stats["taken"], "last_requests": stats["last_requests"]}
 
 
-func _make_stores(count: int, settings: PackedFloat64Array) -> Array:
+func _make_stores(count: int, settings: PackedFloat64Array, geometry: Object = null) -> Array:
 	var stores := []
 	for i in count:
 		var store: Object = ClassDB.instantiate(&"AIMemoryStore")
 		store.set_sight_settings(settings)
+		store.set_sight_geometry(geometry) # Claude 2026-11-09 (step 4): null means physics rays
 		stores.append(store)
 	return stores
 

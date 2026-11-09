@@ -15,6 +15,9 @@
 ##
 ## Line of sight is one ray, from eye_height above this pawn's feet to target_height above the target's feet. Only layers in
 ## sight_blocking_mask block it: the world (layer 1) by default, so other pawns don't hide each other.
+## Claude 2026-11-09 (scaling spec step 4): with the C++ library, the ray is tested in C++ against SightGeometry (SightGeometryFeeder
+## keeps it fed), on worker threads when the sensing job runs, instead of a physics ray. A mask that includes the pawns' own layer
+## keeps physics rays, because pawns aren't in the geometry.
 ##
 ## Which way the eyes face: where the AI is looking when it has a look target (AIController.look_at_point), or else the way the
 ## body faces. While a player has the pawn, where the player looks. So a goblin looking toward a noise sees that way, and a walking
@@ -74,6 +77,7 @@ func full_pass_prepared(job: Object, tick: int) -> void:
 	var store: Object = memory.get_store()
 	_fill_settings()
 	store.set_sight_settings(_settings)
+	store.set_sight_geometry(SightGeometryFeeder.get_geometry()) # Claude 2026-11-09 (step 4)
 	memory.announce_sight_results(store.sight_check_prepared(job, pawn, tick))
 
 
@@ -162,6 +166,9 @@ func _check_all(targets: Array, tick: int) -> void:
 	var store: Object = memory.get_store()
 	_fill_settings() # Claude 2026-11-09 (step 2): moved into a function, which the job's request uses too
 	store.set_sight_settings(_settings)
+	# Claude 2026-11-09 (scaling spec step 4): line of sight in C++ where the C++ store runs; the GDScript store casts physics rays.
+	if store.has_method(&"set_sight_geometry"):
+		store.set_sight_geometry(SightGeometryFeeder.get_geometry())
 	memory.announce_sight_results(store.sight_check(pawn, _eye_yaw(), targets, tick))
 
 

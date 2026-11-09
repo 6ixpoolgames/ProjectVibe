@@ -57,9 +57,12 @@ enum Kind { LOCOMOTION, ACTION }
 ## ticks left of a timed run. 0: not running a timed run
 var ticks_left := 0:
 	set(value):
-		if manager and (value > 0) != (ticks_left > 0):
+		var flips := (value > 0) != (ticks_left > 0)
+		if manager and flips:
 			manager.timers_changed()
 		ticks_left = value
+		if flips:
+			_running_changed(value > 0) # Claude 2026-11-09 (scaling spec step 4)
 ## ticks until it can start again
 var cooldown_ticks_left := 0:
 	set(value):
@@ -111,6 +114,12 @@ func duration_ticks() -> int:
 ## True while a timed run is going.
 func is_running_timed() -> bool:
 	return ticks_left > 0
+
+
+## Claude 2026-11-09 (scaling spec step 4): called whenever a timed run starts or ends, through the ticks_left setter, so also when a
+## rollback loads new values. Nothing by default; DeathAbility uses it to keep Pawn.dead current.
+func _running_changed(_running: bool) -> void:
+	pass
 
 
 ## A stat from the pawn's StatManager, or fallback if there's no such stat or no StatManager.

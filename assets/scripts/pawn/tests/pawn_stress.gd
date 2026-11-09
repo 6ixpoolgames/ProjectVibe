@@ -24,6 +24,8 @@
 ##                                     times as long. Only the main thread; worker threads and the physics engine run at full speed.
 ##                                     The phase columns don't include the wait; "all phases" and the physics frame do
 ##   --no-jobs                         no worker jobs (TickJobs.enabled off): the old main-thread way, to compare
+##   --physics-rays                    line of sight with physics rays on the main thread, not in C++ (SightGeometryFeeder.enabled
+##                                     off). Claude 2026-11-09, step 4
 extends Node
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
@@ -58,6 +60,8 @@ func _ready() -> void:
 			_stretch = maxf(float(arg.trim_prefix("--stretch=")), 1.0)
 		elif arg == "--no-jobs":
 			TickJobs.enabled = false
+		elif arg == "--physics-rays": # Claude 2026-11-09 (step 4)
+			SightGeometryFeeder.enabled = false
 	if _stretch > 1.0:
 		TickDriver.before_tick.connect(func(_dt: float, _tick: int) -> void: _tick_started_usec = Time.get_ticks_usec())
 		TickDriver.after_tick.connect(_stretch_tick)
@@ -75,6 +79,7 @@ func _ready() -> void:
 		["never", "every tick", "every 2nd tick"][_history_interval]])
 	# Claude 2026-11-09 (step 2)
 	var scheduler: Object = TickJobs.get_scheduler()
+	print("line of sight: %s" % ("C++ (SightGeometry)" if SightGeometryFeeder.get_geometry() != null else "physics rays")) # Claude 2026-11-09 (step 4)
 	print("jobs: %s; main thread stretched %.1f times" % [
 		"off" if scheduler == null else "on, %d worker threads (%s)" % [scheduler.workers_for_machine() if TickJobs.get_worker_count_setting() < 0 else TickJobs.get_worker_count_setting(), "sized to this machine" if TickJobs.get_worker_count_setting() < 0 else "fixed"],
 		_stretch])

@@ -472,7 +472,7 @@ The owner's call: there's no health manager. Health is a stat, and death is an a
 - **Locks out** movement, combat and utility, so Walk stops steering and the body slows to a stop.
 - **Interrupts:** priority 1000 cancels whatever was running, and threshold 1000 means nothing cancels it.
 - **It keeps itself running while Health is 0.** `Pawn.revive()` refills Health, and it ends on its next tick.
-- **While it runs, `Pawn.is_dead()` is true:**
+- **While it runs, `Pawn.is_dead()` is true:** *(Claude 2026-11-09, scaling spec 6.1: and `Pawn.dead`, a plain value the ability keeps current through its timer, so rollback updates it too; C++ reads it instead of calling `is_dead()`.)*
   - the pawn ignores its input and its AI, whose running behaviour stopped with the reason "died"
   - other pawns' sight skips it, in both memory stores
   - memories forget it on their next pass

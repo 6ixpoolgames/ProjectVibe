@@ -1,8 +1,8 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-09: the tier 1 plan for running many more pawns on a server: plain data, worker threads and the owner's scheduler. From the 2026-11-09 discussion with the owner. A draft to agree, nothing built. -->
 
-# Scaling Spec v0.7 (tier 1, being built)
+# Scaling Spec v0.8 (tier 1, being built)
 
-**Status:** agreed by the owner on 2026-11-09 ("Ok. Proceed") and being built, step by step (section 10). **Built:** step 1, the pawn table (3.1); step 2, the job scheduler, the table's columns and the sensing job (3.2, 4.2); step 3, the contract's exceptions (5.1). The groundwork it stands on is pawn spec 15.
+**Status:** agreed by the owner on 2026-11-09 ("Ok. Proceed") and being built, step by step (section 10). **Built:** step 1, the pawn table (3.1); step 2, the job scheduler, the table's columns and the sensing job (3.2, 4.2); step 3, the contract's exceptions (5.1); step 4, line of sight in C++ (6.1). The groundwork it stands on is pawn spec 15.
 **Scope:** how a server runs many more pawns: a shared table of plain pawn data, worker threads with the owner's scheduler, the AI on workers, simulating far-away pawns less often, crowd movement for AI units, and per-client network work. Clients change little.
 **Why:** on the owner's PC, which is above average, about 235 fighting pawns fit in a 60 Hz tick today (pawn spec 15.6), so about **145 on the target machine** (section 0). The owner's words: "My machine is above average and 250ish units networked is far from ideal."
 **Numbers** marked "guess" are estimates until a step is built and measured.
@@ -15,6 +15,7 @@
 - v0.5 (2026-11-09): agreed; step 1 built (3.1). The table is read at the first use in a tick, not in the record phase (3).
 - v0.6 (2026-11-09): step 2 built (4.2). The owner's calls: the table's fields are columns with automatic and manual switches, and a game can add its own (3.2); network replication stays declared in `TickStateComponent`, not flagged on the table (3.2). The main thread's budget and deferral move to step 5, where there's first main-only work to defer (4.2).
 - v0.7 (2026-11-09): step 3 built (5.1): forces and taunts asked for during a tick are queued for the pawn's next AI step.
+- v0.8 (2026-11-09): step 4 built (6.1). The terrain is triangles, not a heightmap, so line of sight holds the same triangles physics has, and triangle meshes are exact instead of bounding boxes. Recording what's seen stays on the main thread for now (6.1).
 
 ---
 
@@ -281,6 +282,27 @@ Today the AI is about a third of a fighting pawn's cost.
     - **Props block sight** *(v0.3, the owner's call)*. Each prop that blocks sight gives the sight system simple shapes (boxes, spheres, capsules), kept in C++ in a grid like the pawn grid. By default they come from the prop's collision shapes on a "blocks sight" physics layer, so a designer only ticks a layer; a prop can also list its own shapes. A prop that moves updates its shapes when it moves, applied between ticks like everything else.
     - A ray first walks the heightmap, then tests the shapes in the grid cells it passes. A comparison test checks it agrees with physics rays on a map with props.
     - Collision shapes that aren't simple (a triangle mesh, say) are stood in for by their bounding box, with a warning, unless the prop lists its own shapes.
+### 6.1 Step 4, as built *(Claude 2026-11-09)*
+
+**Line of sight in C++** (`SightGeometry`, `native/src/sight_geometry.*`), so the rays run on worker threads with the rest of the sensing job:
+- **What it holds:** a copy of every body that can block sight, as the shapes physics has for it, in world space. `TerrainGenerator` (and the nav test terrain) give physics a triangle mesh of jittered points, not a heightmap, so the geometry holds **the same triangles**, and the terrain blocks sight exactly as it blocks a physics ray. Boxes, spheres, capsules, cylinders and world boundaries are tested exactly. Anything else (a convex hull, a heightmap shape) stands in as its bounding box, with a warning once per body, as this section planned for props. *(v0.8: the plan said the terrain was a heightmap and triangle meshes would be bounding boxes; neither fit the terrain we have.)*
+- **Layers:** each piece keeps its body's collision layer, and a ray meets only the layers in its sense's `sight_blocking_mask`, as a physics ray does. So a designer makes a prop block sight by putting it on a layer in that mask (layer 1, the world, by default).
+- **Kept up to date:** `SightGeometryFeeder` (static, `assets/scripts/ai/senses/`) adds every body in the tree on first use, then follows the tree: bodies entering and leaving, collision shape nodes added to or taken from a body. The geometry itself notices, once a tick (`sync`), a body that moved or changed layer, and a shape resource that changed, such as a terrain chunk's triangles after an edit. Changes wait in a list until `sync`, which runs on the main thread and calls the scheduler's change guard first, so the geometry never changes while a job reads it.
+- **Fast enough:** a grid of 4 m cells over the ground, each with the lowest and highest point of what's in it, so a ray skips cells it passes over; very large pieces (a 400 m floor) are in a short list every ray tests. A ray costs about the same as a physics ray did (1.3 µs either way, called from GDScript), but runs on a worker.
+- **What's left out:** areas, which sight's rays never stopped at, and pawns, which move every tick. A sense whose mask includes the pawns' own layer keeps physics rays on the main thread, as before (`AIMemoryStore.check_one`).
+- **Where it's used:** both sight checks, so they still agree exactly: the sensing job tests the ray on a worker (a candidate's `ray`), and the main-thread check (refreshes, and passes with no job result) tests it there. `SightGeometryFeeder.enabled` off goes back to physics rays.
+
+**Death as plain data:** C++ used to ask each pawn `is_dead()` through GDScript, for every candidate and every remembered entry: about a third of sensing's main-thread time. Now `Pawn.dead` is a plain value the Death ability keeps current (`AbilityBase._running_changed`, called from the `ticks_left` setter, so rollback updates it too), `is_dead()` returns it, and C++ reads the property.
+
+**What's still on the main thread:** recording what was seen into each pawn's memory (about 19 µs a full pass at 200 pawns, roughly 0.6 µs a candidate), forgetting, and the small GDScript cost of each pawn's sensing turn. Writing memory from workers would clash with anything reading memory between ticks (the arena's readouts, debug tools), so it waits for step 5, where decisions read memory as data too. So sensing isn't yet fully off the main thread, as this step's check in section 10 asked.
+
+**Tests:**
+- `ai/tests/sight_geometry_selftest`: 20,000 random rays over hilly terrain and 160 props (rotated boxes, spheres, capsules, cylinders, on two layers, with three kinds of mask), 29% of them blocked: line of sight agrees with physics rays on **100%**. And it keeps up as bodies are added, moved, resized, put on another layer and removed, and as the terrain is edited and freed.
+- `ai/tests/ai_sensing_job_selftest`: with the geometry too, the job's answers equal the main-thread check's with every worker count, and remember exactly what physics rays did.
+- Every other suite passes unchanged, the stealth tests with their walls included.
+
+**Measured** (owner's PC): `ai_stress`, the AI per tick: 6.11 ms at 400 pawns against 7.54 with no jobs and physics rays, and 2.52 against 3.30 at 200: about a fifth less. Sensing alone at 200 pawns: 1.48 ms, from 2.67 before step 2. `pawn_stress`, 400 fighting pawns: the input phase 8.11 ms against 9.40, all phases 27.1 against 28.4; with `--workers=3 --stretch=1.6`, 45.4 against 46.3. Every sensing batch ran on a worker, with no waits.
+
 - **Thinking as data ("considerations"):** a behaviour's score as a list of inputs (distance to target, awareness, health, time in state...), each through a `Curve` and a weight, multiplied together. Computed in jobs.
   - This is how the AI spec already treats scores, written down as data instead of code. Jitter, persistence and interrupts stay as they are (pawn spec 10.7).
   - A behaviour that overrides `score()` in GDScript runs on the main thread, and a test checks both paths agree for the built-ins.
@@ -350,7 +372,7 @@ Each step ends with tests passing on Windows and Linux, and the measurement it n
 | 1 | **Pawn table**, `AIPawnGrid` built from it (3). **Built 2026-11-09 (3.1)** | Nothing behaves differently: every suite passes; `pawn_stress` costs no more than 1 µs per pawn extra. *Measured: 0.3 µs per pawn; every suite passes* |
 | 2 | **Job system and scheduler** in `navcore`: batches, due ticks, cost estimates, the main thread's budget, late-job counting, sizing to the machine (4, 4.1). One job kind to start: the sight checks. `pawn_stress` and `net_stress` get the slower-CPU stretch and worker cap (section 0). **Built 2026-11-09 (4.2), with the table's columns (3.2); the budget moves to step 5** | The same results with 0, 1, 2, 3 and N worker threads, compared exactly; `ai_stress` main-thread time down. *Measured: identical with every worker count and in a whole fight; the AI's main-thread time 7 to 9% less (`ai_stress`); the rays, most of what's left, go in step 4* |
 | 3 | **Contract exceptions tidied** (5). **Built 2026-11-09 (5.1)** | `ai_stealth_selftest`, taunt tests unchanged. *Unchanged, and a new check of forces asked for during a tick* |
-| 4 | **Line of sight in C++, against the heightmap and props** (6) | Agrees with physics rays on a map with props, in a comparison test; sensing fully off the main thread |
+| 4 | **Line of sight in C++, against the heightmap and props** (6). **Built 2026-11-09 (6.1), against the terrain's own triangles** | Agrees with physics rays on a map with props, in a comparison test; sensing fully off the main thread. *Agrees on 100% of 20,000 rays; the AI's main-thread time about a fifth less; recording what's seen is still on the main thread, for step 5* |
 | 5 | **Considerations as data** for the built-in behaviours (6), and the main thread's budget with deferral by count (4, 4.1; moved from step 2 in v0.6) | Scores equal to the GDScript ones on recorded situations; decisions off the main thread; ~235 → ~350 fighting pawns (guess) |
 | 6 | **Tick rate chosen per match** (7): the reference-rate conversion for the 38 tick settings, history sized in time, the rate in the handshake | Every suite and network test passes at 60 and at 30; converted settings last the same time at both |
 | 7 | **Interest management and per-client snapshots on workers** (9) | Bandwidth per client and server snapshot time in `net_stress` |

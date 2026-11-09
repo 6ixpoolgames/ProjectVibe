@@ -17,6 +17,7 @@
 #include "ai_sight_rules.h"
 #include "job_scheduler.h"
 #include "pawn_table.h"
+#include "sight_geometry.h" // Claude 2026-11-09 (scaling spec step 4)
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -41,11 +42,17 @@ public:
 		Vector3 position;
 		Vector3 aim;
 		double visibility = 0.0;
+		// Claude 2026-11-09 (step 4): line of sight, tested here when it could be seen and the geometry can answer: -1 not tested
+		// (the main thread casts a physics ray), 0 clear, 1 blocked.
+		int8_t ray = -1;
 	};
 
 	// The scheduler that runs it, and the grid it searches (which reads the pawn table). Sets the table's change guard, so the table
 	// never changes while the job reads it.
 	void setup(const Ref<JobScheduler> &scheduler, const Ref<AIPawnGrid> &grid);
+	// Claude 2026-11-09 (scaling spec step 4): line of sight on the workers too, from this geometry (null: physics rays on the main
+	// thread, as in step 2). Sets the geometry's change guard as well.
+	void set_geometry(const Ref<SightGeometry> &geometry);
 	~AISensingJob(); // finishes a run still going, which writes into this object
 	// Asks for observer's pass on the tick after the next start(): eyes facing eye_yaw, looking reach metres for at most
 	// max_candidates pawns, with its SightSense's settings (in AIMemoryStore.set_sight_settings' order). Where the eyes are is worked
@@ -78,6 +85,7 @@ private:
 		double reach = 0.0;
 		int64_t max_candidates = 0;
 		sight_rules::Settings sight;
+		bool use_geometry = false; // Claude 2026-11-09 (step 4): its mask doesn't include its own layer, so pawns can't block it
 		size_t first = 0; // where its candidates start in _candidates
 		int64_t found = 0; // how many it found
 	};
@@ -87,6 +95,7 @@ private:
 
 	Ref<JobScheduler> _scheduler;
 	Ref<AIPawnGrid> _grid;
+	Ref<SightGeometry> _geometry; // Claude 2026-11-09 (step 4)
 	const PawnTable *_table = nullptr; // the grid's table, set by start(); the grid holds the reference
 	int _kind = -1;
 	int _detectability = -1; // the table's detectability column

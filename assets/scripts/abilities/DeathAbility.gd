@@ -34,6 +34,13 @@ func get_rollback_properties() -> Array[String]:
 	return out
 
 
+# Claude 2026-11-09 (scaling spec step 4): keeps Pawn.dead current, a plain value that C++ (sensing, memory) reads directly, instead
+# of calling Pawn.is_dead() through GDScript for every pawn it looks at, which was about a third of sensing's cost.
+func _running_changed(running: bool) -> void:
+	if pawn:
+		pawn.dead = running
+
+
 # One tick at a time: each tick it adds one back for as long as Health is 0, so it never runs out while the pawn is dead.
 func duration_ticks() -> int:
 	return 1
