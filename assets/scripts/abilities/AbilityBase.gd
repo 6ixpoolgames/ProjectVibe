@@ -80,6 +80,9 @@ var pawn: Pawn = null
 var category_mask := 0
 ## locks_out as bits. Worked out once by the manager.
 var locks_out_mask := 0
+## Claude 2026-11-09: trigger_action's input bit (InputActions), or 0 with none. Worked out once by the manager, so a tick tests a bit
+## instead of looking the name up (pawn spec 15.2).
+var trigger_bit := 0
 
 
 func _init() -> void:

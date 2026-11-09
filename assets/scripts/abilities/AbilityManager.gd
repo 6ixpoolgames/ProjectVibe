@@ -195,7 +195,7 @@ func _run_locomotion(dt: float) -> void:
 	for ability in _locomotions:
 		if ability.trigger_action == &"":
 			continue
-		var wanted := pawn.is_action_held(ability.trigger_action)
+		var wanted := pawn.held_actions & ability.trigger_bit != 0 # Claude 2026-11-09: was pawn.is_action_held(trigger_action)
 		if ability.is_running_timed():
 			if wanted and not is_locked(ability):
 				chosen = ability
@@ -225,7 +225,10 @@ func _run_locomotion(dt: float) -> void:
 
 
 func _run_actions(dt: float) -> void:
-	var used_actions := {} # actions that started something this tick, so one press starts one ability
+	# Claude 2026-11-09: bits instead of names (pawn spec 15.2): this tick's presses worked out once, and the actions that started
+	# something kept as bits, where they were a Dictionary of names made every tick. The same rules.
+	var pressed_bits: int = pawn.held_actions & ~pawn.previous_held_actions
+	var used_bits := 0 # actions that started something this tick, so one press starts one ability
 	for ability in _actions:
 		if ability.is_running_timed():
 			ability.tick(dt)
@@ -233,21 +236,22 @@ func _run_actions(dt: float) -> void:
 			if ability.ticks_left <= 0:
 				_finish(ability)
 			continue
-		if ability.trigger_action == &"" or used_actions.has(ability.trigger_action):
+		if ability.trigger_action == &"" or used_bits & ability.trigger_bit != 0:
 			continue
-		var pressed := pawn.was_action_pressed(ability.trigger_action)
+		var pressed := pressed_bits & ability.trigger_bit != 0
 		if not pressed and ability.buffer_ticks_left <= 0:
 			continue
 		if _is_ready(ability):
 			_clear_way(ability) # Claude 2026-11-09: cancels what it's strong enough to cancel
 			_start(ability)
-			used_actions[ability.trigger_action] = true
+			used_bits |= ability.trigger_bit
 		elif pressed and ability.buffer_window > 0.0:
 			ability.buffer_ticks_left = ticks_for(ability.buffer_window)
 	# A press that started something doesn't also wait in another ability on the same action.
-	for ability in _actions:
-		if used_actions.has(ability.trigger_action) and not ability.is_running_timed():
-			ability.buffer_ticks_left = 0
+	if used_bits != 0: # Claude 2026-11-09: bits, and skipped when nothing started
+		for ability in _actions:
+			if used_bits & ability.trigger_bit != 0 and not ability.is_running_timed():
+				ability.buffer_ticks_left = 0
 
 
 # Claude 2026-11-09: "not locked out" became "every conflicting running ability can be cancelled by it", which is the same thing
@@ -360,14 +364,14 @@ func _collect_abilities() -> void:
 	_every_tick_abilities.clear() # Claude 2026-11-09
 	_action_bits = 0
 	for ability in _abilities:
+		ability.trigger_bit = InputActions.mask_of(ability.trigger_action) if ability.trigger_action != &"" else 0 # Claude 2026-11-09
 		if ability.kind == AbilityBase.Kind.LOCOMOTION:
 			_locomotions.append(ability)
 			if ability.trigger_action == &"" and _default_locomotion == null:
 				_default_locomotion = ability
 		else:
 			_actions.append(ability)
-			if ability.trigger_action != &"":
-				_action_bits |= InputActions.mask_of(ability.trigger_action) # Claude 2026-11-09: the input channel
+			_action_bits |= ability.trigger_bit # Claude 2026-11-09: the input channel
 		if _script_overrides_every_tick(ability.get_script()): # Claude 2026-11-09
 			_every_tick_abilities.append(ability)
 	_timers_dirty = true # Claude 2026-11-09
