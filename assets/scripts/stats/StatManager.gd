@@ -17,6 +17,9 @@ extends Node
 
 var _stats := {} # StringName -> Stat
 var pawn: Pawn = null # Claude 2026-11-09
+## Claude 2026-11-09: goes up by one whenever a stat's value changes, or a stat is added or removed (not when a current value such
+## as Health changes). An ability that keeps stat values reads them again only when this has changed (pawn spec 15.2).
+var version := 1
 
 
 func _init() -> void:
@@ -88,8 +91,10 @@ func get_stat_names() -> Array[StringName]:
 func _on_child_entered(node: Node) -> void:
 	if node is Stat:
 		_stats[StringName(node.name)] = node
+		version += 1 # Claude 2026-11-09
 
 
 func _on_child_exiting(node: Node) -> void:
 	if node is Stat and _stats.get(StringName(node.name)) == node:
 		_stats.erase(StringName(node.name))
+		version += 1 # Claude 2026-11-09

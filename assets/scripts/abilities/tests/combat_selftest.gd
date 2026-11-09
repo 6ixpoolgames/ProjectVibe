@@ -34,6 +34,7 @@ func _ready() -> void:
 	await _test_interrupts()
 	await _test_melee_hits()
 	await _test_melee_multi_hit() # Claude 2026-11-09
+	await _test_hits_after_simulate() # Claude 2026-11-09
 	await _test_server_only_and_replays()
 	_test_view_ticks_behind()
 	await _test_ai_attacks()
@@ -177,6 +178,46 @@ func _test_melee_multi_hit() -> void:
 	attacker.free()
 	left.free()
 	right.free()
+
+
+## Claude 2026-11-09 (pawn spec 15.4): hits are delivered after every pawn has simulated, so it doesn't matter whether the target
+## simulates before or after its attacker. The same swing, with the two pawns joining the tick driver in both orders, must give the
+## same result tick for tick. Placed at x = -30, away from the other tests' pawns.
+func _test_hits_after_simulate() -> void:
+	var results := []
+	for attacker_first in [true, false]:
+		var attacker: Pawn = null
+		var target: Pawn = null
+		if attacker_first:
+			attacker = _make_pawn(Vector3(-30, 0.1, 40))
+			target = _make_pawn(Vector3(-30, 0.1, 38.6))
+		else:
+			target = _make_pawn(Vector3(-30, 0.1, 38.6))
+			attacker = _make_pawn(Vector3(-30, 0.1, 40))
+		attacker.team = 1
+		await _ticks(15)
+		# GDScript note: a lambda can't change a plain local it captured, so what it records goes into an array.
+		var seen := []
+		attacker.ability_manager.get_node("MeleeAttack").hit_landed.connect(func(_hit): seen.append(["landed", TickDriver.tick]))
+		target.hit_received.connect(func(_hit): seen.append(["received", TickDriver.tick, TickDriver.is_in_simulate()]))
+		var ai := _ai(attacker)
+		ai.look_at_point(Vector3(-30, 1, 30))
+		await _ticks(2)
+		var pressed_at: int = TickDriver.tick
+		ai.press(&"primary")
+		var path: Array[Vector3] = []
+		for i in 30:
+			await _ticks(1)
+			path.append(target.global_position)
+		results.append({"seen": seen.map(func(e): return [e[0], e[1] - pressed_at] + e.slice(2)), "path": path, "health": target.get_health()})
+		attacker.free()
+		target.free()
+	var first: Dictionary = results[0]
+	var second: Dictionary = results[1]
+	_check(first["seen"].size() == 2 and first["seen"][0][0] == "landed" and first["seen"][1][0] == "received" and first["seen"][0][1] == first["seen"][1][1], "a hit lands and is taken in the same tick, hit_landed first (%s)" % str(first["seen"]))
+	_check(first["seen"][1][2] == false, "the target takes it after simulate, not during it")
+	_check(first["seen"] == second["seen"] and first["health"] == second["health"], "the same tick and damage whether the target simulates before or after its attacker (%s)" % str(second["seen"]))
+	_check(first["path"] == second["path"], "and the same knockback, tick for tick")
 
 
 func _test_melee_hits() -> void:

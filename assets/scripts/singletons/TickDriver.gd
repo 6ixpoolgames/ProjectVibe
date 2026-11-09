@@ -69,6 +69,10 @@ class_name TickDriverSingleton
 signal before_tick_loop
 signal before_tick(dt: float, tick: int)
 signal after_tick(dt: float, tick: int)
+## Claude 2026-11-09: after every participant has simulated and before anything is recorded (pawn spec 15.1). Effects one entity
+## queued for another during simulate, such as hits, are delivered here, so they never depend on which simulated first. Not sent
+## during a rollback's replay.
+signal after_simulate(dt: float, tick: int)
 signal after_tick_loop
 signal after_rollback(from_tick: int, to_tick: int) # Claude 2026-11-04: rollback added
 ## Claude 2026-11-07: state is back to from_tick, and the replay is about to run. A correction can put a pawn somewhere new here,
@@ -103,6 +107,7 @@ var _accumulator: float = 0.0
 var _resimulating := false
 var _in_tick := false
 var _in_phases := false           # inside a tick's phases; rollback isn't allowed then
+var _in_simulate := false         # Claude 2026-11-09: inside a tick's simulate phase (not a replay's); see is_in_simulate()
 var _removed_now: Dictionary = {} # unregistered during the current tick
 var _tick_random := RandomNumberGenerator.new()
 
@@ -236,6 +241,12 @@ func set_tick(new_tick: int) -> void:
 ## True while a rollback is replaying ticks. Cosmetic effects (sounds, particles) should not fire then.
 func is_resimulating() -> bool:
 	return _resimulating
+
+
+## Claude 2026-11-09: true while a tick's simulate phase runs (not a rollback's replay). An effect aimed at another entity during
+## it is queued and delivered from after_simulate (pawn spec 15.1).
+func is_in_simulate() -> bool:
+	return _in_simulate
 
 
 ## Claude 2026-11-04: repeatable randomness for gameplay, instead of randf(). The rolls depend only on key, tick and
@@ -385,11 +396,14 @@ func _run_tick(dt: float) -> void:
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_capture_input(tick)
 	mark = _profile_phase(&"capture", mark)
+	_in_simulate = true # Claude 2026-11-09
 	for p in _simulate:
 		if not is_instance_valid(p):
 			_dirty = true
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_simulate(dt, tick)
+	_in_simulate = false
+	after_simulate.emit(dt, tick) # Claude 2026-11-09: queued effects, such as hits, are delivered here (pawn spec 15.1)
 	mark = _profile_phase(&"simulate", mark)
 	for p in _record:
 		if not is_instance_valid(p):

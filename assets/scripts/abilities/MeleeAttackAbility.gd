@@ -12,13 +12,15 @@
 ##     carries view_ticks_behind, and the server limits it to what's believable. The AI's swings use 0.
 ##   - Each pawn is hit at most once per swing. Its own team is skipped unless hits_own_team is on.
 ##   - Each hit calls the target's Pawn.receive_hit() with a HitInfo, which starts the target's own knockback, and sends hit_landed
-##     here, for local effects such as sounds. Claude 2026-11-09: each hit also takes damage health points (step 10); dead pawns
+##     here, for local effects such as sounds. Claude 2026-11-09: the target takes the hit after every pawn has simulated this tick
+##     (pawn spec 15.4), so hit_landed goes out first. Claude 2026-11-09: each hit also takes damage health points (step 10); dead pawns
 ##     aren't hit.
 ## A rollback replay never hits again: hits are decided once, on the authority, outside replays.
 class_name MeleeAttackAbility
 extends AbilityBase
 
-## Sent on the server for each pawn this swing hits, after the target's receive_hit(). For effects, sounds and UI.
+## Sent on the server for each pawn this swing hits, when the swing finds it. For effects, sounds and UI. Claude 2026-11-09: the
+## target takes the hit (its damage, knockback and hit_received) later in the same tick, after every pawn has simulated.
 signal hit_landed(hit: HitInfo)
 ## Claude 2026-11-09: sent once per swing, on its first hit tick, with where the hit sphere is and its radius. Sent on every machine
 ## that runs the swing (the server, offline, and a client predicting its own pawn), never during a rollback replay. For effects,

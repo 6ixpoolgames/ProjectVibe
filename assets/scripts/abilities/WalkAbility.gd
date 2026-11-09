@@ -14,6 +14,16 @@ extends AbilityBase
 ## Top speed when the pawn has no such stat.
 @export var fallback_speed := 5.0
 
+# Claude 2026-11-09: the five stats, kept here and read again only when the StatManager's version changes (pawn spec 15.2). Reading
+# all five every tick was about a third of this ability's cost.
+var _stats_version := -1
+var _stats_speed_stat: StringName = &""
+var _speed := 0.0
+var _acceleration := 0.0
+var _deceleration := 0.0
+var _air_control := 0.0
+var _turn_rate := 0.0
+
 
 func _init() -> void:
 	super()
@@ -26,11 +36,12 @@ func _init() -> void:
 
 
 func tick(dt: float) -> void:
-	var speed := read_stat(speed_stat, fallback_speed)
-	var acceleration := read_stat(&"Acceleration", 30.0)
-	var deceleration := read_stat(&"Deceleration", 40.0)
-	var air_control := clampf(read_stat(&"AirControl", 0.3), 0.0, 1.0)
-	var turn_rate := deg_to_rad(read_stat(&"TurnRate", 720.0))
+	_refresh_stats() # Claude 2026-11-09: was five read_stat calls here
+	var speed := _speed
+	var acceleration := _acceleration
+	var deceleration := _deceleration
+	var air_control := _air_control
+	var turn_rate := _turn_rate
 
 	# Accelerate the horizontal velocity toward what's wanted. Locked out, nothing is wanted.
 	var wanted := Vector3.ZERO if manager.is_locked(self) else pawn.move_input.limit_length(1.0)
@@ -47,3 +58,18 @@ func tick(dt: float) -> void:
 	if horizontal.length_squared() > 0.01:
 		var target_yaw := atan2(-horizontal.x, -horizontal.z)
 		pawn.yaw = rotate_toward(pawn.yaw, target_yaw, turn_rate * dt)
+
+
+# Claude 2026-11-09: reads the five stats again if a stat changed (or there was no StatManager before and there is now), or if
+# speed_stat was changed. The same values and fallbacks as before.
+func _refresh_stats() -> void:
+	var version: int = pawn.stat_manager.version if pawn and pawn.stat_manager else 0
+	if version == _stats_version and speed_stat == _stats_speed_stat:
+		return
+	_stats_version = version
+	_stats_speed_stat = speed_stat
+	_speed = read_stat(speed_stat, fallback_speed)
+	_acceleration = read_stat(&"Acceleration", 30.0)
+	_deceleration = read_stat(&"Deceleration", 40.0)
+	_air_control = clampf(read_stat(&"AirControl", 0.3), 0.0, 1.0)
+	_turn_rate = deg_to_rad(read_stat(&"TurnRate", 720.0))

@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.18
+# Pawn Spec v0.19
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -26,6 +26,7 @@
 - v0.14 (2026-11-09): step 10 built: Health as a stat that changes during play, damage, death as an ability, being hit as a state rule, threat from damage (8.7). The owner's call: no health manager.
 - v0.15 (2026-11-09): step 11, saving terrain edits: `TerrainEditLog` saves to and loads from a file (12).
 - v0.16 (2026-11-09): the t0 test level, `arena_sample.tscn` (12, step 12, pulled forward at the owner's request). Attack moved to the left mouse button. What a whole pawn costs per tick, `pawn_stress` (12.1), with open question 16.
+- v0.19 (2026-11-09): tick foundations for tier 1 (15): the per-tick contract, gates and channels in abilities, resting pawns, hits delivered after simulate. The owner asked for the prep work.
 - v0.18 (2026-11-09): rollback recording in C++ (`TickStateRecorder`) and saved only where it's read (`history_interval_ticks`), measured in 12.1. Open question 16 settled.
 - v0.17 (2026-11-09): debug shapes for swings and dashes (`AbilityDebugDraw`), `MeleeAttackAbility.hit_window_started`, Chase's `dash_to_close`, and the arena readout's last ability (8.6, 10.7, 12).
 
@@ -1171,3 +1172,102 @@ Measured with `pawn_stress -- --sizes=100,400` and its new `--history=` and `--g
 - **Abilities, from step 9 (2026-11-09):**
   - Cancel windows: an action cancellable only during some of its phases, such as recovery. Noted by the owner.
   - Invulnerability during a dash, combos, and hit effects shown on clients.
+
+---
+
+## 15. Tick foundations: t0 prep for tier 1 *(Claude 2026-11-09)*
+
+**Why.** Tier 1 moves server-side work to plain data on worker threads: AI sensing and thinking, then crowd movement (section 12.1, and the owner's scheduler: work that doesn't fit on the main thread overflows to workers, with results due on a fixed tick). That only goes smoothly if the tick already has clear rules about what runs when and who writes what. The owner's words: "solidify the foundations so later work like this we build on it is rock steady". The owner asked for this prep and left the spec to Claude's judgement; it isn't separately agreed.
+
+**Not in t0:** the scheduler, worker threads, the shared table of pawn data, crowd movement and flowfields.
+
+### 15.1 The per-tick contract
+
+One tick runs these phases, for every pawn, in a fixed order (`TickDriver`):
+
+| Phase | What runs | A pawn may write | It may read |
+|---|---|---|---|
+| before tick | snapshots applied, corrections (clients) | — | — |
+| input | AI (server and offline), then the controller in charge | its own input, its own AI parts | other pawns' positions and teams, its own memory |
+| capture | inputs saved for replays and snapshots | — | — |
+| simulate | abilities, gravity, `move_and_slide` | **only itself**. Effects on another pawn, such as a hit, are queued (15.4) | other pawns' positions, through physics |
+| after simulate | queued hits delivered, in a fixed order | the pawn being hit | the hit |
+| record | rollback state rounded and saved (`TickStateRecorder`) | its own listed properties (rounding) | — |
+| after tick | snapshots sent (server) | — | — |
+
+**The rules:**
+1. **Pawns are processed in a fixed order** in every phase: the order they joined the tick driver, which on a server is the order of their entity ids. A result must never depend on another pawn having gone first in the same phase, which is what will let tier 1 run one phase's pawns in parallel.
+2. **In simulate, a pawn writes only itself.** Anything aimed at another pawn is queued and delivered after simulate (15.4).
+3. **Reads of other pawns in the input phase see last tick's results,** because nothing has moved yet this tick. Tier 1's shared table works the same way: jobs read a frozen copy of tick T-1 and write only their own slots.
+4. **Every piece of per-tick logic needs a reason to run** (15.2, 15.3). Idle logic costs nothing.
+
+**Known exceptions, for tier 1 to tidy:**
+- Sensing reads other pawns through the shared `AIPawnGrid`, built on the first query of a tick. It's read-only and rebuilt once a tick, so it already fits rule 3.
+- `AITargetSelector.force_target` (a taunt) writes into another pawn's AI immediately. It's rare and comes from game code, not from a phase.
+
+### 15.2 Gates and channels in abilities
+
+Before, the `AbilityManager` touched every ability every tick: counting every cooldown and buffer down, calling every `every_tick()`, rebuilding the locks, checking every action for a press, and Walk reading five stats. About 14 µs per pawn even when idle (12.1).
+
+Now each piece runs only when something gives it a reason:
+- **Counting down** only for abilities with a timer running (a run, a cooldown or a buffered press). The manager keeps that list and rebuilds it only when a timer starts or reaches 0: the timers' setters tell it, so a rollback that loads new values is noticed too.
+- **`every_tick()`** only on abilities whose script overrides it, found once from the script (Jump, in t0).
+- **The input channel:** this tick's presses are one bit calculation (`held_actions & ~previous_held_actions`, limited to the actions any ability answers to). With no press, nothing buffered and no action running, the action step is skipped.
+- **Locks** are rebuilt only when an action starts or stops.
+- **Stats:** Walk (and Sprint) keep their five stat values and read them again only when a stat changes. `StatManager.version` goes up whenever a stat's value changes, or a stat is added or removed.
+
+Timers stay counters, not "ready at tick N" deadlines. With the list above, an idle ability is never touched anyway, and counters stay one byte on the network; deadlines would be absolute tick numbers, several bytes each, in every snapshot.
+
+### 15.3 Resting pawns
+
+A pawn **rests** on a tick when all of these hold:
+- `rest_when_idle` is on (the default; a designer can turn it off per pawn)
+- it's grounded, its velocity is exactly zero, and it has no move input and no held actions
+- nothing has moved it since its last tick (a teleport, or `TerrainBodyLifter` raising it)
+- its `AbilityManager` has no timer running, and every ability with `every_tick()` agrees (`AbilityBase.can_rest()`; Jump does once its time off the ground is 0)
+- it isn't one of its check ticks: every `rest_check_ticks` (15) it runs a full tick anyway, staggered by entity id, so ground that went away under it is noticed within a quarter of a second
+
+A resting pawn skips its abilities, gravity and `move_and_slide`, and only does its bookkeeping. **What wakes it:** any input or press, any ability starting (a hit's knockback, Death), any velocity, being moved, or a check tick.
+
+**It's a pure rule of the pawn's state and the tick number,** with nothing remembered, so there's nothing extra to roll back, and a server and a client predicting the same pawn rest on exactly the same ticks.
+
+Things to know:
+- A standing pawn used to be nudged out of the way by `move_and_slide`'s depenetration when another walked into it. A resting one is nudged only on its check ticks, so crowds can press together a little more between checks.
+- The AI still runs on a resting pawn (the input phase), so a goblin that decides to move wakes on its next tick.
+
+### 15.4 Hits are delivered after simulate
+
+`Pawn.receive_hit()` called **during simulate** (an ability hitting) queues the hit. After every pawn has simulated, the queue is delivered in a fixed order (by the attacker's entity id, then the target's, then the order they were queued), through the new `TickDriver.after_simulate` signal. Called at any other time (game code, tests) it takes effect at once, as before.
+
+- So a hit's result never depends on whether the target simulated before or after the attacker. Before, a target that had already simulated started its knockback a tick later than one that hadn't.
+- Hits still land in the same tick: the damage, death and knockback start are in that tick's recorded state and snapshot.
+- `MeleeAttackAbility.hit_landed` still goes out when the swing finds the target; the target's own `hit_received` goes out when it takes the hit.
+
+### 15.5 Ready for the shared table (design only)
+
+The recorder already reads every pawn's hot values once a tick, in C++. In tier 1, the same read can fill the shared table that AI jobs and the pawn grid use instead of each asking nodes: dense slots, one array per field, entity id to slot, slots kept in entity-id order. Nothing in 15.1 to 15.4 gets in the way of that; nothing of it is built in t0.
+
+### 15.6 As built, and measured *(Claude 2026-11-09)*
+
+**Where it lives:**
+- Gates: `AbilityManager` (`timers_changed()`, `can_rest()`, `_timed`, `_every_tick_abilities`, `_action_bits`), the timer setters in `AbilityBase`, `AbilityBase.can_rest()` (Jump overrides it), Walk's `_refresh_stats()`, `StatManager.version`.
+- Resting: `Pawn.rest_when_idle`, `rest_check_ticks`, `is_resting` (for readouts and tests) and `_can_rest()`.
+- Hits: `Pawn.receive_hit()` queues during simulate; `TickDriver.after_simulate` and `TickDriver.is_in_simulate()`.
+
+**Tests:**
+- `ability_selftest`: `every_tick()` runs only where overridden (found in an inner-class script too), a timer written from outside counts down at once, Walk picks up a changed stat.
+- `pawn_selftest`: a standing pawn rests 28 of 30 ticks; it wakes for input, a teleport, a hit's knockback, and ground taken away (on its next check tick); and the same walk, stop, jump and stand script ends **exactly** where a never-resting pawn does (0.0000 m apart).
+- `combat_selftest`: the same swing with the two pawns joining the tick driver in both orders gives the same tick, damage and knockback path; the target takes the hit after simulate, in the same tick it lands.
+- Every other suite passes unchanged.
+
+**Measured** with `pawn_stress -- --sizes=100,400 --breakdown`, microseconds per pawn per tick at 400 pawns, against the morning's numbers (12.1):
+
+| Scene | Simulate: before | now | Abilities: before | now | Physics frame at 400: before | now |
+|---|---|---|---|---|---|---|
+| standing | 19.2 | 2.7 | 13.7 | 0.4 | 20.1 ms | 11.0 ms |
+| wandering | 24.3 | 11.5 | 14.1 | 2.9 | 24.2 ms | 19.7 ms |
+| fighting | 29.9 | 23.8 | 17.1 | 10.0 | 32.4 ms | 28.1 ms |
+
+- **Standing pawns are about seven times cheaper to simulate,** and a whole tick for 400 of them nearly halves. Wanderers rest between wanders, so they halve too.
+- **Fighting gains less** (about 20%), because fighting pawns are moving and pressing: they really do need their abilities and `move_and_slide` most ticks. About 235 fighting pawns now fit in a 60 Hz tick by the whole physics frame, against about 210 this morning. Fights are where tier 1's AI-on-workers and crowd movement come in.
+- **What a standing pawn still costs** is mostly outside simulate: about 13 µs of the other phases, mostly saving its inputs, which `pawn_stress` pawns do because no network session configures them. A real server or offline game skips that (12.1).

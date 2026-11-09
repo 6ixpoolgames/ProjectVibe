@@ -26,6 +26,7 @@ func _ready() -> void:
 	await _test_ai_with_no_ground()
 	await _test_no_arms_by_default()
 	await _test_visual_smoothing()
+	await _test_resting() # Claude 2026-11-09
 	await _measure_a_crowd()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -413,6 +414,71 @@ func _measure_a_crowd() -> void:
 
 
 # --- Helpers ---
+
+
+## Claude 2026-11-09: resting (pawn spec 15.3): a pawn standing still skips its abilities and move_and_slide, with a full check tick
+## every rest_check_ticks, and wakes for input, being moved, ground going away and hits. Resting changes nothing about where it ends up.
+func _test_resting() -> void:
+	var floor_body := _make_floor()
+	var pawn := _make_pawn(Vector3(0.0, 0.2, 0.0))
+	await _ticks(40)
+	var rested := 0
+	for i in 30:
+		await _ticks(1)
+		if pawn.is_resting:
+			rested += 1
+	_check(rested >= 26 and rested <= 28, "standing still it rests, with a full check tick every %d ticks (%d of 30 rested)" % [pawn.rest_check_ticks, rested])
+	_drive(pawn, Vector3(1.0, 0.0, 0.0))
+	await _ticks(1)
+	_check(not pawn.is_resting and pawn.velocity.x > 0.0, "a move input wakes it at once")
+	_drive(pawn, Vector3.ZERO)
+	await _ticks(60)
+	_check(pawn.is_resting, "and once it has stopped, it rests again")
+	pawn.global_position += Vector3(0.0, 2.0, 0.0)
+	await _ticks(1)
+	_check(not pawn.is_resting, "moved by something else (a teleport into the air): it wakes")
+	await _ticks(60)
+	_check(pawn.grounded and absf(pawn.position.y) < 0.05, "and falls back to the ground (%.3f m)" % pawn.position.y)
+	await _ticks(20)
+	var hit := HitInfo.new()
+	hit.target = pawn
+	hit.direction = Vector3(0.0, 0.0, 1.0)
+	hit.knockback_speed = 6.0
+	hit.knockback_ticks = 10
+	var before := pawn.position.z
+	pawn.receive_hit(hit)
+	await _ticks(3)
+	_check(not pawn.is_resting and pawn.position.z > before + 0.1, "a hit's knockback wakes it (pushed %.2f m)" % (pawn.position.z - before))
+	await _ticks(60)
+	floor_body.free()
+	var fell_after := -1
+	for i in pawn.rest_check_ticks + 5:
+		await _ticks(1)
+		if not pawn.grounded:
+			fell_after = i + 1
+			break
+	_check(fell_after > 0 and fell_after <= pawn.rest_check_ticks + 1, "ground taken away from under a resting pawn: it starts falling on its next check tick (after %d ticks)" % fell_after)
+	pawn.free()
+
+	# The same input script, once resting and once never resting, ends in exactly the same place.
+	floor_body = _make_floor()
+	var resting_pawn := _make_pawn(Vector3(0.0, 0.2, 0.0))
+	var awake_pawn := _make_pawn(Vector3(10.0, 0.2, 0.0))
+	awake_pawn.rest_when_idle = false
+	var plan := [[40, Vector3.ZERO, false], [25, Vector3(1.0, 0.0, 0.3), false], [30, Vector3.ZERO, false], [1, Vector3.ZERO, true], [50, Vector3.ZERO, false], [20, Vector3(-0.5, 0.0, 1.0), false], [45, Vector3.ZERO, false]]
+	var awake_ever_rested := false
+	for step in plan:
+		for i in step[0]:
+			_drive(resting_pawn, step[1], false, step[2])
+			_drive(awake_pawn, step[1], false, step[2])
+			await _ticks(1)
+			awake_ever_rested = awake_ever_rested or awake_pawn.is_resting
+	var offset := resting_pawn.global_position - (awake_pawn.global_position - Vector3(10.0, 0.0, 0.0))
+	_check(not awake_ever_rested, "with rest_when_idle off it never rests")
+	_check(offset.length() < 0.0015, "walking, stopping, jumping and standing: resting ends exactly where never resting does (%.4f m apart)" % offset.length())
+	resting_pawn.free()
+	awake_pawn.free()
+	floor_body.free()
 
 
 func _make_floor() -> StaticBody3D:

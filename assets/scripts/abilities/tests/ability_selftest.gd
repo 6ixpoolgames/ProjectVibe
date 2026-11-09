@@ -49,6 +49,18 @@ class SometimesAction extends AbilityBase:
 		starts += 1
 
 
+## Claude 2026-11-09: overrides every_tick(), to check the manager finds overrides in scripts like this one and calls only those.
+class EveryTickCounter extends AbilityBase:
+	var calls := 0
+
+	func every_tick(_dt: float) -> void:
+		calls += 1
+
+	# It always has something to do, so the pawn never rests while it's there (pawn spec 15.3).
+	func can_rest() -> bool:
+		return false
+
+
 func _ready() -> void:
 	print("--- Ability self-test ---")
 	await _test_rollback_registration()
@@ -59,6 +71,7 @@ func _ready() -> void:
 	await _test_one_press_one_ability()
 	await _test_no_stats()
 	await _test_rollback_restores_ability_state()
+	await _test_gates() # Claude 2026-11-09
 	_test_odd_setups()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -245,6 +258,38 @@ func _test_rollback_restores_ability_state() -> void:
 	var went_back: bool = TickDriver.rollback(TickDriver.tick - 12)
 	_check(went_back and sprint.ticks_left == real_ticks_left, "a replay ends with Sprint's time left exactly as it was (%d ticks)" % sprint.ticks_left)
 	_check(pawn.position.distance_to(real_position) < 0.0011, "and the pawn in the same place")
+	pawn.free()
+	floor_body.free()
+
+
+## Claude 2026-11-09 (pawn spec 15.2): the manager only runs what has a reason to: every_tick() only where a script overrides it, the
+## counters of running timers (including one written from outside, as a rollback does), and Walk reads its stats again when one changes.
+func _test_gates() -> void:
+	var floor_body := _make_floor(400.0)
+	var pawn: Pawn = load(PAWN_SCENE).instantiate()
+	pawn.position = Vector3(0, 0.1, 0)
+	var manager: AbilityManager = load("res://assets/scenes/pawn/parts/AbilityManager.tscn").instantiate()
+	var counter := EveryTickCounter.new()
+	counter.name = "Counter"
+	manager.add_child(counter)
+	pawn.add_child(manager)
+	add_child(pawn)
+	await _ticks(20)
+	var calls_before := counter.calls
+	await _ticks(10)
+	var with_every_tick: Array = manager._every_tick_abilities.map(func(a): return String(a.name))
+	_check(counter.calls - calls_before == 10 and with_every_tick.has("Counter") and with_every_tick.has("Jump") and not with_every_tick.has("Walk"), "every_tick() runs only on abilities that override it, every tick (%s)" % str(with_every_tick))
+	var sprint: SprintAbility = manager.get_node("Sprint")
+	sprint.cooldown_ticks_left = 30 # as a rollback loading saved values would
+	await _ticks(10)
+	_check(sprint.cooldown_ticks_left == 20, "a timer written from outside starts counting down at once (%d left after 10 ticks)" % sprint.cooldown_ticks_left)
+	var ai := _ai(pawn)
+	ai.move_in_direction(Vector3(1, 0, 0))
+	await _ticks(40)
+	var normal_speed := pawn.velocity.x
+	(pawn.stat_manager.get_stat(&"MoveSpeed") as Stat).value = 2.0
+	await _ticks(40)
+	_check(absf(normal_speed - 5.0) < 0.05 and absf(pawn.velocity.x - 2.0) < 0.05, "Walk keeps its stats, and picks up a changed one (%.2f, then %.2f m/s)" % [normal_speed, pawn.velocity.x])
 	pawn.free()
 	floor_body.free()
 

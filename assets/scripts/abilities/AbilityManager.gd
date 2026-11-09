@@ -47,6 +47,14 @@ var _actions: Array[AbilityBase] = []
 var _default_locomotion: AbilityBase = null
 var _locked_mask := 0 # categories locked right now, as bits
 var _tick_rate := 60.0
+# Claude 2026-11-09, gates and channels (pawn spec 15.2): only what has a reason to run this tick runs.
+var _timed: Array[AbilityBase] = [] # abilities with a timer running (a run, a cooldown or a buffered press)
+var _timers_dirty := true # a timer started or reached 0, so _timed is rebuilt before it's next used
+var _locks_dirty := true # an action started or stopped, so the locks are worked out again before they're next used
+var _every_tick_abilities: Array[AbilityBase] = [] # abilities whose script overrides every_tick()
+var _action_bits := 0 # the input bits of every action's trigger_action: the presses anything here answers to
+# Script -> whether it overrides every_tick(), worked out once per script. GDScript note: a static var is shared by every manager.
+static var _overrides_every_tick := {}
 
 
 func _init() -> void:
@@ -72,15 +80,42 @@ func _ready() -> void:
 func tick_abilities(dt: float) -> void:
 	if pawn == null:
 		return
-	_recompute_locks()
-	for ability in _abilities:
+	# Claude 2026-11-09 (pawn spec 15.2): the same steps as before, in the same order, but each only touches what has a reason to
+	# run: the locks only after an action started or stopped, the counters only of running timers, every_tick() only where an
+	# ability overrides it, and the action step only with a press, a buffered press or a running action.
+	if _locks_dirty:
+		_recompute_locks()
+	if _timers_dirty:
+		_rebuild_timed()
+	for ability in _timed:
 		if ability.cooldown_ticks_left > 0:
 			ability.cooldown_ticks_left -= 1
 		if ability.buffer_ticks_left > 0:
 			ability.buffer_ticks_left -= 1
+	for ability in _every_tick_abilities:
 		ability.every_tick(dt)
 	_run_locomotion(dt)
-	_run_actions(dt)
+	if _actions_have_work():
+		_run_actions(dt)
+
+
+## Claude 2026-11-09: the abilities' timers call this when one starts or reaches 0 (pawn spec 15.2).
+func timers_changed() -> void:
+	_timers_dirty = true
+	_locks_dirty = true
+
+
+## Claude 2026-11-09: true if the pawn can rest as far as its abilities go (pawn spec 15.3): no timer running, and every ability
+## with every_tick() agrees.
+func can_rest() -> bool:
+	if _timers_dirty:
+		_rebuild_timed()
+	if not _timed.is_empty():
+		return false
+	for ability in _every_tick_abilities:
+		if not ability.can_rest():
+			return false
+	return true
 
 
 ## True if pressing this action now would start something, counting abilities it would cancel. Asking changes nothing.
@@ -249,9 +284,44 @@ func _clear_way(ability: AbilityBase) -> void:
 # Claude 2026-11-09: the categories locked out right now, from every running timed action.
 func _recompute_locks() -> void:
 	_locked_mask = 0
+	_locks_dirty = false # Claude 2026-11-09
 	for ability in _actions:
 		if ability.is_running_timed():
 			_locked_mask |= ability.locks_out_mask
+
+
+# Claude 2026-11-09: the abilities with a timer running, kept so a tick only counts those down (pawn spec 15.2).
+func _rebuild_timed() -> void:
+	_timed.clear()
+	_timers_dirty = false
+	for ability in _abilities:
+		if ability.ticks_left > 0 or ability.cooldown_ticks_left > 0 or ability.buffer_ticks_left > 0:
+			_timed.append(ability)
+
+
+# Claude 2026-11-09, the input channel: whether _run_actions would do anything this tick. It does with a new press of an action
+# something here answers to, or an action running, or a press waiting in a buffer. Otherwise it would only loop and skip.
+func _actions_have_work() -> bool:
+	if pawn.held_actions & ~pawn.previous_held_actions & _action_bits != 0:
+		return true
+	for ability in _timed:
+		if ability.kind == AbilityBase.Kind.ACTION and (ability.ticks_left > 0 or ability.buffer_ticks_left > 0):
+			return true
+	return false
+
+
+# Claude 2026-11-09: whether this script overrides every_tick(). Godot's method list includes the base scripts' methods too, so an
+# override shows as a second every_tick (AbilityBase has one). Worked out once per script.
+static func _script_overrides_every_tick(script: Script) -> bool:
+	if script == null:
+		return false
+	if not _overrides_every_tick.has(script):
+		var count := 0
+		for method in script.get_script_method_list():
+			if method["name"] == "every_tick":
+				count += 1
+		_overrides_every_tick[script] = count > 1
+	return _overrides_every_tick[script]
 
 
 func _start(ability: AbilityBase) -> void:
@@ -287,6 +357,8 @@ func _collect_abilities() -> void:
 	_locomotions.clear()
 	_actions.clear()
 	_default_locomotion = null
+	_every_tick_abilities.clear() # Claude 2026-11-09
+	_action_bits = 0
 	for ability in _abilities:
 		if ability.kind == AbilityBase.Kind.LOCOMOTION:
 			_locomotions.append(ability)
@@ -294,6 +366,12 @@ func _collect_abilities() -> void:
 				_default_locomotion = ability
 		else:
 			_actions.append(ability)
+			if ability.trigger_action != &"":
+				_action_bits |= InputActions.mask_of(ability.trigger_action) # Claude 2026-11-09: the input channel
+		if _script_overrides_every_tick(ability.get_script()): # Claude 2026-11-09
+			_every_tick_abilities.append(ability)
+	_timers_dirty = true # Claude 2026-11-09
+	_locks_dirty = true
 
 
 ## Tells the pawn's TickStateComponent which ability properties roll back, before the first tick is recorded.

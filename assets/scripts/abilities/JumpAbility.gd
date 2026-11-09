@@ -36,6 +36,11 @@ func every_tick(_dt: float) -> void:
 	ticks_off_ground = 0 if pawn.grounded else mini(ticks_off_ground + 1, COUNT_CAP)
 
 
+## Claude 2026-11-09: a resting pawn is grounded, so every_tick() would only keep this at 0 (pawn spec 15.3).
+func can_rest() -> bool:
+	return ticks_off_ground == 0
+
+
 func can_start() -> bool:
 	if pawn.grounded:
 		return true

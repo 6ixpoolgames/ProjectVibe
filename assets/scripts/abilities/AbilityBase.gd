@@ -14,7 +14,8 @@
 ##   start()                once, when it starts. An action with no duration does its whole job here
 ##   tick(dt)               every tick it runs. A locomotion ability writes the pawn's velocity here
 ##   stop()                 once, when it stops
-##   every_tick(dt)         every tick, running or not, for counters such as time off the ground
+##   every_tick(dt)         every tick, running or not, for counters such as time off the ground. Claude 2026-11-09: only called on
+##                          abilities that override it; such an ability also overrides can_rest() (pawn spec 15.3)
 ## Times are set in seconds and kept in ticks, so they line up exactly between server and client.
 ##
 ## Rollback: what an ability keeps between ticks has to roll back. get_rollback_properties() names those properties, and the
@@ -50,9 +51,27 @@ enum Kind { LOCOMOTION, ACTION }
 @export var interrupt_threshold := 100
 
 # State that rolls back. See the top of the file.
-var ticks_left := 0 ## ticks left of a timed run. 0: not running a timed run
-var cooldown_ticks_left := 0 ## ticks until it can start again
-var buffer_ticks_left := 0 ## ticks a waiting press has left
+# Claude 2026-11-09: each timer tells the manager when it starts or reaches 0, so the manager only counts down the timers that are
+# running (pawn spec 15.2). That includes a rollback loading new values, which writes them through these setters.
+# GDScript note: inside its own setter, a variable's name means the stored value, so "ticks_left" there is the old value.
+## ticks left of a timed run. 0: not running a timed run
+var ticks_left := 0:
+	set(value):
+		if manager and (value > 0) != (ticks_left > 0):
+			manager.timers_changed()
+		ticks_left = value
+## ticks until it can start again
+var cooldown_ticks_left := 0:
+	set(value):
+		if manager and (value > 0) != (cooldown_ticks_left > 0):
+			manager.timers_changed()
+		cooldown_ticks_left = value
+## ticks a waiting press has left
+var buffer_ticks_left := 0:
+	set(value):
+		if manager and (value > 0) != (buffer_ticks_left > 0):
+			manager.timers_changed()
+		buffer_ticks_left = value
 
 ## Set by the AbilityManager.
 var manager: AbilityManager = null
@@ -119,3 +138,10 @@ func stop() -> void:
 
 func every_tick(_dt: float) -> void:
 	pass
+
+
+## Claude 2026-11-09: true if this ability is fine with the pawn resting (pawn spec 15.3): standing still, it skips its abilities,
+## gravity and move_and_slide. Only an ability that overrides every_tick() needs to think about it: answer false while every_tick()
+## would still change something with the pawn standing still. Jump answers false until its time off the ground is back to 0.
+func can_rest() -> bool:
+	return true

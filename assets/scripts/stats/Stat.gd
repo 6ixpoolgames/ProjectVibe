@@ -20,7 +20,14 @@ extends Node
 		value = new_value
 
 ## The value right now. Starts as base_value.
-var value := 0.0
+## Claude 2026-11-09: a change tells the StatManager (its version), so abilities that keep stat values read them again.
+var value := 0.0:
+	set(new_value):
+		if new_value != value:
+			var manager := get_parent() as StatManager
+			if manager:
+				manager.version += 1
+		value = new_value
 
 ## Claude 2026-11-09: on, this stat also has a current value that goes up and down during play, such as Health. value is then its
 ## most.

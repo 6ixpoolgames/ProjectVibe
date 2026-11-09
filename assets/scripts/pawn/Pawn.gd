@@ -99,10 +99,22 @@ signal died(pawn: Pawn, hit: HitInfo)
 ## rate by this (pawn spec 10.4). Nothing in the base changes it: how stealth, gear or light level turn into this number is a game
 ## rule, for a GameMode module to set.
 @export_range(0.0, 4.0, 0.01, "or_greater") var detectability := 1.0
+## Claude 2026-11-09: on: a pawn standing still with nothing to do rests, skipping its abilities, gravity and move_and_slide until
+## something wakes it (pawn spec 15.3). Off: it simulates fully every tick.
+@export var rest_when_idle := true
+## Claude 2026-11-09: a resting pawn still runs a full tick this often, staggered by entity id, so ground that went away under it is
+## noticed. 15 ticks is a quarter of a second at 60 ticks a second.
+@export_range(1, 600, 1, "or_greater") var rest_check_ticks := 15
+## Claude 2026-11-09: whether this pawn rested on its last tick, for readouts and tests. Worked out again every tick from its state,
+## so it isn't rollback state. Setting it changes nothing.
+var is_resting := false
 
 # Claude 2026-11-09: how many pawns in the tree are on each team, so AI sensing can skip looking when there's nobody to find.
 # GDScript note: a static var belongs to the class, not to one pawn, so every pawn shares this one dictionary.
 static var _pawns_per_team := {}
+# Claude 2026-11-09: hits queued during simulate, for every pawn, and the tick driver that delivers them (pawn spec 15.4).
+static var _queued_hits: Array = [] # [attacker's entity id, target's entity id, place in the queue, HitInfo]
+static var _hit_queue_driver: Node = null
 
 # This tick's input, as plain data. Listed in the TickState, so it goes over the network and rolls back.
 var move_input := Vector3.ZERO ## the direction to go, in world space, up to length 1
@@ -381,8 +393,21 @@ func revive() -> void:
 ##      happens.
 ##   4. Its own knockback starts, through its own AbilityManager, so the push moves it like its other movement and rolls back.
 ##   5. hit_received goes out.
+## Claude 2026-11-09 (pawn spec 15.4): called during the simulate phase, as an ability's hit is, it's queued, and every queued hit is
+## delivered after all pawns have simulated, in a fixed order, so the result never depends on whether this pawn simulated before or
+## after its attacker. Called at any other time, such as from game code or a test, it takes effect at once.
 func receive_hit(hit: HitInfo) -> void:
 	if not is_authority() or hit == null or is_dead():
+		return
+	if _driver and _driver.is_in_simulate():
+		_queue_hit(hit)
+		return
+	_take_hit(hit)
+
+
+# Claude 2026-11-09: the hit itself, steps 1 to 5 above. Checked again here, because a queued hit can arrive after another killed it.
+func _take_hit(hit: HitInfo) -> void:
+	if not is_authority() or is_dead():
 		return
 	if ai_context:
 		ai_context.note_hit(hit)
@@ -399,6 +424,46 @@ func receive_hit(hit: HitInfo) -> void:
 				ability.push(hit.direction * hit.knockback_speed, hit.knockback_ticks)
 				break
 	hit_received.emit(hit)
+
+
+# Claude 2026-11-09 (pawn spec 15.4): holds a hit until after simulate. One queue for all pawns, delivered by the tick driver's
+# after_simulate signal, which is connected the first time a hit is queued.
+func _queue_hit(hit: HitInfo) -> void:
+	if _hit_queue_driver != _driver:
+		# GDScript note: Pawn._deliver_queued_hits is a Callable on the class itself, not on this pawn, so it keeps working after
+		# this pawn is freed.
+		if is_instance_valid(_hit_queue_driver) and _hit_queue_driver.after_simulate.is_connected(Pawn._deliver_queued_hits):
+			_hit_queue_driver.after_simulate.disconnect(Pawn._deliver_queued_hits)
+		_driver.after_simulate.connect(Pawn._deliver_queued_hits)
+		_hit_queue_driver = _driver
+	_queued_hits.append([_order_key(hit.attacker), _order_key(self), _queued_hits.size(), hit])
+
+
+# Claude 2026-11-09: the entity id, which is the same on every machine, or -1 for a pawn that isn't networked (the queue order then
+# decides, which is the order pawns simulated in).
+static func _order_key(node: Node) -> int:
+	var pawn := node as Pawn
+	if pawn == null or not is_instance_valid(pawn) or pawn._entity == null:
+		return -1
+	return pawn._entity.entity_id
+
+
+# Claude 2026-11-09: delivers every queued hit, sorted by the attacker's entity id, then the target's, then the order they were queued.
+static func _deliver_queued_hits(_dt: float, _tick: int) -> void:
+	if _queued_hits.is_empty():
+		return
+	var hits := _queued_hits
+	_queued_hits = []
+	hits.sort_custom(func(a: Array, b: Array) -> bool:
+		if a[0] != b[0]:
+			return a[0] < b[0]
+		if a[1] != b[1]:
+			return a[1] < b[1]
+		return a[2] < b[2])
+	for entry in hits:
+		var hit: HitInfo = entry[3]
+		if is_instance_valid(hit.target):
+			hit.target._take_hit(hit)
 
 
 ## Claude 2026-11-09: this pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
@@ -471,9 +536,16 @@ func _tick_ai(tick: int) -> void:
 		ai_behaviour_manager.tick_running(tick)
 
 
-func _tick_simulate(dt: float, _tick: int) -> void:
+func _tick_simulate(dt: float, tick: int) -> void:
+	# Claude 2026-11-09: resting (pawn spec 15.3). Checked before _current_position is overwritten, because "nothing moved it since
+	# its last tick" compares against it. A resting pawn only does the bookkeeping at the end.
+	var resting := _can_rest(tick)
+	is_resting = resting
 	_previous_position = _current_position
 	_previous_yaw = _current_yaw
+	if resting:
+		_finish_tick()
+		return
 	# Claude 2026-11-07: abilities steer, then gravity, then one move_and_slide. Gravity goes by whether it was on the ground when the
 	# tick began, as GroundMovement did, so a jump that starts this tick isn't pulled down in the same tick.
 	var was_grounded := grounded
@@ -487,6 +559,12 @@ func _tick_simulate(dt: float, _tick: int) -> void:
 	move_and_slide()
 	velocity /= factor
 	grounded = is_on_floor()
+	_finish_tick() # Claude 2026-11-09: moved into a function, which a resting tick runs too
+
+
+# Claude 2026-11-09: the end of every tick, resting or not: where the body is now, for smoothing Visual and for the resting check,
+# and the input bookkeeping.
+func _finish_tick() -> void:
 	_current_position = global_position
 	_current_yaw = yaw
 	# Claude 2026-11-07: what was held this tick, so the next tick can tell a press from a hold.
@@ -495,6 +573,23 @@ func _tick_simulate(dt: float, _tick: int) -> void:
 	if not _input_missing_this_tick:
 		_missing_input_ticks = 0
 	_input_missing_this_tick = false
+
+
+## Claude 2026-11-09: true if this pawn rests this tick (pawn spec 15.3). A pure rule of its state and the tick number, with nothing
+## remembered, so nothing extra rolls back and a server and a client predicting it rest on the same ticks. In order of cheapness:
+##   - rest_when_idle is on, it's grounded, its velocity is exactly zero, and it has no move input and no held actions
+##   - nothing moved it since its last tick (a teleport, or TerrainBodyLifter raising it)
+##   - this isn't one of its check ticks, every rest_check_ticks, staggered by entity id
+##   - its abilities have no timer running and agree (AbilityManager.can_rest)
+func _can_rest(tick: int) -> bool:
+	if not rest_when_idle or not grounded or velocity != Vector3.ZERO or move_input != Vector3.ZERO or held_actions != 0:
+		return false
+	if global_position != _current_position:
+		return false
+	var stagger: int = _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
+	if (tick + stagger) % rest_check_ticks == 0:
+		return false
+	return ability_manager == null or ability_manager.can_rest()
 
 
 ## TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is
