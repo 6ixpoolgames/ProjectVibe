@@ -35,6 +35,8 @@ func _ready() -> void:
 	add_child(floor_body)
 	await _test_dash()
 	await _test_interrupts()
+	await _test_tag_groups() # Claude 2026-11-10
+	await _test_interrupt_table() # Claude 2026-11-10
 	await _test_melee_hits()
 	await _test_melee_multi_hit() # Claude 2026-11-09
 	await _test_hits_after_simulate() # Claude 2026-11-09
@@ -110,13 +112,57 @@ func _test_dash() -> void:
 	pawn.free()
 
 
+# Claude 2026-11-10: several tags per ability (extra_categories), a lockout naming a group, and the AI's search by tag.
+func _test_tag_groups() -> void:
+	var pawn := _make_pawn(Vector3(50, 0.1, 0))
+	var ai := _ai(pawn)
+	var manager := pawn.ability_manager
+	var dash: DashAbility = manager.get_node("Dash")
+	await _ticks(15)
+	var mask := dash.category_mask
+	_check(TagRegistry.matches(mask, Tags.MOVEMENT_DASH) and TagRegistry.matches(mask, Tags.MOVEMENT_ADVANCED) and TagRegistry.matches(mask, Tags.MOVEMENT) and not TagRegistry.matches(mask, Tags.MOVEMENT_BASIC), "a dash answers to its category, its extra category (movement.advanced) and their parent, and not to basic movement")
+	_check(manager.action_for_tag(Tags.MOVEMENT_ADVANCED) == &"dash", "asked for advanced movement, the manager answers with the action that starts the dash")
+	_check(manager.action_for_tag(Tags.MOVEMENT_BASIC) == &"jump", "asked for basic movement: jump (walk and sprint are held, not pressed, so they're not offered)")
+	_check(manager.action_for_tag(&"no.such.group") == &"" and not TagRegistry.has_tag(&"no.such.group"), "an unknown tag finds nothing, and isn't added to the registry")
+	ai.press(&"dash")
+	await _ticks(2)
+	_check(dash.is_running_timed() and manager.action_for_tag(Tags.MOVEMENT_ADVANCED) == &"", "while the dash runs (or cools down), nothing in the group can start, so nothing is offered")
+	_check(not manager.can_start(&"jump") and manager.action_for_tag(Tags.MOVEMENT_BASIC) == &"", "the dash locks out the basic movement group (locks_out [movement.basic]): jump can't start")
+	pawn.free()
+
+
+# Claude 2026-11-10: the interrupt table says what the rules do, by the pawn's numbers now.
+func _test_interrupt_table() -> void:
+	var listed := Busy.new()
+	listed.name = "CancelledByJump"
+	listed.cancelled_by = [Tags.MOVEMENT_JUMP]
+	var pawn := _make_pawn(Vector3(60, 0.1, 0), [listed])
+	var manager := pawn.ability_manager
+	await _ticks(5)
+	var rule := func(starting: String, running: String) -> String:
+		return manager.interrupt_rule(manager.get_node(starting), manager.get_node(running))["result"]
+	_check(rule.call("Dash", "MeleeAttack") == "cancels" and rule.call("Sprint", "MeleeAttack") == "blocked", "dash cancels a swing; sprint is blocked by one")
+	_check(rule.call("Knockback", "Dash") == "cancels" and rule.call("Dash", "Knockback") == "cancels" and rule.call("MeleeAttack", "Knockback") == "blocked", "knockback and dash cancel each other; a swing can't break a knockback")
+	_check(rule.call("Jump", "Dash") == "blocked" and rule.call("Jump", "Sprint") == "alongside", "a dash blocks a jump; a jump and a sprint run alongside")
+	var listed_rule: Dictionary = manager.interrupt_rule(manager.get_node("Jump"), listed)
+	_check(listed_rule["result"] == "cancels" and String(listed_rule["reason"]).contains("cancelled_by"), "cancelled_by shows, with its reason (%s)" % listed_rule["reason"])
+	var melee: MeleeAttackAbility = manager.get_node("MeleeAttack")
+	melee.interrupt_threshold = 50 # a berserk state, say: swings that can't be broken
+	_check(rule.call("Dash", "MeleeAttack") == "blocked" and rule.call("Knockback", "MeleeAttack") == "blocked", "a threshold changed while playing shows at once: nothing below 50 breaks the swing")
+	melee.interrupt_threshold = 15
+	var table := manager.get_interrupt_table()
+	var has_jump_row := table.any(func(row: Dictionary) -> bool: return row["running"] == &"Jump")
+	_check(table.size() == manager.get_abilities().size() - 1 and not has_jump_row and table[0]["cells"].size() == manager.get_abilities().size() - 1, "a row per ability that can be running (not Jump, which happens at once), and an entry per other ability (%d rows)" % table.size())
+	print(manager.get_interrupt_table_text().indent("      "))
+	pawn.free()
+
+
 # Claude 2026-11-10: a hit from in front, with a push and no damage worth noting, for the dash's invulnerability checks.
 func _push_hit(pawn: Pawn) -> HitInfo:
 	var hit := HitInfo.new()
 	hit.target = pawn
 	hit.direction = Vector3(-1, 0, 0)
-	hit.knockback_speed = 8.0
-	hit.knockback_ticks = 10
+	hit.effects = [Effect.make_knockback(8.0, 10)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	return hit
 
 
@@ -284,7 +330,9 @@ func _test_melee_multi_hit() -> void:
 	await _ticks(16) # the 8-tick wind-up, the 4 hit ticks and the knockback's first ticks
 	var hit_both := landed.any(func(hit): return hit.target == left) and landed.any(func(hit): return hit.target == right)
 	_check(landed.size() == 2 and hit_both, "multi-hit: one swing hits both enemies inside its sphere, each once (%d hits)" % landed.size())
-	_check(left.get_health() == 100.0 - melee.damage and right.get_health() == 100.0 - melee.damage, "and each takes the damage (%d and %d HP)" % [int(left.get_health()), int(right.get_health())])
+	# Claude 2026-11-10: the damage is the swing's on-hit effect now (swing_hit.tres, 20), not a number on the swing.
+	var damage := -melee.on_hit_effects[0].planned_change(&"Health")
+	_check(damage == 20.0 and left.get_health() == 100.0 - damage and right.get_health() == 100.0 - damage, "and each takes the damage from the swing's on-hit effect (%d and %d HP)" % [int(left.get_health()), int(right.get_health())])
 	_check(left.global_position.x < 29.45 and right.global_position.x > 30.55, "and each is knocked back away from the attacker, to its own side (%.2f and %.2f m sideways)" % [left.global_position.x - 29.5, right.global_position.x - 30.5])
 	attacker.free()
 	left.free()

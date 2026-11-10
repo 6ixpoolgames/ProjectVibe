@@ -40,8 +40,8 @@ const GOBLIN_SCENE := preload("res://assets/scenes/samples/arena_goblin.tscn")
 ## Claude 2026-11-09: longer cooldowns in this level only, in seconds by ability name, so switching between abilities is easy to see
 ## (the owner's request). The base's are MeleeAttack 0, Jump 0, Dash 1 and Sprint 4. Knockback and Death are left alone: a cooldown
 ## on Death would make a revived pawn unkillable for a while, and one on Knockback would let a second hit go unstaggered.
-## Claude 2026-11-10: MeleeAttack 1.5 → 0.8, the owner's call that it was a little long. With the faction arena's follow-up, that's a
-## swing, a follow-up, and a short wait.
+## Claude 2026-11-10: MeleeAttack 1.5 → 0.8, the owner's call that it was a little long. Claude 2026-11-10: the faction arena leaves
+## MeleeAttack's out, so its combo is decided by boosts alone (FactionArenaSample._debug_cooldowns).
 ## Claude 2026-11-10: Dash 3 → 6, doubled with the base's (1 → 2), the owner's call that it's too good.
 const DEBUG_COOLDOWNS := {"MeleeAttack": 0.8, "Jump": 1.0, "Dash": 6.0, "Sprint": 8.0}
 ## Claude 2026-11-09: the players' team. Every other team is AI (faction_arena_sample has two).
@@ -55,6 +55,7 @@ var _show_readouts := true
 var _kills := 0
 var _deaths := 0
 var _readouts := {} # Pawn -> Label3D
+var _player_readouts := {} # Claude 2026-11-10: Pawn -> Label3D over each player's pawn: last ability, effects, Health (pawn spec 8.11)
 var _player_pawn: Pawn = null # the pawn this machine's player started with, to go back to after Tab
 var _last_ability := {} # Claude 2026-11-09: Pawn -> the AbilityBase it last started, for the readout
 var _debug_draw: AbilityDebugDraw = null # Claude 2026-11-09: swing spheres and dash trails
@@ -175,28 +176,47 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 		return
 	_debug_draw.watch(pawn) # Claude 2026-11-09
 	_lengthen_cooldowns(pawn) # Claude 2026-11-09
+	# Claude 2026-11-09: remember what each pawn last started, for its readout. Walk never "starts": it's what runs when nothing else
+	# does. Claude 2026-11-10: players' pawns too, for their own readout.
+	if pawn.ability_manager:
+		pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void: _last_ability[pawn] = ability)
 	if pawn.team != PLAYER_TEAM: # Claude 2026-11-09: was team 1; any AI team now
 		_timeline.watch(pawn) # Claude 2026-11-09
-		# Claude 2026-11-09: remember what each goblin last started, for its readout. Walk never "starts": it's what runs when
-		# nothing else does.
-		if pawn.ability_manager:
-			pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void: _last_ability[pawn] = ability)
-		var label := Label3D.new()
-		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		label.no_depth_test = true
-		label.font_size = 48
-		label.outline_size = 12
-		label.pixel_size = 0.005 # Claude 2026-11-09: was 0.004; a little bigger, the owner's request
-		label.position = Vector3(0.0, 2.4, 0.0)
-		pawn.get_visual().add_child(label)
-		_readouts[pawn] = label
+		_readouts[pawn] = _make_readout(pawn)
 		# Claude 2026-11-10: its readout goes the moment it leaves, since a spawner removes bodies now, not this script. A freed pawn
 		# left in _readouts broke the loops over it, whose loop variable is typed Pawn.
 		pawn.tree_exiting.connect(func() -> void:
 			_readouts.erase(pawn)
 			_last_ability.erase(pawn))
+	else:
+		# Claude 2026-11-10: a smaller readout over a player's pawn, so a player sees their own combo boosts (pawn spec 8.11). Kept
+		# apart from _readouts, which Tab and the goblin counts read.
+		var label := _make_readout(pawn)
+		label.pixel_size = 0.004
+		_player_readouts[pawn] = label
+		pawn.tree_exiting.connect(func() -> void:
+			_player_readouts.erase(pawn)
+			_last_ability.erase(pawn))
 	if not NetworkSession.is_client():
 		pawn.died.connect(_on_pawn_died)
+
+
+# Claude 2026-11-10: a readout label over a pawn. Moved here from _on_entity_spawned, unchanged, so players' pawns get one too.
+func _make_readout(pawn: Pawn) -> Label3D:
+	var label := Label3D.new()
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.font_size = 48
+	label.outline_size = 12
+	label.pixel_size = 0.005 # Claude 2026-11-09: was 0.004; a little bigger, the owner's request
+	label.position = Vector3(0.0, 2.4, 0.0)
+	pawn.get_visual().add_child(label)
+	return label
+
+
+## Claude 2026-11-10: this level's cooldowns, DEBUG_COOLDOWNS. A sample that extends this one can return its own.
+func _debug_cooldowns() -> Dictionary:
+	return DEBUG_COOLDOWNS
 
 
 ## Claude 2026-11-09: every machine, for every pawn: sets DEBUG_COOLDOWNS. An ability that had no cooldown didn't list its cooldown
@@ -211,11 +231,12 @@ func _lengthen_cooldowns(pawn: Pawn) -> void:
 			tick_state = child
 	var new_entries: Array[String] = []
 	for ability in pawn.ability_manager.get_abilities():
-		if not DEBUG_COOLDOWNS.has(String(ability.name)):
+		var cooldowns := _debug_cooldowns() # Claude 2026-11-10: a function, so the faction arena can change the list
+		if not cooldowns.has(String(ability.name)):
 			continue
 		if ability.cooldown <= 0.0:
 			new_entries.append("%s:cooldown_ticks_left" % pawn.get_path_to(ability))
-		ability.cooldown = DEBUG_COOLDOWNS[String(ability.name)]
+		ability.cooldown = cooldowns[String(ability.name)]
 	if tick_state and not new_entries.is_empty():
 		tick_state.add_state_properties(new_entries)
 
@@ -264,10 +285,20 @@ func _update_readouts() -> void:
 			continue
 		label.text = _readout_text(pawn)
 		label.modulate = Color(1.0, 0.45, 0.4) if pawn.ai_context and pawn.ai_context.current_state_name() == &"Combat" else Color(1.0, 0.95, 0.8)
+	# Claude 2026-11-10: players' pawns: their last ability, their effects and their Health.
+	for pawn: Pawn in _player_readouts.keys():
+		var label: Label3D = _player_readouts[pawn]
+		if not is_instance_valid(pawn) or not is_instance_valid(label):
+			_player_readouts.erase(pawn)
+			continue
+		label.visible = _show_readouts and not _timeline.is_viewing_past()
+		if label.visible:
+			label.text = _player_readout_text(pawn)
+			label.modulate = Color(0.75, 0.9, 1.0)
 
 
 ## Claude 2026-11-09: one goblin's readout, which the timeline also records each tick: its state and behaviour, its target and how
-## aware of it it is, the last ability it started, and its Health.
+## aware of it it is, the last ability it started, and its Health. Claude 2026-11-10: and the effects on it.
 func _readout_text(pawn: Pawn) -> String:
 	var lines := PackedStringArray()
 	if pawn.is_dead():
@@ -289,8 +320,33 @@ func _readout_text(pawn: Pawn) -> String:
 			lines.append("last: %s%s" % [last.name, " (running)" if last.is_running_timed() else ""])
 		else:
 			lines.append("last: —")
+	lines.append_array(_effect_lines(pawn)) # Claude 2026-11-10
 	lines.append("HP %d" % int(pawn.get_health()))
 	return "\n".join(lines)
+
+
+## Claude 2026-11-10: a player's pawn's readout: the last ability it started, what's on it, and its Health.
+func _player_readout_text(pawn: Pawn) -> String:
+	var lines := PackedStringArray()
+	var last: AbilityBase = _last_ability.get(pawn)
+	lines.append("last: %s%s" % [last.name, " (running)" if last.is_running_timed() else ""] if is_instance_valid(last) else "last: —")
+	lines.append_array(_effect_lines(pawn))
+	lines.append("HP %d" % int(pawn.get_health()))
+	return "\n".join(lines)
+
+
+## Claude 2026-11-10 (pawn spec 8.11): a line per effect on the pawn: its name, the seconds it has left, and its stacks if more than
+## one, such as "combo second boost 0.4 s". On a client these come from snapshots, or from its own prediction for its own pawn.
+func _effect_lines(pawn: Pawn) -> PackedStringArray:
+	var lines := PackedStringArray()
+	if pawn.effect_manager == null:
+		return lines
+	var rate := float(TickDriver.get_tick_rate())
+	for entry in pawn.effect_manager.get_active_effects():
+		var effect: Effect = entry["effect"]
+		var stacks: int = entry["stacks"]
+		lines.append("+ %s %.1f s%s" % [effect.describe() if effect else "?", entry["ticks_left"] / rate, " x%d" % stacks if stacks > 1 else ""])
+	return lines
 
 
 # --- Pause, step and the view-only rewind (Claude 2026-11-09) ---

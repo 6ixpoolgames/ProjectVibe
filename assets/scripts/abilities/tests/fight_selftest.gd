@@ -135,11 +135,11 @@ func _hit(attacker: Pawn, target: Pawn, damage: int) -> HitInfo:
 	hit.attacker = attacker
 	hit.target = target
 	hit.tick = TickDriver.tick
-	hit.damage = damage
+	hit.effects = [Effect.make_damage(damage)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	var away := target.global_position - attacker.global_position
 	away.y = 0.0
 	hit.direction = away.normalized()
-	hit.knockback_speed = 0.0 # these tests check damage; knockback has its own test
+	# these tests check damage; knockback has its own test, so the hit has no knockback effect
 	return hit
 
 

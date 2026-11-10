@@ -24,8 +24,9 @@ var push_ticks := 0
 func _init() -> void:
 	super()
 	kind = Kind.ACTION
-	category = &"combat.knockback"
-	locks_out = [&"movement", &"combat"]
+	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	category = Tags.COMBAT_KNOCKBACK
+	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
 	interrupt_priority = 30
 	# Claude 2026-11-10, the owner's call: only Dash (40) cancels a knockback. Walking, sprinting, jumping and attacking stay locked
 	# out, as before, when the threshold was the default 100.

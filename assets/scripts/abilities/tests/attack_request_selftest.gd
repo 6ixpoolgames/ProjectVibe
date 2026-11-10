@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless self-test for presses as requests: when several abilities answer one
 ## action, the highest priority that can start wins (it was the lowest), priority_jitter varies the choice from tick to tick but never
 ## within one tick, and the faction arena's attacks: the attack request gives the normal swing, then a follow-up while that cools
-## down, and the special request gives the heavy attack.
+## down, and the special request gives the heavy attack. Claude 2026-11-10: the follow-up is now a combo made of boosts (_test_combo).
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/attack_request_selftest.tscn"
 extends Node
@@ -39,7 +39,7 @@ func _ready() -> void:
 	add_child(floor_body)
 	await _test_higher_priority_wins()
 	await _test_jitter()
-	await _test_follow_up()
+	await _test_combo() # Claude 2026-11-10: was _test_follow_up
 	await _test_special()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -81,36 +81,49 @@ func _test_jitter() -> void:
 	plain.free()
 
 
-## Attack, then attack again quickly: the follow-up. Then nothing until the normal swing's cooldown is over.
-func _test_follow_up() -> void:
+## Claude 2026-11-10 (pawn spec 8.11): replaces the follow-up test. The faction arena's combo, made of boosts: pressing again quickly
+## gives swing, second, finisher; pressing slowly gives swing, swing.
+func _test_combo() -> void:
 	var pawn: Pawn = load(PLAYER_SCENE).instantiate()
 	pawn.skip_default_parts = NO_AI
 	add_child(pawn)
-	var normal: MeleeAttackAbility = pawn.ability_manager.get_node("MeleeAttack")
-	var follow: FollowUpAttackAbility = pawn.ability_manager.get_node("FollowUpAttack")
-	normal.cooldown = 0.8 # as in the arena: 48 ticks (Claude 2026-11-10: was 1.5, the arena's old value)
+	var manager := pawn.ability_manager
+	var swing: MeleeAttackAbility = manager.get_node("MeleeAttack")
+	var second: MeleeAttackAbility = manager.get_node("SecondSwing")
+	var finisher: MeleeAttackAbility = manager.get_node("FinisherSwing")
 	await _ticks(5)
-	_check(follow.priority < normal.priority and follow.trigger_action == normal.trigger_action and normal.priority_jitter == 0.0 and follow.priority_jitter == 0.0, "the follow-up answers the same request with a lower priority, and neither has jitter")
+	_check(swing.trigger_action == second.trigger_action and second.trigger_action == finisher.trigger_action and swing.priority == 10 and second.priority == 0 and finisher.priority == -10, "three swings answer the attack request, at priorities 10, 0 and -10")
 	_ai(pawn).press(&"primary")
 	await _ticks(2)
-	_check(normal.is_running_timed() and not follow.is_running_timed(), "the attack request starts the normal swing")
-	await _until(func() -> bool: return not normal.is_running_timed(), 60)
+	_check(swing.is_running_timed() and manager.press_priority_now(second) == 20, "the request starts the swing, which boosts the second swing to 20 for a moment (%d)" % manager.press_priority_now(second))
+	await _until(func() -> bool: return not swing.is_running_timed(), 60)
 	_ai(pawn).press(&"primary")
 	await _ticks(2)
-	_check(follow.is_running_timed(), "pressed again while it cools down, within the window: the follow-up")
-	await _until(func() -> bool: return not follow.is_running_timed(), 60)
+	_check(second.is_running_timed() and manager.press_priority_now(finisher) == 30, "pressed again quickly: the second swing, which boosts the finisher to 30 (%d)" % manager.press_priority_now(finisher))
+	await _until(func() -> bool: return not second.is_running_timed(), 60)
 	_ai(pawn).press(&"primary")
 	await _ticks(2)
-	_check(not normal.is_running_timed() and not follow.is_running_timed(), "and again: nothing, one follow-up per swing, and the normal one still cooling down")
-	await _until(func() -> bool: return normal.cooldown_ticks_left == 0, 120)
+	_check(finisher.is_running_timed(), "and again: the finisher")
+	await _until(func() -> bool: return not finisher.is_running_timed(), 60)
+	await _ticks(40) # past every boost
+	_check(manager.press_priority_now(second) == 0 and manager.press_priority_now(finisher) == -10 and pawn.effect_manager.get_active_effects().is_empty(), "the boosts end at their deadline: back to 0 and -10, nothing left on the pawn")
 	_ai(pawn).press(&"primary")
 	await _ticks(2)
-	_check(normal.is_running_timed(), "once its cooldown is over, the normal swing again")
-	await _until(func() -> bool: return not normal.is_running_timed(), 60)
-	await _ticks(int(follow.follow_window * 60) + 5)
+	_check(swing.is_running_timed(), "a press after that: the swing again")
+	await _until(func() -> bool: return not swing.is_running_timed(), 60)
+	await _ticks(40)
 	_ai(pawn).press(&"primary")
 	await _ticks(2)
-	_check(not follow.is_running_timed(), "a press after the window has closed: no follow-up")
+	_check(swing.is_running_timed(), "pressing slowly: swing, swing")
+	# Mashing: a press near the end of the swing can't cancel it (10 against 15), so it waits in the buffer and the second starts
+	# as soon as the swing ends.
+	await _until(func() -> bool: return swing.ticks_left <= 4, 60)
+	_ai(pawn).press(&"primary")
+	await _ticks(2)
+	_check(swing.is_running_timed() and not second.is_running_timed(), "a press during the swing doesn't cut it short")
+	await _until(func() -> bool: return not swing.is_running_timed(), 60)
+	await _ticks(1)
+	_check(second.is_running_timed(), "it waits, and the second swing starts when the swing ends")
 	pawn.free()
 
 

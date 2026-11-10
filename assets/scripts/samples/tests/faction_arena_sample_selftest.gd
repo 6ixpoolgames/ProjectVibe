@@ -26,12 +26,18 @@ func _ready() -> void:
 	var blue: Array[Pawn] = []
 	for pawn: Pawn in arena._readouts:
 		(red if pawn.team == 1 else blue).append(pawn)
-	_check(player != null and player.team == 0 and player.ability_manager.has_node("HeavyAttack") and player.ability_manager.has_node("FollowUpAttack"), "the player is on team 0, with the heavy and follow-up attacks")
+	_check(player != null and player.team == 0 and player.ability_manager.has_node("HeavyAttack") and player.ability_manager.has_node("SecondSwing") and player.ability_manager.has_node("FinisherSwing"), "the player is on team 0, with the heavy attack and the combo's swings") # Claude 2026-11-10
 	_check(red.size() == 4 and blue.size() == 4, "the spawners fill up: %d red goblins on team 1 and %d blue on team 2" % [red.size(), blue.size()])
 	_check(GameMode.possession_coordinator.controller.action_keys.get(&"secondary") == arena.SPECIAL_KEY_ACTION and InputMap.has_action(arena.SPECIAL_KEY_ACTION), "the special attack is bound to the right mouse button")
 	var label: Label3D = arena._readouts[red[0]]
 	_check(is_equal_approx(label.pixel_size, 0.005), "the readouts are a little bigger (pixel_size 0.005)")
 	_check(arena._keys_text().contains("right mouse"), "and the key reminder mentions the special attack")
+	# Claude 2026-11-10 (pawn spec 8.11): the player's pawn has a readout too, which lists the effects on it, such as a combo boost.
+	var swing: AbilityBase = player.ability_manager.get_node("MeleeAttack")
+	player.effect_manager.apply_effects(swing.on_start_effects, player, swing)
+	var player_text: String = arena._player_readout_text(player)
+	_check(arena._player_readouts.has(player) and player_text.contains("combo second boost") and arena._readout_text(red[0]).contains("HP"), "the player's pawn has a readout, listing its effects (%s)" % player_text.replace("\n", " | "))
+	player.effect_manager.remove_all()
 	# The player stands far away, so the goblins find each other; bring the two groups close.
 	player.global_position = Vector3(60, player.global_position.y + 1.0, 60)
 	for i in red.size():

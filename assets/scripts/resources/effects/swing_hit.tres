@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="Effect" format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_wvhr7"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/StatChangePart.gd" id="2_kfqjk"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/KnockbackPart.gd" id="3_c4opk"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="4_1jbm4"]
+
+[sub_resource type="Resource" id="Resource_duwnk"]
+script = ExtResource("2_kfqjk")
+amount = -20.0
+
+[sub_resource type="Resource" id="Resource_n7s6f"]
+script = ExtResource("3_c4opk")
+hop_speed = 2.0
+
+[resource]
+script = ExtResource("4_1jbm4")
+effect_name = &"swing hit"
+tags = Array[StringName]([&"damage.physical"])
+parts = Array[ExtResource("1_wvhr7")]([SubResource("Resource_duwnk"), SubResource("Resource_n7s6f")])

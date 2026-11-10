@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/abilities/AbilityManager.gd" id="1_manager"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/WalkAbility.gd" id="2_walk"]
@@ -8,6 +8,9 @@
 [ext_resource type="Script" path="res://assets/scripts/abilities/MeleeAttackAbility.gd" id="6_melee"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/KnockbackAbility.gd" id="7_knockback"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/DeathAbility.gd" id="8_death"]
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectApplier.gd" id="9_applier"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="10_effect"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/swing_hit.tres" id="11_swing_hit"]
 
 [node name="AbilityManager" type="Node"]
 script = ExtResource("1_manager")
@@ -26,6 +29,10 @@ script = ExtResource("5_dash")
 
 [node name="MeleeAttack" type="Node" parent="."]
 script = ExtResource("6_melee")
+
+[node name="OnHit" type="Node" parent="MeleeAttack"]
+script = ExtResource("9_applier")
+effects = Array[ExtResource("10_effect")]([ExtResource("11_swing_hit")])
 
 [node name="Knockback" type="Node" parent="."]
 script = ExtResource("7_knockback")

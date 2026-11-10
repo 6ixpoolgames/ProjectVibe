@@ -32,9 +32,15 @@ enum Kind { LOCOMOTION, ACTION }
 @export var trigger_action: StringName = &""
 ## What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
 @export var category: StringName = &""
+## Claude 2026-11-10: more groups this ability belongs to, besides category, such as &"movement.advanced" for a dash, or a school and a
+## range for an attack (&"school.magic", &"range.ranged"). It answers to all of them, for lockouts, cancels and the AI's searches
+## (AbilityManager.action_for_tag): each is a group, so one rule covers every ability in it. All of them share one 64-bit mask, with
+## every other ability tag; how strong it is stays in the interrupt numbers, not in tags.
+@export var extra_categories: Array[StringName] = []
 ## When several abilities share a trigger_action, the highest priority that can start wins; then the first in the tree. Claude
 ## 2026-11-09: was lowest-wins; now it's higher-wins like interrupt_priority and behaviour scores (the owner's call). Among locomotion
-## abilities whose action is held, the same.
+## abilities whose action is held, the same. Claude 2026-11-10: effects on the pawn can add to it while they last
+## (AbilityPriorityPart, pawn spec 8.11), which is how combos work; and to interrupt_priority and interrupt_threshold.
 @export var priority := 0
 ## Claude 2026-11-09: a random offset, up to ± this much, added to priority each time a press picks between abilities on one action,
 ## like a behaviour's score_jitter. 0 (the default): none, so the order is always the same. The offset comes from the tick's own
@@ -103,7 +109,8 @@ var manager: AbilityManager = null
 ## Claude 2026-11-09: set by the AbilityManager: a number from this ability's name, for its priority_jitter's random offset.
 var jitter_salt := 0
 var pawn: Pawn = null
-## This ability's category as bits, with its parents' bits too. Worked out once by the manager.
+## This ability's category as bits, with its parents' bits too. Worked out once by the manager. Claude 2026-11-10: and its
+## extra_categories', with theirs.
 var category_mask := 0
 ## locks_out as bits. Worked out once by the manager.
 var locks_out_mask := 0
@@ -112,6 +119,12 @@ var cancelled_by_mask := 0
 ## Claude 2026-11-09: trigger_action's input bit (InputActions), or 0 with none. Worked out once by the manager, so a tick tests a bit
 ## instead of looking the name up (pawn spec 15.2).
 var trigger_bit := 0
+## Claude 2026-11-10 (pawn spec 8.11): what this ability applies, from its EffectApplier children, collected once by the manager.
+## on_start_effects go on its own pawn when it starts. on_hit_effects go on a pawn it hits, and on_hit_self_effects on its own pawn
+## when it hits; an ability that hits (MeleeAttack) hands both to the HitInfo.
+var on_start_effects: Array[Effect] = []
+var on_hit_effects: Array[Effect] = []
+var on_hit_self_effects: Array[Effect] = []
 
 
 func _init() -> void:

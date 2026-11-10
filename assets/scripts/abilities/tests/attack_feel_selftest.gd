@@ -151,7 +151,7 @@ func _test_invulnerable() -> void:
 	await _ticks(2)
 	var dash: DashAbility = dasher.ability_manager.get_node("Dash")
 	var hit := _hit(dasher, 2.0)
-	hit.damage = 30
+	hit.effects.append(Effect.make_damage(30)) # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	dasher.receive_hit(hit)
 	_check(dash.is_running_timed() and received.is_empty() and dasher.get_health() == 100.0, "a dashing pawn takes no hit: no damage and no hit_received (dashing %s, %d received, HP %d, grounded %s)" % [dash.is_running_timed(), received.size(), int(dasher.get_health()), dasher.grounded])
 	dasher.free()
@@ -165,9 +165,7 @@ func _hit(pawn: Pawn, hop: float) -> HitInfo:
 	var hit := HitInfo.new()
 	hit.target = pawn
 	hit.direction = Vector3(0, 0, 1)
-	hit.knockback_speed = 6.0
-	hit.knockback_ticks = 10
-	hit.knockback_hop = hop
+	hit.effects = [Effect.make_knockback(6.0, 10, hop)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	return hit
 
 

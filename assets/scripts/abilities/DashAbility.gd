@@ -51,11 +51,14 @@ func _init() -> void:
 	super()
 	kind = Kind.ACTION
 	trigger_action = &"dash"
-	category = &"movement.dash"
+	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	category = Tags.MOVEMENT_DASH
+	extra_categories = [Tags.MOVEMENT_ADVANCED] # Claude 2026-11-10: the AI asks for this group, not for "dash"
 	# Claude 2026-11-10: its length comes from its two phases (duration_ticks), not duration, as MeleeAttack's comes from its phases.
 	duration = 0.0
 	cooldown = 2.0 # Claude 2026-11-10: was 1.0
-	locks_out = [&"movement.walk", &"movement.sprint", &"movement.jump"]
+	# Claude 2026-11-10: the basic movement group: walk, sprint and jump, as the three names it listed before.
+	locks_out = [Tags.MOVEMENT_BASIC]
 	interrupt_priority = 40 # Claude 2026-11-10: was 20; above knockback's threshold (35)
 	# Claude 2026-11-10: 25 again (it was 40 for a few hours): a knockback (30) cancels it, once its invulnerability is over.
 	interrupt_threshold = 25

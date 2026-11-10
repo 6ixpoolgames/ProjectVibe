@@ -1,10 +1,11 @@
-[gd_resource type="Resource" script_class="PawnDefaultsRes" load_steps=12 format=3]
+[gd_resource type="Resource" script_class="PawnDefaultsRes" load_steps=13 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/resources/PawnDefaults_resource.gd" id="1_defaults"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/ControllerManager.tscn" id="2_controllers"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/NavigationManager.tscn" id="5_navigation"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/StatManager.tscn" id="3_stats"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AbilityManager.tscn" id="4_abilities"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/EffectManager.tscn" id="12_effects"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AIContextComponent.tscn" id="6_ai_context"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AISensingManager.tscn" id="9_ai_sensing"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AIMemory.tscn" id="10_ai_memory"]
@@ -14,4 +15,4 @@
 
 [resource]
 script = ExtResource("1_defaults")
-parts = Array[PackedScene]([ExtResource("2_controllers"), ExtResource("5_navigation"), ExtResource("3_stats"), ExtResource("4_abilities"), ExtResource("6_ai_context"), ExtResource("9_ai_sensing"), ExtResource("10_ai_memory"), ExtResource("11_ai_target"), ExtResource("7_ai_states"), ExtResource("8_ai_behaviours")])
+parts = Array[PackedScene]([ExtResource("2_controllers"), ExtResource("5_navigation"), ExtResource("3_stats"), ExtResource("12_effects"), ExtResource("4_abilities"), ExtResource("6_ai_context"), ExtResource("9_ai_sensing"), ExtResource("10_ai_memory"), ExtResource("11_ai_target"), ExtResource("7_ai_states"), ExtResource("8_ai_behaviours")])

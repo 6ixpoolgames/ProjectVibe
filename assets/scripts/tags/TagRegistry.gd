@@ -167,6 +167,30 @@ static func content_hash() -> int:
 	return ",".join(PackedStringArray(_tags)).hash()
 
 
+## Claude 2026-11-10: every tag the declarations file declares, with each one's parent levels, sorted: the list a tag dropdown offers
+## (addons/tag_picker). It only reads the file, so it changes nothing here: safe in the editor, and before or after the registry is
+## in use. Tags declared from code (declare()) aren't in it.
+static func read_declared_tags() -> Array[StringName]:
+	var out: Array[StringName] = []
+	var path: String = ProjectSettings.get_setting(DECLARATIONS_SETTING, DEFAULT_DECLARATIONS_PATH)
+	if path == "" or not ResourceLoader.exists(path):
+		return out
+	var res = load(path)
+	if not res is TagDeclarationsRes:
+		return out
+	var all := {}
+	for t in res.tags:
+		var tag := normalize(t)
+		var level_path := ""
+		for level in String(tag).split(".", false):
+			level_path = level if level_path == "" else level_path + "." + level
+			all[StringName(level_path)] = true
+	for tag in all.keys():
+		out.append(tag)
+	out.sort_custom(func(a, b): return String(a) < String(b))
+	return out
+
+
 ## Cleans up a tag name: trims spaces, drops empty levels. Returns &"" for nothing usable.
 static func normalize(tag) -> StringName:
 	if tag == null:

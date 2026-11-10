@@ -57,7 +57,8 @@ func tick(context: AIContextComponent) -> Status:
 	# The press reaches the ability on the next input; give it two ticks to start before checking whether it's over.
 	if context.current_tick - _started_tick < 2:
 		return Status.RUNNING
-	# Claude 2026-11-09: any swing on the action, since the manager may have picked a follow-up (FollowUpAttackAbility) instead.
+	# Claude 2026-11-09: any swing on the action, since the manager may have picked a follow-up instead. Claude 2026-11-10: such as
+	# the second swing of a combo, which a boost picks (pawn spec 8.11).
 	var abilities: Array = pawn.ability_manager.get_abilities() if pawn.ability_manager else []
 	for ability in abilities:
 		if ability.trigger_action == attack_action and ability.is_running_timed():

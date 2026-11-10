@@ -12,7 +12,9 @@ extends WalkAbility
 func _init() -> void:
 	super()
 	trigger_action = &"sprint"
-	category = &"movement.sprint"
+	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	category = Tags.MOVEMENT_SPRINT
+	extra_categories = [Tags.MOVEMENT_BASIC] # Claude 2026-11-10
 	speed_stat = &"SprintSpeed"
 	fallback_speed = 9.0
 	duration = 3.0

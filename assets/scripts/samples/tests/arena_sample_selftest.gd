@@ -92,7 +92,7 @@ func _ready() -> void:
 		var info := HitInfo.new()
 		info.attacker = player
 		info.target = victim
-		info.damage = 20
+		info.effects = [Effect.make_damage(20)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 		victim.receive_hit(info)
 	_check(victim.is_dead() and arena._kills == 1, "a goblin killed counts as a kill")
 	# Claude 2026-11-10: its spawner removes the body and sends a replacement; R (_spawn_wave) refills at once.

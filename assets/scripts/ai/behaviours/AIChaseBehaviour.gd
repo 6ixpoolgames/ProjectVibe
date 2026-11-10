@@ -24,6 +24,9 @@ extends AIBehaviourBase
 ## default; the arena's goblins turn it on, so the owner can see the AI switch abilities. A dash goes the way the pawn is moving, which
 ## is along its path.
 @export var dash_to_close := false
+## Claude 2026-11-10: the group of ability it uses to close in, not one ability by name: any ability tagged with it that can start
+## (AbilityManager.action_for_tag), so a pawn with a grappling hook in that group closes in the same way. Advanced movement by default.
+@export var close_in_tag: StringName = Tags.MOVEMENT_ADVANCED
 ## Claude 2026-11-09: the farthest the target can be for a dash, in metres. Claude 2026-11-10: 7.5 (was 6), for the new dash.
 @export_range(0.0, 50.0, 0.1, "or_greater") var dash_from_distance := 7.5
 ## Claude 2026-11-09: the nearest the target can be for a dash, in metres. Claude 2026-11-10: 5.5 (it was 4): a dash from a sprint
@@ -77,10 +80,13 @@ func tick(context: AIContextComponent) -> Status:
 		_last_path_tick = now
 		_hands.move_to(last_known)
 	# Claude 2026-11-09: a dash to close in. Pressed only when it can start, so a press never waits in Dash's buffer.
+	# Claude 2026-11-10: whatever ability in close_in_tag's group can start, through the action that starts it (it named &"dash").
 	if dash_to_close and pawn.ability_manager:
 		var distance_squared := offset.length_squared()
-		if distance_squared <= dash_from_distance * dash_from_distance and distance_squared >= dash_to_distance * dash_to_distance and pawn.ability_manager.can_start(&"dash"):
-			_hands.press(&"dash")
+		if distance_squared <= dash_from_distance * dash_from_distance and distance_squared >= dash_to_distance * dash_to_distance:
+			var action := pawn.ability_manager.action_for_tag(close_in_tag)
+			if action != &"":
+				_hands.press(action)
 	return Status.RUNNING
 
 

@@ -2,6 +2,9 @@
 ## Pawn.receive_hit(). Pawn spec section 8.6, step 9.
 ##
 ## Plain data. Made on the server only, where hits are decided. Claude 2026-11-09: damage added, step 10.
+## Claude 2026-11-10 (pawn spec 8.11): a hit carries effects now, not numbers. damage, knockback_speed, knockback_ticks and
+## knockback_hop are gone: the attacking ability's on-hit effects (EffectApplier children) say what the hit does, and the target's
+## EffectManager applies them. A hit made in code gives its own, such as [Effect.make_damage(20)].
 class_name HitInfo
 extends RefCounted
 
@@ -15,11 +18,19 @@ var ability: AbilityBase = null
 var tick := 0
 ## Flat, length 1: from the attacker toward the target. Knockback pushes this way.
 var direction := Vector3.ZERO
-## Claude 2026-11-09, step 10: health points taken from the target.
-var damage := 0
-## How fast the target is pushed, in metres per second, at the start of its knockback. 0: no knockback.
-var knockback_speed := 0.0
-## How many ticks the knockback lasts.
-var knockback_ticks := 0
-## Claude 2026-11-10: how fast the knockback lifts the target, in metres per second upward, for a small hop. 0: it stays on the ground.
-var knockback_hop := 0.0
+## Claude 2026-11-10: the effects that go on the target, in order.
+var effects: Array[Effect] = []
+## Claude 2026-11-10: the effects that go on the attacker once the hit lands (an EffectApplier on hit that applies to itself).
+var attacker_effects: Array[Effect] = []
+## Claude 2026-11-10: filled in when the hit lands: how much Health it took, after resistances. 0 before then.
+var damage_dealt := 0.0
+
+
+## Claude 2026-11-10: how much Health this hit's effects take before resistances, from their StatChangeParts. For readouts that show a
+## hit before it lands, such as the swing's debug label.
+func planned_damage() -> float:
+	var total := 0.0
+	for effect in effects:
+		if effect:
+			total -= effect.planned_change(&"Health")
+	return maxf(total, 0.0)

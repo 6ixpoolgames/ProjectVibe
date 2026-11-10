@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="Effect" format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_b3pmp"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/StatChangePart.gd" id="2_rg6n6"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/KnockbackPart.gd" id="3_e42d2"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="4_8rpnl"]
+
+[sub_resource type="Resource" id="Resource_rcihd"]
+script = ExtResource("2_rg6n6")
+amount = -35.0
+
+[sub_resource type="Resource" id="Resource_tybd6"]
+script = ExtResource("3_e42d2")
+speed = 11.0
+ticks = 14
+hop_speed = 3.5
+
+[resource]
+script = ExtResource("4_8rpnl")
+effect_name = &"heavy hit"
+tags = Array[StringName]([&"damage.physical"])
+parts = Array[ExtResource("1_b3pmp")]([SubResource("Resource_rcihd"), SubResource("Resource_tybd6")])

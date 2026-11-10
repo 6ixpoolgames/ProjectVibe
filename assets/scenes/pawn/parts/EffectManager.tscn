@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectManager.gd" id="1_effects"]
+
+[node name="EffectManager" type="Node"]
+script = ExtResource("1_effects")

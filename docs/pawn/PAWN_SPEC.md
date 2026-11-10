@@ -454,7 +454,7 @@ Agreed with the owner before building; the decisions are in the step 9 notes bel
 The owner wanted to test the behaviour system with more attacks: "another attack on a longer cooldown with higher priority, and a follow up attack that has a lower priority than normal", with the input passing through "as a request for an attack (the normal and followup) and a special attack (the heavy attack)", and priority meaning "which ability is chosen when a request is sent".
 
 - **Priority is higher-wins now** (8.4), with `priority_jitter` per ability, 0 by default.
-- **`FollowUpAttackAbility`** (`abilities/FollowUpAttackAbility.gd`): a `MeleeAttackAbility` that can start only within `follow_window` seconds (0.6) after the ability it `follows` (MeleeAttack) finishes, once per swing. Its priority is -10, below the normal swing's 0, so the attack request starts the normal swing when it's ready and the follow-up while that cools down. Quicker and lighter (5, 4 and 10 ticks, 12 damage). The tick its leader last finished rolls back.
+- ~~**`FollowUpAttackAbility`** (`abilities/FollowUpAttackAbility.gd`): a `MeleeAttackAbility` that can start only within `follow_window` seconds (0.6) after the ability it `follows` (MeleeAttack) finishes, once per swing. Its priority is -10, below the normal swing's 0, so the attack request starts the normal swing when it's ready and the follow-up while that cools down. Quicker and lighter (5, 4 and 10 ticks, 12 damage). The tick its leader last finished rolls back.~~ *(Claude 2026-11-10: removed. Its window was a gate; the faction arena's combo is made of boosts now, 8.11.)*
 - **The special request** (`secondary`) starts a heavy `MeleeAttackAbility` (`HeavyAttack` in `faction_abilities.tscn`: 18, 5 and 18 ticks, 35 damage, reach 2.4 m, a 6 s cooldown).
 - **The AI uses the same requests:** `AIAttackBehaviour` presses its action and waits for whichever ability on it runs (it used to wait for the first one only). A second Attack behaviour on `secondary` with a higher score (0.95 against 0.9) uses the heavy attack whenever it's ready and in range.
 - **Where to try it:** `faction_arena_sample.tscn`, red goblins (team 1) against blue goblins (team 2) against the players (team 0), with the left mouse button for the attack request and the right for the special. Its debug keys (from the arena): P pauses (offline only), → steps one tick, ← steps back through the last 10 s, view only (`AIDebugTimeline`, in `ai/debug/`): ghosts and readouts where the goblins were, and a list of their state, behaviour, target and ability events and hits. Tests: `abilities/tests/attack_request_selftest`, `samples/tests/faction_arena_sample_selftest`.
@@ -472,7 +472,7 @@ The owner wanted to test the behaviour system with more attacks: "another attack
 - **The arena's normal swing cooldown** is 0.8 s (it was 1.5).
 
 **Knockback:**
-- **A small hop back:** `MeleeAttackAbility.knockback_hop_speed` (2.0 m/s up; 1.5 on the follow-up, 3.5 on the heavy) goes in `HitInfo.knockback_hop`, and `KnockbackAbility.push(velocity, ticks, hop)` lifts the pawn on its first tick, as a jump does, if it's on the ground. A pawn already in the air isn't lifted again, so hits in a row can't keep it up. The hop is the y of `push_velocity`, which already rolled back.
+- **A small hop back:** `MeleeAttackAbility.knockback_hop_speed` (2.0 m/s up; 1.5 on the follow-up, 3.5 on the heavy) goes in `HitInfo.knockback_hop` *(Claude 2026-11-10: now `KnockbackPart.hop_speed` in the swing's on-hit effect, 8.11)*, and `KnockbackAbility.push(velocity, ticks, hop)` lifts the pawn on its first tick, as a jump does, if it's on the ground. A pawn already in the air isn't lifted again, so hits in a row can't keep it up. The hop is the y of `push_velocity`, which already rolled back.
 - **It locks out all movement and every attack,** as before: walking, sprinting, jumping and attacking can't start while it runs.
 - **Dash is the one way out:** Knockback's threshold is 35 (it was 100), and Dash's priority is 40.
 
@@ -522,6 +522,105 @@ The owner wanted to test the behaviour system with more attacks: "another attack
 
 **Tests:** `abilities/tests/attack_feel_selftest` (the sweep both ways, no sweep, the windup turn, the hop, invulnerability), `game_mode/tests/spawn_manager_selftest` (points, delays, the player's respawn, the spawner), and `combat_selftest`'s dash and knockback checks, changed to the new rules.
 
+### 8.10 Tag typo protection *(Claude 2026-11-10, the owner's request)*
+
+Ability tags (`category`, `extra_categories`, `locks_out`, `cancelled_by`) were typed by hand, and a misspelt one only gave a warning while playing (`TagRegistry` adds an undeclared tag on the spot). Now:
+- **Designers pick, not type:** the Tag Picker editor plugin (`addons/tag_picker/`, turned on in Project > Project Settings > Plugins) shows those properties as dropdowns of the declared tags, with their parent levels: one dropdown for `category` (with "(none)"), and a dropdown per entry for the lists, with a remove button and "Add tag". A value that isn't declared still shows, marked "(not declared)". New tags go in `resources/tag_declarations.tres`, and the dropdowns list them at once. Editor only: nothing in it runs in the game.
+- **Code uses constants:** `tags/Tags.gd` has a constant per declared tag and parent level (`Tags.MOVEMENT_DASH` for `movement.dash`), so a misspelling is an error when the script is checked. The built-in abilities use them. `tag_registry_selftest` checks every constant is declared and named after its tag.
+- `TagRegistry.read_declared_tags()` (new) gives the dropdown's list: it only reads the file, so it's safe in the editor and changes no bits.
+- Tests: `addons/tag_picker/tests/tag_picker_selftest` checks what the dropdown is built on. The dropdown itself only exists inside the editor, so it's checked by using it there.
+
+The limit is 64 tag levels in all (every level of a tag is one bit). The declarations use 17.
+
+**Several tags per ability** *(Claude 2026-11-10, agreed with the owner)*. Tags are for groups, which have no order; how strong an ability is stays in the interrupt numbers, which do. So:
+- **`AbilityBase.extra_categories`** (new): more groups an ability belongs to besides `category`. All of them go into its one `category_mask`, with their parents, so lockouts, cancels and searches see every group. Separate groups add up where nesting multiplies: a school (physical, magic, special), a range (melee, ranged) and a movement type take about a dozen bits, where `combat.attack.physicalMelee.heavy`-style nesting took 31 for attacks alone.
+- **Movement groups** (new tags): walk, sprint and jump are `movement.basic`; dash is `movement.advanced`, as a grappling hook would be. Dash's `locks_out` is now `[movement.basic]`, the same three abilities it named before.
+- **The AI asks for a group, not an ability:** `AbilityManager.action_for_tag(tag)` (new) gives the action that would start the highest-priority ability in that group that can start now, or nothing. It answers with an action because everything a pawn does goes through its input, which rolls back. Only pressed actions are offered, not held locomotion (walk, sprint). `AIChaseBehaviour` uses it with `close_in_tag` (`movement.advanced` by default) where it pressed `dash` by name, so a pawn with a grappling hook in that group closes in the same way.
+- **Room:** this is one table of 64 for ability rules. Other kinds of tag (damage types, statuses, items) get tables of their own when they're built, as navigation's `NavTags` already has. Masks can grow to two integers (128 bits) if this table ever fills; that changes a few lines in `AbilityManager`, not how designers use tags.
+- Still to come, when needed: tags the pawn wears while an ability runs (`state.dashing`), and tags an ability needs or can't have to start (`state.stunned`).
+
+**The interrupt table** *(Claude 2026-11-10, the owner's request)*. "What cancels what" for one pawn, worked out from its abilities' numbers and tags as they are now, so a change made while playing shows at once:
+- `AbilityManager.interrupt_rule(starting, running)`: alongside (they don't conflict), cancels (priority at least the threshold, or `cancelled_by`) or blocked, with the reason. The cancelling code and the table share one rule (`_lets_through`), so the table can't disagree with what happens.
+- `get_interrupt_table()`: a row per ability that can be running (timed ones and locomotion; an instant action such as Jump has no row, only entries), an entry per other ability. `get_interrupt_table_text()`: one line per row, for a print or a readout.
+- It doesn't look at cooldowns or `can_start()`, only at whether the two can overlap.
+- Not built yet: an editor panel showing it, and a place to set every ability's numbers at once; the owner and Claude are agreeing how, including changes while playing (a berserk state).
+
+### 8.11 Effects *(Claude 2026-11-10, the owner's design)*
+
+What abilities do to pawns is now **effects**, shaped like Unreal's gameplay effects. The owner's design: ability modifiers are modular and split into instantaneous effects (damage of every type, knockback, lifesteal) and over-time effects (buffs, debuffs, damage over time). On a hit, the effects land on the target pawn, which applies them to itself, so a knockback interrupts through the target's own interrupt system. Effect types are tags, and resistances go by them. Combos come from priority boosts and tags alone, with no gates.
+
+**How it fits together:**
+- An **`Effect`** is a Resource (a `.tres` file), so one file tunes every ability that uses it. Its **parts** say what it does, picked from a dropdown in the inspector.
+- An ability's **`EffectApplier`** children say which effects it applies, when (on start, on hit) and to whom (the target, itself). The ability itself carries no damage or knockback numbers.
+- Each pawn's **`EffectManager`** (a default part) applies effects to its own pawn, with its own resistances, and keeps the over-time ones in a rolled-back list.
+- **Who decides:** do-once parts change things only on the authority (the server, or offline), as hits always have; clients get the results in snapshots. Held parts work on every machine from the rolled-back list, so a client predicting its own pawn agrees with the server.
+
+**Classes** (in `assets/scripts/effects/`):
+- **`Effect`** (Resource):
+  - `effect_name`; `tags` (effect tags); `is_harmful` (on: resistances apply and invulnerability stops it; off: it gets through both).
+  - `duration_seconds`: 0 is instant (parts once, then gone); above 0 is over time.
+  - `period_seconds`: an over-time effect's do-once parts run when first applied, then every period while it lasts. A 3 s poison with a 1 s period runs at 0, 1 and 2 s.
+  - `stacking`: `REFRESH` (time starts again), `ADD_STACK` (one more stack up to `max_stacks`, and time starts again; parts count once per stack), `IGNORE` (the second does nothing).
+  - `parts`: the list, run in order.
+  - `get_id()`: what the active list stores, the same on every machine: from the file path, or else `effect_name`. `register()` makes it findable on this machine; two different effects with one id is an error. The AbilityManager registers every effect its abilities can apply, which covers every pawn on every machine.
+  - `make_damage(amount, tags)` and `make_knockback(speed, ticks, hop)`: instant effects for hits made in code (a trap, a test).
+  - `planned_change(stat)`, `has_tag(tag)`, `has_held_parts()`, `describe()`.
+- **`EffectPart`** (Resource): the base for parts. A **do-once** part overrides `apply_once(application)`; a **held** part returns true from `is_held()`. Parts keep no state while playing, because one part is shared by every pawn its effect lands on.
+  - **`StatChangePart`** (do once): `stat`, `amount`. Health −20 is damage, +15 a heal. On a harmful effect a negative amount is reduced by the resistance (a weakness adds to it); a heal is never changed. Health taken adds to the application's `damage_dealt`.
+  - **`KnockbackPart`** (do once): `speed`, `ticks` (written for 60 a second), `hop_speed`. Starts the target's own `KnockbackAbility`, so its interrupt rules decide: a swing is cancelled, a dash isn't. Along the hit's direction, or straight back with no hit.
+  - **`LifestealPart`** (do once): `fraction`, `stat`. Gives the source that share of the damage this application has dealt so far, so it goes after the damage part.
+  - **`StatModifierPart`** (held): `stat`, `add`, `multiply`. The stat's value is (base + every add) × every multiply while they last, and goes back to its base when they end. Stacks count again (×0.7 twice is ×0.49). Lowering Health's most below what the pawn has brings what it has down too.
+  - **`AbilityPriorityPart`** (held): `ability_tag` (an ability tag), `number`, `amount`. The three numbers are kept apart (the owner's call): `PRESS_PRIORITY` (which ability a press picks), `INTERRUPT_PRIORITY` (how hard it cancels), `INTERRUPT_THRESHOLD` (how hard it is to cancel; below 0 makes it easier, such as a mage who's easy to interrupt). It reaches every ability on the pawn in that tag group.
+  - **`ResistancePart`** (held): `tag` (an effect tag), `amount`. Adds to the pawn's resistances while it lasts.
+- **`EffectApplication`** (plain data): one effect being applied once: `effect`, `target`, `source`, `source_ability`, `hit`, `stacks`, `resistance`, and the result `damage_dealt`. Made by the EffectManager and handed to each do-once part.
+- **`EffectApplier`** (node, a child of an ability): `trigger` (`ON_START` to its own pawn, on every machine including replays, so an over-time effect from it is predicted; `ON_HIT` on the server), `applies_to` (`TARGET` or `SELF`, for on hit), `effects`. Collected once by the AbilityManager into the ability's `on_start_effects`, `on_hit_effects` and `on_hit_self_effects`.
+- **`EffectManager`** (a pawn part, `pawn.effect_manager`, in `assets/scenes/pawn/parts/EffectManager.tscn`):
+  - `apply_effect(effect, source, source_ability, hit)`: a dead pawn takes nothing. A harmful effect does nothing while the pawn is invulnerable, or if its resistance is 1 or more (immune). Instant: its do-once parts run now. Over time: it goes in the active list, or its stacking rule decides; the first time, its do-once parts run now. Do-once parts run in order; when Health reaches 0 the pawn dies (`Pawn.health_ran_out`) and the rest are skipped. Health taken from a source adds threat in this pawn's AI memory, as hits did.
+  - `apply_effects(list, ...)`, `take_hit(hit)` (fills in `hit.damage_dealt`).
+  - `tick_effects()`: called by the pawn each tick before its abilities. Times count down, ended effects stop holding at once, periods come round.
+  - `has_effect`, `get_stacks`, `get_ticks_left`, `get_active_effects()` (for readouts: effect, ticks left, stacks, source), `remove_effect`, `remove_with_tag(tag)` (a cleanse), `remove_all()` (the pawn does this when it dies).
+  - `resistances` (inspector): effect tag → amount. An effect's resistance is every resistance whose tag is one of its tags or a level above one, added up: 0.2 against `damage.elemental` and 0.3 against `damage.elemental.fire` make 0.5 against fire. Negative is a weakness. `resistance_to(effect)`.
+  - `ability_bonus(ability, number)` and `has_ability_bonuses()`, which the AbilityManager asks.
+  - `max_active_effects` (16): a new over-time effect past it is refused, with a warning once.
+  - Signals `effect_applied(effect, application)` and `effect_ended(effect)`.
+  - **Rollback:** the active list is one `PackedInt64Array`, `active_effects`, five numbers per effect: id, ticks left, ticks to the next period, stacks, source (an entity id online, else an instance id). Empty, which most pawns are, it costs almost nothing in snapshots. What the held parts add up to (stat values, ability numbers, resistances) is worked out from the list whenever it changes, at once when this script changes it and on the next tick after a rollback loads it, so it needn't roll back. A pawn with effects on it doesn't rest.
+- **`EffectTags`**: effect type tags, such as `damage.elemental.fire`, with the same rules as `TagRegistry` and `NavTags` and their own 64 bits, declared in `resources/effect_tag_declarations.tres` (`damage.physical`, `damage.elemental.fire`, `damage.elemental.frost`, `damage.poison`, `heal`, `buff.combo`, `debuff.slow`). Constants for code (`EffectTags.DAMAGE_PHYSICAL`), and the tag picker offers them as dropdowns on an Effect's `tags` and a ResistancePart's `tag`.
+
+**What changed elsewhere:**
+- **`HitInfo`** carries `effects` (for the target) and `attacker_effects` (for the attacker, once the hit lands) instead of `damage`, `knockback_speed`, `knockback_ticks` and `knockback_hop`. `damage_dealt` is filled in when it lands; `planned_damage()` reads the effects before (the swing's debug label uses it).
+- **`MeleeAttackAbility`** lost `damage`, `knockback_speed`, `knockback_ticks` and `knockback_hop_speed`; a hit hands over its on-hit effects. A swing with none warns once. The default swing's are `resources/effects/swing_hit.tres`, with the old numbers (20 damage, 6 m/s for 10 ticks, a 2 m/s hop), in an `OnHit` child of `MeleeAttack` in `AbilityManager.tscn`.
+- **`Pawn._take_hit`**: the AI notes the hit, the EffectManager applies its effects, `hit_received` goes out, then the attacker gets the attacker effects. Damage, threat and knockback moved into the effects. `Pawn.health_ran_out(hit)` (new) starts death. A pawn with no EffectManager isn't affected by hits.
+- **`AbilityManager`** adds what effects hold when it compares numbers: `press_priority_now`, `interrupt_priority_now` and `interrupt_threshold_now` (new, public). `_lets_through`, the interrupt table and `action_for_tag` use them. On-start effects are applied when an ability starts. A press waiting in a buffer counts as a press of its action, so when the wait ends every ready ability on that action competes, including the one that just finished; with no jitter and no boost the choice is the same as before. `_any_jitter` is gone: a press always compares.
+- **Tags:** `combo.second` and `combo.finisher` ability tags (`Tags.COMBO_SECOND`, `Tags.COMBO_FINISHER`).
+
+**The combo** (`faction_abilities.tscn`), the owner's design: the basic attack's cooldown and its priority boosts together make the input timings.
+
+| Ability | Tag | Priority | Interrupt priority / threshold | On start | On hit |
+|---|---|---|---|---|---|
+| MeleeAttack | | 10 | 15 / 15 | boost `combo.second` +20 for 0.6 s | 20 damage, 6 m/s push |
+| SecondSwing | `combo.second` | 0 | 10 / 15 | boost `combo.finisher` +40 for 0.6 s | 12 damage, 4 m/s push |
+| FinisherSwing | `combo.finisher` | −10 | 10 / 20 | | 30 damage, 9 m/s push |
+| HeavyAttack (right mouse) | | 0 | 15 / 15 | | 35 damage, 11 m/s push |
+
+- Clicking again quickly gives swing, second, finisher; slowly, swing, swing.
+- A click during a swing can't cancel it (10 against 15), so it waits in the buffer (0.15 s) and the next swing starts when this one ends.
+- MeleeAttack has no cooldown in the faction arena (`FactionArenaSample._debug_cooldowns`), so the boosts alone decide.
+- An alternate-button attack tagged `combo.second` would be boosted by the swing too, so chains can cross buttons.
+- An ability without a boost can still start when it's the only one ready. That's by design: no gates except an explicitly designed combo.
+
+**Tests:**
+- `effects/tests/effect_selftest`: tags, damage, resistances adding up across levels, weaknesses, immunity, heals, lifesteal, a hit's `damage_dealt` and attacker effects, invulnerability, death mid-effect; slows that hold and end, max Health, poisons that tick and kill, stacking, cleanses, a full list; the three ability numbers and the interrupt table; a rollback loading the list.
+- `attack_request_selftest`'s combo test replaces the follow-up test.
+- `rollback_coverage_selftest` now watches the EffectManager and puts an over-time slow and a self boost in its fight. It also keeps each pawn's values apart: both pawns shared one key before, which hid changes on the first. That found `MeleeAttackAbility._hit_this_swing`, which is server-only and listed with why.
+- The tests that built hits by hand use `Effect.make_damage` and `Effect.make_knockback`.
+
+**Not built yet:**
+- statuses changing what blocks what (lockout bitmasks)
+- effects that last until removed
+- on-kill and on-end triggers
+- effects changing hit shapes
+- the tuning panel
+
 ### 8.7 Step 10: Health, damage and death (built 2026-11-09)
 
 The owner's call: there's no health manager. Health is a stat, and death is an ability.
@@ -532,7 +631,7 @@ The owner's call: there's no health manager. Health is a stat, and death is an a
 - Only the server changes it, with `StatManager.change_current(&"Health", amount)`. `Pawn.get_health()` reads it.
 
 **Damage:**
-- `HitInfo.damage`; MeleeAttack's `damage` is 20.
+- `HitInfo.damage`; MeleeAttack's `damage` is 20. *(Claude 2026-11-10: replaced by effects, 8.11: the swing's on-hit effect `swing_hit.tres` takes 20, and the steps below are its parts, applied by the target's `EffectManager`. `HitInfo.damage_dealt` says what a hit took.)*
 - `Pawn.receive_hit()`, on the server, in this order:
   1. The AI notes the hit (`AIContextComponent.note_hit`), which wakes a decision.
   2. Memory adds threat to the attacker's entry: damage × `AIMemory.threat_per_damage` (0.01).
@@ -576,7 +675,7 @@ The owner's call: there's no health manager. Health is a stat, and death is an a
 - other ways to take damage (a ranged attack, a hazard)
 - healing abilities
 - the base removing bodies
-- shields and resistances
+- shields and resistances *(Claude 2026-11-10: resistances are built, 8.11)*
 
 ---
 

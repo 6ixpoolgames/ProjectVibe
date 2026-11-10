@@ -9,7 +9,13 @@
 ##      (plus its priority_jitter's offset, if it has one), then the first in the tree. One that can't yet keeps the press for its
 ##      buffer_window and tries again each tick.
 ## Claude 2026-11-09: priority is higher-wins now, as interrupt_priority and behaviour scores are; it was lowest-wins. A press is a
-## request: an attack action can start a normal attack, or a follow-up when the normal one can't (FollowUpAttackAbility).
+## request: an attack action can start a normal attack, or a follow-up when the normal one can't.
+## Claude 2026-11-10 (pawn spec 8.11): effects on the pawn add to the numbers while they last (AbilityPriorityPart): a press compares
+## priority plus those, and cancelling compares interrupt_priority and interrupt_threshold plus those. That's how combos work: a
+## swing boosts the second swing's priority for a moment, so the next press picks it. A press waiting in a buffer is a press of its
+## action, so when the wait ends every ability on that action that's ready competes, including the one that just finished.
+## FollowUpAttackAbility, which opened a window after the normal swing, is gone: a boost does the same without a gate.
+## An ability's EffectApplier children are collected here once: on-start effects are applied to the pawn when it starts.
 ## Everything that persists between ticks lives on the abilities and rolls back (see AbilityBase), so this node keeps none.
 ##
 ## How to use it (outside code only talks to the manager):
@@ -45,7 +51,7 @@ signal ability_finished(ability: AbilityBase)
 ## Claude 2026-11-09: sent when an ability is cancelled by another starting, after ability_finished for it.
 signal ability_cancelled(ability: AbilityBase, by: AbilityBase)
 
-var _any_jitter := false # Claude 2026-11-09: some action ability has priority_jitter, so a press compares them all
+# Claude 2026-11-10: _any_jitter is gone: a press always compares the abilities on its action now, since effects can boost them.
 var _invulnerable_abilities: Array[AbilityBase] = [] # Claude 2026-11-10: those with invulnerable_while_running, usually just Dash
 var _locomotion_pausers: Array[AbilityBase] = [] # Claude 2026-11-10: those with pauses_locomotion, usually just Dash
 
@@ -134,6 +140,24 @@ func can_start(action: StringName) -> bool:
 		if ability.trigger_action == action and not ability.is_running_timed() and _is_ready(ability):
 			return true
 	return false
+
+
+## Claude 2026-11-10: the action to press to start an ability in this group (its category or one of its extra_categories, such as
+## &"movement.advanced"), picking the highest-priority one that could start right now; &"" if none could. For the AI, so a behaviour
+## asks for a kind of ability instead of naming one: a pawn with a grappling hook instead of a dash closes in the same way. It
+## answers with an action, not an ability, because everything a pawn does goes through its input, which rolls back. Asking changes
+## nothing. The press goes through the usual rules, so if another ability shares that action and wins it, that one starts.
+func action_for_tag(tag: StringName) -> StringName:
+	var bit := TagRegistry.own_bit(tag) if TagRegistry.has_tag(tag) else 0
+	if bit == 0:
+		return &"" # an unknown tag matches nothing, and isn't added
+	# Claude 2026-11-10: the highest priority now, boosts included (it was the first in priority order).
+	var best: AbilityBase = null
+	for ability in _actions:
+		if ability.trigger_action != &"" and ability.category_mask & bit != 0 and not ability.is_running_timed() and _is_ready(ability):
+			if best == null or press_priority_now(ability) > press_priority_now(best):
+				best = ability
+	return best.trigger_action if best else &""
 
 
 ## Claude 2026-11-09: starts an ability by the same rules as a press: its cooldown, can_start(), and cancelling what it conflicts
@@ -255,6 +279,12 @@ func _run_actions(dt: float) -> void:
 	# something kept as bits, where they were a Dictionary of names made every tick. The same rules.
 	var pressed_bits: int = pawn.held_actions & ~pawn.previous_held_actions
 	var used_bits := 0 # actions that started something this tick, so one press starts one ability
+	# Claude 2026-11-10: actions with a press waiting in some ability's buffer. Every ready ability on such an action competes when
+	# the wait ends, not only the one holding it, so the swing that was running when the press came can win it too.
+	var waiting_bits := 0
+	for ability in _timed:
+		if ability.buffer_ticks_left > 0:
+			waiting_bits |= ability.trigger_bit
 	for ability in _actions:
 		if ability.is_running_timed():
 			ability.tick(dt)
@@ -269,7 +299,8 @@ func _run_actions(dt: float) -> void:
 			continue
 		if _is_ready(ability):
 			# Claude 2026-11-09: with jitter on any of them, the best ready one on this action, not just the first.
-			var chosen := _best_ready(ability, pressed_bits) if _any_jitter else ability
+			# Claude 2026-11-10: always now, since an effect can boost one at any time; with no jitter and no boost it's still this one.
+			var chosen := _best_ready(ability, pressed_bits | waiting_bits)
 			_clear_way(chosen) # Claude 2026-11-09: cancels what it's strong enough to cancel
 			_start(chosen)
 			used_bits |= ability.trigger_bit
@@ -285,13 +316,15 @@ func _run_actions(dt: float) -> void:
 # Claude 2026-11-09: of the abilities on first's action that are pressed or waiting and ready, the one with the highest priority plus
 # jitter; ties go to the earlier in the list (first itself, when nobody has jitter). The list is sorted by priority, so with no
 # jitter this is always first.
-func _best_ready(first: AbilityBase, pressed_bits: int) -> AbilityBase:
+# Claude 2026-11-10: and boosts (pawn spec 8.11). wanted_bits is the actions pressed this tick or waiting in a buffer: every ready
+# ability on first's action is in it, so with no jitter and no boost, first still wins.
+func _best_ready(first: AbilityBase, wanted_bits: int) -> AbilityBase:
 	var best := first
 	var best_score := _priority_now(first)
 	for ability in _actions:
 		if ability == first or ability.trigger_bit != first.trigger_bit or ability.is_running_timed():
 			continue
-		if pressed_bits & ability.trigger_bit == 0 and ability.buffer_ticks_left <= 0:
+		if wanted_bits & ability.trigger_bit == 0:
 			continue
 		if not _is_ready(ability):
 			continue
@@ -303,13 +336,38 @@ func _best_ready(first: AbilityBase, pressed_bits: int) -> AbilityBase:
 
 
 # Claude 2026-11-09: priority plus this tick's random offset, from the tick's own random numbers, so a replay draws the same.
+# Claude 2026-11-10: plus boosts from effects (press_priority_now).
 func _priority_now(ability: AbilityBase) -> float:
 	if ability.priority_jitter <= 0.0:
-		return float(ability.priority)
+		return float(press_priority_now(ability))
 	var entity := pawn.get_network_entity()
 	var key: int = entity.entity_id if entity and entity.entity_id >= 0 else pawn.get_instance_id()
 	var rng: RandomNumberGenerator = TickDriver.tick_rng(key, ability.jitter_salt)
-	return ability.priority + rng.randf_range(-ability.priority_jitter, ability.priority_jitter)
+	return press_priority_now(ability) + rng.randf_range(-ability.priority_jitter, ability.priority_jitter)
+
+
+## Claude 2026-11-10 (pawn spec 8.11): an ability's priority right now: its own, plus what effects on the pawn add to it
+## (AbilityPriorityPart). Without priority_jitter's random offset.
+func press_priority_now(ability: AbilityBase) -> int:
+	return ability.priority + _bonus(ability, AbilityPriorityPart.Number.PRESS_PRIORITY)
+
+
+## Claude 2026-11-10: its interrupt_priority right now, with what effects add.
+func interrupt_priority_now(ability: AbilityBase) -> int:
+	return ability.interrupt_priority + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_PRIORITY)
+
+
+## Claude 2026-11-10: its interrupt_threshold right now, with what effects add.
+func interrupt_threshold_now(ability: AbilityBase) -> int:
+	return ability.interrupt_threshold + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD)
+
+
+# Claude 2026-11-10: what the pawn's effects add to one of an ability's numbers; 0 with no EffectManager or nothing held.
+func _bonus(ability: AbilityBase, number: int) -> int:
+	var effects := pawn.effect_manager if pawn else null
+	if effects == null or not effects.has_ability_bonuses():
+		return 0
+	return effects.ability_bonus(ability, number)
 
 
 # Claude 2026-11-09: "not locked out" became "every conflicting running ability can be cancelled by it", which is the same thing
@@ -327,10 +385,72 @@ func _conflicts(a: AbilityBase, b: AbilityBase) -> bool:
 # Claude 2026-11-10: or lists this one's category in its cancelled_by, which lets it through whatever the numbers say.
 func _conflicts_allow(ability: AbilityBase) -> bool:
 	for other in _abilities:
-		if other != ability and other.is_running_timed() and _conflicts(ability, other) and other.interrupt_threshold > ability.interrupt_priority \
-				and other.cancelled_by_mask & ability.category_mask == 0:
+		if other != ability and other.is_running_timed() and not _lets_through(ability, other):
 			return false
 	return true
+
+
+# Claude 2026-11-10: the one rule, shared by starting abilities and the interrupt table so the two can't disagree: true if running
+# lets starting start: they don't conflict, or starting is strong enough, or running lists starting's group in cancelled_by.
+# Claude 2026-11-10: with what effects add to the two numbers (pawn spec 8.11).
+func _lets_through(starting: AbilityBase, running: AbilityBase) -> bool:
+	return not _conflicts(starting, running) or interrupt_threshold_now(running) <= interrupt_priority_now(starting) \
+			or running.cancelled_by_mask & starting.category_mask != 0
+
+
+## Claude 2026-11-10, for the interrupt table: what happens if starting tries to start while running runs, by this pawn's numbers
+## now, so a change made while playing (a berserk state raising a threshold) shows. Claude 2026-11-10: including what effects on the
+## pawn add (pawn spec 8.11). It doesn't look at cooldowns or can_start().
+## {"result": "alongside" | "cancels" | "blocked", "reason": text}:
+##   alongside  they don't conflict: neither's locks_out covers the other, so both run
+##   cancels    running stops and starting starts (priority at least the threshold, or cancelled_by)
+##   blocked    starting can't start while running runs (for a locomotion ability: it stops steering instead)
+func interrupt_rule(starting: AbilityBase, running: AbilityBase) -> Dictionary:
+	if not _conflicts(starting, running):
+		return {"result": "alongside", "reason": "no lockout between them"}
+	if running.cancelled_by_mask & starting.category_mask != 0:
+		return {"result": "cancels", "reason": "%s lists it in cancelled_by" % running.name}
+	var priority := interrupt_priority_now(starting)
+	var threshold := interrupt_threshold_now(running)
+	if threshold <= priority:
+		return {"result": "cancels", "reason": "priority %d >= threshold %d" % [priority, threshold]}
+	return {"result": "blocked", "reason": "priority %d < threshold %d" % [priority, threshold]}
+
+
+## Claude 2026-11-10: the interrupt table for this pawn: one row per ability that could be running (timed ones, and locomotion), one
+## entry per other ability, each interrupt_rule's answer plus "running" and "starting" names. In run order. An action that happens
+## at once, such as Jump, never runs, so it has no row; it's still in every row's entries, as something starting.
+func get_interrupt_table() -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	for running in _abilities:
+		# Timed abilities roll back their timer, ticks_left: that's how to tell them from instant ones, whose length can come from
+		# duration, phases (MeleeAttack, Dash) or a push (Knockback).
+		if running.kind != AbilityBase.Kind.LOCOMOTION and not running.get_rollback_properties().has("ticks_left"):
+			continue
+		var row := {"running": running.name, "priority": interrupt_priority_now(running), "threshold": interrupt_threshold_now(running), "cells": {}}
+		for starting in _abilities:
+			if starting != running:
+				row["cells"][starting.name] = interrupt_rule(starting, running)
+		rows.append(row)
+	return rows
+
+
+## Claude 2026-11-10: the interrupt table as text, for a debug print or a readout: a line per running ability, with what cancels it
+## and what it blocks.
+func get_interrupt_table_text() -> String:
+	var lines: PackedStringArray = []
+	for row in get_interrupt_table():
+		var cancels: PackedStringArray = []
+		var blocked: PackedStringArray = []
+		for starting_name in row["cells"]:
+			var cell: Dictionary = row["cells"][starting_name]
+			if cell["result"] == "cancels":
+				cancels.append(starting_name)
+			elif cell["result"] == "blocked":
+				blocked.append(starting_name)
+		lines.append("%s (priority %d, threshold %d): cancelled by %s; blocks %s" % [row["running"], row["priority"], row["threshold"],
+				", ".join(cancels) if not cancels.is_empty() else "nothing", ", ".join(blocked) if not blocked.is_empty() else "nothing"])
+	return "\n".join(lines)
 
 
 # Claude 2026-11-09: cancels every running ability that conflicts with this one. Call it only after _conflicts_allow said yes.
@@ -394,6 +514,10 @@ func _start(ability: AbilityBase) -> void:
 	if ability.kind == AbilityBase.Kind.ACTION and ability.is_running_timed():
 		_locked_mask |= ability.locks_out_mask # later abilities this tick respect it at once
 	ability.start()
+	# Claude 2026-11-10 (pawn spec 8.11): its on-start effects, on its own pawn, on every machine that runs it (replays too), so an
+	# over-time one such as a combo boost is predicted. Their do-once parts only run on the authority (EffectManager).
+	if not ability.on_start_effects.is_empty() and pawn.effect_manager:
+		pawn.effect_manager.apply_effects(ability.on_start_effects, pawn, ability)
 	ability_started.emit(ability)
 	if ability.kind == AbilityBase.Kind.ACTION and not ability.is_running_timed():
 		_finish(ability) # an action with no duration is done as soon as it starts
@@ -413,20 +537,19 @@ func _collect_abilities() -> void:
 			child.manager = self
 			child.pawn = pawn
 			child.category_mask = TagRegistry.mask_of(child.category) if child.category != &"" else 0
+			child.category_mask |= TagRegistry.category_mask_of_list(child.extra_categories) # Claude 2026-11-10
 			child.locks_out_mask = TagRegistry.mask_of_list(child.locks_out)
 			child.cancelled_by_mask = TagRegistry.mask_of_list(child.cancelled_by) # Claude 2026-11-10
+			_collect_effects(child) # Claude 2026-11-10
 			_abilities.append(child)
 	# GDScript note: sort_custom keeps this rule; abilities with equal priority keep their tree order because each has a distinct index.
 	# Claude 2026-11-09: highest priority first (it was lowest first).
 	_abilities.sort_custom(func(a: AbilityBase, b: AbilityBase) -> bool:
 		return a.priority > b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
-	_any_jitter = false
 	_invulnerable_abilities.clear() # Claude 2026-11-10
 	_locomotion_pausers.clear() # Claude 2026-11-10
 	for ability in _abilities:
 		ability.jitter_salt = hash(String(ability.name))
-		if ability.kind != AbilityBase.Kind.LOCOMOTION and ability.priority_jitter > 0.0:
-			_any_jitter = true
 		if ability.invulnerable_while_running:
 			_invulnerable_abilities.append(ability)
 		if ability.pauses_locomotion and ability.kind != AbilityBase.Kind.LOCOMOTION:
@@ -449,6 +572,28 @@ func _collect_abilities() -> void:
 			_every_tick_abilities.append(ability)
 	_timers_dirty = true # Claude 2026-11-09
 	_locks_dirty = true
+
+
+# Claude 2026-11-10 (pawn spec 8.11): the ability's EffectApplier children, into its three effect lists. Each effect is registered,
+# so an over-time one in a pawn's active list is recognised by its id on every machine (Effect.register).
+func _collect_effects(ability: AbilityBase) -> void:
+	ability.on_start_effects.clear()
+	ability.on_hit_effects.clear()
+	ability.on_hit_self_effects.clear()
+	for child in ability.get_children():
+		var applier := child as EffectApplier
+		if applier == null:
+			continue
+		for effect in applier.effects:
+			if effect == null:
+				continue
+			effect.register()
+			if applier.trigger == EffectApplier.Trigger.ON_START:
+				ability.on_start_effects.append(effect)
+			elif applier.applies_to == EffectApplier.AppliesTo.SELF:
+				ability.on_hit_self_effects.append(effect)
+			else:
+				ability.on_hit_effects.append(effect)
 
 
 ## Tells the pawn's TickStateComponent which ability properties roll back, before the first tick is recorded.

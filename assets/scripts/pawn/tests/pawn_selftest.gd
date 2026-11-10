@@ -453,8 +453,7 @@ func _test_resting() -> void:
 	var hit := HitInfo.new()
 	hit.target = pawn
 	hit.direction = Vector3(0.0, 0.0, 1.0)
-	hit.knockback_speed = 6.0
-	hit.knockback_ticks = 10
+	hit.effects = [Effect.make_knockback(6.0, 10)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	var before := pawn.position.z
 	pawn.receive_hit(hit)
 	await _ticks(3)

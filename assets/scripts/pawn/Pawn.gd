@@ -9,7 +9,8 @@
 ## Claude 2026-11-07: parts and input, pawn spec steps 3 to 6.
 ##   - When it enters the tree, GameMode's PawnInitializer adds the default parts its scene doesn't have: ControllerManager (with an
 ##     AIController), NavigationManager (Claude 2026-11-08), StatManager (with movement stats) and AbilityManager (with Walk, Jump
-##     and Sprint). fill_in_default_parts and skip_default_parts opt out.
+##     and Sprint). fill_in_default_parts and skip_default_parts opt out. Claude 2026-11-10: and EffectManager, which applies effects
+##     such as a hit's damage and knockback (pawn spec 8.11).
 ##   - Each tick, in its input phase, it asks its ControllerManager for input from whoever is in charge: this machine's player, or
 ##     else its AI controller. It only asks where its input is decided here. A client's pawn on the server gets its input over the
 ##     network instead.
@@ -47,6 +48,7 @@ extends CharacterBody3D
 ## Sent when a player takes this pawn, or lets it go.
 signal possession_changed(pawn: Pawn, has_player: bool)
 ## Claude 2026-11-09: sent on the server when something hits this pawn, after its knockback starts. For effects.
+## Claude 2026-11-10: after its effects are applied (pawn spec 8.11); hit.damage_dealt says how much Health it took.
 signal hit_received(hit: HitInfo)
 ## Claude 2026-11-09, step 10: sent once on the server when this pawn dies. hit is what did it, or null.
 signal died(pawn: Pawn, hit: HitInfo)
@@ -145,6 +147,9 @@ var grounded := false
 var ability_manager: AbilityManager = null
 ## Claude 2026-11-07: this pawn's stats, which abilities read. Null if it has none, and then abilities use their fallbacks.
 var stat_manager: StatManager = null
+## Claude 2026-11-10: applies effects to this pawn and keeps the over-time ones (pawn spec 8.11). Null if it has none, and then hits
+## and effects do nothing to it.
+var effect_manager: EffectManager = null
 ## Claude 2026-11-07: picks whose input this pawn follows. Null if the pawn has none, and then nothing writes its input for it.
 var controller_manager: ControllerManager = null
 ## Claude 2026-11-08: finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
@@ -228,6 +233,8 @@ func _ready() -> void:
 			ability_manager = child
 		elif child is StatManager and stat_manager == null: # Claude 2026-11-07
 			stat_manager = child
+		elif child is EffectManager and effect_manager == null: # Claude 2026-11-10
+			effect_manager = child
 		elif child is NetworkEntity:
 			_entity = child
 		elif child is ControllerManager and controller_manager == null: # Claude 2026-11-07
@@ -404,6 +411,9 @@ func revive() -> void:
 ##      happens.
 ##   4. Its own knockback starts, through its own AbilityManager, so the push moves it like its other movement and rolls back.
 ##   5. hit_received goes out.
+## Claude 2026-11-10 (pawn spec 8.11): steps 2 to 4 are now the hit's effects, which its EffectManager applies in their order:
+## damage is a StatChangePart, the push a KnockbackPart that starts the Knockback ability, and threat is added for the Health taken.
+## Then hit_received, then the attacker gets the hit's attacker_effects (an EffectApplier on hit, applies to self).
 ## Claude 2026-11-09 (pawn spec 15.4): called during the simulate phase, as an ability's hit is, it's queued, and every queued hit is
 ## delivered after all pawns have simulated, in a fixed order, so the result never depends on whether this pawn simulated before or
 ## after its attacker. Called at any other time, such as from game code or a test, it takes effect at once.
@@ -424,24 +434,25 @@ func is_invulnerable() -> bool:
 
 # Claude 2026-11-09: the hit itself, steps 1 to 5 above. Checked again here, because a queued hit can arrive after another killed it.
 # Claude 2026-11-10: and invulnerability, checked here when the hit is delivered: a dash started in the same tick dodges it.
+# Claude 2026-11-10 (pawn spec 8.11): damage, threat and knockback moved into the hit's effects, which the EffectManager applies.
 func _take_hit(hit: HitInfo) -> void:
 	if not is_authority() or is_dead() or is_invulnerable():
 		return
 	if ai_context:
 		ai_context.note_hit(hit)
-	if ai_memory and is_instance_valid(hit.attacker):
-		ai_memory.add_threat(hit.attacker, hit.damage * ai_memory.threat_per_damage)
-	if stat_manager and hit.damage > 0 and stat_manager.has_stat(&"Health"):
-		if stat_manager.change_current(&"Health", -hit.damage) <= 0.0:
-			_die(hit)
-			hit_received.emit(hit)
-			return
-	if ability_manager and hit.knockback_speed > 0.0 and hit.knockback_ticks > 0:
-		for ability in ability_manager.get_abilities():
-			if ability is KnockbackAbility:
-				ability.push(hit.direction * hit.knockback_speed, hit.knockback_ticks, hit.knockback_hop) # Claude 2026-11-10: and the hop
-				break
+	if effect_manager:
+		effect_manager.take_hit(hit)
 	hit_received.emit(hit)
+	var attacker := hit.attacker
+	if not hit.attacker_effects.is_empty() and is_instance_valid(attacker) and attacker.effect_manager:
+		attacker.effect_manager.apply_effects(hit.attacker_effects, attacker, hit.ability, hit)
+
+
+## Claude 2026-11-10: the EffectManager calls this on the authority when an effect has just taken this pawn's Health to 0: its Death
+## ability starts (_die). hit is the hit that did it, or null (a poison's tick). Nothing happens if it's already dead.
+func health_ran_out(hit: HitInfo) -> void:
+	if is_authority() and not is_dead():
+		_die(hit)
 
 
 # Claude 2026-11-09 (pawn spec 15.4): holds a hit until after simulate. One queue for all pawns, delivered by the tick driver's
@@ -597,6 +608,9 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	# Claude 2026-11-07: abilities steer, then gravity, then one move_and_slide. Gravity goes by whether it was on the ground when the
 	# tick began, as GroundMovement did, so a jump that starts this tick isn't pulled down in the same tick.
 	var was_grounded := grounded
+	# Claude 2026-11-10: over-time effects count down first, so this tick's abilities see this tick's slows and boosts (8.11).
+	if effect_manager:
+		effect_manager.tick_effects()
 	if ability_manager:
 		ability_manager.tick_abilities(dt)
 	if not was_grounded:
@@ -629,6 +643,7 @@ func _finish_tick() -> void:
 ##   - nothing moved it since its last tick (a teleport, or TerrainBodyLifter raising it)
 ##   - this isn't one of its check ticks, every rest_check_ticks, staggered by entity id
 ##   - its abilities have no timer running and agree (AbilityManager.can_rest)
+##   - Claude 2026-11-10: it has no over-time effect on it to count down (EffectManager.can_rest)
 func _can_rest(tick: int) -> bool:
 	if not rest_when_idle or not grounded or velocity != Vector3.ZERO or move_input != Vector3.ZERO or held_actions != 0:
 		return false
@@ -636,6 +651,8 @@ func _can_rest(tick: int) -> bool:
 		return false
 	var stagger: int = _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
 	if (tick + stagger) % TickDriver.ticks_at_rate(rest_check_ticks) == 0: # Claude 2026-11-09 (scaling spec step 6)
+		return false
+	if effect_manager and not effect_manager.can_rest(): # Claude 2026-11-10
 		return false
 	return ability_manager == null or ability_manager.can_rest()
 
@@ -767,6 +784,8 @@ func _die(hit: HitInfo) -> void:
 	if _death == null or not ability_manager:
 		return
 	ability_manager.start_ability(_death)
+	if effect_manager: # Claude 2026-11-10: dying ends every effect on it (pawn spec 8.11)
+		effect_manager.remove_all()
 	if ai_behaviour_manager:
 		ai_behaviour_manager.stop_running("died")
 	var hands := controller_manager.ai_controller as AIController if controller_manager else null

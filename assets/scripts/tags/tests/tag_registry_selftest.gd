@@ -99,6 +99,28 @@ func _test_declarations_file() -> void:
 	TagRegistry.reset() # reads res://assets/scripts/resources/tag_declarations.tres
 	_check(TagRegistry.get_tags().has(&"movement.walk") and TagRegistry.get_tags().has(&"movement"), "declarations file is read at first use")
 	_check(TagRegistry.get_tags().has(&"combat.melee"), "file declares the prototype ability categories")
+	# Claude 2026-11-10: the dropdown's list, and the Tags constants (typo protection).
+	TagRegistry.reset()
+	var listed := TagRegistry.read_declared_tags()
+	_check(listed.has(&"movement.dash") and listed.has(&"movement") and listed.has(&"status"), "read_declared_tags lists the declared tags and their parent levels (%d)" % listed.size())
+	var sorted := listed.duplicate()
+	sorted.sort_custom(func(a, b): return String(a) < String(b))
+	_check(listed == sorted, "in sorted order")
+	# Reading it numbered nothing: a tag declared after it still sorts in first (bit 0), as before the registry is in use.
+	TagRegistry.declare([&"aaa.from_code"])
+	_check(not TagRegistry.read_declared_tags().has(&"aaa.from_code") and TagRegistry.bit_of(&"aaa") == 0, "it only reads the file: it adds nothing and numbers nothing")
+	TagRegistry.reset()
+	var undeclared: Array[String] = []
+	var constants: Dictionary = Tags.new().get_script().get_script_constant_map()
+	for constant_name in constants:
+		if not listed.has(constants[constant_name]):
+			undeclared.append("%s (%s)" % [constant_name, constants[constant_name]])
+	_check(constants.size() >= 15 and undeclared.is_empty(), "every Tags constant is a declared tag (%d constants; not declared: %s)" % [constants.size(), ", ".join(undeclared)])
+	var misnamed: Array[String] = []
+	for constant_name in constants:
+		if String(constant_name) != String(constants[constant_name]).to_upper().replace(".", "_"):
+			misnamed.append(constant_name)
+	_check(misnamed.is_empty(), "and each constant's name matches its tag (%s)" % ", ".join(misnamed))
 
 
 func _check(ok: bool, what: String) -> void:

@@ -216,6 +216,10 @@ func _ready() -> void:
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 	(multiplayer as SceneMultiplayer).peer_packet.connect(_on_packet)
 	(multiplayer as SceneMultiplayer).server_relay = false
+	# Claude 2026-11-10: the netcode's graphs in the editor's Debugger > Monitors, only while that debugger is attached (a game run from
+	# the editor), so an exported game or a headless test never has them. See netcode/debug/NetMonitors.gd.
+	if EngineDebugger.is_active():
+		NetMonitors.on.call_deferred(self)
 
 
 func _process(_delta: float) -> void:

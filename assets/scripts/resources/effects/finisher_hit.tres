@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="Effect" format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_vlwif"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/StatChangePart.gd" id="2_su2im"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/KnockbackPart.gd" id="3_ojv3b"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="4_ti1t2"]
+
+[sub_resource type="Resource" id="Resource_mmm6i"]
+script = ExtResource("2_su2im")
+amount = -30.0
+
+[sub_resource type="Resource" id="Resource_b8yhp"]
+script = ExtResource("3_ojv3b")
+speed = 9.0
+ticks = 14
+hop_speed = 3.0
+
+[resource]
+script = ExtResource("4_ti1t2")
+effect_name = &"finisher hit"
+tags = Array[StringName]([&"damage.physical"])
+parts = Array[ExtResource("1_vlwif")]([SubResource("Resource_mmm6i"), SubResource("Resource_b8yhp")])

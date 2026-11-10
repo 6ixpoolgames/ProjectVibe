@@ -28,7 +28,9 @@ var _turn_rate := 0.0
 func _init() -> void:
 	super()
 	kind = Kind.LOCOMOTION
-	category = &"movement.walk"
+	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	category = Tags.MOVEMENT_WALK
+	extra_categories = [Tags.MOVEMENT_BASIC] # Claude 2026-11-10: a group, so a rule can name all basic movement at once
 	# Claude 2026-11-09: moving cancels only actions with a threshold of 0, such as an emote. Locomotion never blocks an action:
 	# anything that conflicts with it stops it, as before.
 	interrupt_priority = 0

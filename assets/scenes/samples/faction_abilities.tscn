@@ -1,13 +1,58 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AbilityManager.tscn" id="1_abilities"]
-[ext_resource type="Script" path="res://assets/scripts/abilities/FollowUpAttackAbility.gd" id="2_follow"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/MeleeAttackAbility.gd" id="3_melee"]
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectApplier.gd" id="4_applier"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="5_effect"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/combo_second_boost.tres" id="6_second_boost"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/combo_finisher_boost.tres" id="7_finisher_boost"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/second_swing_hit.tres" id="8_second_hit"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/finisher_hit.tres" id="9_finisher_hit"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/heavy_hit.tres" id="10_heavy_hit"]
 
 [node name="AbilityManager" instance=ExtResource("1_abilities")]
 
-[node name="FollowUpAttack" type="Node" parent="."]
-script = ExtResource("2_follow")
+[node name="MeleeAttack" parent="." index="4"]
+priority = 10
+
+[node name="ComboBoost" type="Node" parent="MeleeAttack"]
+script = ExtResource("4_applier")
+trigger = 0
+effects = Array[ExtResource("5_effect")]([ExtResource("6_second_boost")])
+
+[node name="SecondSwing" type="Node" parent="."]
+script = ExtResource("3_melee")
+extra_categories = Array[StringName]([&"combo.second"])
+interrupt_priority = 10
+windup_ticks = 5
+recovery_ticks = 10
+sweep_from_left = true
+
+[node name="OnHit" type="Node" parent="SecondSwing"]
+script = ExtResource("4_applier")
+effects = Array[ExtResource("5_effect")]([ExtResource("8_second_hit")])
+
+[node name="ComboBoost" type="Node" parent="SecondSwing"]
+script = ExtResource("4_applier")
+trigger = 0
+effects = Array[ExtResource("5_effect")]([ExtResource("7_finisher_boost")])
+
+[node name="FinisherSwing" type="Node" parent="."]
+script = ExtResource("3_melee")
+extra_categories = Array[StringName]([&"combo.finisher"])
+priority = -10
+interrupt_priority = 10
+interrupt_threshold = 20
+windup_ticks = 10
+hit_ticks = 5
+recovery_ticks = 16
+attack_range = 2.1
+hit_radius = 0.9
+sweep_degrees = 140.0
+
+[node name="OnHit" type="Node" parent="FinisherSwing"]
+script = ExtResource("4_applier")
+effects = Array[ExtResource("5_effect")]([ExtResource("9_finisher_hit")])
 
 [node name="HeavyAttack" type="Node" parent="."]
 script = ExtResource("3_melee")
@@ -17,9 +62,9 @@ hit_ticks = 5
 recovery_ticks = 18
 attack_range = 2.4
 hit_radius = 1.1
-damage = 35
-knockback_speed = 11.0
-knockback_ticks = 14
 sweep_degrees = 160.0
-knockback_hop_speed = 3.5
 cooldown = 6.0
+
+[node name="OnHit" type="Node" parent="HeavyAttack"]
+script = ExtResource("4_applier")
+effects = Array[ExtResource("5_effect")]([ExtResource("10_heavy_hit")])

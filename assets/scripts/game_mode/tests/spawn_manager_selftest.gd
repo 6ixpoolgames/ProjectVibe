@@ -90,7 +90,7 @@ func _test_player_respawn() -> void:
 	pawn.global_position = Vector3(10, 0.1, 10)
 	var hit := HitInfo.new()
 	hit.target = pawn
-	hit.damage = 1000
+	hit.effects = [Effect.make_damage(1000)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	pawn.receive_hit(hit)
 	_check(pawn.is_dead(), "it dies")
 	await _ticks(20)
@@ -176,7 +176,7 @@ func _point(point_name: String, at: Vector3, team: int, group: StringName, scatt
 func _kill(pawn: Pawn) -> void:
 	var hit := HitInfo.new()
 	hit.target = pawn
-	hit.damage = 1000
+	hit.effects = [Effect.make_damage(1000)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	pawn.receive_hit(hit)
 
 

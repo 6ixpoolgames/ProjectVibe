@@ -22,8 +22,9 @@ extends AbilityBase
 func _init() -> void:
 	super()
 	kind = Kind.ACTION
-	category = &"status.dead"
-	locks_out = [&"movement", &"combat", &"utility"]
+	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	category = Tags.STATUS_DEAD
+	locks_out = [Tags.MOVEMENT, Tags.COMBAT, Tags.UTILITY]
 	interrupt_priority = 1000
 	interrupt_threshold = 1000
 

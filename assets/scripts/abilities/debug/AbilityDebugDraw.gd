@@ -144,9 +144,9 @@ func _on_hit_landed(hit: HitInfo) -> void:
 		label.scale = Vector3.ONE / sphere.scale.x
 		label.position = Vector3(0.0, 1.1, 0.0) # just above the sphere's top, in its own unit-sized space
 		sphere.add_child(label)
-		label.text = "%s -%d" % [hit.target.name, hit.damage]
+		label.text = "%s -%d" % [hit.target.name, hit.planned_damage()] # Claude 2026-11-10: from its effects, before it lands
 	else:
-		label.text += "\n%s -%d" % [hit.target.name, hit.damage]
+		label.text += "\n%s -%d" % [hit.target.name, hit.planned_damage()]
 
 
 func _leave_capsule(pawn: Pawn) -> void:

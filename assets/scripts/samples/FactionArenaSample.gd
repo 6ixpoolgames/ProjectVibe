@@ -10,9 +10,15 @@
 ##     and otherwise, within 0.6 s of a normal swing ending, the quicker, lighter FollowUpAttack. The normal swing has a 0.8 s cooldown
 ##     here (the arena's DEBUG_COOLDOWNS; Claude 2026-11-10: was 1.5), so swing, then click again quickly for the follow-up. Priority picks: higher wins, with no
 ##     jitter on these two.
+##     Claude 2026-11-10 (pawn spec 8.11): replaced by a combo made of boosts, with no follow-up window. Three swings answer to Attack:
+##     MeleeAttack (priority 10), SecondSwing (0, tagged combo.second) and FinisherSwing (-10, tagged combo.finisher). Starting
+##     MeleeAttack boosts combo.second by 20 for 0.6 s, and starting SecondSwing boosts combo.finisher by 40 for 0.6 s
+##     (resources/effects/combo_*_boost.tres). So clicking again quickly gives swing, second, finisher; slowly, swing, swing. A click
+##     during a swing waits in its buffer, since the next swing can't cancel it (interrupt priority 10 against 15). MeleeAttack has no
+##     cooldown here (_debug_cooldowns), so the boosts alone decide. Each swing's damage and knockback are its on-hit effects.
 ##   - Special (the right mouse button, the action secondary) is HeavyAttack: a slow, wide, hard-hitting swing on a 6 s cooldown.
-##   - The goblins use the same requests: their Attack behaviour presses attack (and gets the follow-up when the normal swing is
-##     cooling down), and a second one, HeavyAttack, presses special and scores higher (0.95 against 0.9), so they use it whenever
+##   - The goblins use the same requests: their Attack behaviour presses attack (and gets the combo's next swing when it presses
+##     again quickly; Claude 2026-11-10), and a second one, HeavyAttack, presses special and scores higher (0.95 against 0.9), so they use it whenever
 ##     it's ready and they're in its range.
 extends "res://assets/scripts/samples/ArenaSample.gd"
 
@@ -25,6 +31,13 @@ const BLUE_GOBLIN_SCENE := preload("res://assets/scenes/samples/faction_goblin_b
 const SPECIAL_KEY_ACTION := &"attack_secondary"
 
 var _special_key_bound := false
+
+
+## Claude 2026-11-10: the arena's cooldowns without MeleeAttack's, so the combo is decided by its boosts alone (pawn spec 8.11).
+func _debug_cooldowns() -> Dictionary:
+	var cooldowns: Dictionary = super().duplicate()
+	cooldowns.erase("MeleeAttack")
+	return cooldowns
 
 
 func _ready() -> void:
@@ -52,4 +65,5 @@ func _process(delta: float) -> void:
 
 
 func _keys_text() -> String:
-	return super() + "\nAttack: left mouse (again quickly: follow-up)    Special: right mouse (heavy, 6 s cooldown)    Red and blue goblins fight each other too"
+	# Claude 2026-11-10: the combo (pawn spec 8.11)
+	return super() + "\nAttack: left mouse (quickly again: second swing, then finisher)    Special: right mouse (heavy, 6 s cooldown)    Red and blue goblins fight each other too"

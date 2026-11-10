@@ -27,6 +27,11 @@
 ##     still from the start, as before.
 ##   - A hit can lift the target in a small hop: knockback_hop_speed, in metres per second upward (KnockbackAbility).
 ##   - hit_area_moved goes out on every hit tick, for debug drawing the sweep.
+## Claude 2026-11-10 (pawn spec 8.11), the owner's design: a swing no longer carries damage or knockback. damage, knockback_speed,
+## knockback_ticks and knockback_hop_speed are gone; its EffectApplier children say what a hit does (on hit, to the target: a
+## StatChangePart for damage, a KnockbackPart for the push and hop), and the target applies them. The default swing's are in
+## resources/effects/swing_hit.tres, with the same numbers as before (20 damage, 6 m/s for 10 ticks, a 2 m/s hop). A swing with no
+## on-hit effects hits and does nothing, and warns once.
 class_name MeleeAttackAbility
 extends AbilityBase
 
@@ -53,12 +58,6 @@ signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
 @export_range(0.05, 10.0, 0.05, "or_greater") var hit_radius := 0.8
 ## The hit sphere's height above the pawn's feet, in metres: about the chest.
 @export var hit_height := 1.0
-## Claude 2026-11-09, step 10: health points each hit takes.
-@export_range(0, 10000, 1, "or_greater") var damage := 20
-## How fast a hit pushes the target, in metres per second at the start.
-@export var knockback_speed := 6.0
-## How many ticks a hit's push lasts.
-@export_range(0, 120, 1, "or_greater") var knockback_ticks := 10
 ## On: it can hit pawns on its own team.
 @export var hits_own_team := false
 ## Claude 2026-11-10: how far round the hit sphere sweeps during the hit ticks, in degrees, centred straight ahead. 0: it holds still.
@@ -67,18 +66,18 @@ signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
 @export var sweep_from_left := false
 ## Claude 2026-11-10: how fast it turns toward where the pawn looks during the windup, in degrees per second. 0: no turning.
 @export_range(0.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second := 720.0
-## Claude 2026-11-10: how fast a hit lifts the target, in metres per second upward, for a small hop back. 0: no hop.
-@export_range(0.0, 20.0, 0.1, "or_greater") var knockback_hop_speed := 2.0
 
 var _hit_this_swing: Array[int] = [] # instance ids, on the server only
+var _warned_no_effects := false # Claude 2026-11-10
 
 
 func _init() -> void:
 	super()
 	kind = Kind.ACTION
 	trigger_action = &"primary"
-	category = &"combat.melee"
-	locks_out = [&"movement", &"combat"]
+	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	category = Tags.COMBAT_MELEE
+	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
 	interrupt_priority = 15
 	interrupt_threshold = 15
 	buffer_window = 0.15 # a press near the end of a dash waits for it
@@ -197,10 +196,12 @@ func _check_hits(tick: int, centres: Array[Vector3]) -> void:
 		var away := target.global_position - pawn.global_position
 		away.y = 0.0
 		hit.direction = away.normalized() if away.length_squared() > 0.0001 else Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
-		hit.damage = damage
-		hit.knockback_speed = knockback_speed
-		hit.knockback_ticks = TickDriver.ticks_at_rate(knockback_ticks) # Claude 2026-11-09 (step 6)
-		hit.knockback_hop = knockback_hop_speed # Claude 2026-11-10
+		# Claude 2026-11-10 (pawn spec 8.11): its effects, from its EffectApplier children, instead of damage and knockback numbers.
+		hit.effects = on_hit_effects
+		hit.attacker_effects = on_hit_self_effects
+		if on_hit_effects.is_empty() and on_hit_self_effects.is_empty() and not _warned_no_effects:
+			_warned_no_effects = true
+			push_warning("MeleeAttackAbility %s hit %s but has no on-hit effects (EffectApplier children), so the hit does nothing." % [name, target.name])
 		target.receive_hit(hit)
 		hit_landed.emit(hit)
 

@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="Effect" format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_c3n2e"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/AbilityPriorityPart.gd" id="2_bxxyp"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="3_f06iw"]
+
+[sub_resource type="Resource" id="Resource_25fe4"]
+script = ExtResource("2_bxxyp")
+ability_tag = &"combo.second"
+
+[resource]
+script = ExtResource("3_f06iw")
+effect_name = &"combo second boost"
+tags = Array[StringName]([&"buff.combo"])
+is_harmful = false
+duration_seconds = 0.6
+parts = Array[ExtResource("1_c3n2e")]([SubResource("Resource_25fe4")])
