@@ -6,6 +6,8 @@
 ##     window opens (MeleeAttackAbility.hit_window_started), whether or not it hit anything.
 ##     Claude 2026-11-09: a swing that hits labels its sphere with each pawn it hit and the damage, one per line ("pawn_3 -20"),
 ##     from MeleeAttackAbility.hit_landed. Hits are decided on the server, so a client's own spheres stay unlabelled.
+##     Claude 2026-11-10: and the sweep: a fainter sphere where the hit sphere ended each hit tick, so the arc it swept shows
+##     (MeleeAttackAbility.hit_area_moved). The first sphere, with the hit labels, is where the sweep started.
 ##   - A dash's trail: a copy of the pawn's capsule every physics frame while it dashes, each left behind for dash_seconds (1 s).
 ##
 ## Where it shows: on the machine whose abilities run the swing or dash. That's every pawn offline and on the server, and a
@@ -55,6 +57,7 @@ func watch(pawn: Pawn) -> void:
 				_swings[ability] = null
 				ability.hit_window_started.connect(_on_hit_window_started.bind(ability))
 				ability.hit_landed.connect(_on_hit_landed)
+				ability.hit_area_moved.connect(_on_hit_area_moved) # Claude 2026-11-10
 		elif ability is DashAbility:
 			var already := false
 			for pair in _dashes:
@@ -107,6 +110,17 @@ func _on_hit_window_started(centre: Vector3, radius: float, swing: MeleeAttackAb
 	shape.global_position = centre
 	shape.scale = Vector3.ONE * radius
 	_swings[swing] = shape
+
+
+## Claude 2026-11-10: one step of a swing's sweep, at half the starting sphere's alpha, so the arc shows without hiding the first one.
+func _on_hit_area_moved(_from: Vector3, to: Vector3, radius: float) -> void:
+	if not visible:
+		return
+	var colour := attack_colour
+	colour.a *= 0.5
+	var shape := _add_shape("SweepSphere", _sphere_mesh, colour, attack_seconds)
+	shape.global_position = to
+	shape.scale = Vector3.ONE * radius
 
 
 ## Claude 2026-11-09: adds the pawn hit, and the damage, to its swing's sphere, one line per hit. The label is made on the first hit.

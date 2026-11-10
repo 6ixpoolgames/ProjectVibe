@@ -1,0 +1,8 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/pawn.tscn" id="1_pawn"]
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_abilities.tscn" id="2_abilities"]
+
+[node name="FactionPlayer" instance=ExtResource("1_pawn")]
+
+[node name="AbilityManager" parent="." instance=ExtResource("2_abilities")]

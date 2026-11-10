@@ -6,6 +6,7 @@
 ##   PawnInitializer         gives each pawn its default parts, from one list per game (Claude 2026-11-07)
 ##   PossessionCoordinator   creates the PlayerController, and tracks who controls which pawn
 ##   AIActivationManager     switches AI pawns off when no source keeps the ground under them loaded
+##   SpawnManager            puts pawns in at SpawnPoints, and brings players back after they die (Claude 2026-11-10)
 ##
 ## How to use it:
 ##   GameMode.pawn_initializer         # a module, or null if this game doesn't have it, so check first
@@ -31,6 +32,7 @@ const DEFAULT_MODULES: Array[String] = [
 	"res://assets/scripts/game_mode/PawnInitializer.gd", # Claude 2026-11-07: first, so it's ready before any pawn arrives
 	"res://assets/scripts/game_mode/PossessionCoordinator.gd",
 	"res://assets/scripts/game_mode/AIActivationManager.gd",
+	"res://assets/scripts/game_mode/SpawnManager.gd", # Claude 2026-11-10: does nothing with no spawn points placed
 ]
 
 ## The module that switches AI pawns off, or null without one. Each module fills in its own line when it starts.
@@ -40,6 +42,8 @@ var ai_activation_manager: AIActivationManager = null
 var possession_coordinator: PossessionCoordinator = null
 ## Claude 2026-11-07: gives pawns their default parts, or null without one.
 var pawn_initializer: PawnInitializer = null
+## Claude 2026-11-10: spawns pawns at spawn points and brings players back, or null without one.
+var spawn_manager: SpawnManager = null
 
 var _modules: Array[GameModeModule] = []
 

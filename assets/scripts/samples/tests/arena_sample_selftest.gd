@@ -18,13 +18,20 @@ func _ready() -> void:
 	add_child(arena)
 	await get_tree().physics_frame
 	arena._start_offline()
-	await _ticks(30)
+	# Claude 2026-11-10: the goblins come from the scene's spawners now, which wait for the ground around them to load.
+	var wanted := 0
+	for spawner: PawnSpawner in arena.get_spawners():
+		wanted += spawner.keep_alive
+	for i in 300:
+		await get_tree().physics_frame
+		if i >= 30 and arena._readouts.size() >= wanted:
+			break
 	var player: Pawn = GameMode.possession_coordinator.get_pawn_of()
 	var goblins: Array[Pawn] = []
 	for pawn: Pawn in arena._readouts:
 		goblins.append(pawn)
-	_check(player != null and player.team == 0, "offline: the player has a pawn on team 0")
-	_check(goblins.size() == arena.GOBLINS_PER_WAVE, "a wave of %d goblins on team 1" % goblins.size())
+	_check(player != null and player.team == 0 and Vector2(player.global_position.x, player.global_position.z).length() <= 3.01, "offline: the player has a pawn on team 0, at the PlayerStart")
+	_check(goblins.size() == wanted and wanted == 6, "the spawners fill up: %d goblins on team 1" % goblins.size())
 	_check(goblins.all(func(g: Pawn) -> bool: return g.grounded or g.global_position.y > -5.0), "standing on the terrain")
 	# Claude 2026-11-09: this level's longer cooldowns, with the swing's timer registered for rollback (it had no cooldown before).
 	var swing: AbilityBase = null
@@ -88,12 +95,19 @@ func _ready() -> void:
 		info.damage = 20
 		victim.receive_hit(info)
 	_check(victim.is_dead() and arena._kills == 1, "a goblin killed counts as a kill")
-	await get_tree().create_timer(arena.BODY_REMOVAL_SECONDS + 0.5).timeout
-	_check(not is_instance_valid(victim), "and its body is removed after %.0f s" % arena.BODY_REMOVAL_SECONDS)
-	var before: int = arena._readouts.size()
+	# Claude 2026-11-10: its spawner removes the body and sends a replacement; R (_spawn_wave) refills at once.
+	var body_seconds: float = arena.get_spawners()[0].body_seconds
+	await get_tree().create_timer(body_seconds + 0.5).timeout
+	_check(not is_instance_valid(victim), "and its spawner removes its body after %.0f s" % body_seconds)
+	var living := func() -> int:
+		var count := 0
+		for spawner: PawnSpawner in arena.get_spawners():
+			count += spawner.get_alive().filter(func(p: Pawn) -> bool: return not p.is_dead()).size()
+		return count
+	var before: int = living.call()
 	arena._spawn_wave()
 	await _ticks(5)
-	_check(arena._readouts.size() == before + arena.GOBLINS_PER_WAVE, "R sends another wave")
+	_check(before < wanted and living.call() == wanted, "R refills the spawners at once (%d living, was %d)" % [living.call(), before])
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 

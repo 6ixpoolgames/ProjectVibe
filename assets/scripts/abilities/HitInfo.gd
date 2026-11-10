@@ -21,3 +21,5 @@ var damage := 0
 var knockback_speed := 0.0
 ## How many ticks the knockback lasts.
 var knockback_ticks := 0
+## Claude 2026-11-10: how fast the knockback lifts the target, in metres per second upward, for a small hop. 0: it stays on the ground.
+var knockback_hop := 0.0

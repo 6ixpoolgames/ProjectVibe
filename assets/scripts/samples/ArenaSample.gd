@@ -3,7 +3,8 @@
 ## Press Offline to play alone. To play together, open it twice, press Host in one and Join in the other.
 ##
 ## Keys: WASD to move, Shift to sprint, Space to jump, Left Alt to dash, the left mouse button to swing, the mouse to look, the wheel
-## to zoom. Esc frees the mouse, and a click takes it back. R sends a new wave of goblins. Tab possesses a goblin (then it fights for
+## to zoom. Esc frees the mouse, and a click takes it back. R fills the spawners up at once (Claude 2026-11-10: it sent a new wave of
+## six on top of the others). Tab possesses a goblin (then it fights for
 ## you, on its team; Tab again goes back). F3 shows or hides the readout over each goblin, and the debug shapes.
 ## Claude 2026-11-09: debug shapes (AbilityDebugDraw): each swing leaves its hit sphere for 2 s, and each dash a trail of
 ## capsules for 1 s, fading. The readout also shows each goblin's last ability. Goblins sprint and dash while chasing. Cooldowns
@@ -17,6 +18,15 @@
 ##     how aware of your pawn it is. This is sample code: the base has no debug readout yet (pawn spec open question 10).
 ##   - Death: a dead goblin is removed after 3 s. A dead player is revived where they fell after 3 s. Both are this sample's rules,
 ##     not the base's (pawn spec 8.7).
+##     Claude 2026-11-10: now the base's spawning does both, from nodes in the scene's Spawning folder: three PawnSpawners keep two
+##     goblins each alive, 22 m out and facing the middle, removing a body after 3 s and sending its replacement 5 s after the death;
+##     and the PlayerStart SpawnPoint is where players appear, and come back 3 s after dying (GameMode.spawn_manager). The spawners
+##     start switched off in the scene, and this script switches them on once a game starts, so nothing spawns behind the menu.
+##
+## Claude 2026-11-09, debug keys for watching the AI (offline only, since pausing a host would stall its clients): P pauses and
+## plays on. Paused, → runs one tick and ← steps back through the last 10 s, view only (AIDebugTimeline): a ghost and a label for each
+## goblin where it was, and a list of what happened (states, behaviours, targets, abilities, hits). Shift moves ten ticks at a time.
+## Playing on carries on from the real present.
 ##
 ## A scripted start also works, after "--" on the command line: --offline, --host, --join=127.0.0.1, --ping=100, and (Claude
 ## 2026-11-09) --port=24900 for another port than PORT.
@@ -25,15 +35,18 @@ extends Node3D
 const PORT := 24896
 const PAWN_SCENE := preload("res://assets/scenes/pawn/pawn.tscn")
 const GOBLIN_SCENE := preload("res://assets/scenes/samples/arena_goblin.tscn")
-const GOBLINS_PER_WAVE := 6
-const BODY_REMOVAL_SECONDS := 3.0
-const PLAYER_REVIVE_SECONDS := 3.0
+# Claude 2026-11-10: GOBLINS_PER_WAVE, BODY_REMOVAL_SECONDS and PLAYER_REVIVE_SECONDS are gone: the spawners and SpawnManager
+# have those settings now.
 ## Claude 2026-11-09: longer cooldowns in this level only, in seconds by ability name, so switching between abilities is easy to see
 ## (the owner's request). The base's are MeleeAttack 0, Jump 0, Dash 1 and Sprint 4. Knockback and Death are left alone: a cooldown
 ## on Death would make a revived pawn unkillable for a while, and one on Knockback would let a second hit go unstaggered.
-const DEBUG_COOLDOWNS := {"MeleeAttack": 1.5, "Jump": 1.0, "Dash": 3.0, "Sprint": 8.0}
+## Claude 2026-11-10: MeleeAttack 1.5 → 0.8, the owner's call that it was a little long. With the faction arena's follow-up, that's a
+## swing, a follow-up, and a short wait.
+## Claude 2026-11-10: Dash 3 → 6, doubled with the base's (1 → 2), the owner's call that it's too good.
+const DEBUG_COOLDOWNS := {"MeleeAttack": 0.8, "Jump": 1.0, "Dash": 6.0, "Sprint": 8.0}
+## Claude 2026-11-09: the players' team. Every other team is AI (faction_arena_sample has two).
+const PLAYER_TEAM := 0
 
-@onready var _terrain: TerrainGenerator = $World/Terrain
 @onready var _status: Label = $Display/Status
 @onready var _menu: Control = $Display/Menu
 @onready var _address: LineEdit = $Display/Menu/Box/Address
@@ -46,12 +59,18 @@ var _player_pawn: Pawn = null # the pawn this machine's player started with, to 
 var _last_ability := {} # Claude 2026-11-09: Pawn -> the AbilityBase it last started, for the readout
 var _debug_draw: AbilityDebugDraw = null # Claude 2026-11-09: swing spheres and dash trails
 var _port := PORT # Claude 2026-11-09: --port= changes it, so a scripted check doesn't land in a game already hosting on PORT
+var _timeline: AIDebugTimeline = null # Claude 2026-11-09: the view-only rewind, for P and the arrow keys
+var _paused_note := "" # Claude 2026-11-09: why P did nothing, shown in the status lines
 
 
 func _ready() -> void:
 	_debug_draw = AbilityDebugDraw.new() # Claude 2026-11-09
 	_debug_draw.name = "AbilityDebugDraw"
 	add_child(_debug_draw)
+	_timeline = AIDebugTimeline.new() # Claude 2026-11-09
+	_timeline.name = "AIDebugTimeline"
+	_timeline.describe = _readout_text
+	add_child(_timeline)
 	NetworkSession.world_root = $Entities
 	NetworkSession.register_type("pawn", PAWN_SCENE)
 	NetworkSession.register_type("goblin", GOBLIN_SCENE)
@@ -73,7 +92,15 @@ func _process(_delta: float) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not event.is_pressed() or event.is_echo():
 		return
-	match (event as InputEventKey).physical_keycode:
+	var key := event as InputEventKey
+	match key.physical_keycode:
+		# Claude 2026-11-09: pause, step and the view-only rewind
+		KEY_P:
+			_toggle_pause()
+		KEY_RIGHT:
+			_step(10 if key.shift_pressed else 1)
+		KEY_LEFT:
+			_step(-10 if key.shift_pressed else -1)
 		KEY_R:
 			_spawn_wave()
 		KEY_TAB:
@@ -88,9 +115,9 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _start_offline() -> void:
 	_menu.hide()
-	_player_pawn = _spawn("pawn", 0, Vector3.ZERO)
-	GameMode.possession_coordinator.possess(_player_pawn)
-	_spawn_wave()
+	# Claude 2026-11-10: at the PlayerStart, possessed, and brought back after dying, by SpawnManager.
+	_player_pawn = GameMode.spawn_manager.spawn_player(0)
+	_start_spawners()
 
 
 func _host() -> void:
@@ -100,7 +127,7 @@ func _host() -> void:
 		return
 	_menu.hide()
 	_on_player_connected(NetworkSession.get_local_peer())
-	_spawn_wave()
+	_start_spawners() # Claude 2026-11-10: was _spawn_wave()
 
 
 func _join(address: String) -> void:
@@ -109,28 +136,36 @@ func _join(address: String) -> void:
 
 
 ## Server: a player has arrived, so they get a pawn near the middle.
+## Claude 2026-11-10: at the PlayerStart, through SpawnManager, which also possesses it for them and brings it back after dying.
 func _on_player_connected(peer: int) -> void:
-	var pawn := _spawn("pawn", peer, Vector3(randf_range(-3.0, 3.0), 0.0, randf_range(-3.0, 3.0)))
+	var pawn := GameMode.spawn_manager.spawn_player(peer)
 	if peer == NetworkSession.get_local_peer() or not NetworkSession.is_server():
 		_player_pawn = pawn
-	GameMode.possession_coordinator.possess_for(peer, pawn)
 
 
-## Server: a ring of goblins 18 to 26 m out, so they have to notice you first.
+## Claude 2026-11-10: every PawnSpawner in the Spawning folder. They're off in the scene, so nothing spawns behind the menu.
+func get_spawners() -> Array[PawnSpawner]:
+	var out: Array[PawnSpawner] = []
+	for child in $Spawning.get_children():
+		if child is PawnSpawner:
+			out.append(child)
+	return out
+
+
+## Claude 2026-11-10: server or offline: switches the spawners on, which fills them up.
+func _start_spawners() -> void:
+	if NetworkSession.is_client():
+		return
+	for spawner in get_spawners():
+		spawner.active = true
+
+
+## R. Claude 2026-11-10: fills every spawner up at once, skipping the wait for replacements. It used to send a ring of six more.
 func _spawn_wave() -> void:
 	if NetworkSession.is_client():
 		return
-	for i in GOBLINS_PER_WAVE:
-		var angle := TAU * i / GOBLINS_PER_WAVE + randf_range(-0.3, 0.3)
-		var distance := randf_range(18.0, 26.0)
-		_spawn("goblin", 0, Vector3(cos(angle) * distance, 0.0, sin(angle) * distance))
-
-
-func _spawn(type_name: String, owner_peer: int, spot: Vector3) -> Pawn:
-	# The server has no ground there yet, so it builds that one chunk first to find the height.
-	_terrain.load_chunk(_terrain.chunk_of(spot))
-	spot.y = _terrain.height_at(spot.x, spot.z) + 0.3
-	return NetworkSession.spawn(type_name, owner_peer, spot) as Pawn
+	for spawner in get_spawners():
+		spawner.refill_now()
 
 
 ## Every machine: give each pawn its readout; the server also listens for deaths.
@@ -140,7 +175,8 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 		return
 	_debug_draw.watch(pawn) # Claude 2026-11-09
 	_lengthen_cooldowns(pawn) # Claude 2026-11-09
-	if pawn.team == 1:
+	if pawn.team != PLAYER_TEAM: # Claude 2026-11-09: was team 1; any AI team now
+		_timeline.watch(pawn) # Claude 2026-11-09
 		# Claude 2026-11-09: remember what each goblin last started, for its readout. Walk never "starts": it's what runs when
 		# nothing else does.
 		if pawn.ability_manager:
@@ -150,10 +186,15 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 		label.no_depth_test = true
 		label.font_size = 48
 		label.outline_size = 12
-		label.pixel_size = 0.004
+		label.pixel_size = 0.005 # Claude 2026-11-09: was 0.004; a little bigger, the owner's request
 		label.position = Vector3(0.0, 2.4, 0.0)
 		pawn.get_visual().add_child(label)
 		_readouts[pawn] = label
+		# Claude 2026-11-10: its readout goes the moment it leaves, since a spawner removes bodies now, not this script. A freed pawn
+		# left in _readouts broke the loops over it, whose loop variable is typed Pawn.
+		pawn.tree_exiting.connect(func() -> void:
+			_readouts.erase(pawn)
+			_last_ability.erase(pawn))
 	if not NetworkSession.is_client():
 		pawn.died.connect(_on_pawn_died)
 
@@ -182,18 +223,13 @@ func _lengthen_cooldowns(pawn: Pawn) -> void:
 # --- Deaths (this sample's rules) ---
 
 
+# Claude 2026-11-10: only counts now. Removing bodies and bringing players back moved to the spawners and SpawnManager, which count
+# their delays in ticks, so pausing (P) pauses them too; the scene timers used here kept running while paused.
 func _on_pawn_died(pawn: Pawn, _hit: HitInfo) -> void:
-	if pawn.team == 1:
+	if pawn.team != PLAYER_TEAM: # Claude 2026-11-09: was team 1
 		_kills += 1
-		await get_tree().create_timer(BODY_REMOVAL_SECONDS).timeout
-		if is_instance_valid(pawn):
-			_readouts.erase(pawn)
-			NetworkSession.despawn(pawn.get_network_entity().entity_id)
 	else:
 		_deaths += 1
-		await get_tree().create_timer(PLAYER_REVIVE_SECONDS).timeout
-		if is_instance_valid(pawn):
-			pawn.revive()
 
 
 # --- Keys ---
@@ -203,7 +239,7 @@ func _on_pawn_died(pawn: Pawn, _hit: HitInfo) -> void:
 func _swap_pawn() -> void:
 	var coordinator := GameMode.possession_coordinator
 	var current := coordinator.get_pawn_of()
-	if current != null and current.team == 1 and is_instance_valid(_player_pawn):
+	if current != null and current.team != PLAYER_TEAM and is_instance_valid(_player_pawn): # Claude 2026-11-09: was team 1
 		coordinator.possess(_player_pawn)
 		return
 	for pawn: Pawn in _readouts:
@@ -216,36 +252,70 @@ func _swap_pawn() -> void:
 
 
 func _update_readouts() -> void:
-	var player := _player_pawn if is_instance_valid(_player_pawn) else null
 	for pawn: Pawn in _readouts.keys():
 		var label: Label3D = _readouts[pawn]
 		if not is_instance_valid(pawn) or not is_instance_valid(label):
 			_readouts.erase(pawn)
 			_last_ability.erase(pawn) # Claude 2026-11-09
 			continue
-		label.visible = _show_readouts
-		if not _show_readouts:
+		# Claude 2026-11-09: hidden while the timeline shows the past, whose ghosts carry the readouts of then.
+		label.visible = _show_readouts and not _timeline.is_viewing_past()
+		if not label.visible:
 			continue
-		var lines := PackedStringArray()
-		if pawn.is_dead():
-			lines.append("dead")
-		elif pawn.runs_ai_here() and pawn.ai_context:
-			var running := pawn.ai_behaviour_manager.get_running_behaviour() if pawn.ai_behaviour_manager else null
-			lines.append("%s · %s" % [pawn.ai_context.current_state_name(), running.name if running else "—"])
-			if player and pawn.ai_memory:
-				var index := pawn.ai_memory.find(player)
-				if index >= 0:
-					var awareness := pawn.ai_memory.awareness_at(index, pawn.ai_context.current_tick)
-					lines.append("aware %d%%%s" % [int(awareness * 100.0), " (certain)" if pawn.ai_memory.is_certain_at(index) else ""])
-			# Claude 2026-11-09: the last ability it started, marked while it's still running (Sprint lasts up to 3 s).
-			var last: AbilityBase = _last_ability.get(pawn)
-			if is_instance_valid(last):
-				lines.append("last: %s%s" % [last.name, " (running)" if last.is_running_timed() else ""])
-			else:
-				lines.append("last: —")
-		lines.append("HP %d" % int(pawn.get_health()))
-		label.text = "\n".join(lines)
+		label.text = _readout_text(pawn)
 		label.modulate = Color(1.0, 0.45, 0.4) if pawn.ai_context and pawn.ai_context.current_state_name() == &"Combat" else Color(1.0, 0.95, 0.8)
+
+
+## Claude 2026-11-09: one goblin's readout, which the timeline also records each tick: its state and behaviour, its target and how
+## aware of it it is, the last ability it started, and its Health.
+func _readout_text(pawn: Pawn) -> String:
+	var lines := PackedStringArray()
+	if pawn.is_dead():
+		lines.append("dead")
+	elif pawn.runs_ai_here() and pawn.ai_context:
+		var running := pawn.ai_behaviour_manager.get_running_behaviour() if pawn.ai_behaviour_manager else null
+		lines.append("%s · %s" % [pawn.ai_context.current_state_name(), running.name if running else "—"])
+		var target := pawn.ai_context.current_target as Pawn
+		if not is_instance_valid(target):
+			target = _player_pawn if is_instance_valid(_player_pawn) else null
+		if target and pawn.ai_memory:
+			var index := pawn.ai_memory.find(target)
+			if index >= 0:
+				var awareness := pawn.ai_memory.awareness_at(index, pawn.ai_context.current_tick)
+				lines.append("%s: aware %d%%%s" % [target.name, int(awareness * 100.0), " (certain)" if pawn.ai_memory.is_certain_at(index) else ""])
+		# Claude 2026-11-09: the last ability it started, marked while it's still running (Sprint lasts up to 3 s).
+		var last: AbilityBase = _last_ability.get(pawn)
+		if is_instance_valid(last):
+			lines.append("last: %s%s" % [last.name, " (running)" if last.is_running_timed() else ""])
+		else:
+			lines.append("last: —")
+	lines.append("HP %d" % int(pawn.get_health()))
+	return "\n".join(lines)
+
+
+# --- Pause, step and the view-only rewind (Claude 2026-11-09) ---
+
+
+func _toggle_pause() -> void:
+	if NetworkSession.is_server() or NetworkSession.is_client():
+		_paused_note = "P pauses offline only: pausing a host would stall everyone joined to it"
+		return
+	TickDriver.active = not TickDriver.active
+	_timeline.view_present()
+	_timeline.show_panel(not TickDriver.active)
+	_update_readouts() # at once, not on the next frame, so the live readouts and the ghosts change together
+
+
+# Paused: back through the recording, or forward to the present and then on by real ticks.
+func _step(ticks: int) -> void:
+	if TickDriver.active:
+		return
+	var to_run := _timeline.step_view(ticks)
+	for i in to_run:
+		TickDriver.step()
+	if to_run > 0:
+		_timeline.view_present()
+	_update_readouts() # at once, as above
 
 
 func _status_text() -> String:
@@ -264,8 +334,17 @@ func _status_text() -> String:
 	if pawn:
 		lines.append("HP %d%s    speed %.1f m/s" % [int(pawn.get_health()), "  (dead: reviving)" if pawn.is_dead() else "", Vector2(pawn.velocity.x, pawn.velocity.z).length()])
 	lines.append("goblins %d    kills %d    deaths %d" % [alive, _kills, _deaths])
-	lines.append("WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: new wave    Tab: possess a goblin    F3: readouts and debug shapes    Esc: free the mouse")
+	lines.append(_keys_text()) # Claude 2026-11-09: a function, so faction_arena_sample can add its special attack
+	if not TickDriver.active:
+		lines.append("PAUSED (P)")
+	if _paused_note != "":
+		lines.append(_paused_note)
 	return "\n".join(lines)
+
+
+## Claude 2026-11-09: the key reminder in the status lines.
+func _keys_text() -> String:
+	return "WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: refill the spawners    Tab: possess a goblin    F3: readouts and debug shapes    P: pause, then ←/→ step    Esc: free the mouse"
 
 
 func _read_command_line() -> void:

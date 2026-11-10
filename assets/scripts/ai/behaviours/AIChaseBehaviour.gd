@@ -20,13 +20,15 @@ extends AIBehaviourBase
 ## On: it holds sprint while chasing. Sprint's own cooldown decides when it actually sprints.
 @export var sprint := true
 ## Claude 2026-11-09: on: it presses dash to close in, when the target is between dash_to_distance and dash_from_distance away and
-## Dash can start (grounded, off cooldown, nothing it can't cancel running). Off by default; the arena's goblins turn it on, so the
-## owner can see the AI switch abilities. A dash goes the way the pawn is moving, which is along its path.
+## Dash can start (off cooldown, nothing it can't cancel running; Claude 2026-11-10: in the air too now, Dash's usable_in_air). Off by
+## default; the arena's goblins turn it on, so the owner can see the AI switch abilities. A dash goes the way the pawn is moving, which
+## is along its path.
 @export var dash_to_close := false
-## Claude 2026-11-09: the farthest the target can be for a dash, in metres.
-@export_range(0.0, 50.0, 0.1, "or_greater") var dash_from_distance := 6.0
-## Claude 2026-11-09: the nearest the target can be for a dash, in metres. With Dash's default 2.7 m, 4 lands it about at stop_distance.
-@export_range(0.0, 50.0, 0.1, "or_greater") var dash_to_distance := 4.0
+## Claude 2026-11-09: the farthest the target can be for a dash, in metres. Claude 2026-11-10: 7.5 (was 6), for the new dash.
+@export_range(0.0, 50.0, 0.1, "or_greater") var dash_from_distance := 7.5
+## Claude 2026-11-09: the nearest the target can be for a dash, in metres. Claude 2026-11-10: 5.5 (it was 4): a dash from a sprint
+## (9 m/s) now covers about 4.2 m, so 5.5 lands it a little outside stop_distance.
+@export_range(0.0, 50.0, 0.1, "or_greater") var dash_to_distance := 5.5
 
 var _goal := Vector3.ZERO
 var _last_path_tick := -1000000

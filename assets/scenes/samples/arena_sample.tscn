@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/samples/ArenaSample.gd" id="1_sample"]
 [ext_resource type="Script" path="res://assets/scripts/terrain/TerrainGenerator.gd" id="2_terrain"]
@@ -7,6 +7,8 @@
 [ext_resource type="Script" path="res://assets/scripts/terrain/TerrainBodyLifter.gd" id="5_lifter"]
 [ext_resource type="Script" path="res://assets/scripts/world/WorldCoordinator.gd" id="6_world"]
 [ext_resource type="Script" path="res://assets/scripts/world/TerrainNavFeeder.gd" id="7_link"]
+[ext_resource type="Script" path="res://assets/scripts/spawning/SpawnPoint.gd" id="8_point"]
+[ext_resource type="Script" path="res://assets/scripts/spawning/PawnSpawner.gd" id="9_spawner"]
 
 [sub_resource type="NavHooks" id="Hooks"]
 
@@ -50,6 +52,37 @@ nav_hooks = SubResource("Hooks")
 tick_nav = true
 
 [node name="Entities" type="Node3D" parent="."]
+
+[node name="Spawning" type="Node3D" parent="."]
+
+[node name="PlayerStart" type="Node3D" parent="Spawning"]
+script = ExtResource("8_point")
+team = 0
+scatter_radius = 3.0
+
+[node name="GoblinSpawner1" type="Node3D" parent="Spawning"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 22)
+script = ExtResource("9_spawner")
+active = false
+pawn_type = "goblin"
+keep_alive = 2
+scatter_radius = 4.0
+
+[node name="GoblinSpawner2" type="Node3D" parent="Spawning"]
+transform = Transform3D(-0.499991, 0, -0.86603, 0, 1, 0, 0.86603, 0, -0.499991, -19.053, 0, -11)
+script = ExtResource("9_spawner")
+active = false
+pawn_type = "goblin"
+keep_alive = 2
+scatter_radius = 4.0
+
+[node name="GoblinSpawner3" type="Node3D" parent="Spawning"]
+transform = Transform3D(-0.499991, 0, 0.86603, 0, 1, 0, -0.86603, 0, -0.499991, 19.053, 0, -11)
+script = ExtResource("9_spawner")
+active = false
+pawn_type = "goblin"
+keep_alive = 2
+scatter_radius = 4.0
 
 [node name="Sun" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 30, 0)

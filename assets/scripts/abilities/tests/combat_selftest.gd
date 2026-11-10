@@ -50,41 +50,93 @@ func _test_dash() -> void:
 	var ai := _ai(pawn)
 	var dash: DashAbility = pawn.ability_manager.get_node("Dash")
 	await _ticks(15)
+	# Claude 2026-11-10, the owner's design: it speeds up at 100 m/s^2 for 0.1 s (+10 m/s), then slows down at 50 m/s^2 for 0.2 s
+	# (-10 m/s), so it ends at the speed it started with. These checks replace the flat 18 m/s ones (a burst at DashSpeed, about 2.7 m).
+	_check(dash.duration_ticks() == 18, "it lasts 18 ticks: 6 speeding up, 12 slowing down (%d)" % dash.duration_ticks())
 	var start := pawn.global_position
 	ai.move_in_direction(Vector3(1, 0, 0))
 	ai.press(&"dash")
-	await _ticks(2)
-	_check(dash.is_running_timed() and pawn.velocity.x > 17.0, "dash: a burst at DashSpeed, the way it's moving (%.1f m/s)" % pawn.velocity.x)
-	ai.press(&"jump")
-	await _ticks(1)
-	_check(pawn.velocity.y <= 0.01, "jump is locked out while dashing")
-	await _ticks(10)
-	ai.stop()
-	await _ticks(30)
+	var run := await _dash_run(pawn, dash, func(frame: int) -> void:
+		if frame == 3:
+			ai.press(&"jump"))
 	var travelled := pawn.global_position.x - start.x
-	_check(not dash.is_running_timed() and travelled > 2.5 and travelled < 4.0, "it lasts 9 ticks, about 2.7 m, then Walk slows it (%.2f m)" % travelled)
+	_check(run["ticks"] >= 17 and run["peak"] > 9.5 and run["peak"] < 11.5 and run["end"] < 1.5, "from standing: up to about 10 m/s, then back down (peak %.1f, end %.1f m/s, %d ticks)" % [run["peak"], run["end"], run["ticks"]])
+	_check(travelled > 1.3 and travelled < 2.0, "about 1.5 m (%.2f m)" % travelled)
+	_check(run["max_y"] <= 0.01, "jump is locked out while dashing")
+	ai.stop()
+	await _until(func() -> bool: return dash.cooldown_ticks_left == 0, 150)
+	# Walking at 5 m/s: up to about 15, then back to about 5. Walk doesn't slow it as well (pauses_locomotion).
+	ai.move_in_direction(Vector3(1, 0, 0))
+	await _ticks(30)
+	var walking := pawn.velocity.x
 	ai.press(&"dash")
-	await _ticks(2)
-	_check(not dash.is_running_timed() or dash.cooldown_ticks_left == 0, "after its 1 s cooldown is over it can go again")
+	run = await _dash_run(pawn, dash)
+	_check(walking > 4.8 and run["peak"] > 14.0 and run["peak"] < 16.0 and absf(run["end"] - walking) < 0.6, "walking: up to walking speed + 10, then back to it (%.1f, peak %.1f, end %.1f m/s)" % [walking, run["peak"], run["end"]])
+	ai.stop()
 	await _ticks(60)
+	_check(Vector2(pawn.velocity.x, pawn.velocity.z).length() < 0.5, "and Walk takes over again after it")
+	await _until(func() -> bool: return dash.cooldown_ticks_left == 0, 150)
 	var facing_before := pawn.yaw
 	ai.press(&"dash")
 	await _ticks(2)
 	var along := Vector3(-sin(facing_before), 0, -cos(facing_before))
 	_check(Vector3(pawn.velocity.x, 0, pawn.velocity.z).normalized().dot(along) > 0.99, "standing still, it dashes the way it faces")
-	await _ticks(70)
+	await _until(func() -> bool: return not dash.is_running_timed() and dash.cooldown_ticks_left == 0, 150)
+	await _ticks(30)
+	# Claude 2026-11-10, the owner's call: an air dash now (it was "no air dash"), toward the input, not the way the pawn faces. And
+	# speed gained some other way during it is kept at the end: the slow-down takes a fixed amount off, it doesn't aim at a speed.
+	pawn.yaw = 0.0 # facing -Z
+	ai.press(&"jump")
+	await _ticks(3)
+	ai.move_in_direction(Vector3(1, 0, 0))
+	ai.press(&"dash")
+	await _ticks(2)
+	_check(dash.is_running_timed() and not pawn.grounded and pawn.velocity.x > 1.0 and absf(pawn.velocity.z) < 0.5, "an air dash, toward the input (+X), not the way it faced (-Z) (%.1f, %.1f m/s)" % [pawn.velocity.x, pawn.velocity.z])
+	run = await _dash_run(pawn, dash, func(frame: int) -> void:
+		if frame == 6:
+			pawn.velocity.x += 3.0) # a push from something else, partway through
+	_check(run["end"] > 2.4 and run["end"] < 3.6, "an extra 3 m/s found during the dash is still there when it ends (%.1f m/s)" % run["end"])
+	ai.stop()
+	ai.press(&"dash")
+	await _ticks(2)
+	_check(not dash.is_running_timed() and dash.cooldown_ticks_left > 0, "its cooldown stops a second dash straight after")
+	dash.usable_in_air = false
+	await _until(func() -> bool: return dash.cooldown_ticks_left == 0 and pawn.grounded, 150)
 	ai.press(&"jump")
 	await _ticks(3)
 	ai.press(&"dash")
 	await _ticks(2)
-	_check(not dash.is_running_timed(), "no air dash")
-	await _ticks(60)
-	ai.press(&"dash")
-	await _ticks(2)
-	ai.press(&"dash")
-	await _ticks(12)
-	_check(not dash.is_running_timed() and dash.cooldown_ticks_left > 0, "its cooldown stops a second dash straight after")
+	_check(not dash.is_running_timed(), "with usable_in_air off: no air dash, as before")
 	pawn.free()
+
+
+# Claude 2026-11-10: a hit from in front, with a push and no damage worth noting, for the dash's invulnerability checks.
+func _push_hit(pawn: Pawn) -> HitInfo:
+	var hit := HitInfo.new()
+	hit.target = pawn
+	hit.direction = Vector3(-1, 0, 0)
+	hit.knockback_speed = 8.0
+	hit.knockback_ticks = 10
+	return hit
+
+
+# Claude 2026-11-10: follows a dash pressed this tick until it ends: its peak speed along its direction, its speed on the tick it ended,
+# how many ticks it ran and the highest upward speed. during(frame) runs each frame, for a test to press something or push the pawn.
+func _dash_run(pawn: Pawn, dash: DashAbility, during: Callable = Callable()) -> Dictionary:
+	var out := {"peak": 0.0, "end": 0.0, "ticks": 0, "max_y": -INF}
+	for frame in 40:
+		await get_tree().physics_frame
+		if not dash.is_running_timed():
+			if out["ticks"] > 0:
+				break
+			continue
+		out["ticks"] += 1
+		out["peak"] = maxf(out["peak"], pawn.velocity.dot(dash.dash_direction))
+		out["max_y"] = maxf(out["max_y"], pawn.velocity.y)
+		if during.is_valid():
+			during.call(frame)
+	out["end"] = pawn.velocity.dot(dash.dash_direction)
+	return out
 
 
 func _test_interrupts() -> void:
@@ -107,23 +159,79 @@ func _test_interrupts() -> void:
 	_check(Vector2(pawn.velocity.x, pawn.velocity.z).length() < 0.5, "and the pawn holds still while swinging")
 	ai.press(&"dash")
 	await _ticks(2)
-	_check(not melee.is_running_timed() and dash.is_running_timed(), "dash (20) cancels the swing: the animation cancel")
+	_check(not melee.is_running_timed() and dash.is_running_timed(), "dash (40; Claude 2026-11-10: was 20) cancels the swing: the animation cancel")
 	_check(cancels.has([&"MeleeAttack", &"Dash"]) and melee.cooldown_ticks_left >= 0, "ability_cancelled says so")
 	ai.hold(&"sprint", false)
 	ai.stop()
 	await _ticks(30)
-	# A knockback cancels a dash.
+	# Claude 2026-11-10, the owner's calls: a dash is invulnerable for its first 0.18 s (11 ticks), so a hit then does nothing. After
+	# that a hit lands, and its knockback (30) cancels the rest of the dash (threshold 25). A dash still cancels a knockback (below).
+	await _until(func() -> bool: return dash.cooldown_ticks_left == 0, 150)
+	var knockback: KnockbackAbility = manager.get_node("Knockback")
+	ai.move_in_direction(Vector3(0, 0, 1))
+	ai.press(&"dash")
+	await _until(func() -> bool: return dash.is_running_timed(), 5)
+	await _ticks(2)
+	pawn.receive_hit(_push_hit(pawn))
+	_check(dash.is_running_timed() and not knockback.is_running_timed() and pawn.is_invulnerable(), "early in a dash a hit does nothing: invulnerable (%d ticks in)" % dash.ticks_running())
+	await _until(func() -> bool: return not pawn.is_invulnerable(), 20)
+	var invulnerable_for := dash.ticks_running()
+	_check(dash.is_running_timed() and invulnerable_for == 11, "invulnerable for the first 0.18 s, 11 ticks, then not, while the dash still runs (%d)" % invulnerable_for)
+	pawn.receive_hit(_push_hit(pawn))
+	_check(not dash.is_running_timed() and knockback.is_running_timed() and cancels.has([&"Dash", &"Knockback"]), "a hit after that lands, and its knockback (30) cancels the dash (threshold 25)")
+	ai.stop()
+	await _until(func() -> bool: return not knockback.is_running_timed() and not dash.is_running_timed() and dash.cooldown_ticks_left == 0, 150)
+	_check(not pawn.is_invulnerable(), "and it isn't invulnerable once the dash is over")
+	# cancelled_by: a test-only ability that jump can always cancel, though its threshold (100) is far above jump's priority (5).
+	var cancelled_by_jump := Busy.new()
+	cancelled_by_jump.name = "CancelledByJump"
+	cancelled_by_jump.cancelled_by = [&"movement.jump"]
+	var plain_busy := Busy.new()
+	plain_busy.name = "PlainBusy"
+	plain_busy.trigger_action = &"ability_2"
+	var listed := _make_pawn(Vector3(40, 0.1, 0), [cancelled_by_jump, plain_busy])
+	var listed_ai := _ai(listed)
+	await _ticks(15)
+	listed_ai.press(&"ability_2")
+	await _ticks(2)
+	listed_ai.press(&"jump")
+	await _ticks(2)
+	_check(plain_busy.is_running_timed() and listed.velocity.y <= 0.01, "without cancelled_by, jump (5) can't cancel a threshold of 100")
+	listed.ability_manager.cancel(&"ability_2")
+	# The jump pressed above waited in Jump's buffer and jumps now; let it land first.
+	await _ticks(10)
+	await _until(func() -> bool: return listed.grounded, 120)
+	await _ticks(5)
+	listed_ai.press(&"secondary")
+	await _ticks(2)
+	listed_ai.press(&"jump")
+	await _ticks(2)
+	_check(not cancelled_by_jump.is_running_timed() and listed.velocity.y > 1.0, "with cancelled_by [movement.jump], a jump cancels it and jumps (%.1f m/s up)" % listed.velocity.y)
+	listed.free()
+	knockback.push(Vector3(-8, 0, 0), 20)
+	await _ticks(1)
+	_check(knockback.is_running_timed() and pawn.velocity.x < -6.0, "a knockback pushes the pawn (%.1f m/s)" % pawn.velocity.x)
+	ai.press(&"primary")
+	ai.press(&"jump")
+	await _ticks(2)
+	_check(not melee.is_running_timed() and pawn.velocity.y <= 0.01, "attacking and jumping stay locked out while it's staggered")
 	ai.move_in_direction(Vector3(0, 0, 1))
 	ai.press(&"dash")
 	await _ticks(2)
-	var knockback: KnockbackAbility = manager.get_node("Knockback")
-	knockback.push(Vector3(-8, 0, 0), 10)
-	_check(not dash.is_running_timed() and knockback.is_running_timed(), "knockback (30) cancels a dash (threshold 25)")
-	await _ticks(1)
-	_check(pawn.velocity.x < -6.0, "and pushes the pawn (%.1f m/s)" % pawn.velocity.x)
+	_check(dash.is_running_timed() and not knockback.is_running_timed() and cancels.has([&"Knockback", &"Dash"]), "a dash (40) cancels the knockback (threshold 35)")
 	ai.stop()
 	await _ticks(30)
-	_check(Vector2(pawn.velocity.x, pawn.velocity.z).length() < 0.5, "the push fades out")
+	_check(Vector2(pawn.velocity.x, pawn.velocity.z).length() < 0.5, "then the pawn slows to a stop")
+	# Claude 2026-11-10, the owner's call: Dash works in the air now, so it breaks a knockback whose hop has lifted the pawn.
+	await _until(func() -> bool: return dash.cooldown_ticks_left == 0 and pawn.grounded, 150)
+	knockback.push(Vector3(-8, 0, 0), 20, 3.0)
+	await _ticks(3)
+	var hopping := not pawn.grounded
+	ai.move_in_direction(Vector3(0, 0, 1))
+	ai.press(&"dash")
+	await _ticks(2)
+	_check(hopping and dash.is_running_timed() and not knockback.is_running_timed(), "a dash breaks a knockback mid-hop (in the air: %s)" % hopping)
+	ai.stop()
 	pawn.free()
 
 	# Thresholds 0 and 10, on an action that locks out movement: walking cancels the first, only sprinting the second.
@@ -361,6 +469,14 @@ func _ai(pawn: Pawn) -> AIController:
 
 func _ticks(count: int) -> void:
 	for i in count:
+		await get_tree().physics_frame
+
+
+## Claude 2026-11-10: waits until the condition is true, or max_ticks physics frames.
+func _until(condition: Callable, max_ticks: int) -> void:
+	for i in max_ticks:
+		if condition.call():
+			return
 		await get_tree().physics_frame
 
 

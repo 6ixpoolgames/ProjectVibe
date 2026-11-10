@@ -6,7 +6,10 @@
 ## call). Changing the attack's range changes both. Chase brings the pawn in; this scores higher (0.9 against 0.8), so it takes over
 ## at that distance.
 ##
-## It faces the target, presses the attack's action once, and finishes when the swing is over. Its interrupt_threshold (15) keeps an
+## It faces the target, presses the attack's action once, and finishes when the swing is over. Claude 2026-11-09: the press is a
+## request; the ability manager picks what it starts (the normal swing, or a follow-up when that can't), and this waits for whichever
+## runs. A second Attack behaviour with attack_action and presses_action set to another action, and a higher score, uses a special
+## attack whenever it's ready (faction_arena_sample's goblins). Its interrupt_threshold (15) keeps an
 ## ordinary decision from cutting it off mid-swing; the swing itself follows the ability rules (pawn spec 8.6).
 class_name AIAttackBehaviour
 extends AIBehaviourBase
@@ -54,8 +57,12 @@ func tick(context: AIContextComponent) -> Status:
 	# The press reaches the ability on the next input; give it two ticks to start before checking whether it's over.
 	if context.current_tick - _started_tick < 2:
 		return Status.RUNNING
-	var melee := _find_melee()
-	return Status.RUNNING if melee and melee.is_running_timed() else Status.SUCCEEDED
+	# Claude 2026-11-09: any swing on the action, since the manager may have picked a follow-up (FollowUpAttackAbility) instead.
+	var abilities: Array = pawn.ability_manager.get_abilities() if pawn.ability_manager else []
+	for ability in abilities:
+		if ability.trigger_action == attack_action and ability.is_running_timed():
+			return Status.RUNNING
+	return Status.SUCCEEDED
 
 
 func exit(context: AIContextComponent, _reason: String) -> void:

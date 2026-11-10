@@ -32,8 +32,15 @@ enum Kind { LOCOMOTION, ACTION }
 @export var trigger_action: StringName = &""
 ## What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
 @export var category: StringName = &""
-## When several abilities share a trigger_action, the lowest priority that can start wins; then the first in the tree.
+## When several abilities share a trigger_action, the highest priority that can start wins; then the first in the tree. Claude
+## 2026-11-09: was lowest-wins; now it's higher-wins like interrupt_priority and behaviour scores (the owner's call). Among locomotion
+## abilities whose action is held, the same.
 @export var priority := 0
+## Claude 2026-11-09: a random offset, up to ± this much, added to priority each time a press picks between abilities on one action,
+## like a behaviour's score_jitter. 0 (the default): none, so the order is always the same. The offset comes from the tick's own
+## random numbers (TickDriver.tick_rng), so a rollback replay picks the same ability. Locomotion ignores it, because it's chosen every
+## tick and would flicker.
+@export var priority_jitter := 0.0
 ## Seconds. For an action, 0 means it happens at once. For locomotion, 0 means it runs as long as it's wanted.
 @export_range(0.0, 60.0, 0.05, "or_greater") var duration := 0.0
 ## Seconds after it stops before it can start again.
@@ -43,12 +50,27 @@ enum Kind { LOCOMOTION, ACTION }
 ## Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
 @export_range(0.0, 2.0, 0.01, "or_greater") var buffer_window := 0.0
 ## Claude 2026-11-09: how strong this ability is at cancelling a running ability it conflicts with (pawn spec 8.6). Two abilities
-## conflict when either one's locks_out covers the other's category. Walk 0, Sprint 10, Jump 5, Dash 20, knockback 30.
+## conflict when either one's locks_out covers the other's category. Walk 0, Sprint 10, Jump 5, Dash 20, knockback 30. Claude
+## 2026-11-10: Dash 40 now, the one thing that cancels a knockback (threshold 35).
 @export var interrupt_priority := 0
 ## Claude 2026-11-09: while this runs, a conflicting ability whose interrupt_priority is at least this cancels it and starts; a
 ## weaker one is locked out, as before. 100: nothing in t0 can cancel it. MeleeAttack uses 15, so Dash cancels a swing and Sprint
 ## doesn't. An action meant to be cancelled by sprinting (a reload, say) uses 10 or less; by just moving, 0.
 @export var interrupt_threshold := 100
+## Claude 2026-11-10: on: while this runs, hits don't land on the pawn: no damage, no knockback, nothing (invulnerability frames).
+## Dash has it, the owner's call. It's read from the running timer, which rolls back, so a replay agrees about what was dodged.
+@export var invulnerable_while_running := false
+## Claude 2026-11-10: with invulnerable_while_running on, how long it lasts from the start of the run, in seconds. 0: the whole run.
+## Dash uses 0.18 (the owner's call), so the end of its slow-down can be hit.
+@export_range(0.0, 10.0, 0.01, "or_greater") var invulnerable_seconds := 0.0
+## Claude 2026-11-10: categories that can always cancel this while it runs, whatever the interrupt numbers say, such as
+## &"movement.jump" for an ability a jump should cut short. Empty (the default): only the numbers decide. For the exceptions a single
+## ladder of numbers can't express. A category covers its children, as in locks_out.
+@export var cancelled_by: Array[StringName] = []
+## Claude 2026-11-10: on: while this runs, the pawn's locomotion (Walk, Sprint) doesn't run at all, so it neither steers nor slows the
+## pawn and this ability's own movement isn't fought. Dash has it. Off (the default): a locked-out locomotion still slows the pawn to
+## a stop, which is what an attack that roots the pawn wants.
+@export var pauses_locomotion := false
 
 # State that rolls back. See the top of the file.
 # Claude 2026-11-09: each timer tells the manager when it starts or reaches 0, so the manager only counts down the timers that are
@@ -78,11 +100,15 @@ var buffer_ticks_left := 0:
 
 ## Set by the AbilityManager.
 var manager: AbilityManager = null
+## Claude 2026-11-09: set by the AbilityManager: a number from this ability's name, for its priority_jitter's random offset.
+var jitter_salt := 0
 var pawn: Pawn = null
 ## This ability's category as bits, with its parents' bits too. Worked out once by the manager.
 var category_mask := 0
 ## locks_out as bits. Worked out once by the manager.
 var locks_out_mask := 0
+## Claude 2026-11-10: cancelled_by as bits. Worked out once by the manager, so the check while playing is one bit test.
+var cancelled_by_mask := 0
 ## Claude 2026-11-09: trigger_action's input bit (InputActions), or 0 with none. Worked out once by the manager, so a tick tests a bit
 ## instead of looking the name up (pawn spec 15.2).
 var trigger_bit := 0
@@ -114,6 +140,12 @@ func duration_ticks() -> int:
 ## True while a timed run is going.
 func is_running_timed() -> bool:
 	return ticks_left > 0
+
+
+## Claude 2026-11-10: how many ticks of the current run have been ticked: 0 on the tick it starts, before its first tick. 0 when not
+## running. Read from ticks_left, which rolls back, so it needs no state of its own.
+func ticks_running() -> int:
+	return duration_ticks() - ticks_left if ticks_left > 0 else 0
 
 
 ## Claude 2026-11-09 (scaling spec step 4): called whenever a timed run starts or ends, through the ticks_left setter, so also when a

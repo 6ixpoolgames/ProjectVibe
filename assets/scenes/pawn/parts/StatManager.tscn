@@ -34,9 +34,9 @@ base_value = 720.0
 script = ExtResource("2_stat")
 base_value = 5.0
 
-[node name="DashSpeed" type="Node" parent="."]
+[node name="DashAcceleration" type="Node" parent="."]
 script = ExtResource("2_stat")
-base_value = 18.0
+base_value = 100.0
 
 [node name="Health" type="Node" parent="."]
 script = ExtResource("2_stat")

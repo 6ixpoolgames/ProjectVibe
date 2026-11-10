@@ -277,7 +277,7 @@ func get_path_corners() -> PackedVector3Array   # the corners ahead, for debug d
 
 ### 8.2 Binding actions to abilities
 - Each ability node names the action that triggers it: `trigger_action = &"primary"`. The designer sets it on the node, so there's no separate table to keep in sync.
-- **Several abilities on one action:** the manager starts the first that can start, by `priority`, then by tree order.
+- **Several abilities on one action:** the manager starts the first that can start, by `priority`, then by tree order. *(Claude 2026-11-09, the owner's call: a press is a request, and the **highest** priority that can start wins, as with `interrupt_priority` and behaviour scores; it was the lowest. Each ability has a tunable `priority_jitter`, 0 by default, a random offset on its priority at each press, from the tick's own random numbers so a replay picks the same one; locomotion ignores it. See 8.8.)*
 - **A held action can switch locomotion.** For example, Sprint is a locomotion ability with `trigger_action = &"sprint"`, used while that action is held.
 - **The same path for player and AI.** The player's key presses `&"primary"`, and an AI behaviour presses `&"primary"`. Both reach the same ability through the same rules. That's why possession needs nothing extra.
 
@@ -291,7 +291,7 @@ enum Kind { LOCOMOTION, ACTION }
 @export var kind := Kind.ACTION
 @export var trigger_action: StringName = &""     # empty = only the manager starts it, as the default locomotion
 @export var category: StringName = &""           # a tag, e.g. movement.jump, for lockouts (tag registry, built)
-@export var priority := 0                        # lower wins when several abilities share an action
+@export var priority := 0                        # higher wins when several abilities share an action (Claude 2026-11-09: was lower)
 @export var duration := 0.0                      # seconds. Action: 0 = at once. Locomotion: 0 = as long as wanted
 @export var cooldown := 0.0                      # seconds after it stops
 @export var locks_out: Array[StringName] = []    # categories that can't start or steer while this runs
@@ -371,10 +371,11 @@ Agreed with the owner before building; the decisions are in the step 9 notes bel
   | Knockback | 30 | 100 |
 
   100, the base default, means nothing in t0 can cancel it.
+  *(Claude 2026-11-10, the owner's call: Dash 40 and 40, Knockback 30 and 35. Dash is the one thing stronger than knockback: it cancels one, and a knockback can't cancel it. See 8.9.)*
 - **What that gives:**
   - Dash cancels a swing: the player's animation cancel.
   - Sprint and Jump don't cancel a swing.
-  - Knockback staggers a swing or a dash.
+  - Knockback staggers a swing or a dash. *(Claude 2026-11-10: a swing only now; a dash cancels a knockback instead, 8.9.)*
   - An action with threshold 10 or less (a reload, say) is cancelled by sprinting, like CoD's sprint cancel.
   - An action with threshold 0 (an emote) is cancelled by just moving.
 - **Where the rules live:** in the abilities, checked by `AbilityManager`. Controllers only send the inputs, so a player and the AI cancel the same way, and a rollback replay gets the same cancels.
@@ -384,8 +385,8 @@ Agreed with the owner before building; the decisions are in the step 9 notes bel
 **`DashAbility`** (`&"dash"`, a new action, Left Alt for players):
 - **Speed and length:** the `DashSpeed` stat (18 m/s, a new stat) for 0.15 s, 9 ticks, about 2.7 m.
 - **Direction:** the way the pawn is moved, or the way it faces when standing still.
-- **Ground only:** no air dash.
-- **Locks out** walking, sprinting and jumping. Cooldown 1 s.
+- **Ground only:** no air dash. *(Claude 2026-11-10: in the air too now, and it speeds up then slows down instead, 8.9.)*
+- **Locks out** walking, sprinting and jumping. Cooldown 1 s. *(Claude 2026-11-10: 2 s, and invulnerable while it runs, 8.9.)*
 - **Ending:** it cuts horizontal speed to `MoveSpeed` (`exit_speed_stat`), so it stops crisply. Without this, Walk eased 18 m/s down over several metres; it was measured at 10.6 m in all.
 - **Rollback:** its direction rolls back.
 
@@ -427,7 +428,7 @@ Agreed with the owner before building; the decisions are in the step 9 notes bel
 
 **Defaults:**
 - The default `AbilityManager.tscn` now holds Dash, MeleeAttack and Knockback, after Walk, Sprint and Jump.
-- `StatManager.tscn` has `DashSpeed`.
+- `StatManager.tscn` has `DashSpeed`. *(Claude 2026-11-10: `DashAcceleration` now, 100, 8.9.)*
 - New entries go at the end of their lists, so earlier bits don't change: the `combat.knockback` tag and the `dash` action.
 - New input-map keys `move_dash` and `attack_primary`, both in `project.godot`.
 
@@ -443,10 +444,83 @@ Agreed with the owner before building; the decisions are in the step 9 notes bel
 
 **Not built:**
 - damage, death, and being hit as a state rule (step 10) *(built, 8.7)*
-- invulnerability during a dash
+- invulnerability during a dash *(built 2026-11-10, 8.9)*
 - cancel windows
 - combos
 - hit effects on clients
+
+### 8.8 Attack requests, follow-ups and special attacks *(Claude 2026-11-09, the owner's request)*
+
+The owner wanted to test the behaviour system with more attacks: "another attack on a longer cooldown with higher priority, and a follow up attack that has a lower priority than normal", with the input passing through "as a request for an attack (the normal and followup) and a special attack (the heavy attack)", and priority meaning "which ability is chosen when a request is sent".
+
+- **Priority is higher-wins now** (8.4), with `priority_jitter` per ability, 0 by default.
+- **`FollowUpAttackAbility`** (`abilities/FollowUpAttackAbility.gd`): a `MeleeAttackAbility` that can start only within `follow_window` seconds (0.6) after the ability it `follows` (MeleeAttack) finishes, once per swing. Its priority is -10, below the normal swing's 0, so the attack request starts the normal swing when it's ready and the follow-up while that cools down. Quicker and lighter (5, 4 and 10 ticks, 12 damage). The tick its leader last finished rolls back.
+- **The special request** (`secondary`) starts a heavy `MeleeAttackAbility` (`HeavyAttack` in `faction_abilities.tscn`: 18, 5 and 18 ticks, 35 damage, reach 2.4 m, a 6 s cooldown).
+- **The AI uses the same requests:** `AIAttackBehaviour` presses its action and waits for whichever ability on it runs (it used to wait for the first one only). A second Attack behaviour on `secondary` with a higher score (0.95 against 0.9) uses the heavy attack whenever it's ready and in range.
+- **Where to try it:** `faction_arena_sample.tscn`, red goblins (team 1) against blue goblins (team 2) against the players (team 0), with the left mouse button for the attack request and the right for the special. Its debug keys (from the arena): P pauses (offline only), → steps one tick, ← steps back through the last 10 s, view only (`AIDebugTimeline`, in `ai/debug/`): ghosts and readouts where the goblins were, and a list of their state, behaviour, target and ability events and hits. Tests: `abilities/tests/attack_request_selftest`, `samples/tests/faction_arena_sample_selftest`.
+
+### 8.9 Game feel, dash and knockback, and spawning *(Claude 2026-11-10, the owner's requests)*
+
+**The swing** (`MeleeAttackAbility`, so the follow-up and the heavy attack too):
+- **The hit area moves:** during the hit ticks the sphere sweeps across `sweep_degrees` (100) in front of the pawn, right to left (`sweep_from_left` turns it round), always at the same reach, so `attack_range` still means what it did.
+  - Each tick checks every spot the sphere passes through in that tick, no more than half its radius apart, so a quick sweep or a 30 Hz match leaves no gaps.
+  - In a session they're checked in one lag compensation rewind, `LagCompensation.melee_spheres` (rewinding costs far more than the checks). `melee` is now a list of one.
+  - `sweep_degrees` 0 is the old sphere that holds still.
+  - `hit_area_moved(from, to, radius)` goes out every hit tick, and `AbilityDebugDraw` draws the sweep with it. `hit_window_started` now gives where the sweep starts.
+- **It turns during the windup:** toward where the pawn looks, at up to `windup_turn_degrees_per_second` (720), then holds still from the first hit tick. 0 is the old behaviour.
+- **The follow-up** sweeps back the other way (left to right), with a smaller hop. **The heavy attack** sweeps 160 degrees, with a bigger hop.
+- **The arena's normal swing cooldown** is 0.8 s (it was 1.5).
+
+**Knockback:**
+- **A small hop back:** `MeleeAttackAbility.knockback_hop_speed` (2.0 m/s up; 1.5 on the follow-up, 3.5 on the heavy) goes in `HitInfo.knockback_hop`, and `KnockbackAbility.push(velocity, ticks, hop)` lifts the pawn on its first tick, as a jump does, if it's on the ground. A pawn already in the air isn't lifted again, so hits in a row can't keep it up. The hop is the y of `push_velocity`, which already rolled back.
+- **It locks out all movement and every attack,** as before: walking, sprinting, jumping and attacking can't start while it runs.
+- **Dash is the one way out:** Knockback's threshold is 35 (it was 100), and Dash's priority is 40.
+
+**Dash:**
+- **Priority 40, threshold 40:** it cancels a swing or a knockback, and a knockback can't cancel it. *(Later: threshold 25, see "Dash, reworked" below.)*
+- **Invulnerable while it runs,** through the new `AbilityBase.invulnerable_while_running`:
+  - `Pawn.is_invulnerable()` and `AbilityManager.is_invulnerable()` read it.
+  - A hit on an invulnerable pawn does nothing at all: no damage, no knockback, no `hit_received`, and the AI doesn't note it.
+  - A swing doesn't mark it as hit either, so the rest of the sweep can catch it once the dash ends.
+  - It's read from the running timer, which rolls back. Hits are judged on the server at its own present, so a dash counts if it's running there when the hit lands.
+- **Cooldown 2 s** (it was 1); 6 s in the arenas (it was 3).
+- ~~**Still ground only.** So a knockback with a hop, which leaves the ground, can't be dashed out of until the pawn lands, and by then the push is usually over.~~
+- **In the air too** *(the owner's call, later the same day)*: `usable_in_air` (on by default; off is ground only, as before), so a dash breaks a knockback mid-hop. Gravity still pulls during an air dash; the cooldown is what stops chains of them.
+- ~~**Shorter:** `DashSpeed` is 13.5 m/s (it was 18), so 9 ticks cover about 2 m (it was 2.7).~~ The owner meant shorter in time; replaced below.
+- **Direction:** the way the movement input points, as it always was, not the way the pawn faces; only with no input does it use the facing. The pawn then turns to face the dash.
+
+**Dash, reworked** *(Claude 2026-11-10, the owner's design)*. It now works by acceleration instead of setting a flat speed:
+- **Speed-up:** for `speed_up_seconds` (0.1 s, 6 ticks) it adds the `DashAcceleration` stat (100 m/s², a new stat that replaces `DashSpeed`) along the dash direction: +10 m/s.
+- **Slow-down:** for `slow_down_seconds` (0.2 s, 12 ticks) it takes `slow_down_deceleration` (50 m/s²) off the speed along the dash direction: −10 m/s, never below 0 along it, so never backwards.
+- **So it ends at the speed it started with.** Standing: a peak of 10 m/s and about 1.5 m. Walking (5 m/s): 15 m/s and about 3 m. Sprinting (9 m/s): 19 m/s and about 4.2 m. 0.3 s in all (it was 0.15). Speed across the dash direction is left alone.
+- **Room for movement tech:** it adds and takes away speed instead of setting it, and the slow-down lasts a fixed time instead of aiming at a speed, so speed gained some other way during a dash is still there when it ends. The old cut to walking speed at the end is gone; Walk brings the pawn back to walking speed afterwards, at its own rate.
+- **Walk doesn't fight it:** the new `AbilityBase.pauses_locomotion` (Dash has it) stops the locomotion running at all while it runs. A locked-out Walk would otherwise slow the pawn as well, which is still what an attack that roots the pawn gets.
+- **Invulnerable for its first 0.18 s** (11 ticks), through the new `AbilityBase.invulnerable_seconds` (0, the default, means the whole run). Read from the timer (`ticks_running()`), which rolls back.
+- **Threshold 25 again:** once the invulnerability is over, a hit lands and its knockback (30) cancels the rest of the dash. Dash (40) still cancels a knockback (35), and a jump can't cancel a dash. Hits are the only way a knockback starts in t0, and an invulnerable pawn drops them; code calling `KnockbackAbility.push()` directly would skip that check.
+- **`cancelled_by`** (new on `AbilityBase`): categories that can always cancel an ability while it runs, whatever the numbers say, for the exceptions one ladder of numbers can't express. Stored as bits once (`cancelled_by_mask`), so it costs one bit test in `_conflicts_allow`, only when something tries to start. Nothing uses it yet; `combat_selftest` checks it.
+- **The goblins' closing dash:** `AIChaseBehaviour` now dashes from 5.5 to 7.5 m away (it was 4 to 6), as a dash from a sprint covers about 4.2 m.
+
+**The facing marker:** a yellow visor on `pawn.tscn` (`Visual/Model/FacingMarker`) turns with the pawn's facing, so every pawn shows which way it faces. The rewind's ghosts have one too.
+
+**Spawning** (the owner agreed the proposal):
+- **`SpawnPoint`** (`spawning/SpawnPoint.gd`): a placeable spot, like Unreal's PlayerStart. Settings: `team` (−1 for anyone), `group`, `scatter_radius`, `enabled`. A pawn appearing there faces the point's way. It spawns nothing itself.
+- **`SpawnManager`** (`game_mode/SpawnManager.gd`), a default GameMode module, `GameMode.spawn_manager`:
+  - `spawn(type, group)`, `spawn_near(type, node, radius)` and `spawn_player(peer, type)`, on the server or offline.
+  - It picks a point for the pawn's team (read once from its scene), in a shuffled order from the tick's own random numbers, and the first free spot: no pawn body within `clearance_radius`. If every spot is taken it uses one anyway; with no point, it warns and spawns nothing.
+  - On terrain the pawn goes on the ground under the spot, building that chunk first if needed.
+  - Players: a pawn from `spawn_player` is possessed for its player, and after dying comes back after `player_respawn_seconds` (3) at a point for its team, the same pawn, revived. With no point, it comes back where it fell.
+  - `after_seconds(seconds, callable)` runs something after that many seconds of ticks, between ticks. Every delay in spawning uses it, so pausing the tick driver pauses them.
+- **`PawnSpawner`** (`spawning/PawnSpawner.gd`): a placeable node that keeps `keep_alive` pawns of one type alive.
+  - A dead pawn's body is removed after `body_seconds` (3), and a fresh pawn replaces it `respawn_seconds` (5) after the death, so its AI starts clean.
+  - A pawn removed some other way counts as a death.
+  - `total_limit` stops it after that many in all.
+  - It waits while the ground around it isn't loaded (`only_where_loaded`, the rule `AIActivationManager` uses).
+  - With `spawn_group` it uses spawn points in that group; without one, the circle around itself.
+  - `active`, `refill_now()`, `get_alive()`.
+- **The arenas use them:** a PlayerStart and goblin spawners in each scene's `Spawning` folder, off in the scene and switched on when a game starts. R now refills the spawners. The scene timers the arena used for removing bodies kept running while paused; the spawners' delays don't.
+- `NetworkSession.get_type_scene(type)` is new, for reading a type's team.
+
+**Tests:** `abilities/tests/attack_feel_selftest` (the sweep both ways, no sweep, the windup turn, the hop, invulnerability), `game_mode/tests/spawn_manager_selftest` (points, delays, the player's respawn, the spawner), and `combat_selftest`'s dash and knockback checks, changed to the new rules.
 
 ### 8.7 Step 10: Health, damage and death (built 2026-11-09)
 
@@ -477,7 +551,7 @@ The owner's call: there's no health manager. Health is a stat, and death is an a
   - other pawns' sight skips it, in both memory stores
   - memories forget it on their next pass
 - **`Pawn.died(pawn, hit)`** goes out once.
-- **What the base doesn't decide:** the body stays where it falls. Removing it, a death animation or respawning are game rules.
+- **What the base doesn't decide:** the body stays where it falls. Removing it, a death animation or respawning are game rules. *(Claude 2026-11-10: the optional spawning pieces do the usual ones: `PawnSpawner` removes its own pawns' bodies and replaces them, and `SpawnManager` brings players back. See 8.9.)*
 
 **Being hit, as a state rule** (10.6):
 - `AIAwarenessState` gained `hit_within_ticks` and `attacker` (`ANY`, `KNOWN`, `UNKNOWN`).
@@ -792,7 +866,7 @@ Code can change a behaviour's threshold while it's running, through `behaviour_m
 | Look Toward | Alert | Stops and faces the last known position of the most aware entry | 8b |
 | Investigate | Alert | Walks, without sprinting, to the last known position. Scores highest for an uncertain entry | 8b |
 | Search | Alert | Runs to the last known position, then walks to a few random points around it. Scores highest for a certain entry that's stale | 8b |
-| Chase | Combat | Follows the current target (10.5), holding `&"sprint"`, finding a new path every so often rather than every tick . Stops within 1.2 m (2026-11-09). *Claude 2026-11-09:* with `dash_to_close` on (off by default), it presses `&"dash"` when the target is 4 to 6 m away (`dash_to_distance`, `dash_from_distance`) and Dash can start | 8b |
+| Chase | Combat | Follows the current target (10.5), holding `&"sprint"`, finding a new path every so often rather than every tick . Stops within 1.2 m (2026-11-09). *Claude 2026-11-09:* with `dash_to_close` on (off by default), it presses `&"dash"` when the target is 4 to 6 m away (`dash_to_distance`, `dash_from_distance`) and Dash can start. *Claude 2026-11-10:* 5.5 to 7.5 m, for the reworked dash (8.9) | 8b |
 | Attack | Combat | Within MeleeAttack's `attack_range` minus `approach_margin`, faces the target and presses `&"primary"` (8.6) | 9 |
 
 Because they all move with `move_to`, they cross nav links (jumps and drops) for free (section 7).
@@ -1062,7 +1136,7 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
    - **Deaths are this sample's rules:** bodies are removed after 3 s, and a dead player is revived where they fell after 3 s.
    - **Test:** `samples/tests/arena_sample_selftest`, a headless smoke test: a wave, noticing, a fight, the readouts, a kill, removal, another wave.
    - *(Claude 2026-11-09, the owner's requests:)* debug shapes (`AbilityDebugDraw`, 8.6): swing spheres for 2 s and dash trails for 1 s, hidden with F3. Goblins have Chase's `dash_to_close` on, so a chase switches between Walk, Sprint, Dash and the swing. Each readout shows the goblin's last ability, marked "(running)" while it runs. The test checks the shapes appear and fade, and that chasing goblins sprint, dash and swing.
-   - *(Claude 2026-11-09, the owner's request:)* longer cooldowns in this level only (`ArenaSample.DEBUG_COOLDOWNS`), so the switching is easy to see: MeleeAttack 1.5 s, Jump 1 s, Dash 3 s, Sprint 8 s. Knockback and Death keep none: a cooldown on Death would make a revived pawn unkillable for a while. A timer that had no cooldown is registered for rollback when the pawn spawns (`TickStateComponent.add_state_properties`), the same on every machine.
+   - *(Claude 2026-11-09, the owner's request:)* longer cooldowns in this level only (`ArenaSample.DEBUG_COOLDOWNS`), so the switching is easy to see: MeleeAttack 1.5 s, Jump 1 s, Dash 3 s, Sprint 8 s. *(Claude 2026-11-10: MeleeAttack 0.8 s and Dash 6 s now, 8.9.)* Knockback and Death keep none: a cooldown on Death would make a revived pawn unkillable for a while. A timer that had no cooldown is registered for rollback when the pawn spawns (`TickStateComponent.add_state_properties`), the same on every machine.
 13. **t0 docs:** an overview, plus a reference for every class and function.
 
 ### 12.1 What a whole pawn costs (Claude 2026-11-09)

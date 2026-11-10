@@ -1,0 +1,16 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/arena_goblin.tscn" id="1_goblin"]
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_abilities.tscn" id="2_abilities"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIAttackBehaviour.gd" id="3_attack"]
+
+[node name="FactionGoblin" instance=ExtResource("1_goblin")]
+
+[node name="AbilityManager" parent="." instance=ExtResource("2_abilities")]
+
+[node name="HeavyAttack" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("3_attack")
+attack_action = &"secondary"
+presses_action = &"secondary"
+max_score = 0.95
+min_score = 0.95

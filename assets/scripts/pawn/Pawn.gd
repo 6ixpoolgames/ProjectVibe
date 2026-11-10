@@ -416,9 +416,16 @@ func receive_hit(hit: HitInfo) -> void:
 	_take_hit(hit)
 
 
+## Claude 2026-11-10: true while hits don't land on this pawn, because an ability with invulnerable_while_running runs, such as a Dash.
+## A hit then does nothing at all: no damage, no knockback, no hit_received, and the AI doesn't note it.
+func is_invulnerable() -> bool:
+	return ability_manager != null and ability_manager.is_invulnerable()
+
+
 # Claude 2026-11-09: the hit itself, steps 1 to 5 above. Checked again here, because a queued hit can arrive after another killed it.
+# Claude 2026-11-10: and invulnerability, checked here when the hit is delivered: a dash started in the same tick dodges it.
 func _take_hit(hit: HitInfo) -> void:
-	if not is_authority() or is_dead():
+	if not is_authority() or is_dead() or is_invulnerable():
 		return
 	if ai_context:
 		ai_context.note_hit(hit)
@@ -432,7 +439,7 @@ func _take_hit(hit: HitInfo) -> void:
 	if ability_manager and hit.knockback_speed > 0.0 and hit.knockback_ticks > 0:
 		for ability in ability_manager.get_abilities():
 			if ability is KnockbackAbility:
-				ability.push(hit.direction * hit.knockback_speed, hit.knockback_ticks)
+				ability.push(hit.direction * hit.knockback_speed, hit.knockback_ticks, hit.knockback_hop) # Claude 2026-11-10: and the hop
 				break
 	hit_received.emit(hit)
 

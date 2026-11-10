@@ -1,4 +1,4 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/pawn/Pawn.gd" id="1_pawn"]
 [ext_resource type="Script" path="res://assets/scripts/netcode/TickStateComponent.gd" id="3_state"]
@@ -14,6 +14,12 @@ height = 1.8
 
 [sub_resource type="StandardMaterial3D" id="Body_material"]
 albedo_color = Color(0.3, 0.55, 0.85, 1)
+
+[sub_resource type="BoxMesh" id="Facing_mesh"]
+size = Vector3(0.5, 0.12, 0.3)
+
+[sub_resource type="StandardMaterial3D" id="Facing_material"]
+albedo_color = Color(0.98, 0.86, 0.3, 1)
 
 [node name="Pawn" type="CharacterBody3D"]
 collision_layer = 2
@@ -40,3 +46,8 @@ script = ExtResource("4_entity")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
 mesh = SubResource("Capsule_mesh")
 surface_material_override/0 = SubResource("Body_material")
+
+[node name="FacingMarker" type="MeshInstance3D" parent="Visual/Model"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.45, -0.32)
+mesh = SubResource("Facing_mesh")
+surface_material_override/0 = SubResource("Facing_material")

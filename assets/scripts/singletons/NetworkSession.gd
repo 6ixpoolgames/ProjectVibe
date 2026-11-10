@@ -251,6 +251,11 @@ func register_type(type_name: String, scene: PackedScene) -> void:
 	_hash_is_cached = false
 
 
+## Claude 2026-11-10: the scene registered for this type name, or null. SpawnManager reads a type's team from it.
+func get_type_scene(type_name: String) -> PackedScene:
+	return _types.get(type_name)
+
+
 ## Starts a server. Returns OK or an error.
 func host(port: int, max_clients: int = 32) -> Error:
 	if _driver == null:

@@ -36,22 +36,33 @@ static func hitscan(shooter: NetworkEntity, origin: Vector3, direction: Vector3,
 
 ## A sphere around centre, such as a melee swing. Returns every entity it touched, as an Array of NetworkEntity.
 static func melee(shooter: NetworkEntity, centre: Vector3, radius: float, view_ticks_behind: float) -> Array[NetworkEntity]:
+	# Claude 2026-11-10: one sphere is a list of one; the checking moved to melee_spheres.
+	var one: Array[Vector3] = [centre]
+	return melee_spheres(shooter, one, radius, view_ticks_behind)
+
+
+## Claude 2026-11-10: several spheres of one radius, checked in one rewind, such as the spots a sweeping swing passes through in one
+## tick (MeleeAttackAbility). Rewinding moves every other entity, which costs far more than a sphere check, so it's done once for the
+## lot. Returns every entity any of them touched, each once, as an Array of NetworkEntity.
+static func melee_spheres(shooter: NetworkEntity, centres: Array[Vector3], radius: float, view_ticks_behind: float) -> Array[NetworkEntity]:
 	var found: Array[NetworkEntity] = []
 	var body := shooter.get_parent() as Node3D
-	if body == null:
+	if body == null or centres.is_empty():
 		return found
 	var rewound := _rewind_others(shooter, view_ticks_behind)
 	var sphere := SphereShape3D.new()
 	sphere.radius = radius
 	var query := PhysicsShapeQueryParameters3D.new()
 	query.shape = sphere
-	query.transform = Transform3D(Basis.IDENTITY, centre)
 	if body is CollisionObject3D:
 		query.exclude = [body.get_rid()]
-	for hit: Dictionary in body.get_world_3d().direct_space_state.intersect_shape(query):
-		var entity := _entity_of(hit["collider"])
-		if entity and not found.has(entity):
-			found.append(entity)
+	var space := body.get_world_3d().direct_space_state
+	for centre in centres:
+		query.transform = Transform3D(Basis.IDENTITY, centre)
+		for hit: Dictionary in space.intersect_shape(query):
+			var entity := _entity_of(hit["collider"])
+			if entity and not found.has(entity):
+				found.append(entity)
 	_restore(rewound)
 	return found
 

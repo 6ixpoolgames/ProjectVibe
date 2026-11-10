@@ -5,8 +5,11 @@
 ##   1. Counters: cooldowns and waiting presses count down, and every ability's every_tick() runs.
 ##   2. Locomotion: exactly one runs. A locomotion ability whose trigger_action is held, and which can run, wins, by priority and then
 ##      tree order (Sprint). Otherwise the default runs: the first locomotion ability with no trigger_action (Walk).
-##   3. Actions: running timed ones tick. A pressed action starts the first ability bound to it that can start. One that can't yet
-##      keeps the press for its buffer_window and tries again each tick.
+##   3. Actions: running timed ones tick. A pressed action starts the ability bound to it that can start with the highest priority
+##      (plus its priority_jitter's offset, if it has one), then the first in the tree. One that can't yet keeps the press for its
+##      buffer_window and tries again each tick.
+## Claude 2026-11-09: priority is higher-wins now, as interrupt_priority and behaviour scores are; it was lowest-wins. A press is a
+## request: an attack action can start a normal attack, or a follow-up when the normal one can't (FollowUpAttackAbility).
 ## Everything that persists between ticks lives on the abilities and rolls back (see AbilityBase), so this node keeps none.
 ##
 ## How to use it (outside code only talks to the manager):
@@ -21,7 +24,10 @@
 ## Claude 2026-11-09, cancelling (pawn spec 8.6): two abilities conflict when either one's locks_out covers the other's category. A
 ## conflicting ability can start only if its interrupt_priority is at least the interrupt_threshold of every conflicting ability
 ## running; then those are cancelled (they stop, and their cooldowns start) and it starts. Otherwise it's locked out, as before. So
-## Dash (20) cancels MeleeAttack (15) and Sprint (10) doesn't; moving cancels only actions with a threshold of 0. The rules live
+## Dash (20) cancels MeleeAttack (15) and Sprint (10) doesn't; moving cancels only actions with a threshold of 0. Claude 2026-11-10:
+## an ability's cancelled_by lists categories that can cancel it whatever the numbers say, for the exceptions; as bits, so it costs
+## one bit test, only when something tries to start. And an action with pauses_locomotion stops Walk running at all while it runs
+## (Dash), where a locked-out Walk would otherwise slow the pawn. The rules live
 ## here, not in the controllers, so a player and the AI cancel the same way and a rollback replays the same cancels.
 ##   pawn.ability_manager.start_ability(ability)   # starts one that has no trigger action, such as Knockback, by the same rules
 ##   ability_cancelled(ability, by)
@@ -38,6 +44,10 @@ signal ability_started(ability: AbilityBase)
 signal ability_finished(ability: AbilityBase)
 ## Claude 2026-11-09: sent when an ability is cancelled by another starting, after ability_finished for it.
 signal ability_cancelled(ability: AbilityBase, by: AbilityBase)
+
+var _any_jitter := false # Claude 2026-11-09: some action ability has priority_jitter, so a press compares them all
+var _invulnerable_abilities: Array[AbilityBase] = [] # Claude 2026-11-10: those with invulnerable_while_running, usually just Dash
+var _locomotion_pausers: Array[AbilityBase] = [] # Claude 2026-11-10: those with pauses_locomotion, usually just Dash
 
 var pawn: Pawn = null
 
@@ -141,6 +151,17 @@ func start_ability(ability: AbilityBase) -> bool:
 	return true
 
 
+## Claude 2026-11-10: true while an ability with invulnerable_while_running runs, such as a Dash: hits don't land (Pawn.is_invulnerable).
+## Claude 2026-11-10: only for its first invulnerable_seconds, when that's above 0.
+func is_invulnerable() -> bool:
+	for ability in _invulnerable_abilities:
+		if not ability.is_running_timed():
+			continue
+		if ability.invulnerable_seconds <= 0.0 or ability.ticks_running() < ticks_for(ability.invulnerable_seconds):
+			return true
+	return false
+
+
 ## True while a timed action is running, such as an attack's swing.
 func is_busy() -> bool:
 	for ability in _actions:
@@ -217,6 +238,11 @@ func _run_locomotion(dt: float) -> void:
 			_finish(ability)
 	if chosen == null:
 		return
+	# Claude 2026-11-10: an action with pauses_locomotion is running (a Dash): no steering and no slowing this tick, so the action's
+	# own movement isn't fought. A timed locomotion's timer waits too.
+	for ability in _locomotion_pausers:
+		if ability.is_running_timed():
+			return
 	chosen.tick(dt)
 	if chosen.is_running_timed():
 		chosen.ticks_left -= 1
@@ -242,8 +268,10 @@ func _run_actions(dt: float) -> void:
 		if not pressed and ability.buffer_ticks_left <= 0:
 			continue
 		if _is_ready(ability):
-			_clear_way(ability) # Claude 2026-11-09: cancels what it's strong enough to cancel
-			_start(ability)
+			# Claude 2026-11-09: with jitter on any of them, the best ready one on this action, not just the first.
+			var chosen := _best_ready(ability, pressed_bits) if _any_jitter else ability
+			_clear_way(chosen) # Claude 2026-11-09: cancels what it's strong enough to cancel
+			_start(chosen)
 			used_bits |= ability.trigger_bit
 		elif pressed and ability.buffer_window > 0.0:
 			ability.buffer_ticks_left = ticks_for(ability.buffer_window)
@@ -252,6 +280,36 @@ func _run_actions(dt: float) -> void:
 		for ability in _actions:
 			if used_bits & ability.trigger_bit != 0 and not ability.is_running_timed():
 				ability.buffer_ticks_left = 0
+
+
+# Claude 2026-11-09: of the abilities on first's action that are pressed or waiting and ready, the one with the highest priority plus
+# jitter; ties go to the earlier in the list (first itself, when nobody has jitter). The list is sorted by priority, so with no
+# jitter this is always first.
+func _best_ready(first: AbilityBase, pressed_bits: int) -> AbilityBase:
+	var best := first
+	var best_score := _priority_now(first)
+	for ability in _actions:
+		if ability == first or ability.trigger_bit != first.trigger_bit or ability.is_running_timed():
+			continue
+		if pressed_bits & ability.trigger_bit == 0 and ability.buffer_ticks_left <= 0:
+			continue
+		if not _is_ready(ability):
+			continue
+		var score := _priority_now(ability)
+		if score > best_score:
+			best = ability
+			best_score = score
+	return best
+
+
+# Claude 2026-11-09: priority plus this tick's random offset, from the tick's own random numbers, so a replay draws the same.
+func _priority_now(ability: AbilityBase) -> float:
+	if ability.priority_jitter <= 0.0:
+		return float(ability.priority)
+	var entity := pawn.get_network_entity()
+	var key: int = entity.entity_id if entity and entity.entity_id >= 0 else pawn.get_instance_id()
+	var rng: RandomNumberGenerator = TickDriver.tick_rng(key, ability.jitter_salt)
+	return ability.priority + rng.randf_range(-ability.priority_jitter, ability.priority_jitter)
 
 
 # Claude 2026-11-09: "not locked out" became "every conflicting running ability can be cancelled by it", which is the same thing
@@ -266,9 +324,11 @@ func _conflicts(a: AbilityBase, b: AbilityBase) -> bool:
 
 
 # Claude 2026-11-09: true if every running ability that conflicts with this one would let it cancel them.
+# Claude 2026-11-10: or lists this one's category in its cancelled_by, which lets it through whatever the numbers say.
 func _conflicts_allow(ability: AbilityBase) -> bool:
 	for other in _abilities:
-		if other != ability and other.is_running_timed() and _conflicts(ability, other) and other.interrupt_threshold > ability.interrupt_priority:
+		if other != ability and other.is_running_timed() and _conflicts(ability, other) and other.interrupt_threshold > ability.interrupt_priority \
+				and other.cancelled_by_mask & ability.category_mask == 0:
 			return false
 	return true
 
@@ -354,10 +414,23 @@ func _collect_abilities() -> void:
 			child.pawn = pawn
 			child.category_mask = TagRegistry.mask_of(child.category) if child.category != &"" else 0
 			child.locks_out_mask = TagRegistry.mask_of_list(child.locks_out)
+			child.cancelled_by_mask = TagRegistry.mask_of_list(child.cancelled_by) # Claude 2026-11-10
 			_abilities.append(child)
 	# GDScript note: sort_custom keeps this rule; abilities with equal priority keep their tree order because each has a distinct index.
+	# Claude 2026-11-09: highest priority first (it was lowest first).
 	_abilities.sort_custom(func(a: AbilityBase, b: AbilityBase) -> bool:
-		return a.priority < b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
+		return a.priority > b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
+	_any_jitter = false
+	_invulnerable_abilities.clear() # Claude 2026-11-10
+	_locomotion_pausers.clear() # Claude 2026-11-10
+	for ability in _abilities:
+		ability.jitter_salt = hash(String(ability.name))
+		if ability.kind != AbilityBase.Kind.LOCOMOTION and ability.priority_jitter > 0.0:
+			_any_jitter = true
+		if ability.invulnerable_while_running:
+			_invulnerable_abilities.append(ability)
+		if ability.pauses_locomotion and ability.kind != AbilityBase.Kind.LOCOMOTION:
+			_locomotion_pausers.append(ability)
 	_locomotions.clear()
 	_actions.clear()
 	_default_locomotion = null
