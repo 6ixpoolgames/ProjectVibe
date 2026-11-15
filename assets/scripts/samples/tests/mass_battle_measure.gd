@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-15: measures the mass battle, the owner's request: how close three factions of a
 ## given size get to the edge of a tick, through the march and the fight in the middle. Not pass/fail: it prints a row every 10 s of
-## game time, the PerformanceOverlay's numbers averaged over those 10 s. One size per run, since the game mode and session carry over
+## game time, diagnostics v0's numbers averaged over those 10 s (Claude 2026-11-16: was the PerformanceOverlay's). One size per run, since the game mode and session carry over
 ## between arenas in one process. Headless, so nothing is drawn: a windowed game adds rendering on top (F4 in the sample shows it).
 ## Run from the project folder (add --tick-rate=30 to measure at 30 ticks a second):
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --fixed-fps 60 --path . "res://assets/scripts/samples/tests/mass_battle_measure.tscn" -- --size=50 --seconds=150
@@ -8,11 +8,16 @@
 ## slow the ticks are. Leave it out to measure in real time, where slow ticks get dropped (the dropped column).
 ## Claude 2026-11-15: the sample records a replay, as playing it does; --no-record leaves that out, to measure what recording costs.
 ## Recording runs in TickDriver's after_tick, so it shows in the "other" column.
+## Claude 2026-11-16, for windowed runs (leave out --headless and --fixed-fps to measure what playing feels like): each row also
+## shows the frame, the per-frame scripts (process), drawing on the CPU and GPU, and draw calls. --no-visuals hides the toy figures
+## and swords and stops their per-frame scripts; --no-shadows switches the lights' shadows off. Comparing runs shows what each costs.
 extends Node
 
 var _size := 50
 var _seconds := 150
 var _record := true # Claude 2026-11-15
+var _visuals := true # Claude 2026-11-16
+var _shadows := true
 
 
 func _ready() -> void:
@@ -23,28 +28,54 @@ func _ready() -> void:
 			_seconds = int(argument.trim_prefix("--seconds="))
 		elif argument == "--no-record": # Claude 2026-11-15
 			_record = false
+		elif argument == "--no-visuals": # Claude 2026-11-16
+			_visuals = false
+		elif argument == "--no-shadows":
+			_shadows = false
+	if not _visuals:
+		get_tree().node_added.connect(_on_node_added)
 	if not _record and GameMode.replay_recorder:
 		GameMode.replay_recorder.enabled = false
 	var arena: Node = load("res://assets/scenes/samples/mass_battle_sample.tscn").instantiate()
 	arena.team_size = _size
 	add_child(arena)
 	await get_tree().physics_frame
-	var overlay: PerformanceOverlay = arena._overlay
-	overlay.refresh_seconds = 10.0
+	if not _shadows: # Claude 2026-11-16
+		for light: Node in arena.find_children("*", "Light3D", true, false):
+			(light as Light3D).shadow_enabled = false
+	# Claude 2026-11-16: the numbers come from diagnostics v0 now (the PerformanceOverlay is gone), as 10 s averages.
+	var diagnostics := GameMode.get_module(DiagnosticsManager) as DiagnosticsManager
+	if diagnostics == null:
+		print("--- no DiagnosticsManager: check the project setting project_base/game_mode/modules ---")
+		get_tree().quit(1)
+		return
 	arena._start_offline()
-	print("--- Mass battle, %d a faction, %d ticks a second, %s ---" % [_size, TickDriver.get_tick_rate(), "recording a replay" if _record else "no replay"])
-	print(" time   pawns frozen dead   input+AI  simulate  record  other   tick ms  budget%  physics frame (worst)  outside ticks  dropped/s  chunks (waiting)")
+	# Claude 2026-11-16: in a window, the overhead view of the middle, where the fight is: the most there is to draw.
+	if DisplayServer.get_name() != "headless":
+		arena._toggle_overhead()
+	print("--- Mass battle, %d a faction, %d ticks a second, %s%s%s ---" % [_size, TickDriver.get_tick_rate(), "recording a replay" if _record else "no replay",
+		"" if _visuals else ", no toy visuals", "" if _shadows else ", no shadows"])
+	print(" time   pawns frozen dead   input+AI  simulate  record  other   tick ms  budget%  physics a step (worst frame)  outside ticks  dropped/s")
 	var started := Time.get_ticks_msec()
-	var shown := {}
 	var ticks_per_row := 10 * TickDriver.get_tick_rate()
 	for i in _seconds * TickDriver.get_tick_rate():
 		await get_tree().physics_frame
-		var n: Dictionary = overlay.get_numbers()
-		if n.is_empty() or shown.has(n) or i < ticks_per_row:
+		if i == 0 or i % ticks_per_row != 0:
 			continue
-		shown[n] = true
+		var s: Dictionary = diagnostics.get_summary(10.0)
+		var parts: Dictionary = s.tick_parts
+		var outside: float = maxf(s.physics_ms - s.tick_ms * s.steps_per_frame, 0.0)
+		var n := {"pawns": s.pawns, "frozen": s.frozen, "dead": s.dead, "input_ms": parts.get("input", 0.0) + parts.get("capture", 0.0),
+			"simulate_ms": parts.get("simulate", 0.0), "record_ms": parts.get("record", 0.0),
+			"other_ms": parts.get("before_tick", 0.0) + parts.get("after_tick", 0.0), "tick_ms": s.tick_ms, "budget_ms": 1000.0 / TickDriver.get_tick_rate(),
+			"physics_ms": s.physics_ms / maxf(s.steps_per_frame, 1.0), "physics_worst_ms": s.frame_worst_ms, "outside_ticks_ms": outside,
+			"dropped_per_second": s.dropped_per_second, "frame_ms": s.frame_ms, "fps": s.fps,
+			"process_ms": s.scripts_ms, "render_cpu_ms": s.render_cpu_ms, "render_gpu_ms": s.render_gpu_ms, "draw_calls": s.draw_calls,
+			"objects": s.objects}
 		@warning_ignore("integer_division") # whole seconds on purpose
-		print("%4ds   %5d %6d %4d   %8.2f  %8.2f  %6.2f  %5.2f   %7.2f  %6d%%  %8.1f (%6.1f)  %13.1f  %9.1f  %6d (%d)" % [i / TickDriver.get_tick_rate(), n["pawns"], n["frozen"], n["dead"], n["input_ms"], n["simulate_ms"], n["record_ms"], n["other_ms"], n["tick_ms"], int(100.0 * n["tick_ms"] / n["budget_ms"]), n["physics_ms"], n["physics_worst_ms"], n["outside_ticks_ms"], n["dropped_per_second"], n["chunks_built"], n["chunks_queued"]])
+		print("%4ds   %5d %6d %4d   %8.2f  %8.2f  %6.2f  %5.2f   %7.2f  %6d%%  %15.1f (%6.1f)  %13.1f  %9.1f" % [i / TickDriver.get_tick_rate(), n["pawns"], n["frozen"], n["dead"], n["input_ms"], n["simulate_ms"], n["record_ms"], n["other_ms"], n["tick_ms"], int(100.0 * n["tick_ms"] / n["budget_ms"]), n["physics_ms"], n["physics_worst_ms"], n["outside_ticks_ms"], n["dropped_per_second"]])
+		# Claude 2026-11-16: the frame as a whole, for windowed runs
+		print("        frame %.1f ms (%d fps)   scripts %.1f ms   drawing CPU %.1f ms, GPU %.1f ms   %d draw calls, %d objects" % [n["frame_ms"], n["fps"], n["process_ms"], n["render_cpu_ms"], n["render_gpu_ms"], n["draw_calls"], n["objects"]])
 	# Claude 2026-11-15: the replay's size, before stopping it
 	var recorder: ReplayRecorder = GameMode.replay_recorder
 	if recorder and recorder.is_recording():
@@ -54,3 +85,13 @@ func _ready() -> void:
 		print("replay: %.2f MB for %d ticks, %.1f MB a minute, %s" % [size / 1048576.0, ticks, size / 1048576.0 / (ticks / 60.0 / 60.0) if ticks > 0 else 0.0, recorder.get_recording_path()])
 	print("--- done in %.0f s ---" % ((Time.get_ticks_msec() - started) / 1000.0))
 	get_tree().quit(0)
+
+
+# Claude 2026-11-16: --no-visuals: each toy figure and sword is hidden once it's ready, and its per-frame script stopped, so the run
+# shows what the game costs without them. GDScript note: CONNECT_ONE_SHOT disconnects after the first call; ready is waited for
+# because Godot switches processing on at ready for any script with a _process.
+func _on_node_added(node: Node) -> void:
+	if node is ToyWaddle or node is FloatingSword:
+		node.ready.connect(func() -> void:
+			node.set_process(false)
+			(node as Node3D).visible = false, CONNECT_ONE_SHOT)

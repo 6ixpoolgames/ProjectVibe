@@ -54,6 +54,13 @@ func _exit_tree() -> void:
 
 
 func _on_after_simulate(_dt: float, tick: int) -> void:
+	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	_check_pawns(tick)
+	PerfScopes.end(&"world.kill_floor", started)
+
+
+# Claude 2026-11-16: the work itself, timed by _on_after_simulate.
+func _check_pawns(tick: int) -> void:
 	if tick % TickDriver.ticks_at_rate(check_every_ticks) != 0:
 		return
 	var height := global_position.y

@@ -12,6 +12,8 @@
 ##       # frame.terrains, frame.sources   from the world channel (ReplayWorldChannel)
 ##       # frame.events                this tick's events from every event channel: {tick, channel, kind, id, data}
 ##       reader.get_events(from_tick, to_tick)   every event in that range, oldest first
+##       # Claude 2026-11-16: frame.diagnostics   the frames that finished this tick, when the recording has the diagnostics channel
+##       reader.get_diagnostics(from_tick, to_tick)   [tick, frame record] for every frame in that range (ReplayDiagnosticsChannel)
 ##
 ## How it finds a tick: the file is a list of blocks, each opening with a keyframe (replay spec section 2). It finds the tick's block,
 ## decodes it from its keyframe (keeping the last few decoded blocks), and reads the state at that tick. Nothing before that block is
@@ -36,7 +38,7 @@ var _cache_order: Array[int] = []
 
 func _init() -> void:
 	for channel: ReplayChannel in [ReplayMotionChannel.new(), ReplayInputChannel.new(), ReplaySpawnChannel.new(),
-			ReplayWorldChannel.new(), ReplayGameplayChannel.new()]:
+			ReplayWorldChannel.new(), ReplayGameplayChannel.new(), ReplayDiagnosticsChannel.new()]: # Claude 2026-11-16: diagnostics
 		_channels[channel.channel_id] = channel
 
 
@@ -133,7 +135,7 @@ func get_ticks() -> Array[int]:
 ## The state at a tick: see the top of the file. A tick before the first gives the first, and one after the last gives the last.
 func get_frame(tick: int) -> Dictionary:
 	if _blocks.is_empty():
-		return {"tick": -1, "pawns": {}, "terrains": {}, "sources": {}, "events": []}
+		return {"tick": -1, "pawns": {}, "terrains": {}, "sources": {}, "events": [], "diagnostics": []}
 	var index := _block_index(tick)
 	var block: Dictionary = _decoded(index)
 	var ticks: Array[int] = block.ticks
@@ -151,7 +153,7 @@ func get_frame(tick: int) -> Dictionary:
 		info["input"] = input.get(id)
 		pawns[id] = info
 	return {"tick": ticks[at], "pawns": pawns, "terrains": world.get("terrains", {}), "sources": world.get("sources", {}),
-		"events": block.events[at]}
+		"events": block.events[at], "diagnostics": states.get(ReplayDiagnosticsChannel.ID, {}).get("frames", [])} # Claude 2026-11-16
 
 
 ## Every event from from_tick to to_tick, both included, oldest first. Each is {tick, channel, kind, id, data}.
@@ -167,6 +169,24 @@ func get_events(from_tick: int, to_tick: int) -> Array:
 			var tick: int = block.ticks[i]
 			if tick >= from_tick and tick <= to_tick:
 				out.append_array(block.events[i])
+	return out
+
+
+## Claude 2026-11-16: every diagnostics frame from from_tick to to_tick, both included, as [tick, frame record], oldest first. Empty
+## for a recording without the diagnostics channel.
+func get_diagnostics(from_tick: int, to_tick: int) -> Array:
+	var out: Array = []
+	if _blocks.is_empty():
+		return out
+	for index in range(_block_index(from_tick), _blocks.size()):
+		if _blocks[index][0] > to_tick:
+			break
+		var block: Dictionary = _decoded(index)
+		for i in block.ticks.size():
+			var tick: int = block.ticks[i]
+			if tick >= from_tick and tick <= to_tick:
+				for record: Dictionary in block.states[i].get(ReplayDiagnosticsChannel.ID, {}).get("frames", []):
+					out.append([tick, record])
 	return out
 
 

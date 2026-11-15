@@ -164,7 +164,8 @@ func _join(address: String) -> void:
 
 ## Claude 2026-11-15: starts a replay recording, if this game has a recorder (GameMode.replay_recorder). role: "host" or "client".
 func _start_recording(role: String) -> void:
-	if GameMode.replay_recorder:
+	# Claude 2026-11-16: unless one is already running: diagnostics starts one too, on hosting and joining (always-on replays).
+	if GameMode.replay_recorder and not GameMode.replay_recorder.is_recording():
 		GameMode.replay_recorder.start_recording(role)
 
 

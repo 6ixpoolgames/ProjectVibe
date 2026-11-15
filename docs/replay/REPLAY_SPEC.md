@@ -45,10 +45,24 @@ A channel is one kind of data, with an **id**, a **name** and a **version** in t
 | 3 | `spawns` | spawned (id, name, scene, team) and despawned (id) | every live pawn |
 | 4 | `world` | chunk built or removed, per terrain | every terrain (chunk size, origin) and its built chunks, and every chunk source (position, load and nav distances, on or off) |
 | 5 | `gameplay` | events: hit, died, ability started, ability cancelled, AI state, behaviour and target changes, frozen, unfrozen, possessed, released, fell (the kill floor's report) | nothing: events are moments, not state |
+| 6 | `diagnostics` *(2026-11-16, diagnostics v0)* | the frames that finished since the last tick: their times, physics steps, drawing, counts, and timing scopes; events for scope names, warnings and errors, and captures. Filled by the DiagnosticsManager in debug builds (docs/diagnostics/DIAGNOSTICS_SPEC.md) | the scope names so far |
 
 **Pawn ids** are their `NetworkEntity` id where they have one, which is the same on every machine, so a host's file and a client's file can be compared pawn by pawn. Pawns that aren't networked get ids from 2^30 up, handed out by the recorder.
 
 **"Changed" is exact:** a pawn whose record is the same as last tick, such as a sleeping or frozen one, writes nothing until the next keyframe. zstd then shrinks what's left.
+
+## 3.1 Safeguards *(2026-11-16, the owner's request)*
+
+A recording can never run away, outnumber the cap, or grow without limit. Each safeguard stops the recording with a warning saying why (`ReplayRecorder.get_stopped_reason()`), and the file stays readable up to there:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `max_recording_seconds` | 10800 (3 hours) | A recording stops at this length |
+| `max_file_megabytes` | 2048 | A recording stops when its file reaches this size |
+| `min_free_megabytes` | 1024 | A recording doesn't start, or stops, with less disk space than this. Checked every minute |
+| `keep_recordings` | 10 | Recordings kept in each role's folder |
+| `max_folder_megabytes` | 4096 | Old recordings are deleted, oldest first, to keep a role's folder under this. The file being recorded is never deleted, and one another instance has open is skipped |
+| `max_queued_blocks` | 30 | If the disk falls this far behind, the recording stops rather than filling memory. After a failed write, the writer writes nothing more |
 
 ## 4. Classes (`assets/scripts/replay/`)
 

@@ -19,6 +19,9 @@ extends RefCounted
 ## Off: blocks are compressed and written on the calling thread instead, at once. For tests that compare the two, and for platforms
 ## without threads.
 var use_thread := true
+## Claude 2026-11-16: the most blocks that may wait to be written. push_block refuses more, so a disk that can't keep up never fills
+## memory; the recorder then stops recording.
+var max_queued_blocks := 30
 
 var _file: FileAccess = null
 var _thread: Thread = null
@@ -48,17 +51,23 @@ func open(path: String, header: PackedByteArray) -> Error:
 	return OK
 
 
-## Queues a finished block. Returns at once; the block is written on the thread.
-func push_block(raw: PackedByteArray) -> void:
-	if _file == null:
-		return
+## Queues a finished block. Returns at once; the block is written on the thread. Claude 2026-11-16: false if it was refused: the
+## file isn't open, writing has already failed (get_error), or max_queued_blocks are already waiting.
+func push_block(raw: PackedByteArray) -> bool:
+	if _file == null or _error != OK:
+		return false
 	if not use_thread:
 		_write_block(raw)
-		return
+		return _error == OK
 	_mutex.lock()
-	_queue.append(raw)
+	var full := _queue.size() >= max_queued_blocks
+	if not full:
+		_queue.append(raw)
 	_mutex.unlock()
+	if full:
+		return false
 	_semaphore.post()
+	return true
 
 
 ## Writes every queued block, closes the file and stops the thread. Safe to call twice.
@@ -114,6 +123,8 @@ func _run() -> void:
 # One block: raw size (u32), compressed size (u32), the compressed bytes (replay spec section 2). Flushed, so a crash keeps every
 # block before the one being written.
 func _write_block(raw: PackedByteArray) -> void:
+	if _error != OK:
+		return # Claude 2026-11-16: after a failed write nothing more is written, so a broken file isn't made worse
 	var packed := raw.compress(FileAccess.COMPRESSION_ZSTD)
 	_file.store_32(raw.size())
 	_file.store_32(packed.size())

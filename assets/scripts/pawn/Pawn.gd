@@ -512,10 +512,12 @@ static func _deliver_queued_hits(_dt: float, _tick: int) -> void:
 		if a[1] != b[1]:
 			return a[1] < b[1]
 		return a[2] < b[2])
+	var hits_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	for entry in hits:
 		var hit: HitInfo = entry[3]
 		if is_instance_valid(hit.target):
 			hit.target._take_hit(hit)
+	PerfScopes.end(&"pawn.hits", hits_started)
 
 
 ## Claude 2026-11-09: the shared table of plain pawn data (scaling spec section 3), or null without the C++ library. Read-only for
@@ -565,10 +567,14 @@ func _tick_input(_dt: float, tick: int) -> void:
 	if is_dead():
 		_clear_input() # Claude 2026-11-09: a dead pawn ignores its controllers and its AI
 		return
+	var ai_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	_tick_ai(tick) # Claude 2026-11-09: step 1 of pawn spec section 4, before the controller in charge is asked for input
+	PerfScopes.end(&"ai", ai_started)
 	if controller_manager == null or not _decides_own_input():
 		return
+	var input_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	var command := controller_manager.take_input_command(tick)
+	PerfScopes.end(&"pawn.input", input_started)
 	if command:
 		apply_input(command)
 
@@ -596,7 +602,9 @@ func _tick_ai(tick: int) -> void:
 		return
 	# Claude 2026-11-09: step 1, sensing writes into memory. MEMORY_ONLY stops after it.
 	if ai_sensing_manager:
+		var sensing_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 		ai_sensing_manager.tick_sensing(tick)
+		PerfScopes.end(&"ai.sensing", sensing_started)
 	if _has_player and ai_context.while_possessed == AIContextComponent.WhilePossessed.MEMORY_ONLY:
 		return
 	if ai_state_manager:
@@ -605,6 +613,7 @@ func _tick_ai(tick: int) -> void:
 		ai_target_selector.check_force_expiry(tick)
 	if ai_context.is_decision_tick(tick):
 		ai_context.request_decision()
+	var decide_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	if ai_context.has_decision_waiting():
 		if ai_target_selector:
 			ai_target_selector.update_target(tick) # first, because states such as Combat look at the current target
@@ -614,8 +623,11 @@ func _tick_ai(tick: int) -> void:
 			ai_behaviour_manager.decide(tick)
 		else:
 			ai_context.clear_decision()
+	PerfScopes.end(&"ai.decide", decide_started)
 	if ai_behaviour_manager:
+		var behaviours_started := PerfScopes.begin()
 		ai_behaviour_manager.tick_running(tick)
+		PerfScopes.end(&"ai.behaviours", behaviours_started)
 
 
 func _tick_simulate(dt: float, tick: int) -> void:
@@ -632,16 +644,20 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	# tick began, as GroundMovement did, so a jump that starts this tick isn't pulled down in the same tick.
 	var was_grounded := grounded
 	# Claude 2026-11-10: over-time effects count down first, so this tick's abilities see this tick's slows and boosts (8.11).
+	var abilities_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	if effect_manager:
 		effect_manager.tick_effects()
 	if ability_manager:
 		ability_manager.tick_abilities(dt)
+	PerfScopes.end(&"pawn.abilities", abilities_started)
 	if not was_grounded:
 		velocity.y -= _gravity_strength() * dt
 	# move_and_slide uses Godot's physics delta. This scales it so that one tick moves velocity * tick dt.
 	var factor: float = _driver.get_physics_factor() if _driver else 1.0
 	velocity *= factor
+	var move_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	move_and_slide()
+	PerfScopes.end(&"pawn.move_and_slide", move_started)
 	velocity /= factor
 	grounded = is_on_floor()
 	_finish_tick() # Claude 2026-11-09: moved into a function, which a resting tick runs too
@@ -713,12 +729,14 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	if _visual == null:
 		return
+	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	# Fades over about 100 ms, so the player sees a quick slide rather than a jump (netcode spec section 6.2).
 	_correction_offset = _correction_offset.lerp(Vector3.ZERO, 1.0 - exp(-delta / 0.04))
 	var fraction: float = _driver.get_interpolation_fraction() if _driver else 1.0
 	_visual.global_position = _previous_position.lerp(_current_position, fraction) + _correction_offset
 	if _model:
 		_model.rotation.y = lerp_angle(_previous_yaw, _current_yaw, fraction)
+	PerfScopes.end(&"visuals.smoothing", started)
 
 
 # --- Multiplayer: optional hooks from NetworkEntity ---

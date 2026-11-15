@@ -1,0 +1,63 @@
+## Written by Claude (claude-opus-5-5), 2026-11-16: timing scopes, the one piece of diagnostics v0 that lives in the base (the owner's
+## call; docs/diagnostics/DIAGNOSTICS_SPEC.md). Systems mark the work they do, and a diagnostics tool reads how long each took, frame by
+## frame. When nothing is listening (enabled off, as in a release build, where the debug tools aren't there), a scope costs one check
+## of a true-or-false, so the marks can stay in shipping code, as TickDriver's profile does (docs/TEST_AND_DEBUG_CODE.md).
+##
+## How to mark work:
+##   var started := PerfScopes.begin()          # 0 when nothing is listening, else the time now
+##   ... the work ...
+##   PerfScopes.end(&"ai.sensing", started)     # adds the time since begin() to "ai.sensing" for this frame
+## Names are dotted, from the general to the particular ("ai.sensing", "net.snapshots.send"), so a tool can add up a group ("ai").
+## The same name can be used many times a frame, such as once per pawn: the times add up, and the count says how many.
+##
+## How a tool reads them (DiagnosticsManager does, once a frame):
+##   PerfScopes.enabled = true
+##   var frame := PerfScopes.take_frame()       # name -> [microseconds, count] since the last take_frame(), and starts afresh
+##
+## Main thread only: the totals aren't guarded for threads. Work on worker threads is timed by whoever waits for it.
+##
+## GDScript note: everything here is static, so it's used as PerfScopes.begin() with no object made, like TickJobs.
+class_name PerfScopes
+extends RefCounted
+
+## On while a tool is listening. Off, begin() returns 0 and end() does nothing.
+static var enabled := false
+
+static var _totals := {} # name -> [microseconds, count], this frame
+
+
+## The time now, in microseconds, to hand to end(); or 0 when nothing is listening.
+static func begin() -> int:
+	return Time.get_ticks_usec() if enabled else 0
+
+
+## Adds the time since started (from begin()) to name's total for this frame. Does nothing if started is 0.
+static func end(name: StringName, started: int) -> void:
+	if started == 0:
+		return
+	var spent := Time.get_ticks_usec() - started
+	var entry: Variant = _totals.get(name)
+	if entry == null:
+		_totals[name] = [spent, 1]
+	else:
+		entry[0] += spent
+		entry[1] += 1
+
+
+## Adds a time measured some other way, in microseconds, such as one a C++ class reports.
+static func add(name: StringName, microseconds: int, count := 1) -> void:
+	if not enabled:
+		return
+	var entry: Variant = _totals.get(name)
+	if entry == null:
+		_totals[name] = [microseconds, count]
+	else:
+		entry[0] += microseconds
+		entry[1] += count
+
+
+## Everything timed since the last call, as name -> [microseconds, count], and starts afresh.
+static func take_frame() -> Dictionary:
+	var frame := _totals
+	_totals = {}
+	return frame

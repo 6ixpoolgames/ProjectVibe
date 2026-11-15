@@ -131,8 +131,10 @@ func _scene_and_run() -> void:
 	var reader := ReplayReader.new()
 	_check(reader.open(path) == OK, "the reader opens it")
 	var header := reader.get_header()
-	_check(header.get("tick_rate") == 60 and header.get("role") == "host" and header.get("channels", []).size() == 6,
-		"the header has the tick rate, role and channels (%s)" % str(header.get("channels", []).size()))
+	# Claude 2026-11-16: the base's five, the test's own (120), and diagnostics (6) in debug builds, where its module adds it.
+	var channel_ids: Array = header.get("channels", []).map(func(info: Dictionary) -> int: return info.id)
+	_check(header.get("tick_rate") == 60 and header.get("role") == "host" and [1, 2, 3, 4, 5, 120].all(func(id: int) -> bool: return channel_ids.has(id)),
+		"the header has the tick rate, role and channels (%s)" % str(channel_ids))
 	_check(reader.get_last_tick() - reader.get_first_tick() + 1 == ticks and not reader.is_cut_short(),
 		"every tick is there (%d of %d), and nothing is cut short" % [reader.get_last_tick() - reader.get_first_tick() + 1, ticks])
 	_check(reader.get_block_count() == ceili(ticks / 30.0), "in blocks of 30 ticks (%d blocks)" % reader.get_block_count())
@@ -142,6 +144,7 @@ func _scene_and_run() -> void:
 	_test_damaged(path, reader)
 	_test_unknown_channel(path)
 	await _test_viewer(path, reader)
+	await _test_safeguards()
 	var size := FileAccess.get_file_as_bytes(path).size()
 	print("  (size: %d bytes for %d ticks of 3 to 4 pawns, %.1f bytes a pawn a tick)" % [size, ticks, float(size) / (ticks * 3.5)])
 	standing.free()
@@ -247,6 +250,60 @@ func _test_unknown_channel(path: String) -> void:
 	with.get_frame(middle)
 	var state: Dictionary = with._decoded(with._block_index(middle)).states[0].get(120, {})
 	_check(state.get("last", -1) >= with.get_first_tick(), "one with it reads it")
+
+
+# Claude 2026-11-16: the safeguards (ReplayRecorder's top comment): a length cap stops a recording, a disk without room refuses one,
+# a folder over its size is pruned oldest first, and the writer refuses blocks once its queue is full.
+func _test_safeguards() -> void:
+	var host_folder := FOLDER.path_join("host")
+	# A length cap: 1 s, so the recording stops on its own after about 60 ticks, with a reason.
+	_recorder.max_recording_seconds = 1.0
+	_recorder.start_recording("host")
+	var capped := _recorder.get_recording_path()
+	for i in 150:
+		await get_tree().physics_frame
+		if not _recorder.is_recording():
+			break
+	_check(not _recorder.is_recording() and _recorder.get_stopped_reason().contains("max_recording_seconds"),
+		"a recording stops by itself at max_recording_seconds (%s)" % _recorder.get_stopped_reason())
+	var capped_reader := ReplayReader.new()
+	_check(capped_reader.open(capped) == OK and capped_reader.get_last_tick() - capped_reader.get_first_tick() < 75,
+		"and its file is complete up to there (%d ticks)" % (capped_reader.get_last_tick() - capped_reader.get_first_tick() + 1))
+	_recorder.max_recording_seconds = 10800.0
+	# No room on the disk: an impossible minimum, so it refuses to start.
+	_recorder.min_free_megabytes = 1 << 40
+	var refused := _recorder.start_recording("host")
+	_check(refused != OK and not _recorder.is_recording() and _recorder.get_stopped_reason() == "not enough disk space",
+		"it won't start without min_free_megabytes free on the disk")
+	_recorder.min_free_megabytes = 1024
+	# A folder over max_folder_megabytes: three old 1 MB files and a 2 MB limit, so the oldest go when the next recording starts.
+	for file_name in DirAccess.get_files_at(host_folder):
+		DirAccess.remove_absolute(host_folder.path_join(file_name))
+	var megabyte := PackedByteArray()
+	megabyte.resize(1048576)
+	for i in 3:
+		var big := FileAccess.open(host_folder.path_join("2000-01-01_00-00-1%d.pbreplay" % i), FileAccess.WRITE)
+		big.store_buffer(megabyte)
+		big.close()
+	_recorder.max_folder_megabytes = 2
+	_recorder.start_recording("host")
+	_recorder.stop_recording()
+	var left := DirAccess.get_files_at(host_folder)
+	_check(left.size() == 2 and not Array(left).has("2000-01-01_00-00-10.pbreplay") and not Array(left).has("2000-01-01_00-00-11.pbreplay"),
+		"a folder over max_folder_megabytes loses its oldest recordings first (%s)" % ", ".join(left))
+	_recorder.max_folder_megabytes = 4096
+	# The writer's queue: the test holds the writer's lock, so its thread can't take blocks, and the queue fills.
+	var writer := ReplayWriter.new()
+	writer.max_queued_blocks = 3
+	writer.open(FOLDER.path_join("queue.bin"), PackedByteArray([1, 2, 3, 4]))
+	writer._mutex.lock() # GDScript note: Godot's Mutex can be locked again by the same thread, so push_block still gets in
+	var accepted := 0
+	for i in 6:
+		if writer.push_block(PackedByteArray([i, i, i, i, i, i, i, i])):
+			accepted += 1
+	writer._mutex.unlock()
+	writer.close()
+	_check(accepted == 3, "the writer refuses blocks once max_queued_blocks are waiting (%d of 6 taken)" % accepted)
 
 
 # The viewer opens the file and shows a ghost for each pawn that has a record, at any tick.

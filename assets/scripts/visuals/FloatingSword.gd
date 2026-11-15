@@ -106,6 +106,13 @@ func _bind() -> void:
 
 
 func _process(delta: float) -> void:
+	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	_animate(delta)
+	PerfScopes.end(&"visuals.sword", started)
+
+
+# Claude 2026-11-16: the work itself, timed by _process.
+func _animate(delta: float) -> void:
 	if _pawn == null:
 		return
 	if not _bound:

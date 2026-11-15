@@ -117,7 +117,9 @@ func refresh_now() -> void:
 
 
 func _physics_process(_delta: float) -> void:
+	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	_build_ground_under_sources()
+	PerfScopes.end(&"streaming.ground_under_sources", started)
 
 
 func _on_before_tick(_dt: float, _tick: int) -> void:
@@ -163,6 +165,13 @@ func _build_now(key: Vector2i) -> void:
 
 
 func _process(delta: float) -> void:
+	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	_stream_chunks(delta)
+	PerfScopes.end(&"streaming.chunks", started)
+
+
+# Claude 2026-11-16: the work itself, timed by _process.
+func _stream_chunks(delta: float) -> void:
 	# GDScript note: is_instance_valid is false for a freed object, which a plain null check wouldn't catch.
 	if not is_instance_valid(terrain) or not terrain.is_inside_tree():
 		if not _warned_no_terrain:

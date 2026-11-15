@@ -122,6 +122,11 @@ attack_primary={
 jolt_physics_3d/simulation/penetration_slop=0.04
 jolt_physics_3d/queries/use_enhanced_internal_edge_removal=true
 
+[project_base]
+
+game_mode/modules=["res://assets/scripts/game_mode/PawnInitializer.gd", "res://assets/scripts/game_mode/PossessionCoordinator.gd", "res://assets/scripts/game_mode/AIActivationManager.gd", "res://assets/scripts/game_mode/SpawnManager.gd", "res://assets/scripts/replay/ReplayRecorder.gd", "res://assets/scripts/debug/diagnostics/DiagnosticsManager.gd"]
+game_mode/modules.release=["res://assets/scripts/game_mode/PawnInitializer.gd", "res://assets/scripts/game_mode/PossessionCoordinator.gd", "res://assets/scripts/game_mode/AIActivationManager.gd", "res://assets/scripts/game_mode/SpawnManager.gd", "res://assets/scripts/replay/ReplayRecorder.gd"]
+
 [rendering]
 
 renderer/rendering_method="mobile"

@@ -91,13 +91,17 @@ func refresh_now() -> void:
 
 func _physics_process(delta: float) -> void:
 	if tick_nav and Engine.has_singleton("NavServer"):
+		var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 		Engine.get_singleton("NavServer").tick(delta)
+		PerfScopes.end(&"nav.tick", started)
 
 
 func _process(delta: float) -> void:
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0:
+		var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 		refresh_now()
+		PerfScopes.end(&"nav.refresh", started)
 
 
 # --- Chunks ---

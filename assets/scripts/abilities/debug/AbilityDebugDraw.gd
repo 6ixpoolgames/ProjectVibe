@@ -103,6 +103,13 @@ func _physics_process(_delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	_fade_shapes(delta)
+	PerfScopes.end(&"debug.ability_draw", started)
+
+
+# Claude 2026-11-16: the work itself, timed by _process.
+func _fade_shapes(delta: float) -> void:
 	# Each shape's alpha goes down in a straight line from its starting alpha to 0, then the shape is removed.
 	for i in range(_fading.size() - 1, -1, -1):
 		var entry: Array = _fading[i]

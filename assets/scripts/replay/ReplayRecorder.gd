@@ -16,6 +16,17 @@
 ##
 ## Files: <folder>/<role>/<date>_<time>.pbreplay, with role "host" (host and offline) or "client". Only the newest keep_recordings in
 ## each folder are kept; older ones are deleted when a new recording starts.
+##
+## Claude 2026-11-16, safeguards (the owner asked that the writer can never run away, write more recordings than the cap, or grow one
+## recording without limit). Each stops the recording with a warning saying why (get_stopped_reason), and the file stays readable:
+##   - max_recording_seconds (3 hours): a recording stops when it's this long.
+##   - max_file_megabytes (2 GB): a recording stops when its file is this big, whatever its length.
+##   - min_free_megabytes (1 GB): a recording doesn't start, or stops, when the disk has less room than this. Checked every minute.
+##   - max_folder_megabytes (4 GB): old recordings in a role's folder are deleted, oldest first, until the folder is under this, as
+##     well as down to keep_recordings. The file being recorded is never deleted, and one another instance still has open can't be
+##     (Windows refuses), so it's skipped.
+##   - The writer's queue: if the disk falls so far behind that max_queued_blocks blocks are waiting, the recording stops rather than
+##     filling memory. And if writing fails (a full disk, a lost drive), the writer stops writing and the recording stops.
 class_name ReplayRecorder
 extends GameModeModule
 
@@ -42,6 +53,17 @@ const LOCAL_IDS_START := 1 << 30
 @export_range(0.1, 10.0, 0.1) var block_seconds := 1.0
 ## Off: blocks are written on the main thread, at once (ReplayWriter.use_thread). For tests.
 @export var write_on_thread := true
+## Claude 2026-11-16, safeguards (see the top of the file). 0 switches each one off.
+## The longest a recording may be, in seconds: 3 hours by default (the owner's call).
+@export_range(0.0, 86400.0, 60.0, "or_greater") var max_recording_seconds := 10800.0
+## The biggest a recording's file may get, in megabytes.
+@export_range(0, 100000, 1, "or_greater") var max_file_megabytes := 2048
+## The least free disk space recording needs, in megabytes.
+@export_range(0, 100000, 1, "or_greater") var min_free_megabytes := 1024
+## The most a role's folder may hold, in megabytes. Older recordings are deleted to stay under it.
+@export_range(0, 1000000, 1, "or_greater") var max_folder_megabytes := 4096
+## How many finished blocks may wait for the writer before the recording gives up.
+@export_range(1, 3600, 1, "or_greater") var max_queued_blocks := 30
 
 var _channels: Array[ReplayChannel] = []
 var _recording := false
@@ -56,6 +78,8 @@ var _block: Array[StreamPeerBuffer] = [] # one buffer per channel, in the order 
 var _block_first_tick := -1
 var _block_ticks := 0
 var _ticks_recorded := 0
+var _stopped_reason := "" # Claude 2026-11-16: why the last recording stopped, if a safeguard stopped it
+var _next_space_check_msec := 0
 
 
 func _init() -> void:
@@ -109,6 +133,12 @@ func start_recording(role: String) -> Error:
 	if made != OK:
 		push_warning("ReplayRecorder: couldn't make %s (error %d), so nothing is recorded." % [role_folder, made])
 		return made
+	# Claude 2026-11-16: refuses to start without room on the disk.
+	var space := _free_megabytes(role_folder)
+	if min_free_megabytes > 0 and space >= 0 and space < min_free_megabytes:
+		push_warning("ReplayRecorder: only %d MB free, under min_free_megabytes (%d), so nothing is recorded." % [space, min_free_megabytes])
+		_stopped_reason = "not enough disk space"
+		return ERR_FILE_NO_PERMISSION
 	_prune(role_folder, keep_recordings - 1) # room for the new one
 	# GDScript note: the date and time with a space, so it's changed to a file-name-friendly form.
 	var stamp := Time.get_datetime_string_from_system(false, true).replace(":", "-").replace(" ", "_")
@@ -119,12 +149,15 @@ func start_recording(role: String) -> Error:
 		suffix += 1
 	_writer = ReplayWriter.new()
 	_writer.use_thread = write_on_thread
+	_writer.max_queued_blocks = max_queued_blocks # Claude 2026-11-16
 	var error := _writer.open(_path, _header(role))
 	if error != OK:
 		push_warning("ReplayRecorder: couldn't create %s (error %d), so nothing is recorded." % [_path, error])
 		_writer = null
 		return error
 	_recording = true
+	_stopped_reason = ""
+	_next_space_check_msec = Time.get_ticks_msec() + 60000
 	_ids.clear()
 	_pawns.clear()
 	_arrived.clear()
@@ -173,6 +206,12 @@ func is_recording() -> bool:
 	return _recording
 
 
+## Claude 2026-11-16: why the last recording stopped on its own (a safeguard), or "" if it was stopped by stop_recording() or is
+## still running.
+func get_stopped_reason() -> String:
+	return _stopped_reason
+
+
 ## The file being recorded, or the last one recorded. GDScript note: not get_path(), which every Node already has (its place in the
 ## scene tree).
 func get_recording_path() -> String:
@@ -201,6 +240,13 @@ func get_replay_id(node: Node) -> int:
 
 
 func _on_after_tick(_dt: float, tick: int) -> void:
+	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	_record_tick(tick)
+	PerfScopes.end(&"replay.record", started)
+
+
+# Claude 2026-11-16: the work itself, timed by _on_after_tick.
+func _record_tick(tick: int) -> void:
 	_hand_over_arrivals()
 	if _block_first_tick < 0:
 		_block_first_tick = tick
@@ -294,8 +340,41 @@ func _finish_block() -> void:
 		out.put_u16(_channels[i].channel_id)
 		out.put_u32(bytes.size())
 		out.put_data(bytes)
-	_writer.push_block(out.data_array)
+	# Claude 2026-11-16: the writer refuses a block when too many are already waiting, or after a write failed.
+	if not _writer.push_block(out.data_array):
+		_safeguard_stop.call_deferred("the writer fell %d blocks behind or failed to write (error %d)" % [max_queued_blocks, _writer.get_error()])
 	_block_ticks = 0
+	_check_limits()
+
+
+# Claude 2026-11-16: the safeguards checked once a block (see the top of the file). Stopping is deferred to the end of the frame,
+# because this runs inside the tick's after_tick signal.
+func _check_limits() -> void:
+	if not _recording or _writer == null:
+		return
+	if max_recording_seconds > 0.0 and _ticks_recorded >= roundi(max_recording_seconds * _driver.get_tick_rate()):
+		_safeguard_stop.call_deferred("it reached max_recording_seconds (%.0f s)" % max_recording_seconds)
+	elif max_file_megabytes > 0 and _writer.get_bytes_written() >= max_file_megabytes * 1048576:
+		_safeguard_stop.call_deferred("its file reached max_file_megabytes (%d MB)" % max_file_megabytes)
+	elif min_free_megabytes > 0 and Time.get_ticks_msec() >= _next_space_check_msec:
+		_next_space_check_msec = Time.get_ticks_msec() + 60000
+		var space := _free_megabytes(_path.get_base_dir())
+		if space >= 0 and space < min_free_megabytes:
+			_safeguard_stop.call_deferred("the disk has only %d MB free (min_free_megabytes %d)" % [space, min_free_megabytes])
+
+
+func _safeguard_stop(reason: String) -> void:
+	if not _recording:
+		return
+	push_warning("ReplayRecorder: stopped recording %s, because %s. The file is complete up to there." % [_path, reason])
+	stop_recording()
+	_stopped_reason = reason
+
+
+# Free space on the disk holding a folder, in megabytes, or -1 if it can't be found out.
+static func _free_megabytes(in_folder: String) -> int:
+	var dir := DirAccess.open(in_folder)
+	return int(dir.get_space_left() / 1048576.0) if dir else -1
 
 
 # The header (replay spec section 2): magic, format version (u16), the fields' byte count (u32), then the fields as one Dictionary.
@@ -331,5 +410,23 @@ func _prune(role_folder: String, keep: int) -> void:
 		if file_name.get_extension() == FILE_EXTENSION:
 			names.append(file_name)
 	names.sort()
-	while names.size() > maxi(keep, 0):
-		DirAccess.remove_absolute(role_folder.path_join(names.pop_front()))
+	# Claude 2026-11-16: also down to max_folder_megabytes, oldest first, and never the file being recorded; a file another instance
+	# still has open can't be deleted, and is left.
+	var sizes := {}
+	var total := 0
+	for file_name in names:
+		var file := FileAccess.open(role_folder.path_join(file_name), FileAccess.READ)
+		sizes[file_name] = file.get_length() if file else 0
+		total += sizes[file_name]
+	var limit := max_folder_megabytes * 1048576 if max_folder_megabytes > 0 else -1
+	for file_name in names.duplicate():
+		var too_many := names.size() > maxi(keep, 0)
+		var too_big := limit >= 0 and total >= limit # under the limit, not at it
+		if not too_many and not too_big:
+			break
+		var path := role_folder.path_join(file_name)
+		if path == _path and _recording:
+			continue
+		if DirAccess.remove_absolute(path) == OK:
+			names.erase(file_name)
+			total -= sizes[file_name]

@@ -20,10 +20,18 @@
 ##   - The player starts at the players' spawner, 285 m from the middle, so they can watch the march or walk in.
 ##
 ## Keys, besides the faction arena's: C the centre's source, H the heroes' sources, V an overhead view of the middle (the camera
-## only: your pawn stays where it is), F4 the performance overlay (PerformanceOverlay), = and - team_size up or down by 10 (the
+## only: your pawn stays where it is), = and - team_size up or down by 10 (the
 ## spawners top up to it; lowering it removes nobody, those that die just aren't replaced). F3 still shows the readouts and debug
 ## shapes, which are off to begin with: hundreds of floating labels cost more than the AI. The AI debug timeline (← to step back)
 ## isn't recorded here, for the same reason; P still pauses.
+## The team sizes, how many of each faction are alive, and the switches are in the status text at the top left.
+##
+## Claude 2026-11-16: performance is diagnostics v0's (docs/diagnostics/DIAGNOSTICS_SPEC.md), in every debug build: F1 lists its keys,
+## F4 shows the timings, and a session log is written per instance. The PerformanceOverlay this sample had (F4) is gone. For runs
+## from the command line, after "--":
+##   --perf-log       prints the diagnostics summary every 5 s, as the session log has it
+##   --near-middle    the player's pawn starts 30 m from the middle instead of at its spawner, so the fight comes to it
+##   --overhead       starts in the overhead view of the middle (V), the owner's way of watching the fight
 extends "res://assets/scripts/samples/FactionArenaSample.gd"
 
 const HERO_RED_SCENE := preload("res://assets/scenes/samples/hero_red.tscn")
@@ -33,11 +41,13 @@ const HERO_ALLY_SCENE := preload("res://assets/scenes/samples/hero_ally.tscn")
 ## How far players' pawns keep ground loaded here, in metres, the same as the level's other sources. Set as a player's pawn spawns.
 @export_range(0.0, 2000.0, 1.0, "or_greater") var load_distance := 160.0
 
-var _overlay: PerformanceOverlay = null
 var _heroes: Array[Pawn] = []
 var _hero_sources_on := true
 var _overhead := false
 var _camera_before: Camera3D = null
+var _perf_log := false # Claude 2026-11-16: diagnostics, see the top of the file
+var _near_middle := false
+var _next_print_msec := 0
 
 
 func _ready() -> void:
@@ -48,11 +58,26 @@ func _ready() -> void:
 	# Off to begin with: with hundreds of pawns, the readouts and shapes cost more than what they show. F3 brings them back.
 	_show_readouts = false
 	_debug_draw.visible = false
-	_overlay = PerformanceOverlay.new()
-	_overlay.name = "PerformanceOverlay"
-	_overlay.streamer = $World/ChunkStreamer
-	_overlay.extra_text = _overlay_lines
-	$Display.add_child(_overlay)
+	# Claude 2026-11-16: diagnostics (see the top of the file)
+	for argument in OS.get_cmdline_user_args():
+		if argument == "--perf-log":
+			_perf_log = true
+		elif argument == "--near-middle":
+			_near_middle = true
+		elif argument == "--overhead":
+			_toggle_overhead.call_deferred() # once the scene's cameras are ready
+
+
+# Claude 2026-11-16: --perf-log prints the diagnostics summary every 5 s. Samples, like debug tools, aren't in release builds, so a
+# sample may name DiagnosticsManager; without the module (the project setting changed), it prints nothing.
+func _process(delta: float) -> void:
+	super(delta)
+	if not _perf_log or Time.get_ticks_msec() < _next_print_msec:
+		return
+	_next_print_msec = Time.get_ticks_msec() + 5000
+	var diagnostics := GameMode.get_module(DiagnosticsManager) as DiagnosticsManager
+	if diagnostics:
+		print(diagnostics.summary_text(diagnostics.get_summary(5.0)))
 
 
 func _records_timeline() -> bool:
@@ -67,6 +92,8 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 	if pawn.scene_file_path == FACTION_PLAYER_SCENE.resource_path:
 		# Before it's possessed, which is when it makes its StreamingSource (Pawn._refresh_source).
 		pawn.streaming_load_distance = load_distance
+		if _near_middle: # Claude 2026-11-16: diagnostics
+			pawn.global_position = $RallyPoint.global_position + Vector3(0, 3, 30)
 	elif _is_hero(pawn):
 		_heroes.append(pawn)
 		if not _hero_sources_on:
@@ -85,9 +112,6 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				return
 			KEY_V:
 				_toggle_overhead()
-				return
-			KEY_F4:
-				_overlay.visible = not _overlay.visible
 				return
 			KEY_EQUAL:
 				_change_team_size(10)
@@ -147,8 +171,13 @@ func _toggle_overhead() -> void:
 		_camera_before.make_current()
 
 
-# The overlay's extra lines: each faction's living pawns, the switches, and the team size.
-func _overlay_lines() -> String:
+# Claude 2026-11-16: the mass battle's lines in the status text (they were the PerformanceOverlay's extra lines): each faction's living
+# pawns, the switches, and the team size.
+func _status_text() -> String:
+	return super() + "\n" + _mass_battle_lines()
+
+
+func _mass_battle_lines() -> String:
 	var alive := {0: 0, 1: 0, 2: 0}
 	for pawn: Pawn in _readouts:
 		if is_instance_valid(pawn) and not pawn.is_dead():
@@ -159,4 +188,4 @@ func _overlay_lines() -> String:
 
 
 func _keys_text() -> String:
-	return super() + "\nMass battle: C centre source, H hero sources, V view the middle, F4 performance, = and - team size, F3 readouts (off)"
+	return super() + "\nMass battle: C centre source, H hero sources, V view the middle, = and - team size, F3 readouts (off). F1 diagnostics"

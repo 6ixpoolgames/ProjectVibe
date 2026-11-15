@@ -13,6 +13,11 @@
 ##   Right mouse drag to turn the camera, the mouse wheel to zoom, W A S D to move it (when not following)
 ## The slider at the bottom scrubs.
 ##
+## Claude 2026-11-16, diagnostics (docs/diagnostics/DIAGNOSTICS_SPEC.md): a recording with the diagnostics channel shows a strip above
+## the slider, each tick's slowest frame (blue up to 1/60 s, orange up to 1/30 s, red beyond, with lines at both), with the tick shown
+## marked; click it to jump there. The panel then also shows the frame at that tick: its parts and its most expensive scopes. The strip
+## is filled in the background, a few blocks a frame, so a long recording opens at once.
+##
 ## What the ghosts show: the team's colour; grey and lying down when dead; pale blue when frozen (switched off by the AI switch-off,
 ## not ticking at all); darker when sleeping (idle, skipping physics but still ticking). The labels list the flags as letters:
 ##   G on the ground, D dead, F frozen, S sleeping, C keeps chunks loaded (a source of its own), P a player has it.
@@ -47,6 +52,9 @@ var _status: Label = null
 var _panel: Label = null
 var _slider: HSlider = null
 var _setting_slider := false
+var _strip: Control = null # Claude 2026-11-16: the diagnostics strip
+var _strip_values := PackedFloat32Array() # the slowest frame in each column of the strip, in ms; -1 where there's nothing yet
+var _strip_next_block := 0 # the next block to read for the strip
 
 
 func _ready() -> void:
@@ -65,6 +73,9 @@ func _ready() -> void:
 	_tick = _reader.get_first_tick()
 	_slider.min_value = _reader.get_first_tick()
 	_slider.max_value = _reader.get_last_tick()
+	_strip_values.resize(512) # Claude 2026-11-16: columns of the diagnostics strip
+	_strip_values.fill(-1.0)
+	_strip_next_block = 0
 	var first := _reader.get_frame(_reader.get_first_tick())
 	_labels_on = first.pawns.size() <= 40
 	_focus = _middle_of(first)
@@ -98,6 +109,7 @@ func get_reader() -> ReplayReader:
 func _process(delta: float) -> void:
 	if _reader == null:
 		return
+	_fill_strip() # Claude 2026-11-16
 	if _playing:
 		_tick = minf(_tick + delta * float(_reader.get_header().get("tick_rate", 60)) * SPEEDS[_speed_index], _reader.get_last_tick())
 		if _tick >= _reader.get_last_tick():
@@ -323,6 +335,17 @@ func _panel_text(frame: Dictionary) -> String:
 		var input: Variant = info.get("input")
 		if input != null:
 			lines.append("  input: move %s, look %.0f°, held %d" % [_vector(input.move_input), rad_to_deg(input.look_yaw), input.held_actions])
+	# Claude 2026-11-16: the frame at this tick, from the diagnostics channel, if the recording has it.
+	if not frame.diagnostics.is_empty():
+		var record: Dictionary = frame.diagnostics.reduce(func(a: Dictionary, b: Dictionary) -> Dictionary: return a if a.frame_ms >= b.frame_ms else b)
+		var scope_names: Array = record.scopes.keys()
+		scope_names.sort_custom(func(a: Variant, b: Variant) -> bool: return record.scopes[a][0] > record.scopes[b][0])
+		var top := PackedStringArray()
+		for scope: Variant in scope_names.slice(0, 5):
+			top.append("%s %.2f" % [scope, record.scopes[scope][0] / 1000.0])
+		lines.append("Frame %d: %.1f ms = physics %.1f (%d steps) + scripts %.1f + rest %.1f   objects %d, orphans %d" % [record.frame,
+			record.frame_ms, record.physics_ms, record.steps, record.scripts_ms, record.rest_ms, record.objects, record.orphans])
+		lines.append("  top ms: " + ", ".join(top))
 	var rate: int = _reader.get_header().get("tick_rate", 60)
 	var events := _reader.get_events(frame.tick - rate * 2, frame.tick)
 	var names := {}
@@ -404,7 +427,7 @@ func _build_scene() -> void:
 	layer.add_child(_status)
 	_panel = _make_label(Control.PRESET_BOTTOM_LEFT)
 	_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_panel.offset_bottom = -44.0
+	_panel.offset_bottom = -72.0 # Claude 2026-11-16: was -44, above the diagnostics strip now
 	layer.add_child(_panel)
 	_slider = HSlider.new()
 	_slider.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -418,6 +441,61 @@ func _build_scene() -> void:
 			_playing = false
 			_tick = value)
 	layer.add_child(_slider)
+	# Claude 2026-11-16: the diagnostics strip, just above the slider
+	_strip = Control.new()
+	_strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
+	_strip.offset_left = 14.0
+	_strip.offset_right = -14.0
+	_strip.offset_top = -66.0
+	_strip.offset_bottom = -34.0
+	_strip.draw.connect(_draw_strip)
+	_strip.gui_input.connect(func(event: InputEvent) -> void:
+		var click := event as InputEventMouseButton
+		if click and click.pressed and click.button_index == MOUSE_BUTTON_LEFT and _reader and _strip.size.x > 0.0:
+			_playing = false
+			_tick = lerpf(_reader.get_first_tick(), _reader.get_last_tick(), clampf(click.position.x / _strip.size.x, 0.0, 1.0)))
+	layer.add_child(_strip)
+
+
+# Claude 2026-11-16: reads a few blocks' diagnostics a frame into the strip's columns, until the whole recording is in.
+func _fill_strip() -> void:
+	if _strip == null:
+		return
+	var first := _reader.get_first_tick()
+	var span := maxi(_reader.get_last_tick() - first, 1)
+	var blocks := _reader.get_block_count()
+	var read := 0
+	while _strip_next_block < blocks and read < 8:
+		var from: int = _reader._blocks[_strip_next_block][0]
+		var to: int = _reader._blocks[_strip_next_block][1]
+		for entry: Array in _reader.get_diagnostics(from, to):
+			var column := clampi(int(float(entry[0] - first) / span * (_strip_values.size() - 1)), 0, _strip_values.size() - 1)
+			_strip_values[column] = maxf(_strip_values[column], float(entry[1].frame_ms))
+		_strip_next_block += 1
+		read += 1
+	_strip.queue_redraw()
+
+
+func _draw_strip() -> void:
+	var size := _strip.size
+	_strip.draw_rect(Rect2(Vector2.ZERO, size), Color(0.0, 0.0, 0.0, 0.5))
+	var scale_ms := 50.0
+	var width := size.x / _strip_values.size()
+	var any := false
+	for i in _strip_values.size():
+		var value := _strip_values[i]
+		if value < 0.0:
+			continue
+		any = true
+		var colour := Color(0.35, 0.6, 1.0) if value <= 17.5 else (Color(1.0, 0.65, 0.25) if value <= 34.0 else Color(1.0, 0.3, 0.3))
+		var height := minf(value / scale_ms, 1.0) * size.y
+		_strip.draw_rect(Rect2(i * width, size.y - height, maxf(width, 1.0), height), colour)
+	for line: float in [1000.0 / 60.0, 1000.0 / 30.0]:
+		var at := size.y - line / scale_ms * size.y
+		_strip.draw_line(Vector2(0, at), Vector2(size.x, at), Color(1, 1, 1, 0.35))
+	if _reader and any:
+		var x := (float(_shown_tick - _reader.get_first_tick()) / maxi(_reader.get_last_tick() - _reader.get_first_tick(), 1)) * size.x
+		_strip.draw_line(Vector2(x, 0), Vector2(x, size.y), Color(1, 1, 1, 0.9), 2.0)
 
 
 func _make_label(preset: Control.LayoutPreset) -> Label:

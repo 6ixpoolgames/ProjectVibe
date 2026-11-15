@@ -94,6 +94,13 @@ func get_watched_count() -> int:
 
 
 func _physics_process(_delta: float) -> void:
+	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	_check_pawns()
+	PerfScopes.end(&"ai.activation", started)
+
+
+# Claude 2026-11-16: the work itself, timed by _physics_process.
+func _check_pawns() -> void:
 	if _pawns.is_empty():
 		return
 	_refresh_terrains()
