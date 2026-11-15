@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/hero_red.tscn" id="1_hero"]
+[ext_resource type="PackedScene" path="res://assets/3d/miniCharacters/Models/GLB format/character-soldier.glb" id="2_soldier"]
+
+[node name="HeroAlly" instance=ExtResource("1_hero")]
+team = 0
+
+[node name="Waddle" parent="Visual/Model" index="2"]
+toy_scene = ExtResource("2_soldier")
+stand_color = Color(0.98, 0.9, 0.6, 1)

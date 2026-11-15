@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/hero_red.tscn" id="1_hero"]
+[ext_resource type="PackedScene" path="res://assets/3d/miniCharacters/Models/GLB format/character-zombie.glb" id="2_zombie"]
+
+[node name="HeroBlue" instance=ExtResource("1_hero")]
+team = 2
+
+[node name="Waddle" parent="Visual/Model" index="2"]
+toy_scene = ExtResource("2_zombie")
+stand_color = Color(0.2, 0.4, 0.9, 1)

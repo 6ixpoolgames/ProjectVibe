@@ -202,7 +202,8 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 		pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void: _last_ability[pawn] = ability)
 	# Claude 2026-11-13: _is_npc, not team != PLAYER_TEAM, so the faction arena's NPCs on the players' team get an NPC's readout too.
 	if _is_npc(pawn): # Claude 2026-11-09: was team 1; any AI team now
-		_timeline.watch(pawn) # Claude 2026-11-09
+		if _records_timeline(): # Claude 2026-11-15
+			_timeline.watch(pawn) # Claude 2026-11-09
 		_readouts[pawn] = _make_readout(pawn)
 		# Claude 2026-11-10: its readout goes the moment it leaves, since a spawner removes bodies now, not this script. A freed pawn
 		# left in _readouts broke the loops over it, whose loop variable is typed Pawn.
@@ -233,6 +234,12 @@ func _make_readout(pawn: Pawn) -> Label3D:
 	label.position = Vector3(0.0, 2.4, 0.0)
 	pawn.get_visual().add_child(label)
 	return label
+
+
+## Claude 2026-11-15: true if the AI debug timeline records this level's NPCs (← steps back through it). It writes each NPC's readout
+## text every tick, which a level with hundreds of NPCs, such as the mass battle, can't afford, so that one says no.
+func _records_timeline() -> bool:
+	return true
 
 
 ## Claude 2026-11-13: true for a pawn the AI plays (it gets an NPC's readout, and Tab can possess it), false for a player's own pawn.

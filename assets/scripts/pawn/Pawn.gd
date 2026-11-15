@@ -63,6 +63,10 @@ signal died(pawn: Pawn, hit: HitInfo)
 	set(value):
 		ai_loads_chunks = value
 		_refresh_source()
+		# Claude 2026-11-15: and whether the AI switch-off watches it, as everywhere else the source changes. Without this, a pawn
+		# whose source was switched off here (the mass battle's H key, for heroes) was never watched, so it was never frozen, walked
+		# on where the ground unloaded under it, and fell through the world.
+		_refresh_ai_activity()
 ## On: the camera arm exists all the time, so taking this pawn has no delay at all. For a handful of hero pawns. Leave it off
 ## for anything there are many of, or a horde gets thousands of arms that do nothing.
 @export var always_has_camera_arm := false
@@ -440,12 +444,25 @@ func _take_hit(hit: HitInfo) -> void:
 		return
 	if ai_context:
 		ai_context.note_hit(hit)
+	# Claude 2026-11-15: a running parry turns away a hit from the front: no effects land, and the attacker is pushed back instead
+	# (ParryAbility). The AI above still notes it was attacked.
+	if ability_manager and ability_manager.parry_hit(hit):
+		return
 	if effect_manager:
 		effect_manager.take_hit(hit)
 	hit_received.emit(hit)
 	var attacker := hit.attacker
 	if not hit.attacker_effects.is_empty() and is_instance_valid(attacker) and attacker.effect_manager:
 		attacker.effect_manager.apply_effects(hit.attacker_effects, attacker, hit.ability, hit)
+
+
+## Claude 2026-11-15: an enemy has started a swing that may reach this pawn: its hit starts on hit_tick. On the server, its AI notes it
+## (so it can parry, AIParryBehaviour). MeleeAttackAbility calls this when a swing starts, if its warns_targets is on.
+func notice_incoming_attack(attacker: Pawn, start_tick: int, hit_tick: int) -> void:
+	if not is_authority() or is_dead():
+		return
+	if ai_context:
+		ai_context.note_incoming_attack(attacker, start_tick, hit_tick)
 
 
 ## Claude 2026-11-10: the EffectManager calls this on the authority when an effect has just taken this pawn's Health to 0: its Death

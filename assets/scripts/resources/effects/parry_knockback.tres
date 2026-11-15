@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="Effect" load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_part"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/KnockbackPart.gd" id="2_knockback"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="3_effect"]
+
+[sub_resource type="Resource" id="Knockback"]
+script = ExtResource("2_knockback")
+speed = 12.0
+ticks = 18
+hop_speed = 4.0
+
+[resource]
+script = ExtResource("3_effect")
+effect_name = &"parry knockback"
+parts = Array[ExtResource("1_part")]([SubResource("Knockback")])

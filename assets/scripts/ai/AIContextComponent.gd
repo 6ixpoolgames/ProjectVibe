@@ -162,6 +162,34 @@ func note_hit(hit: HitInfo) -> void:
 	request_decision()
 
 
+## Claude 2026-11-15: the latest swing coming at this pawn (Pawn.notice_incoming_attack), for AIParryBehaviour: who swung, the tick
+## its swing started, and the tick its hit starts. incoming_hit_tick is -1 when nothing is coming.
+var incoming_attacker: Pawn = null
+var incoming_start_tick := -1
+var incoming_hit_tick := -1
+
+
+## Claude 2026-11-15: called by Pawn.notice_incoming_attack, on the server, when an enemy starts a swing that may reach this pawn. Notes
+## it and asks for a decision at once, since a swing's windup is shorter than the time between ordinary decisions.
+func note_incoming_attack(attacker: Pawn, start_tick: int, hit_tick: int) -> void:
+	incoming_attacker = attacker
+	incoming_start_tick = start_tick
+	incoming_hit_tick = hit_tick
+	request_decision()
+
+
+## Claude 2026-11-15: true while a noted swing hasn't hit yet and its attacker is still there and alive.
+func has_incoming_attack() -> bool:
+	return incoming_hit_tick >= current_tick and is_instance_valid(incoming_attacker) and not incoming_attacker.is_dead()
+
+
+## Claude 2026-11-15: forgets the noted swing, once it's been answered.
+func clear_incoming_attack() -> void:
+	incoming_attacker = null
+	incoming_start_tick = -1
+	incoming_hit_tick = -1
+
+
 ## Claude 2026-11-09: true if the pawn was hit within this many ticks.
 ## Claude 2026-11-09 (scaling spec step 6): ticks at the reference rate (60 a second), like every AI setting.
 func was_hit_within(ticks: int) -> bool:

@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AbilityManager.tscn" id="1_abilities"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/MeleeAttackAbility.gd" id="3_melee"]
@@ -9,6 +9,8 @@
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/second_swing_hit.tres" id="8_second_hit"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/finisher_hit.tres" id="9_finisher_hit"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/heavy_hit.tres" id="10_heavy_hit"]
+[ext_resource type="Script" path="res://assets/scripts/abilities/ParryAbility.gd" id="11_parry"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/parry_knockback.tres" id="12_parry_knockback"]
 
 [node name="AbilityManager" instance=ExtResource("1_abilities")]
 
@@ -74,3 +76,11 @@ cooldown = 6.0
 [node name="OnHit" type="Node" parent="HeavyAttack"]
 script = ExtResource("4_applier")
 effects = Array[ExtResource("5_effect")]([ExtResource("10_heavy_hit")])
+
+[node name="Parry" type="Node" parent="."]
+script = ExtResource("11_parry")
+
+[node name="PushBack" type="Node" parent="Parry"]
+script = ExtResource("4_applier")
+trigger = 2
+effects = Array[ExtResource("5_effect")]([ExtResource("12_parry_knockback")])

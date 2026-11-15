@@ -53,6 +53,7 @@ signal ability_cancelled(ability: AbilityBase, by: AbilityBase)
 
 # Claude 2026-11-10: _any_jitter is gone: a press always compares the abilities on its action now, since effects can boost them.
 var _invulnerable_abilities: Array[AbilityBase] = [] # Claude 2026-11-10: those with invulnerable_while_running, usually just Dash
+var _parry_abilities: Array[AbilityBase] = [] # Claude 2026-11-15: ParryAbility nodes, asked about each hit (parry_hit)
 var _locomotion_pausers: Array[AbilityBase] = [] # Claude 2026-11-10: those with pauses_locomotion, usually just Dash
 
 var pawn: Pawn = null
@@ -173,6 +174,15 @@ func start_ability(ability: AbilityBase) -> bool:
 	_clear_way(ability)
 	_start(ability)
 	return true
+
+
+## Claude 2026-11-15: true if a running ParryAbility turns this hit away (from the front, while it runs). It has then already sent the
+## attacker the parry's effects. Pawn asks this for every hit, on the server, before the hit's effects land.
+func parry_hit(hit: HitInfo) -> bool:
+	for ability in _parry_abilities:
+		if (ability as ParryAbility).try_parry(hit):
+			return true
+	return false
 
 
 ## Claude 2026-11-10: true while an ability with invulnerable_while_running runs, such as a Dash: hits don't land (Pawn.is_invulnerable).
@@ -547,11 +557,14 @@ func _collect_abilities() -> void:
 	_abilities.sort_custom(func(a: AbilityBase, b: AbilityBase) -> bool:
 		return a.priority > b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
 	_invulnerable_abilities.clear() # Claude 2026-11-10
+	_parry_abilities.clear() # Claude 2026-11-15
 	_locomotion_pausers.clear() # Claude 2026-11-10
 	for ability in _abilities:
 		ability.jitter_salt = hash(String(ability.name))
 		if ability.invulnerable_while_running:
 			_invulnerable_abilities.append(ability)
+		if ability is ParryAbility: # Claude 2026-11-15
+			_parry_abilities.append(ability)
 		if ability.pauses_locomotion and ability.kind != AbilityBase.Kind.LOCOMOTION:
 			_locomotion_pausers.append(ability)
 	_locomotions.clear()
@@ -580,6 +593,8 @@ func _collect_effects(ability: AbilityBase) -> void:
 	ability.on_start_effects.clear()
 	ability.on_hit_effects.clear()
 	ability.on_hit_self_effects.clear()
+	ability.on_parry_effects.clear() # Claude 2026-11-15
+	ability.on_parry_self_effects.clear()
 	for child in ability.get_children():
 		var applier := child as EffectApplier
 		if applier == null:
@@ -590,6 +605,11 @@ func _collect_effects(ability: AbilityBase) -> void:
 			effect.register()
 			if applier.trigger == EffectApplier.Trigger.ON_START:
 				ability.on_start_effects.append(effect)
+			elif applier.trigger == EffectApplier.Trigger.ON_PARRY: # Claude 2026-11-15
+				if applier.applies_to == EffectApplier.AppliesTo.SELF:
+					ability.on_parry_self_effects.append(effect)
+				else:
+					ability.on_parry_effects.append(effect)
 			elif applier.applies_to == EffectApplier.AppliesTo.SELF:
 				ability.on_hit_self_effects.append(effect)
 			else:

@@ -1,4 +1,4 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/arena_goblin.tscn" id="1_goblin"]
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_abilities.tscn" id="2_abilities"]
@@ -7,6 +7,8 @@
 [ext_resource type="PackedScene" path="res://assets/3d/miniDungeon/Models/GLB format/character-orc.glb" id="5_orc"]
 [ext_resource type="Script" path="res://assets/scripts/visuals/FloatingSword.gd" id="6_sword"]
 [ext_resource type="PackedScene" path="res://assets/3d/miniCharacters/Models/GLB format/weapon-sword.glb" id="7_sword_model"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIParryBehaviour.gd" id="8_parry"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIGoToPointBehaviour.gd" id="9_go_to_point"]
 
 [node name="FactionGoblin" instance=ExtResource("1_goblin")]
 
@@ -18,6 +20,12 @@ attack_action = &"secondary"
 presses_action = &"secondary"
 max_score = 0.95
 min_score = 0.95
+
+[node name="Parry" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("8_parry")
+
+[node name="GoToPoint" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("9_go_to_point")
 
 [node name="Body" parent="Visual/Model" index="0"]
 visible = false

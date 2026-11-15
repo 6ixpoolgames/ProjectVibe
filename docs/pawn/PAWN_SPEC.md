@@ -696,6 +696,73 @@ Both kill through the effect system, so the usual death follows: the Death abili
 - **Pawns respawned on top of each other** *(found the same day: the owner saw pawns "perma dashing", and the windowed probe caught two players 0.00 m apart, moving 0.6 m a tick with no velocity)*. Players brought back in the same tick got the same spot. A respawn moves the pawn by setting its position, and physics only sees that after its next step, so the second respawn's free-spot check didn't see the first. Respawns also rolled the same random numbers, because rolls went by `_spawn_count`, which only new spawns add to. Two pawns inside each other are then pushed apart by physics every tick, which isn't velocity: it looked like dashing that never stops, and pushed them into the ground. That's the likeliest cause of the owner's falls through the world in networked games, where two players can die together. With bigger teams at 100 Health it happened all the time. Fixed in `SpawnManager`: every spot it puts a pawn on is claimed for `claim_ticks` (2) ticks and counts as taken within twice `clearance_radius`, and every roll has its own random numbers (`_roll_count`). Test: `spawn_manager_selftest`, "two players brought back in the same tick", which fails without the fix (0.53 m apart). Two pawns spawned fresh in the same tick were already fine: physics sees a new body at once.
 
 
+### 8.15 Parry, heroes and the mass battle *(Claude 2026-11-15, the owner's request)*
+
+**Parry (`ParryAbility`)**
+- **Starting it:** the new `parry` action (F in the faction arena and the mass battle, added at the end of `input_actions.tres`) starts it. It's tagged `combat.parry`, added at the end of the tag declarations.
+- **Timing:** it runs 0.35 s, then cools down 1.5 s.
+- **While it runs:** it turns the pawn toward its look direction at up to 900°/s, and locks out movement and combat.
+- **Interrupts:** it can't cancel the pawn's own swing (priority 10 against a swing's 15). A knockback or a dash cancels it (threshold 20).
+- **What it blocks:** while it runs, a hit whose attacker is within `front_degrees` (120, so 60° either side) of where the pawn faces is turned away. `Pawn._take_hit` asks `AbilityManager.parry_hit()` before any effects land; the AI still notes the hit. Hits from the sides and back land as usual.
+- **What it does to the attacker:** it gets a hit of its own, from the parrying pawn, carrying the parry's ON_PARRY effects. This is a new third `EffectApplier` trigger, added at the end so saved scenes keep their numbers. TARGET goes on the attacker, SELF on the parrying pawn. In the samples it's `parry_knockback.tres`: speed 12, 18 ticks and a 4 m/s hop, about twice a swing's. It goes through the attacker's usual hit path, so its AI notices and the knockback cancels its swing.
+- **No ping-pong:** a parry's own hit can't be parried, so two pawns parrying each other don't bounce hits forever.
+- **The `parried(hit)` signal** goes out on the server for each hit turned away.
+- **Debug visual** (`AbilityDebugDraw`): a see-through curved shield as wide as the front, on the pawn's model so it turns with it, fading over the run. A parried attacker gets a bright flash labelled PARRIED. The `FloatingSword` guards in front of the chest while a parry runs.
+- **The AI's parry (`AIParryBehaviour`, score 0.97, presses parry):**
+  - **The problem:** ordinary decisions come every 15 ticks, longer than a swing's 8-tick windup, so a parry chosen at the next decision would usually be late.
+  - **The warning:** when a swing starts on the server, `MeleeAttackAbility` (`warns_targets`, on by default) does one sphere query for enemies within its reach. It tells those within the sweep's width plus 30° of where it will face when its hit starts (`Pawn.notice_incoming_attack`).
+  - **Facing at the hit:** that's its facing turned toward its look direction as far as the windup's turn speed allows. A knockback can leave an attacker turned away, and a warning using the starting facing missed half the swings in the test.
+  - **The decision:** the pawn's AI notes the swing (`AIContextComponent.note_incoming_attack`) and asks for a decision at once.
+  - **The roll:** the behaviour rolls `parry_chance` (0.3) once per swing, from the swing's start tick and the attacker. It looks at the attacker, presses parry, and finishes two ticks later.
+  - **In the samples:** every faction NPC has it (`faction_goblin.tscn`, so blue goblins, soldiers and heroes too).
+- **Tests:** `abilities/tests/parry_selftest` (14 checks, including the AI parrying 4 of 4 swings at chance 1 and none at chance 0).
+
+**Going to a point (`AIGoToPointBehaviour`)**
+- **What it does:** walks to the nearest node in a Godot group (`point_group`, `rally_point` by default), like Unreal's target points, so pawns spawned at any time find it.
+- **When:** allowed in Idle, scoring 0.15 against Wander's 0.1. So an idle pawn marches, fights what it meets, and once within `arrive_radius` (15 m) it isn't available any more and Wander takes over.
+- **How it walks:** in legs of at most `leg_metres` (30), since nav is only built near streaming sources and a short path exists where a long one might not yet. A leg that can't be walked is tried 5 m shorter. Each pawn keeps to its own side of the straight line, up to `spread_metres` (6), so a crowd marches as a band.
+- **In the samples:** every faction NPC has it. Levels without a rally point, such as the faction arena, aren't affected.
+- **Test:** `ai/tests/ai_go_to_point_selftest`.
+
+**Heroes** (`hero_red.tscn`, and `hero_blue.tscn` and `hero_ally.tscn`, which inherit it, changing only team and model, as the blue goblin does)
+- **Body:** the model 1.8 times the size (`toy_scale` 3.96) and the sword 1.5 times. The collision capsule is 1.5 times too (radius 0.6, height 2.7), the owner's call, to see how a bigger body behaves; nav is still built for the normal pawn size.
+- **Stats:** their own `StatManager` in the scene (PawnInitializer skips a part the pawn already has): 1000 Health, MoveSpeed 4.25 and SprintSpeed 7.65 (15% slower).
+- **Swings:** 0.3 m more reach, with `hero_*_hit.tres` effects doing 1.5 times the damage and knockback.
+- **Chunk source:** `ai_loads_chunks` is on, with `streaming_load_distance` 160.
+
+**The mass battle (`mass_battle_sample.tscn`, `MassBattleSample.gd`, extending the faction arena)**
+- **Teams:** `team_size` 50 a faction, changed while playing with = and - (by 10).
+- **Ground:** 64 m chunks and 160 m load distances, against 128 m and 320 m elsewhere, so a spread-out level fits.
+- **Spawners:** three faction spawners 300 m from the middle, 120° apart, each with a `StreamingSource` child, so its ground stays loaded wherever the players are. Each has a hero spawner beside it that brings its hero back 30 s after it dies.
+- **The middle:** a `RallyPoint`, and a `CentreSource` that C switches on and off. With it on, the spawners' ground and the middle's meet. With it off, the AI in the middle freezes once its ground unloads, unless a hero or player is near.
+- **Switches:** H switches the heroes' sources, V shows the middle from above (the camera only), and F4 the `PerformanceOverlay` (`assets/scripts/debug/`).
+- **What the overlay shows:** frame times, a tick by phase against its budget, time in the physics frame outside the ticks, dropped ticks, pawns (frozen, dead), chunks, and each team's living pawns and the switches.
+- **Off by default:** readouts and debug shapes (F3). The AI debug timeline isn't recorded here, through a new `ArenaSample._records_timeline()`, since it writes every NPC's text each tick.
+- **Where the player starts:** at the players' spawner, 285 m out.
+- **Tests:** `samples/tests/mass_battle_sample_selftest` covers the layout, the teams filling with heroes, the march, H, C freezing and unfreezing a goblin in the middle, and a pawn sprinting and dashing for 20 s into unloaded land without once running off built ground (133 m, about 6.6 m/s).
+- **Measuring:** `samples/tests/mass_battle_measure.tscn` (`-- --size=N --seconds=S`, add `--tick-rate=30`) prints a row every 10 s of game time.
+- **Found on the way:**
+  - **Faction arena soldiers' facing:** the faction arena's AllySpawner faced away from the middle (a `.tscn` turn is written row by row); fixed.
+  - **Nav is the biggest cost outside the ticks:** with 33 pawns a tick was about 2 ms, but the physics frame 8. Switching nav ticking off took it to 4.
+  - **Heroes fell through the world when their source was switched off** *(the owner saw pawns fall through when chunks unloaded)*. The AI switch-off only watches pawns without a source of their own, since one with a source always has ground. Switching `Pawn.ai_loads_chunks` (the H key) added or removed the source but never told the switch-off, as possession and spawning do. So a hero with its source off was never frozen: it walked on where its ground unloaded and fell. The setter now calls `_refresh_ai_activity()` too. `mass_battle_sample_selftest` checks a hero with its source off freezes in the middle when the ground goes, and fails without the fix. The kill floor's report named it correctly: "No ground is built where it fell, so it went off the edge of the loaded world."
+
+**Measured, 2026-11-15** (`mass_battle_measure`, the owner's PC, headless so nothing drawn, offline, 150 s of game time each: the march, then the fight from about 65 s). Each row gives the range over its 10 s rows. "Tick" is TickDriver's phases; "physics frame" adds the physics engine, nav and other nodes' physics work, and is what has to fit in the budget.
+
+| A faction | Pawns | Tick rate | Tick, marching | Tick, fighting (worst 10 s) | Physics frame, fighting (worst single frame) | Outside the ticks | Budget |
+|---|---|---|---|---|---|---|---|
+| 50 | 153 | 60 | 10–11 ms (59–66%) | 11–12 ms (71%) | 14–19 ms (24) | 3–7 ms | 16.7 ms |
+| 75 | 228 | 60 | 15–17 ms (91–101%) | 13–19 ms (114%) | 16–26 ms (30) | 3–9 ms | 16.7 ms |
+| 100 | 303 | 60 | 19–20 ms (111–122%) | 19–24 ms (142%) | 23–31 ms (35) | 3–10 ms | 16.7 ms |
+| 100 | 303 | 30 | 21–22 ms (61–67%) | 21–28 ms (84%) | 24–36 ms (42) | 3–12 ms | 33.3 ms |
+
+- **The edge at 60 ticks a second is about 50 a faction** (150 pawns): the whole physics frame is then at the budget when fights start. 75 a faction is over it at the first clash, and 100 is over it all the time, by up to about 1.9 times. That matches pawn spec 12.1's estimate of about 150 to 210.
+- **At 30 ticks a second, 100 a faction fits,** with the tick at about two thirds of its 33 ms and the worst frames at the first clash just over.
+- **A tick costs about the same at 30 as at 60**, a little more in input and AI, since AI timings are in time, not ticks. So a second costs about half as much.
+- **Where it goes:** simulate (abilities and `move_and_slide`) about half, input and AI about a quarter to a third, recording 2–3 ms. The busiest moment is the first clash, when every faction arrives at once: about 15–25% above marching.
+- **Outside the ticks** is 3–12 ms, mostly nav: tile building around moving sources (heroes, the player) and the AI's path searches. It rises during fights, when every pawn asks for paths.
+- **Chunks** settle at about 116–120 built (64 m) with nothing waiting, and chunk building costs nothing once the level is loaded. Nothing froze, because the centre's source was on. Freezing is checked in the self-test and by hand (C and H).
+- **Not measured yet:** a windowed game (rendering 300 toy figures and their swords), and over a network (snapshots of 300 pawns with no delta compression yet).
+
 ### 8.7 Step 10: Health, damage and death (built 2026-11-09)
 
 The owner's call: there's no health manager. Health is a stat, and death is an ability.

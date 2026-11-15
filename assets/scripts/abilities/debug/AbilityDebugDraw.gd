@@ -9,6 +9,9 @@
 ##     Claude 2026-11-10: and the sweep: a fainter sphere where the hit sphere ended each hit tick, so the arc it swept shows
 ##     (MeleeAttackAbility.hit_area_moved). The first sphere, with the hit labels, is where the sweep started.
 ##   - A dash's trail: a copy of the pawn's capsule every physics frame while it dashes, each left behind for dash_seconds (1 s).
+##   - Claude 2026-11-15: a parry (ParryAbility): a see-through curved shield in front of the pawn, as wide as the parry's front,
+##     turning with the pawn and fading over the parry's run. When it turns a hit away, a bright flash on the attacker, labelled
+##     "PARRIED", for parry_flash_seconds. The flash only shows where hits are decided (offline and on the server).
 ##
 ## Where it shows: on the machine whose abilities run the swing or dash. That's every pawn offline and on the server, and a
 ## client's own pawn. A client doesn't draw other players' or the AI's shapes, because it doesn't run their abilities.
@@ -30,7 +33,14 @@ extends Node3D
 ## A dash trail's colour. Its alpha is where the fade starts.
 @export var dash_colour := Color(0.35, 0.7, 1.0, 0.3)
 
+## Claude 2026-11-15: a parry's shield colour, and the flash on a parried attacker and how long it stays.
+@export var parry_colour := Color(0.55, 0.85, 1.0, 0.35)
+@export var parry_flash_colour := Color(1.0, 0.95, 0.4, 0.6)
+@export var parry_flash_seconds := 0.6
+
 var _dashes: Array = [] # [pawn, DashAbility] pairs to watch each physics frame
+var _parries := {} # Claude 2026-11-15: ParryAbility -> true, so watching a pawn twice doesn't draw its parries twice
+var _shield_meshes := {} # Claude 2026-11-15: front_degrees -> the shield mesh for that width, made once
 var _swings := {} # Claude 2026-11-09: MeleeAttackAbility -> its latest sphere, so a hit can label the sphere of its own swing
 var _fading: Array = [] # [MeshInstance3D, StandardMaterial3D, seconds left, seconds in all, starting alpha]
 var _sphere_mesh: SphereMesh = null
@@ -58,6 +68,10 @@ func watch(pawn: Pawn) -> void:
 				ability.hit_window_started.connect(_on_hit_window_started.bind(ability))
 				ability.hit_landed.connect(_on_hit_landed)
 				ability.hit_area_moved.connect(_on_hit_area_moved) # Claude 2026-11-10
+		elif ability is ParryAbility: # Claude 2026-11-15
+			if not _parries.has(ability):
+				_parries[ability] = true
+				ability.parried.connect(_on_parried)
 		elif ability is DashAbility:
 			var already := false
 			for pair in _dashes:
@@ -65,6 +79,9 @@ func watch(pawn: Pawn) -> void:
 					already = true
 			if not already:
 				_dashes.append([pawn, ability])
+	# Claude 2026-11-15: a parry's shield is drawn when it starts. GDScript note: bind() adds the pawn as the last argument.
+	if not _parries.is_empty() and not pawn.ability_manager.ability_started.is_connected(_on_ability_started):
+		pawn.ability_manager.ability_started.connect(_on_ability_started.bind(pawn))
 
 
 func _physics_process(_delta: float) -> void:
@@ -80,6 +97,9 @@ func _physics_process(_delta: float) -> void:
 	for swing in _swings.keys():
 		if not is_instance_valid(swing):
 			_swings.erase(swing)
+	for parry in _parries.keys(): # Claude 2026-11-15
+		if not is_instance_valid(parry):
+			_parries.erase(parry)
 
 
 func _process(delta: float) -> void:
@@ -147,6 +167,68 @@ func _on_hit_landed(hit: HitInfo) -> void:
 		label.text = "%s -%d" % [hit.target.name, hit.planned_damage()] # Claude 2026-11-10: from its effects, before it lands
 	else:
 		label.text += "\n%s -%d" % [hit.target.name, hit.planned_damage()]
+
+
+# Claude 2026-11-15: a parry started: its shield goes on the pawn's model, so it turns with the pawn, and fades over the parry's run.
+func _on_ability_started(ability: AbilityBase, pawn: Pawn) -> void:
+	if not visible or not (ability is ParryAbility) or not is_instance_valid(pawn):
+		return
+	var parry := ability as ParryAbility
+	var visual := pawn.get_visual()
+	if visual == null:
+		return
+	var holder: Node3D = visual.get_node_or_null("Model") if visual.has_node("Model") else visual
+	var shape := _add_shape("ParryShield", _shield_mesh(parry.front_degrees), parry_colour, maxf(parry.duration, 0.05))
+	# GDScript note: reparent() moves a node to a new parent; keep_global_transform false puts it at the new parent's origin.
+	shape.reparent(holder, false)
+	shape.top_level = false
+	shape.position = Vector3.ZERO
+	shape.rotation = Vector3.ZERO
+
+
+# Claude 2026-11-15: a hit was parried: a flash on the attacker, with a label, in the world where it was.
+func _on_parried(hit: HitInfo) -> void:
+	if not visible or hit == null or not is_instance_valid(hit.attacker):
+		return
+	var flash := _add_shape("ParryFlash", _sphere_mesh, parry_flash_colour, parry_flash_seconds)
+	flash.global_position = hit.attacker.global_position + Vector3(0.0, 1.0, 0.0)
+	flash.scale = Vector3.ONE * 0.9
+	var label := Label3D.new()
+	label.name = "Hits" # faded with its shape in _process, like a swing's hit labels
+	label.text = "PARRIED"
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.no_depth_test = true
+	label.font_size = 48
+	label.outline_size = 12
+	label.pixel_size = 0.005
+	label.modulate = Color(1.0, 0.95, 0.5)
+	label.scale = Vector3.ONE / flash.scale.x
+	label.position = Vector3(0.0, 1.3, 0.0)
+	flash.add_child(label)
+
+
+# Claude 2026-11-15: a curved band in front of the pawn, front_degrees wide, 1 m out, from 0.2 to 1.9 m up. Forward is -Z, as the
+# pawn faces. Made once per width.
+func _shield_mesh(front_degrees: float) -> Mesh:
+	if _shield_meshes.has(front_degrees):
+		return _shield_meshes[front_degrees]
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var steps := 16
+	var half := deg_to_rad(front_degrees * 0.5)
+	for i in steps:
+		var a0 := lerpf(-half, half, float(i) / steps)
+		var a1 := lerpf(-half, half, float(i + 1) / steps)
+		var p0 := Vector3(sin(a0), 0.0, -cos(a0))
+		var p1 := Vector3(sin(a1), 0.0, -cos(a1))
+		var low := Vector3(0.0, 0.2, 0.0)
+		var high := Vector3(0.0, 1.9, 0.0)
+		# Two triangles for each slice of the band.
+		for corner in [p0 + low, p1 + low, p1 + high, p0 + low, p1 + high, p0 + high]:
+			surface.add_vertex(corner)
+	var mesh := surface.commit()
+	_shield_meshes[front_degrees] = mesh
+	return mesh
 
 
 func _leave_capsule(pawn: Pawn) -> void:

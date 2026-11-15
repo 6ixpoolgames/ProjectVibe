@@ -29,7 +29,7 @@ func _ready() -> void:
 	var standing := _pawn(Vector3(0, 0.1, 0))
 	var falling := _pawn(Vector3(40, 0.1, 0))
 	var deaths := []
-	falling.died.connect(func(_pawn: Pawn, hit: HitInfo) -> void: deaths.append(hit))
+	falling.died.connect(func(_who: Pawn, hit: HitInfo) -> void: deaths.append(hit)) # Claude 2026-11-15: _who, as _pawn shadowed the _pawn() helper (an editor warning)
 	await _ticks(5)
 	_check(kill_floor.kill_effect != null and kill_floor.kill_effect.effect_name == &"kill self", "by default it uses the kill_self effect")
 	for i in 240:

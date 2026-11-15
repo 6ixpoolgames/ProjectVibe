@@ -38,6 +38,8 @@ const ALLY_SCENE := preload("res://assets/scenes/samples/faction_ally.tscn") # C
 # the middle and facing each other, and the arena's script switches them on when a game starts.
 ## The key action for the special attack. The project has none for the right mouse button, so this sample adds one.
 const SPECIAL_KEY_ACTION := &"attack_secondary"
+## Claude 2026-11-15: the key action for parrying (ParryAbility, on the parry action): F. Added to the InputMap by this sample, as above.
+const PARRY_KEY_ACTION := &"pawn_parry"
 
 ## Claude 2026-11-13: how many pawns each team has: red goblins, blue goblins, and the players with their soldiers together.
 @export_range(0, 100, 1, "or_greater") var team_size := 8
@@ -74,6 +76,11 @@ func _ready() -> void:
 		var click := InputEventMouseButton.new()
 		click.button_index = MOUSE_BUTTON_RIGHT
 		InputMap.action_add_event(SPECIAL_KEY_ACTION, click)
+	if not InputMap.has_action(PARRY_KEY_ACTION): # Claude 2026-11-15
+		InputMap.add_action(PARRY_KEY_ACTION)
+		var key := InputEventKey.new()
+		key.physical_keycode = KEY_F
+		InputMap.action_add_event(PARRY_KEY_ACTION, key)
 
 
 func _process(delta: float) -> void:
@@ -81,6 +88,7 @@ func _process(delta: float) -> void:
 	# The player controller is made by the game mode when it's first needed, so this binds the special attack once it exists.
 	if not _special_key_bound and GameMode.possession_coordinator and GameMode.possession_coordinator.controller:
 		GameMode.possession_coordinator.controller.action_keys[&"secondary"] = SPECIAL_KEY_ACTION
+		GameMode.possession_coordinator.controller.action_keys[&"parry"] = PARRY_KEY_ACTION # Claude 2026-11-15
 		_special_key_bound = true
 
 
@@ -122,4 +130,4 @@ func _is_npc(pawn: Pawn) -> bool:
 
 func _keys_text() -> String:
 	# Claude 2026-11-10: the combo (pawn spec 8.11)
-	return super() + "\nAttack: left mouse (quickly again: second swing, then finisher)    Special: right mouse (heavy, 6 s cooldown)    Red and blue goblins fight each other too; soldiers fight on your side"
+	return super() + "\nAttack: left mouse (quickly again: second swing, then finisher)    Special: right mouse (heavy, 6 s cooldown)    Parry: F (from the front)    Red and blue goblins fight each other too; soldiers fight on your side"

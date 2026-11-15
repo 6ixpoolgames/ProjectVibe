@@ -125,6 +125,10 @@ var trigger_bit := 0
 var on_start_effects: Array[Effect] = []
 var on_hit_effects: Array[Effect] = []
 var on_hit_self_effects: Array[Effect] = []
+## Claude 2026-11-15: from EffectApplier children with ON_PARRY: what a parried attacker gets (on_parry_effects), and what this
+## ability's own pawn gets (on_parry_self_effects). Only ParryAbility uses them.
+var on_parry_effects: Array[Effect] = []
+var on_parry_self_effects: Array[Effect] = []
 
 
 func _init() -> void:

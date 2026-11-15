@@ -27,6 +27,7 @@ const COMBAT_MELEE := &"combat.melee"
 const COMBAT_RANGED := &"combat.ranged"
 const COMBAT_EVADE := &"combat.evade"
 const COMBAT_KNOCKBACK := &"combat.knockback"
+const COMBAT_PARRY := &"combat.parry" # Claude 2026-11-15: ParryAbility
 
 const UTILITY := &"utility"
 const UTILITY_HEAL := &"utility.heal"

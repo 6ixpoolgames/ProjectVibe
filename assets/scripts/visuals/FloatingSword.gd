@@ -11,6 +11,8 @@
 ##                 including swings that rise, fall or chop straight down (height_at_sweep_start and _end).
 ##       recovery  it drifts back to hovering
 ##   - Dead: it drops to the ground beside the pawn, lying flat.
+##   - Claude 2026-11-15: a parry (ParryAbility running): it guards in front of the pawn's chest, blade held flat across, edge out,
+##     for as long as the parry runs (guard_forward and guard_height).
 ## Claude 2026-11-12, the owner's request (the combo's swings should alternate): after a swing it rests on the side where the swing
 ## ended, so the next swing starts from there. A swing ending on the left leaves it hovering at the pawn's left, the second swing
 ## then sweeps from left to right, and so on. A swing ending in the middle (a chop) leaves it where it was. After return_seconds with
@@ -54,10 +56,16 @@ extends Node3D
 ## Claude 2026-11-12: how long that trip round the front takes, in seconds.
 @export_range(0.01, 3.0, 0.01, "or_greater") var side_change_seconds := 0.35
 
+@export_group("Parrying")
+## Claude 2026-11-15: while a parry runs, how far in front of the pawn the guarding sword is, and how high, in metres.
+@export var guard_forward := 0.6
+@export var guard_height := 1.15
+
 var _pawn: Pawn = null
 var _visual: Node3D = null
 var _model: Node3D = null
 var _swings: Array[MeleeAttackAbility] = []
+var _parries: Array[ParryAbility] = [] # Claude 2026-11-15
 var _bound := false
 var _sword: Node3D = null
 var _bob_phase := 0.0
@@ -91,6 +99,8 @@ func _bind() -> void:
 		for ability in _pawn.ability_manager.get_abilities():
 			if ability is MeleeAttackAbility:
 				_swings.append(ability)
+			elif ability is ParryAbility: # Claude 2026-11-15
+				_parries.append(ability)
 	global_transform = _target(_facing())
 	_shown_key = _shown()
 
@@ -117,6 +127,9 @@ func _process(delta: float) -> void:
 func _shown() -> int:
 	if _pawn.is_dead():
 		return 1
+	var parry := _running_parry() # Claude 2026-11-15
+	if parry:
+		return parry.get_instance_id()
 	var swing := _running_swing()
 	return swing.get_instance_id() if swing else 0
 
@@ -130,6 +143,10 @@ func _target(facing: float) -> Transform3D:
 		var forward := Vector3(-sin(facing), 0.0, -cos(facing))
 		return Transform3D(_blade_basis(forward, Vector3.UP), feet + right * hover_side + Vector3(0.0, 0.05, 0.0))
 	var hover := _hover(feet, right)
+	# Claude 2026-11-15: guarding during a parry: in front of the chest, blade flat across the pawn, edge facing out.
+	if _running_parry():
+		var ahead := Vector3(-sin(facing), 0.0, -cos(facing))
+		return Transform3D(_blade_basis(right, ahead), feet + ahead * guard_forward + Vector3(0.0, guard_height, 0.0) - right * 0.5)
 	var swing := _running_swing()
 	if swing == null:
 		return hover
@@ -208,6 +225,14 @@ func _running_swing() -> MeleeAttackAbility:
 	for swing in _swings:
 		if swing.is_running_timed():
 			return swing
+	return null
+
+
+# Claude 2026-11-15: the running parry, or null.
+func _running_parry() -> ParryAbility:
+	for parry in _parries:
+		if parry.is_running_timed():
+			return parry
 	return null
 
 

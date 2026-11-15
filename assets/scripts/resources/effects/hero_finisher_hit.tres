@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="Effect" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_part"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/StatChangePart.gd" id="2_damage"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/KnockbackPart.gd" id="3_knockback"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="4_effect"]
+
+[sub_resource type="Resource" id="Damage"]
+script = ExtResource("2_damage")
+amount = -45.0
+
+[sub_resource type="Resource" id="Knockback"]
+script = ExtResource("3_knockback")
+speed = 13.5
+ticks = 14
+hop_speed = 4.5
+
+[resource]
+script = ExtResource("4_effect")
+effect_name = &"hero finisher hit"
+tags = Array[StringName]([&"damage.physical"])
+parts = Array[ExtResource("1_part")]([SubResource("Damage"), SubResource("Knockback")])

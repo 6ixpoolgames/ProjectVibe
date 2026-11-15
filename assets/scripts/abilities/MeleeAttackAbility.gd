@@ -78,6 +78,9 @@ signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
 ## Claude 2026-11-10: how fast it turns toward where the pawn looks during the windup, in degrees per second. 0: no turning.
 ## Claude 2026-11-12: the attack's turn speed: it no longer snaps to the look when it starts, so this is all the turning it does.
 @export_range(0.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second := 720.0
+## Claude 2026-11-15: on: when a swing starts, on the server, enemies within its reach and in front of the pawn are told it's coming
+## (Pawn.notice_incoming_attack), so their AI can parry. One sphere query a swing.
+@export var warns_targets := true
 
 var _hit_this_swing: Array[int] = [] # instance ids, on the server only
 var _warned_no_effects := false # Claude 2026-11-10
@@ -119,6 +122,41 @@ func start() -> void:
 	# Claude 2026-11-12, the owner's request: no snap to where the pawn looks. It turns there during the windup at
 	# windup_turn_degrees_per_second, so a turn speed limits every attack.
 	_hit_this_swing.clear()
+	if warns_targets and pawn.is_authority() and not _is_replaying(): # Claude 2026-11-15
+		_warn_targets()
+
+
+# Claude 2026-11-15: tells enemies this swing may reach that it's coming, and when its hit starts. Within attack_range plus hit_radius,
+# and within the sweep's width (plus 30 degrees to spare) of where the pawn will face when the hit starts: its facing turned toward
+# where it looks, as far as the windup's turn speed allows (tick() does the turning).
+func _warn_targets() -> void:
+	var reach := attack_range + hit_radius
+	var sphere := SphereShape3D.new()
+	sphere.radius = reach
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = sphere
+	query.transform = Transform3D(Basis.IDENTITY, pawn.global_position + Vector3(0.0, 0.9, 0.0))
+	query.collision_mask = pawn.collision_layer
+	query.exclude = [pawn.get_rid()]
+	var turn := deg_to_rad(windup_turn_degrees_per_second) * float(_windup()) / TickDriver.get_tick_rate()
+	var hit_yaw := rotate_toward(pawn.yaw, pawn.look_yaw, turn)
+	var facing := Vector3(-sin(hit_yaw), 0.0, -cos(hit_yaw))
+	var widest := deg_to_rad(sweep_degrees * 0.5 + 30.0)
+	var now: int = TickDriver.tick
+	for found in pawn.get_world_3d().direct_space_state.intersect_shape(query, 16):
+		var other := found.collider as Pawn
+		if other == null or other.team == pawn.team or other.is_dead():
+			continue
+		var to := other.global_position - pawn.global_position
+		to.y = 0.0
+		if to.length_squared() > 0.0001 and facing.angle_to(to.normalized()) > widest:
+			continue
+		other.notice_incoming_attack(pawn, now, now + _windup())
+
+
+func _is_replaying() -> bool:
+	var driver: Node = pawn.get_node_or_null("/root/TickDriver")
+	return driver != null and driver.is_resimulating()
 
 
 func tick(dt: float) -> void:

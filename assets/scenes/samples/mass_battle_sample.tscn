@@ -1,0 +1,90 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_arena_sample.tscn" id="1_arena"]
+[ext_resource type="Script" path="res://assets/scripts/samples/MassBattleSample.gd" id="2_sample"]
+[ext_resource type="Script" path="res://assets/scripts/streaming/StreamingSource.gd" id="3_source"]
+[ext_resource type="Script" path="res://assets/scripts/spawning/PawnSpawner.gd" id="4_spawner"]
+
+[node name="MassBattleSample" instance=ExtResource("1_arena")]
+script = ExtResource("2_sample")
+team_size = 50
+
+[node name="Terrain" parent="World" index="0"]
+chunk_size = 64.0
+chunk_resolution = 11
+
+[node name="ChunkStreamer" parent="World" index="1"]
+unload_margin = 32.0
+
+[node name="TerrainNavFeeder" parent="World" index="2"]
+unload_margin = 32.0
+
+[node name="PlayerStart" parent="Spawning" index="0"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 285, 0, 0)
+
+[node name="RedSpawner" parent="Spawning" index="1"]
+transform = Transform3D(0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, 0.866025, -150, 0, 259.808)
+keep_alive = 50
+scatter_radius = 10.0
+
+[node name="StreamingSource" type="Node3D" parent="Spawning/RedSpawner"]
+script = ExtResource("3_source")
+load_distance = 160.0
+nav_distance = 160.0
+
+[node name="BlueSpawner" parent="Spawning" index="2"]
+transform = Transform3D(-0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, -0.866025, -150, 0, -259.808)
+keep_alive = 50
+scatter_radius = 10.0
+
+[node name="StreamingSource" type="Node3D" parent="Spawning/BlueSpawner"]
+script = ExtResource("3_source")
+load_distance = 160.0
+nav_distance = 160.0
+
+[node name="AllySpawner" parent="Spawning" index="3"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 300, 0, 0)
+keep_alive = 49
+scatter_radius = 10.0
+
+[node name="StreamingSource" type="Node3D" parent="Spawning/AllySpawner"]
+script = ExtResource("3_source")
+load_distance = 160.0
+nav_distance = 160.0
+
+[node name="HeroRedSpawner" type="Node3D" parent="Spawning"]
+transform = Transform3D(0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, 0.866025, -157.5, 0, 272.798)
+script = ExtResource("4_spawner")
+active = false
+pawn_type = "hero_red"
+keep_alive = 1
+respawn_seconds = 30.0
+scatter_radius = 4.0
+
+[node name="HeroBlueSpawner" type="Node3D" parent="Spawning"]
+transform = Transform3D(-0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, -0.866025, -157.5, 0, -272.798)
+script = ExtResource("4_spawner")
+active = false
+pawn_type = "hero_blue"
+keep_alive = 1
+respawn_seconds = 30.0
+scatter_radius = 4.0
+
+[node name="HeroAllySpawner" type="Node3D" parent="Spawning"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 315, 0, 0)
+script = ExtResource("4_spawner")
+active = false
+pawn_type = "hero_ally"
+keep_alive = 1
+respawn_seconds = 30.0
+scatter_radius = 4.0
+
+[node name="RallyPoint" type="Node3D" parent="." groups=["rally_point"]]
+
+[node name="CentreSource" type="Node3D" parent="."]
+script = ExtResource("3_source")
+load_distance = 160.0
+nav_distance = 160.0
+
+[node name="WaitingCamera" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866025, 0, -0.866025, 0.5, 0, 140, 80)
