@@ -126,6 +126,7 @@ func get_drawn_count() -> int:
 
 ## How many lines the current drawing holds.
 func get_line_count() -> int:
+	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
 	return _points.size() / 2
 
 

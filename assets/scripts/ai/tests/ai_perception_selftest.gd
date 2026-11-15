@@ -264,9 +264,18 @@ func _test_target_selection() -> void:
 	selector.release_forced_target()
 	selector.update_target(TickDriver.tick + 32)
 	_check(selector.get_current_target() == far, "release_forced_target hands back")
+	# Claude 2026-11-12: a target freed between AI steps (a spawner removing a body) is skipped, not cast. Casting the freed object
+	# was a script error that stopped the faction arena; this run's log would show it as a SCRIPT ERROR.
+	observer.ai_context.current_target = near
+	near.free()
+	var refreshed := 0
+	for sense in observer.ai_sensing_manager.get_children():
+		if sense is SightSense:
+			sense.refresh(TickDriver.tick)
+			refreshed += 1
+	_check(refreshed > 0 and not observer.ai_context.has_target(), "a freed target: the sight refresh skips it, and has_target() is false")
 	observer.free()
 	far.free()
-	near.free()
 
 
 ## A fade no mode covers, made by a script: a step from full to nothing at 50 ticks.

@@ -18,6 +18,10 @@
 ##   2. In a shuffled order, from the tick's own random numbers (TickDriver.tick_rng), so it's repeatable.
 ##   3. On each point, up to tries_per_point spots inside its scatter_radius, and the first one with no pawn standing on it wins:
 ##      no pawn body within clearance_radius of where the new one's middle would be.
+##      Claude 2026-11-13: and no spot handed out in the last claim_ticks ticks within twice clearance_radius. Physics only sees a pawn
+##      that was just placed after its next step, so two pawns spawned or brought back in the same tick both found the same spot
+##      free and landed inside each other, 0 m apart. Physics then pushed the pair around at up to 36 m/s, which looked like pawns
+##      dashing forever, and pushed them into the ground (the owner's report).
 ##   4. If every spot is taken, it uses a spot on the first point anyway. A crowded spawn is better than none.
 ##   5. No point at all: a warning, and nothing spawns.
 ##
@@ -50,6 +54,9 @@ signal player_respawned(peer: int, pawn: Pawn)
 @export var ground_lift := 0.3
 ## The physics layers pawns are on, for the free-spot check. Pawns use layer 2.
 @export_flags_3d_physics var pawn_layers := 2
+## Claude 2026-11-13: for how many ticks a spot it handed out counts as taken, until physics has stepped and sees the pawn there
+## itself. 2 covers a frame that runs two ticks.
+@export_range(1, 60, 1) var claim_ticks := 2
 
 const RANDOM_SALT := 7151 # separates these rolls from other users of the same tick's random numbers
 
@@ -59,7 +66,11 @@ var _game_mode: GameModeSingleton = null
 var _pending: Array = [] # [due tick, Callable], run between ticks
 var _players := {} # pawn instance id -> peer
 var _team_of_type := {} # type name -> team, read once from its scene
-var _spawn_count := 0 # each spawn rolls differently, even several in one tick
+var _spawn_count := 0 # how many it has spawned
+# Claude 2026-11-13: every roll counts, so each one differs, even several in one tick. Rolls went by _spawn_count, which a respawn
+# doesn't add to, so players brought back in the same tick rolled the same numbers and tried the same spots.
+var _roll_count := 0
+var _claimed: Array = [] # Claude 2026-11-13: [tick, feet position] of each spot handed out lately (claim_ticks)
 
 
 func _init() -> void:
@@ -179,6 +190,7 @@ func _respawn_player(pawn_id: int) -> void:
 			pawn.global_position = place["position"]
 			pawn.velocity = Vector3.ZERO
 			pawn.yaw = place["yaw"]
+			_claim(place["position"]) # Claude 2026-11-13: so another player brought back this tick goes somewhere else
 	pawn.revive()
 	player_respawned.emit(_players.get(pawn_id, 0), pawn)
 
@@ -201,6 +213,7 @@ func _spawn_at(type_name: String, owner_peer: int, place: Dictionary) -> Pawn:
 	if pawn == null:
 		return null
 	pawn.yaw = place["yaw"]
+	_claim(place["position"]) # Claude 2026-11-13: so the next pawn spawned this tick goes somewhere else
 	_spawn_count += 1
 	pawn_spawned.emit(pawn)
 	return pawn
@@ -236,10 +249,15 @@ func _ground_height(at: Vector3) -> float:
 	return at.y
 
 
-## True if no pawn body is within clearance_radius of a new pawn's middle here.
+## True if no pawn body is within clearance_radius of a new pawn's middle here. Claude 2026-11-13: and no spot handed out lately is
+## within twice clearance_radius (two pawns' worth), since physics doesn't see those pawns yet.
 func _is_free(world_node: Node3D, feet: Vector3) -> bool:
 	if clearance_radius <= 0.0 or not world_node.is_inside_tree():
 		return true
+	_forget_old_claims()
+	for claim: Array in _claimed:
+		if (claim[1] as Vector3).distance_to(feet) < clearance_radius * 2.0:
+			return false
 	var sphere := SphereShape3D.new()
 	sphere.radius = clearance_radius
 	var query := PhysicsShapeQueryParameters3D.new()
@@ -247,6 +265,19 @@ func _is_free(world_node: Node3D, feet: Vector3) -> bool:
 	query.transform = Transform3D(Basis.IDENTITY, feet + Vector3(0.0, 0.9, 0.0)) # about a pawn's middle
 	query.collision_mask = pawn_layers
 	return world_node.get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
+
+
+## Claude 2026-11-13: remembers a spot a pawn was just put on, for claim_ticks ticks (see "Choosing a point" at the top).
+func _claim(feet: Vector3) -> void:
+	_forget_old_claims()
+	_claimed.append([_driver.tick if _driver else 0, feet])
+
+
+# Claude 2026-11-13: drops claims older than claim_ticks, by which time physics has stepped and sees those pawns itself.
+func _forget_old_claims() -> void:
+	var now: int = _driver.tick if _driver else 0
+	# GDScript note: filter() keeps the entries the function returns true for.
+	_claimed = _claimed.filter(func(claim: Array) -> bool: return now - int(claim[0]) < claim_ticks)
 
 
 ## A pawn type's team, read from its scene once: an instance is made, read and freed, without entering the tree.
@@ -266,7 +297,8 @@ func _team_of(type_name: String) -> int:
 ## GDScript note: tick_rng hands back one shared generator, seeded from the tick and these numbers, so it's used at once and never
 ## kept. The spawn count as the key means two spawns in one tick roll differently.
 func _next_rng() -> RandomNumberGenerator:
-	return _driver.tick_rng(_spawn_count, RANDOM_SALT) if _driver else RandomNumberGenerator.new()
+	_roll_count += 1 # Claude 2026-11-13: was _spawn_count, see _roll_count
+	return _driver.tick_rng(_roll_count, RANDOM_SALT) if _driver else RandomNumberGenerator.new()
 
 
 ## Between ticks: runs every delay whose tick has come, in the order they were asked for.
@@ -274,12 +306,12 @@ func _run_due() -> void:
 	if _pending.is_empty():
 		return
 	var now: int = _driver.tick
-	var ready: Array = []
+	var come: Array = [] # Claude 2026-11-12: was "ready", which clashed with Node's ready signal (an editor warning)
 	var still: Array = []
 	for entry: Array in _pending:
-		(ready if entry[0] <= now else still).append(entry)
+		(come if entry[0] <= now else still).append(entry)
 	_pending = still
-	for entry: Array in ready:
+	for entry: Array in come:
 		var what: Callable = entry[1]
 		if what.is_valid():
 			what.call()

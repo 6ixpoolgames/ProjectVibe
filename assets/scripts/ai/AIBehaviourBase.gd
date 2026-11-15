@@ -124,8 +124,10 @@ func is_allowed_in(state_name: StringName) -> bool:
 
 
 ## True while its cooldown hasn't finished.
-func is_cooling_down(tick: int) -> bool:
-	return cooldown_ticks > 0 and ended_tick >= 0 and tick - ended_tick < TickDriver.ticks_at_rate(cooldown_ticks) # Claude 2026-11-09 (step 6)
+# Claude 2026-11-12: these functions' tick parameters are named at_tick: "tick" clashed with tick() above, which the editor
+# warned about. The same values as before.
+func is_cooling_down(at_tick: int) -> bool:
+	return cooldown_ticks > 0 and ended_tick >= 0 and at_tick - ended_tick < TickDriver.ticks_at_rate(cooldown_ticks) # Claude 2026-11-09 (step 6)
 
 
 ## This behaviour's jitter amount: its own, or the manager's default when it's -1.
@@ -136,34 +138,34 @@ func effective_jitter() -> float:
 
 
 ## What persistence adds to its score at this tick.
-func persistence_now(tick: int) -> float:
+func persistence_now(at_tick: int) -> float:
 	if not _persistence_running or persistence == 0.0 or persistence_fade == null:
 		return 0.0
-	return persistence * persistence_fade.value_at(_persistence_ticks_along(tick))
+	return persistence * persistence_fade.value_at(_persistence_ticks_along(at_tick))
 
 
 ## Starts persistence from the beginning of its fade. The manager calls this when the behaviour is chosen.
-func start_persistence(tick: int) -> void:
+func start_persistence(at_tick: int) -> void:
 	_persistence_running = true
 	_persistence_along = 0.0
-	_persistence_changed_tick = tick
+	_persistence_changed_tick = at_tick
 	_persistence_speed = 1.0
 
 
 ## Moves persistence back along its fade by this many ticks, so it lasts longer. Negative: forward, so it ends sooner.
-func add_persistence_ticks(ticks: float, tick: int) -> void:
+func add_persistence_ticks(ticks: float, at_tick: int) -> void:
 	if not _persistence_running:
 		return
-	_persistence_along = maxf(0.0, _persistence_ticks_along(tick) - ticks)
-	_persistence_changed_tick = tick
+	_persistence_along = maxf(0.0, _persistence_ticks_along(at_tick) - ticks)
+	_persistence_changed_tick = at_tick
 
 
 ## How fast persistence moves along its fade from now on: 1.0 normally, 0.5 for half speed.
-func set_persistence_speed(speed: float, tick: int) -> void:
-	_persistence_along = _persistence_ticks_along(tick)
-	_persistence_changed_tick = tick
+func set_persistence_speed(speed: float, at_tick: int) -> void:
+	_persistence_along = _persistence_ticks_along(at_tick)
+	_persistence_changed_tick = at_tick
 	_persistence_speed = maxf(0.0, speed)
 
 
-func _persistence_ticks_along(tick: int) -> float:
-	return _persistence_along + (tick - _persistence_changed_tick) * _persistence_speed
+func _persistence_ticks_along(at_tick: int) -> float:
+	return _persistence_along + (at_tick - _persistence_changed_tick) * _persistence_speed

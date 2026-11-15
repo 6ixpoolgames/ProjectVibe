@@ -145,7 +145,7 @@ func apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBa
 		_entries[at + TICKS_LEFT] = TickDriver.seconds_to_ticks(effect.duration_seconds)
 		_entries[at + SOURCE] = _source_key(source)
 	else:
-		if _entries.size() / STRIDE >= max_active_effects:
+		if _entries.size() >= max_active_effects * STRIDE: # Claude 2026-11-12: no integer division, which the editor warned about
 			_warn_once("full", "EffectManager: %s already has %d effects on it (max_active_effects), so '%s' was refused." % [pawn.name, max_active_effects, effect.describe()])
 			return false
 		_entries.append_array([effect.get_id(), TickDriver.seconds_to_ticks(effect.duration_seconds),
@@ -362,7 +362,7 @@ func _refresh() -> void:
 	for at in range(0, _entries.size(), STRIDE):
 		var effect := Effect.find(_entries[at + ID])
 		if effect == null:
-			_warn_once("unknown:%d" % _entries[at + ID], "EffectManager: an effect on %s isn't known on this machine (id %d), so its held parts do nothing here. Give an effect made in code an effect_name." % [pawn.name if pawn else "?", _entries[at + ID]])
+			_warn_once("unknown:%d" % _entries[at + ID], "EffectManager: an effect on %s isn't known on this machine (id %d), so its held parts do nothing here. Give an effect made in code an effect_name." % [String(pawn.name) if pawn else "?", _entries[at + ID]]) # Claude 2026-11-12: String(), so both sides are text
 			continue
 		var stacks := int(_entries[at + STACKS])
 		for part in effect.parts:

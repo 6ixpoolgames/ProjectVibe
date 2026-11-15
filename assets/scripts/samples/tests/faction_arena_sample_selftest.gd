@@ -1,6 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless smoke test for faction_arena_sample.tscn: two goblin teams and the
 ## players' team; red and blue goblins fighting each other, using their heavy attacks; the special attack bound to the right mouse
 ## button; the bigger readouts; and the debug keys: pausing, stepping back through the recording (view only) and forward.
+## Claude 2026-11-13: also teams of team_size (8), soldiers filling the players' team, and the usual Health.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/samples/tests/faction_arena_sample_selftest.tscn"
 extends Node
@@ -17,17 +18,37 @@ func _ready() -> void:
 	await get_tree().physics_frame
 	arena._start_offline()
 	# Claude 2026-11-10: the goblins come from the scene's two spawners now, which wait for the ground around them to load.
-	for i in 300:
+	# Claude 2026-11-13: team_size of each goblin colour, and the players' team filled up with soldiers (one player here).
+	var wanted: int = arena.team_size * 3 - 1
+	for i in 600:
 		await get_tree().physics_frame
-		if i >= 30 and arena._readouts.size() >= 8:
+		if i >= 30 and arena._readouts.size() >= wanted:
 			break
 	var player: Pawn = GameMode.possession_coordinator.get_pawn_of()
 	var red: Array[Pawn] = []
 	var blue: Array[Pawn] = []
+	var soldiers: Array[Pawn] = [] # Claude 2026-11-13
 	for pawn: Pawn in arena._readouts:
-		(red if pawn.team == 1 else blue).append(pawn)
+		if pawn.team == 1:
+			red.append(pawn)
+		elif pawn.team == 2:
+			blue.append(pawn)
+		else:
+			soldiers.append(pawn)
 	_check(player != null and player.team == 0 and player.ability_manager.has_node("HeavyAttack") and player.ability_manager.has_node("SecondSwing") and player.ability_manager.has_node("FinisherSwing"), "the player is on team 0, with the heavy attack and the combo's swings") # Claude 2026-11-10
-	_check(red.size() == 4 and blue.size() == 4, "the spawners fill up: %d red goblins on team 1 and %d blue on team 2" % [red.size(), blue.size()])
+	# Claude 2026-11-13: the usual Health again (it was ten times that from 2026-11-12), and teams of team_size (8).
+	_check(player.get_health() == 100.0 and red[0].get_health() == 100.0 and red[0].stat_manager.get_value(&"Health") == 100.0, "every pawn has the usual Health (%d)" % red[0].get_health())
+	_check(arena.team_size == 8 and red.size() == 8 and blue.size() == 8, "the spawners fill up: %d red goblins on team 1 and %d blue on team 2" % [red.size(), blue.size()])
+	# Claude 2026-11-13: soldiers fill the players' team up to team_size: 7, with the one player.
+	_check(soldiers.size() == 7 and soldiers.all(func(p: Pawn) -> bool: return p.scene_file_path == arena.ALLY_SCENE.resource_path), "and %d soldiers on the players' team (team_size less 1 player)" % soldiers.size())
+	_check(arena._is_npc(soldiers[0]) and not arena._is_npc(player) and not arena._player_readouts.has(soldiers[0]), "soldiers count as NPCs, with an NPC's readout, and the player doesn't")
+	var allies: PawnSpawner = arena.get_node("Spawning/AllySpawner")
+	arena._players[5] = true # as if a second player had joined
+	arena._update_team_sizes()
+	var with_two := allies.keep_alive
+	arena._players.erase(5)
+	arena._update_team_sizes()
+	_check(with_two == 6 and allies.keep_alive == 7, "a second player means one soldier fewer (%d), and leaving gives it back (%d)" % [with_two, allies.keep_alive])
 	_check(GameMode.possession_coordinator.controller.action_keys.get(&"secondary") == arena.SPECIAL_KEY_ACTION and InputMap.has_action(arena.SPECIAL_KEY_ACTION), "the special attack is bound to the right mouse button")
 	var label: Label3D = arena._readouts[red[0]]
 	_check(is_equal_approx(label.pixel_size, 0.005), "the readouts are a little bigger (pixel_size 0.005)")
@@ -39,10 +60,12 @@ func _ready() -> void:
 	_check(arena._player_readouts.has(player) and player_text.contains("combo second boost") and arena._readout_text(red[0]).contains("HP"), "the player's pawn has a readout, listing its effects (%s)" % player_text.replace("\n", " | "))
 	player.effect_manager.remove_all()
 	# The player stands far away, so the goblins find each other; bring the two groups close.
-	player.global_position = Vector3(60, player.global_position.y + 1.0, 60)
+	# Claude 2026-11-12: everyone placed on the ground under them, so nobody starts inside a hill and falls through the world.
+	var terrain: TerrainGenerator = arena.get_node("World/Terrain")
+	player.global_position = Vector3(60, terrain.height_at(60, 60) + 0.5, 60)
 	for i in red.size():
-		red[i].global_position = Vector3(i * 1.5, 1.0, 4.0)
-		blue[i].global_position = Vector3(i * 1.5, 1.0, -4.0)
+		red[i].global_position = Vector3(i * 1.5, terrain.height_at(i * 1.5, 4.0) + 0.5, 4.0)
+		blue[i].global_position = Vector3(i * 1.5, terrain.height_at(i * 1.5, -4.0) + 0.5, -4.0)
 	# GDScript note: a lambda copies plain numbers when it's made, so the count lives in a dictionary, which it shares.
 	var across := {"hits": 0} # hits between the two AI teams
 	var used := {}

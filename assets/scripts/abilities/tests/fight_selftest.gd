@@ -24,6 +24,7 @@ func _ready() -> void:
 	await _test_being_hit_states()
 	await _test_dead_are_ignored()
 	await _test_fight_to_the_death()
+	await _test_kill_self() # Claude 2026-11-12
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -164,6 +165,24 @@ func _make_goblin(at: Vector3) -> Pawn:
 	goblin.add_child(manager)
 	add_child(goblin)
 	return goblin
+
+
+# Claude 2026-11-12, the owner's request: pressing kill_self kills your own pawn (the KillSelf ability in the default abilities, which
+# applies kill_self.tres to itself), even while invulnerable, so a player stuck in the ground can respawn.
+func _test_kill_self() -> void:
+	var pawn := _make_pawn(Vector3(0, 0.1, 20), 0)
+	await _ticks(10)
+	var ai := pawn.controller_manager.ai_controller as AIController
+	_check(pawn.ability_manager.has_action(&"kill_self") and pawn.ability_manager.can_start(&"kill_self"), "every pawn has KillSelf, on the kill_self action")
+	ai.move_in_direction(Vector3(0, 0, 1))
+	await _ticks(2)
+	ai.press(&"dash")
+	await _ticks(2)
+	var dodging := pawn.is_invulnerable()
+	ai.press(&"kill_self")
+	await _ticks(3)
+	_check(dodging and pawn.is_dead() and pawn.get_health() == 0.0, "pressing it kills the pawn at once, even mid-dash")
+	pawn.free()
 
 
 func _ticks(count: int) -> void:

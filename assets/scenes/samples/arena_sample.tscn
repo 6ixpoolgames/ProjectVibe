@@ -1,5 +1,6 @@
-[gd_scene load_steps=16 format=3]
+[gd_scene load_steps=17 format=3]
 
+[ext_resource type="Script" path="res://assets/scripts/world/KillFloor.gd" id="20_kill_floor"]
 [ext_resource type="Script" path="res://assets/scripts/samples/ArenaSample.gd" id="1_sample"]
 [ext_resource type="Script" path="res://assets/scripts/terrain/TerrainGenerator.gd" id="2_terrain"]
 [ext_resource type="Script" path="res://assets/scripts/streaming/ChunkStreamer.gd" id="3_streamer"]
@@ -127,3 +128,7 @@ placeholder_text = "Server address"
 [node name="Join" type="Button" parent="Display/Menu/Box"]
 layout_mode = 2
 text = "Join"
+
+[node name="KillFloor" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -40, 0)
+script = ExtResource("20_kill_floor")

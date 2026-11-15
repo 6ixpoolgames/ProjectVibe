@@ -29,6 +29,10 @@ NetworkSession="*res://assets/scripts/singletons/NetworkSession.gd"
 NavMarkerManager="*res://assets/scripts/singletons/NavMarkerManager.gd"
 GameMode="*res://assets/scripts/singletons/GameMode.gd"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/tag_picker/plugin.cfg")
+
 [input]
 
 move_forward={

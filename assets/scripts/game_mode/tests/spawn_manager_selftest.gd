@@ -35,6 +35,7 @@ func _ready() -> void:
 	await _test_points()
 	await _test_after_seconds()
 	await _test_player_respawn()
+	await _test_same_tick() # Claude 2026-11-13
 	await _test_pawn_spawner()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -159,6 +160,38 @@ func _test_pawn_spawner() -> void:
 
 
 # --- Helpers ---
+
+
+# Claude 2026-11-13: pawns spawned or brought back in the same tick, before physics can see the first. They used to land on the same
+# spot, 0 m apart, and physics then pushed the pair around as if they were dashing forever (the owner's report). Two pawns' radii
+# are 0.8 m, so they must be at least that far apart.
+func _test_same_tick() -> void:
+	var start: SpawnPoint = get_node("PlayerStart")
+	start.scatter_radius = 4.0
+	var first := _manager.spawn("spawn_test_player")
+	var second := _manager.spawn("spawn_test_player") # same tick: physics hasn't seen the first yet
+	var apart := first.global_position.distance_to(second.global_position)
+	_check(apart > 0.8, "two pawns spawned in the same tick don't land inside each other (%.2f m apart)" % apart)
+	NetworkSession.despawn(first.get_network_entity().entity_id)
+	NetworkSession.despawn(second.get_network_entity().entity_id)
+	await _ticks(2)
+	_manager.player_respawn_seconds = 0.2
+	var one := _manager.spawn_player(0, "spawn_test_player")
+	var two := _manager.spawn_player(0, "spawn_test_player")
+	await _ticks(4)
+	one.global_position = Vector3(20, 0.1, 0)
+	two.global_position = Vector3(-20, 0.1, 0)
+	_kill(one)
+	_kill(two) # the same tick, so they come back in the same tick
+	await _until(func() -> bool: return not one.is_dead() and not two.is_dead(), 60)
+	var back_apart := one.global_position.distance_to(two.global_position)
+	_check(not one.is_dead() and not two.is_dead() and back_apart > 0.8, "two players brought back in the same tick don't either (%.2f m apart)" % back_apart)
+	GameMode.possession_coordinator.release()
+	NetworkSession.despawn(one.get_network_entity().entity_id)
+	NetworkSession.despawn(two.get_network_entity().entity_id)
+	_manager.player_respawn_seconds = 3.0
+	start.scatter_radius = 0.0
+	await _ticks(2)
 
 
 func _point(point_name: String, at: Vector3, team: int, group: StringName, scatter: float, yaw_degrees: float) -> SpawnPoint:

@@ -1,8 +1,27 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/pawn.tscn" id="1_pawn"]
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_abilities.tscn" id="2_abilities"]
+[ext_resource type="Script" path="res://assets/scripts/visuals/ToyWaddle.gd" id="3_waddle"]
+[ext_resource type="PackedScene" path="res://assets/3d/miniCharacters/Models/GLB format/character-knight.glb" id="4_knight"]
+[ext_resource type="Script" path="res://assets/scripts/visuals/FloatingSword.gd" id="5_sword"]
+[ext_resource type="PackedScene" path="res://assets/3d/miniCharacters/Models/GLB format/weapon-sword.glb" id="6_sword_model"]
 
 [node name="FactionPlayer" instance=ExtResource("1_pawn")]
 
 [node name="AbilityManager" parent="." instance=ExtResource("2_abilities")]
+
+[node name="Body" parent="Visual/Model" index="0"]
+visible = false
+
+[node name="FacingMarker" parent="Visual/Model" index="1"]
+visible = false
+
+[node name="Waddle" type="Node3D" parent="Visual/Model"]
+script = ExtResource("3_waddle")
+toy_scene = ExtResource("4_knight")
+stand_color = Color(0.95, 0.78, 0.3, 1)
+
+[node name="FloatingSword" type="Node3D" parent="Visual"]
+script = ExtResource("5_sword")
+sword_scene = ExtResource("6_sword_model")

@@ -469,6 +469,7 @@ func follow_server_at(render_tick: float, allow_extrapolation: bool = true) -> v
 ## The nearest tick with server data, starting at from_tick and looking one way (step is 1 or -1). -1 if there's none near.
 func _find_authoritative(from_tick: int, step: int) -> int:
 	var t := from_tick
+	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
 	for i in history_size / 2:
 		if t < 0:
 			return -1

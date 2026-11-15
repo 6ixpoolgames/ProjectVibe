@@ -9,6 +9,8 @@ class_name ControllerBase
 extends Node
 
 ## Sent when this controller gets a pawn or loses it. The pawn is null if it has none now.
+# Claude 2026-11-12: sent by the controllers that extend this (PlayerController), so the editor's "never used" warning is off here.
+@warning_ignore("unused_signal")
 signal pawn_changed(pawn: Pawn)
 
 ## The pawn this controller drives, or null.

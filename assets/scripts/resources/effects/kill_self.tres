@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="Effect" load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_part"]
+[ext_resource type="Script" path="res://assets/scripts/effects/parts/StatChangePart.gd" id="2_change"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="3_effect"]
+
+[sub_resource type="Resource" id="Resource_all_health"]
+script = ExtResource("2_change")
+amount = -1000000000.0
+
+[resource]
+script = ExtResource("3_effect")
+effect_name = &"kill self"
+is_harmful = false
+parts = Array[ExtResource("1_part")]([SubResource("Resource_all_health")])

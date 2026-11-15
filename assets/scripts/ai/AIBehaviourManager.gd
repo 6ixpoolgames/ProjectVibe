@@ -300,7 +300,7 @@ func _find(behaviour_name: StringName) -> AIBehaviourBase:
 	for behaviour in _behaviours:
 		if behaviour.name == behaviour_name:
 			return behaviour
-	push_warning("AIBehaviourManager: %s has no behaviour called %s." % [pawn.name if pawn else "this pawn", behaviour_name])
+	push_warning("AIBehaviourManager: %s has no behaviour called %s." % [String(pawn.name) if pawn else "this pawn", behaviour_name]) # Claude 2026-11-12: String(), so both sides are text
 	return null
 
 

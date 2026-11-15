@@ -329,6 +329,7 @@ func build_chunk_step(key: Vector2i) -> bool:
 	# GDScript note: match compares a value against each option below, like a list of "if" checks.
 	match build.stage:
 		Stage.POINTS:
+			@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
 			var rows := maxi(1, POINTS_PER_STEP / _points_per_edge())
 			var end_row := mini(build.next_row + rows, _points_per_edge())
 			_fill_point_rows(build.points, key, build.next_row, end_row)
@@ -774,7 +775,9 @@ func _mesh_row_count() -> int:
 
 func _mesh_rows_per_step() -> int:
 	if smooth_shading:
+		@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
 		return maxi(1, SMOOTH_POINTS_PER_STEP / _points_per_edge())
+	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
 	return maxi(1, SQUARES_PER_STEP / chunk_resolution)
 
 

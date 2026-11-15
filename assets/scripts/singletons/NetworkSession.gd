@@ -674,6 +674,7 @@ func _within_limits(peer: int, bytes: PackedByteArray) -> bool:
 		return false
 	if max_packet_bytes > 0 and bytes.size() > max_packet_bytes:
 		return false
+	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
 	var second := Time.get_ticks_msec() / 1000
 	if int(info.get("limit_second", -1)) != second:
 		info["limit_second"] = second
@@ -1205,6 +1206,7 @@ func _send_snapshots(tick: int) -> void:
 		entries[at + 7] = entity.state.get_custom_values(tick)
 		at += NetPackets.WORLD_ENTRY_SIZE
 	entries.resize(at)
+	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose: divided as a float, it went into put_u16 as one (a narrowing warning)
 	var count := at / NetPackets.WORLD_ENTRY_SIZE
 	var world_bytes: PackedByteArray = _codec.write_world(entries) if _codec != null else NetPackets.write_world(entries)
 	var server_features := 0

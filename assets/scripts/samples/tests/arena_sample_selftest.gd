@@ -55,7 +55,11 @@ func _ready() -> void:
 	# Bring the goblins close, facing the player, so they notice quickly; then wait for a fight.
 	for i in goblins.size():
 		var goblin := goblins[i]
-		goblin.global_position = player.global_position + Vector3(cos(i) * 6.0, 1.0, sin(i) * 6.0)
+		# Claude 2026-11-12: on the ground there, not 1 m above the player's height: on a slope that put one inside the hill, where it
+		# fell through the world, and the new kill floor counted its death as a second kill.
+		var spot := player.global_position + Vector3(cos(i) * 6.0, 0.0, sin(i) * 6.0)
+		spot.y = _ground(arena, spot) + 0.5
+		goblin.global_position = spot
 	var noticed := false
 	var hurt := false
 	var used := {} # Claude 2026-11-09: names of abilities goblins started during the fight
@@ -94,7 +98,7 @@ func _ready() -> void:
 		info.target = victim
 		info.effects = [Effect.make_damage(20)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 		victim.receive_hit(info)
-	_check(victim.is_dead() and arena._kills == 1, "a goblin killed counts as a kill")
+	_check(victim.is_dead() and arena._kills == 1, "a goblin killed counts as a kill (dead %s, %d kills, invulnerable %s, HP %d)" % [victim.is_dead(), arena._kills, victim.is_invulnerable(), victim.get_health()]) # Claude 2026-11-12: says why
 	# Claude 2026-11-10: its spawner removes the body and sends a replacement; R (_spawn_wave) refills at once.
 	var body_seconds: float = arena.get_spawners()[0].body_seconds
 	await get_tree().create_timer(body_seconds + 0.5).timeout
@@ -128,6 +132,12 @@ func _count_shapes(draw: AbilityDebugDraw, shape_name: String) -> int:
 		if child.name.begins_with(shape_name):
 			count += 1
 	return count
+
+
+# Claude 2026-11-12: the terrain's height at a spot.
+func _ground(arena: Node, at: Vector3) -> float:
+	var terrain: TerrainGenerator = arena.get_node("World/Terrain")
+	return terrain.height_at(at.x, at.z)
 
 
 func _ticks(count: int) -> void:

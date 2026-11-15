@@ -92,7 +92,9 @@ func ask_job(job: Object, reach: float, max_candidates: int) -> void:
 ## (measured with ai_stress), and keeping a tracked target fresh is what the refresh is for.
 func refresh(tick: int) -> void:
 	var context := pawn.ai_context if pawn else null
-	var target := context.current_target as Pawn if context else null
+	# Claude 2026-11-12: has_target() first. The target can be freed between AI steps (a spawner removing a body), and casting a
+	# freed object is a script error, which stopped the faction arena.
+	var target := context.current_target as Pawn if context and context.has_target() else null
 	if target and target.is_inside_tree():
 		_one_target[0] = target
 		_check_all(_one_target, tick)

@@ -55,6 +55,11 @@ var _show_readouts := true
 var _kills := 0
 var _deaths := 0
 var _readouts := {} # Pawn -> Label3D
+## Claude 2026-11-12: the key action for kill_self, the owner's request: a way out when stuck in the ground. The project has none, so
+## this sample adds one, on K.
+const KILL_SELF_KEY_ACTION := &"pawn_kill_self"
+
+var _kill_self_key_bound := false # Claude 2026-11-12
 var _player_readouts := {} # Claude 2026-11-10: Pawn -> Label3D over each player's pawn: last ability, effects, Health (pawn spec 8.11)
 var _player_pawn: Pawn = null # the pawn this machine's player started with, to go back to after Tab
 var _last_ability := {} # Claude 2026-11-09: Pawn -> the AbilityBase it last started, for the readout
@@ -79,15 +84,29 @@ func _ready() -> void:
 	NetworkSession.entity_spawned.connect(_on_entity_spawned)
 	NetworkSession.refused.connect(func(reason: String) -> void: _status.text = "Refused: %s" % reason)
 	NetworkSession.disconnected.connect(func() -> void: _menu.show())
+	# Claude 2026-11-12: K kills your own pawn (the KillSelf ability), so a player stuck in the ground can respawn.
+	if not InputMap.has_action(KILL_SELF_KEY_ACTION):
+		InputMap.add_action(KILL_SELF_KEY_ACTION)
+		var key := InputEventKey.new()
+		key.physical_keycode = KEY_K
+		InputMap.action_add_event(KILL_SELF_KEY_ACTION, key)
 	$Display/Menu/Box/Offline.pressed.connect(_start_offline)
 	$Display/Menu/Box/Host.pressed.connect(_host)
 	$Display/Menu/Box/Join.pressed.connect(func() -> void: _join(_address.text))
-	_read_command_line()
+	# Claude 2026-11-13: deferred, so a scripted --host or --offline starts once the whole scene is ready, including the _ready of a
+	# script that extends this one. FactionArenaSample registers its own pawn scenes after calling super(), so a --host read right
+	# here spawned the host's player from the plain pawn.tscn: a capsule, without the faction arena's attacks (the owner spotted it).
+	# GDScript note: call_deferred runs the function at the end of this frame, after every _ready has finished.
+	_read_command_line.call_deferred()
 
 
 func _process(_delta: float) -> void:
 	_status.text = _status_text()
 	_update_readouts()
+	# Claude 2026-11-12: the player controller is made when it's first needed, so K is bound to kill_self once it exists.
+	if not _kill_self_key_bound and GameMode.possession_coordinator and GameMode.possession_coordinator.controller:
+		GameMode.possession_coordinator.controller.action_keys[&"kill_self"] = KILL_SELF_KEY_ACTION
+		_kill_self_key_bound = true
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -176,11 +195,13 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 		return
 	_debug_draw.watch(pawn) # Claude 2026-11-09
 	_lengthen_cooldowns(pawn) # Claude 2026-11-09
+	_scale_health(pawn) # Claude 2026-11-12
 	# Claude 2026-11-09: remember what each pawn last started, for its readout. Walk never "starts": it's what runs when nothing else
 	# does. Claude 2026-11-10: players' pawns too, for their own readout.
 	if pawn.ability_manager:
 		pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void: _last_ability[pawn] = ability)
-	if pawn.team != PLAYER_TEAM: # Claude 2026-11-09: was team 1; any AI team now
+	# Claude 2026-11-13: _is_npc, not team != PLAYER_TEAM, so the faction arena's NPCs on the players' team get an NPC's readout too.
+	if _is_npc(pawn): # Claude 2026-11-09: was team 1; any AI team now
 		_timeline.watch(pawn) # Claude 2026-11-09
 		_readouts[pawn] = _make_readout(pawn)
 		# Claude 2026-11-10: its readout goes the moment it leaves, since a spawner removes bodies now, not this script. A freed pawn
@@ -212,6 +233,29 @@ func _make_readout(pawn: Pawn) -> Label3D:
 	label.position = Vector3(0.0, 2.4, 0.0)
 	pawn.get_visual().add_child(label)
 	return label
+
+
+## Claude 2026-11-13: true for a pawn the AI plays (it gets an NPC's readout, and Tab can possess it), false for a player's own pawn.
+## Here every pawn not on the players' team; the faction arena also has NPCs on the players' team, and says so by scene.
+func _is_npc(pawn: Pawn) -> bool:
+	return pawn.team != PLAYER_TEAM
+
+
+## Claude 2026-11-12: how many times its usual Health each pawn in this level has. 1 here; the faction arena uses more, so fights last
+## long enough to watch how the AI groups up (the owner's request).
+func _health_multiplier() -> float:
+	return 1.0
+
+
+## Claude 2026-11-12: every machine, for every pawn, before its first tick: multiplies its Health's base value by _health_multiplier()
+## and fills it. Health's most is the same on every machine this way; how much it has now rolls back and comes in snapshots anyway.
+func _scale_health(pawn: Pawn) -> void:
+	var multiplier := _health_multiplier()
+	var health := pawn.stat_manager.get_stat(&"Health") if pawn.stat_manager else null
+	if health == null or is_equal_approx(multiplier, 1.0):
+		return
+	health.base_value *= multiplier # GDScript note: base_value's setter sets value too
+	health.current = health.value
 
 
 ## Claude 2026-11-10: this level's cooldowns, DEBUG_COOLDOWNS. A sample that extends this one can return its own.
@@ -260,7 +304,8 @@ func _on_pawn_died(pawn: Pawn, _hit: HitInfo) -> void:
 func _swap_pawn() -> void:
 	var coordinator := GameMode.possession_coordinator
 	var current := coordinator.get_pawn_of()
-	if current != null and current.team != PLAYER_TEAM and is_instance_valid(_player_pawn): # Claude 2026-11-09: was team 1
+	# Claude 2026-11-13: _is_npc, so possessing an NPC on the players' team counts as possessing an NPC.
+	if current != null and _is_npc(current) and is_instance_valid(_player_pawn): # Claude 2026-11-09: was team 1
 		coordinator.possess(_player_pawn)
 		return
 	for pawn: Pawn in _readouts:
@@ -305,8 +350,9 @@ func _readout_text(pawn: Pawn) -> String:
 		lines.append("dead")
 	elif pawn.runs_ai_here() and pawn.ai_context:
 		var running := pawn.ai_behaviour_manager.get_running_behaviour() if pawn.ai_behaviour_manager else null
-		lines.append("%s · %s" % [pawn.ai_context.current_state_name(), running.name if running else "—"])
-		var target := pawn.ai_context.current_target as Pawn
+		lines.append("%s · %s" % [pawn.ai_context.current_state_name(), String(running.name) if running else "—"]) # Claude 2026-11-12: String(), so both sides are text
+		# Claude 2026-11-12: has_target() first: casting a target that was freed (a body removed) is a script error.
+		var target := pawn.ai_context.current_target as Pawn if pawn.ai_context.has_target() else null
 		if not is_instance_valid(target):
 			target = _player_pawn if is_instance_valid(_player_pawn) else null
 		if target and pawn.ai_memory:
@@ -400,7 +446,7 @@ func _status_text() -> String:
 
 ## Claude 2026-11-09: the key reminder in the status lines.
 func _keys_text() -> String:
-	return "WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: refill the spawners    Tab: possess a goblin    F3: readouts and debug shapes    P: pause, then ←/→ step    Esc: free the mouse"
+	return "WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: refill the spawners    Tab: possess a goblin    F3: readouts and debug shapes    P: pause, then ←/→ step    K: respawn (if stuck)    Esc: free the mouse"
 
 
 func _read_command_line() -> void:

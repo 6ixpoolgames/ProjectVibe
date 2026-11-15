@@ -152,7 +152,9 @@ func _test_interrupt_table() -> void:
 	melee.interrupt_threshold = 15
 	var table := manager.get_interrupt_table()
 	var has_jump_row := table.any(func(row: Dictionary) -> bool: return row["running"] == &"Jump")
-	_check(table.size() == manager.get_abilities().size() - 1 and not has_jump_row and table[0]["cells"].size() == manager.get_abilities().size() - 1, "a row per ability that can be running (not Jump, which happens at once), and an entry per other ability (%d rows)" % table.size())
+	# Claude 2026-11-12: and not KillSelf, which happens at once too (pawn spec 8.13).
+	var has_kill_self_row := table.any(func(row: Dictionary) -> bool: return row["running"] == &"KillSelf")
+	_check(table.size() == manager.get_abilities().size() - 2 and not has_jump_row and not has_kill_self_row and table[0]["cells"].size() == manager.get_abilities().size() - 1, "a row per ability that can be running (not Jump or KillSelf, which happen at once), and an entry per other ability (%d rows)" % table.size())
 	print(manager.get_interrupt_table_text().indent("      "))
 	pawn.free()
 

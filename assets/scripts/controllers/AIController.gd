@@ -48,7 +48,7 @@ func move_to(point: Vector3) -> bool:
 	_move = Vector3.ZERO # once the path ends, it stands
 	var navigation := _navigation()
 	if navigation == null:
-		push_warning("AIController: %s has no NavigationManager, so move_to can't find a way. Check its skip_default_parts." % (pawn.name if pawn else "this pawn"))
+		push_warning("AIController: %s has no NavigationManager, so move_to can't find a way. Check its skip_default_parts." % (String(pawn.name) if pawn else "this pawn")) # Claude 2026-11-12: String(), so both sides are text
 		return false
 	if not _is_in_charge():
 		_waiting_point = point

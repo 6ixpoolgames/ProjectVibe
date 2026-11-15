@@ -14,6 +14,8 @@
 
 [node name="MeleeAttack" parent="." index="4"]
 priority = 10
+height_at_sweep_start = 0.6
+height_at_sweep_end = -0.3
 
 [node name="ComboBoost" type="Node" parent="MeleeAttack"]
 script = ExtResource("4_applier")
@@ -27,6 +29,8 @@ interrupt_priority = 10
 windup_ticks = 5
 recovery_ticks = 10
 sweep_from_left = true
+height_at_sweep_start = -0.4
+height_at_sweep_end = 0.6
 
 [node name="OnHit" type="Node" parent="SecondSwing"]
 script = ExtResource("4_applier")
@@ -48,7 +52,9 @@ hit_ticks = 5
 recovery_ticks = 16
 attack_range = 2.1
 hit_radius = 0.9
-sweep_degrees = 140.0
+sweep_degrees = 12.0
+height_at_sweep_start = 1.3
+height_at_sweep_end = -0.8
 
 [node name="OnHit" type="Node" parent="FinisherSwing"]
 script = ExtResource("4_applier")

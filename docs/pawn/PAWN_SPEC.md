@@ -621,6 +621,81 @@ What abilities do to pawns is now **effects**, shaped like Unreal's gameplay eff
 - effects changing hit shapes
 - the tuning panel
 
+### 8.12 Toy visuals: models, waddling and a floating sword *(Claude 2026-11-12, the owner's request)*
+
+The owner's aesthetic: "playing with my toys". Figures hop and rock instead of walking with legs, and the weapon is a separate toy floating beside them, swooping through each swing. Visual only: nothing here is simulated or rolled back.
+
+**Models** (Kenney packs, CC0), one per faction in the faction arena, each on a round base in its team's colour like a figurine's stand, so the factions read apart (the orc and zombie are both green):
+
+| Faction | Model | Base |
+|---|---|---|
+| Players (team 0) | `character-knight`, copied into `assets/3d/miniCharacters/` | gold |
+| Red goblins (team 1) | `character-orc`, from `assets/3d/miniDungeon/` | red |
+| Blue goblins (team 2) | `character-zombie`, copied into `assets/3d/miniCharacters/` | blue |
+
+Every Kenney character is rigged, with about 20 animations (idle, walk, sprint, jump, die, `attack-melee-right` and more), unused for now: the waddle fits the look better. The pawn's capsule collision is unchanged; the faction scenes hide the capsule mesh and the facing marker.
+
+**Classes** (in `assets/scripts/visuals/`):
+- **`ToyWaddle`** (Node3D, under the pawn's `Visual/Model`): makes the model from `toy_scene` at `toy_scale` (2.2), turned round to face the pawn's forward (`turn_model_round`: Kenney's characters face +Z), holds the first frame of `pose_animation` (`idle`, arms down), and adds the base (`stand_color`, `stand_radius`). Each rendered frame it reads the pawn and moves only itself, pivoting at the feet:
+  - walking: rocks side to side (`rock_degrees`, 10) and hops (`hop_height`, 0.09 m) once per step, `steps_per_metre` (1.6) steps per metre, so a step always covers the same ground; leans forward (`lean_degrees`); up to one and a half times as much when sprinting (`walk_speed` is full walking speed, 5)
+  - standing: a slow breathing bob (`breathe_height`, `breathe_rate`)
+  - dashing: leans hard forward; knocked back: tips back; in the air: tilts back a little (`dash_lean_degrees`, `knockback_tilt_degrees`, `air_tilt_degrees`)
+  - dead: falls over onto its side (`death_fall_degrees`, 90), and stands back up when revived
+  - its speed comes from how fast the drawn model moves, not the pawn's velocity, so pawns drawn from snapshots on a client waddle too.
+- **`FloatingSword`** (Node3D, under the pawn's `Visual`, placed in world space each frame): makes the sword from `sword_scene` at `sword_scale` (2.2, about 1 m). It hovers at the pawn's right, chest high, bobbing (`hover_side`, `hover_height`, `bob_height`, `bob_rate`, `hover_lean_degrees`). During any running `MeleeAttackAbility`:
+  - windup: it swings back to a little before where the hit starts (`windup_pull_back`)
+  - hit ticks: its blade points from a pivot at the chest (`swing_pivot_height`) through each spot the hit checks, edge first, its grip `grip_distance` (0.5 m) out from the pivot. It uses the swing's own `hit_offset_at()`, so what you see is what hits.
+  - recovery: it drifts back to hovering
+  - dead: it drops to the ground beside the pawn
+  - after a swing it rests on the side the sweep ended on, so the combo's swings alternate: the first swing ends at the pawn's left and the sword hovers there, the second sweeps from there to the right. A chop ending straight ahead leaves it where it was. After `return_seconds` (0.8) with no swing it goes back to the right, round the front of the pawn over `side_change_seconds` (0.35) *(Claude 2026-11-12, the owner's request)*
+  - it follows the swing exactly, with no lag, and glides only when what it shows changes at once (a swing cancelled, a new one starting, dying), over `settle_seconds` (0.12). Its progress comes from the swing's rolled-back timer plus the tick driver's interpolation fraction, so it's smooth between ticks and other pawns' swings show on clients.
+
+**Swings that rise and fall:** `MeleeAttackAbility` has two new settings, `height_at_sweep_start` and `height_at_sweep_end`: how far above or below `hit_height` the hit area is at the start and end of the sweep, moving in a straight line between. Both 0 by default, so swings stay level as before. The hit checks' spacing counts the drop too, so a fast chop leaves no gaps. New: `hit_offset_at(progress, facing)`, `windup_length()`, `hit_length()`. In the faction arena:
+
+| Swing | Sweep | Heights (start → end, from hit_height 1.0) |
+|---|---|---|
+| MeleeAttack | right to left, 100° | +0.6 → −0.3: a diagonal slash down |
+| SecondSwing | left to right, 100° | −0.4 → +0.6: a rising backhand |
+| FinisherSwing | 12° | +1.3 → −0.8: an overhead chop |
+| HeavyAttack | 160° | level: a spin |
+
+The finisher's narrower sweep (it was 140°) means it hits a strip in front instead of a wide arc: the owner's request for vertical attacks.
+
+**A turn speed for attacks** *(Claude 2026-11-12, the owner's request)*: a swing no longer snaps to where the pawn looks when it starts. It turns there during its windup at `windup_turn_degrees_per_second` (720 by default: about 96° over an 8-tick windup), then holds still while it can hit, as before. So a target behind the pawn needs a turn first; the AI faces its target while chasing, so it rarely matters for goblins. `attack_feel_selftest` checks it.
+
+**Ten times the Health in the faction arena** *(Claude 2026-11-12, the owner's request)*: 1000 instead of 100, so fights last long enough to watch how the AI groups up. A sample setting (`ArenaSample._health_multiplier()`, 10 in `FactionArenaSample`), applied to every pawn as it spawns on every machine; the base and the plain arena keep 100.
+
+**Fixed the same day:** the AI's sight refresh (`SightSense.refresh`) and the arena's readout cast the current target to a Pawn without checking it still existed. A goblin whose target's body a spawner had just removed hit a script error, which stopped the game in the editor. Both check `AIContextComponent.has_target()` first now, and `ai_perception_selftest` frees a target and refreshes to prove it.
+
+**Tests:** `visuals/tests/visuals_selftest`: each faction scene makes its model, base and sword with the capsule hidden; no waddle standing, a waddle walking; falling over and the sword dropping when dead; the sword at the pawn's right when hovering, pointing through the hit's spots during a chop (within 25°; about 8° measured), and back afterwards; the heights moving the hit area, level by default, and the spacing of a fast chop's spots.
+
+**Not built:** the built-in animations, hit flashes, sounds, shadows and lighting work, models for the base `pawn.tscn` (it keeps its capsule), a shield or other weapons.
+
+### 8.13 Getting unstuck: kill yourself, and a kill floor *(Claude 2026-11-12, the owner's request)*
+
+Both kill through the effect system, so the usual death follows: the Death ability runs, a player comes back at a spawn point after `SpawnManager.player_respawn_seconds`, and a spawner's pawn is replaced.
+
+- **`kill_self.tres`** (`resources/effects/`): an instant effect, not harmful, with one `StatChangePart` taking 1,000,000,000 Health, so all of it. Not harmful means invulnerability and resistances don't stop it.
+- **`KillSelf`** (in the default `AbilityManager.tscn`, so every pawn has it): a plain `AbilityBase` on the new `kill_self` action, instant, with an on-start `EffectApplier` applying `kill_self.tres` to itself. It has no category, so nothing locks it out, and it works mid-dash. The AI never presses it. Like every do-once effect, it only takes Health on the authority, so a client's press reaches the server through its input and the death comes back in a snapshot.
+- **`kill_self`** is a new action, at the end of `resources/input_actions.tres`, so the other actions' bits don't change. The arena samples bind it to **K** (`ArenaSample.KILL_SELF_KEY_ACTION`, added to the InputMap at runtime because the project's input map is in `project.godot`).
+- **`KillFloor`** (`world/KillFloor.gd`), like Unreal's "kill Z": a Node3D whose height is the floor. On the authority, every `check_every_ticks` (10), after every pawn has simulated, any living pawn below it gets `kill_effect` (`kill_self.tres` by default). A pawn with no Health or no EffectManager can't die there and is warned about once. Both arenas have one at −40 m (their hills reach about ±12).
+- **Tests:** `world/tests/kill_floor_selftest`; `fight_selftest`'s kill-self check.
+- **Why a pawn fell through the world while its player was away isn't known yet.** The kill floor makes it harmless, but the cause is worth finding. *(Claude 2026-11-12: looked for and not reproduced. A probe left the player idle, headless: 50 game minutes of the faction arena offline (453 deaths, 51 of them the player's), 15 minutes as Host, 15 of the plain arena, and about 3 minutes in real time with random 0.1 to 1.5 s freezes. No pawn fell, or even sank 12 cm into the ground. Not covered: a real window (meshes, the mouse, the editor's debugger), and joining as a client.)* *(Claude 2026-11-13: the owner remembers it happening in a networked game, not offline, so a host and a joined client were run as two processes, both players idle and the check running on both machines: 8 minutes at no ping (13 player deaths), 8 at a fake 150 ms ping (17), and 3 with the client's chunk building slowed right down (3). No falls on either machine. Knockback only sets velocity, which the pawn's one `move_and_slide` uses, so it never places a pawn directly; only respawns, `TerrainBodyLifter` and a client's rollback do. Still not covered: real windows.)* *(Claude 2026-11-13, later: and in real windows, a host and a client side by side for 9 minutes with the players' Health at 100, the owner's idea, so they respawned often: 60 player deaths and respawns, no falls on either machine. Found on the way, by the owner: started with `--host` on the command line, the faction arena gave the host's player the plain `pawn.tscn` (a capsule), because `ArenaSample._ready` read the command line before `FactionArenaSample` registered its scenes. It reads it deferred now. The Host button was never affected.)*
+- **Fall reports** *(Claude 2026-11-12)*: so the next fall says what happened, `KillFloor.report_falls` (on by default) puts a warning in the Debugger for each pawn it kills: where it fell, where it was last standing and how long before, how fast it was moving then, and whether ground is built where it fell. Built ground means it went through solid ground, a physics problem; no ground means it went off the edge of the loaded world, a streaming problem. Each check remembers where every pawn was last standing (`_last_on_ground`, rebuilt every check, so pawns that are gone drop out). `kill()` now returns whether the pawn got the effect, and only those are reported, so a pawn that can't die isn't reported on every check. `fall_report()` makes the text, and the test reads it.
+
+**Editor warnings cleared the same day:** everything the owner's Debugger listed from game code: integer divisions marked as intended (`@warning_ignore("integer_division")`), names that clashed with functions or signals renamed (`tick`, `start`, `on`, `ready`, `ease`), and "this if that else the other" with two different types made the same. 29 remain in test scripts, shown only when those tests run, and 22 in legacy files, which aren't changed.
+
+### 8.14 Faction arena: teams of 8, and soldiers on the players' team *(Claude 2026-11-13, the owner's request)*
+
+- **`team_size`** on `FactionArenaSample` (8; the goblin spawners kept 4) is how many each team has. The red and blue spawners are set to it when the spawners start.
+- **Soldiers:** a new `AllySpawner`, 12 m east of the middle and facing it, keeps `team_size` minus the number of players alive. With 1 player that's 7, with 3 players 5, and with `team_size` players or more, none. `faction_ally.tscn` is the red goblin's scene on team 0: the same AI and abilities, with Kenney's soldier on a pale gold base (`assets/3d/miniCharacters/.../character-soldier.glb`, CC0, copied from the owner's Kenney folder). The count is worked out again when a player joins or leaves (`_players`, `_update_team_sizes()`). A joining player doesn't remove a soldier: the next soldier to die isn't replaced.
+- **NPC or player:** the arena used to treat every team-0 pawn as a player's. `ArenaSample._is_npc(pawn)` decides now: by team in the plain arena, by scene in the faction arena (only `faction_player.tscn` is a player's). It picks the readout (an NPC's, or the smaller player one) and what Tab treats as an NPC to possess. Kills and deaths in the status line still go by team.
+- **Health:** back to the usual 100 for everyone; the faction arena's `_health_multiplier()` (10) is gone.
+- **Found on the way:** started with `--host` on the command line, the faction arena gave the host's player the plain `pawn.tscn`, a capsule. `ArenaSample._ready` read the command line before `FactionArenaSample` registered its scenes, so it reads it deferred now. The Host button was never affected.
+- **Test:** `faction_arena_sample_selftest`: 8 red, 8 blue and 7 soldiers, soldiers' readouts, one soldier fewer for a second player.
+- **Pawns respawned on top of each other** *(found the same day: the owner saw pawns "perma dashing", and the windowed probe caught two players 0.00 m apart, moving 0.6 m a tick with no velocity)*. Players brought back in the same tick got the same spot. A respawn moves the pawn by setting its position, and physics only sees that after its next step, so the second respawn's free-spot check didn't see the first. Respawns also rolled the same random numbers, because rolls went by `_spawn_count`, which only new spawns add to. Two pawns inside each other are then pushed apart by physics every tick, which isn't velocity: it looked like dashing that never stops, and pushed them into the ground. That's the likeliest cause of the owner's falls through the world in networked games, where two players can die together. With bigger teams at 100 Health it happened all the time. Fixed in `SpawnManager`: every spot it puts a pawn on is claimed for `claim_ticks` (2) ticks and counts as taken within twice `clearance_radius`, and every roll has its own random numbers (`_roll_count`). Test: `spawn_manager_selftest`, "two players brought back in the same tick", which fails without the fix (0.53 m apart). Two pawns spawned fresh in the same tick were already fine: physics sees a new body at once.
+
+
 ### 8.7 Step 10: Health, damage and death (built 2026-11-09)
 
 The owner's call: there's no health manager. Health is a stat, and death is an ability.

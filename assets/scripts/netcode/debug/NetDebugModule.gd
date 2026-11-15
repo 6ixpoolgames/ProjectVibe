@@ -62,37 +62,40 @@ func is_feature_on(feature: String) -> bool:
 
 ## Turns a feature on or off, even while running. On a client, a feature the server decides only changes if the server agrees: the
 ## next snapshot says.
-func set_feature(feature: String, on: bool) -> void:
+# Claude 2026-11-12: "on" is "enabled" here: it clashed with the static on() above (an editor warning).
+func set_feature(feature: String, enabled: bool) -> void:
 	if not FEATURES.has(feature):
 		push_warning("NetDebugModule: no feature called '%s'" % feature)
 		return
 	if _session.is_client() and NetworkSessionSingleton.SERVER_FEATURES.has(feature):
-		_session.send_to_server(CHANNEL, switch_message(feature, on))
+		_session.send_to_server(CHANNEL, switch_message(feature, enabled))
 		return
-	_session.set(feature, on)
+	_session.set(feature, enabled)
 	_session._refresh_entities()
 	if not _session.time_dilation_enabled and _session._driver:
 		_session._set_tick_factor(1.0)
 
 
 ## What a client sends to ask for a switch.
-func switch_message(feature: String, on: bool) -> PackedByteArray:
+# Claude 2026-11-12: "on" is "enabled" here: it clashed with the static on() above (an editor warning).
+func switch_message(feature: String, enabled: bool) -> PackedByteArray:
 	var buffer := NetPackets.new_buffer()
 	NetPackets.write_value(buffer, feature, StateEncoding.RAW)
-	NetPackets.write_value(buffer, on, StateEncoding.RAW)
+	NetPackets.write_value(buffer, enabled, StateEncoding.RAW)
 	return buffer.data_array
 
 
 ## Server: a client's test switch. Refused unless this is a debug build and the game allows it, and only for SERVER_FEATURES.
+# Claude 2026-11-12: "on" is "enabled" here: it clashed with the static on() above (an editor warning).
 func _on_switch_request(_peer: int, bytes: PackedByteArray) -> void:
 	if not allow_debug_commands or not OS.is_debug_build():
 		_session.stats["bad_packets"] += 1
 		return
 	var buffer := NetPackets.reader(bytes)
 	var feature: Variant = NetPackets.read_value(buffer)
-	var on: Variant = NetPackets.read_value(buffer)
-	if feature is String and NetworkSessionSingleton.SERVER_FEATURES.has(feature) and on is bool:
-		_session.set(feature, on)
+	var enabled: Variant = NetPackets.read_value(buffer)
+	if feature is String and NetworkSessionSingleton.SERVER_FEATURES.has(feature) and enabled is bool:
+		_session.set(feature, enabled)
 		_session._refresh_entities()
 	else:
 		_session.stats["bad_packets"] += 1

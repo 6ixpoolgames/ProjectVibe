@@ -97,7 +97,7 @@ func update_state(tick: int) -> void:
 			return
 	if not _warned_none_fits:
 		_warned_none_fits = true
-		push_warning("AIStateManager: no state fits on %s, so it stays in %s. An AIIdleState, which always fits, prevents this." % [pawn.name, _current.name if _current else "no state"])
+		push_warning("AIStateManager: no state fits on %s, so it stays in %s. An AIIdleState, which always fits, prevents this." % [pawn.name, String(_current.name) if _current else "no state"]) # Claude 2026-11-12: String(), so both sides are text
 
 
 ## The pawn calls this every tick, so a force that runs out hands back to the normal check on time, not at the next decision.

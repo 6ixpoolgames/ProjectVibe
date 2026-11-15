@@ -37,6 +37,7 @@ func _ready() -> void:
 	add_child(floor_body)
 	await _test_sweep()
 	await _test_windup_turn()
+	await _test_no_snap() # Claude 2026-11-12
 	await _test_hop()
 	await _test_invulnerable()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
@@ -99,6 +100,26 @@ func _test_windup_turn() -> void:
 		else:
 			_check(absf(degrees) < 0.5, "with windup turning at 0, it holds where it started (%.0f degrees)" % degrees)
 		pawn.free()
+
+
+# Claude 2026-11-12, the owner's request: a swing doesn't snap to where the pawn looks when it starts; it turns there at its windup
+# turn speed.
+func _test_no_snap() -> void:
+	var origin := Vector3(40, 0.1, 30)
+	var pawn := _pawn(origin, 0)
+	var melee: MeleeAttackAbility = pawn.ability_manager.get_node("MeleeAttack")
+	var ai := _ai(pawn)
+	ai.look_at_point(origin + Vector3(0, 1, 10)) # behind: yaw 180 degrees
+	await _ticks(2)
+	ai.press(&"primary")
+	await _until(func() -> bool: return melee.is_running_timed(), 10)
+	var first := absf(rad_to_deg(angle_difference(0.0, pawn.yaw)))
+	var per_tick := melee.windup_turn_degrees_per_second / 60.0
+	_check(melee.is_running_timed() and first <= per_tick * 2.0 + 0.5, "on its first tick a swing turns at most its turn speed allows, not all the way round (%.0f degrees)" % first)
+	await _until(func() -> bool: return melee.duration_ticks() - melee.ticks_left >= melee.windup_ticks, 30)
+	var by_hit := absf(rad_to_deg(angle_difference(0.0, pawn.yaw)))
+	_check(by_hit > 60.0 and by_hit < 179.0, "and keeps turning through the windup, without reaching a target behind it (%.0f of 180 degrees)" % by_hit)
+	pawn.free()
 
 
 func _test_hop() -> void:

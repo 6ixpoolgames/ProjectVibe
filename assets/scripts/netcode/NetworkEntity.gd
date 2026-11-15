@@ -283,7 +283,10 @@ func _hit_position_at(tick: int) -> Variant:
 	if tick < 0 or _hit_ticks.is_empty():
 		return null
 	var slot := tick % HIT_HISTORY_SIZE
-	return _hit_positions[slot] if _hit_ticks[slot] == tick else null
+	# Claude 2026-11-12: an if, not "a if b else null": a Vector3 and null aren't the same type, which the editor warned about.
+	if _hit_ticks[slot] == tick:
+		return _hit_positions[slot]
+	return null
 
 
 func _find_state() -> TickStateComponent:
