@@ -150,7 +150,7 @@ var packet_filter: Object = null
 ## Bytes and packets sent and received, for diagnostics.
 var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_received": 0, "snapshots_received": 0,
 		"corrections": 0, "correction_total": 0.0, "correction_worst": 0.0, "jump_total": 0.0, "jump_worst": 0.0, "resyncs": 0,
-		"bad_packets": 0, "packets_over_limit": 0, "rejected_inputs": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
+		"bad_packets": 0, "packets_over_limit": 0, "rejected_inputs": 0, "snapshots_encoded": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
 		"margin_lowest": NO_MARGIN, "speed_lowest": 1.0, "speed_highest": 1.0}
 ## Client: which tick of the server's remote entities are being drawn at. -1 before the first snapshot.
 var render_tick: float = -1.0
@@ -1119,15 +1119,21 @@ func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 	var acknowledged := buffer.get_32()
 	var count := buffer.get_u8()
 	var entity: NetworkEntity = get_entity(entity_id)
-	if entity == null or entity.owner_peer != peer or entity.state == null or count > MAX_INPUTS_PER_PACKET:
+	# Claude 2026-11-16 (networking T1.0, from the networking assessment): N2: an empty packet is rejected too (count 0), and so is one claiming a newest tick further ahead than any history
+	# could hold, which can't be real and would otherwise push this client's timing marker past every honest packet.
+	if entity == null or entity.owner_peer != peer or entity.state == null or count == 0 or count > MAX_INPUTS_PER_PACKET \
+			or newest >= tick + entity.state.history_size:
 		stats["rejected_inputs"] += 1
 		return
 	# Claude 2026-11-05: the whole packet is read first. A broken one used to count towards the timing that drives time
 	# dilation and lag compensation before the break was found.
 	var lists: Array = []
+	# Claude 2026-11-16 (networking T1.0, from the networking assessment): N2: each input must have exactly this entity's input fields, checked before the timing is used. A wrong-sized list
+	# used to become an empty input later, after its timing had already counted.
+	var field_count: int = entity.state.get_input_encodings().size()
 	for i in count:
 		var values: Variant = NetPackets.read_list(buffer)
-		if values == null:
+		if values == null or (values as Array).size() != field_count:
 			stats["bad_packets"] += 1
 			return
 		lists.append(values)
@@ -1183,8 +1189,21 @@ func _is_in_snapshot(entity: NetworkEntity, tick: int) -> bool:
 	return entity.is_replicated and entity.state != null and entity.state.has_state(tick)
 
 
+# Claude 2026-11-16 (networking T1.0, from the networking assessment): N1: true if at least one client has passed the handshake.
+func _has_welcomed_peer() -> bool:
+	for peer: int in _peers:
+		if _peers[peer]["welcomed"]:
+			return true
+	return false
+
+
 ## Server: sends the whole world to every client, with a note for each on how its input is arriving, for time dilation.
 func _send_snapshots(tick: int) -> void:
+	# Claude 2026-11-16 (networking T1.0, from the networking assessment): N1: with no welcomed client there's nobody to send to, so nothing is gathered or encoded. This was the
+	# 1.4 ms a tick a host with nobody connected spent (2026-11-16 measurement). Recording for rollback and lag compensation is
+	# TickStateComponent's and carries on regardless; a client that joins later gets a full snapshot at the next snapshot tick.
+	if not _has_welcomed_peer():
+		return
 	# Claude 2026-11-05: everything is gathered first and encoded in one call, so C++ is only called into once per snapshot.
 	var all_entities := get_entities()
 	var entries: Array = []
@@ -1209,6 +1228,7 @@ func _send_snapshots(tick: int) -> void:
 	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose: divided as a float, it went into put_u16 as one (a narrowing warning)
 	var count := at / NetPackets.WORLD_ENTRY_SIZE
 	var world_bytes: PackedByteArray = _codec.write_world(entries) if _codec != null else NetPackets.write_world(entries)
+	stats["snapshots_encoded"] += 1 # Claude 2026-11-16 (networking T1.0): counted, so N1 (nothing encoded with nobody to send to) can be seen
 	var server_features := 0
 	for i in SERVER_FEATURES.size():
 		if get(SERVER_FEATURES[i]):

@@ -5,6 +5,9 @@
 ##
 ## The rule: an AI pawn runs only while every chunk within edge_margin of it is built. In other words, it's near enough to a
 ## source. A pawn with its own active source has ground wherever it goes, so it's never switched off.
+## Claude 2026-11-16 (pawn M2): every pawn is watched, and one that keeps the world loaded (counts_on_this_machine, the source contract) is left
+## running, checked each time it's looked at. Nothing has to tell this when that changes, so a pawn can't be left unwatched. A
+## possession is checked at once (its ControllerManager's possession_changed signal), so a frozen pawn a player takes starts at once.
 ##
 ## This is a first pass, chosen by the owner for tier 0. It's meant to be replaced or added to: a game that needs AI simulated
 ## out of sight, such as ecology, migration or faction wars, can listen to ai_deactivated and ai_activated, and simulate those
@@ -12,7 +15,8 @@
 ##
 ## What a pawn needs:
 ##   - to call GameMode.ai_activation_manager.add_pawn(self) when it's an AI pawn, and remove_pawn(self) when it stops being one
-##   - a method set_simulation_active(active: bool), which stops and restarts its ticks and leaves all its state as it is
+##   - a method set_frozen(frozen: bool), which stops and restarts its ticks and leaves all its state as it is (Claude 2026-11-16:
+##     was set_simulation_active(active), renamed in pawn M1)
 ##
 ## What happens in odd cases (all checked in game_mode/tests/game_mode_selftest.gd):
 ##   - No terrain in the scene: every pawn stays on.
@@ -55,6 +59,7 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 	_session = get_node_or_null("/root/NetworkSession")
 
 
+
 func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	game_mode.ai_activation_manager = null
 	for pawn: Node3D in _inactive.keys():
@@ -67,6 +72,11 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 func add_pawn(pawn: Node3D) -> void:
 	if pawn != null and not _pawns.has(pawn):
 		_pawns.append(pawn)
+		# Claude 2026-11-16 (pawn M2): a pawn a player takes or lets go is checked at once, rather than at its next turn.
+		# Claude 2026-11-16 (pawn M4): the signal is the ControllerManager's now.
+		var controllers: Node = pawn.get(&"controller_manager")
+		if controllers and not controllers.possession_changed.is_connected(_on_possession_changed):
+			controllers.possession_changed.connect(_on_possession_changed)
 		_refresh_terrains()
 		_check_pawn(pawn) # at once, so a pawn spawned out where there's no ground never takes a tick there
 
@@ -74,6 +84,9 @@ func add_pawn(pawn: Node3D) -> void:
 ## Stops watching a pawn, such as one a player has taken over. If it was off, it goes back on.
 func remove_pawn(pawn: Node3D) -> void:
 	_pawns.erase(pawn)
+	var controllers: Node = pawn.get(&"controller_manager") if is_instance_valid(pawn) else null # Claude 2026-11-16 (pawn M4)
+	if controllers and controllers.possession_changed.is_connected(_on_possession_changed):
+		controllers.possession_changed.disconnect(_on_possession_changed)
 	if _inactive.has(pawn):
 		_inactive.erase(pawn)
 		if is_instance_valid(pawn):
@@ -127,7 +140,9 @@ func _check_pawn(pawn: Node3D) -> void:
 		return
 	if not pawn.is_inside_tree():
 		return
-	var has_ground := _has_ground_around(pawn.global_position)
+	# Claude 2026-11-16 (pawn M2): a pawn that keeps the world loaded always has ground.
+	var keeps_loaded: bool = pawn.has_method(&"counts_on_this_machine") and pawn.counts_on_this_machine()
+	var has_ground := keeps_loaded or _has_ground_around(pawn.global_position)
 	if has_ground and _inactive.has(pawn):
 		_inactive.erase(pawn)
 		_set_active(pawn, true)
@@ -166,6 +181,11 @@ func _on_chunk_removed(_key: Vector2i) -> void:
 	_check_everyone = true
 
 
+func _on_possession_changed(pawn: Node3D, _has_player: bool) -> void:
+	if is_instance_valid(pawn) and _pawns.has(pawn):
+		_check_pawn(pawn)
+
+
 func _set_active(pawn: Node3D, active: bool) -> void:
-	if pawn.has_method(&"set_simulation_active"):
-		pawn.set_simulation_active(active)
+	if pawn.has_method(&"set_frozen"): # Claude 2026-11-16 (pawn M1): renamed
+		pawn.set_frozen(not active)

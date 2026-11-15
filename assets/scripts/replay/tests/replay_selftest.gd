@@ -78,9 +78,9 @@ func _scene_and_run() -> void:
 	# here is everywhere but its one chunk. So the standing and falling pawns keep the world loaded themselves, and stay running; the
 	# leaving one doesn't, and freezes, which is recorded too.
 	var standing := _pawn(Vector3(0, 0.1, 0), "Standing")
-	standing.ai_loads_chunks = true
+	standing.keeps_world_loaded = true
 	var falling := _pawn(Vector3(40, 0.1, 0), "Falling")
-	falling.ai_loads_chunks = true
+	falling.keeps_world_loaded = true
 	var leaving := _pawn(Vector3(2, 0.1, 2), "Leaving")
 	await _ticks(2)
 
@@ -115,7 +115,7 @@ func _scene_and_run() -> void:
 				terrain.unload_chunk(Vector2i(0, 0))
 			70:
 				# A held action and a move direction on the standing pawn, written straight onto it, which the input channel records.
-				standing.held_actions = 5
+				standing.controller_manager.held_actions = 5
 			90:
 				bytes_after_one_second = _recorder.get_bytes_written()
 	var standing_id := _recorder.get_replay_id(standing)
@@ -201,7 +201,8 @@ func _test_events(reader: ReplayReader, falling_id: int) -> void:
 	var kinds := {}
 	for event: Dictionary in events:
 		kinds[event.kind] = kinds.get(event.kind, 0) + 1
-	for kind in ["spawned", "despawned", "chunk_built", "chunk_removed", "source_off", "source_on", "fell", "died", "frozen"]:
+	# Claude 2026-11-16 (pawn M2): a switched-off source is "source_removed" now, and switched back on, "source_added" again.
+	for kind in ["spawned", "despawned", "chunk_built", "chunk_removed", "source_added", "source_removed", "fell", "died", "frozen"]:
 		_check(kinds.has(kind), "the %s event is recorded" % kind)
 	var fell: Array = events.filter(func(event: Dictionary) -> bool: return event.kind == "fell")
 	_check(fell.size() == 1 and fell[0].id == falling_id and str(fell[0].data.get("report", "")).contains("Falling"),
@@ -219,8 +220,10 @@ func _test_events(reader: ReplayReader, falling_id: int) -> void:
 		_check(terrain.get("chunks", {}).has(Vector2i(0, 0)) and terrain.get("chunk_size") == 32.0, "the world state has the chunk while it's built")
 		var after := reader.get_frame(removed[0].tick + 1)
 		_check(not after.terrains.values()[0].chunks.has(Vector2i(0, 0)), "and not after it's removed")
-	var sources_off := reader.get_frame(events.filter(func(event: Dictionary) -> bool: return event.kind == "source_off")[0].tick)
-	_check(sources_off.sources.values().any(func(source: Dictionary) -> bool: return not source.active), "a switched-off source shows as off")
+	var removed_sources := events.filter(func(event: Dictionary) -> bool: return event.kind == "source_removed")
+	var count_before: int = reader.get_frame(removed_sources[0].tick - 1).sources.size() if not removed_sources.is_empty() else -1
+	var count_after: int = reader.get_frame(removed_sources[0].tick).sources.size() if not removed_sources.is_empty() else -1
+	_check(count_after == count_before - 1, "a switched-off source leaves the world state (%d sources, then %d)" % [count_before, count_after])
 
 
 func _test_damaged(path: String, whole: ReplayReader) -> void:
@@ -334,7 +337,7 @@ func _capture(_dt: float, tick: int) -> void:
 			continue
 		var id := _recorder.get_replay_id(pawn)
 		if id != 0:
-			now[id] = [pawn.global_position, pawn.velocity, ReplayMotionChannel.flags_of(pawn), pawn.move_input, pawn.held_actions]
+			now[id] = [pawn.global_position, pawn.velocity, ReplayMotionChannel.flags_of(pawn), pawn.controller_manager.move_input, pawn.controller_manager.held_actions]
 	_expected[tick] = now
 
 

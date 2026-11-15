@@ -17,7 +17,8 @@
 ##   - Each tick, its AbilityManager runs the abilities, which write velocity and facing. Then the pawn adds gravity and makes the one
 ##     move_and_slide call. Claude 2026-11-07: this replaced GroundMovement and MovementModule, which are gone.
 ##   - Claude 2026-11-09: each tick, before asking for input, it runs its AI parts (AIContextComponent, AIStateManager,
-##     AIBehaviourManager) in a fixed order, offline or on the server only. See _tick_ai and pawn spec section 10.
+##     AIBehaviourManager) in a fixed order, offline or on the server only. See AIContextComponent.run_ai (Claude 2026-11-16: was _tick_ai here) and pawn spec
+##     section 10.
 ##
 ## What it needs in its scene, all optional:
 ##   - an AbilityManager child. With none, nothing steers it, and it only falls. It comes from PawnInitializer by default.
@@ -35,53 +36,46 @@
 ##
 ## Claude 2026-11-07: input is now an InputCommand, given with apply_input(). Actions such as jump and sprint are named, held as bits,
 ## and a press is "held this tick, not last tick" (was_action_pressed). Pawn spec section 5.
+## Claude 2026-11-16 (pawn M4): the input, the press and hold checks, the server's checks on a client's input and whether a player has the pawn
+## all moved to its ControllerManager (pawn.controller_manager.move_input, .has_player() and so on), the owner's call.
 ##
 ## What happens in odd cases (all checked in tests/pawn_selftest.gd):
 ##   - No TickDriver: it ticks itself from _physics_process.
 ##   - AI pawn in unloaded ground: AIActivationManager stops its ticks, and it keeps all its state.
-##   - On the server, a client's input goes missing: the last one repeats for missing_input_hold_ticks, then its direction fades out
-##     over missing_input_fade_ticks. Held actions keep repeating, so a key still held when input comes back isn't a new press. Both
-##     settings default to -1, which uses NetworkSession's settings of the same names.
+##   - On the server, a client's input goes missing: see ControllerManager._network_input_missing (Claude 2026-11-16 (pawn M4)).
 class_name Pawn
 extends CharacterBody3D
 
-## Sent when a player takes this pawn, or lets it go.
-signal possession_changed(pawn: Pawn, has_player: bool)
-## Claude 2026-11-09: sent on the server when something hits this pawn, after its knockback starts. For effects.
-## Claude 2026-11-10: after its effects are applied (pawn spec 8.11); hit.damage_dealt says how much Health it took.
-signal hit_received(hit: HitInfo)
-## Claude 2026-11-09, step 10: sent once on the server when this pawn dies. hit is what did it, or null.
-signal died(pawn: Pawn, hit: HitInfo)
+## Claude 2026-11-16 (pawn M1): sent when this pawn's team changes, for the TeamRegistry (GameMode.team_registry), which keeps the counts.
+signal team_changed(pawn: Pawn, old_team: int, new_team: int)
+# Claude 2026-11-16 (pawn M4): possession_changed moved to the ControllerManager, with whether a player has the pawn.
+# Claude 2026-11-16 (pawn M3): hit_received and died moved to the AbilityManager, which handles hits and death now (pawn.ability_manager.died).
 
 ## Whether a player may take control of this pawn. Turn it off on pawns players should never control.
 # Claude 2026-11-07: on by default, the owner's choice. Off, people would be left wondering why their pawn doesn't work. Something
 # still has to ask for a possession, so a wrong one is a clear bug that gets looked at.
 @export var possessable := true
-## On: an AI pawn keeps the world loaded around it, as a player's pawn always does. Off, it's switched off wherever no
-## source keeps the ground loaded, which is what you want for a horde.
-@export var ai_loads_chunks := false:
-	set(value):
-		ai_loads_chunks = value
-		_refresh_source()
-		# Claude 2026-11-15: and whether the AI switch-off watches it, as everywhere else the source changes. Without this, a pawn
-		# whose source was switched off here (the mass battle's H key, for heroes) was never watched, so it was never frozen, walked
-		# on where the ground unloaded under it, and fell through the world.
-		_refresh_ai_activity()
-## On: the camera arm exists all the time, so taking this pawn has no delay at all. For a handful of hero pawns. Leave it off
-## for anything there are many of, or a horde gets thousands of arms that do nothing.
-@export var always_has_camera_arm := false
-## How far this pawn keeps the world loaded, when it does, in metres.
-@export var streaming_load_distance := 320.0
-## How far nav is built around it, in metres.
-@export var streaming_nav_distance := 128.0
-## The arm's settings, for a pawn that wants its own. Empty means the defaults.
-@export var camera_preset: CameraPreset
-## On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's
-## setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own.
-# Claude 2026-11-07: -1 by default, so the rule is set once per game on NetworkSession rather than on every pawn.
-@export_range(-1, 60, 1, "or_greater") var missing_input_hold_ticks := -1
-## Then its direction fades to nothing over this many ticks. -1 uses NetworkSession's setting.
-@export_range(-1, 60, 1, "or_greater") var missing_input_fade_ticks := -1
+## On: this pawn keeps the world loaded around it even without a player, as a player's pawn always does: a hero, say. Off, it's
+## frozen wherever nothing else keeps the ground loaded, which is what you want for a horde.
+## Claude 2026-11-16 (pawn M2): renamed from ai_loads_chunks, and now only a flag: the pawn makes no StreamingSource node. The chunk streamer, the nav
+## feeder and the AI switch-off read it whenever they look (counts_on_this_machine below), so changing it needs nothing told. That
+## also ends the bug where switching it off left a hero unwatched (2026-11-15). How far it loads is the game's setting
+## (PawnDefaultsRes.world_load_distance), not the pawn's.
+@export var keeps_world_loaded := false
+# Claude 2026-11-16 (pawn M5): always_has_camera_arm is gone: the player's one arm moves to whichever pawn they take, so there's no delay to save.
+## Claude 2026-11-16 (pawn M2): how far this pawn keeps the world loaded when it does, in metres: the game's setting (PawnDefaultsRes, read through
+## GameMode's PawnInitializer), 320 without one. Read-only. Named as a StreamingSource's is, because the chunk streamer reads both the
+## same way (StreamingSource.gd, "the source contract").
+var load_distance: float:
+	get:
+		var defaults: PawnDefaultsRes = _pawn_defaults()
+		return defaults.world_load_distance if defaults else 320.0
+## How far nav is built around it, in metres: the game's setting, 128 without one. Read-only.
+var nav_distance: float:
+	get:
+		var defaults: PawnDefaultsRes = _pawn_defaults()
+		return defaults.world_nav_distance if defaults else 128.0
+# Claude 2026-11-16 (pawn M5): camera_preset moved to a CameraMount node the pawn's scene places under Visual (camera/CameraMount.gd).
 ## Claude 2026-11-07: on, GameMode's PawnInitializer adds every default part this pawn's scene doesn't already have. Off, the pawn
 ## gets only what its scene has.
 @export var fill_in_default_parts := true
@@ -97,52 +91,42 @@ signal died(pawn: Pawn, hit: HitInfo)
 	set(value):
 		if team == value:
 			return
-		if is_inside_tree():
-			_count_team(team, -1)
-			_count_team(value, 1)
+		var old_team := team
 		team = value
+		team_changed.emit(self, old_team, value) # Claude 2026-11-16 (pawn M1): the counts moved to the TeamRegistry module
 ## Claude 2026-11-09: how easy this pawn is for AI to see: 1 is normal, lower is harder, 0 is invisible. Sight multiplies its fill
 ## rate by this (pawn spec 10.4). Nothing in the base changes it: how stealth, gear or light level turn into this number is a game
 ## rule, for a GameMode module to set.
 @export_range(0.0, 4.0, 0.01, "or_greater") var detectability := 1.0
-## Claude 2026-11-09: on: a pawn standing still with nothing to do rests, skipping its abilities, gravity and move_and_slide until
+## Claude 2026-11-09: on: a pawn standing still with nothing to do sleeps, skipping its abilities, gravity and move_and_slide until
 ## something wakes it (pawn spec 15.3). Off: it simulates fully every tick.
-@export var rest_when_idle := true
-## Claude 2026-11-09: a resting pawn still runs a full tick this often, staggered by entity id, so ground that went away under it is
+@export var sleep_when_idle := true
+## Claude 2026-11-09: a sleeping pawn still runs a full tick this often, staggered by entity id, so ground that went away under it is
 ## noticed. 15 ticks is a quarter of a second at 60 ticks a second.
-@export_range(1, 600, 1, "or_greater") var rest_check_ticks := 15
+@export_range(1, 600, 1, "or_greater") var sleep_check_ticks := 15
+## Claude 2026-11-16 (movement experiments): on: a pawn awake for its timers (an effect or ability counting down) but not moving skips move_and_slide, when it's
+## grounded, has no velocity after its abilities and gravity, and nothing moved it since its last tick. It still moves for real on its
+## check ticks (sleep_check_ticks), so ground taken from under it is noticed, as for a sleeping pawn. Off (the default until it's
+## measured): it always moves. Skipped moves are counted in diagnostics as pawn.move_skipped.
+## Claude 2026-11-16: on by default, the owner's call after the mass battle measurement (24 to 31 skipped moves a frame at the first
+## clash, about 0.2 ms; nothing skipped while marching, when everyone moves).
+@export var skip_move_when_still := true
+## Claude 2026-11-16 (movement experiments): on (the default, as before): after a rollback restores this pawn, a zero-length move_and_slide rebuilds Godot's own
+## "on the floor" flag, which the first replayed tick's floor snap reads. Off: it's left as it was, which saves a physics solve per
+## restored pawn but can make that first replayed tick differ. Only clients roll back, and by default only their own pawn.
+@export var rebuild_floor_on_rollback := true
 ## Claude 2026-11-09: whether this pawn rested on its last tick, for readouts and tests. Worked out again every tick from its state,
 ## so it isn't rollback state. Setting it changes nothing.
-var is_resting := false
+var is_sleeping := false
 
-# Claude 2026-11-09: how many pawns in the tree are on each team, so AI sensing can skip looking when there's nobody to find.
-# GDScript note: a static var belongs to the class, not to one pawn, so every pawn shares this one dictionary.
-static var _pawns_per_team := {}
 # Claude 2026-11-09: the shared table of plain pawn data (a PawnTable from the navcore C++ library, scaling spec section 3), or null
 # without the library. Every pawn in the tree has a row, in entity-id order. Pawns NetworkSession never configured, as in most
 # tests, have no entity id; they get keys from TABLE_KEYS_WITHOUT_ID up, after every networked pawn, in the order they joined.
 static var _table: Object = null
 const TABLE_KEYS_WITHOUT_ID := 1 << 40
 static var _next_table_key := TABLE_KEYS_WITHOUT_ID
-# Claude 2026-11-09: hits queued during simulate, for every pawn, and the tick driver that delivers them (pawn spec 15.4).
-static var _queued_hits: Array = [] # [attacker's entity id, target's entity id, place in the queue, HitInfo]
-static var _hit_queue_driver: Node = null
 
-# This tick's input, as plain data. Listed in the TickState, so it goes over the network and rolls back.
-var move_input := Vector3.ZERO ## the direction to go, in world space, up to length 1
-# Claude 2026-11-07: replaces wants_sprint and wants_jump. Bits from InputActions.
-var held_actions := 0 ## which named actions are held this tick
-var look_yaw := 0.0 ## where the player is looking, which is often not where the pawn is facing
-var look_pitch := 0.0
-## Claude 2026-11-09: how many ticks behind its own tick the controller was drawing other pawns, for lag compensation. In the input
-## list, so a client's swing reaches the server with it; the server limits it to what's believable (LagCompensation).
-var view_ticks_behind := 0.0
-
-# State that affects the next tick. Listed in the TickState too.
-## Claude 2026-11-07: last tick's held_actions, so a press can be told from a hold. It's in the TickState's state list, so the
-## server's value reaches clients in snapshots and a correction fixes it, like position. From the audit of 6df1464: reading it back
-## from the client's own saved input instead went wrong when the server never got a press. Protocol 5 made it 2 bytes per pawn.
-var previous_held_actions := 0
+# Claude 2026-11-16 (pawn M4): this tick's input and last tick's held actions moved to the ControllerManager (see the top of the file).
 var yaw := 0.0
 ## Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
 var grounded := false
@@ -173,14 +157,14 @@ var ai_target_selector: AITargetSelector = null
 
 
 var _driver: Node = null
-var _death: DeathAbility = null # Claude 2026-11-09: found when ready
 ## Claude 2026-11-09 (scaling spec step 4): true while the Death ability runs, the same as is_dead(). Kept current by DeathAbility
 ## (through its timer, so a rollback updates it too), and read directly by C++, which is much cheaper than calling is_dead().
 ## Read it; don't set it.
 var dead := false
 var _entity: NetworkEntity = null
-var _has_player := false
-var _source: StreamingSource = null
+var _game_mode: Node = null # Claude 2026-11-16 (pawn M2): found when entering the tree, for the distances
+var _last_streamed_position := Vector3.ZERO # for distance_moved_since_last_check
+var _streamed_before := false
 var _visual: Node3D = null
 var _model: Node3D = null
 var _previous_position := Vector3.ZERO # the body before and after the last tick, for smoothing Visual
@@ -189,9 +173,7 @@ var _previous_yaw := 0.0
 var _current_yaw := 0.0
 var _correction_offset := Vector3.ZERO # what's left of a correction, fading to nothing
 var _fallback_tick := 0
-var _simulating := true
-var _missing_input_ticks := 0 # on the server: how many ticks in a row a client's input has been missing
-var _input_missing_this_tick := false
+var _frozen := false # Claude 2026-11-16 (pawn M1): was _simulating, the other way round
 
 
 func _init() -> void:
@@ -204,11 +186,12 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	add_to_group(TerrainBodyLifter.GROUP)
-	_count_team(team, 1) # Claude 2026-11-09
+	add_to_group(StreamingSource.GROUP) # Claude 2026-11-16 (pawn M2): the streamer, nav feeder and replay find sources here; this pawn counts when it keeps the world loaded
 	_join_table() # Claude 2026-11-09: the shared table of plain pawn data, which AI sensing's grid reads (C++ only; scaling spec step 1)
 	# Claude 2026-11-07: default parts first, so they're children before anything below or any _ready looks for them. A node may
 	# add children to itself here: Godot enters them right after.
 	var game_mode: Node = get_node_or_null("/root/GameMode")
+	_game_mode = game_mode
 	if game_mode and game_mode.pawn_initializer:
 		game_mode.pawn_initializer.initialize(self)
 	_driver = get_node_or_null("/root/TickDriver")
@@ -217,7 +200,6 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
-	_count_team(team, -1) # Claude 2026-11-09
 	if _table: # Claude 2026-11-09: leaves the shared table (scaling spec step 1)
 		_table.remove(self)
 	# Claude 2026-11-07: this first, because leaving the list can switch the pawn back on, which would register it again.
@@ -258,11 +240,6 @@ func _ready() -> void:
 		elif child is AITargetSelector and ai_target_selector == null:
 			ai_target_selector = child
 
-	if ability_manager: # Claude 2026-11-09
-		for ability in ability_manager.get_abilities():
-			if ability is DeathAbility:
-				_death = ability
-				break
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
 		_visual.top_level = true # it's placed by _process, between ticks, not by the body
@@ -271,59 +248,36 @@ func _ready() -> void:
 	_current_position = global_position
 	_previous_yaw = yaw
 	_current_yaw = yaw
-	_refresh_source()
-	_refresh_ai_activity()
-	if always_has_camera_arm:
-		make_camera_arm()
+	# Claude 2026-11-16 (pawn M2): every pawn is watched by the AI switch-off, which leaves alone those that keep the world loaded, checking each time.
+	var ai := _ai_activation_manager()
+	if ai:
+		ai.add_pawn(self)
 
 
 # --- Things other scripts can call ---
 
 
-## True if a player controls this pawn. On a client, that's any player, not only this machine's.
-func has_player() -> bool:
-	return _has_player
+## Claude 2026-11-16 (pawn M2): true while this pawn keeps the world loaded around it: a player has it or keeps_world_loaded is on, and it's
+## simulated on this machine (another player's pawn on a client doesn't count there). Was has_chunk_source(). The same as
+## counts_on_this_machine(), under a name that says what it means outside streaming.
+func is_keeping_world_loaded() -> bool:
+	return counts_on_this_machine()
 
 
-## Claude 2026-11-15: true while this pawn keeps the world loaded around it with a chunk source of its own (a player has it, or
-## ai_loads_chunks is on, and it's simulated on this machine). For replay recordings and debugging.
-func has_chunk_source() -> bool:
-	return _source != null
+## Claude 2026-11-16 (pawn M2): the source contract (StreamingSource.gd): whether this pawn loads the world around it on this machine now. The chunk
+## streamer, the nav feeder and the AI switch-off ask this every time they look.
+func counts_on_this_machine() -> bool:
+	return (keeps_world_loaded or _has_a_player()) and is_inside_tree() and is_simulated_here()
 
 
-## PossessionCoordinator tells the pawn. Nothing else should call this.
-func set_has_player(value: bool) -> void:
-	if _has_player == value:
-		return
-	_has_player = value
-	# Claude 2026-11-07: with nobody driving it, a pawn stands idle. The last tick's input would otherwise repeat forever, which is
-	# what happened offline. Claude 2026-11-07: from the next tick its ControllerManager hands it to its AI controller, if it has one.
-	if not value and _is_simulated_here():
-		_clear_input()
-	_refresh_source()
-	_refresh_ai_activity()
-	possession_changed.emit(self, value)
-
-
-## What a controller gives the pawn each tick.
-# Claude 2026-11-07: replaces apply_player_input(move, yaw, pitch, sprint, jump).
-func apply_input(command: InputCommand) -> void:
-	move_input = command.move
-	look_yaw = command.look_yaw
-	look_pitch = command.look_pitch
-	held_actions = command.held_actions
-	view_ticks_behind = command.view_ticks_behind # Claude 2026-11-09
-
-
-## True while this named action is held, such as &"sprint".
-func is_action_held(action: StringName) -> bool:
-	return held_actions & InputActions.mask_of(action) != 0
-
-
-## True on the one tick this named action became held, such as &"jump". Holding it down doesn't repeat it.
-func was_action_pressed(action: StringName) -> bool:
-	var bit := InputActions.mask_of(action)
-	return held_actions & bit != 0 and previous_held_actions & bit == 0
+## Claude 2026-11-16 (pawn M2): the source contract: how far this pawn has moved since the streamer last asked, so it can judge how soon a chunk edge
+## comes. 0 the first time, because arriving somewhere isn't moving.
+func distance_moved_since_last_check() -> float:
+	var at := global_position
+	var moved := at.distance_to(_last_streamed_position) if _streamed_before else 0.0
+	_last_streamed_position = at
+	_streamed_before = true
+	return moved
 
 
 ## The node that follows the body smoothly, for hanging things from. With no Visual, it's the body.
@@ -331,27 +285,27 @@ func get_visual() -> Node3D:
 	return _visual if _visual else self
 
 
-## This pawn's arm, or null. An arm placed in the scene counts.
+## This pawn's arm, or null: one placed in its scene, or the player's while they have it. Claude 2026-11-16 (pawn M5): looks on the CameraMount too.
 func get_camera_arm() -> CameraArm:
-	var parent := get_visual()
-	for child in parent.get_children():
-		if child is CameraArm:
-			return child
+	for parent: Node in [get_visual(), get_camera_mount()]:
+		for child in parent.get_children():
+			if child is CameraArm:
+				return child
 	return null
 
 
-## Makes the arm, from camera_preset or the defaults, if there isn't one. It's created idle.
-func make_camera_arm() -> CameraArm:
-	var arm := get_camera_arm()
-	if arm:
-		return arm
-	arm = CameraArm.new()
-	arm.name = "CameraArm"
-	arm.preset = camera_preset if camera_preset else CameraPreset.new()
-	arm.spawned_by_possession = not always_has_camera_arm
-	get_visual().add_child(arm)
-	arm.ignore_body(self)
-	return arm
+## Claude 2026-11-16 (pawn M5): where a player's arm attaches: the CameraMount under Visual if the scene has one, else Visual itself.
+func get_camera_mount() -> Node3D:
+	for child in get_visual().get_children():
+		if child is CameraMount:
+			return child
+	return get_visual()
+
+
+## Claude 2026-11-16 (pawn M5): the arm's settings for this pawn: its CameraMount's preset, or null for the defaults.
+func get_camera_preset() -> CameraPreset:
+	var mount := get_camera_mount() as CameraMount
+	return mount.preset if mount else null
 
 
 ## The view a camera should attach to when this pawn is possessed: the first VirtualCamera in its scene, or null.
@@ -362,25 +316,28 @@ func get_default_view() -> VirtualCamera:
 	return _find_view(self)
 
 
-## AIActivationManager calls this. Everything about the pawn stays as it is, and it simply stops ticking.
+## Freezes or unfreezes the pawn: frozen, it doesn't tick at all, and everything about it stays as it is. AIActivationManager calls this
+## where no ground is loaded around an AI pawn (pawn spec 15.3, "frozen").
 # Claude 2026-11-07: through the NetworkEntity, because it decides what ticks. This only stopped the pawn itself, and left its entity and
 # TickState running: 2,000 pawns that were off still cost 53 ms a tick.
-func set_simulation_active(active: bool) -> void:
-	if _simulating == active:
+# Claude 2026-11-16 (pawn M1): renamed from set_simulation_active(active), the agreed name; the true-or-false is the other way round.
+func set_frozen(frozen: bool) -> void:
+	if _frozen == frozen:
 		return
-	_simulating = active
+	_frozen = frozen
 	if _driver == null:
-		set_physics_process(active)
+		set_physics_process(not frozen)
 	elif _entity:
-		_entity.set_paused(not active)
-	elif active:
-		_driver.register(self)
-	else:
+		_entity.set_paused(frozen)
+	elif frozen:
 		_driver.unregister(self)
+	else:
+		_driver.register(self)
 
 
-func is_simulation_active() -> bool:
-	return _simulating
+## True while frozen. Claude 2026-11-16 (pawn M1): was is_simulation_active(), the other way round.
+func is_frozen() -> bool:
+	return _frozen
 
 
 ## Claude 2026-11-09: true where this pawn's AI runs: offline, or on the server. The AI never runs on a client (pawn spec 10.2).
@@ -404,120 +361,8 @@ func get_health() -> float:
 	return stat_manager.get_current(&"Health", 0.0) if stat_manager else 0.0
 
 
-## Claude 2026-11-09: brings a dead pawn back with full Health, on the server. Its Death ability ends on its next tick.
-func revive() -> void:
-	if not is_authority() or stat_manager == null:
-		return
-	var stat := stat_manager.get_stat(&"Health")
-	if stat and stat.changes_during_play:
-		stat.current = stat.value
-
-
-## Claude 2026-11-09: something hit this pawn. Called on the server by the attacking ability, such as MeleeAttack (step 9). In
-## order (step 10 added the first three):
-##   1. Its AI notes the hit (AIContextComponent.note_hit), for the "being hit" state rules, and wakes a decision.
-##   2. Its memory adds threat to the attacker's entry, if it has one: damage × AIMemory.threat_per_damage.
-##   3. It takes the damage from its Health stat. At 0 its Death ability starts, its AI stops, died goes out, and nothing below
-##      happens.
-##   4. Its own knockback starts, through its own AbilityManager, so the push moves it like its other movement and rolls back.
-##   5. hit_received goes out.
-## Claude 2026-11-10 (pawn spec 8.11): steps 2 to 4 are now the hit's effects, which its EffectManager applies in their order:
-## damage is a StatChangePart, the push a KnockbackPart that starts the Knockback ability, and threat is added for the Health taken.
-## Then hit_received, then the attacker gets the hit's attacker_effects (an EffectApplier on hit, applies to self).
-## Claude 2026-11-09 (pawn spec 15.4): called during the simulate phase, as an ability's hit is, it's queued, and every queued hit is
-## delivered after all pawns have simulated, in a fixed order, so the result never depends on whether this pawn simulated before or
-## after its attacker. Called at any other time, such as from game code or a test, it takes effect at once.
-func receive_hit(hit: HitInfo) -> void:
-	if not is_authority() or hit == null or is_dead():
-		return
-	if _driver and _driver.is_in_simulate():
-		_queue_hit(hit)
-		return
-	_take_hit(hit)
-
-
-## Claude 2026-11-10: true while hits don't land on this pawn, because an ability with invulnerable_while_running runs, such as a Dash.
-## A hit then does nothing at all: no damage, no knockback, no hit_received, and the AI doesn't note it.
-func is_invulnerable() -> bool:
-	return ability_manager != null and ability_manager.is_invulnerable()
-
-
-# Claude 2026-11-09: the hit itself, steps 1 to 5 above. Checked again here, because a queued hit can arrive after another killed it.
-# Claude 2026-11-10: and invulnerability, checked here when the hit is delivered: a dash started in the same tick dodges it.
-# Claude 2026-11-10 (pawn spec 8.11): damage, threat and knockback moved into the hit's effects, which the EffectManager applies.
-func _take_hit(hit: HitInfo) -> void:
-	if not is_authority() or is_dead() or is_invulnerable():
-		return
-	if ai_context:
-		ai_context.note_hit(hit)
-	# Claude 2026-11-15: a running parry turns away a hit from the front: no effects land, and the attacker is pushed back instead
-	# (ParryAbility). The AI above still notes it was attacked.
-	if ability_manager and ability_manager.parry_hit(hit):
-		return
-	if effect_manager:
-		effect_manager.take_hit(hit)
-	hit_received.emit(hit)
-	var attacker := hit.attacker
-	if not hit.attacker_effects.is_empty() and is_instance_valid(attacker) and attacker.effect_manager:
-		attacker.effect_manager.apply_effects(hit.attacker_effects, attacker, hit.ability, hit)
-
-
-## Claude 2026-11-15: an enemy has started a swing that may reach this pawn: its hit starts on hit_tick. On the server, its AI notes it
-## (so it can parry, AIParryBehaviour). MeleeAttackAbility calls this when a swing starts, if its warns_targets is on.
-func notice_incoming_attack(attacker: Pawn, start_tick: int, hit_tick: int) -> void:
-	if not is_authority() or is_dead():
-		return
-	if ai_context:
-		ai_context.note_incoming_attack(attacker, start_tick, hit_tick)
-
-
-## Claude 2026-11-10: the EffectManager calls this on the authority when an effect has just taken this pawn's Health to 0: its Death
-## ability starts (_die). hit is the hit that did it, or null (a poison's tick). Nothing happens if it's already dead.
-func health_ran_out(hit: HitInfo) -> void:
-	if is_authority() and not is_dead():
-		_die(hit)
-
-
-# Claude 2026-11-09 (pawn spec 15.4): holds a hit until after simulate. One queue for all pawns, delivered by the tick driver's
-# after_simulate signal, which is connected the first time a hit is queued.
-func _queue_hit(hit: HitInfo) -> void:
-	if _hit_queue_driver != _driver:
-		# GDScript note: Pawn._deliver_queued_hits is a Callable on the class itself, not on this pawn, so it keeps working after
-		# this pawn is freed.
-		if is_instance_valid(_hit_queue_driver) and _hit_queue_driver.after_simulate.is_connected(Pawn._deliver_queued_hits):
-			_hit_queue_driver.after_simulate.disconnect(Pawn._deliver_queued_hits)
-		_driver.after_simulate.connect(Pawn._deliver_queued_hits)
-		_hit_queue_driver = _driver
-	_queued_hits.append([_order_key(hit.attacker), _order_key(self), _queued_hits.size(), hit])
-
-
-# Claude 2026-11-09: the entity id, which is the same on every machine, or -1 for a pawn that isn't networked (the queue order then
-# decides, which is the order pawns simulated in).
-static func _order_key(node: Node) -> int:
-	var pawn := node as Pawn
-	if pawn == null or not is_instance_valid(pawn) or pawn._entity == null:
-		return -1
-	return pawn._entity.entity_id
-
-
-# Claude 2026-11-09: delivers every queued hit, sorted by the attacker's entity id, then the target's, then the order they were queued.
-static func _deliver_queued_hits(_dt: float, _tick: int) -> void:
-	if _queued_hits.is_empty():
-		return
-	var hits := _queued_hits
-	_queued_hits = []
-	hits.sort_custom(func(a: Array, b: Array) -> bool:
-		if a[0] != b[0]:
-			return a[0] < b[0]
-		if a[1] != b[1]:
-			return a[1] < b[1]
-		return a[2] < b[2])
-	var hits_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
-	for entry in hits:
-		var hit: HitInfo = entry[3]
-		if is_instance_valid(hit.target):
-			hit.target._take_hit(hit)
-	PerfScopes.end(&"pawn.hits", hits_started)
+# Claude 2026-11-16 (pawn M3): revive, receive_hit, is_invulnerable, notice_incoming_attack, health_ran_out and the hit queue moved to the
+# AbilityManager (pawn.ability_manager.receive_hit and so on); the swing's warning goes to the AI context directly.
 
 
 ## Claude 2026-11-09: the shared table of plain pawn data (scaling spec section 3), or null without the C++ library. Read-only for
@@ -549,15 +394,6 @@ func get_network_entity() -> NetworkEntity:
 	return _entity
 
 
-## Claude 2026-11-09: how many pawns in the tree are on a team other than this one. AI sensing skips looking when it's 0.
-static func count_pawns_not_on_team(own_team: int) -> int:
-	var total := 0
-	for each_team: int in _pawns_per_team:
-		if each_team != own_team:
-			total += _pawns_per_team[each_team]
-	return total
-
-
 # --- Ticks ---
 
 
@@ -565,79 +401,30 @@ static func count_pawns_not_on_team(own_team: int) -> int:
 ## A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
 func _tick_input(_dt: float, tick: int) -> void:
 	if is_dead():
-		_clear_input() # Claude 2026-11-09: a dead pawn ignores its controllers and its AI
+		if controller_manager:
+			controller_manager.clear_input() # Claude 2026-11-09: a dead pawn ignores its controllers and its AI
 		return
-	var ai_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
-	_tick_ai(tick) # Claude 2026-11-09: step 1 of pawn spec section 4, before the controller in charge is asked for input
-	PerfScopes.end(&"ai", ai_started)
-	if controller_manager == null or not _decides_own_input():
-		return
-	var input_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
-	var command := controller_manager.take_input_command(tick)
-	PerfScopes.end(&"pawn.input", input_started)
-	if command:
-		apply_input(command)
-
-
-## Claude 2026-11-09: the AI's step, in a fixed order (pawn spec sections 4 and 10.9). Runs only where the AI runs (offline or the
-## server), never while a rollback replays ticks, and, while a player has the pawn, only as far as the AI context's
-## while_possessed allows. Order:
-##   1. Sensing, which writes into memory (Claude 2026-11-09, step 8b).
-##   2. On a decision tick, or when something asked for a decision: the target is picked, the state is checked, then the
-##      behaviour manager decides.
-##   3. The running behaviour ticks, which calls the AI controller.
-func _tick_ai(tick: int) -> void:
-	if ai_context == null or not runs_ai_here():
-		return
-	if _driver and _driver.is_resimulating():
-		return # the AI is never rolled back, so a replay must not run it again
-	ai_context.current_tick = tick
-	# Claude 2026-11-09 (scaling spec step 3): forces asked for during the last tick (a taunt from another pawn, say), in the order
-	# they were asked for. Before anything else, and even while possessed, as a force between ticks would have been.
-	if ai_state_manager:
-		ai_state_manager.apply_queued(tick)
-	if ai_target_selector:
-		ai_target_selector.apply_queued(tick)
-	if _has_player and ai_context.while_possessed == AIContextComponent.WhilePossessed.OFF:
-		return
-	# Claude 2026-11-09: step 1, sensing writes into memory. MEMORY_ONLY stops after it.
-	if ai_sensing_manager:
-		var sensing_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
-		ai_sensing_manager.tick_sensing(tick)
-		PerfScopes.end(&"ai.sensing", sensing_started)
-	if _has_player and ai_context.while_possessed == AIContextComponent.WhilePossessed.MEMORY_ONLY:
-		return
-	if ai_state_manager:
-		ai_state_manager.check_force_expiry(tick)
-	if ai_target_selector:
-		ai_target_selector.check_force_expiry(tick)
-	if ai_context.is_decision_tick(tick):
-		ai_context.request_decision()
-	var decide_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
-	if ai_context.has_decision_waiting():
-		if ai_target_selector:
-			ai_target_selector.update_target(tick) # first, because states such as Combat look at the current target
-		if ai_state_manager:
-			ai_state_manager.update_state(tick) # a change asks for a decision with the new state's priority
-		if ai_behaviour_manager:
-			ai_behaviour_manager.decide(tick)
-		else:
-			ai_context.clear_decision()
-	PerfScopes.end(&"ai.decide", decide_started)
-	if ai_behaviour_manager:
-		var behaviours_started := PerfScopes.begin()
-		ai_behaviour_manager.tick_running(tick)
-		PerfScopes.end(&"ai.behaviours", behaviours_started)
+	# Claude 2026-11-09: the AI first (step 1 of pawn spec section 4), before the controller in charge is asked for input.
+	# Claude 2026-11-16 (pawn M1): the AI's ordered step moved into its core part, AIContextComponent.run_ai (was Pawn._tick_ai).
+	if ai_context:
+		var ai_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+		ai_context.run_ai(tick)
+		PerfScopes.end(&"ai", ai_started)
+	# Claude 2026-11-16 (pawn M4): the ControllerManager asks the controller in charge and writes the input, where it's decided here.
+	if controller_manager:
+		var input_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+		controller_manager.tick_input(tick)
+		PerfScopes.end(&"pawn.input", input_started)
 
 
 func _tick_simulate(dt: float, tick: int) -> void:
-	# Claude 2026-11-09: resting (pawn spec 15.3). Checked before _current_position is overwritten, because "nothing moved it since
-	# its last tick" compares against it. A resting pawn only does the bookkeeping at the end.
-	var resting := _can_rest(tick)
-	is_resting = resting
+	# Claude 2026-11-09: sleeping (pawn spec 15.3). Checked before _current_position is overwritten, because "nothing moved it since
+	# its last tick" compares against it. A sleeping pawn only does the bookkeeping at the end.
+	var sleeping := _can_sleep(tick)
+	is_sleeping = sleeping
 	_previous_position = _current_position
 	_previous_yaw = _current_yaw
-	if resting:
+	if sleeping:
 		_finish_tick()
 		return
 	# Claude 2026-11-07: abilities steer, then gravity, then one move_and_slide. Gravity goes by whether it was on the ground when the
@@ -653,6 +440,11 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	if not was_grounded:
 		velocity.y -= _gravity_strength() * dt
 	# move_and_slide uses Godot's physics delta. This scales it so that one tick moves velocity * tick dt.
+	# Claude 2026-11-16 (movement experiments): standing still with nothing to move it: skip the solve (see skip_move_when_still).
+	if skip_move_when_still and was_grounded and velocity == Vector3.ZERO and global_position == _current_position and not _is_check_tick(tick):
+		PerfScopes.add(&"pawn.move_skipped", 0)
+		_finish_tick()
+		return
 	var factor: float = _driver.get_physics_factor() if _driver else 1.0
 	velocity *= factor
 	var move_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
@@ -660,40 +452,47 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	PerfScopes.end(&"pawn.move_and_slide", move_started)
 	velocity /= factor
 	grounded = is_on_floor()
-	_finish_tick() # Claude 2026-11-09: moved into a function, which a resting tick runs too
+	_finish_tick() # Claude 2026-11-09: moved into a function, which a sleeping tick runs too
 
 
-# Claude 2026-11-09: the end of every tick, resting or not: where the body is now, for smoothing Visual and for the resting check,
+# Claude 2026-11-09: the end of every tick, sleeping or not: where the body is now, for smoothing Visual and for the sleeping check,
 # and the input bookkeeping.
 func _finish_tick() -> void:
 	_current_position = global_position
 	_current_yaw = yaw
-	# Claude 2026-11-07: what was held this tick, so the next tick can tell a press from a hold.
-	previous_held_actions = held_actions
-	# Claude 2026-11-07: a tick with real input ends a run of missing ones.
-	if not _input_missing_this_tick:
-		_missing_input_ticks = 0
-	_input_missing_this_tick = false
+	# Claude 2026-11-07: the input bookkeeping: what was held this tick, so the next tick can tell a press from a hold, and a tick with
+	# real input ends a run of missing ones. Claude 2026-11-16 (pawn M4): the ControllerManager's, with the input.
+	if controller_manager:
+		controller_manager.finish_tick()
 
 
-## Claude 2026-11-09: true if this pawn rests this tick (pawn spec 15.3). A pure rule of its state and the tick number, with nothing
+## Claude 2026-11-09: true if this pawn sleeps this tick (pawn spec 15.3). Claude 2026-11-16 (pawn M1): "resting" renamed "sleeping", the standard
+## physics name, so it isn't confused with frozen or paused. A pure rule of its state and the tick number, with nothing
 ## remembered, so nothing extra rolls back and a server and a client predicting it rest on the same ticks. In order of cheapness:
-##   - rest_when_idle is on, it's grounded, its velocity is exactly zero, and it has no move input and no held actions
+##   - sleep_when_idle is on, it's grounded, its velocity is exactly zero, and it has no move input and no held actions
 ##   - nothing moved it since its last tick (a teleport, or TerrainBodyLifter raising it)
-##   - this isn't one of its check ticks, every rest_check_ticks, staggered by entity id
-##   - its abilities have no timer running and agree (AbilityManager.can_rest)
-##   - Claude 2026-11-10: it has no over-time effect on it to count down (EffectManager.can_rest)
-func _can_rest(tick: int) -> bool:
-	if not rest_when_idle or not grounded or velocity != Vector3.ZERO or move_input != Vector3.ZERO or held_actions != 0:
+##   - this isn't one of its check ticks, every sleep_check_ticks, staggered by entity id
+##   - its abilities have no timer running and agree (AbilityManager.can_sleep)
+##   - Claude 2026-11-10: it has no over-time effect on it to count down (EffectManager.can_sleep)
+func _can_sleep(tick: int) -> bool:
+	if not sleep_when_idle or not grounded or velocity != Vector3.ZERO:
+		return false
+	if controller_manager and (controller_manager.move_input != Vector3.ZERO or controller_manager.held_actions != 0): # Claude 2026-11-16 (pawn M4)
 		return false
 	if global_position != _current_position:
 		return false
+	if _is_check_tick(tick): # Claude 2026-11-16 (movement experiments): shared with skip_move_when_still
+		return false
+	if effect_manager and not effect_manager.can_sleep(): # Claude 2026-11-10
+		return false
+	return ability_manager == null or ability_manager.can_sleep()
+
+
+# Claude 2026-11-09: one of this pawn's check ticks, every sleep_check_ticks, staggered by entity id, when a sleeping or still pawn runs
+# a full tick anyway so ground that went away under it is noticed. Claude 2026-11-16 (movement experiments): moved into its own function.
+func _is_check_tick(tick: int) -> bool:
 	var stagger: int = _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
-	if (tick + stagger) % TickDriver.ticks_at_rate(rest_check_ticks) == 0: # Claude 2026-11-09 (scaling spec step 6)
-		return false
-	if effect_manager and not effect_manager.can_rest(): # Claude 2026-11-10
-		return false
-	return ability_manager == null or ability_manager.can_rest()
+	return (tick + stagger) % TickDriver.ticks_at_rate(sleep_check_ticks) == 0 # Claude 2026-11-09 (scaling spec step 6)
 
 
 ## TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is
@@ -702,13 +501,16 @@ func _on_state_loaded(_tick: int) -> void:
 	# Claude 2026-11-07: previous_held_actions is restored by the TickState itself now, as rollback state.
 	var saved_position := position
 	var saved_velocity := velocity
-	var saved_snap := floor_snap_length
-	floor_snap_length = 0.0
-	velocity = Vector3.ZERO
-	move_and_slide()
-	floor_snap_length = saved_snap
-	if grounded and not is_on_floor():
-		apply_floor_snap()
+	if rebuild_floor_on_rollback: # Claude 2026-11-16 (movement experiments): gated, see rebuild_floor_on_rollback
+		var saved_snap := floor_snap_length
+		floor_snap_length = 0.0
+		velocity = Vector3.ZERO
+		var rebuild_started := PerfScopes.begin()
+		move_and_slide()
+		PerfScopes.end(&"pawn.rollback_floor_rebuild", rebuild_started)
+		floor_snap_length = saved_snap
+		if grounded and not is_on_floor():
+			apply_floor_snap()
 	position = saved_position
 	velocity = saved_velocity
 	_previous_position = global_position
@@ -746,50 +548,11 @@ func _process(delta: float) -> void:
 func _on_network_role(entity: NetworkEntity) -> void:
 	_entity = entity
 	# The server runs it now: it stops doing what the last player's final input said.
-	if entity.role == NetworkEntity.Role.AUTHORITY and entity.owner_peer == 0:
-		_clear_input()
-	if is_node_ready():
-		_refresh_source()
-		_refresh_ai_activity()
+	if entity.role == NetworkEntity.Role.AUTHORITY and entity.owner_peer == 0 and controller_manager:
+		controller_manager.clear_input()
 
 
-## On the server: a client's input is never trusted. Wrong types are replaced, and direction is limited to full speed.
-func sanitize_network_input(values: Dictionary) -> Dictionary:
-	var clean := values.duplicate()
-	var wanted: Variant = values.get("move_input", Vector3.ZERO)
-	clean["move_input"] = wanted.limit_length(1.0) if wanted is Vector3 and wanted.is_finite() else Vector3.ZERO
-	# Claude 2026-11-07: replaces the two bools. Bits for actions that aren't listed are thrown away.
-	var held: Variant = values.get("held_actions", 0)
-	clean["held_actions"] = held & InputActions.all_listed_mask() if held is int else 0
-	# Claude 2026-11-09: a number of ticks, never negative. LagCompensation limits how far back it really goes.
-	var behind: Variant = values.get("view_ticks_behind", 0.0)
-	clean["view_ticks_behind"] = maxf(behind, 0.0) if behind is float and is_finite(behind) else 0.0
-	for angle: String in ["look_yaw", "look_pitch"]:
-		var value: Variant = values.get(angle, 0.0)
-		clean[angle] = value if value is float and is_finite(value) else 0.0
-	return clean
-
-
-## On the server: this tick's input never arrived, so the last one repeats. A held direction repeats fine, and a press doesn't.
-# Claude 2026-11-07: a press can't repeat any more, because a repeated hold isn't "newly held". New: after missing_input_hold_ticks,
-# the direction fades out. Held actions are left alone, so a key still held when input comes back doesn't count as a new press.
-func _network_input_missing() -> void:
-	_input_missing_this_tick = true
-	_missing_input_ticks += 1
-	# Claude 2026-11-07: -1 means NetworkSession's rule. With no session at all, 3 and 6, the same as its defaults.
-	var session: Node = get_node_or_null("/root/NetworkSession")
-	var hold: int = missing_input_hold_ticks if missing_input_hold_ticks >= 0 else (session.missing_input_hold_ticks if session else 3)
-	var fade: int = missing_input_fade_ticks if missing_input_fade_ticks >= 0 else (session.missing_input_fade_ticks if session else 6)
-	# Claude 2026-11-09 (scaling spec step 6): written for 60 ticks a second.
-	hold = TickDriver.ticks_at_rate(hold)
-	fade = TickDriver.ticks_at_rate(fade)
-	if _missing_input_ticks <= hold:
-		return
-	if fade <= 0:
-		move_input = Vector3.ZERO
-	else:
-		# A full-length direction reaches zero in "fade" ticks. A shorter one gets there sooner.
-		move_input = move_input.move_toward(Vector3.ZERO, 1.0 / fade)
+# Claude 2026-11-16 (pawn M4): sanitize_network_input and _network_input_missing moved to the ControllerManager, NetworkEntity's input_owner.
 
 
 ## On a client, for a pawn someone else controls: it was just moved between snapshots, so Visual follows.
@@ -819,52 +582,10 @@ func _find_view(node: Node) -> VirtualCamera:
 	return null
 
 
-# Claude 2026-11-09, step 10: Health reached 0. The Death ability locks out everything, which stops the pawn steering; the AI's
-# running behaviour stops and its hands let go.
-func _die(hit: HitInfo) -> void:
-	if _death == null or not ability_manager:
-		return
-	ability_manager.start_ability(_death)
-	if effect_manager: # Claude 2026-11-10: dying ends every effect on it (pawn spec 8.11)
-		effect_manager.remove_all()
-	if ai_behaviour_manager:
-		ai_behaviour_manager.stop_running("died")
-	var hands := controller_manager.ai_controller as AIController if controller_manager else null
-	if hands:
-		hands.release_all()
-	died.emit(self, hit)
-
-
-# Claude 2026-11-09: keeps the shared team counts in step with pawns entering and leaving the tree, and changing team.
-static func _count_team(which_team: int, change: int) -> void:
-	var count: int = _pawns_per_team.get(which_team, 0) + change
-	if count <= 0:
-		_pawns_per_team.erase(which_team)
-	else:
-		_pawns_per_team[which_team] = count
-
-
-func _clear_input() -> void:
-	# Claude 2026-11-07: keeps the look direction, as before.
-	move_input = Vector3.ZERO
-	held_actions = 0
-
-
-## A pawn only has a source if something wants the world kept loaded around it, so a horde doesn't carry thousands of them.
-func _refresh_source() -> void:
-	if not is_inside_tree():
-		return
-	# On a client, another player's pawn needs nothing loaded here. It's drawn from snapshots.
-	var wanted := _is_simulated_here() and (_has_player or ai_loads_chunks)
-	if wanted and _source == null:
-		_source = StreamingSource.new()
-		_source.name = "StreamingSource"
-		_source.load_distance = streaming_load_distance
-		_source.nav_distance = streaming_nav_distance
-		add_child(_source)
-	elif not wanted and _source != null:
-		_source.queue_free()
-		_source = null
+# Claude 2026-11-16 (pawn M2): the game's pawn defaults, for the distances, or null without a PawnInitializer.
+func _pawn_defaults() -> PawnDefaultsRes:
+	var initializer: PawnInitializer = _game_mode.pawn_initializer if _game_mode else null
+	return initializer.defaults if initializer else null
 
 
 ## Claude 2026-11-07: gravity in metres per second per second, from the gravity setting or else the project's.
@@ -874,26 +595,15 @@ func _gravity_strength() -> float:
 	return ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
 
 
-## Claude 2026-11-07: true where this pawn's input is decided: offline, its owner's machine, or the server for a pawn nobody owns. False
-## on the server for a client's pawn, whose input arrives over the network, and on a client for anyone else's pawn.
-func _decides_own_input() -> bool:
-	return _entity == null or _entity.is_local or (_entity.role == NetworkEntity.Role.AUTHORITY and _entity.owner_peer == 0)
-
-
-## False for a pawn on a client that belongs to someone else.
-func _is_simulated_here() -> bool:
+## False for a pawn on a client that belongs to someone else. Claude 2026-11-16 (pawn M4): public (was _is_simulated_here), since the ControllerManager
+## asks it too; deciding whose input this is moved there (ControllerManager.decides_own_input).
+func is_simulated_here() -> bool:
 	return _entity == null or _entity.is_local or _entity.role == NetworkEntity.Role.AUTHORITY
 
 
-## An AI pawn is switched off where there's no ground. A pawn with a source always has ground, so it's never watched.
-func _refresh_ai_activity() -> void:
-	var ai := _ai_activation_manager()
-	if ai == null:
-		return
-	if _source != null or _has_player or not _is_simulated_here():
-		ai.remove_pawn(self)
-	else:
-		ai.add_pawn(self)
+# Claude 2026-11-16 (pawn M4): true while a player has this pawn (asked of its ControllerManager; a pawn without one never has a player).
+func _has_a_player() -> bool:
+	return controller_manager != null and controller_manager.has_player()
 
 
 func _ai_activation_manager() -> AIActivationManager: # Claude 2026-11-07: renamed with the module

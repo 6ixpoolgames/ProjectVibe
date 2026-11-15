@@ -7,7 +7,7 @@
 ##   pawn.effect_manager.has_effect(effect)              # is an over-time effect on the pawn now?
 ##   pawn.effect_manager.remove_with_tag(EffectTags.DEBUFF)   # a cleanse
 ##   pawn.effect_manager.resistances[EffectTags.DAMAGE_ELEMENTAL_FIRE] = 0.5   # set in the inspector, usually
-## A hit (HitInfo) carries its ability's effects, and Pawn._take_hit hands them here (take_hit).
+## A hit (HitInfo) carries its ability's effects, and AbilityManager._take_hit hands them here (take_hit; Pawn's until pawn M3).
 ##
 ## Applying one, in order (apply_effect):
 ##   1. A dead pawn takes nothing. A harmful effect does nothing while the pawn is invulnerable (a dash), or if the pawn's resistance
@@ -98,6 +98,10 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	if pawn == null:
 		return
+	# Claude 2026-11-16 (pawn M3): dying ends every effect on it (pawn spec 8.11): this listens for it now, where Pawn._die used to call remove_all.
+	var abilities := _sibling_ability_manager()
+	if abilities:
+		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: remove_all())
 	var entries: Array[String] = ["%s:active_effects" % String(pawn.get_path_to(self))]
 	for child in pawn.get_children():
 		if child is TickStateComponent:
@@ -115,7 +119,7 @@ func apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBa
 		return false
 	var resistance := 0.0
 	if effect.is_harmful:
-		if pawn.is_invulnerable():
+		if pawn.ability_manager and pawn.ability_manager.is_invulnerable(): # Claude 2026-11-16 (pawn M3): moved from Pawn
 			return false
 		resistance = resistance_to(effect)
 		if resistance >= 1.0:
@@ -168,7 +172,7 @@ func apply_effects(effects: Array[Effect], source: Pawn = null, source_ability: 
 		apply_effect(effect, source, source_ability, hit)
 
 
-## Called by Pawn._take_hit, on the authority: the hit's effects, from its attacker. Fills in hit.damage_dealt.
+## Called by AbilityManager._take_hit (Pawn's until pawn M3), on the authority: the hit's effects, from its attacker. Fills in hit.damage_dealt.
 func take_hit(hit: HitInfo) -> void:
 	var before := pawn.get_health()
 	apply_effects(hit.effects, hit.attacker, hit.ability, hit)
@@ -211,7 +215,7 @@ func tick_effects() -> void:
 		if pawn.is_dead():
 			return
 		var effect: Effect = entry[0]
-		if effect.is_harmful and pawn.is_invulnerable():
+		if effect.is_harmful and pawn.ability_manager and pawn.ability_manager.is_invulnerable(): # Claude 2026-11-16 (pawn M3): moved from Pawn
 			continue # a dash dodges a poison's tick too
 		var application := EffectApplication.new()
 		application.effect = effect
@@ -222,8 +226,8 @@ func tick_effects() -> void:
 		_run_once(application)
 
 
-## True if the pawn can rest (pawn spec 15.3): nothing in the list to count down, and nothing waiting to be worked out.
-func can_rest() -> bool:
+## True if the pawn can sleep (pawn spec 15.3): nothing in the list to count down, and nothing waiting to be worked out.
+func can_sleep() -> bool:
 	return _entries.is_empty() and not _dirty
 
 
@@ -328,7 +332,8 @@ func _run_once(application: EffectApplication) -> void:
 			continue
 		part.apply_once(application)
 		if not pawn.is_dead() and pawn.stat_manager and pawn.stat_manager.has_stat(&"Health") and pawn.get_health() <= 0.0:
-			pawn.health_ran_out(application.hit)
+			if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): moved from Pawn
+				pawn.ability_manager.health_ran_out(application.hit)
 		if pawn.is_dead():
 			break
 	var source := application.source
@@ -423,3 +428,12 @@ func _warn_once(key: String, message: String) -> void:
 		return
 	_warned[key] = true
 	push_warning(message)
+
+# Claude 2026-11-16 (pawn M3): the pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
+func _sibling_ability_manager() -> AbilityManager:
+	if pawn == null:
+		return null
+	for child in pawn.get_children():
+		if child is AbilityManager:
+			return child
+	return null

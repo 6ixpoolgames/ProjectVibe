@@ -7,6 +7,14 @@
 ##
 ## It's a node of its own, not a setting on the controller, so that things without a pawn controller can use it too.
 ## Claude 2026-11-07: Pawn makes its own while a player possesses it, or while its ai_loads_chunks bool is on.
+## Claude 2026-11-16 (pawn M2): not any more: a Pawn is a source itself (the owner's call: a flag on the pawn, the streamer holding the code).
+##
+## The source contract: anything in the GROUP below with these counts as a source, a StreamingSource node or a Pawn, and the chunk
+## streamer, the nav feeder and the replay read them only through these:
+##   global_position                      where it is
+##   load_distance, nav_distance          how far it loads ground and builds nav, in metres
+##   counts_on_this_machine() -> bool     whether it loads anything on this machine right now
+##   distance_moved_since_last_check()    how far it moved since the streamer last asked
 ##
 ## In multiplayer, a source on a networked entity counts only where it should, with no setup needed:
 ##   - On the server, or offline: it counts, so the world stays loaded around every player, wherever they are.

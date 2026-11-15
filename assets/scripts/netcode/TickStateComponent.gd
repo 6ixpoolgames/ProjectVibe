@@ -257,7 +257,10 @@ func _tick_capture_input(tick: int) -> void:
 
 ## After simulating. Stores what state the entity ended this tick in.
 func _tick_record(tick: int) -> void:
-	if _states.is_empty() and _custom_paths.is_empty():
+	# Claude 2026-11-16 (networking T1.0, from the networking assessment): N3: sync properties count too. An entity with only sync properties (a score or a status, say) used to record
+	# nothing, so has_state was never true and it never went into a snapshot. Now its ticks are recorded with an empty state list,
+	# and its sync values ride along as for any other entity.
+	if _states.is_empty() and _custom_paths.is_empty() and _syncs.is_empty():
 		return
 	# Claude 2026-11-04: following uses the server's data, not its own, so it has nothing to save.
 	if rollback_mode == RollbackMode.FOLLOW_SERVER:

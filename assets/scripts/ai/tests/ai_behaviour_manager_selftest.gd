@@ -453,22 +453,22 @@ func _test_while_possessed() -> void:
 	await _ticks(5)
 	var context := pawn.ai_context
 	context.while_possessed = AIContextComponent.WhilePossessed.MEMORY_ONLY
-	pawn.set_has_player(true) # a player on another machine, so nobody here is in charge
+	pawn.controller_manager.set_has_player(true) # a player on another machine, so nobody here is in charge
 	var before := counter.ticks
 	await _ticks(10)
 	_check(counter.ticks == before, "MEMORY_ONLY (the default): behaviours pause while a player has the pawn")
-	pawn.set_has_player(false)
+	pawn.controller_manager.set_has_player(false)
 	await _ticks(5)
 	_check(counter.ticks > before and _running_name(pawn) == &"Counter", "letting go: the same behaviour carries on, with no special code")
 	context.while_possessed = AIContextComponent.WhilePossessed.OFF
-	pawn.set_has_player(true)
+	pawn.controller_manager.set_has_player(true)
 	before = counter.ticks
 	await _ticks(10)
 	_check(counter.ticks == before, "OFF: nothing runs while a player has the pawn")
 	context.while_possessed = AIContextComponent.WhilePossessed.FULL
 	await _ticks(10)
 	_check(counter.ticks > before, "FULL: behaviours keep running")
-	pawn.set_has_player(false)
+	pawn.controller_manager.set_has_player(false)
 	pawn.free()
 	# FULL: the hands keep the order without touching the player's path, and carry it out once in charge again.
 	var go := GoToBehaviour.new()
@@ -478,7 +478,7 @@ func _test_while_possessed() -> void:
 	pawn.ai_context.while_possessed = AIContextComponent.WhilePossessed.FULL
 	pawn.ai_context.decision_interval_ticks = NEVER
 	await _ticks(5)
-	pawn.set_has_player(true)
+	pawn.controller_manager.set_has_player(true)
 	pawn.navigation_manager.move_to(Vector3(-10, 0, 0)) # the player's path
 	_decide(pawn, TickDriver.tick) # GoTo starts while the AI isn't in charge
 	var hands: AIController = pawn.controller_manager.ai_controller
@@ -488,7 +488,7 @@ func _test_while_possessed() -> void:
 	hands.stop()
 	_check(pawn.navigation_manager.is_following_path(), "stop() while not in charge leaves the player's path alone too")
 	hands.move_to(Vector3(10, 0, 0))
-	pawn.set_has_player(false)
+	pawn.controller_manager.set_has_player(false)
 	await _ticks(3)
 	corners = pawn.navigation_manager.get_path_corners()
 	_check(pawn.navigation_manager.is_following_path() and corners[corners.size() - 1].x > 9.0, "in charge again: the kept walk starts")

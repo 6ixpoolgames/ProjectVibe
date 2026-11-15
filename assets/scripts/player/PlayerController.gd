@@ -55,6 +55,7 @@ var look_pitch := 0.0
 var _latched_actions := 0
 var _zoom_steps := 0.0
 var _arm: CameraArm = null
+var _own_arm: CameraArm = null # Claude 2026-11-16 (pawn M5): the player's one arm, moved to each pawn they take; made when first needed
 
 
 func _ready() -> void:
@@ -97,9 +98,10 @@ func take_pawn(new_pawn: Pawn) -> void:
 		_show_mouse()
 		_latched_actions = 0 # Claude 2026-11-07: a press before letting go doesn't belong to the next pawn
 	else:
+		# Claude 2026-11-16 (pawn M5): a pawn's own placed arm or view is used as it is; otherwise the player's one arm moves to the pawn's mount.
 		_arm = pawn.get_camera_arm()
 		if _arm == null and pawn.get_default_view() == null:
-			_arm = pawn.make_camera_arm()
+			_arm = _attach_own_arm(pawn)
 		if _arm:
 			_arm.set_active(true)
 			# The view stays where the player was looking, as far as this arm allows.
@@ -270,11 +272,23 @@ func _edge_turn(delta: float) -> float:
 func _let_go_of_arm() -> void:
 	if is_instance_valid(_arm):
 		_arm.set_active(false)
-		# An arm possession made goes away with it. A placed arm, or a hero's, stays.
-		if _arm.spawned_by_possession and _arm.is_inside_tree():
-			_arm.get_parent().remove_child(_arm)
-			_arm.queue_free()
+		# Claude 2026-11-16 (pawn M5): the player's own arm comes back here, idle, for the next pawn. A placed arm stays on its pawn.
+		if _arm == _own_arm and _arm.get_parent() != self:
+			_arm.reparent(self, false)
 	_arm = null
+
+
+# Claude 2026-11-16 (pawn M5): moves the player's arm to a pawn's mount (its CameraMount, or Visual), with the pawn's preset, ignoring the pawn's own body.
+func _attach_own_arm(target: Pawn) -> CameraArm:
+	if not is_instance_valid(_own_arm):
+		_own_arm = CameraArm.new()
+		_own_arm.name = "CameraArm"
+		add_child(_own_arm)
+	_own_arm.reparent(target.get_camera_mount(), false)
+	_own_arm.apply_preset(target.get_camera_preset())
+	_own_arm.clear_ignored()
+	_own_arm.ignore_body(target)
+	return _own_arm
 
 
 func _capture_mouse() -> void:

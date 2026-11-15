@@ -5,8 +5,11 @@
 ##   "chunk_built"     data: terrain (its id here), chunk (Vector2i)       a terrain finished building a chunk
 ##   "chunk_collision" data: terrain, chunk                                its collision is in, so things can stand on it
 ##   "chunk_removed"   data: terrain, chunk
-##   "source_added", "source_removed", "source_on", "source_off"
-##                     data: source (its id here), position, load, nav    a chunk source appeared, went, or was switched
+##   "source_added", "source_removed"
+##                     data: source (its id here), position, load, nav    a chunk source started or stopped keeping the world loaded
+##                     here. Claude 2026-11-16 (pawn M2): pawns are sources now, so only those that count on this machine are tracked
+##                     (counts_on_this_machine), and a source switched off is "source_removed". "source_on" and "source_off"
+##                     are still read in older recordings.
 ## A keyframe's snapshot: every terrain (id, name, chunk size, origin, built chunks) and every source (id, position, load and nav
 ## distances, on or off, and whether it counts on this machine).
 ##
@@ -19,7 +22,7 @@ extends ReplayEventChannel
 const ID := 4
 
 var _terrains: Array[TerrainGenerator] = [] # a terrain's id here is its index + 1
-var _sources := {} # source instance id -> [source id here, StreamingSource, active last tick]
+var _sources := {} # source instance id -> [source id here, the source (a StreamingSource or a Pawn)]
 var _next_source_id := 1
 
 
@@ -61,7 +64,7 @@ func snapshot() -> Dictionary:
 				"chunks": terrain.get_loaded_chunks()}
 	var sources := {}
 	for entry: Array in _sources.values():
-		var source: StreamingSource = entry[1]
+		var source: Node3D = entry[1]
 		if is_instance_valid(source):
 			sources[entry[0]] = _describe_source(source)
 	return {"terrains": terrains, "sources": sources}
@@ -147,19 +150,15 @@ func _check_sources() -> void:
 		return
 	var seen := {}
 	for node in recorder.get_tree().get_nodes_in_group(StreamingSource.GROUP):
-		var source := node as StreamingSource
-		if source == null:
+		var source := node as Node3D
+		if source == null or not source.counts_on_this_machine():
 			continue
 		var key := source.get_instance_id()
 		seen[key] = true
-		var entry: Variant = _sources.get(key)
-		if entry == null:
-			_sources[key] = [_next_source_id, source, source.active]
+		if not _sources.has(key):
+			_sources[key] = [_next_source_id, source]
 			_next_source_id += 1
 			add_event("source_added", 0, _describe_source(source))
-		elif entry[2] != source.active:
-			entry[2] = source.active
-			add_event("source_on" if source.active else "source_off", 0, _describe_source(source))
 	for key: int in _sources.keys():
 		if not seen.has(key):
 			var gone: Array = _sources[key]
@@ -167,7 +166,7 @@ func _check_sources() -> void:
 			add_event("source_removed", 0, {"source": gone[0]})
 
 
-func _describe_source(source: StreamingSource) -> Dictionary:
+func _describe_source(source: Node3D) -> Dictionary:
 	var entry: Variant = _sources.get(source.get_instance_id())
 	return {"source": entry[0] if entry != null else 0, "position": source.global_position, "load": source.load_distance,
-		"nav": source.nav_distance, "active": source.active, "counts": source.counts_on_this_machine()}
+		"nav": source.nav_distance, "active": true, "counts": true}

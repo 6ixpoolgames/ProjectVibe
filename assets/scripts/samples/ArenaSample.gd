@@ -239,7 +239,8 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 			_player_readouts.erase(pawn)
 			_last_ability.erase(pawn))
 	if not NetworkSession.is_client():
-		pawn.died.connect(_on_pawn_died)
+		if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): died moved to the AbilityManager
+			pawn.ability_manager.died.connect(_on_pawn_died)
 
 
 # Claude 2026-11-10: a readout label over a pawn. Moved here from _on_entity_spawned, unchanged, so players' pawns get one too.

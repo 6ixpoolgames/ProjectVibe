@@ -12,7 +12,7 @@
 | What it's suspected of | Not the GPU (good hardware, a simple game), unless something leaks: so memory and object, node and orphan-node counts are recorded every frame | the owner |
 | Recordings and logs | Always on in debug builds | the owner |
 | Keys | One per panel, for readability, in a small font with nothing overlapping. A proper look comes with UI v0 | the owner |
-| How it's switched on | The project setting `project_base/game_mode/modules` lists `DiagnosticsManager`; its `.release` override leaves it out. The base never names it | Claude's proposal, agreed |
+| How it's switched on | The project setting `project_base/game_mode/modules` lists `DiagnosticsManager`. The base never names it. *(2026-11-16: the `.release` override lists it too, and it moved from `debug/` to `diagnostics/`: diagnostics ship in release builds, for bug reports, the owner's call)* | Claude's proposal, agreed; release, the owner's call |
 | The performance baseline check | On request. Claude suggests a run when one is warranted | the owner |
 
 ## 2. The pieces
@@ -20,7 +20,7 @@
 | Class | Where | What it does |
 |---|---|---|
 | `PerfScopes` | `assets/scripts/diagnostics/` (base) | Timing scopes. Systems mark their work with `begin()` and `end(name, started)`. With nothing listening it costs one check of a true-or-false, so the marks stay in shipping code |
-| `DiagnosticsManager` | `assets/scripts/debug/diagnostics/` (debug only) | A `GameMode` module. Every frame it measures the frame and keeps 30 s of history, spikes, session logs and warnings, and feeds the replay, the editor's monitors and the panels |
+| `DiagnosticsManager` | `assets/scripts/diagnostics/` (shipped, 2026-11-16) | A `GameMode` module. Every frame it measures the frame and keeps 30 s of history, spikes, session logs and warnings, and feeds the replay, the editor's monitors and the panels |
 | `DiagnosticsLogger` | the same | Godot's `Logger`, catching every warning and error from any thread, for the manager to take once a frame |
 | `DiagnosticsPanels` | the same | The panels, one key each, and the capture key |
 | `ReplayDiagnosticsChannel` | `assets/scripts/replay/` (base) | Replay channel 6: each frame's numbers and scopes, plus warnings and captures as events. A plain data channel that the manager fills |

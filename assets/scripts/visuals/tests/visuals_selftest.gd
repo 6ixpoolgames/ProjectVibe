@@ -64,7 +64,7 @@ func _test_waddle() -> void:
 	_check(moving.most_rock > deg_to_rad(5.0) and moving.most_hop > 0.04 and moving.leaned_forward, "walking: it rocks side to side, hops and leans forward (rock %.1f deg, hop %.3f m)" % [rad_to_deg(moving.most_rock), moving.most_hop])
 	_ai(pawn).stop()
 	pawn.stat_manager.change_current(&"Health", -1000.0)
-	pawn.health_ran_out(null)
+	pawn.ability_manager.health_ran_out(null)
 	await _frames(90)
 	_check(pawn.is_dead() and absf(waddle.rotation.z) > deg_to_rad(70.0), "dead: it falls over on its side (%.0f deg)" % rad_to_deg(absf(waddle.rotation.z)))
 	var sword: FloatingSword = pawn.get_node(^"Visual/FloatingSword")

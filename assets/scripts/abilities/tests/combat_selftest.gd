@@ -220,16 +220,16 @@ func _test_interrupts() -> void:
 	ai.press(&"dash")
 	await _until(func() -> bool: return dash.is_running_timed(), 5)
 	await _ticks(2)
-	pawn.receive_hit(_push_hit(pawn))
-	_check(dash.is_running_timed() and not knockback.is_running_timed() and pawn.is_invulnerable(), "early in a dash a hit does nothing: invulnerable (%d ticks in)" % dash.ticks_running())
-	await _until(func() -> bool: return not pawn.is_invulnerable(), 20)
+	pawn.ability_manager.receive_hit(_push_hit(pawn))
+	_check(dash.is_running_timed() and not knockback.is_running_timed() and pawn.ability_manager.is_invulnerable(), "early in a dash a hit does nothing: invulnerable (%d ticks in)" % dash.ticks_running())
+	await _until(func() -> bool: return not pawn.ability_manager.is_invulnerable(), 20)
 	var invulnerable_for := dash.ticks_running()
 	_check(dash.is_running_timed() and invulnerable_for == 11, "invulnerable for the first 0.18 s, 11 ticks, then not, while the dash still runs (%d)" % invulnerable_for)
-	pawn.receive_hit(_push_hit(pawn))
+	pawn.ability_manager.receive_hit(_push_hit(pawn))
 	_check(not dash.is_running_timed() and knockback.is_running_timed() and cancels.has([&"Dash", &"Knockback"]), "a hit after that lands, and its knockback (30) cancels the dash (threshold 25)")
 	ai.stop()
 	await _until(func() -> bool: return not knockback.is_running_timed() and not dash.is_running_timed() and dash.cooldown_ticks_left == 0, 150)
-	_check(not pawn.is_invulnerable(), "and it isn't invulnerable once the dash is over")
+	_check(not pawn.ability_manager.is_invulnerable(), "and it isn't invulnerable once the dash is over")
 	# cancelled_by: a test-only ability that jump can always cancel, though its threshold (100) is far above jump's priority (5).
 	var cancelled_by_jump := Busy.new()
 	cancelled_by_jump.name = "CancelledByJump"
@@ -360,7 +360,7 @@ func _test_hits_after_simulate() -> void:
 		# GDScript note: a lambda can't change a plain local it captured, so what it records goes into an array.
 		var seen := []
 		attacker.ability_manager.get_node("MeleeAttack").hit_landed.connect(func(_hit): seen.append(["landed", TickDriver.tick]))
-		target.hit_received.connect(func(_hit): seen.append(["received", TickDriver.tick, TickDriver.is_in_simulate()]))
+		target.ability_manager.hit_received.connect(func(_hit): seen.append(["received", TickDriver.tick, TickDriver.is_in_simulate()]))
 		var ai := _ai(attacker)
 		ai.look_at_point(Vector3(-30, 1, 30))
 		await _ticks(2)
@@ -393,7 +393,7 @@ func _test_melee_hits() -> void:
 	var landed := []
 	melee.hit_landed.connect(func(hit): landed.append(hit))
 	var received := []
-	near.hit_received.connect(func(hit): received.append(hit))
+	near.ability_manager.hit_received.connect(func(hit): received.append(hit))
 	var ai := _ai(attacker)
 	ai.look_at_point(Vector3(0, 1, 30))
 	await _ticks(2)
@@ -453,14 +453,17 @@ func _test_server_only_and_replays() -> void:
 
 func _test_view_ticks_behind() -> void:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
-	var negative := pawn.sanitize_network_input({"view_ticks_behind": -4.0})
-	var nan := pawn.sanitize_network_input({"view_ticks_behind": NAN})
-	var wrong := pawn.sanitize_network_input({"view_ticks_behind": "far"})
-	var fine := pawn.sanitize_network_input({"view_ticks_behind": 6.5})
+	# Claude 2026-11-16 (pawn M4): the input checks are the ControllerManager's, which a pawn only gets when it enters the tree, so a bare one.
+	var checks := ControllerManager.new()
+	var negative := checks.sanitize_network_input({"view_ticks_behind": -4.0})
+	var nan := checks.sanitize_network_input({"view_ticks_behind": NAN})
+	var wrong := checks.sanitize_network_input({"view_ticks_behind": "far"})
+	var fine := checks.sanitize_network_input({"view_ticks_behind": 6.5})
 	_check(negative["view_ticks_behind"] == 0.0 and nan["view_ticks_behind"] == 0.0 and wrong["view_ticks_behind"] == 0.0, "view_ticks_behind from a client: negative, NaN or the wrong type become 0")
 	_check(fine["view_ticks_behind"] == 6.5, "a sensible value passes through (LagCompensation limits how far back it goes)")
 	var tick_state: TickStateComponent = pawn.get_node("TickState")
-	_check(tick_state.input_properties.has("view_ticks_behind @float"), "it's in the pawn's input list, so a client's swing carries it")
+	_check(tick_state.input_properties.has("ControllerManager:view_ticks_behind @float"), "it's in the pawn's input list, so a client's swing carries it")
+	checks.free()
 	pawn.free()
 
 

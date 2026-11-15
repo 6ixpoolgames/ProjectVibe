@@ -21,14 +21,14 @@ const ID := 1
 const FLAG_GROUNDED := 1
 ## Dead (Pawn.dead): its Death ability runs.
 const FLAG_DEAD := 2
-## Frozen: switched off completely, so it doesn't tick at all (Pawn.is_simulation_active() is false). The AI switch-off does this
+## Frozen: switched off completely, so it doesn't tick at all (Pawn.is_frozen()). The AI switch-off does this
 ## where no ground is loaded.
 const FLAG_FROZEN := 4
-## Sleeping: idle, so it skipped its physics this tick, but still ticks its input and AI and wakes at once (Pawn.is_resting).
+## Sleeping: idle, so it skipped its physics this tick, but still ticks its input and AI and wakes at once (Pawn.is_sleeping).
 const FLAG_SLEEPING := 8
-## Keeps the world loaded around it: it has a chunk source of its own (Pawn.has_chunk_source()).
+## Keeps the world loaded around it: it has a chunk source of its own (Pawn.is_keeping_world_loaded()).
 const FLAG_HAS_SOURCE := 16
-## A player controls it (Pawn.has_player()).
+## A player controls it (ControllerManager.has_player(); Pawn's until pawn M4).
 const FLAG_HAS_PLAYER := 32
 # Claude 2026-11-15: in the file only, version 2: this record's position is whole, not a change. Never in a record read back.
 const _WHOLE_POSITION := 128
@@ -47,13 +47,13 @@ static func flags_of(pawn: Pawn) -> int:
 		flags |= FLAG_GROUNDED
 	if pawn.dead:
 		flags |= FLAG_DEAD
-	if not pawn.is_simulation_active():
+	if pawn.is_frozen():
 		flags |= FLAG_FROZEN
-	if pawn.is_resting:
+	if pawn.is_sleeping:
 		flags |= FLAG_SLEEPING
-	if pawn.has_chunk_source():
+	if pawn.is_keeping_world_loaded():
 		flags |= FLAG_HAS_SOURCE
-	if pawn.has_player():
+	if pawn.controller_manager and pawn.controller_manager.has_player(): # Claude 2026-11-16 (pawn M4)
 		flags |= FLAG_HAS_PLAYER
 	return flags
 

@@ -5,7 +5,8 @@
 ##
 ## The level (mass_battle_sample.tscn):
 ##   - Smaller chunks than the other samples (64 m, not 128), and every source loads ground 160 m around it (not 320), so a spread-out
-##     level fits in a test. Load distances are on each StreamingSource node, and load_distance below for players and heroes.
+##     level fits in a test. Load distances are on each StreamingSource node, and load_distance below for players and heroes (Claude 2026-11-16: the game's
+##     setting for every pawn that keeps the world loaded, PawnDefaultsRes.world_load_distance, set while this level runs).
 ##   - Three faction spawners, 300 m from the middle and 120 degrees apart: red goblins, blue goblins, and the players' soldiers. Each
 ##     has a StreamingSource child, so the ground around it is always loaded, wherever the players are. Each faction's hero has its
 ##     own spawner beside it, which brings it back 30 s after it dies.
@@ -15,7 +16,7 @@
 ##     300 m out) meets the middle's (160 m out), so the whole way is loaded. With it off there's a gap in the middle, and the AI
 ##     switch-off (AIActivationManager) freezes every AI pawn there, unless a hero or a player is near enough to keep the ground loaded.
 ##   - Heroes (hero_red.tscn, hero_blue.tscn, hero_ally.tscn): a bigger figure on a 1.5 times bigger capsule, 1000 Health, 15% slower,
-##     hitting 1.5 times as hard with a little more reach, and a chunk source of its own (ai_loads_chunks). H switches every hero's
+##     hitting 1.5 times as hard with a little more reach, and keeps the world loaded itself (keeps_world_loaded). H switches every hero's
 ##     source on and off, apart from the centre's.
 ##   - The player starts at the players' spawner, 285 m from the middle, so they can watch the march or walk in.
 ##
@@ -38,8 +39,12 @@ const HERO_RED_SCENE := preload("res://assets/scenes/samples/hero_red.tscn")
 const HERO_BLUE_SCENE := preload("res://assets/scenes/samples/hero_blue.tscn")
 const HERO_ALLY_SCENE := preload("res://assets/scenes/samples/hero_ally.tscn")
 
-## How far players' pawns keep ground loaded here, in metres, the same as the level's other sources. Set as a player's pawn spawns.
+## How far players' pawns and heroes keep ground loaded here, in metres, the same as the level's other sources. Claude 2026-11-16 (pawn M2): the
+## game's setting now (PawnDefaultsRes.world_load_distance), so this level sets it on a copy of the defaults while it runs, and puts
+## the old ones back when it closes.
 @export_range(0.0, 2000.0, 1.0, "or_greater") var load_distance := 160.0
+
+var _defaults_before: PawnDefaultsRes = null
 
 var _heroes: Array[Pawn] = []
 var _hero_sources_on := true
@@ -55,6 +60,12 @@ func _ready() -> void:
 	NetworkSession.register_type("hero_red", HERO_RED_SCENE)
 	NetworkSession.register_type("hero_blue", HERO_BLUE_SCENE)
 	NetworkSession.register_type("hero_ally", HERO_ALLY_SCENE)
+	# Claude 2026-11-16 (pawn M2): this level's load distance, as the game's setting while it runs.
+	var initializer: PawnInitializer = GameMode.pawn_initializer
+	if initializer and initializer.defaults:
+		_defaults_before = initializer.defaults
+		initializer.defaults = _defaults_before.duplicate()
+		initializer.defaults.world_load_distance = load_distance
 	# Off to begin with: with hundreds of pawns, the readouts and shapes cost more than what they show. F3 brings them back.
 	_show_readouts = false
 	_debug_draw.visible = false
@@ -80,6 +91,12 @@ func _process(delta: float) -> void:
 		print(diagnostics.summary_text(diagnostics.get_summary(5.0)))
 
 
+# Claude 2026-11-16 (pawn M2): the game's defaults back as they were.
+func _exit_tree() -> void:
+	if _defaults_before and GameMode.pawn_initializer:
+		GameMode.pawn_initializer.defaults = _defaults_before
+
+
 func _records_timeline() -> bool:
 	return false
 
@@ -90,14 +107,12 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 	if pawn == null:
 		return
 	if pawn.scene_file_path == FACTION_PLAYER_SCENE.resource_path:
-		# Before it's possessed, which is when it makes its StreamingSource (Pawn._refresh_source).
-		pawn.streaming_load_distance = load_distance
 		if _near_middle: # Claude 2026-11-16: diagnostics
 			pawn.global_position = $RallyPoint.global_position + Vector3(0, 3, 30)
 	elif _is_hero(pawn):
 		_heroes.append(pawn)
 		if not _hero_sources_on:
-			pawn.ai_loads_chunks = false
+			pawn.keeps_world_loaded = false # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -137,7 +152,7 @@ func set_centre_source(on: bool) -> void:
 func set_hero_sources(on: bool) -> void:
 	_hero_sources_on = on
 	for hero in get_heroes():
-		hero.ai_loads_chunks = on
+		hero.keeps_world_loaded = on # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
 
 
 ## The heroes alive in the level right now.

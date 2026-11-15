@@ -127,18 +127,18 @@ func _test_hop() -> void:
 	await _ticks(10)
 	_check(pawn.grounded, "the target starts on the ground")
 	var start_y := pawn.global_position.y
-	pawn.receive_hit(_hit(pawn, 2.0))
+	pawn.ability_manager.receive_hit(_hit(pawn, 2.0))
 	await _ticks(2)
 	_check(not pawn.grounded and pawn.velocity.y > 0.0, "a hit with a hop lifts it off the ground (%.2f m/s up)" % pawn.velocity.y)
 	await _ticks(5)
 	var rising := pawn.velocity.y
-	pawn.receive_hit(_hit(pawn, 2.0))
+	pawn.ability_manager.receive_hit(_hit(pawn, 2.0))
 	await _ticks(2)
 	_check(pawn.velocity.y < rising, "a second hit in the air doesn't lift it again (%.2f m/s, was %.2f)" % [pawn.velocity.y, rising])
 	await _until(func() -> bool: return pawn.grounded, 90)
 	_check(pawn.grounded and absf(pawn.global_position.y - start_y) < 0.05, "and it lands again")
 	var from := pawn.global_position
-	pawn.receive_hit(_hit(pawn, 0.0))
+	pawn.ability_manager.receive_hit(_hit(pawn, 0.0))
 	await _ticks(2)
 	_check(pawn.grounded, "with no hop, a hit pushes it along the ground")
 	await _ticks(20)
@@ -158,7 +158,7 @@ func _test_invulnerable() -> void:
 	await _ticks(5)
 	_ai(target).press(&"secondary")
 	await _ticks(2)
-	_check(shield.is_running_timed() and target.is_invulnerable(), "an ability with invulnerable_while_running makes its pawn invulnerable while it runs")
+	_check(shield.is_running_timed() and target.ability_manager.is_invulnerable(), "an ability with invulnerable_while_running makes its pawn invulnerable while it runs")
 	await _swing(attacker, origin + Vector3(0, 1, -10))
 	_check(hits.is_empty() and target.get_health() == 100.0, "a swing doesn't hit an invulnerable pawn (HP %d)" % int(target.get_health()))
 	attacker.free()
@@ -166,14 +166,14 @@ func _test_invulnerable() -> void:
 	# Dashing: a hit straight to receive_hit does nothing.
 	var dasher := _pawn(Vector3(20, 0.1, 90), 0)
 	var received := []
-	dasher.hit_received.connect(func(hit: HitInfo) -> void: received.append(hit))
+	dasher.ability_manager.hit_received.connect(func(hit: HitInfo) -> void: received.append(hit))
 	await _ticks(20) # it lands first (Claude 2026-11-10: Dash works in the air now, but the check is on the ground, as before)
 	_ai(dasher).press(&"dash")
 	await _ticks(2)
 	var dash: DashAbility = dasher.ability_manager.get_node("Dash")
 	var hit := _hit(dasher, 2.0)
 	hit.effects.append(Effect.make_damage(30)) # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
-	dasher.receive_hit(hit)
+	dasher.ability_manager.receive_hit(hit)
 	_check(dash.is_running_timed() and received.is_empty() and dasher.get_health() == 100.0, "a dashing pawn takes no hit: no damage and no hit_received (dashing %s, %d received, HP %d, grounded %s)" % [dash.is_running_timed(), received.size(), int(dasher.get_health()), dasher.grounded])
 	dasher.free()
 

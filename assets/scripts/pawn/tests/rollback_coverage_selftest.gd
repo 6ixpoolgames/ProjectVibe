@@ -24,13 +24,13 @@ const NOT_ROLLED_BACK := {
 	"AbilityManager:_timed": "worked out from the timers",
 	"AbilityManager:_timers_dirty": "worked out from the timers",
 	# For drawing: the body's place and facing at the last two ticks, so Visual moves smoothly between them. Never read by the
-	# simulation, except that a stale one only stops a pawn resting for a tick (Pawn._can_rest), which is safe.
+	# simulation, except that a stale one only stops a pawn sleeping for a tick (Pawn._can_sleep), which is safe.
 	"Pawn:_current_position": "drawing",
 	"Pawn:_current_yaw": "drawing",
 	"Pawn:_previous_position": "drawing",
 	"Pawn:_previous_yaw": "drawing",
-	# Worked out fresh every tick from rolled-back state (Pawn._can_rest: "nothing remembered"); kept for readouts.
-	"Pawn:is_resting": "worked out each tick",
+	# Worked out fresh every tick from rolled-back state (Pawn._can_sleep: "nothing remembered"); kept for readouts.
+	"Pawn:is_sleeping": "worked out each tick",
 	# Walk's and Sprint's copies of their stats, read again whenever the StatManager's version changes (pawn spec 15.2). Sprint fills
 	# them the first time it runs; Walk already has by the time play starts here, but the same holds for it.
 	"SprintAbility:_acceleration": "a cache of stats",

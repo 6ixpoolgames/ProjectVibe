@@ -17,6 +17,8 @@
 ##   _on_network_role(entity)                     told its role before entering the tree, so it can pick where input comes from
 ##   sanitize_network_input(values) -> Dictionary the server cleans a client's input. Never trust it
 ##   _network_input_missing()                     the server has no input for this tick and repeats the last one
+## Claude 2026-11-16 (pawn M4): those two input hooks go to input_owner when it's set (a Pawn's ControllerManager sets itself, since it holds the
+## input), and to the parent otherwise.
 ##   _on_network_interpolated()                   a remote entity was just moved between snapshots
 ##   _on_network_corrected(jump)                  a rollback moved it by this much, for hiding the jump on the visible model
 ##
@@ -41,6 +43,9 @@ enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED, LOCA
 		keep_history_offline = value
 		refresh_input_saving()
 
+## Claude 2026-11-16 (pawn M4): the node that holds this entity's input, for the server's input hooks (sanitize_network_input and
+## _network_input_missing). Null: the parent, as before.
+var input_owner: Node = null
 var entity_id: int = -1
 var type_name: String = ""
 var owner_peer: int = 0            # the peer that sends its input; 0 is the server itself, such as an AI pawn
@@ -209,8 +214,9 @@ func _tick_input(dt: float, tick: int) -> void:
 		# Claude 2026-11-04: only once it has started sending. A client takes a moment to sync its clock after its pawn spawns.
 		if last_input_tick >= 0:
 			missed_inputs += 1
-		if _root.has_method(&"_network_input_missing"):
-			_root._network_input_missing()
+		var owner_node: Node = input_owner if is_instance_valid(input_owner) else _root # Claude 2026-11-16 (pawn M4)
+		if owner_node.has_method(&"_network_input_missing"):
+			owner_node._network_input_missing()
 
 
 ## Server: remembers where this entity was, so lag compensation can look back.
@@ -235,8 +241,9 @@ func follow_server(render_tick: float, allow_extrapolation: bool = true) -> void
 
 ## The server's cleaned-up version of a client's input.
 func clean_input(values: Dictionary) -> Dictionary:
-	if _root.has_method(&"sanitize_network_input"):
-		return _root.sanitize_network_input(values)
+	var owner_node: Node = input_owner if is_instance_valid(input_owner) else _root # Claude 2026-11-16 (pawn M4)
+	if owner_node.has_method(&"sanitize_network_input"):
+		return owner_node.sanitize_network_input(values)
 	return values
 
 

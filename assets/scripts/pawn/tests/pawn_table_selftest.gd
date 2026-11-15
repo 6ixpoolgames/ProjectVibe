@@ -59,9 +59,9 @@ func _test_columns() -> void:
 	table.require_column(&"grounded") # what a system that reads it does
 	table.disable_column(&"grounded") # warns: a system needs it
 	_check(table.is_column_on(&"grounded"), "a column a system requires stays on when switched off by hand (with a warning)")
-	_check(table.add_column(&"rest_ticks", TYPE_INT, &"rest_check_ticks", 0) and table.is_column_on(&"rest_ticks"), "a game's own column, read from a property, on once added")
+	_check(table.add_column(&"rest_ticks", TYPE_INT, &"sleep_check_ticks", 0) and table.is_column_on(&"rest_ticks"), "a game's own column, read from a property, on once added")
 	table.refresh(51)
-	_check(table.get_row(table.get_slot(pawn)).get("rest_ticks") == pawn.rest_check_ticks and Array(table.get_column(&"rest_ticks")) == [pawn.rest_check_ticks], "its values, in a row and as a whole column")
+	_check(table.get_row(table.get_slot(pawn)).get("rest_ticks") == pawn.sleep_check_ticks and Array(table.get_column(&"rest_ticks")) == [pawn.sleep_check_ticks], "its values, in a row and as a whole column")
 	_check(not table.add_column(&"rest_ticks", TYPE_INT, &"x", 0) and not table.enable_column(&"no_such_column"), "a name that's taken, or one that doesn't exist, is refused with an error")
 	pawn.free()
 

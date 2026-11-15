@@ -298,22 +298,30 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 		_set_up_streaming_for(entity) # Claude 2026-11-07
 
 
+# Claude 2026-11-16 (pawn M2): this test's load and nav distances, as the game's setting (PawnDefaultsRes), on a copy of the defaults, once.
+var _distances_set := false
+func _set_world_distances() -> void:
+	var initializer: PawnInitializer = GameMode.pawn_initializer
+	if _distances_set or initializer == null or initializer.defaults == null:
+		return
+	_distances_set = true
+	initializer.defaults = initializer.defaults.duplicate()
+	initializer.defaults.world_load_distance = float(settings.get("load-distance", 96))
+	initializer.defaults.world_nav_distance = float(settings.get("nav-distance", 64))
+
+
 ## Claude 2026-11-07: the real pawn makes its own source. This only sets its distances and gives it something to walk it.
 func _set_up_real_pawn(entity: NetworkEntity) -> void:
 	var pawn: Pawn = entity.get_parent()
-	pawn.streaming_load_distance = float(settings.get("load-distance", 96))
-	pawn.streaming_nav_distance = float(settings.get("nav-distance", 64))
+	_set_world_distances() # Claude 2026-11-16 (pawn M2): the game's setting now, not each pawn's
 	# Claude 2026-11-07: a player's first pawn is the one they possess, which gives it a source. Their other walkers are test scaffolding:
 	# nothing would load ground for them, so this turns it on, as a game would have to for pawns like these.
 	var earlier_pawns: int = _real_pawns_by_owner.get(entity.owner_peer, 0)
 	_real_pawns_by_owner[entity.owner_peer] = earlier_pawns + 1
 	if (entity.owner_peer == 0 and settings.has("ai-loads")) or (entity.owner_peer != 0 and earlier_pawns > 0):
-		pawn.ai_loads_chunks = true
+		pawn.keeps_world_loaded = true # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
 	if entity.owner_peer == 0 and settings.has("ai-not-possessable"):
 		pawn.possessable = false # Claude 2026-11-07
-	if pawn._source:
-		pawn._source.load_distance = pawn.streaming_load_distance
-		pawn._source.nav_distance = pawn.streaming_nav_distance
 	if settings.has("no-server-brain") and session.is_server():
 		return # Claude 2026-11-07
 	var brain := PawnWalkerBrain.new()
@@ -680,7 +688,8 @@ func _update_summaries() -> void:
 			"last_input_tick": entity.last_input_tick, "offset": body._correction_offset.length(), "corrections_seen": _stat(body, "corrections_seen", 0),
 			"paths": _stat(body, "paths_found", 0), "path_failures": _stat(body, "path_failures", 0), "stuck": _stat(body, "times_stuck", 0), "walked": _stat(body, "distance_walked", 0.0),
 			"missing_stretches": _stat(body, "missing_stretches", []), "bonus": body.get("bonus"), "total": body.get("total"), "tick": driver.tick,
-			"no_ground": _stat(body, "ticks_without_ground", 0), "look_yaw": _stat(body, "look_yaw", 0.0), "simulating": _stat(body, "_simulating", true),
+			"no_ground": _stat(body, "ticks_without_ground", 0), "look_yaw": body.controller_manager.look_yaw if body is Pawn and body.controller_manager else _stat(body, "look_yaw", 0.0), # Claude 2026-11-16 (pawn M4)
+			 "simulating": not _stat(body, "_frozen", false), # Claude 2026-11-16 (pawn M1): _simulating became _frozen
 		}
 
 

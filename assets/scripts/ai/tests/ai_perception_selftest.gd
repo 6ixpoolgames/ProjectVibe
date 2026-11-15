@@ -170,9 +170,10 @@ func _test_sight() -> void:
 	side.team = 1
 	observer.ai_sensing_manager.full_pass(6100)
 	_check(memory.find(side) < 0, "a pawn on its own team never goes into memory")
-	_check(Pawn.count_pawns_not_on_team(1) == 0, "with everyone on one team, there's no one to look for, so the query is skipped")
+	# Claude 2026-11-16 (pawn M1): the counts are the TeamRegistry module's now.
+	_check(GameMode.team_registry.count_not_on_team(1) == 0, "with everyone on one team, there's no one to look for, so the query is skipped")
 	side.team = 0
-	_check(Pawn.count_pawns_not_on_team(1) == 1, "changing team updates the counts")
+	_check(GameMode.team_registry.count_not_on_team(1) == 1, "changing team updates the counts")
 	side.free()
 	observer.free()
 
@@ -188,10 +189,10 @@ func _test_eyes() -> void:
 	_check(sight.visibility_of(target) > 0.9, "looking behind it (look_at_point): now it is")
 	hands.stop_looking()
 	_check(sight.visibility_of(target) == 0.0, "stop_looking: back to the body's facing")
-	observer.set_has_player(true)
-	observer.look_yaw = PI # a player looking behind
+	observer.controller_manager.set_has_player(true)
+	observer.controller_manager.look_yaw = PI # a player looking behind
 	_check(sight.visibility_of(target) > 0.9, "while a player has it: where the player looks")
-	observer.set_has_player(false)
+	observer.controller_manager.set_has_player(false)
 	observer.free()
 	target.free()
 
@@ -204,11 +205,11 @@ func _test_scheduled_sensing() -> void:
 	_check(ticks >= 0 and ticks < 60, "on schedule (passes and refreshes): certain in front, close, within a second (%d ticks)" % ticks)
 	memory.clear()
 	observer.ai_context.while_possessed = AIContextComponent.WhilePossessed.MEMORY_ONLY
-	observer.set_has_player(true)
-	observer.look_yaw = 0.0
+	observer.controller_manager.set_has_player(true)
+	observer.controller_manager.look_yaw = 0.0
 	ticks = await _until(func() -> bool: return memory.find(target) >= 0, 60)
 	_check(ticks >= 0, "while possessed with MEMORY_ONLY, sensing still fills memory")
-	observer.set_has_player(false)
+	observer.controller_manager.set_has_player(false)
 	observer.free()
 	target.free()
 

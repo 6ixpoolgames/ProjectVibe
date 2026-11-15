@@ -97,8 +97,8 @@ func _ready() -> void:
 		info.attacker = player
 		info.target = victim
 		info.effects = [Effect.make_damage(20)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
-		victim.receive_hit(info)
-	_check(victim.is_dead() and arena._kills == 1, "a goblin killed counts as a kill (dead %s, %d kills, invulnerable %s, HP %d)" % [victim.is_dead(), arena._kills, victim.is_invulnerable(), victim.get_health()]) # Claude 2026-11-12: says why
+		victim.ability_manager.receive_hit(info)
+	_check(victim.is_dead() and arena._kills == 1, "a goblin killed counts as a kill (dead %s, %d kills, invulnerable %s, HP %d)" % [victim.is_dead(), arena._kills, victim.ability_manager.is_invulnerable(), victim.get_health()]) # Claude 2026-11-12: says why
 	# Claude 2026-11-10: its spawner removes the body and sends a replacement; R (_spawn_wave) refills at once.
 	var body_seconds: float = arena.get_spawners()[0].body_seconds
 	await get_tree().create_timer(body_seconds + 0.5).timeout

@@ -145,8 +145,8 @@ func take_input_command(_tick: int) -> InputCommand:
 		_command.look_yaw = _look_yaw
 		_command.look_pitch = _look_pitch
 	else:
-		_command.look_yaw = pawn.look_yaw
-		_command.look_pitch = pawn.look_pitch
+		_command.look_yaw = pawn.controller_manager.look_yaw if pawn.controller_manager else pawn.yaw # Claude 2026-11-16 (pawn M4)
+		_command.look_pitch = pawn.controller_manager.look_pitch if pawn.controller_manager else 0.0
 	_command.held_actions = _held | _pressed_once | link_press
 	_pressed_once = 0
 	return _command

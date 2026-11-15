@@ -12,7 +12,7 @@
 ##   - Checked through LagCompensation.melee, so a player's swing is judged against where they saw other pawns: the pawn's input
 ##     carries view_ticks_behind, and the server limits it to what's believable. The AI's swings use 0.
 ##   - Each pawn is hit at most once per swing. Its own team is skipped unless hits_own_team is on.
-##   - Each hit calls the target's Pawn.receive_hit() with a HitInfo, which starts the target's own knockback, and sends hit_landed
+##   - Each hit calls the target's AbilityManager.receive_hit() (Pawn's until pawn M3) with a HitInfo, which starts the target's own knockback, and sends hit_landed
 ##     here, for local effects such as sounds. Claude 2026-11-09: the target takes the hit after every pawn has simulated this tick
 ##     (pawn spec 15.4), so hit_landed goes out first. Claude 2026-11-09: each hit also takes damage health points (step 10); dead pawns
 ##     aren't hit.
@@ -139,7 +139,7 @@ func _warn_targets() -> void:
 	query.collision_mask = pawn.collision_layer
 	query.exclude = [pawn.get_rid()]
 	var turn := deg_to_rad(windup_turn_degrees_per_second) * float(_windup()) / TickDriver.get_tick_rate()
-	var hit_yaw := rotate_toward(pawn.yaw, pawn.look_yaw, turn)
+	var hit_yaw := rotate_toward(pawn.yaw, look_yaw(), turn) # Claude 2026-11-16 (pawn M4)
 	var facing := Vector3(-sin(hit_yaw), 0.0, -cos(hit_yaw))
 	var widest := deg_to_rad(sweep_degrees * 0.5 + 30.0)
 	var now: int = TickDriver.tick
@@ -151,7 +151,9 @@ func _warn_targets() -> void:
 		to.y = 0.0
 		if to.length_squared() > 0.0001 and facing.angle_to(to.normalized()) > widest:
 			continue
-		other.notice_incoming_attack(pawn, now, now + _windup())
+		# Claude 2026-11-16 (pawn M3): straight to the target's AI (was Pawn.notice_incoming_attack), on the server, while it's alive.
+		if other.ai_context and other.is_authority() and not other.is_dead():
+			other.ai_context.note_incoming_attack(pawn, now, now + _windup())
 
 
 func _is_replaying() -> bool:
@@ -166,7 +168,7 @@ func tick(dt: float) -> void:
 	# same way. GDScript note: rotate_toward() turns an angle toward another by at most the step, the short way round.
 	if elapsed < _windup():
 		if windup_turn_degrees_per_second > 0.0:
-			pawn.yaw = rotate_toward(pawn.yaw, pawn.look_yaw, deg_to_rad(windup_turn_degrees_per_second) * dt)
+			pawn.yaw = rotate_toward(pawn.yaw, look_yaw(), deg_to_rad(windup_turn_degrees_per_second) * dt) # Claude 2026-11-16 (pawn M4)
 		return
 	if elapsed >= _windup() + _hit():
 		return
@@ -246,7 +248,7 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 	var entity := pawn.get_network_entity()
 	# Through lag compensation in a network session; offline there's nobody to rewind, and pawns aren't tagged for it.
 	if entity and entity.session:
-		for found in LagCompensation.melee_spheres(entity, centres, hit_radius, pawn.view_ticks_behind): # Claude 2026-11-10: was melee
+		for found in LagCompensation.melee_spheres(entity, centres, hit_radius, view_ticks_behind()): # Claude 2026-11-10: was melee
 			var other := found.get_parent() as Pawn
 			if other:
 				targets.append(other)
@@ -257,7 +259,7 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 			continue
 		# Claude 2026-11-10: a dashing pawn isn't hit, and isn't marked as hit either, so the rest of the sweep can catch it once its
 		# dash ends.
-		if target.is_invulnerable():
+		if target.ability_manager and target.ability_manager.is_invulnerable(): # Claude 2026-11-16 (pawn M3): moved from Pawn
 			continue
 		if target.team == pawn.team and not hits_own_team:
 			continue
@@ -276,7 +278,8 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 		if on_hit_effects.is_empty() and on_hit_self_effects.is_empty() and not _warned_no_effects:
 			_warned_no_effects = true
 			push_warning("MeleeAttackAbility %s hit %s but has no on-hit effects (EffectApplier children), so the hit does nothing." % [name, target.name])
-		target.receive_hit(hit)
+		if target.ability_manager: # Claude 2026-11-16 (pawn M3): moved from Pawn; a pawn with no abilities can't be hit
+			target.ability_manager.receive_hit(hit)
 		hit_landed.emit(hit)
 
 

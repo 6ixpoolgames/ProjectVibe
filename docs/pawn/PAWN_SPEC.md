@@ -728,7 +728,7 @@ Both kill through the effect system, so the usual death follows: the Death abili
 - **Body:** the model 1.8 times the size (`toy_scale` 3.96) and the sword 1.5 times. The collision capsule is 1.5 times too (radius 0.6, height 2.7), the owner's call, to see how a bigger body behaves; nav is still built for the normal pawn size.
 - **Stats:** their own `StatManager` in the scene (PawnInitializer skips a part the pawn already has): 1000 Health, MoveSpeed 4.25 and SprintSpeed 7.65 (15% slower).
 - **Swings:** 0.3 m more reach, with `hero_*_hit.tres` effects doing 1.5 times the damage and knockback.
-- **Chunk source:** `ai_loads_chunks` is on, with `streaming_load_distance` 160.
+- **Chunk source:** `ai_loads_chunks` is on, with `streaming_load_distance` 160. *(2026-11-16, pawn M2: now `keeps_world_loaded`, a flag; the 160 m is the level's game-wide setting, `PawnDefaultsRes.world_load_distance`.)*
 
 **The mass battle (`mass_battle_sample.tscn`, `MassBattleSample.gd`, extending the faction arena)**
 - **Teams:** `team_size` 50 a faction, changed while playing with = and - (by 10).
@@ -820,6 +820,59 @@ The owner's call: there's no health manager. Health is a stat, and death is an a
 - shields and resistances *(Claude 2026-11-10: resistances are built, 8.11)*
 
 ---
+
+### 8.16 Hits and death on the AbilityManager *(Claude 2026-11-16, pawn M3, the owner's call: gameplay signals on the manager that processes the action)*
+
+- **Moved from `Pawn` to `AbilityManager`:**
+  - `receive_hit`, the hit queue and its delivery after simulate (15.4)
+  - `health_ran_out`, `revive`, and starting the Death ability
+  - the signals `hit_received` and `died`
+- **New: `hit_arrived`.** It's sent when a hit reaches a pawn that isn't dead or invulnerable, before a parry can turn it away. `AIContextComponent` listens and notes the hit, as `Pawn._take_hit` used to do for it.
+- **Death clean-up is each part's own.** On `died`:
+  - the `EffectManager` ends every effect
+  - the `AIBehaviourManager` stops the running behaviour
+  - the `ControllerManager` makes its AI controller let go
+  
+  `Pawn._die` used to do all three. Each part finds the AbilityManager among its siblings when it's ready.
+- **A swing's warning** goes straight to the target's `ai_context.note_incoming_attack` (was `Pawn.notice_incoming_attack`).
+- **What stays on the pawn:** the `dead` flag, `is_dead()` and `get_health()`, which only read data.
+- **Callers:** `pawn.ability_manager.receive_hit(hit)`, `pawn.ability_manager.died.connect(...)`, and so on. A pawn with no AbilityManager can't be hit.
+
+### 8.17 Input and possession on the ControllerManager *(Claude 2026-11-16, pawn M4, the owner's call)*
+
+- **Moved from `Pawn` to `ControllerManager`:**
+  - the input: `move_input`, `held_actions`, `look_yaw`, `look_pitch`, `view_ticks_behind` and `previous_held_actions`
+  - `apply_input`, `is_action_held`, `was_action_pressed` and `clear_input`
+  - the end-of-tick bookkeeping (`finish_tick`)
+  - whose input is decided here (`decides_own_input`)
+  - whether a player has the pawn: `has_player`, `set_has_player` and the `possession_changed` signal
+  - the server's checks on a client's input: `sanitize_network_input`, `_network_input_missing`, and the `missing_input_*` settings
+- **The ControllerManager stays optional,** and PawnInitializer adds it by default. A pawn without one has no input and no player: it stands still and can't be possessed.
+- **Rollback:** `pawn.tscn`'s TickStateComponent lists `ControllerManager:move_input` and the rest. Input sent by clients is keyed the same way, and `sanitize_network_input` takes either the full keys or the plain names.
+- **`NetworkEntity.input_owner`:** the node its two input hooks go to. The ControllerManager sets itself when it's ready; other entities keep the parent, as before.
+- **Abilities read input through helpers on `AbilityBase`:** `move_input()`, `look_yaw()`, `view_ticks_behind()`, `held_actions()` and `previous_held_actions()`. These give "nothing pressed" without a ControllerManager.
+- **Other code reads `pawn.controller_manager` directly.** The pawn keeps no copies or shortcuts.
+- **`Pawn.is_simulated_here()`** is public now; it was `_is_simulated_here`.
+
+### 8.18 One camera per player *(Claude 2026-11-16, pawn M5, the owner's call)*
+
+- **The PlayerController owns one `CameraArm`** and moves it to each pawn it takes. It applies that pawn's settings, then brings the arm back, idle, when it lets go. Nothing is created on possession, so `always_has_camera_arm` is gone.
+- **The pawn holds only data.**
+  - A `CameraMount` node (`camera/CameraMount.gd`) its scene can place under Visual says where the arm attaches, and with which `CameraPreset`. It replaces `Pawn.camera_preset`.
+  - Without a mount, the arm attaches to Visual with the default settings.
+  - `Pawn.get_camera_mount()` and `get_camera_preset()` read it.
+- **A pawn's scene can still place its own `CameraArm`, or a `VirtualCamera` at the eyes.** Those are used as they are, and stay on the pawn.
+- **`CameraArm.apply_preset()` and `clear_ignored()`** let the arm take a new pawn's settings and body.
+
+### 8.19 Movement experiments *(Claude 2026-11-16, measured in the mass battle, 50 a faction)*
+
+- **`max_slides` 4 or 3:** no change. Most moves resolve in one or two iterations, and each call costs a fixed ~22 µs.
+- **`skip_move_when_still`, now on by default:**
+  - **What it does:** an awake pawn standing still skips `move_and_slide`, and still moves on its check ticks so it notices ground going away.
+  - **Measured:** 24 to 31 skips a frame at the first clash (about 0.2 ms); none while marching. Skips are counted as `pawn.move_skipped`.
+- **Pawn-pawn collision off:** `move_and_slide` −27% and the tick −1.5 ms at the clash, almost nothing while marching. Kept on for now. Off for distant pawns is a rung of the tick driver update's load ladder (the owner's idea).
+- **`rebuild_floor_on_rollback`:** gates the zero-length `move_and_slide` a rollback restore does to rebuild Godot's floor flag. It stays on; only clients roll back, and by default only their own pawn.
+- **The lever:** fewer calls. That means per-pawn tick steps for distant pawns (the tick driver update), since each call has a fixed cost.
 
 ## 9. Stats (built 2026-11-07, step 5)
 
@@ -1150,7 +1203,7 @@ Between decisions, only the running behaviour's `tick` runs, once per tick. When
   - `AIStateManager.gd`, `AIStateBase.gd`, `states/AIIdleState.gd`
   - `AIBehaviourManager.gd`, `AIBehaviourBase.gd`, `behaviours/AIWanderBehaviour.gd`
 - **Part scenes:** `assets/scenes/pawn/parts/AIContextComponent.tscn`, `AIStateManager.tscn` (with an Idle state) and `AIBehaviourManager.tscn` (empty), all three listed in `resources/pawn_defaults.tres`.
-- **The pawn's AI step:** `Pawn._tick_ai`, called at the start of the pawn's input phase. Also on `Pawn`:
+- **The pawn's AI step:** `Pawn._tick_ai` *(2026-11-16, pawn M1: now `AIContextComponent.run_ai`)*, called at the start of the pawn's input phase. Also on `Pawn`:
   - `runs_ai_here()`: offline, or on the server
   - `get_network_entity()`
   - `ai_context`, `ai_state_manager` and `ai_behaviour_manager`
@@ -1188,9 +1241,9 @@ Between decisions, only the running behaviour's `tick` runs, once per tick. When
 - **Part scenes:** `AISensingManager.tscn` (with a Sight node), `AIMemory.tscn` and `AITargetSelector.tscn`, added to `resources/pawn_defaults.tres`. `AIStateManager.tscn` now holds Idle, Alert and Combat, with the settings in 10.6.
 - **On `Pawn`:**
   - `team` and `detectability` settings
-  - `count_pawns_not_on_team()`, which counts the pawns in the tree on other teams
+  - `count_pawns_not_on_team()`, which counts the pawns in the tree on other teams *(2026-11-16, pawn M1: now the `TeamRegistry` module's `count_not_on_team()`, `GameMode.team_registry`)*
   - `ai_sensing_manager`, `ai_memory` and `ai_target_selector`
-- **The AI step order:** sensing every tick it's due; then, on decisions, target, then state, then behaviour (`Pawn._tick_ai`).
+- **The AI step order:** sensing every tick it's due; then, on decisions, target, then state, then behaviour (`AIContextComponent.run_ai`, `Pawn._tick_ai` until pawn M1).
 
 **What differs from, or adds to, the text above:**
 - **Which way the eyes face:**
@@ -1540,11 +1593,11 @@ Timers stay counters, not "ready at tick N" deadlines. With the list above, an i
 ### 15.3 Resting pawns
 
 A pawn **rests** on a tick when all of these hold:
-- `rest_when_idle` is on (the default; a designer can turn it off per pawn)
+- `sleep_when_idle` is on (the default; a designer can turn it off per pawn)
 - it's grounded, its velocity is exactly zero, and it has no move input and no held actions
 - nothing has moved it since its last tick (a teleport, or `TerrainBodyLifter` raising it)
-- its `AbilityManager` has no timer running, and every ability with `every_tick()` agrees (`AbilityBase.can_rest()`; Jump does once its time off the ground is 0)
-- it isn't one of its check ticks: every `rest_check_ticks` (15) it runs a full tick anyway, staggered by entity id, so ground that went away under it is noticed within a quarter of a second
+- its `AbilityManager` has no timer running, and every ability with `every_tick()` agrees (`AbilityBase.can_sleep()`; Jump does once its time off the ground is 0)
+- it isn't one of its check ticks: every `sleep_check_ticks` (15) it runs a full tick anyway, staggered by entity id, so ground that went away under it is noticed within a quarter of a second
 
 A resting pawn skips its abilities, gravity and `move_and_slide`, and only does its bookkeeping. **What wakes it:** any input or press, any ability starting (a hit's knockback, Death), any velocity, being moved, or a check tick.
 
@@ -1558,11 +1611,17 @@ Things to know:
 
 | Flag | What it means | Still ticks? | Who sets it | Wakes when | How to read it |
 |---|---|---|---|---|---|
-| **Sleeping** (called resting in the code until the pawn is slimmed down; the standard physics name) | Idle: this tick it skipped its abilities, gravity and `move_and_slide`. A cost saving that changes nothing anyone can see | Yes: input and AI every tick, and a full tick every `rest_check_ticks` | The pawn itself, worked out fresh every tick (above) | At once: any input, ability, velocity or being moved | `Pawn.is_resting`; `S` in replay labels |
-| **Frozen** | Switched off completely: no ticks at all, no AI, no physics, left out of snapshots, but all its state kept as it was | No | `AIActivationManager`, for an AI pawn with no chunk source of its own where the ground around it isn't loaded (`set_simulation_active(false)`) | When the ground around it is loaded again | `not Pawn.is_simulation_active()`; `F` in replay labels |
+| **Sleeping** (the standard physics name; called resting until pawn M1, 2026-11-16) | Idle: this tick it skipped its abilities, gravity and `move_and_slide`. A cost saving that changes nothing anyone can see | Yes: input and AI every tick, and a full tick every `sleep_check_ticks` | The pawn itself, worked out fresh every tick (above) | At once: any input, ability, velocity or being moved | `Pawn.is_sleeping`; `S` in replay labels |
+| **Frozen** | Switched off completely: no ticks at all, no AI, no physics, left out of snapshots, but all its state kept as it was | No | `AIActivationManager`, for an AI pawn with no chunk source of its own where the ground around it isn't loaded (`set_frozen(true)`) | When the ground around it is loaded again | `Pawn.is_frozen()`; `F` in replay labels |
 | **Paused** | The whole game stopped, every pawn at once. Not a pawn flag | No | The game (the arena's P key, offline only) | When the game unpauses | `get_tree().paused` |
 
 A pawn can be sleeping and later frozen, but never both on the same tick: a frozen pawn doesn't tick, so it doesn't decide whether to sleep.
+
+**Keeping the world loaded** *(Claude 2026-11-16, pawn M2, the owner's call: a flag on the pawn, with the streaming code in the streamer)*:
+- **What a pawn holds:** `keeps_world_loaded`, a flag that replaced `ai_loads_chunks`. A player's pawn always keeps the world loaded; this flag is for AI pawns that should too, such as heroes.
+- **The source contract:** a pawn is a chunk source itself, in `StreamingSource.GROUP`, and makes no `StreamingSource` node. The chunk streamer, the nav feeder and the replay read any member of the group through five things: `global_position`, `load_distance`, `nav_distance`, `counts_on_this_machine()` and `distance_moved_since_last_check()`. That's what a `StreamingSource` node has too.
+- **The distances** are the game's setting, `PawnDefaultsRes.world_load_distance` (320 m) and `world_nav_distance` (128 m), not each pawn's.
+- **The AI switch-off** watches every pawn and leaves running any that counts on this machine, checking each time it looks. A possession is checked at once. Nothing has to be told when the flag changes, so the bug of 2026-11-15, a hero left unwatched, can't come back.
 
 ### 15.4 Hits are delivered after simulate
 
@@ -1579,8 +1638,8 @@ The recorder already reads every pawn's hot values once a tick, in C++. In tier 
 ### 15.6 As built, and measured *(Claude 2026-11-09)*
 
 **Where it lives:**
-- Gates: `AbilityManager` (`timers_changed()`, `can_rest()`, `_timed`, `_every_tick_abilities`, `_action_bits`), the timer setters in `AbilityBase`, `AbilityBase.can_rest()` (Jump overrides it), Walk's `_refresh_stats()`, `StatManager.version`.
-- Resting: `Pawn.rest_when_idle`, `rest_check_ticks`, `is_resting` (for readouts and tests) and `_can_rest()`.
+- Gates: `AbilityManager` (`timers_changed()`, `can_sleep()`, `_timed`, `_every_tick_abilities`, `_action_bits`), the timer setters in `AbilityBase`, `AbilityBase.can_rest()` (Jump overrides it), Walk's `_refresh_stats()`, `StatManager.version`.
+- Sleeping (resting until pawn M1): `Pawn.sleep_when_idle`, `sleep_check_ticks`, `is_sleeping` (for readouts and tests) and `_can_sleep()`.
 - Hits: `Pawn.receive_hit()` queues during simulate; `TickDriver.after_simulate` and `TickDriver.is_in_simulate()`.
 
 **Tests:**

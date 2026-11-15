@@ -89,14 +89,14 @@ func _test_instant() -> void:
 	hit.direction = Vector3(1, 0, 0)
 	hit.effects = [Effect.make_damage(10)]
 	hit.attacker_effects = [heal]
-	a.receive_hit(hit)
+	a.ability_manager.receive_hit(hit)
 	_check(hit.damage_dealt == 10.0 and a.get_health() == 42.0 and is_equal_approx(b.get_health(), 71.0), "a hit fills in damage_dealt, and its attacker effects go on the attacker (dealt %d, b %.1f)" % [hit.damage_dealt, b.get_health()])
 	# Invulnerability stops harmful effects and lets helpful ones through.
 	_ai(a).move_in_direction(Vector3(0, 0, 1))
 	await _ticks(2)
 	_ai(a).press(&"dash")
 	await _ticks(2)
-	_check(a.is_invulnerable(), "(a is dashing)")
+	_check(a.ability_manager.is_invulnerable(), "(a is dashing)")
 	_check(not a.effect_manager.apply_effect(Effect.make_damage(10), b) and a.get_health() == 42.0, "a dashing pawn refuses harmful effects")
 	_check(a.effect_manager.apply_effect(heal, a) and a.get_health() == 57.0, "and takes helpful ones (%d)" % a.get_health())
 	_ai(a).stop()
@@ -121,7 +121,7 @@ func _test_over_time() -> void:
 	slow.tags = [EffectTags.DEBUFF_SLOW]
 	a.effect_manager.apply_effect(slow, null)
 	_check(a.effect_manager.has_effect(slow) and is_equal_approx(a.stat_manager.get_value(&"MoveSpeed"), 3.0), "a slow holds while it lasts: MoveSpeed 5 x0.6 = %.2f" % a.stat_manager.get_value(&"MoveSpeed"))
-	_check(not a.effect_manager.can_rest() and a.effect_manager.get_ticks_left(slow) == 30, "a pawn with an effect on it doesn't rest; 0.5 s is 30 ticks (%d)" % a.effect_manager.get_ticks_left(slow))
+	_check(not a.effect_manager.can_sleep() and a.effect_manager.get_ticks_left(slow) == 30, "a pawn with an effect on it doesn't rest; 0.5 s is 30 ticks (%d)" % a.effect_manager.get_ticks_left(slow))
 	_ai(a).move_in_direction(Vector3(1, 0, 0))
 	await _ticks(20)
 	var slowed_speed := Vector2(a.velocity.x, a.velocity.z).length()
@@ -190,7 +190,7 @@ func _test_stacking_and_removing() -> void:
 	_check(a.effect_manager.apply_effect(extra, null) and not a.effect_manager.apply_effect(another, null), "a full list refuses a new effect")
 	a.effect_manager.remove_all()
 	await _ticks(1)
-	_check(a.effect_manager.can_rest() and a.stat_manager.get_value(&"MoveSpeed") == 5.0, "remove_all empties the list, and the stats go back")
+	_check(a.effect_manager.can_sleep() and a.stat_manager.get_value(&"MoveSpeed") == 5.0, "remove_all empties the list, and the stats go back")
 	a.free()
 
 

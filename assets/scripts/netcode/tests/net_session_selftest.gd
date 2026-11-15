@@ -28,6 +28,9 @@ func _ready() -> void:
 	await _test_custom_only_entity_is_in_snapshots()
 	_test_actions_in_the_content_hash()
 	_test_actions_frozen_online()
+	await _test_sync_only_entity_is_in_snapshots() # Claude 2026-11-16 (networking T1.0)
+	await _test_no_snapshots_without_clients()
+	_test_unusable_inputs_dont_count()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -62,6 +65,98 @@ func _test_custom_only_entity_is_in_snapshots() -> void:
 	_check(not NetworkSession._is_in_snapshot(entity, TickDriver.tick + 100), "a tick it didn't record leaves it out, as for a paused entity")
 	entity.is_replicated = false
 	_check(not NetworkSession._is_in_snapshot(entity, recorded), "and an entity that isn't replicated is left out")
+	root.free()
+
+
+# Claude 2026-11-16 (networking T1.0): an entity whose only networked value is a sync property (a score, say). N3 in the networking assessment: it used to
+# record nothing, so it never went into a snapshot.
+class SyncOnly extends Node:
+	var score := 0
+
+
+func _test_sync_only_entity_is_in_snapshots() -> void:
+	var root := SyncOnly.new()
+	root.name = "SyncOnly"
+	var state := TickStateComponent.new()
+	state.name = "TickState"
+	state.sync_properties = ["score"]
+	root.add_child(state)
+	var entity := NetworkEntity.new()
+	entity.name = "NetworkEntity"
+	root.add_child(entity)
+	add_child(root)
+	for i in 4:
+		await get_tree().physics_frame
+	var recorded: int = TickDriver.tick - 1
+	_check(state.has_state(recorded) and state.get_state_values(recorded).is_empty(), "an entity with only sync properties records its ticks, with an empty state list")
+	_check(NetworkSession._is_in_snapshot(entity, recorded), "so it goes in snapshots, carrying its sync values")
+	root.free()
+
+
+# Claude 2026-11-16 (networking T1.0): N1: a host with nobody connected gathers and encodes nothing.
+func _test_no_snapshots_without_clients() -> void:
+	var session: NetworkSessionSingleton = NetworkSession
+	var error := session.host(47000 + randi() % 2000)
+	_check(error == OK, "(hosting, with nobody connected)")
+	var before: int = session.stats["snapshots_encoded"]
+	for i in 12:
+		await get_tree().physics_frame
+	_check(session.stats["snapshots_encoded"] == before and not session._has_welcomed_peer(), "a host with no client encodes no snapshots")
+	session._peers[999] = {"welcomed": true, "margins": [], "acknowledged_snapshot": -1}
+	_check(session._has_welcomed_peer(), "(and one welcomed client is enough to start)")
+	session._peers.erase(999)
+	session.leave()
+
+
+# Claude 2026-11-16 (networking T1.0): N2: input that can't be used doesn't count towards a client's timing (time dilation): an empty packet, one claiming a
+# newest tick beyond any history, and one with the wrong number of fields. A good one does count.
+class InputOnly extends Node:
+	var wanted := 0
+
+
+func _test_unusable_inputs_dont_count() -> void:
+	var session: NetworkSessionSingleton = NetworkSession
+	var root := InputOnly.new()
+	root.name = "InputOnly"
+	var state := TickStateComponent.new()
+	state.name = "TickState"
+	state.input_properties = ["wanted"]
+	root.add_child(state)
+	var entity := NetworkEntity.new()
+	entity.name = "NetworkEntity"
+	root.add_child(entity)
+	add_child(root)
+	var peer := 77
+	var entity_id := 9001
+	entity.configure(entity_id, "test", peer, NetworkEntity.Role.AUTHORITY, false, session)
+	session._entities[entity_id] = entity
+	session._mode = NetworkSessionSingleton.Mode.SERVER # pretend, so the packets are read the way a server reads them
+	session._peers[peer] = {"welcomed": true, "margins": [], "acknowledged_snapshot": -1}
+	var tick: int = TickDriver.tick
+	var encodings: Array = state.get_input_encodings()
+	var packet := func(newest: int, lists: Array) -> PackedByteArray:
+		var buffer := NetPackets.new_buffer()
+		buffer.put_u8(NetPackets.Type.INPUT)
+		buffer.put_u32(entity_id)
+		buffer.put_u32(newest)
+		buffer.put_32(-1)
+		buffer.put_u8(lists.size())
+		for values: Array in lists:
+			NetPackets.write_list(buffer, values, encodings if values.size() == encodings.size() else [])
+		return buffer.data_array
+	var rejected: int = session.stats["rejected_inputs"]
+	var bad: int = session.stats["bad_packets"]
+	session._on_input(peer, packet.call(tick + 2, []), tick)
+	_check(session.stats["rejected_inputs"] == rejected + 1 and session._peers[peer]["margins"].is_empty(), "an empty input packet is rejected, and its timing doesn't count")
+	session._on_input(peer, packet.call(tick + 1000000, [[1]]), tick)
+	_check(session.stats["rejected_inputs"] == rejected + 2 and session._peers[peer]["margins"].is_empty(), "so is one claiming a tick beyond any history")
+	session._on_input(peer, packet.call(tick + 2, [[1, 2, 3]]), tick)
+	_check(session.stats["bad_packets"] == bad + 1 and session._peers[peer]["margins"].is_empty(), "and one with the wrong number of fields is a bad packet")
+	session._on_input(peer, packet.call(tick + 2, [[1]]), tick)
+	_check(session._peers[peer]["margins"].size() == 1, "a good one counts towards the timing")
+	session._peers.erase(peer)
+	session._entities.erase(entity_id)
+	session.leave()
 	root.free()
 
 

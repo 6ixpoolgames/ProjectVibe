@@ -71,8 +71,9 @@ func _exit_tree() -> void:
 
 
 ## GameMode's AIActivationManager calls this. Everything about the pawn stays as it is, and it simply stops moving.
-func set_simulation_active(active: bool) -> void:
-	set_physics_process(active)
+# Claude 2026-11-16 (pawn M1): renamed from set_simulation_active(active), the other way round.
+func set_frozen(frozen: bool) -> void:
+	set_physics_process(not frozen)
 
 
 ## Starts walking a new list of points.

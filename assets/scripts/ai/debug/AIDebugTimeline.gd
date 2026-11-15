@@ -80,9 +80,11 @@ func watch(pawn: Pawn) -> void:
 			_event("%s: ability %s started" % [who, ability.name]))
 		pawn.ability_manager.ability_cancelled.connect(func(ability: AbilityBase, by: AbilityBase) -> void:
 			_event("%s: ability %s cancelled by %s" % [who, ability.name, _name_of(by)]))
-	pawn.hit_received.connect(func(hit: HitInfo) -> void:
+	if pawn.ability_manager == null: # Claude 2026-11-16 (pawn M3): hit_received and died moved to the AbilityManager
+		return
+	pawn.ability_manager.hit_received.connect(func(hit: HitInfo) -> void:
 		_event("%s: hit by %s (%d)" % [who, _name_of(hit.attacker), int(hit.damage_dealt)])) # Claude 2026-11-10: damage_dealt, after the hit's effects
-	pawn.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: _event("%s: died" % who))
+	pawn.ability_manager.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: _event("%s: died" % who))
 
 
 ## True while showing a tick before the present.

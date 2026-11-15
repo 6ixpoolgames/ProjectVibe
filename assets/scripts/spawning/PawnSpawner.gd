@@ -118,7 +118,8 @@ func _update() -> void:
 			return # no point, or the type isn't registered: SpawnManager has warned
 		_spawned_total += 1
 		_alive.append(pawn.get_instance_id())
-		pawn.died.connect(_on_died.bind(pawn.get_instance_id()))
+		if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): died moved to the AbilityManager
+			pawn.ability_manager.died.connect(_on_died.bind(pawn.get_instance_id()))
 		spawned.emit(pawn)
 
 

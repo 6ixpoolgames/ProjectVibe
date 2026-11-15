@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-16: replay channel 6, "diagnostics": how each frame went, recorded alongside the game
 ## (the owner's call: diagnostics hook into replay v0, so one recording holds what happened and what it cost; docs/diagnostics/
 ## DIAGNOSTICS_SPEC.md). It's a plain data channel in the base, like the others: something else fills it. In debug builds that's the
-## DiagnosticsManager (debug/diagnostics/), which adds this channel to the recorder; without it, nothing is recorded here.
+## DiagnosticsManager (diagnostics/), which adds this channel to the recorder; without it, nothing is recorded here.
 ##
 ## Frames and ticks aren't the same: a frame can run two ticks when it catches up, or none while paused. So each tick writes the frames
 ## that finished since the last tick, each with its own frame number.

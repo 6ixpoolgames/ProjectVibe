@@ -47,18 +47,18 @@ func _test_front_and_back() -> void:
 	_check(defender.ability_manager.start_ability(parry), "it starts")
 	await _ticks(1)
 	var before := front.global_position.distance_to(defender.global_position)
-	defender.receive_hit(_hit(front, defender, 20))
+	defender.ability_manager.receive_hit(_hit(front, defender, 20))
 	var knockback: AbilityBase = front.ability_manager.get_node("Knockback")
 	_check(defender.get_health() == 100.0 and parried.size() == 1, "a hit from the front does nothing to it (Health %d), and parried goes out" % defender.get_health())
 	_check(knockback.is_running_timed(), "the attacker is knocked back")
 	await _ticks(10)
 	var after := front.global_position.distance_to(defender.global_position)
 	_check(after > before + 1.0, "pushed away, a long way (%.1f m to %.1f m)" % [before, after])
-	defender.receive_hit(_hit(behind, defender, 20))
+	defender.ability_manager.receive_hit(_hit(behind, defender, 20))
 	_check(defender.get_health() == 80.0, "a hit from behind still lands (Health %d)" % defender.get_health())
 	await _ticks(30)
 	_check(not parry.is_running_timed(), "it ends after its duration (0.35 s)")
-	defender.receive_hit(_hit(front, defender, 20))
+	defender.ability_manager.receive_hit(_hit(front, defender, 20))
 	_check(defender.get_health() == 60.0, "then a hit from the front lands again (Health %d)" % defender.get_health())
 	_check(not defender.ability_manager.can_start(&"parry"), "and it's cooling down")
 	for pawn in [defender, front, behind]:
@@ -72,7 +72,7 @@ func _test_real_swing() -> void:
 	var attacker := _make_pawn(Vector3(20, 0.1, -1.4), 1)
 	await _ticks(10)
 	attacker.yaw = PI # facing +Z, toward the defender
-	attacker.look_yaw = PI
+	attacker.controller_manager.look_yaw = PI
 	var swing: AbilityBase = attacker.ability_manager.get_node("MeleeAttack")
 	attacker.ability_manager.start_ability(swing)
 	await _ticks(3)
@@ -92,11 +92,11 @@ func _test_no_parry_back() -> void:
 	var two := _make_pawn(Vector3(-20, 0.1, -1.5), 1)
 	await _ticks(10)
 	two.yaw = PI
-	two.look_yaw = PI
+	two.controller_manager.look_yaw = PI
 	one.ability_manager.start_ability(_parry_of(one))
 	two.ability_manager.start_ability(_parry_of(two))
 	await _ticks(1)
-	one.receive_hit(_hit(two, one, 20))
+	one.ability_manager.receive_hit(_hit(two, one, 20))
 	var knockback: AbilityBase = two.ability_manager.get_node("Knockback")
 	_check(one.get_health() == 100.0 and knockback.is_running_timed(), "a parry's push can't be parried back: it lands on the parrying attacker")
 	one.queue_free()
@@ -126,7 +126,7 @@ func _test_ai_parries(chance: float) -> void:
 		attacker.global_position = Vector3(40, 0.1, -1.4)
 		attacker.velocity = Vector3.ZERO
 		attacker.yaw = PI # facing +Z, toward the goblin
-		attacker.look_yaw = PI
+		attacker.controller_manager.look_yaw = PI
 		attacker.ability_manager.start_ability(swing)
 		await _ticks(130)
 	if chance >= 1.0:

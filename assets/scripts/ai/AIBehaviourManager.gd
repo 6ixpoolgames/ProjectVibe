@@ -82,6 +82,10 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	_collect_behaviours()
+	# Claude 2026-11-16 (pawn M3): the running behaviour stops when the pawn dies: this listens for it now, where Pawn._die used to call it.
+	var abilities := _sibling_ability_manager()
+	if abilities:
+		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: stop_running("died"))
 
 
 func _exit_tree() -> void:
@@ -325,3 +329,12 @@ func _collect_behaviours() -> void:
 	_behaviours.sort_custom(func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool: return String(a.name) < String(b.name))
 	for i in _behaviours.size():
 		_behaviours[i].decision_index = i
+
+# Claude 2026-11-16 (pawn M3): the pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
+func _sibling_ability_manager() -> AbilityManager:
+	if pawn == null:
+		return null
+	for child in pawn.get_children():
+		if child is AbilityManager:
+			return child
+	return null

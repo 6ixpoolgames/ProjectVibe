@@ -1,7 +1,8 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-16: diagnostics v0 (docs/diagnostics/DIAGNOSTICS_SPEC.md), the owner's request after the
-## mass battle ran under 30 fps in play but not in Claude's runs. A GameMode module, in debug builds only: the project setting
-## project_base/game_mode/modules lists it, and its .release override leaves it out, so release builds never have it and the base never
-## names it (docs/TEST_AND_DEBUG_CODE.md).
+## mass battle ran under 30 fps in play but not in Claude's runs. A GameMode module, listed by the project setting
+## project_base/game_mode/modules, so the base never names it (docs/TEST_AND_DEBUG_CODE.md). Claude 2026-11-16: it ships in release builds
+## too, the owner's call (bug reports: session logs, captures and replays from players' machines), so it moved from debug/ to diagnostics/
+## and the setting's .release override lists it as well. A game can still leave it out of either list.
 ##
 ## What it does, every frame, wherever the game runs (the editor, a window, headless):
 ##   - Measures the frame: the physics steps (all of this frame's ticks), every node's _process, and the rest (drawing the last frame,
@@ -321,7 +322,7 @@ func _summary(seconds: float) -> Dictionary:
 			pawns += 1
 			if pawn.is_dead():
 				dead += 1
-			if not pawn.is_simulation_active():
+			if pawn.is_frozen():
 				frozen += 1
 	out["pawns"] = pawns
 	out["dead"] = dead

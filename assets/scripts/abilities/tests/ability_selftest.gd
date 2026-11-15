@@ -56,8 +56,8 @@ class EveryTickCounter extends AbilityBase:
 	func every_tick(_dt: float) -> void:
 		calls += 1
 
-	# It always has something to do, so the pawn never rests while it's there (pawn spec 15.3).
-	func can_rest() -> bool:
+	# It always has something to do, so the pawn never sleeps while it's there (pawn spec 15.3).
+	func can_sleep() -> bool:
 		return false
 
 

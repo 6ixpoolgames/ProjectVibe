@@ -8,7 +8,8 @@
 ##   - random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
 ##   - Claude 2026-11-09, step 8b: the current target, and shared inputs behaviours read (current_target_index, most_aware_index)
 ##
-## The pawn runs its AI from its own tick, in a fixed order (Pawn._tick_ai). Nothing here ticks on its own.
+## The pawn calls run_ai() from its own tick, which runs the AI parts in a fixed order. Nothing here ticks on its own.
+## Claude 2026-11-16 (pawn M1): run_ai was Pawn._tick_ai.
 ##
 ## How to use it (behaviours and states get it as their "context"):
 ##   context.pawn, context.controller, context.state_manager, context.behaviour_manager
@@ -61,6 +62,14 @@ func _enter_tree() -> void:
 	pawn = get_parent() as Pawn # GDScript note: "as" gives null when the parent isn't a Pawn, rather than an error
 	if pawn == null:
 		push_warning("AIContextComponent: its parent isn't a Pawn, so this AI has nothing to drive.")
+
+
+# Claude 2026-11-16 (pawn M3): the AI notes every hit that reaches the pawn, parried ones included: it listens for them now, where Pawn._take_hit
+# used to call note_hit.
+func _ready() -> void:
+	var abilities := _sibling_ability_manager()
+	if abilities:
+		abilities.hit_arrived.connect(note_hit)
 
 
 # --- References (read when needed, because the pawn finds its parts in its own _ready, after ours) ---
@@ -215,6 +224,66 @@ func has_target() -> bool:
 	return is_instance_valid(current_target)
 
 
+# --- Running the AI ---
+
+
+## Claude 2026-11-09: the AI's step, in a fixed order. Claude 2026-11-16 (pawn M1): moved here from Pawn._tick_ai, the owner's call (the AI's
+## core part runs the AI; the pawn only calls this). The pawn calls it in its input phase. In a fixed order (pawn spec sections 4 and 10.9). Runs only where the AI runs (offline or the
+## server), never while a rollback replays ticks, and, while a player has the pawn, only as far as the AI context's
+## while_possessed allows. Order:
+##   1. Sensing, which writes into memory (Claude 2026-11-09, step 8b).
+##   2. On a decision tick, or when something asked for a decision: the target is picked, the state is checked, then the
+##      behaviour manager decides.
+##   3. The running behaviour ticks, which calls the AI controller.
+func run_ai(tick: int) -> void:
+	if pawn == null or not pawn.runs_ai_here():
+		return
+	if TickDriver.is_resimulating():
+		return # the AI is never rolled back, so a replay must not run it again
+	current_tick = tick
+	var has_player := pawn.controller_manager != null and pawn.controller_manager.has_player() # Claude 2026-11-16 (pawn M4)
+	var ai_state_manager := state_manager
+	var ai_target_selector := target_selector
+	var ai_behaviour_manager := behaviour_manager
+	var ai_sensing_manager := pawn.ai_sensing_manager
+	# Claude 2026-11-09 (scaling spec step 3): forces asked for during the last tick (a taunt from another pawn, say), in the order
+	# they were asked for. Before anything else, and even while possessed, as a force between ticks would have been.
+	if ai_state_manager:
+		ai_state_manager.apply_queued(tick)
+	if ai_target_selector:
+		ai_target_selector.apply_queued(tick)
+	if has_player and while_possessed == WhilePossessed.OFF:
+		return
+	# Claude 2026-11-09: step 1, sensing writes into memory. MEMORY_ONLY stops after it.
+	if ai_sensing_manager:
+		var sensing_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+		ai_sensing_manager.tick_sensing(tick)
+		PerfScopes.end(&"ai.sensing", sensing_started)
+	if has_player and while_possessed == WhilePossessed.MEMORY_ONLY:
+		return
+	if ai_state_manager:
+		ai_state_manager.check_force_expiry(tick)
+	if ai_target_selector:
+		ai_target_selector.check_force_expiry(tick)
+	if is_decision_tick(tick):
+		request_decision()
+	var decide_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	if has_decision_waiting():
+		if ai_target_selector:
+			ai_target_selector.update_target(tick) # first, because states such as Combat look at the current target
+		if ai_state_manager:
+			ai_state_manager.update_state(tick) # a change asks for a decision with the new state's priority
+		if ai_behaviour_manager:
+			ai_behaviour_manager.decide(tick)
+		else:
+			clear_decision()
+	PerfScopes.end(&"ai.decide", decide_started)
+	if ai_behaviour_manager:
+		var behaviours_started := PerfScopes.begin()
+		ai_behaviour_manager.tick_running(tick)
+		PerfScopes.end(&"ai.behaviours", behaviours_started)
+
+
 # --- Decisions ---
 
 
@@ -294,3 +363,12 @@ func pawn_number() -> int:
 	if entity and entity.entity_id >= 0:
 		return entity.entity_id
 	return String(pawn.name).hash() & 0x7FFFFFFF
+
+# Claude 2026-11-16 (pawn M3): the pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
+func _sibling_ability_manager() -> AbilityManager:
+	if pawn == null:
+		return null
+	for child in pawn.get_children():
+		if child is AbilityManager:
+			return child
+	return null

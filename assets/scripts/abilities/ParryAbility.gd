@@ -3,7 +3,7 @@
 ##
 ## Claude 2026-11-15: FLAGGED AS A SHORTCUT, the owner's call: this works, but it's hacky and needs a proper implementation pass later
 ## (pawn spec 14, "Shortcuts to redo"). AbilityManager keeps a list of ParryAbility nodes by type, AbilityBase carries parry-only
-## effect lists that every ability has, EffectApplier has a parry-only trigger, and Pawn._take_hit asks for parries by name. The
+## effect lists that every ability has, EffectApplier has a parry-only trigger, and AbilityManager._take_hit (Pawn's until pawn M3) asks for parries by name. The
 ## proper version is general: abilities that can inspect an incoming hit and change or stop it (hit interceptors), switched on by
 ## state tags, so blocks, shields and armour don't each need the same special cases.
 ##
@@ -11,7 +11,7 @@
 ##   - The parry action starts it (F in the arenas). It runs for duration (0.35 s), then can't be used again for cooldown (1.5 s).
 ##   - While it runs it turns the pawn toward where it looks, at up to turn_degrees_per_second, like a swing's windup, and holds the
 ##     pawn still: it locks out movement and combat.
-##   - Every hit is delivered through Pawn._take_hit, on the server. That asks AbilityManager.parry_hit(), which asks this. A hit
+##   - Every hit is delivered through AbilityManager._take_hit (Pawn's until pawn M3), on the server. That asks AbilityManager.parry_hit(), which asks this. A hit
 ##     whose attacker is within front_degrees of where the pawn faces (centred on it, so 120 is 60 either side) is turned away: none
 ##     of its effects land.
 ##   - The attacker then gets a hit of its own, from this pawn, carrying this ability's ON_PARRY effects (EffectApplier children with
@@ -54,7 +54,7 @@ func _init() -> void:
 func tick(dt: float) -> void:
 	# yaw rolls back and look_yaw is input, so a replay turns the same way (as MeleeAttackAbility's windup).
 	if turn_degrees_per_second > 0.0:
-		pawn.yaw = rotate_toward(pawn.yaw, pawn.look_yaw, deg_to_rad(turn_degrees_per_second) * dt)
+		pawn.yaw = rotate_toward(pawn.yaw, look_yaw(), deg_to_rad(turn_degrees_per_second) * dt) # Claude 2026-11-16 (pawn M4)
 
 
 ## True if this parry turns the hit away. It then sends the attacker the parry's effects. Called by AbilityManager.parry_hit().
@@ -93,6 +93,7 @@ func _push_back(parried_hit: HitInfo, attacker: Pawn) -> void:
 	back.direction = away.normalized() if away.length_squared() > 0.0001 else Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
 	back.effects = on_parry_effects
 	if not on_parry_effects.is_empty():
-		attacker.receive_hit(back)
+		if attacker.ability_manager: # Claude 2026-11-16 (pawn M3): moved from Pawn
+			attacker.ability_manager.receive_hit(back)
 	if not on_parry_self_effects.is_empty() and pawn.effect_manager:
 		pawn.effect_manager.apply_effects(on_parry_self_effects, pawn, self, parried_hit)

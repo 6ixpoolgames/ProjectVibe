@@ -92,7 +92,7 @@ func _test_player_respawn() -> void:
 	var hit := HitInfo.new()
 	hit.target = pawn
 	hit.effects = [Effect.make_damage(1000)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
-	pawn.receive_hit(hit)
+	pawn.ability_manager.receive_hit(hit)
 	_check(pawn.is_dead(), "it dies")
 	await _ticks(20)
 	_check(pawn.is_dead(), "and stays dead until its respawn time")
@@ -210,7 +210,7 @@ func _kill(pawn: Pawn) -> void:
 	var hit := HitInfo.new()
 	hit.target = pawn
 	hit.effects = [Effect.make_damage(1000)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
-	pawn.receive_hit(hit)
+	pawn.ability_manager.receive_hit(hit)
 
 
 func _until(condition: Callable, max_ticks: int) -> void:

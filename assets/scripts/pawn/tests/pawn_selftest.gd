@@ -30,6 +30,7 @@ func _ready() -> void:
 	await _test_no_arms_by_default()
 	await _test_visual_smoothing()
 	await _test_resting() # Claude 2026-11-09
+	await _test_skipping_still_moves() # Claude 2026-11-16
 	await _measure_a_crowd()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -109,7 +110,7 @@ func _test_holding_jump() -> void:
 	_drive(pawn, Vector3.ZERO, false, true)
 	await _ticks(1)
 	_check(pawn.velocity.y > 0.0, "holding jump: the first tick jumps")
-	_check(pawn.is_action_held(&"jump") and pawn.previous_held_actions == pawn.held_actions, "and the pawn remembers it was held")
+	_check(pawn.controller_manager.is_action_held(&"jump") and pawn.controller_manager.previous_held_actions == pawn.controller_manager.held_actions, "and the pawn remembers it was held")
 	var jumps := 1
 	var was_grounded := false
 	for i in 150: # still held the whole time
@@ -123,7 +124,7 @@ func _test_holding_jump() -> void:
 	_drive(pawn, Vector3.ZERO, false, true)
 	await _ticks(1)
 	_check(pawn.velocity.y > 0.0, "letting go and pressing again jumps")
-	_check(not pawn.was_action_pressed(&"sprint") and not pawn.is_action_held(&"sprint"), "an action that isn't held reads as not held")
+	_check(not pawn.controller_manager.was_action_pressed(&"sprint") and not pawn.controller_manager.is_action_held(&"sprint"), "an action that isn't held reads as not held")
 	pawn.free()
 	floor_body.free()
 
@@ -131,54 +132,55 @@ func _test_holding_jump() -> void:
 ## Claude 2026-11-07: on the server, when a client's input goes missing, the last one repeats, then its direction fades out.
 func _test_missing_input_fades() -> void:
 	var floor_body := _make_floor()
-	# Claude 2026-11-07: no ControllerManager, like a client's pawn on the server: nothing here writes its input, so what the network
-	# left on it is what it uses.
-	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0), [&"ControllerManager"])
-	pawn.missing_input_hold_ticks = 3
-	pawn.missing_input_fade_ticks = 6
+	# Claude 2026-11-07: like a client's pawn on the server: nothing here writes its input, so what the network left on it is what it uses.
+	# Claude 2026-11-16 (pawn M4): the input lives on the ControllerManager now, so the pawn keeps one, with a player elsewhere: nobody here is in charge.
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	pawn.controller_manager.set_has_player(true)
+	pawn.controller_manager.missing_input_hold_ticks = 3
+	pawn.controller_manager.missing_input_fade_ticks = 6
 	await _ticks(10)
 	_drive(pawn, Vector3(1.0, 0.0, 0.0), true)
 	await _ticks(1)
 	# What NetworkEntity does each tick no input arrives. Calling it straight before a tick is the same.
 	var lengths: Array[float] = []
 	for i in 9:
-		pawn._network_input_missing()
+		pawn.controller_manager._network_input_missing()
 		await _ticks(1)
-		lengths.append(pawn.move_input.length())
+		lengths.append(pawn.controller_manager.move_input.length())
 	_check(is_equal_approx(lengths[2], 1.0), "missing input: the last direction repeats in full for 3 ticks")
 	_check(lengths[3] < 1.0 and lengths[3] > lengths[4], "then fades")
 	_check(lengths[8] == 0.0, "and is gone after 6 more (%s)" % str(lengths))
-	_check(pawn.is_action_held(&"sprint"), "held actions keep repeating, so a key still held isn't a new press later")
+	_check(pawn.controller_manager.is_action_held(&"sprint"), "held actions keep repeating, so a key still held isn't a new press later")
 	_drive(pawn, Vector3(1.0, 0.0, 0.0), true)
 	await _ticks(1)
-	_check(pawn._missing_input_ticks == 0, "real input starts the count again")
-	pawn._network_input_missing()
+	_check(pawn.controller_manager._missing_input_ticks == 0, "real input starts the count again") # Claude 2026-11-16 (pawn M4): the ControllerManager's now
+	pawn.controller_manager._network_input_missing()
 	await _ticks(1)
-	_check(is_equal_approx(pawn.move_input.length(), 1.0), "so the next missing tick repeats in full")
-	pawn.missing_input_hold_ticks = 0
-	pawn.missing_input_fade_ticks = 0
-	pawn._network_input_missing()
+	_check(is_equal_approx(pawn.controller_manager.move_input.length(), 1.0), "so the next missing tick repeats in full")
+	pawn.controller_manager.missing_input_hold_ticks = 0
+	pawn.controller_manager.missing_input_fade_ticks = 0
+	pawn.controller_manager._network_input_missing()
 	await _ticks(1)
-	_check(pawn.move_input == Vector3.ZERO, "with both set to 0, a missing input stops it at once")
+	_check(pawn.controller_manager.move_input == Vector3.ZERO, "with both set to 0, a missing input stops it at once")
 	# Claude 2026-11-07: -1, the default, uses NetworkSession's settings.
 	var session: Node = get_node("/root/NetworkSession")
 	var saved_hold: int = session.missing_input_hold_ticks
 	var saved_fade: int = session.missing_input_fade_ticks
 	session.missing_input_hold_ticks = 1
 	session.missing_input_fade_ticks = 0
-	pawn.missing_input_hold_ticks = -1
-	pawn.missing_input_fade_ticks = -1
+	pawn.controller_manager.missing_input_hold_ticks = -1
+	pawn.controller_manager.missing_input_fade_ticks = -1
 	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(1)
-	pawn._network_input_missing()
+	pawn.controller_manager._network_input_missing()
 	await _ticks(1)
-	var after_one := pawn.move_input.length()
-	pawn._network_input_missing()
+	var after_one := pawn.controller_manager.move_input.length()
+	pawn.controller_manager._network_input_missing()
 	await _ticks(1)
-	_check(is_equal_approx(after_one, 1.0) and pawn.move_input == Vector3.ZERO, "with -1, the pawn follows NetworkSession's settings")
+	_check(is_equal_approx(after_one, 1.0) and pawn.controller_manager.move_input == Vector3.ZERO, "with -1, the pawn follows NetworkSession's settings")
 	session.missing_input_hold_ticks = saved_hold
 	session.missing_input_fade_ticks = saved_fade
-	var plain := Pawn.new()
+	var plain := ControllerManager.new() # Claude 2026-11-16 (pawn M4): the settings are the ControllerManager's now
 	_check(plain.missing_input_hold_ticks == -1 and plain.missing_input_fade_ticks == -1, "and -1 is the default, so the rule is set once per game")
 	plain.free()
 	pawn.free()
@@ -283,11 +285,12 @@ func _test_server_corrects_held_history() -> void:
 	_drive(pawn, Vector3.ZERO, false, true) # held from here on: one jump, then standing with it held
 	await _ticks(90)
 	await get_tree().physics_frame
-	_check(pawn.grounded and pawn.is_action_held(&"jump"), "(standing with jump held, after its one jump)")
+	_check(pawn.grounded and pawn.controller_manager.is_action_held(&"jump"), "(standing with jump held, after its one jump)")
 	var corrected_tick: int = TickDriver.tick - 3
 	var server_says := tick_state.get_state(corrected_tick)
-	_check(int(server_says.get("previous_held_actions", -1)) == InputActions.mask_of(&"jump"), "previous_held_actions is saved as rollback state")
-	server_says["previous_held_actions"] = 0
+	# Claude 2026-11-16 (pawn M4): keyed by its path, now that it lives on the ControllerManager.
+	_check(int(server_says.get("ControllerManager:previous_held_actions", -1)) == InputActions.mask_of(&"jump"), "previous_held_actions is saved as rollback state")
+	server_says["ControllerManager:previous_held_actions"] = 0
 	tick_state.correct_state(corrected_tick, server_says)
 	TickDriver.rollback(corrected_tick)
 	_check(pawn.velocity.y > 0.0 or pawn.position.y > 0.05, "a correction saying jump wasn't held makes the replay jump, as the server did (%.2f m up)" % pawn.position.y)
@@ -310,13 +313,13 @@ func _test_bad_input() -> void:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
 	add_child(pawn)
 	# Claude 2026-11-07: held_actions replaces the two bools.
-	var clean := pawn.sanitize_network_input({"move_input": Vector3(1000.0, 0.0, 0.0), "held_actions": "yes", "look_yaw": INF, "look_pitch": "up"})
+	var clean := pawn.controller_manager.sanitize_network_input({"move_input": Vector3(1000.0, 0.0, 0.0), "held_actions": "yes", "look_yaw": INF, "look_pitch": "up"})
 	_check(is_equal_approx(clean["move_input"].length(), 1.0), "the server limits a client's direction")
 	_check(clean["held_actions"] == 0, "and throws out wrong types")
-	var made_up := pawn.sanitize_network_input({"held_actions": InputActions.mask_of(&"jump") | (1 << 62)})
+	var made_up := pawn.controller_manager.sanitize_network_input({"held_actions": InputActions.mask_of(&"jump") | (1 << 62)})
 	_check(made_up["held_actions"] == InputActions.mask_of(&"jump"), "and bits for actions that aren't listed")
 	_check(clean["look_yaw"] == 0.0 and clean["look_pitch"] == 0.0, "and broken angles")
-	var nan_move := pawn.sanitize_network_input({"move_input": Vector3(NAN, 0.0, 0.0)})
+	var nan_move := pawn.controller_manager.sanitize_network_input({"move_input": Vector3(NAN, 0.0, 0.0)})
 	_check(nan_move["move_input"] == Vector3.ZERO, "and broken directions")
 	pawn.free()
 
@@ -326,18 +329,19 @@ func _test_bad_input() -> void:
 
 
 func _test_source_rules() -> void:
+	# Claude 2026-11-16 (pawn M2): a flag, read through the source contract: the pawn makes no StreamingSource node any more.
 	var pawn := _make_pawn(Vector3.ZERO)
-	_check(pawn.get_node_or_null("StreamingSource") == null, "an AI pawn carries no source by default")
-	pawn.ai_loads_chunks = true
-	_check(pawn.get_node_or_null("StreamingSource") != null, "with its bool on, it does")
-	pawn.ai_loads_chunks = false
-	await get_tree().process_frame
-	_check(pawn.get_node_or_null("StreamingSource") == null, "and it goes when the bool goes off")
-	pawn.set_has_player(true)
-	_check(pawn.get_node_or_null("StreamingSource") != null, "a pawn with a player has one")
-	pawn.set_has_player(false)
-	await get_tree().process_frame
-	_check(pawn.get_node_or_null("StreamingSource") == null, "until the player leaves")
+	_check(not pawn.counts_on_this_machine() and pawn.is_in_group(StreamingSource.GROUP), "an AI pawn doesn't keep the world loaded by default")
+	pawn.keeps_world_loaded = true
+	_check(pawn.counts_on_this_machine() and pawn.is_keeping_world_loaded(), "with keeps_world_loaded on, it does")
+	pawn.keeps_world_loaded = false
+	_check(not pawn.counts_on_this_machine(), "and stops when it goes off")
+	pawn.controller_manager.set_has_player(true)
+	_check(pawn.counts_on_this_machine(), "a pawn with a player does")
+	pawn.controller_manager.set_has_player(false)
+	_check(not pawn.counts_on_this_machine(), "until the player leaves")
+	_check(pawn.get_node_or_null("StreamingSource") == null and pawn.load_distance == 320.0 and pawn.nav_distance == 128.0,
+		"with no StreamingSource node, and the game's distances (%.0f, %.0f)" % [pawn.load_distance, pawn.nav_distance])
 	pawn.free()
 
 
@@ -351,18 +355,18 @@ func _test_ai_with_no_ground() -> void:
 	var pawn := _make_pawn(Vector3(5.0, 40.0, 5.0))
 	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(30)
-	_check(not pawn.is_simulation_active(), "an AI pawn with no ground is switched off")
+	_check(pawn.is_frozen(), "an AI pawn with no ground is switched off")
 	_check(is_equal_approx(pawn.position.y, 40.0) and is_equal_approx(pawn.position.x, 5.0), "so it stays exactly where it is")
 	# Claude 2026-11-07: the bug this guards against: its entity and TickState kept ticking, so a pawn that was off still cost a lot.
 	var entity: NetworkEntity = pawn.get_node("NetworkEntity")
 	var state: TickStateComponent = pawn.get_node("TickState")
 	_check(not driver.is_registered(pawn) and not driver.is_registered(entity) and not driver.is_registered(state), "and nothing of it ticks")
-	pawn.set_has_player(true)
-	_check(pawn.is_simulation_active(), "a player taking it switches it on")
+	pawn.controller_manager.set_has_player(true)
+	_check(not pawn.is_frozen(), "a player taking it switches it on")
 	_check(driver.is_registered(pawn) and driver.is_registered(entity) and driver.is_registered(state), "and all of it ticks again")
-	pawn.set_has_player(false)
+	pawn.controller_manager.set_has_player(false)
 	await _ticks(2)
-	_check(not pawn.is_simulation_active(), "(it's off again)")
+	_check(pawn.is_frozen(), "(it's off again)")
 	pawn.free()
 	await get_tree().process_frame
 	_check(driver.get_participant_count() == participants_before, "and a pawn freed while it's off leaves nothing behind")
@@ -372,13 +376,8 @@ func _test_ai_with_no_ground() -> void:
 func _test_no_arms_by_default() -> void:
 	var pawn := _make_pawn(Vector3.ZERO)
 	_check(pawn.get_camera_arm() == null, "a pawn has no camera arm by default")
+	_check(pawn.get_camera_mount() == pawn.get_visual() and pawn.get_camera_preset() == null, "and with no CameraMount, the arm would go on Visual, with the defaults") # Claude 2026-11-16 (pawn M5)
 	pawn.free()
-	var hero: Pawn = load(PAWN_SCENE).instantiate()
-	hero.always_has_camera_arm = true
-	add_child(hero)
-	_check(hero.get_camera_arm() != null, "a hero pawn has one from the start")
-	_check(not hero.get_camera_arm().is_processing(), "and it's idle with nobody looking")
-	hero.free()
 
 
 func _test_visual_smoothing() -> void:
@@ -419,8 +418,8 @@ func _measure_a_crowd() -> void:
 # --- Helpers ---
 
 
-## Claude 2026-11-09: resting (pawn spec 15.3): a pawn standing still skips its abilities and move_and_slide, with a full check tick
-## every rest_check_ticks, and wakes for input, being moved, ground going away and hits. Resting changes nothing about where it ends up.
+## Claude 2026-11-09: sleeping (pawn spec 15.3): a pawn standing still skips its abilities and move_and_slide, with a full check tick
+## every sleep_check_ticks, and wakes for input, being moved, ground going away and hits. Sleeping changes nothing about where it ends up.
 func _test_resting() -> void:
 	var floor_body := _make_floor()
 	var pawn := _make_pawn(Vector3(0.0, 0.2, 0.0))
@@ -428,25 +427,25 @@ func _test_resting() -> void:
 	var rested := 0
 	for i in 30:
 		await _ticks(1)
-		if pawn.is_resting:
+		if pawn.is_sleeping:
 			rested += 1
-	_check(rested >= 26 and rested <= 28, "standing still it rests, with a full check tick every %d ticks (%d of 30 rested)" % [pawn.rest_check_ticks, rested])
+	_check(rested >= 26 and rested <= 28, "standing still it sleeps, with a full check tick every %d ticks (%d of 30 rested)" % [pawn.sleep_check_ticks, rested])
 	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(1)
-	_check(not pawn.is_resting and pawn.velocity.x > 0.0, "a move input wakes it at once")
+	_check(not pawn.is_sleeping and pawn.velocity.x > 0.0, "a move input wakes it at once")
 	_drive(pawn, Vector3.ZERO)
 	await _ticks(60)
-	# Claude 2026-11-09: counted over a check period, not looked at once, because one tick in rest_check_ticks is a full check tick,
+	# Claude 2026-11-09: counted over a check period, not looked at once, because one tick in sleep_check_ticks is a full check tick,
 	# staggered by the pawn's instance id, which differs from run to run (this failed about 1 run in 15 on Linux).
 	var rested_again := 0
-	for i in pawn.rest_check_ticks:
+	for i in pawn.sleep_check_ticks:
 		await _ticks(1)
-		if pawn.is_resting:
+		if pawn.is_sleeping:
 			rested_again += 1
-	_check(rested_again == pawn.rest_check_ticks - 1, "and once it has stopped, it rests again (%d of %d ticks)" % [rested_again, pawn.rest_check_ticks])
+	_check(rested_again == pawn.sleep_check_ticks - 1, "and once it has stopped, it sleeps again (%d of %d ticks)" % [rested_again, pawn.sleep_check_ticks])
 	pawn.global_position += Vector3(0.0, 2.0, 0.0)
 	await _ticks(1)
-	_check(not pawn.is_resting, "moved by something else (a teleport into the air): it wakes")
+	_check(not pawn.is_sleeping, "moved by something else (a teleport into the air): it wakes")
 	await _ticks(60)
 	_check(pawn.grounded and absf(pawn.position.y) < 0.05, "and falls back to the ground (%.3f m)" % pawn.position.y)
 	await _ticks(20)
@@ -455,25 +454,25 @@ func _test_resting() -> void:
 	hit.direction = Vector3(0.0, 0.0, 1.0)
 	hit.effects = [Effect.make_knockback(6.0, 10)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	var before := pawn.position.z
-	pawn.receive_hit(hit)
+	pawn.ability_manager.receive_hit(hit)
 	await _ticks(3)
-	_check(not pawn.is_resting and pawn.position.z > before + 0.1, "a hit's knockback wakes it (pushed %.2f m)" % (pawn.position.z - before))
+	_check(not pawn.is_sleeping and pawn.position.z > before + 0.1, "a hit's knockback wakes it (pushed %.2f m)" % (pawn.position.z - before))
 	await _ticks(60)
 	floor_body.free()
 	var fell_after := -1
-	for i in pawn.rest_check_ticks + 5:
+	for i in pawn.sleep_check_ticks + 5:
 		await _ticks(1)
 		if not pawn.grounded:
 			fell_after = i + 1
 			break
-	_check(fell_after > 0 and fell_after <= pawn.rest_check_ticks + 1, "ground taken away from under a resting pawn: it starts falling on its next check tick (after %d ticks)" % fell_after)
+	_check(fell_after > 0 and fell_after <= pawn.sleep_check_ticks + 1, "ground taken away from under a sleeping pawn: it starts falling on its next check tick (after %d ticks)" % fell_after)
 	pawn.free()
 
-	# The same input script, once resting and once never resting, ends in exactly the same place.
+	# The same input script, once sleeping and once never sleeping, ends in exactly the same place.
 	floor_body = _make_floor()
 	var resting_pawn := _make_pawn(Vector3(0.0, 0.2, 0.0))
 	var awake_pawn := _make_pawn(Vector3(10.0, 0.2, 0.0))
-	awake_pawn.rest_when_idle = false
+	awake_pawn.sleep_when_idle = false
 	var plan := [[40, Vector3.ZERO, false], [25, Vector3(1.0, 0.0, 0.3), false], [30, Vector3.ZERO, false], [1, Vector3.ZERO, true], [50, Vector3.ZERO, false], [20, Vector3(-0.5, 0.0, 1.0), false], [45, Vector3.ZERO, false]]
 	var awake_ever_rested := false
 	for step in plan:
@@ -481,13 +480,53 @@ func _test_resting() -> void:
 			_drive(resting_pawn, step[1], false, step[2])
 			_drive(awake_pawn, step[1], false, step[2])
 			await _ticks(1)
-			awake_ever_rested = awake_ever_rested or awake_pawn.is_resting
+			awake_ever_rested = awake_ever_rested or awake_pawn.is_sleeping
 	var offset := resting_pawn.global_position - (awake_pawn.global_position - Vector3(10.0, 0.0, 0.0))
-	_check(not awake_ever_rested, "with rest_when_idle off it never rests")
-	_check(offset.length() < 0.0015, "walking, stopping, jumping and standing: resting ends exactly where never resting does (%.4f m apart)" % offset.length())
+	_check(not awake_ever_rested, "with sleep_when_idle off it never sleeps")
+	_check(offset.length() < 0.0015, "walking, stopping, jumping and standing: sleeping ends exactly where never sleeping does (%.4f m apart)" % offset.length())
 	resting_pawn.free()
 	awake_pawn.free()
 	floor_body.free()
+
+
+# Claude 2026-11-16 (movement experiments): an ability that always has something to do, so its pawn never sleeps: awake, but still.
+class BusyAbility extends AbilityBase:
+	# The manager only asks abilities that run every tick whether the pawn may sleep (pawn spec 15.2), so this is one.
+	func every_tick(_dt: float) -> void:
+		pass
+
+	func can_sleep() -> bool:
+		return false
+
+
+# Claude 2026-11-16 (movement experiments): skip_move_when_still. A pawn kept awake but standing still skips move_and_slide (counted in
+# diagnostics as pawn.move_skipped) and stays put; with its floor taken away, a check tick still notices, and it falls.
+func _test_skipping_still_moves() -> void:
+	var floor_body := _make_floor()
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	var busy := BusyAbility.new()
+	busy.name = "Busy"
+	pawn.ability_manager.add_child(busy)
+	pawn.ability_manager._collect_abilities()
+	await _ticks(30)
+	var diagnostics := GameMode.get_module(DiagnosticsManager) as DiagnosticsManager
+	var skipped := 0
+	if diagnostics:
+		for record: Dictionary in diagnostics.get_frames().slice(-15):
+			skipped += int(record.scopes.get(&"pawn.move_skipped", [0, 0])[1])
+	var at := pawn.global_position
+	await _ticks(10)
+	_check(pawn.skip_move_when_still and not pawn.is_sleeping and skipped > 0 and pawn.global_position == at and pawn.grounded,
+		"an awake pawn standing still skips its moves (%d skipped in 15 frames) and stays put (velocity %s, grounded %s, sleeping %s)" % [skipped, pawn.velocity, pawn.grounded, pawn.is_sleeping])
+	floor_body.free()
+	var fell := false
+	for i in pawn.sleep_check_ticks + 10:
+		await get_tree().physics_frame
+		if pawn.global_position.y < at.y - 0.05:
+			fell = true
+			break
+	_check(fell, "with its floor gone, a check tick notices and it falls")
+	pawn.free()
 
 
 func _make_floor() -> StaticBody3D:
@@ -527,7 +566,7 @@ func _drive(pawn: Pawn, move: Vector3, sprint := false, jump := false) -> void:
 		held.append(&"sprint")
 	if jump:
 		held.append(&"jump")
-	pawn.apply_input(InputCommand.make(move, held))
+	pawn.controller_manager.apply_input(InputCommand.make(move, held))
 
 
 func _ticks(count: int) -> void:

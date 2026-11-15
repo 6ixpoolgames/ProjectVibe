@@ -6,10 +6,10 @@
 ##   - its interrupt_priority, 1000, cancels whatever was running when it started, and its interrupt_threshold, 1000, means nothing
 ##     cancels it;
 ##   - Pawn.is_dead() is true: the pawn ignores its input and its AI, other pawns' sensing ignores it, and memories forget it.
-## It keeps itself running for as long as Health is 0. Pawn.revive() fills Health again, and it ends on its next tick.
+## It keeps itself running for as long as Health is 0. AbilityManager.revive() (Pawn's until pawn M3) fills Health again, and it ends on its next tick.
 ##
 ## The body stays where it falls. Removing it, playing a death animation or respawning are game rules, for game code listening to
-## Pawn.died or AbilityManager.ability_started.
+## AbilityManager.died (Pawn's until pawn M3) or AbilityManager.ability_started.
 ##
 ## Rollback: its timer is rollback state, with Health, so clients see the pawn dead from snapshots.
 class_name DeathAbility

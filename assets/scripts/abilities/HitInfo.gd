@@ -1,5 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: what one hit was, handed from the attacking ability to the target's
-## Pawn.receive_hit(). Pawn spec section 8.6, step 9.
+## AbilityManager.receive_hit() (Pawn's until pawn M3). Pawn spec section 8.6, step 9.
 ##
 ## Plain data. Made on the server only, where hits are decided. Claude 2026-11-09: damage added, step 10.
 ## Claude 2026-11-10 (pawn spec 8.11): a hit carries effects now, not numbers. damage, knockback_speed, knockback_ticks and

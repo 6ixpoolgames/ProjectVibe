@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: runs a pawn's AI senses on their turn. A part on the pawn, added by
 ## PawnInitializer, with its senses (AISenseBase nodes) as children: SightSense by default. Pawn spec section 10.4.
 ##
-## Each tick the pawn's AI runs (Pawn._tick_ai), in this order:
+## Each tick the pawn's AI runs (AIContextComponent.run_ai, which was Pawn._tick_ai until pawn M1), in this order:
 ##   - Every sense_interval_ticks: a full pass. One shared query finds the pawns of other teams within the longest sense's range,
 ##     and each sense gets that list. Then memory forgets entries whose fade has ended.
 ##   - Every refresh_interval_ticks in between: each sense refreshes the current target, which for sight is one ray.
@@ -172,7 +172,7 @@ func _ask_job() -> void:
 	# A pawn that died during this tick, after it asked: a dead pawn's AI doesn't run (Pawn._tick_input), so the pass won't happen.
 	if pawn.is_dead():
 		return
-	if Pawn.count_pawns_not_on_team(pawn.team) == 0:
+	if _nobody_to_find():
 		return
 	var reach := get_range()
 	if reach <= 0.0:
@@ -182,7 +182,7 @@ func _ask_job() -> void:
 
 func _find_candidates(tick: int) -> void:
 	_candidates.clear()
-	if Pawn.count_pawns_not_on_team(pawn.team) == 0:
+	if _nobody_to_find():
 		return # nobody on another team anywhere: nothing to find
 	var reach := get_range()
 	if reach <= 0.0 or not pawn.is_inside_tree():
@@ -199,3 +199,11 @@ func _find_candidates(tick: int) -> void:
 		var other := hit.collider as Pawn
 		if other and other != pawn and other.team != pawn.team:
 			_candidates.append(other)
+
+
+# Claude 2026-11-16 (pawn M1): true when no pawn anywhere is on another team, from the TeamRegistry module (was a counter on Pawn). Without the
+# module, sensing looks every time.
+func _nobody_to_find() -> bool:
+	var game_mode: Node = get_node_or_null("/root/GameMode")
+	var registry: TeamRegistry = game_mode.team_registry if game_mode else null
+	return registry != null and registry.count_not_on_team(pawn.team) == 0

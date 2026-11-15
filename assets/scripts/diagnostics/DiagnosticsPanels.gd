@@ -264,9 +264,11 @@ func _inspector_text() -> String:
 	var at := pawn.global_position
 	lines.append("  at (%.1f, %.1f, %.1f)   moving %.1f m/s   facing %.0f°" % [at.x, at.y, at.z, pawn.velocity.length(), rad_to_deg(pawn.yaw)])
 	lines.append("  flags: %s%s%s%s%s%s   Health %.0f" % ["grounded " if pawn.grounded else "", "DEAD " if pawn.is_dead() else "",
-		"FROZEN " if not pawn.is_simulation_active() else "", "sleeping " if pawn.is_resting else "", "source " if pawn.has_chunk_source() else "",
-		"player" if pawn.has_player() else "", pawn.get_health()])
-	lines.append("  input: move (%.2f, %.2f), look %.0f°, held %d" % [pawn.move_input.x, pawn.move_input.z, rad_to_deg(pawn.look_yaw), pawn.held_actions])
+		"FROZEN " if pawn.is_frozen() else "", "sleeping " if pawn.is_sleeping else "", "source " if pawn.is_keeping_world_loaded() else "",
+		"player" if pawn.controller_manager and pawn.controller_manager.has_player() else "", pawn.get_health()])
+	var controllers := pawn.controller_manager # Claude 2026-11-16 (pawn M4)
+	if controllers:
+		lines.append("  input: move (%.2f, %.2f), look %.0f°, held %d" % [controllers.move_input.x, controllers.move_input.z, rad_to_deg(controllers.look_yaw), controllers.held_actions])
 	if pawn.ability_manager:
 		var running := PackedStringArray()
 		var cooling := PackedStringArray()

@@ -15,7 +15,7 @@
 ##   tick(dt)               every tick it runs. A locomotion ability writes the pawn's velocity here
 ##   stop()                 once, when it stops
 ##   every_tick(dt)         every tick, running or not, for counters such as time off the ground. Claude 2026-11-09: only called on
-##                          abilities that override it; such an ability also overrides can_rest() (pawn spec 15.3)
+##                          abilities that override it; such an ability also overrides can_sleep() (pawn spec 15.3)
 ## Times are set in seconds and kept in ticks, so they line up exactly between server and client.
 ##
 ## Rollback: what an ability keeps between ticks has to roll back. get_rollback_properties() names those properties, and the
@@ -171,6 +171,35 @@ func _running_changed(_running: bool) -> void:
 	pass
 
 
+# --- The pawn's input (Claude 2026-11-16 (pawn M4): it lives on the ControllerManager now; these read it, and give "nothing pressed" for a pawn
+# without one, so no ability has to check) ---
+
+
+## The direction the pawn is told to go, in world space, up to length 1.
+func move_input() -> Vector3:
+	return pawn.controller_manager.move_input if pawn and pawn.controller_manager else Vector3.ZERO
+
+
+## Where the pawn is told to look, around the vertical, in radians.
+func look_yaw() -> float:
+	return pawn.controller_manager.look_yaw if pawn and pawn.controller_manager else (pawn.yaw if pawn else 0.0)
+
+
+## How many ticks behind its own the controller was drawing other pawns, for lag compensation.
+func view_ticks_behind() -> float:
+	return pawn.controller_manager.view_ticks_behind if pawn and pawn.controller_manager else 0.0
+
+
+## The held actions this tick, as InputActions bits.
+func held_actions() -> int:
+	return pawn.controller_manager.held_actions if pawn and pawn.controller_manager else 0
+
+
+## The held actions last tick, as InputActions bits, so a press can be told from a hold.
+func previous_held_actions() -> int:
+	return pawn.controller_manager.previous_held_actions if pawn and pawn.controller_manager else 0
+
+
 ## A stat from the pawn's StatManager, or fallback if there's no such stat or no StatManager.
 func read_stat(stat_name: StringName, fallback: float) -> float:
 	if pawn and pawn.stat_manager:
@@ -201,8 +230,8 @@ func every_tick(_dt: float) -> void:
 	pass
 
 
-## Claude 2026-11-09: true if this ability is fine with the pawn resting (pawn spec 15.3): standing still, it skips its abilities,
+## Claude 2026-11-09: true if this ability is fine with the pawn sleeping (pawn spec 15.3): standing still, it skips its abilities,
 ## gravity and move_and_slide. Only an ability that overrides every_tick() needs to think about it: answer false while every_tick()
 ## would still change something with the pawn standing still. Jump answers false until its time off the ground is back to 0.
-func can_rest() -> bool:
+func can_sleep() -> bool:
 	return true

@@ -14,7 +14,7 @@
 ## Letting go sets owner_peer to 0, so the server runs it, and it stands idle with nothing driving it.
 ##
 ## Claude 2026-11-07: what a pawn does once it's let go isn't decided here. That's the controller manager's job when it's built,
-## and it can hear about it through Pawn.possession_changed: its AI controller takes over at once if it has one, and otherwise
+## and it can hear about it through ControllerManager.possession_changed (Pawn's until pawn M4): its AI controller takes over at once if it has one, and otherwise
 ## the pawn stays idle. Respawning or removing a pawn belongs to the game, which can listen to released here, and to
 ## NetworkSession.player_left, which fires afterwards. Creating a controller never spawns a pawn.
 ##
@@ -192,7 +192,7 @@ func _why_not(peer: int, pawn: Pawn) -> String:
 
 func _assign(peer: int, pawn: Pawn) -> void:
 	_by_peer[peer] = pawn
-	pawn.set_has_player(true)
+	pawn.controller_manager.set_has_player(true) # Claude 2026-11-16 (pawn M4)
 	if not pawn.tree_exiting.is_connected(_on_pawn_leaving):
 		pawn.tree_exiting.connect(_on_pawn_leaving.bind(pawn), CONNECT_ONE_SHOT)
 	if peer == _local_peer() and controller:
@@ -206,7 +206,8 @@ func _clear(peer: int) -> void:
 	if peer == _local_peer() and controller:
 		controller.take_pawn(null)
 	if is_instance_valid(pawn):
-		pawn.set_has_player(false)
+		if pawn.controller_manager: # Claude 2026-11-16 (pawn M4)
+			pawn.controller_manager.set_has_player(false)
 		if pawn.tree_exiting.is_connected(_on_pawn_leaving):
 			pawn.tree_exiting.disconnect(_on_pawn_leaving)
 	released.emit(peer, pawn if is_instance_valid(pawn) else null)

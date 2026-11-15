@@ -69,13 +69,14 @@ func _exit_tree() -> void:
 
 
 ## AIActivationManager calls this. Everything about the pawn stays as it is, and it simply stops ticking.
-func set_simulation_active(active: bool) -> void:
+# Claude 2026-11-16 (pawn M1): renamed from set_simulation_active(active), the other way round.
+func set_frozen(frozen: bool) -> void:
 	if _driver == null:
 		return
-	if active:
-		_driver.register(self)
-	else:
+	if frozen:
 		_driver.unregister(self)
+	else:
+		_driver.register(self)
 
 
 func _on_network_role(entity: NetworkEntity) -> void:

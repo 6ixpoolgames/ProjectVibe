@@ -52,7 +52,7 @@ func _test_walkthrough() -> void:
 	var start_distance := _flat_distance(goblin.global_position, last_known)
 	await _ticks(40)
 	_check(_flat_distance(goblin.global_position, last_known) < start_distance - 2.0, "walking toward where the intruder was (%.1f m to go, from %.1f)" % [_flat_distance(goblin.global_position, last_known), start_distance])
-	_check(not goblin.is_action_held(&"sprint"), "without sprinting")
+	_check(not goblin.controller_manager.is_action_held(&"sprint"), "without sprinting")
 
 	# 2. The intruder steps out close in front: certain at once, chased.
 	ticks = await _until(func() -> bool:
@@ -61,7 +61,7 @@ func _test_walkthrough() -> void:
 	_check(ticks >= 0 and ticks < 30, "close in front: certain and in Combat within half a second (%d ticks)" % ticks)
 	_check(goblin.ai_context.current_target == intruder, "the intruder is its target")
 	await _ticks(5)
-	_check(_running(goblin) == &"Chase" and goblin.is_action_held(&"sprint"), "Chase runs, holding sprint")
+	_check(_running(goblin) == &"Chase" and goblin.controller_manager.is_action_held(&"sprint"), "Chase runs, holding sprint")
 	ticks = await _until(func() -> bool: return _flat_distance(goblin.global_position, intruder.global_position) < 2.5, 120)
 	_check(ticks >= 0, "it closes in on the intruder, and stops near it (%d ticks)" % ticks)
 

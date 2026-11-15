@@ -85,8 +85,8 @@ func _test_possessing() -> void:
 	_check(heard[0] == 1, "and it's announced")
 	_check(_possession.get_pawn_of() == pawn and _possession.get_peer_of(pawn) == PossessionCoordinator.OFFLINE_PEER, "and it's recorded")
 	_check(_controller.pawn == pawn, "and the controller has it")
-	_check(pawn.has_player(), "and the pawn knows")
-	_check(pawn.get_node_or_null("StreamingSource") != null, "and it has a source now")
+	_check(pawn.controller_manager.has_player(), "and the pawn knows")
+	_check(pawn.is_keeping_world_loaded(), "and it keeps the world loaded now") # Claude 2026-11-16 (pawn M2): a flag, not a StreamingSource node
 	_check(_controller.camera.get_view() == pawn.get_default_view(), "and the camera is on its view")
 	_check(_controller.camera.current, "and in use")
 	await get_tree().process_frame
@@ -95,7 +95,7 @@ func _test_possessing() -> void:
 
 	_possession.release()
 	_check(_possession.get_pawn_of() == null and _controller.pawn == null, "letting go leaves the controller with no pawn")
-	_check(not pawn.has_player(), "and the pawn knows")
+	_check(not pawn.controller_manager.has_player(), "and the pawn knows")
 	_check(is_instance_valid(_controller), "and the controller is still here")
 	pawn.free()
 
@@ -133,10 +133,10 @@ func _test_refusals() -> void:
 func _test_letting_go_stops_the_pawn() -> void:
 	var pawn := _make_pawn(Vector3.ZERO)
 	_possession.possess(pawn)
-	pawn.apply_input(InputCommand.make(Vector3.FORWARD, [&"sprint", &"jump"], 0.5, 0.2)) # Claude 2026-11-07: InputCommand
+	pawn.controller_manager.apply_input(InputCommand.make(Vector3.FORWARD, [&"sprint", &"jump"], 0.5, 0.2)) # Claude 2026-11-07: InputCommand
 	_possession.release()
-	_check(pawn.move_input == Vector3.ZERO and pawn.held_actions == 0, "letting go leaves the pawn idle")
-	_check(is_equal_approx(pawn.look_yaw, 0.5), "and looking where it was")
+	_check(pawn.controller_manager.move_input == Vector3.ZERO and pawn.controller_manager.held_actions == 0, "letting go leaves the pawn idle")
+	_check(is_equal_approx(pawn.controller_manager.look_yaw, 0.5), "and looking where it was")
 	pawn.free()
 	await get_tree().process_frame
 
@@ -152,7 +152,7 @@ func _test_jump_with_no_pawn() -> void:
 	controller.take_pawn(pawn)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
-	_check(not pawn.is_action_held(&"jump"), "a jump pressed with no pawn isn't saved for the next one") # Claude 2026-11-07: named actions
+	_check(not pawn.controller_manager.is_action_held(&"jump"), "a jump pressed with no pawn isn't saved for the next one") # Claude 2026-11-07: named actions
 	controller.take_pawn(null)
 	controller.free()
 	pawn.free()
@@ -160,17 +160,17 @@ func _test_jump_with_no_pawn() -> void:
 
 
 func _test_arm_rules() -> void:
-	# A plain pawn gets one on possession, which goes again afterwards.
+	# A plain pawn gets the player's arm on possession, which leaves again afterwards. Claude 2026-11-16 (pawn M5): the player's one arm, moved here.
 	var plain := _make_pawn(Vector3.ZERO)
 	_check(plain.get_camera_arm() == null, "a plain pawn has no arm")
 	_possession.possess(plain)
 	var arm := plain.get_camera_arm()
-	_check(arm != null, "possession makes one")
+	_check(arm != null and arm == _controller._own_arm, "possession brings the player's own arm")
 	_check(arm.is_processing(), "and it's active")
 	_check(is_equal_approx(arm.get_length(), CameraPreset.new().arm_length), "with the default settings")
 	_possession.release()
 	await get_tree().process_frame
-	_check(plain.get_camera_arm() == null, "and it goes when possession ends")
+	_check(plain.get_camera_arm() == null and is_instance_valid(arm) and arm.get_parent() == _controller, "and it goes back to the player when possession ends")
 	plain.free()
 
 	# A preset chooses the settings.
@@ -178,28 +178,29 @@ func _test_arm_rules() -> void:
 	preset.arm_length = 3.0
 	preset.fov = 50.0
 	var with_preset: Pawn = load(PAWN_SCENE).instantiate()
-	with_preset.camera_preset = preset
+	var mount := CameraMount.new() # Claude 2026-11-16 (pawn M5): the preset lives on a CameraMount under Visual now
+	mount.preset = preset
+	with_preset.get_node("Visual").add_child(mount)
 	add_child(with_preset)
 	_possession.possess(with_preset)
-	_check(is_equal_approx(with_preset.get_camera_arm().get_length(), 3.0), "a pawn's preset sets the arm's length")
+	_check(is_equal_approx(with_preset.get_camera_arm().get_length(), 3.0) and with_preset.get_camera_arm().get_parent() == mount, "a pawn's CameraMount places the arm and its preset sets the length")
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_check(is_equal_approx(_controller.camera.fov, 50.0), "and the field of view")
 	_possession.release()
 	with_preset.free()
 
-	# A hero keeps its arm.
-	var hero: Pawn = load(PAWN_SCENE).instantiate()
-	hero.always_has_camera_arm = true
-	add_child(hero)
-	var hero_arm := hero.get_camera_arm()
-	_check(hero_arm != null and not hero_arm.is_processing(), "a hero's arm is there, idle")
-	_possession.possess(hero)
-	_check(hero.get_camera_arm() == hero_arm and hero_arm.is_processing(), "taking it uses that arm")
+	# Claude 2026-11-16 (pawn M5): one arm per player: the same arm moves from pawn to pawn, with each pawn's settings.
+	var one := _make_pawn(Vector3(-3.0, 0.0, 0.0))
+	var two := _make_pawn(Vector3(3.0, 0.0, 0.0))
+	_possession.possess(one)
+	var moving_arm := one.get_camera_arm()
+	_possession.possess(two)
+	_check(two.get_camera_arm() == moving_arm and one.get_camera_arm() == null and moving_arm.is_processing(), "the player's one arm moves to the next pawn they take")
+	_check(is_equal_approx(moving_arm.get_length(), CameraPreset.new().arm_length), "and takes that pawn's settings (the defaults here, after the last pawn's 3 m)")
 	_possession.release()
-	await get_tree().process_frame
-	_check(hero.get_camera_arm() == hero_arm and not hero_arm.is_processing(), "and it stays, idle again")
-	hero.free()
+	one.free()
+	two.free()
 
 	# An arm placed in the scene is used, and stays.
 	var placed: Pawn = load(PAWN_SCENE).instantiate()
@@ -233,7 +234,7 @@ func _test_swapping() -> void:
 	_controller.look_yaw = 1.0
 	_possession.possess(second)
 	_check(_controller.pawn == second and _possession.get_pawn_of() == second, "taking another pawn swaps to it")
-	_check(not first.has_player(), "and lets go of the first")
+	_check(not first.controller_manager.has_player(), "and lets go of the first")
 	await get_tree().process_frame
 	_check(first.get_camera_arm() == null, "and its arm goes")
 	_check(is_equal_approx(_controller.look_yaw, 1.0), "and the player keeps looking the same way")
@@ -275,7 +276,7 @@ func _test_driving() -> void:
 	await _ticks(60)
 	var moved := pawn.position - start
 	_check(moved.x < -2.0, "forward follows where the player looks (%.1f m)" % moved.x)
-	_check(is_equal_approx(pawn.look_yaw, PI * 0.5), "and the look direction reaches the pawn's input")
+	_check(is_equal_approx(pawn.controller_manager.look_yaw, PI * 0.5), "and the look direction reaches the pawn's input")
 
 	scripted.scripted_move = Vector2.ZERO
 	await _ticks(30)
@@ -380,7 +381,9 @@ func _test_camera_arm() -> void:
 	first_person.max_length = 0.0
 	first_person.mount_height = 1.6
 	var fp_pawn: Pawn = load(PAWN_SCENE).instantiate()
-	fp_pawn.camera_preset = first_person
+	var fp_mount := CameraMount.new() # Claude 2026-11-16 (pawn M5): the preset lives on a CameraMount now
+	fp_mount.preset = first_person
+	fp_pawn.get_node("Visual").add_child(fp_mount)
 	add_child(fp_pawn)
 	scripted.take_pawn(fp_pawn)
 	await get_tree().process_frame
@@ -405,11 +408,11 @@ func _test_streaming_and_ai() -> void:
 	add_child(streamer)
 	var pawn := _make_pawn(Vector3(200.0, 30.0, 200.0))
 	await _ticks(3)
-	_check(not pawn.is_simulation_active(), "an unpossessed pawn with no ground is off")
+	_check(pawn.is_frozen(), "an unpossessed pawn with no ground is off")
 	_check(terrain.get_loaded_chunks().is_empty(), "and loads nothing")
 	_possession.possess(pawn)
 	await _ticks(3)
-	_check(pawn.is_simulation_active(), "possessing it turns it on")
+	_check(not pawn.is_frozen(), "possessing it turns it on")
 	_check(terrain.has_chunk(terrain.chunk_of(pawn.global_position)), "and brings ground under it straight away")
 	await _ticks(240)
 	_check(pawn.position.y < 25.0 and pawn.grounded, "so it lands (at %.1f m)" % pawn.position.y)

@@ -22,7 +22,7 @@ Small diagnostics that cost very little, and that moving would cost more than it
 
 A base class may offer one empty slot for a module to fill, such as a packet filter. It should never name a debug class.
 
-*(Claude 2026-11-16, diagnostics v0.)* `PerfScopes` (`assets/scripts/diagnostics/`) is base code of this kind. Its timing marks cost one check when nothing listens, and they're spread through the systems they time. The tools that listen are in `debug/diagnostics/`. The `DiagnosticsManager` module is switched on by the project setting `project_base/game_mode/modules`, whose `.release` override leaves it out, so `GameMode` never names it. Samples and tests may name it, since they aren't in release builds either.
+*(Claude 2026-11-16, diagnostics v0.)* `PerfScopes` (`assets/scripts/diagnostics/`) is base code of this kind. Its timing marks cost one check when nothing listens, and they're spread through the systems they time. The tools that listen are in `diagnostics/` too. *(2026-11-16: they ship in release builds, the owner's call, for bug reports; they were in `debug/`.)* The `DiagnosticsManager` module is switched on by the project setting `project_base/game_mode/modules` and its `.release` override, so `GameMode` never names it. Samples and tests may name it, since they aren't in release builds either.
 
 ## How to check it
 

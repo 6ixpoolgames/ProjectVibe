@@ -131,7 +131,8 @@ func spawn_player(peer: int, type_name: String = "pawn", group: StringName = &""
 		return null
 	_players[pawn.get_instance_id()] = peer
 	# GDScript note: the instance id is bound, not the pawn, so a pawn freed before the call doesn't break it.
-	pawn.died.connect(_on_player_died.bind(pawn.get_instance_id()))
+	if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): died moved to the AbilityManager
+		pawn.ability_manager.died.connect(_on_player_died.bind(pawn.get_instance_id()))
 	var coordinator: PossessionCoordinator = _game_mode.possession_coordinator if _game_mode else null
 	if coordinator:
 		if serving:
@@ -191,7 +192,8 @@ func _respawn_player(pawn_id: int) -> void:
 			pawn.velocity = Vector3.ZERO
 			pawn.yaw = place["yaw"]
 			_claim(place["position"]) # Claude 2026-11-13: so another player brought back this tick goes somewhere else
-	pawn.revive()
+	if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): moved from Pawn
+		pawn.ability_manager.revive()
 	player_respawned.emit(_players.get(pawn_id, 0), pawn)
 
 

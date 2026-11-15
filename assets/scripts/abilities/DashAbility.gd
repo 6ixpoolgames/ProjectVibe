@@ -86,7 +86,7 @@ func can_start() -> bool:
 
 ## The way the movement input points; the facing only when there's no input. Then the pawn turns to face the dash.
 func start() -> void:
-	var wanted := Vector3(pawn.move_input.x, 0.0, pawn.move_input.z)
+	var wanted := Vector3(move_input().x, 0.0, move_input().z) # Claude 2026-11-16 (pawn M4)
 	if wanted.length_squared() > 0.0001:
 		dash_direction = wanted.normalized()
 	else:

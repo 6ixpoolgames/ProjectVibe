@@ -37,14 +37,14 @@ func _test_health_and_death() -> void:
 	var listed: Array[String] = (victim.get_node("TickState") as TickStateComponent).state_properties
 	_check(listed.has("StatManager/Health:current") and listed.has("AbilityManager/Death:ticks_left"), "Health's current value and the Death ability roll back")
 	var deaths := []
-	victim.died.connect(func(who, hit): deaths.append([who, hit]))
+	victim.ability_manager.died.connect(func(who, hit): deaths.append([who, hit]))
 	for i in 4:
-		victim.receive_hit(_hit(attacker, victim, 20))
+		victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
 	_check(is_equal_approx(victim.get_health(), 20.0) and not victim.is_dead(), "four hits of 20: 20 left, alive")
-	victim.receive_hit(_hit(attacker, victim, 20))
+	victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
 	_check(victim.get_health() == 0.0 and victim.is_dead(), "the fifth: Health 0, and the Death ability runs")
 	_check(deaths.size() == 1 and deaths[0][0] == victim, "died goes out once")
-	victim.receive_hit(_hit(attacker, victim, 20))
+	victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
 	_check(deaths.size() == 1, "a hit on a dead pawn does nothing")
 	var ai := victim.controller_manager.ai_controller as AIController
 	ai.move_in_direction(Vector3(1, 0, 0))
@@ -53,7 +53,7 @@ func _test_health_and_death() -> void:
 	_check(victim.is_dead() and Vector2(victim.velocity.x, victim.velocity.z).length() < 0.2 and victim.velocity.y <= 0.01, "dead, it ignores its input: no walking, no jumping")
 	var pressed_dash := victim.ability_manager.can_start(&"dash") or victim.ability_manager.can_start(&"primary")
 	_check(not pressed_dash, "and no ability can start")
-	victim.revive()
+	victim.ability_manager.revive()
 	await _ticks(2)
 	_check(not victim.is_dead() and is_equal_approx(victim.get_health(), 100.0), "revive: full Health, and Death ends on its next tick")
 	await _ticks(15)
@@ -63,7 +63,7 @@ func _test_health_and_death() -> void:
 	var client_entity := NetworkEntity.new()
 	client_entity.role = NetworkEntity.Role.REMOTE_FOLLOWING
 	victim._entity = client_entity
-	victim.receive_hit(_hit(attacker, victim, 50))
+	victim.ability_manager.receive_hit(_hit(attacker, victim, 50))
 	_check(is_equal_approx(victim.get_health(), 100.0), "on a client, receive_hit does nothing")
 	victim._entity = real_entity
 	client_entity.free()
@@ -76,7 +76,7 @@ func _test_being_hit_states() -> void:
 	var sneak := _make_pawn(Vector3(40, 0.1, 6), 0) # behind the goblin, which faces -Z: never seen
 	await _ticks(20)
 	_check(goblin.ai_context.current_state_name() == &"Idle", "an unseen pawn behind it: Idle")
-	goblin.receive_hit(_hit(sneak, goblin, 10))
+	goblin.ability_manager.receive_hit(_hit(sneak, goblin, 10))
 	await _ticks(3)
 	_check(goblin.ai_context.current_state_name() == &"Alert", "hit by an attacker it doesn't know: Alert at once (the hit rule)")
 	_check(goblin.ai_behaviour_manager.get_running_behaviour().name == &"LookToward", "and it looks toward where the hit came from")
@@ -90,7 +90,7 @@ func _test_being_hit_states() -> void:
 	var known := _make_pawn(Vector3(60, 0.1, 6), 0)
 	await _ticks(20)
 	goblin.ai_memory.record_sighting(known, 0.4, TickDriver.tick, known.global_position) # half-noticed earlier
-	goblin.receive_hit(_hit(known, goblin, 10))
+	goblin.ability_manager.receive_hit(_hit(known, goblin, 10))
 	await _ticks(3)
 	_check(goblin.ai_context.current_state_name() == &"Combat", "hit by an attacker it knows: straight to Combat")
 	_check(goblin.ai_memory.threat_at(goblin.ai_memory.find(known)) > 0.09, "and the damage added threat to the attacker's entry (%.2f)" % goblin.ai_memory.threat_at(goblin.ai_memory.find(known)))
@@ -104,7 +104,7 @@ func _test_dead_are_ignored() -> void:
 	await _ticks(30)
 	_check(watcher.ai_memory.find(corpse) >= 0, "a living enemy in front is sensed")
 	for i in 5:
-		corpse.receive_hit(_hit(watcher, corpse, 20))
+		corpse.ability_manager.receive_hit(_hit(watcher, corpse, 20))
 	_check(corpse.is_dead(), "it dies")
 	await _ticks(25) # past a full sensing pass
 	_check(watcher.ai_memory.find(corpse) < 0, "and memory forgets it on the next pass; sensing doesn't put it back")
@@ -116,7 +116,7 @@ func _test_fight_to_the_death() -> void:
 	var goblin := _make_goblin(Vector3(120, 0.1, 0))
 	var intruder := _make_pawn(Vector3(120, 0.1, -6), 0)
 	var deaths := []
-	intruder.died.connect(func(who, _hit): deaths.append(who))
+	intruder.ability_manager.died.connect(func(who, _hit): deaths.append(who))
 	for i in 900:
 		await get_tree().physics_frame
 		if not deaths.is_empty():
@@ -178,7 +178,7 @@ func _test_kill_self() -> void:
 	await _ticks(2)
 	ai.press(&"dash")
 	await _ticks(2)
-	var dodging := pawn.is_invulnerable()
+	var dodging := pawn.ability_manager.is_invulnerable()
 	ai.press(&"kill_self")
 	await _ticks(3)
 	_check(dodging and pawn.is_dead() and pawn.get_health() == 0.0, "pressing it kills the pawn at once, even mid-dash")

@@ -18,6 +18,9 @@ var _seconds := 150
 var _record := true # Claude 2026-11-15
 var _visuals := true # Claude 2026-11-16
 var _shadows := true
+var _max_slides := -1 # Claude 2026-11-16 (movement experiments): -1: as the scenes have it (Godot's default, 6)
+var _pawn_collision := true
+var _skip_still_moves := false
 
 
 func _ready() -> void:
@@ -32,8 +35,24 @@ func _ready() -> void:
 			_visuals = false
 		elif argument == "--no-shadows":
 			_shadows = false
+		elif argument.begins_with("--max-slides="): # Claude 2026-11-16 (movement experiments)
+			_max_slides = int(argument.trim_prefix("--max-slides="))
+		elif argument == "--no-pawn-collision":
+			_pawn_collision = false
+		elif argument == "--skip-still-moves":
+			_skip_still_moves = true
 	if not _visuals:
 		get_tree().node_added.connect(_on_node_added)
+	# Claude 2026-11-16 (movement experiments): each pawn's movement settings, set as it enters the tree.
+	get_tree().node_added.connect(func(node: Node) -> void:
+		var pawn := node as Pawn
+		if pawn == null:
+			return
+		if _max_slides > 0:
+			pawn.max_slides = _max_slides
+		if not _pawn_collision:
+			pawn.collision_mask &= ~2 # pawns are on layer 2 (pawn.tscn); the ground stays on 1
+		pawn.skip_move_when_still = _skip_still_moves)
 	if not _record and GameMode.replay_recorder:
 		GameMode.replay_recorder.enabled = false
 	var arena: Node = load("res://assets/scenes/samples/mass_battle_sample.tscn").instantiate()
@@ -53,8 +72,9 @@ func _ready() -> void:
 	# Claude 2026-11-16: in a window, the overhead view of the middle, where the fight is: the most there is to draw.
 	if DisplayServer.get_name() != "headless":
 		arena._toggle_overhead()
-	print("--- Mass battle, %d a faction, %d ticks a second, %s%s%s ---" % [_size, TickDriver.get_tick_rate(), "recording a replay" if _record else "no replay",
-		"" if _visuals else ", no toy visuals", "" if _shadows else ", no shadows"])
+	print("--- Mass battle, %d a faction, %d ticks a second, %s%s%s%s%s%s ---" % [_size, TickDriver.get_tick_rate(), "recording a replay" if _record else "no replay",
+		"" if _visuals else ", no toy visuals", "" if _shadows else ", no shadows", ", max_slides %d" % _max_slides if _max_slides > 0 else "",
+		"" if _pawn_collision else ", no pawn-pawn collision", ", skipping still moves" if _skip_still_moves else ""])
 	print(" time   pawns frozen dead   input+AI  simulate  record  other   tick ms  budget%  physics a step (worst frame)  outside ticks  dropped/s")
 	var started := Time.get_ticks_msec()
 	var ticks_per_row := 10 * TickDriver.get_tick_rate()
@@ -74,6 +94,10 @@ func _ready() -> void:
 			"objects": s.objects}
 		@warning_ignore("integer_division") # whole seconds on purpose
 		print("%4ds   %5d %6d %4d   %8.2f  %8.2f  %6.2f  %5.2f   %7.2f  %6d%%  %15.1f (%6.1f)  %13.1f  %9.1f" % [i / TickDriver.get_tick_rate(), n["pawns"], n["frozen"], n["dead"], n["input_ms"], n["simulate_ms"], n["record_ms"], n["other_ms"], n["tick_ms"], int(100.0 * n["tick_ms"] / n["budget_ms"]), n["physics_ms"], n["physics_worst_ms"], n["outside_ticks_ms"], n["dropped_per_second"]])
+		# Claude 2026-11-16 (movement experiments): movement: move_and_slide's cost and calls a frame, and skipped moves.
+		var moves: Array = s.scopes.get(&"pawn.move_and_slide", [0.0, 0.0])
+		var skipped: Array = s.scopes.get(&"pawn.move_skipped", [0.0, 0.0])
+		print("        move_and_slide %.2f ms a frame, %.0f calls, %.1f us each; %.0f skipped" % [moves[0], moves[1], 1000.0 * moves[0] / maxf(moves[1], 1.0), skipped[1]])
 		# Claude 2026-11-16: the frame as a whole, for windowed runs
 		print("        frame %.1f ms (%d fps)   scripts %.1f ms   drawing CPU %.1f ms, GPU %.1f ms   %d draw calls, %d objects" % [n["frame_ms"], n["fps"], n["process_ms"], n["render_cpu_ms"], n["render_gpu_ms"], n["draw_calls"], n["objects"]])
 	# Claude 2026-11-15: the replay's size, before stopping it

@@ -65,12 +65,12 @@ func write_tick(tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
 func pawn_added(pawn: Pawn, id: int) -> void:
 	var connections: Array = []
 	# GDScript note: each lambda below captures id, so the event names the right pawn even after others come and go.
-	_connect(connections, pawn.hit_received, func(hit: HitInfo) -> void:
-		add_event("hit", id, {"attacker": recorder.get_replay_id(hit.attacker) if recorder else 0, "ability": _name_of(hit.ability),
-			"damage": hit.damage_dealt}))
-	_connect(connections, pawn.died, func(_who: Pawn, hit: HitInfo) -> void:
-		add_event("died", id, {"killer": recorder.get_replay_id(hit.attacker) if recorder and hit else 0}))
-	if pawn.ability_manager:
+	if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): hit_received and died moved to the AbilityManager
+		_connect(connections, pawn.ability_manager.hit_received, func(hit: HitInfo) -> void:
+			add_event("hit", id, {"attacker": recorder.get_replay_id(hit.attacker) if recorder else 0, "ability": _name_of(hit.ability),
+				"damage": hit.damage_dealt}))
+		_connect(connections, pawn.ability_manager.died, func(_who: Pawn, hit: HitInfo) -> void:
+			add_event("died", id, {"killer": recorder.get_replay_id(hit.attacker) if recorder and hit else 0}))
 		_connect(connections, pawn.ability_manager.ability_started, func(ability: AbilityBase) -> void:
 			add_event("ability_started", id, {"ability": _name_of(ability)}))
 		_connect(connections, pawn.ability_manager.ability_cancelled, func(ability: AbilityBase, by: AbilityBase) -> void:

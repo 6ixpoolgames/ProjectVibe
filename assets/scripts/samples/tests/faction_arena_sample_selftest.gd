@@ -70,7 +70,7 @@ func _ready() -> void:
 	var across := {"hits": 0} # hits between the two AI teams
 	var used := {}
 	for goblin in red + blue:
-		goblin.hit_received.connect(func(hit: HitInfo) -> void:
+		goblin.ability_manager.hit_received.connect(func(hit: HitInfo) -> void:
 			if hit.attacker and hit.attacker.team != 0 and hit.attacker.team != goblin.team:
 				across["hits"] += 1)
 		goblin.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void: used[String(ability.name)] = true)

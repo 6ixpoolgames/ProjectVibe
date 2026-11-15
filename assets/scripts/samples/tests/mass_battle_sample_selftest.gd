@@ -50,10 +50,10 @@ func _test_filling() -> void:
 			break
 	_check(_alive(1) == 5 and _alive(2) == 5 and _alive(0) == 4, "the teams fill up: red %d, blue %d, soldiers %d (each with a hero)" % [_alive(1), _alive(2), _alive(0)])
 	var heroes: Array[Pawn] = _arena.get_heroes()
-	_check(heroes.size() == 3 and heroes.all(func(h: Pawn) -> bool: return h.has_node("StreamingSource") and h.get_health() == 1000.0), "three heroes, each a chunk source, with 1000 Health")
+	_check(heroes.size() == 3 and heroes.all(func(h: Pawn) -> bool: return h.is_keeping_world_loaded() and h.get_health() == 1000.0), "three heroes, each a chunk source, with 1000 Health")
+	# Claude 2026-11-16 (pawn M2): sources are flags on pawns now, with the level's distance as the game's setting.
 	var player: Pawn = GameMode.possession_coordinator.get_pawn_of()
-	var source := player.get_node_or_null("StreamingSource") as StreamingSource
-	_check(source != null and is_equal_approx(source.load_distance, 160.0) and player.global_position.x > 270.0, "the player starts at the players' spawner, loading 160 m like the rest")
+	_check(player.is_keeping_world_loaded() and is_equal_approx(player.load_distance, 160.0) and player.global_position.x > 270.0, "the player starts at the players' spawner, loading 160 m like the rest")
 
 
 func _test_march() -> void:
@@ -67,10 +67,10 @@ func _test_hero_switch() -> void:
 	_arena.set_hero_sources(false)
 	await _ticks(2)
 	var heroes: Array[Pawn] = _arena.get_heroes()
-	_check(heroes.all(func(h: Pawn) -> bool: return not h.has_node("StreamingSource")), "H: the heroes stop being chunk sources")
+	_check(heroes.all(func(h: Pawn) -> bool: return not h.is_keeping_world_loaded()), "H: the heroes stop being chunk sources")
 	_arena.set_hero_sources(true)
 	await _ticks(2)
-	_check(heroes.all(func(h: Pawn) -> bool: return h.has_node("StreamingSource")), "and H again brings them back")
+	_check(heroes.all(func(h: Pawn) -> bool: return h.is_keeping_world_loaded()), "and H again brings them back")
 
 
 # A red goblin put in the middle: frozen once the centre's source is off and the ground there unloads, running again once it's on.
@@ -111,8 +111,7 @@ func _test_centre_switch() -> void:
 # out from the middle between the red and blue spawners, where nothing else loads ground.
 func _test_outrunning() -> void:
 	var runner: Pawn = load(ALLY_SCENE).instantiate()
-	runner.ai_loads_chunks = true
-	runner.streaming_load_distance = 160.0
+	runner.keeps_world_loaded = true # Claude 2026-11-16 (pawn M2): was ai_loads_chunks, with its own 160 m; 160 is the level's setting now
 	var behaviours := runner.get_node("AIBehaviourManager")
 	for child in behaviours.get_children():
 		behaviours.remove_child(child)

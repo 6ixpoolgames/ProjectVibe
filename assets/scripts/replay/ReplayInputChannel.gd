@@ -17,26 +17,29 @@ func _init() -> void:
 	version = 1
 
 
+# Claude 2026-11-16 (pawn M4): the input is the ControllerManager's now; a pawn without one records nothing pressed.
 func same_as_last(pawn: Pawn, last: Variant) -> bool:
 	if last == null:
 		return false
-	var was: Array = last
-	return was[0] == pawn.move_input and was[1] == pawn.look_yaw and was[2] == pawn.look_pitch and was[3] == pawn.held_actions \
-		and was[4] == pawn.view_ticks_behind
+	return last == remember(pawn)
 
 
 func remember(pawn: Pawn) -> Variant:
-	return [pawn.move_input, pawn.look_yaw, pawn.look_pitch, pawn.held_actions, pawn.view_ticks_behind]
+	var c := pawn.controller_manager
+	if c == null:
+		return [Vector3.ZERO, pawn.yaw, 0.0, 0, 0.0]
+	return [c.move_input, c.look_yaw, c.look_pitch, c.held_actions, c.view_ticks_behind]
 
 
 func write_record(pawn: Pawn, out: StreamPeerBuffer) -> void:
-	out.put_half(pawn.move_input.x)
-	out.put_half(pawn.move_input.y)
-	out.put_half(pawn.move_input.z)
-	out.put_half(wrapf(pawn.look_yaw, -PI, PI))
-	out.put_half(pawn.look_pitch)
-	out.put_u64(pawn.held_actions)
-	out.put_half(pawn.view_ticks_behind)
+	var values: Array = remember(pawn)
+	out.put_half(values[0].x)
+	out.put_half(values[0].y)
+	out.put_half(values[0].z)
+	out.put_half(wrapf(values[1], -PI, PI))
+	out.put_half(values[2])
+	out.put_u64(values[3])
+	out.put_half(values[4])
 
 
 func read_record(data: StreamPeerBuffer) -> Variant:

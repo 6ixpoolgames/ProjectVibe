@@ -8,6 +8,7 @@
 ##   AIActivationManager     switches AI pawns off when no source keeps the ground under them loaded
 ##   SpawnManager            puts pawns in at SpawnPoints, and brings players back after they die (Claude 2026-11-10)
 ##   ReplayRecorder          records the game to a replay file once the game calls start_recording (Claude 2026-11-15, replay spec)
+##   TeamRegistry            how many pawns are on each team (Claude 2026-11-16, pawn M1: was a counter on Pawn)
 ##
 ## How to use it:
 ##   GameMode.pawn_initializer         # a module, or null if this game doesn't have it, so check first
@@ -35,6 +36,7 @@ const DEFAULT_MODULES: Array[String] = [
 	"res://assets/scripts/game_mode/AIActivationManager.gd",
 	"res://assets/scripts/game_mode/SpawnManager.gd", # Claude 2026-11-10: does nothing with no spawn points placed
 	"res://assets/scripts/replay/ReplayRecorder.gd", # Claude 2026-11-15: records nothing until the game starts a recording
+	"res://assets/scripts/game_mode/TeamRegistry.gd", # Claude 2026-11-16 (pawn M1)
 ]
 
 ## The module that switches AI pawns off, or null without one. Each module fills in its own line when it starts.
@@ -48,6 +50,8 @@ var pawn_initializer: PawnInitializer = null
 var spawn_manager: SpawnManager = null
 ## Claude 2026-11-15: records the game to replay files, or null without one (docs/replay/REPLAY_SPEC.md).
 var replay_recorder: ReplayRecorder = null
+## Claude 2026-11-16 (pawn M1): how many pawns are on each team, or null without one.
+var team_registry: TeamRegistry = null
 
 var _modules: Array[GameModeModule] = []
 

@@ -141,12 +141,13 @@ func _build_ground_under_sources() -> void:
 	if not is_instance_valid(terrain) or not terrain.is_inside_tree() or not terrain.is_node_ready():
 		return
 	for node in get_tree().get_nodes_in_group(StreamingSource.GROUP):
-		var source := node as StreamingSource
+		# Claude 2026-11-16 (pawn M2): any source: a StreamingSource or a Pawn, read through the source contract (StreamingSource.gd).
+		var source := node as Node3D
 		if source == null or not source.counts_on_this_machine():
 			continue
 		# Near a chunk's edge, the next chunk has to be there too. How near depends on how fast the source is moving. A move
 		# past MAX_PREDICTED_MOVE is a jump, such as a teleport: it says nothing about where the next step goes.
-		var moved := source.distance_moved_since_last_check()
+		var moved: float = source.distance_moved_since_last_check()
 		var reach := maxf(moved * 2.0, MIN_GROUND_REACH) if moved <= MAX_PREDICTED_MOVE else MIN_GROUND_REACH
 		var at := source.global_position
 		for corner: Vector3 in [Vector3(-reach, 0.0, -reach), Vector3(reach, 0.0, -reach), Vector3(-reach, 0.0, reach), Vector3(reach, 0.0, reach)]:
@@ -237,10 +238,11 @@ func _refresh() -> void:
 		_has_current_build = false
 
 
-func _active_sources() -> Array[StreamingSource]:
-	var sources: Array[StreamingSource] = []
+# Claude 2026-11-16 (pawn M2): Node3D, not StreamingSource: pawns are sources too (the source contract, StreamingSource.gd).
+func _active_sources() -> Array[Node3D]:
+	var sources: Array[Node3D] = []
 	for node in get_tree().get_nodes_in_group(StreamingSource.GROUP):
-		var source := node as StreamingSource
+		var source := node as Node3D
 		# Claude 2026-11-07: asks the source, so a client skips other players' pawns.
 		if source != null and source.counts_on_this_machine():
 			sources.append(source)
@@ -249,7 +251,7 @@ func _active_sources() -> Array[StreamingSource]:
 
 ## Gives every chunk near a source a score: its distance from the source minus that source's load_distance. Negative
 ## is inside load_distance, and lower is more urgent. A chunk near several sources keeps its lowest score.
-func _score_chunks(sources: Array[StreamingSource]) -> Dictionary:
+func _score_chunks(sources: Array[Node3D]) -> Dictionary:
 	var scores := {}
 	var origin := terrain.global_position
 	var size := terrain.chunk_size
@@ -262,7 +264,7 @@ func _score_chunks(sources: Array[StreamingSource]) -> Dictionary:
 		var z := source.global_position.z - origin.z
 		for chunk_z in range(floori((z - reach) / size), floori((z + reach) / size) + 1):
 			for chunk_x in range(floori((x - reach) / size), floori((x + reach) / size) + 1):
-				var score := _distance_to_chunk(x, z, chunk_x, chunk_z, size) - source.load_distance
+				var score: float = _distance_to_chunk(x, z, chunk_x, chunk_z, size) - source.load_distance
 				if score <= unload_margin:
 					var key := Vector2i(chunk_x, chunk_z)
 					if not scores.has(key) or score < scores[key]:

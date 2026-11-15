@@ -12,8 +12,8 @@ extends Node3D
 ## The settings. Empty means the defaults.
 @export var preset: CameraPreset
 
-## True if possession made this arm, so it goes again when possession ends. An arm placed in a scene stays.
-var spawned_by_possession := false
+# Claude 2026-11-16 (pawn M5): spawned_by_possession is gone: the PlayerController owns one arm and moves it between pawns, rather than a pawn
+# making one on possession.
 
 var _view: VirtualCamera = null
 var _length := 6.0
@@ -25,8 +25,13 @@ var _shown_length := 0.0 # how long the arm really is right now, after walls
 
 
 func _ready() -> void:
-	if preset == null:
-		preset = CameraPreset.new()
+	apply_preset(preset)
+
+
+## Claude 2026-11-16 (pawn M5): takes these settings (or the defaults, for null) now: the arm's place, length, pitch, field of view and
+## collision radius. For an arm moving to another pawn, whose preset may differ. Was the body of _ready.
+func apply_preset(new_preset: CameraPreset) -> void:
+	preset = new_preset if new_preset else CameraPreset.new()
 	position = Vector3(preset.shoulder_offset, preset.mount_height, 0.0)
 	_length = clampf(preset.arm_length, 0.0, maxf(preset.max_length, preset.arm_length))
 	_pitch = clampf(deg_to_rad(preset.start_pitch), deg_to_rad(preset.min_pitch), deg_to_rad(preset.max_pitch))
@@ -50,6 +55,11 @@ func get_view() -> VirtualCamera:
 ## Stops this body pulling the camera in, normally the pawn holding the arm.
 func ignore_body(body: CollisionObject3D) -> void:
 	_exclude.append(body.get_rid())
+
+
+## Claude 2026-11-16 (pawn M5): forgets every ignored body, for an arm moving to another pawn.
+func clear_ignored() -> void:
+	_exclude.clear()
 
 
 ## Starts or stops the arm's work. Only the arm a player is looking through needs to run.

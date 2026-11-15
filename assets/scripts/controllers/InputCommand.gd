@@ -2,7 +2,7 @@
 ## it's what goes over the network. Pawn spec section 5. This replaces the old idea of "intent": nothing holds what a pawn wants
 ## between ticks except the last input.
 ##
-## How to use it: a controller makes one each tick and gives it to Pawn.apply_input(). In a script or test,
+## How to use it: a controller makes one each tick and gives it to ControllerManager.apply_input() (Pawn's until pawn M4). In a script or test,
 ## InputCommand.make(direction, [&"sprint"]) is the short way.
 class_name InputCommand
 extends RefCounted

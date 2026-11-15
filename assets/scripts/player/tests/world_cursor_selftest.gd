@@ -201,7 +201,7 @@ func _test_click_to_move() -> void:
 	_check(not controller.is_following_path(), "and it finishes (%d ticks)" % ticks)
 	_check(distance < 2.0, "at the place clicked (%.1f m away)" % distance)
 	_check(pawn.position.y > terrain.height_at(pawn.position.x, pawn.position.z) - 0.5, "on the ground")
-	_check(pawn.move_input.length() < 0.01, "and stops")
+	_check(pawn.controller_manager.move_input.length() < 0.01, "and stops")
 
 	# The cursor finds the ground under a camera, and clicking uses it.
 	var camera := Camera3D.new()

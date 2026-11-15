@@ -29,7 +29,7 @@ func _ready() -> void:
 	var standing := _pawn(Vector3(0, 0.1, 0))
 	var falling := _pawn(Vector3(40, 0.1, 0))
 	var deaths := []
-	falling.died.connect(func(_who: Pawn, hit: HitInfo) -> void: deaths.append(hit)) # Claude 2026-11-15: _who, as _pawn shadowed the _pawn() helper (an editor warning)
+	falling.ability_manager.died.connect(func(_who: Pawn, hit: HitInfo) -> void: deaths.append(hit)) # Claude 2026-11-15: _who, as _pawn shadowed the _pawn() helper (an editor warning)
 	await _ticks(5)
 	_check(kill_floor.kill_effect != null and kill_floor.kill_effect.effect_name == &"kill self", "by default it uses the kill_self effect")
 	for i in 240:
@@ -40,7 +40,7 @@ func _ready() -> void:
 	_check(not standing.is_dead() and standing.get_health() == 100.0, "one standing on the ground above it is left alone")
 	await _ticks(60)
 	_check(deaths.size() == 1, "a dead pawn below it isn't hit again (%d deaths)" % deaths.size())
-	falling.revive()
+	falling.ability_manager.revive()
 	falling.global_position = Vector3(0, 0.1, 0)
 	await _ticks(30)
 	_check(not falling.is_dead(), "revived and back on the ground, it stays alive")
@@ -60,20 +60,23 @@ func _test_reports(kill_floor: KillFloor, standing: Pawn) -> void:
 	var no_terrain := kill_floor.fall_report(standing, last_seen, int(last_seen[2]) + 120)
 	_check(no_terrain.contains("last standing 2.0 s before") and not no_terrain.contains("ground where"), "a report says where and when it last stood (%s)" % no_terrain)
 	_check(kill_floor.fall_report(standing, null, 0).contains("wasn't seen standing"), "or that it never stood anywhere")
-	# A small terrain, with only the chunk at the world's middle built (no collision, so nothing here stands on it).
+	# A small terrain, with only the chunks at the world's middle built (no collision, so nothing here stands on it).
 	var terrain := TerrainGenerator.new()
 	terrain.build_on_start = false
 	terrain.chunk_size = 32.0
 	terrain.chunk_resolution = 4
 	terrain.build_collision = false
 	add_child(terrain)
-	terrain.load_chunk(Vector2i(0, 0))
+	# Claude 2026-11-16: the four chunks around the world's middle, not just one: the standing pawn is at (0, 0), the corner of four, and a
+	# hair's push from the revived pawn placed on the same spot can move it into a neighbour (a check that failed on float noise).
+	for key: Vector2i in [Vector2i(0, 0), Vector2i(-1, 0), Vector2i(0, -1), Vector2i(-1, -1)]:
+		terrain.load_chunk(key)
 	var through := kill_floor.fall_report(standing, last_seen, 0)
 	var old_spot := standing.global_position
 	standing.global_position = Vector3(500, -30, 500)
 	var off_edge := kill_floor.fall_report(standing, last_seen, 0)
 	standing.global_position = old_spot
-	_check(through.contains("went through solid ground"), "over built ground, it says the pawn went through it")
+	_check(through.contains("went through solid ground"), "over built ground, it says the pawn went through it (%s)" % through) # Claude 2026-11-16: with the report, for diagnosing
 	_check(off_edge.contains("off the edge of the loaded world"), "over none, that it went off the edge")
 	terrain.free()
 

@@ -9,8 +9,8 @@ class StubPawn extends Node3D:
 	var active := true
 	var changes := 0
 
-	func set_simulation_active(new_active: bool) -> void:
-		active = new_active
+	func set_frozen(frozen: bool) -> void: # Claude 2026-11-16 (pawn M1): renamed from set_simulation_active
+		active = not frozen
 		changes += 1
 
 

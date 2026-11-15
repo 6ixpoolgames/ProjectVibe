@@ -22,11 +22,11 @@ Owner's decisions, 2026-11-16:
    - a slightly longer basic attack cooldown
    - hit interceptors replacing the parry and dash special cases (pawn spec 14, "Shortcuts to redo")
 2. **Slimming the pawn** (M1 to M6). The pawn keeps the body and its tick order, its part references and its general flags:
-   - **M1:** each part cleans up on `died` itself; a TeamRegistry module; the sleeping and frozen renames; the AI's ordered step moved into AIContextComponent
-   - **M2:** a `keeps_world_loaded` flag on the pawn, with distances from the GameMode, and the chunk streamer reading pawns through a small contract
-   - **M3:** hits and gameplay signals on the AbilityManager
-   - **M4:** input and possession on the ControllerManager, which stays optional and is added by default; abilities read input through helpers
-   - **M5:** one camera per player, on the PlayerController, attaching to a CameraMount on the pawn
+   - **M1** *(built 2026-11-16)*: a TeamRegistry module; the sleeping and frozen renames; the AI's ordered step moved into AIContextComponent. Each part cleaning up on `died` itself moved to M3, which moves the signal
+   - **M2** *(built 2026-11-16)*: a `keeps_world_loaded` flag on the pawn, with distances from the GameMode (`PawnDefaultsRes`), and the chunk streamer, nav feeder and replay reading pawns through the source contract
+   - **M3** *(built 2026-11-16)*: hits, death and their signals on the AbilityManager, each part cleaning up on `died` itself (pawn spec 8.16). Parry and dash as hit interceptors stay with the ability-steps work
+   - **M4** *(built 2026-11-16)*: input and possession on the ControllerManager, which stays optional and is added by default; abilities read input through helpers (pawn spec 8.17)
+   - **M5** *(built 2026-11-16)*: one camera per player, on the PlayerController, attaching to a CameraMount on the pawn (pawn spec 8.18)
    - **M6:** a VisualSmoother (folded into animation v0's visuals manager); detectability as a stat, mirrored into the pawn table (C++)
    - **Optional C++ bundle with M6:** stat columns in the pawn table, the per-pawn tick step from distance in whole chunks, and replay motion packing in C++
 3. **Tick driver update** (variable tick rate):
@@ -34,6 +34,12 @@ Owner's decisions, 2026-11-16:
    - per-pawn steps of 2 or 4 by distance, in multiples of the chunk size
    - the whole game dropping to 30 under load, announced ahead
    - timers that advance by a step
+   - **A batched mover** *(the owner's call, 2026-11-16)*. Every pawn runs its abilities first, then one central step moves them all, still with Godot's move_and_slide. The gains:
+     - every swing and query sees the same moment
+     - one place to swap in the C++ mover from the wishlist
+     - one place for per-pawn steps and skipping sleeping pawns
+     - one place to measure
+   - **The fallback:** the path is chosen once, when a pawn starts. Without TickDriver and the mover, the pawn moves itself, as today. A pawn in the batch that reaches the end of a tick unmoved moves itself and warns once (session log, F8), so a break is never silent.
 4. **Performance.** Start from the findings of 2026-11-16 (the owner's memory notes and the replay spec's measurements):
    - hosting costs about 1.4 ms a tick with no clients connected
    - the tick spikes at the first clash
@@ -60,6 +66,53 @@ Owner's decisions, 2026-11-16:
 
 - Pawn spec 8.15 (`65792c8`): parry, heroes, Go To Point, the mass battle, and the fix for a hero falling through unloaded ground.
 - Replay v0 (`60d6bc9`): recorder, reader and viewer, with motion version 2 at 2.7 MB a minute for 153 pawns.
+
+## Networking track *(the networking assessment, 2026-11-16; the owner adopted it as the networking sub-roadmap, without reordering the plan above)*
+
+- **T1.0** *(N1 to N3 built 2026-11-16)*:
+  - **N1:** no snapshot is gathered or encoded when no client can receive it. This was the 1.4 ms a tick a host spent alone.
+  - **N2:** input packets are validated (a count of 0, an impossible tick, a wrong field count) before their timing counts.
+  - **N3:** entities with only sync properties replicate.
+  - **Still to do:** N4 (an explicit effective schema, with mismatches refused rather than silently emptied) and diagnostics for networking.
+- **T1.1:** the time contract, designed with the tick driver update:
+  - the 120-unit fine clock, with snapshot IDs separate from simulation time
+  - step schedules decided by the server and announced ahead
+  - each entity's state time, and presses kept within slower steps
+- **T1.2:** capturing an unchanging copy of state, then encoding it on workers, with an overload rule for each consumer. This is the performance phase's "recording on workers first".
+- **T1.3:** deltas against acknowledged baselines, with full-state recovery (netcode v1).
+- **T1.4:** input batching, and making lifecycle, teleport and late join wait on the world state they need.
+- **T1.5:** a soak test and validation across machines.
+- **Later, if it's needed:** relevance and priority (netcode v2).
+
+## Navigation and terrain track *(the navigation and terrain assessment, 2026-11-16; adopted by the owner. Each claim was checked against the code and confirmed)*
+
+- **Small fixes, soon:**
+  - **Path states** instead of a silent straight line: pending (nav still building), ready, partial (the closest reachable point; the partial flag is dropped today), and unreachable. The straight line becomes an explicit choice for scenes without nav. `NavigationManager.move_to`.
+  - **A generator version in the terrain's compatibility hash.** `ground_settings_hash()` misses a subclass's `_shape_height`.
+- **With the C++ bundle (M6):** fix `TileManager::commit_finished` clearing a tile's in-flight marker before its version check. A stale result can clear a recreated tile's newer build, so the tile gets built twice. Add a regression test.
+- **With the tick driver update:**
+  - link completion that checks height, not just horizontal distance (corner checks drop y)
+  - grounded or airborne state where it matters
+  - link timeouts in simulation time rather than a count of calls at the engine's physics rate
+- **Performance phase:** queued path requests.
+  - **Today:** every `move_to` searches synchronously (`find_path_now…`), so a mass re-plan bunches into one tick. That likely explains much of the 5–7 ms outside the ticks after the mass battle's first clash.
+  - **First:** time it (a `nav.find_path` scope).
+  - **Then, on the budgeted queue:** one request per pawn, newer requests replacing older ones, and request IDs so late results can't overwrite a newer goal.
+- **T1 terrain, when a game edits terrain heavily:**
+  - builds that know which terrain revision they started from, instead of finishing every half-built chunk before an edit
+  - collision published at a defined point in the tick
+  - paths re-planned after edits, with a watchdog for progress
+- **Later:** checkpoints of the edit log per chunk, catch-up for late joiners in bounded batches, and shared or hierarchical routes, where profiling justifies them. Replacing Recast/Detour, flow fields and threaded pawn movement are not planned.
+
+## Wishlist
+
+- **A C++ mover replacing move_and_slide** *(the owner asked 2026-11-16, then put it here: a bigger job than expected, with more knock-on effects than the rest of the performance work)*. A batched, deterministic collide-and-slide:
+  - terrain on a fast height-and-slope path
+  - swept spheres against static geometry shared with SightGeometry
+  - soft separation between pawns
+  - run once per tick after every pawn's abilities, from the pawn table, on workers, with a GDScript fallback
+  
+  It would save about 3.6 ms of a 9.6 ms tick at 153 pawns. Roughly 2 to 3 weeks of work. Movement would feel slightly different, and Godot's rigid bodies wouldn't block pawns unless they're fed in.
 
 ## Open, older items
 

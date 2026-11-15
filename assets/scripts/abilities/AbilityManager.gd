@@ -50,6 +50,16 @@ signal ability_started(ability: AbilityBase)
 signal ability_finished(ability: AbilityBase)
 ## Claude 2026-11-09: sent when an ability is cancelled by another starting, after ability_finished for it.
 signal ability_cancelled(ability: AbilityBase, by: AbilityBase)
+## Claude 2026-11-16 (pawn M3): a hit reached this pawn, on the server: it isn't dead or invulnerable. Sent before a parry can turn it away and before its
+## effects land, so the AI notes every attack (AIContextComponent listens).
+signal hit_arrived(hit: HitInfo)
+## Claude 2026-11-09: sent on the server when something hits this pawn, after its effects are applied (pawn spec 8.11);
+## hit.damage_dealt says how much Health it took. Claude 2026-11-16 (pawn M3): moved here from Pawn.
+signal hit_received(hit: HitInfo)
+## Claude 2026-11-09, step 10: sent once on the server when this pawn dies, after its Death ability starts. hit is what did it, or null.
+## Claude 2026-11-16 (pawn M3): moved here from Pawn. Each part cleans up after itself by listening (the EffectManager, the AI behaviour manager,
+## the ControllerManager), where Pawn._die used to do it for them.
+signal died(pawn: Pawn, hit: HitInfo)
 
 # Claude 2026-11-10: _any_jitter is gone: a press always compares the abilities on its action now, since effects can boost them.
 var _invulnerable_abilities: Array[AbilityBase] = [] # Claude 2026-11-10: those with invulnerable_while_running, usually just Dash
@@ -57,6 +67,12 @@ var _parry_abilities: Array[AbilityBase] = [] # Claude 2026-11-15: ParryAbility 
 var _locomotion_pausers: Array[AbilityBase] = [] # Claude 2026-11-10: those with pauses_locomotion, usually just Dash
 
 var pawn: Pawn = null
+var _driver: Node = null # Claude 2026-11-16 (pawn M3): for hits during simulate
+var _death: DeathAbility = null # Claude 2026-11-16 (pawn M3): found with the abilities (was on Pawn)
+# Claude 2026-11-09: hits queued during simulate, for every pawn, and the tick driver that delivers them (pawn spec 15.4).
+# Claude 2026-11-16 (pawn M3): moved here from Pawn. GDScript note: static, so one queue is shared by every manager.
+static var _queued_hits: Array = [] # [attacker's entity id, target's entity id, place in the queue, HitInfo]
+static var _hit_queue_driver: Node = null
 
 var _abilities: Array[AbilityBase] = [] # every ability, in run order: by priority, then tree order
 var _locomotions: Array[AbilityBase] = []
@@ -87,6 +103,7 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	var driver: Node = get_node_or_null("/root/TickDriver")
+	_driver = driver # Claude 2026-11-16 (pawn M3)
 	if driver:
 		_tick_rate = float(driver.get_tick_rate())
 	_collect_abilities()
@@ -122,15 +139,15 @@ func timers_changed() -> void:
 	_locks_dirty = true
 
 
-## Claude 2026-11-09: true if the pawn can rest as far as its abilities go (pawn spec 15.3): no timer running, and every ability
+## Claude 2026-11-09: true if the pawn can sleep as far as its abilities go (pawn spec 15.3): no timer running, and every ability
 ## with every_tick() agrees.
-func can_rest() -> bool:
+func can_sleep() -> bool:
 	if _timers_dirty:
 		_rebuild_timed()
 	if not _timed.is_empty():
 		return false
 	for ability in _every_tick_abilities:
-		if not ability.can_rest():
+		if not ability.can_sleep():
 			return false
 	return true
 
@@ -250,7 +267,7 @@ func _run_locomotion(dt: float) -> void:
 	for ability in _locomotions:
 		if ability.trigger_action == &"":
 			continue
-		var wanted := pawn.held_actions & ability.trigger_bit != 0 # Claude 2026-11-09: was pawn.is_action_held(trigger_action)
+		var wanted := _held() & ability.trigger_bit != 0 # Claude 2026-11-09: was pawn.is_action_held(trigger_action)
 		if ability.is_running_timed():
 			if wanted and not is_locked(ability):
 				chosen = ability
@@ -264,7 +281,7 @@ func _run_locomotion(dt: float) -> void:
 	if chosen == null:
 		chosen = _default_locomotion
 		# Claude 2026-11-09: moving cancels a conflicting action that allows it (threshold 0, such as an emote).
-		if chosen and is_locked(chosen) and pawn.move_input.length_squared() > 0.0001 and _conflicts_allow(chosen):
+		if chosen and is_locked(chosen) and _move().length_squared() > 0.0001 and _conflicts_allow(chosen):
 			_clear_way(chosen)
 	# Only one locomotion runs. Any other timed one still going stops.
 	for ability in _locomotions:
@@ -287,7 +304,7 @@ func _run_locomotion(dt: float) -> void:
 func _run_actions(dt: float) -> void:
 	# Claude 2026-11-09: bits instead of names (pawn spec 15.2): this tick's presses worked out once, and the actions that started
 	# something kept as bits, where they were a Dictionary of names made every tick. The same rules.
-	var pressed_bits: int = pawn.held_actions & ~pawn.previous_held_actions
+	var pressed_bits: int = _held() & ~_previous_held()
 	var used_bits := 0 # actions that started something this tick, so one press starts one ability
 	# Claude 2026-11-10: actions with a press waiting in some ability's buffer. Every ready ability on such an action competes when
 	# the wait ends, not only the one holding it, so the swing that was running when the press came can win it too.
@@ -496,7 +513,7 @@ func _rebuild_timed() -> void:
 # Claude 2026-11-09, the input channel: whether _run_actions would do anything this tick. It does with a new press of an action
 # something here answers to, or an action running, or a press waiting in a buffer. Otherwise it would only loop and skip.
 func _actions_have_work() -> bool:
-	if pawn.held_actions & ~pawn.previous_held_actions & _action_bits != 0:
+	if _held() & ~_previous_held() & _action_bits != 0:
 		return true
 	for ability in _timed:
 		if ability.kind == AbilityBase.Kind.ACTION and (ability.ticks_left > 0 or ability.buffer_ticks_left > 0):
@@ -540,6 +557,111 @@ func _finish(ability: AbilityBase) -> void:
 	ability_finished.emit(ability)
 
 
+# --- Hits and death (Claude 2026-11-16 (pawn M3): moved here from Pawn: hits and death are abilities' business) ---
+
+
+## Something hit this pawn. Called on the server by the attacking ability, such as MeleeAttack. In order:
+##   1. hit_arrived goes out, and the AI notes the hit (its AIContextComponent listens), for the "being hit" state rules.
+##   2. A running parry can turn it away from the front (ParryAbility): no effects land, and the attacker is pushed back instead.
+##   3. Its EffectManager applies the hit's effects: damage (a StatChangePart; at 0 Health the Death ability starts and died goes
+##      out), the push (a KnockbackPart starting Knockback here), and threat for the Health taken.
+##   4. hit_received goes out, and the attacker gets the hit's attacker_effects.
+## Claude 2026-11-09 (pawn spec 15.4): called during the simulate phase, as an ability's hit is, it's queued, and every queued hit is
+## delivered after all pawns have simulated, in a fixed order, so the result never depends on whether this pawn simulated before or
+## after its attacker. Called at any other time, such as from game code or a test, it takes effect at once.
+func receive_hit(hit: HitInfo) -> void:
+	if pawn == null or not pawn.is_authority() or hit == null or pawn.is_dead():
+		return
+	if _driver and _driver.is_in_simulate():
+		_queue_hit(hit)
+		return
+	_take_hit(hit)
+
+
+## The EffectManager calls this on the authority when an effect has just taken this pawn's Health to 0: its Death ability starts and
+## died goes out. hit is the hit that did it, or null (a poison's tick). Nothing happens if it's already dead.
+func health_ran_out(hit: HitInfo) -> void:
+	if pawn and pawn.is_authority() and not pawn.is_dead():
+		_die(hit)
+
+
+## Brings a dead pawn back with full Health, on the server. Its Death ability ends on its next tick.
+func revive() -> void:
+	if pawn == null or not pawn.is_authority() or pawn.stat_manager == null:
+		return
+	var stat := pawn.stat_manager.get_stat(&"Health")
+	if stat and stat.changes_during_play:
+		stat.current = stat.value
+
+
+# The hit itself, steps 1 to 4 above. Checked again here, because a queued hit can arrive after another killed it, and for
+# invulnerability, checked when the hit is delivered: a dash started in the same tick dodges it.
+func _take_hit(hit: HitInfo) -> void:
+	if not pawn.is_authority() or pawn.is_dead() or is_invulnerable():
+		return
+	hit_arrived.emit(hit)
+	# Claude 2026-11-15: a running parry turns away a hit from the front (ParryAbility). The AI above still notes it was attacked.
+	if parry_hit(hit):
+		return
+	if pawn.effect_manager:
+		pawn.effect_manager.take_hit(hit)
+	hit_received.emit(hit)
+	var attacker := hit.attacker
+	if not hit.attacker_effects.is_empty() and is_instance_valid(attacker) and attacker.effect_manager:
+		attacker.effect_manager.apply_effects(hit.attacker_effects, attacker, hit.ability, hit)
+
+
+# Health reached 0: the Death ability starts, which locks out everything and stops the pawn steering; then died goes out, and the
+# parts that care clean up (effects end, the AI's behaviour stops, its hands let go).
+func _die(hit: HitInfo) -> void:
+	if _death == null:
+		return
+	start_ability(_death)
+	died.emit(pawn, hit)
+
+
+# Holds a hit until after simulate. One queue for all pawns, delivered by the tick driver's after_simulate signal, which is connected
+# the first time a hit is queued.
+func _queue_hit(hit: HitInfo) -> void:
+	if _hit_queue_driver != _driver:
+		# GDScript note: AbilityManager._deliver_queued_hits is a Callable on the class itself, not on this manager, so it keeps working
+		# after this one is freed.
+		if is_instance_valid(_hit_queue_driver) and _hit_queue_driver.after_simulate.is_connected(AbilityManager._deliver_queued_hits):
+			_hit_queue_driver.after_simulate.disconnect(AbilityManager._deliver_queued_hits)
+		_driver.after_simulate.connect(AbilityManager._deliver_queued_hits)
+		_hit_queue_driver = _driver
+	_queued_hits.append([_order_key(hit.attacker), _order_key(pawn), _queued_hits.size(), hit])
+
+
+# The entity id, which is the same on every machine, or -1 for a pawn that isn't networked (the queue order then decides, which is
+# the order pawns simulated in).
+static func _order_key(node: Node) -> int:
+	var target := node as Pawn
+	if target == null or not is_instance_valid(target) or target.get_network_entity() == null:
+		return -1
+	return target.get_network_entity().entity_id
+
+
+# Delivers every queued hit, sorted by the attacker's entity id, then the target's, then the order they were queued.
+static func _deliver_queued_hits(_dt: float, _tick: int) -> void:
+	if _queued_hits.is_empty():
+		return
+	var hits := _queued_hits
+	_queued_hits = []
+	hits.sort_custom(func(a: Array, b: Array) -> bool:
+		if a[0] != b[0]:
+			return a[0] < b[0]
+		if a[1] != b[1]:
+			return a[1] < b[1]
+		return a[2] < b[2])
+	var hits_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	for entry in hits:
+		var hit: HitInfo = entry[3]
+		if is_instance_valid(hit.target) and hit.target.ability_manager:
+			hit.target.ability_manager._take_hit(hit)
+	PerfScopes.end(&"pawn.hits", hits_started)
+
+
 func _collect_abilities() -> void:
 	_abilities.clear()
 	for child in get_children():
@@ -556,6 +678,7 @@ func _collect_abilities() -> void:
 	# Claude 2026-11-09: highest priority first (it was lowest first).
 	_abilities.sort_custom(func(a: AbilityBase, b: AbilityBase) -> bool:
 		return a.priority > b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
+	_death = null # Claude 2026-11-16 (pawn M3)
 	_invulnerable_abilities.clear() # Claude 2026-11-10
 	_parry_abilities.clear() # Claude 2026-11-15
 	_locomotion_pausers.clear() # Claude 2026-11-10
@@ -565,6 +688,8 @@ func _collect_abilities() -> void:
 			_invulnerable_abilities.append(ability)
 		if ability is ParryAbility: # Claude 2026-11-15
 			_parry_abilities.append(ability)
+		if ability is DeathAbility and _death == null: # Claude 2026-11-16 (pawn M3)
+			_death = ability
 		if ability.pauses_locomotion and ability.kind != AbilityBase.Kind.LOCOMOTION:
 			_locomotion_pausers.append(ability)
 	_locomotions.clear()
@@ -634,3 +759,16 @@ func _register_rollback_state() -> void:
 			entries.append("%s:%s" % [path, property])
 	if not entries.is_empty():
 		tick_state.add_state_properties(entries)
+
+
+# Claude 2026-11-16 (pawn M4): the pawn's input, from its ControllerManager (nothing pressed without one).
+func _held() -> int:
+	return pawn.controller_manager.held_actions if pawn.controller_manager else 0
+
+
+func _previous_held() -> int:
+	return pawn.controller_manager.previous_held_actions if pawn.controller_manager else 0
+
+
+func _move() -> Vector3:
+	return pawn.controller_manager.move_input if pawn.controller_manager else Vector3.ZERO

@@ -55,13 +55,13 @@ func _test_ai_drives_an_unpossessed_pawn() -> void:
 	await _ticks(1)
 	_check(pawn.velocity.y > 0.0, "press() reaches the pawn as a press: it jumps")
 	await _ticks(1)
-	_check(not pawn.is_action_held(&"jump"), "and lasts one tick")
+	_check(not pawn.controller_manager.is_action_held(&"jump"), "and lasts one tick")
 	ai.hold(&"sprint")
 	await _ticks(1)
-	_check(pawn.is_action_held(&"sprint"), "hold() keeps an action held")
+	_check(pawn.controller_manager.is_action_held(&"sprint"), "hold() keeps an action held")
 	ai.release_all()
 	await _ticks(1)
-	_check(pawn.held_actions == 0 and pawn.move_input == Vector3.ZERO, "release_all() goes back to idle")
+	_check(pawn.controller_manager.held_actions == 0 and pawn.controller_manager.move_input == Vector3.ZERO, "release_all() goes back to idle")
 	pawn.free()
 	floor_body.free()
 
@@ -77,16 +77,16 @@ func _test_player_takes_over_and_lets_go() -> void:
 	var player := FixedController.new()
 	add_child(player)
 	# The same order PossessionCoordinator uses: the pawn learns it has a player, then the controller attaches.
-	pawn.set_has_player(true)
+	pawn.controller_manager.set_has_player(true)
 	manager.attach_player(player)
 	_check(manager.get_controller_in_charge() == player, "a player's controller attached here is in charge")
 	await _ticks(1)
-	_check(pawn.move_input.is_equal_approx(Vector3(0, 0, -1)), "and the pawn follows it, not the AI (%s)" % str(pawn.move_input))
+	_check(pawn.controller_manager.move_input.is_equal_approx(Vector3(0, 0, -1)), "and the pawn follows it, not the AI (%s)" % str(pawn.controller_manager.move_input))
 	manager.detach_player(player)
-	pawn.set_has_player(false)
+	pawn.controller_manager.set_has_player(false)
 	_check(manager.get_controller_in_charge() == ai, "when the player lets go, the AI is in charge again")
 	await _ticks(1)
-	_check(pawn.move_input.is_equal_approx(Vector3(1, 0, 0)), "and the pawn carries on with what the AI was told")
+	_check(pawn.controller_manager.move_input.is_equal_approx(Vector3(1, 0, 0)), "and the pawn carries on with what the AI was told")
 	await get_tree().process_frame
 	_check(changes.size() == 2 and changes[0] == player and changes[1] == ai,
 			"controller_changed fires once per change, never with 'nobody' in between (%d times)" % changes.size())
@@ -103,11 +103,11 @@ func _test_player_takes_over_and_lets_go() -> void:
 func _test_player_elsewhere() -> void:
 	var pawn := _make_pawn()
 	await _ticks(1) # on a physics frame, so each _ticks(1) below holds exactly one tick
-	pawn.set_has_player(true)
+	pawn.controller_manager.set_has_player(true)
 	_check(pawn.controller_manager.get_controller_in_charge() == null, "a player elsewhere has it: nobody here is in charge")
-	pawn.apply_input(InputCommand.make(Vector3(0, 0, 1))) # what the network would write
+	pawn.controller_manager.apply_input(InputCommand.make(Vector3(0, 0, 1))) # what the network would write
 	await _ticks(1)
-	_check(pawn.move_input.is_equal_approx(Vector3(0, 0, 1)), "so nothing here replaces the input that came over the network")
+	_check(pawn.controller_manager.move_input.is_equal_approx(Vector3(0, 0, 1)), "so nothing here replaces the input that came over the network")
 	pawn.free()
 
 
@@ -139,9 +139,9 @@ func _test_odd_cases() -> void:
 	var manager := pawn.controller_manager
 	manager.ai_controller.free()
 	_check(manager.get_controller_in_charge() == null, "no AI controller: nobody is in charge of an unpossessed pawn")
-	pawn.apply_input(InputCommand.make(Vector3(1, 0, 0)))
+	pawn.controller_manager.apply_input(InputCommand.make(Vector3(1, 0, 0)))
 	await _ticks(1)
-	_check(pawn.move_input.is_equal_approx(Vector3(1, 0, 0)), "and its input stays as it is")
+	_check(pawn.controller_manager.move_input.is_equal_approx(Vector3(1, 0, 0)), "and its input stays as it is")
 	# A player's controller freed while attached.
 	var player := FixedController.new()
 	add_child(player)
@@ -157,8 +157,8 @@ func _test_look_at_point() -> void:
 	add_child(pawn)
 	var ai: AIController = pawn.controller_manager.ai_controller
 	# Claude 2026-11-07: until it's told where to look, it keeps the pawn's own look, so taking over from a player doesn't snap it.
-	pawn.look_yaw = 0.7
-	pawn.look_pitch = -0.2
+	pawn.controller_manager.look_yaw = 0.7
+	pawn.controller_manager.look_pitch = -0.2
 	var kept := ai.take_input_command(0)
 	_check(is_equal_approx(kept.look_yaw, 0.7) and is_equal_approx(kept.look_pitch, -0.2), "not told where to look: it keeps the pawn's own look")
 	ai.look_at_point(pawn.global_position + Vector3(0, 0, -5))

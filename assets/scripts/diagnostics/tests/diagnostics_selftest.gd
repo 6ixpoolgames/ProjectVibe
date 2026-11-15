@@ -2,7 +2,7 @@
 ## PerfScopes, the DiagnosticsManager's history, spikes, warnings, session log, summaries, the editor's monitors, its replay channel,
 ## captures, the panels, and always-on recordings.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/debug/diagnostics/tests/diagnostics_selftest.tscn"
+##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/diagnostics/tests/diagnostics_selftest.tscn"
 extends Node
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

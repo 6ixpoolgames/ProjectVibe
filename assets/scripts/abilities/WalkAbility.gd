@@ -46,7 +46,7 @@ func tick(dt: float) -> void:
 	var turn_rate := _turn_rate
 
 	# Accelerate the horizontal velocity toward what's wanted. Locked out, nothing is wanted.
-	var wanted := Vector3.ZERO if manager.is_locked(self) else pawn.move_input.limit_length(1.0)
+	var wanted := Vector3.ZERO if manager.is_locked(self) else move_input().limit_length(1.0) # Claude 2026-11-16 (pawn M4)
 	var target := wanted * speed
 	var horizontal := Vector3(pawn.velocity.x, 0.0, pawn.velocity.z)
 	var rate := acceleration if target.length_squared() > 0.0001 else deceleration

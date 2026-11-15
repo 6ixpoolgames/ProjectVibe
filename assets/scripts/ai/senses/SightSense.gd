@@ -192,9 +192,10 @@ func _fill_settings() -> void:
 
 
 func _eye_yaw() -> float:
-	if pawn.has_player():
-		return pawn.look_yaw # where the player looks
+	var controllers := pawn.controller_manager # Claude 2026-11-16 (pawn M4)
+	if controllers and controllers.has_player():
+		return controllers.look_yaw # where the player looks
 	var hands := pawn.controller_manager.ai_controller as AIController if pawn.controller_manager else null
 	if hands and hands.is_looking_at_point():
-		return pawn.look_yaw # the AI looks where it was told to
+		return controllers.look_yaw if controllers else pawn.yaw # the AI looks where it was told to
 	return pawn.yaw # otherwise, the way the body faces
