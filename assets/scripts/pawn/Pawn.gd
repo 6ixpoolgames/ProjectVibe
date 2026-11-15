@@ -285,6 +285,12 @@ func has_player() -> bool:
 	return _has_player
 
 
+## Claude 2026-11-15: true while this pawn keeps the world loaded around it with a chunk source of its own (a player has it, or
+## ai_loads_chunks is on, and it's simulated on this machine). For replay recordings and debugging.
+func has_chunk_source() -> bool:
+	return _source != null
+
+
 ## PossessionCoordinator tells the pawn. Nothing else should call this.
 func set_has_player(value: bool) -> void:
 	if _has_player == value:

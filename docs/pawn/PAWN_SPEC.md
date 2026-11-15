@@ -1487,6 +1487,8 @@ Measured with `pawn_stress -- --sizes=100,400` and its new `--history=` and `--g
 - **Abilities, from step 9 (2026-11-09):**
   - Cancel windows: an action cancellable only during some of its phases, such as recovery. Noted by the owner.
   - Invulnerability during a dash, combos, and hit effects shown on clients.
+- **Shortcuts to redo** *(Claude 2026-11-15)*. These work and are tested, but were built as special cases, and need a proper implementation pass later:
+  - **Parry** *(flagged by the owner 2026-11-15: hacky)*. `AbilityManager` keeps a list of `ParryAbility` nodes by type and asks them in `parry_hit()`; `AbilityBase` carries `on_parry_effects` and `on_parry_self_effects`, which every ability has; `EffectApplier` has an `ON_PARRY` trigger; `Pawn._take_hit` asks for parries by name. The proper version: hit interceptors, abilities that can inspect an incoming hit and change or stop it, switched on by state tags.
 
 ---
 
@@ -1551,6 +1553,16 @@ A resting pawn skips its abilities, gravity and `move_and_slide`, and only does 
 Things to know:
 - A standing pawn used to be nudged out of the way by `move_and_slide`'s depenetration when another walked into it. A resting one is nudged only on its check ticks, so crowds can press together a little more between checks.
 - The AI still runs on a resting pawn (the input phase), so a goblin that decides to move wakes on its next tick.
+
+**Three flags that sound alike** *(Claude 2026-11-15, the owner's request: "document each meaning well because this is ripe for confusion")*. They're different things, set by different code, for different reasons:
+
+| Flag | What it means | Still ticks? | Who sets it | Wakes when | How to read it |
+|---|---|---|---|---|---|
+| **Sleeping** (called resting in the code until the pawn is slimmed down; the standard physics name) | Idle: this tick it skipped its abilities, gravity and `move_and_slide`. A cost saving that changes nothing anyone can see | Yes: input and AI every tick, and a full tick every `rest_check_ticks` | The pawn itself, worked out fresh every tick (above) | At once: any input, ability, velocity or being moved | `Pawn.is_resting`; `S` in replay labels |
+| **Frozen** | Switched off completely: no ticks at all, no AI, no physics, left out of snapshots, but all its state kept as it was | No | `AIActivationManager`, for an AI pawn with no chunk source of its own where the ground around it isn't loaded (`set_simulation_active(false)`) | When the ground around it is loaded again | `not Pawn.is_simulation_active()`; `F` in replay labels |
+| **Paused** | The whole game stopped, every pawn at once. Not a pawn flag | No | The game (the arena's P key, offline only) | When the game unpauses | `get_tree().paused` |
+
+A pawn can be sleeping and later frozen, but never both on the same tick: a frozen pawn doesn't tick, so it doesn't decide whether to sleep.
 
 ### 15.4 Hits are delivered after simulate
 

@@ -1,6 +1,12 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-15: a parry, the owner's request. While it runs, a hit from the front does nothing to
 ## this pawn, and the attacker is pushed back hard instead. Hits from the sides and back land as usual.
 ##
+## Claude 2026-11-15: FLAGGED AS A SHORTCUT, the owner's call: this works, but it's hacky and needs a proper implementation pass later
+## (pawn spec 14, "Shortcuts to redo"). AbilityManager keeps a list of ParryAbility nodes by type, AbilityBase carries parry-only
+## effect lists that every ability has, EffectApplier has a parry-only trigger, and Pawn._take_hit asks for parries by name. The
+## proper version is general: abilities that can inspect an incoming hit and change or stop it (hit interceptors), switched on by
+## state tags, so blocks, shields and armour don't each need the same special cases.
+##
 ## How it works:
 ##   - The parry action starts it (F in the arenas). It runs for duration (0.35 s), then can't be used again for cooldown (1.5 s).
 ##   - While it runs it turns the pawn toward where it looks, at up to turn_degrees_per_second, like a swing's windup, and holds the

@@ -19,6 +19,13 @@
 class_name KillFloor
 extends Node3D
 
+## Claude 2026-11-15: every kill floor joins this group, so a replay recording can find them and record their reports.
+const GROUP := &"kill_floors"
+
+## Claude 2026-11-15: a pawn fell below this floor and died here, with the report of how it got here (the same words as the warning).
+## Sent only while report_falls is on. The replay recorder records it (ReplayGameplayChannel).
+signal pawn_fell(pawn: Pawn, report: String)
+
 ## What a pawn falling below gets. By default resources/effects/kill_self.tres, which takes all its Health. Another effect can do
 ## something gentler, as long as it moves the pawn back up or kills it: otherwise it gets it again on every check.
 @export var kill_effect: Effect = preload("res://assets/scripts/resources/effects/kill_self.tres")
@@ -36,6 +43,7 @@ var _last_on_ground := {}
 
 
 func _ready() -> void:
+	add_to_group(GROUP) # Claude 2026-11-15
 	# GDScript note: after_simulate fires once per tick, after every pawn has simulated, with the tick's length and number.
 	TickDriver.after_simulate.connect(_on_after_simulate)
 
@@ -66,6 +74,7 @@ func _on_after_simulate(_dt: float, tick: int) -> void:
 		var report := fall_report(pawn, _last_on_ground.get(id), tick) if report_falls else ""
 		if kill(pawn) and report_falls:
 			push_warning(report)
+			pawn_fell.emit(pawn, report) # Claude 2026-11-15: for replay recordings
 	_last_on_ground = seen
 
 

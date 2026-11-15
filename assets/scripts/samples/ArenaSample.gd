@@ -84,6 +84,11 @@ func _ready() -> void:
 	NetworkSession.entity_spawned.connect(_on_entity_spawned)
 	NetworkSession.refused.connect(func(reason: String) -> void: _status.text = "Refused: %s" % reason)
 	NetworkSession.disconnected.connect(func() -> void: _menu.show())
+	# Claude 2026-11-15: replay recordings (docs/replay/REPLAY_SPEC.md), the owner's call: recording starts when the game does (Offline
+	# or Host below; on a client once Join has connected) and stops when the session ends. Files go in user://replays/host and
+	# user://replays/client; open them with assets/scenes/replay/replay_viewer.tscn.
+	NetworkSession.joined.connect(func() -> void: _start_recording("client"))
+	NetworkSession.disconnected.connect(_stop_recording)
 	# Claude 2026-11-12: K kills your own pawn (the KillSelf ability), so a player stuck in the ground can respawn.
 	if not InputMap.has_action(KILL_SELF_KEY_ACTION):
 		InputMap.add_action(KILL_SELF_KEY_ACTION)
@@ -135,6 +140,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 func _start_offline() -> void:
 	_menu.hide()
+	_start_recording("host") # Claude 2026-11-15: offline recordings go with the host's, since this machine decides the game
 	# Claude 2026-11-10: at the PlayerStart, possessed, and brought back after dying, by SpawnManager.
 	_player_pawn = GameMode.spawn_manager.spawn_player(0)
 	_start_spawners()
@@ -146,6 +152,7 @@ func _host() -> void:
 		_status.text = "Couldn't host: error %d" % error
 		return
 	_menu.hide()
+	_start_recording("host") # Claude 2026-11-15
 	_on_player_connected(NetworkSession.get_local_peer())
 	_start_spawners() # Claude 2026-11-10: was _spawn_wave()
 
@@ -153,6 +160,17 @@ func _host() -> void:
 func _join(address: String) -> void:
 	_menu.hide()
 	NetworkSession.join(address if address != "" else "127.0.0.1", _port) # Claude 2026-11-09: was PORT
+
+
+## Claude 2026-11-15: starts a replay recording, if this game has a recorder (GameMode.replay_recorder). role: "host" or "client".
+func _start_recording(role: String) -> void:
+	if GameMode.replay_recorder:
+		GameMode.replay_recorder.start_recording(role)
+
+
+func _stop_recording() -> void:
+	if GameMode.replay_recorder:
+		GameMode.replay_recorder.stop_recording()
 
 
 ## Server: a player has arrived, so they get a pawn near the middle.
@@ -440,6 +458,10 @@ func _status_text() -> String:
 	var pawn := GameMode.possession_coordinator.get_pawn_of() if GameMode.possession_coordinator else null
 	var lines := PackedStringArray()
 	lines.append("%s    %d fps" % [mode, Engine.get_frames_per_second()])
+	# Claude 2026-11-15: the replay recording, if one is running
+	var recorder: ReplayRecorder = GameMode.replay_recorder
+	if recorder and recorder.is_recording():
+		lines.append("recording %s (%.1f MB)" % [recorder.get_recording_path().get_file(), recorder.get_bytes_written() / 1048576.0])
 	if pawn:
 		lines.append("HP %d%s    speed %.1f m/s" % [int(pawn.get_health()), "  (dead: reviving)" if pawn.is_dead() else "", Vector2(pawn.velocity.x, pawn.velocity.z).length()])
 	lines.append("goblins %d    kills %d    deaths %d" % [alive, _kills, _deaths])

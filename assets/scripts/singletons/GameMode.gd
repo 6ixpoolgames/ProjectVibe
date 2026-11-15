@@ -7,6 +7,7 @@
 ##   PossessionCoordinator   creates the PlayerController, and tracks who controls which pawn
 ##   AIActivationManager     switches AI pawns off when no source keeps the ground under them loaded
 ##   SpawnManager            puts pawns in at SpawnPoints, and brings players back after they die (Claude 2026-11-10)
+##   ReplayRecorder          records the game to a replay file once the game calls start_recording (Claude 2026-11-15, replay spec)
 ##
 ## How to use it:
 ##   GameMode.pawn_initializer         # a module, or null if this game doesn't have it, so check first
@@ -33,6 +34,7 @@ const DEFAULT_MODULES: Array[String] = [
 	"res://assets/scripts/game_mode/PossessionCoordinator.gd",
 	"res://assets/scripts/game_mode/AIActivationManager.gd",
 	"res://assets/scripts/game_mode/SpawnManager.gd", # Claude 2026-11-10: does nothing with no spawn points placed
+	"res://assets/scripts/replay/ReplayRecorder.gd", # Claude 2026-11-15: records nothing until the game starts a recording
 ]
 
 ## The module that switches AI pawns off, or null without one. Each module fills in its own line when it starts.
@@ -44,6 +46,8 @@ var possession_coordinator: PossessionCoordinator = null
 var pawn_initializer: PawnInitializer = null
 ## Claude 2026-11-10: spawns pawns at spawn points and brings players back, or null without one.
 var spawn_manager: SpawnManager = null
+## Claude 2026-11-15: records the game to replay files, or null without one (docs/replay/REPLAY_SPEC.md).
+var replay_recorder: ReplayRecorder = null
 
 var _modules: Array[GameModeModule] = []
 
