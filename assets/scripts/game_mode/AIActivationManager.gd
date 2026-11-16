@@ -18,6 +18,16 @@
 ##   - a method set_frozen(frozen: bool), which stops and restarts its ticks and leaves all its state as it is (Claude 2026-11-16:
 ##     was set_simulation_active(active), renamed in pawn M1)
 ##
+## Claude 2026-11-16 (pawn spec 8.21, scaling spec 7.1, the owner's call): it also decides how often each AI pawn it leaves on runs,
+## its Pawn.tick_step, which it rechecks with the rest:
+##   - every tick within full_rate_within_chunks chunks of the nearest viewer, every 2nd tick up to every_4th_tick_beyond_chunks
+##     chunks, and every 4th beyond that, measured flat. Viewers are pawns a player has, and this machine's player's camera (a
+##     spectator, or the overview). With no viewer at all, distance changes nothing.
+##   - and at least TickDriver.load_step, the load ladder: while the game is overloaded, every AI pawn runs every 2nd or 4th tick.
+##   - a pawn a player has always runs every tick.
+## So a pawn far from the action costs a half or a quarter as much, and still walks as far and fights as long (Pawn.ticks_elapsed).
+## Only the server or offline does this; a client's pawns are told their step in snapshots, where it's rolled-back state.
+##
 ## What happens in odd cases (all checked in game_mode/tests/game_mode_selftest.gd):
 ##   - No terrain in the scene: every pawn stays on.
 ##   - On a client: this does nothing, because AI only runs on the server.
@@ -39,6 +49,13 @@ signal ai_activated(pawn: Node3D)
 ## The most pawns checked in one frame, however many there are. A very large horde takes longer to get through, so with a lot
 ## of fast pawns, raise edge_margin too. A removed chunk is always handled at once, so this only delays walking to an edge.
 @export_range(1, 100000, 1, "or_greater") var max_checks_per_frame := 500
+## Claude 2026-11-16 (pawn spec 8.21): on, AI pawns far from every viewer run every 2nd or 4th tick. Off, distance changes nothing
+## (the load ladder still applies).
+@export var steps_by_distance := true
+## Claude 2026-11-16: within this many chunks of the nearest viewer, an AI pawn runs every tick.
+@export_range(0.25, 64.0, 0.25, "or_greater") var full_rate_within_chunks := 2.0
+## Claude 2026-11-16: beyond this many chunks of the nearest viewer, every 4th tick; between the two, every 2nd.
+@export_range(0.25, 64.0, 0.25, "or_greater") var every_4th_tick_beyond_chunks := 4.0
 
 var _pawns: Array[Node3D] = []
 var _inactive: Dictionary = {} # pawn -> true
@@ -47,6 +64,8 @@ var _session: Node = null
 var _terrains: Array[TerrainGenerator] = []
 var _connected_terrains := {} # TerrainGenerator -> true
 var _check_everyone := false
+var _viewers := PackedVector3Array() # Claude 2026-11-16: where the viewers are this frame
+var _chunk_size := 64.0 # Claude 2026-11-16: from the first terrain, for the distances
 
 
 func _init() -> void:
@@ -66,6 +85,9 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 		if is_instance_valid(pawn):
 			_set_active(pawn, true)
 	_inactive.clear()
+	for pawn: Node3D in _pawns: # Claude 2026-11-16: back to every tick
+		if is_instance_valid(pawn) and &"tick_step" in pawn:
+			pawn.tick_step = 1
 
 
 ## Starts watching an AI pawn. Adding the same one twice does nothing.
@@ -97,6 +119,17 @@ func is_active(pawn: Node3D) -> bool:
 	return not _inactive.has(pawn)
 
 
+## Claude 2026-11-16 (pawn spec 8.21): how many watched pawns run at each step now, for diagnostics: {1: n, 2: n, 4: n}. Frozen
+## pawns aren't counted.
+func get_step_counts() -> Dictionary:
+	var counts := {1: 0, 2: 0, 4: 0}
+	for pawn: Node3D in _pawns:
+		if is_instance_valid(pawn) and not _inactive.has(pawn) and &"tick_step" in pawn:
+			var step: int = pawn.tick_step
+			counts[step] = counts.get(step, 0) + 1
+	return counts
+
+
 ## How many pawns are off right now.
 func get_inactive_count() -> int:
 	return _inactive.size()
@@ -117,6 +150,7 @@ func _check_pawns() -> void:
 	if _pawns.is_empty():
 		return
 	_refresh_terrains()
+	_find_viewers() # Claude 2026-11-16 (pawn spec 8.21)
 	if _check_everyone:
 		_check_everyone = false
 		for pawn: Node3D in _pawns:
@@ -151,6 +185,51 @@ func _check_pawn(pawn: Node3D) -> void:
 		_inactive[pawn] = true
 		_set_active(pawn, false)
 		ai_deactivated.emit(pawn)
+	# Claude 2026-11-16 (pawn spec 8.21): how often it runs, while it runs.
+	if has_ground and &"tick_step" in pawn:
+		pawn.tick_step = step_for(pawn)
+
+
+## Claude 2026-11-16 (pawn spec 8.21): how often this pawn should run now: 1 (every tick), 2 or 4. See the top of the file.
+func step_for(pawn: Node3D) -> int:
+	var controllers: Node = pawn.get(&"controller_manager")
+	if controllers and controllers.has_player():
+		return 1
+	var step := 1
+	if steps_by_distance and not _viewers.is_empty():
+		var nearest := INF
+		for viewer in _viewers:
+			nearest = minf(nearest, Vector2(viewer.x - pawn.global_position.x, viewer.z - pawn.global_position.z).length_squared())
+		nearest = sqrt(nearest)
+		if nearest >= every_4th_tick_beyond_chunks * _chunk_size:
+			step = 4
+		elif nearest >= full_rate_within_chunks * _chunk_size:
+			step = 2
+	var driver: Node = get_node_or_null(^"/root/TickDriver")
+	if driver:
+		step = maxi(step, driver.load_step)
+	return step
+
+
+# Claude 2026-11-16 (pawn spec 8.21): the viewers this frame: pawns a player has, and this machine's player's camera while it's in use.
+func _find_viewers() -> void:
+	_viewers.clear()
+	_chunk_size = 64.0
+	for terrain in _terrains:
+		if is_instance_valid(terrain):
+			_chunk_size = terrain.chunk_size
+			break
+	for pawn: Node3D in _pawns:
+		if not is_instance_valid(pawn) or not pawn.is_inside_tree():
+			continue
+		var controllers: Node = pawn.get(&"controller_manager")
+		if controllers and controllers.has_player():
+			_viewers.append(pawn.global_position)
+	var game_mode: Node = get_node_or_null(^"/root/GameMode")
+	var coordinator: PossessionCoordinator = game_mode.possession_coordinator if game_mode else null
+	var camera: Camera3D = coordinator.controller.camera if coordinator and coordinator.controller else null
+	if camera and camera.is_inside_tree() and camera.current:
+		_viewers.append(camera.global_position)
 
 
 ## True if some terrain has all the chunks around this position, or if there are no terrains to ask.

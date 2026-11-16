@@ -7,6 +7,9 @@
 ##   GameMode.possession_coordinator.possess_for(peer, pawn)    # server: gives this player this pawn
 ##   GameMode.possession_coordinator.release()                  # lets go. Offline or a client's own, or release_for(peer) on the server
 ##   GameMode.possession_coordinator.controller                 # this machine's PlayerController
+##   GameMode.possession_coordinator.spectate()                 # Claude 2026-11-16: lets go and flies the spectator (FreeFlyCamera)
+##   GameMode.possession_coordinator.stop_spectating()          # stops flying; possessing a pawn stops it too
+##   GameMode.possession_coordinator.is_spectating()
 ##
 ## Every request comes here, and the pawn's possessable flag is the check. Claude 2026-11-07: the simplest version, as the owner
 ## asked. An AI controller will ask here too, when there is one. In multiplayer the server decides, and a client's call is only a
@@ -24,6 +27,12 @@
 ##   - A player leaves: they let go of their pawn, and it stays in the world. Anything else they own is removed by NetworkSession.
 ##   - No module at all: the game runs with no controller, and a scene's own camera carries on working.
 ##   - A client asking for something broken: the server ignores it.
+##
+## Claude 2026-11-16 (the owner's call): spectating. The spectator is a FreeFlyCamera, not a Pawn: nearly the whole game looks for Pawn
+## (abilities, AI, teams, the kill floor, replays, spawning), and a spectator should be in none of it. So this recognises it as its own
+## kind of thing: spectate() lets go of the pawn and has this machine's PlayerController fly it, and possessing any pawn ends it. Like
+## Unreal's spectator, it's local: only this machine knows its player is spectating. Telling the server, for a respawn queue or a
+## scoreboard, waits until something needs it. A dedicated server has no player, so it never spectates.
 class_name PossessionCoordinator
 extends GameModeModule
 
@@ -33,6 +42,8 @@ signal possessed(peer: int, pawn: Pawn)
 signal released(peer: int, pawn: Pawn)
 ## A request was turned down, on the machine that decided.
 signal refused(peer: int, pawn: Pawn, reason: String)
+## Claude 2026-11-16: this machine's player started or stopped spectating.
+signal spectating_changed(spectating: bool)
 
 ## A project setting: a scene to use as the PlayerController, so a game can have its own.
 const CONTROLLER_SCENE_SETTING := "project_base/game_mode/player_controller_scene"
@@ -50,6 +61,7 @@ var controller: PlayerController = null
 var _by_peer := {} # peer -> Pawn
 var _session: Node = null
 var _waiting := {} # entity id -> peer, for a client told about a pawn it hasn't been told to spawn yet
+var _spectating := false # Claude 2026-11-16: this machine's player is flying the spectator
 
 
 func _init() -> void:
@@ -103,6 +115,38 @@ func release() -> void:
 		_ask_server(0)
 	else:
 		release_for(_local_peer())
+
+
+## Claude 2026-11-16: lets go of this machine's pawn, if it has one (its AI controller takes over), and flies the spectator, starting
+## where the camera is. On a client, letting go is a request, but the flying starts at once. False with no PlayerController (a
+## dedicated server).
+func spectate() -> bool:
+	if controller == null:
+		return false
+	if _spectating:
+		return true
+	if get_pawn_of() != null:
+		release()
+	_spectating = true
+	controller.start_spectating()
+	spectating_changed.emit(true)
+	return true
+
+
+## Claude 2026-11-16: stops flying the spectator. The camera holds where it is until this machine's player has a pawn. Possessing one
+## stops spectating by itself, so this is only needed to stop without one.
+func stop_spectating() -> void:
+	if not _spectating:
+		return
+	_spectating = false
+	if controller:
+		controller.stop_spectating()
+	spectating_changed.emit(false)
+
+
+## Claude 2026-11-16: true while this machine's player is flying the spectator.
+func is_spectating() -> bool:
+	return _spectating
 
 
 ## Server or offline: gives this player this pawn, and takes away the one they had. False means refused.
@@ -196,7 +240,10 @@ func _assign(peer: int, pawn: Pawn) -> void:
 	if not pawn.tree_exiting.is_connected(_on_pawn_leaving):
 		pawn.tree_exiting.connect(_on_pawn_leaving.bind(pawn), CONNECT_ONE_SHOT)
 	if peer == _local_peer() and controller:
-		controller.take_pawn(pawn)
+		controller.take_pawn(pawn) # Claude 2026-11-16: this stops the controller's spectating too
+		if _spectating: # Claude 2026-11-16
+			_spectating = false
+			spectating_changed.emit(false)
 	possessed.emit(peer, pawn)
 
 

@@ -42,6 +42,7 @@ func _test_conversion() -> void:
 ## A sample of settings, in seconds at both rates: equal, or within half a tick where they don't divide evenly.
 func _test_same_time() -> void:
 	var swing := MeleeAttackAbility.new()
+	swing.collect_steps() # Claude 2026-11-16 (pawn spec 8.20): a swing is made of steps, made from its settings when its steps are found
 	var fade := FadeProfile.new()
 	fade.hold_ticks = 30
 	fade.fade_ticks = 60
@@ -50,7 +51,7 @@ func _test_same_time() -> void:
 		TickDriver.tick_rate = rate
 		var dt := TickDriver.get_tick_dt()
 		seconds[rate] = {
-			"swing": swing.duration_ticks() * dt,
+			"swing": swing.planned_ticks() * dt, # Claude 2026-11-16: was duration_ticks(), now a stepped swing's safety limit
 			"fade": fade.ends_after() * dt,
 			"half way": fade.value_at(60.0 * rate / 60.0),
 			"sensing interval": TickDriver.ticks_at_rate(10) * dt,

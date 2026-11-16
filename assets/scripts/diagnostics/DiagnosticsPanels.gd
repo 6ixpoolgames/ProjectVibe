@@ -225,6 +225,8 @@ func _timings_text(n: Dictionary) -> String:
 	lines.append("  (late: over 20 ms, a missed 1/60 s; very late: over 34 ms)")
 	lines.append("  physics %6.1f ms (%.2f steps)   scripts %5.1f   rest %5.1f" % [n.physics_ms, n.steps_per_frame, n.scripts_ms, n.rest_ms])
 	lines.append("  tick    %6.2f ms   %3.0f ticks/s   dropped %.1f/s" % [n.tick_ms, n.ticks_per_second, n.dropped_per_second])
+	# Claude 2026-11-16 (pawn spec 8.21): the load ladder, and how many AI pawns run every tick, every 2nd and every 4th.
+	lines.append("  load step %d   AI every tick/2nd/4th %s" % [n.get("load_step", 1), DiagnosticsManager.steps_text(n.get("step_counts", {}))])
 	lines.append("  drawing CPU %.1f  GPU %.1f ms   %d draw calls" % [n.render_cpu_ms, n.render_gpu_ms, n.draw_calls])
 	lines.append("  memory %.0f MB   objects %d   nodes %d   orphan nodes %d" % [n.memory_mb, n.objects, n.nodes, n.orphans])
 	lines.append("  pawns %d   dead %d   frozen %d" % [n.pawns, n.dead, n.frozen])
@@ -274,7 +276,17 @@ func _inspector_text() -> String:
 		var cooling := PackedStringArray()
 		for ability in pawn.ability_manager.get_abilities():
 			if ability.is_running_timed():
-				running.append("%s (%d)" % [ability.name, ability.ticks_left])
+				# Claude 2026-11-16 (pawn spec 8.20): a stepped ability shows its running steps.
+				var steps_now := ability.get_running_step_names()
+				# A stepped ability's ticks_left is only its safety limit, so its steps' ticks show instead.
+				if ability.is_stepped():
+					var parts := PackedStringArray()
+					for step in ability.steps:
+						if step.running:
+							parts.append("%s %d" % [step.name, step.step_ticks])
+					running.append("%s: %s" % [ability.name, ", ".join(parts)])
+				else:
+					running.append("%s%s (%d)" % [ability.name, ": " + " + ".join(steps_now) if not steps_now.is_empty() else "", ability.ticks_left])
 			elif ability.cooldown_ticks_left > 0:
 				cooling.append("%s (%d)" % [ability.name, ability.cooldown_ticks_left])
 		lines.append("  running: %s" % (", ".join(running) if not running.is_empty() else "-"))

@@ -88,6 +88,11 @@ const NO_GROUND := INF
 ## Off: every triangle is one flat colour, which is the low-poly look. On: lighting blends smoothly across triangles.
 @export var smooth_shading := false
 
+## Claude 2026-11-16 (the navigation and terrain assessment): raise this whenever the ground this generator makes changes in a way the
+## settings don't show, such as a script extending this one changing _shape_height. It's part of ground_settings_hash, so saved terrain
+## edits and other machines made for the old ground are refused rather than applied to different ground.
+@export var generator_version := 1
+
 @export_group("Noise")
 @export var noise_seed := 250
 ## Multiplies positions before reading the noise, with X and Z separate. Above 1 squeezes hills together, and below 1
@@ -536,8 +541,9 @@ func chunks_touched_by_edit(x: float, z: float, radius: float) -> Array[Vector2i
 
 ## A number that changes if the settings that decide the ground change. TerrainEditLog uses it to refuse edits made for
 ## different ground.
+## Claude 2026-11-16: generator_version is part of it, since a script's own _shape_height changes the ground without changing any setting.
 func ground_settings_hash() -> int:
-	return hash([chunk_size, chunk_resolution, height_scale, grid_jitter, noise_seed, noise_scale, int(noise_type), frequency, int(fractal_type), fractal_octaves, fractal_gain, fractal_lacunarity])
+	return hash([chunk_size, chunk_resolution, height_scale, grid_jitter, noise_seed, noise_scale, int(noise_type), frequency, int(fractal_type), fractal_octaves, fractal_gain, fractal_lacunarity, generator_version])
 
 
 # --- For scripts that extend this one ---

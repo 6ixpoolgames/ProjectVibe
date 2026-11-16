@@ -8,6 +8,9 @@
 ##   pawn.navigation_manager.is_following_path()
 ##   pawn.navigation_manager.has_arrived()           # true once the last move_to got there, until the next move_to or stop()
 ##   pawn.navigation_manager.stop()
+##   pawn.navigation_manager.get_path_state()        # Claude 2026-11-16: NONE, FOLLOWING, PENDING, ARRIVED or UNREACHABLE
+##   pawn.navigation_manager.is_under_way()          # following a path, or waiting for nav to be built so it can find one
+##   pawn.navigation_manager.is_partial()            # the path ends at the closest place it can reach, not at the point
 ##
 ## It never moves the pawn and never ticks on its own. A controller asks get_move_direction() once per tick and puts the answer
 ## in its InputCommand's move, the same way a player's keys would. So over the network a client follows its own path and only
@@ -16,11 +19,20 @@
 ## The path's corners stay private. Something that wants to draw them can call get_path_corners().
 ##
 ## What happens in odd cases (all checked in tests/navigation_manager_selftest.gd):
-##   - No NavServer (the navcore library isn't loaded), or no nav under the pawn (a level with no nav fed to it): it walks in a
-##     straight line to the point, so click-to-move still works in a bare test level.
-##   - Nav under the pawn, but the point is nowhere near nav: move_to returns false, and any path it had is dropped.
+##   Claude 2026-11-16: each case now ends in a path state (get_path_state()) rather than a silent straight line.
+##   - No NavServer (the navcore library isn't loaded), or no nav under the pawn and none being built (a level with no nav fed to
+##     it): it walks in a straight line to the point, so click-to-move still works in a bare test level. That's a choice,
+##     straight_line_without_nav, on by default; off, move_to returns false (UNREACHABLE) instead.
+##   - Nav still being built (NavServer isn't idle) and no nav yet under the pawn: PENDING. move_to returns true, the pawn stands,
+##     and it tries again every pending_retry_ticks, until it finds a path (FOLLOWING), nav finishes with still none under it (the
+##     straight line, as above), or pending_give_up_ticks pass (UNREACHABLE).
+##   - Nav under the pawn, but the point is nowhere near nav: move_to returns false (UNREACHABLE), and any path it had is dropped.
+##     That's so even while nav is being built elsewhere: in a streaming game it nearly always is, and something asking for a far
+##     point, such as AIGoToPointBehaviour's legs, picks a nearer one when told no, rather than standing and waiting.
 ##   - A point on nav it can't reach, such as an island: the nav library gives the path to the nearest place it can reach, so the
-##     pawn walks as close as it can, and arrives there.
+##     pawn walks as close as it can, and arrives there. is_partial() says so, while following and after arriving, so whatever
+##     asked can tell "got there" from "got as close as it could". Only paths that may cross links know this for now (use_links
+##     on, the default): find_path_now, used with use_links off, gives no partial flag (roadmap, the C++ bundle).
 ##   - Its parent isn't a Pawn: it warns, and move_to always returns false.
 ##   - The controller in charge changes: ControllerManager calls stop(), so the AI never walks the rest of a player's path.
 ##
@@ -29,7 +41,7 @@
 ## the named action to press, such as jump, and the controller presses it for one tick. A drop has no action: the pawn walks off.
 ## If the pawn hasn't reached the link's far end within link_timeout seconds, say after a jump that fell short, it finds a new
 ## path to the same place. That happens once per move_to: missing a second time, it stops, neither following nor arrived, so
-## whatever asked can choose something else. A link that can't be crossed is never tried forever.
+## whatever asked can choose something else. A link that can't be crossed is never tried forever. Claude 2026-11-16: that's UNREACHABLE.
 ##
 ## Later, from the old guide's section 8: finding a new path when nav tiles change, size tiers per pawn, and domains (air, ships).
 class_name NavigationManager
@@ -37,6 +49,15 @@ extends Node
 
 ## Sent once when the end of a path is reached.
 signal arrived
+
+## Claude 2026-11-16: where the last move_to stands. Read it with get_path_state().
+enum PathState {
+	NONE, ## no move_to yet, or stop() since
+	FOLLOWING, ## walking a path, or a straight line where there's no nav
+	PENDING, ## nav is still being built, and there's none under the pawn yet; it tries again every pending_retry_ticks
+	ARRIVED, ## got to the end of the path. With is_partial(), that's the closest place it could reach, not the point
+	UNREACHABLE, ## no way there: nowhere near nav, a link it missed twice, or nav wasn't built in time
+}
 
 ## How close, in metres, the pawn must get to a corner of the path before it heads for the next one. Measured flat, ignoring
 ## height, because a path's height between corners isn't the ground.
@@ -52,13 +73,23 @@ signal arrived
 ## Claude 2026-11-08: how long, in seconds, the pawn has to get from a link's start to its end. Past that it finds a new path,
 ## from wherever it ended up, to the same place.
 @export var link_timeout := 3.0
+## Claude 2026-11-16: on, a move_to where there's no nav at all, and none being built, walks in a straight line (bare test levels,
+## click-to-move without nav). Off, it's UNREACHABLE, for a game where walking off the nav would be a bug.
+@export var straight_line_without_nav := true
+## Claude 2026-11-16: while PENDING, how often it tries again to find a path, in ticks at 60 a second.
+@export var pending_retry_ticks := 10
+## Claude 2026-11-16: how long it waits, in ticks at 60 a second, for nav to be built before giving up (UNREACHABLE). 300 is 5 s.
+@export var pending_give_up_ticks := 300
 
 ## The pawn this manager belongs to, or null if its parent isn't one.
 var pawn: Pawn = null
 
 var _corners := PackedVector3Array()
 var _next_corner := 0 # index into _corners of the corner being walked to
-var _arrived := false
+# Claude 2026-11-16: path states. _state replaces a has-arrived flag; has_arrived() reads it.
+var _state := PathState.NONE
+var _partial := false # the path ends at the closest place it can reach; kept after arriving, until the next move_to or stop()
+var _pending_ticks := 0 # how long it's been PENDING
 # Claude 2026-11-08: links. One id per corner, not 0 where that corner starts a link. Empty when the path has no link info.
 var _link_ids := PackedInt64Array()
 var _goal := Vector3.ZERO # where the last move_to was going, for finding a new path after a missed link
@@ -79,41 +110,27 @@ func _enter_tree() -> void:
 		push_warning("NavigationManager: its parent isn't a Pawn, so it can't find paths for anything.")
 
 
-## Finds a path from the pawn to this point and starts following it. Returns false, and stops, if there's no way there.
-## With no nav at all, it goes in a straight line and returns true.
+## Finds a path from the pawn to this point and starts following it. Returns false, and stops, if there's no way there
+## (UNREACHABLE). With no nav at all, it goes in a straight line and returns true. Claude 2026-11-16: while nav is still being
+## built, it returns true and waits (PENDING); see the top of the file.
 func move_to(point: Vector3) -> bool:
 	stop()
 	if pawn == null:
+		_state = PathState.UNREACHABLE
 		return false
 	_goal = point
 	_new_paths_left = 1 # Claude 2026-11-08
-	var start := pawn.global_position
-	var nav := _nav_server()
-	# GDScript note: closest_point returns null when there's no nav near the point, which is why it's an untyped var.
-	if nav == null or nav.closest_point(start, nav_tier) == null:
-		_corners = PackedVector3Array([start, point]) # no nav here at all: a straight line
-	elif use_links:
-		# Claude 2026-11-08: a path that may cross links, with each link's id at the corner where it starts.
-		var found: Dictionary = nav.find_path_now_with_links(start, point, nav_tier)
-		var points: PackedVector3Array = found.points
-		if points.size() < 2:
-			return false
-		_corners = points
-		_link_ids = found.link_ids
-	else:
-		var found: PackedVector3Array = nav.find_path_now(start, point, nav_tier)
-		if found.size() < 2:
-			return false
-		_corners = found
-	_next_corner = 1 # corner 0 is where the pawn stands
-	return true
+	_state = _find_path(point) # Claude 2026-11-16: the finding moved to _find_path, which PENDING's retries use too
+	return _state != PathState.UNREACHABLE
 
 
-## Stops following the path. has_arrived() goes back to false.
+## Stops following the path. has_arrived() goes back to false, and the state to NONE.
 func stop() -> void:
 	_corners = PackedVector3Array()
 	_next_corner = 0
-	_arrived = false
+	_state = PathState.NONE # Claude 2026-11-16
+	_partial = false
+	_pending_ticks = 0
 	_link_ids = PackedInt64Array() # Claude 2026-11-08
 	_action_to_press = &""
 	_ticks_on_link = -1
@@ -122,21 +139,36 @@ func stop() -> void:
 ## Which way to walk now: flat, length 1, or zero when there's no path. Call it once per tick, because it also moves on to the
 ## next corner when the pawn is close enough, and finishes the path at the end.
 func get_move_direction() -> Vector3:
-	if pawn == null or _corners.is_empty():
+	if pawn == null:
+		return Vector3.ZERO
+	# Claude 2026-11-16: waiting for nav to be built. Try again now and then, and give up after a while.
+	if _state == PathState.PENDING:
+		var elapsed := pawn.ticks_elapsed # Claude 2026-11-16 (pawn spec 8.21): the ticks since its pawn last ran
+		_pending_ticks += elapsed
+		if _pending_ticks >= TickDriver.ticks_at_rate(pending_give_up_ticks):
+			_state = PathState.UNREACHABLE
+			return Vector3.ZERO
+		if _pending_ticks % maxi(1, TickDriver.ticks_at_rate(pending_retry_ticks)) < elapsed:
+			_state = _find_path(_goal)
+		if _state != PathState.FOLLOWING:
+			return Vector3.ZERO # still waiting, or found there's no way after all
+	if _corners.is_empty():
 		return Vector3.ZERO
 	# Claude 2026-11-08: crossing a link and taking too long, such as after falling short of a jump: a new path, same goal.
 	if _ticks_on_link >= 0:
-		_ticks_on_link += 1
+		_ticks_on_link += pawn.ticks_elapsed # Claude 2026-11-16 (pawn spec 8.21): was 1
 		if _ticks_on_link > roundi(link_timeout * Engine.physics_ticks_per_second):
 			# Once per move_to. A link that can't be crossed would otherwise be tried forever, since a new path picks it again.
 			if _new_paths_left <= 0:
 				stop()
+				_state = PathState.UNREACHABLE # Claude 2026-11-16
 				return Vector3.ZERO # gave up: not following, not arrived
 			var left := _new_paths_left - 1
-			var found := move_to(_goal)
+			move_to(_goal)
 			_new_paths_left = left # move_to resets it for a fresh request; this isn't one
-			if not found:
-				return Vector3.ZERO # nowhere to go from here: stopped
+			# Claude 2026-11-16: was "if not found". A PENDING new path has no corners yet, and would have counted as arrived below.
+			if _state != PathState.FOLLOWING:
+				return Vector3.ZERO # nowhere to go from here, or waiting for nav
 	var at := pawn.global_position
 	while _next_corner < _corners.size():
 		var to_corner := _corners[_next_corner] - at
@@ -152,7 +184,7 @@ func get_move_direction() -> Vector3:
 	_next_corner = 0
 	_link_ids = PackedInt64Array()
 	_ticks_on_link = -1
-	_arrived = true
+	_state = PathState.ARRIVED # Claude 2026-11-16: _partial stays, so whatever asked can tell how close it got
 	arrived.emit()
 	return Vector3.ZERO
 
@@ -172,12 +204,29 @@ func is_crossing_link() -> bool:
 
 ## True while there's a path being followed.
 func is_following_path() -> bool:
-	return not _corners.is_empty()
+	return _state == PathState.FOLLOWING # Claude 2026-11-16: the same as having corners, said by the state
 
 
 ## True once the last move_to reached its end, until the next move_to or stop().
 func has_arrived() -> bool:
-	return _arrived
+	return _state == PathState.ARRIVED # Claude 2026-11-16
+
+
+## Claude 2026-11-16: where the last move_to stands (PathState at the top of the file).
+func get_path_state() -> PathState:
+	return _state
+
+
+## Claude 2026-11-16: true while the last move_to is going somewhere: following its path, or waiting for nav (PENDING). Controllers
+## ask for a direction each tick while this is true, which is also what lets a PENDING wait try again.
+func is_under_way() -> bool:
+	return _state == PathState.FOLLOWING or _state == PathState.PENDING
+
+
+## Claude 2026-11-16: true when the path ends at the closest place it can reach rather than at the point, such as a point on an
+## island. Stays true after arriving there, until the next move_to or stop(). False for a path found with use_links off (see the top).
+func is_partial() -> bool:
+	return _partial
 
 
 ## The corners still ahead, starting with the one being walked to. For debug drawing. Empty when there's no path.
@@ -195,6 +244,45 @@ func _reached_corner(index: int) -> void:
 	var nav := _nav_server()
 	_action_to_press = nav.get_link_action(_link_ids[index]) if nav else &""
 	_ticks_on_link = 0
+
+
+# Claude 2026-11-16: finds a path from where the pawn stands to the point, and sets it up to follow. Returns the state it leads
+# to: FOLLOWING (a path, or a straight line), PENDING (nav still being built) or UNREACHABLE. move_to and PENDING's retries use it.
+func _find_path(point: Vector3) -> PathState:
+	var start := pawn.global_position
+	var nav := _nav_server()
+	if nav == null:
+		return _straight_line(start, point) # no nav library at all
+	# GDScript note: closest_point returns null when there's no nav near the point, which is why it's compared with null.
+	if nav.closest_point(start, nav_tier) == null:
+		# NavServer is idle once every tile it was asked for is built. Not idle, the nav under the pawn may just not be built yet.
+		return PathState.PENDING if not nav.is_idle() else _straight_line(start, point)
+	# Nav under the pawn. From here, no path is UNREACHABLE whether or not nav is still building (see the top of the file).
+	var points := PackedVector3Array()
+	if use_links:
+		# Claude 2026-11-08: a path that may cross links, with each link's id at the corner where it starts.
+		var found: Dictionary = nav.find_path_now_with_links(start, point, nav_tier)
+		points = found.points
+		_link_ids = found.link_ids
+		_partial = found.partial # Claude 2026-11-16: the nav library's own flag, which was dropped before
+	else:
+		points = nav.find_path_now(start, point, nav_tier) # gives no partial flag (see the top of the file)
+	if points.size() < 2:
+		_link_ids = PackedInt64Array()
+		_partial = false
+		return PathState.UNREACHABLE
+	_corners = points
+	_next_corner = 1 # corner 0 is where the pawn stands
+	return PathState.FOLLOWING
+
+
+# Claude 2026-11-16: a straight line from the pawn to the point, if straight_line_without_nav allows it.
+func _straight_line(start: Vector3, point: Vector3) -> PathState:
+	if not straight_line_without_nav:
+		return PathState.UNREACHABLE
+	_corners = PackedVector3Array([start, point])
+	_next_corner = 1
+	return PathState.FOLLOWING
 
 
 func _nav_server() -> Object:

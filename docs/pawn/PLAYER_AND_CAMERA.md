@@ -133,3 +133,15 @@ These are the same within the noise between runs, except bandwidth, because the 
 ## 9. Not in tier -1
 
 Nexus, managers including the controller manager, `AIController`, abilities including Walk and Fly, stat manager, `SpectatorPawn`, `RTSPawn`, camera blending, and replay.
+
+## Spectating *(Claude 2026-11-16, the owner's call)*
+
+- **What:** a free-flying camera for a player with no pawn: between matches, waiting to respawn, or after letting go of a pawn. `assets/scripts/camera/FreeFlyCamera.gd`.
+- **Not a Pawn.** Nearly every system looks for `Pawn`: abilities, effects, AI, the team registry, the kill floor, replays, spawning. A spectator belongs in none of them, so it's its own class, and controlled game entities stay `Pawn`s (character bodies).
+- **The PossessionCoordinator recognises it:** `spectate()` lets go of this machine's pawn (its AI controller takes over) and flies the spectator from where the camera is; `stop_spectating()`; `is_spectating()`; the `spectating_changed` signal. Possessing any pawn ends it.
+- **The PlayerController flies it**, once a rendered frame: never ticked, networked or rolled back. `spectator_scene` swaps in a game's own (its root a `FreeFlyCamera`).
+- **Local, as Unreal's spectator is:** only this machine knows its player is spectating. Telling the server waits until something needs it, such as a respawn queue.
+- **Controls:** WASD flies where the view looks, Q up, E down. 10 m/s; 25 with sprint; with sprint held, the wheel ramps that fast speed in steps of 5, from 10 up to 75. No collision. The wheel on its own zooms: each notch 1.25 times, up to 8 times, by narrowing the field of view, with the mouse turning slower to match; the middle mouse button resets it, and it starts unzoomed each time.
+- **Mass battle:** the spectator keeps nothing loaded there, so from the overview (V) you see chunks load and unload around the level's own sources. A player's pawn let go of follows the heroes' switch (H).
+- **It keeps the world loaded** around itself while flying (`keeps_world_loaded`, a `StreamingSource` child).
+- **Arena samples:** U spectates, and U again takes back the pawn you left. The pawn you left keeps the world loaded on the server or offline, so the fight there carries on.

@@ -17,6 +17,11 @@
 ##     during a swing waits in its buffer, since the next swing can't cancel it (interrupt priority 10 against 15). MeleeAttack has no
 ##     cooldown here (_debug_cooldowns), so the boosts alone decide. Each swing's damage and knockback are its on-hit effects.
 ##   - Special (the right mouse button, the action secondary) is HeavyAttack: a slow, wide, hard-hitting swing on a 6 s cooldown.
+##   Claude 2026-11-16 (pawn spec 8.20, the owner's design): combos are counted by position instead of boosts, and light and heavy mix.
+##   MeleeAttack and HeavyAttack open a combo (position 1); SecondSwing fills 2, FinisherSwing 3, and HeavySmash (right mouse, a
+##   downward smash with a longer reach) 2 or 3. Each attack's hit opens a half-second window for the next position, and the follow-up
+##   that fits wins it on its key (priority 20). So swing, second, finisher; swing, smash, finisher; heavy, second, smash; and so on.
+##   Cooldowns: the swing 1.2 s, the heavy attack 1.9 s (was 6). The combo boosts are gone.
 ##   - The goblins use the same requests: their Attack behaviour presses attack (and gets the combo's next swing when it presses
 ##     again quickly; Claude 2026-11-10), and a second one, HeavyAttack, presses special and scores higher (0.95 against 0.9), so they use it whenever
 ##     it's ready and they're in its range.
@@ -53,9 +58,12 @@ var _players := {} # Claude 2026-11-13: peer -> true for every player in the gam
 
 
 ## Claude 2026-11-10: the arena's cooldowns without MeleeAttack's, so the combo is decided by its boosts alone (pawn spec 8.11).
+## Claude 2026-11-16 (pawn spec 8.20, the owner's numbers): the basic swing 1.2 s and the heavy attack 1.9 s, as in faction_abilities.tscn,
+## so the arena's own 0.8 doesn't replace them. Combos are counted by position now, not decided by boosts.
 func _debug_cooldowns() -> Dictionary:
 	var cooldowns: Dictionary = super().duplicate()
-	cooldowns.erase("MeleeAttack")
+	cooldowns["MeleeAttack"] = 1.2
+	cooldowns["HeavyAttack"] = 1.9
 	return cooldowns
 
 
@@ -130,4 +138,4 @@ func _is_npc(pawn: Pawn) -> bool:
 
 func _keys_text() -> String:
 	# Claude 2026-11-10: the combo (pawn spec 8.11)
-	return super() + "\nAttack: left mouse (quickly again: second swing, then finisher)    Special: right mouse (heavy, 6 s cooldown)    Parry: F (from the front)    Red and blue goblins fight each other too; soldiers fight on your side"
+	return super() + "\nAttack: left mouse    Special: right mouse (heavy)    After a hit, either again: the combo's next (second, smash, finisher)    Parry: F (from the front)    Red and blue goblins fight each other too; soldiers fight on your side"

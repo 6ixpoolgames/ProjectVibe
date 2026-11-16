@@ -29,11 +29,17 @@ Owner's decisions, 2026-11-16:
    - **M5** *(built 2026-11-16)*: one camera per player, on the PlayerController, attaching to a CameraMount on the pawn (pawn spec 8.18)
    - **M6:** a VisualSmoother (folded into animation v0's visuals manager); detectability as a stat, mirrored into the pawn table (C++)
    - **Optional C++ bundle with M6:** stat columns in the pawn table, the per-pawn tick step from distance in whole chunks, and replay motion packing in C++
+   - **Also in the C++ bundle** *(the owner's call, 2026-11-16: everything that needs a rebuild goes in one batch)*:
+     - updating godot-cpp from the 4.4 bindings to 4.7 (10.0.0-stable, already fetched; `api_version=4.7`, then `compatibility_minimum = "4.7"` in `bin/navcore.gdextension`)
+     - the tile commit fix (navigation and terrain track below)
+     - a partial flag for paths found without links: `find_path_now` gives only points, so `NavigationManager.is_partial()` is false with `use_links` off. One method giving `{points, link_ids, partial}` either way.
+     - rebuild on Windows and Linux, then the nav, codec and tick_state tests
 3. **Tick driver update** (variable tick rate):
-   - fine ticks counting at 120, with 60 by default
-   - per-pawn steps of 2 or 4 by distance, in multiples of the chunk size
-   - the whole game dropping to 30 under load, announced ahead
-   - timers that advance by a step
+   - fine ticks counting at 120, with 60 by default *(left for later, with networking T1.1: not needed for dropping to 30)*
+   - per-pawn steps of 2 or 4 by distance, in multiples of the chunk size *(built 2026-11-16, pawn spec 8.21: the AIActivationManager picks them)*
+   - the whole game dropping to 30 under load, announced ahead *(built 2026-11-16 as the load ladder: every AI pawn at most every 2nd or 4th tick; players' pawns every tick, so no announcement is needed)*
+   - *(Done 2026-11-16, after the owner's 6 fps playtest.)* Catch-up is capped at 3 ticks a frame, and Godot's own physics-step limit follows TickDriver's, which was the real cap (8) before, with nothing dropped. Dropped time shows in diagnostics.
+   - timers that advance by a step *(built 2026-11-16: `Pawn.ticks_elapsed`, and `fired_since_last_run` for the AI's schedules)*
    - **A batched mover** *(the owner's call, 2026-11-16)*. Every pawn runs its abilities first, then one central step moves them all, still with Godot's move_and_slide. The gains:
      - every swing and query sees the same moment
      - one place to swap in the C++ mover from the wishlist
@@ -73,7 +79,8 @@ Owner's decisions, 2026-11-16:
   - **N1:** no snapshot is gathered or encoded when no client can receive it. This was the 1.4 ms a tick a host spent alone.
   - **N2:** input packets are validated (a count of 0, an impossible tick, a wrong field count) before their timing counts.
   - **N3:** entities with only sync properties replicate.
-  - **Still to do:** N4 (an explicit effective schema, with mismatches refused rather than silently emptied) and diagnostics for networking.
+  - **N4, minimal** *(built 2026-11-16)*: a snapshot list of the wrong size for an entity is refused, counted (`stats.schema_mismatches`) and warned about once per entity type, rather than read as empty (`NetworkSession._snapshot_lists_fit`, `TickStateComponent.get_list_sizes`).
+  - **Still to do:** the rest of N4 (an explicit effective schema, agreed in the handshake) and diagnostics for networking.
 - **T1.1:** the time contract, designed with the tick driver update:
   - the 120-unit fine clock, with snapshot IDs separate from simulation time
   - step schedules decided by the server and announced ahead
@@ -86,9 +93,9 @@ Owner's decisions, 2026-11-16:
 
 ## Navigation and terrain track *(the navigation and terrain assessment, 2026-11-16; adopted by the owner. Each claim was checked against the code and confirmed)*
 
-- **Small fixes, soon:**
-  - **Path states** instead of a silent straight line: pending (nav still building), ready, partial (the closest reachable point; the partial flag is dropped today), and unreachable. The straight line becomes an explicit choice for scenes without nav. `NavigationManager.move_to`.
-  - **A generator version in the terrain's compatibility hash.** `ground_settings_hash()` misses a subclass's `_shape_height`.
+- **Small fixes** *(built 2026-11-16)*:
+  - **Path states** instead of a silent straight line: `NavigationManager.get_path_state()` is NONE, FOLLOWING, PENDING (nav still being built and none under the pawn yet; it retries every `pending_retry_ticks` and gives up after `pending_give_up_ticks`), ARRIVED or UNREACHABLE, and `is_partial()` says a path ends at the closest reachable point. The straight line is a choice, `straight_line_without_nav`, on by default. Controllers follow `is_under_way()`. The partial flag for paths without links waits for the C++ bundle.
+  - **A generator version in the terrain's compatibility hash.** `TerrainGenerator.generator_version`, in `ground_settings_hash()`: raise it when a subclass's `_shape_height` changes the ground.
 - **With the C++ bundle (M6):** fix `TileManager::commit_finished` clearing a tile's in-flight marker before its version check. A stale result can clear a recreated tile's newer build, so the tile gets built twice. Add a regression test.
 - **With the tick driver update:**
   - link completion that checks height, not just horizontal distance (corner checks drop y)
@@ -121,5 +128,5 @@ Owner's decisions, 2026-11-16:
 - Delta compression for snapshots (netcode v1)
 - The deferred effect items
 - The Tag Picker UI, not yet checked in the editor
-- Updating godot-cpp from the 4.4 bindings to 4.7
+- Updating godot-cpp from the 4.4 bindings to 4.7: moved into the C++ bundle with M6 (2026-11-16)
 - Deterministic physics: deferred until a game truly depends on physics; replays use keyframe correction

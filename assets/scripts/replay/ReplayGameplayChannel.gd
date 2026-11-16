@@ -7,6 +7,8 @@
 ##   "died"               killer (replay id, 0 if none)
 ##   "ability_started"    ability
 ##   "ability_cancelled"  ability, by (the ability that cancelled it, "" if none)
+##   "step_started"       ability, step (Claude 2026-11-16, pawn spec 8.20: a step of a stepped ability, ability.step)
+##   "step_finished"      ability, step, reason ("done", "failed" or "cancelled")
 ##   "ai_state"           from, to (state names), reason
 ##   "ai_behaviour"       from, to (behaviour names), reason
 ##   "ai_target"          from, to (replay ids, 0 for none), reason
@@ -75,6 +77,11 @@ func pawn_added(pawn: Pawn, id: int) -> void:
 			add_event("ability_started", id, {"ability": _name_of(ability)}))
 		_connect(connections, pawn.ability_manager.ability_cancelled, func(ability: AbilityBase, by: AbilityBase) -> void:
 			add_event("ability_cancelled", id, {"ability": _name_of(ability), "by": _name_of(by)}))
+		# Claude 2026-11-16 (pawn spec 8.20): steps, the owner's ability.step level of detail.
+		_connect(connections, pawn.ability_manager.step_started, func(ability: AbilityBase, step: AbilityStep) -> void:
+			add_event("step_started", id, {"ability": _name_of(ability), "step": _name_of(step)}))
+		_connect(connections, pawn.ability_manager.step_finished, func(ability: AbilityBase, step: AbilityStep, reason: String) -> void:
+			add_event("step_finished", id, {"ability": _name_of(ability), "step": _name_of(step), "reason": reason}))
 	if pawn.ai_state_manager:
 		_connect(connections, pawn.ai_state_manager.state_changed, func(old: AIStateBase, new: AIStateBase, reason: String) -> void:
 			add_event("ai_state", id, {"from": _name_of(old), "to": _name_of(new), "reason": reason}))

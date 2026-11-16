@@ -190,19 +190,25 @@ func tick_effects() -> void:
 		return
 	var due: Array = [] # [effect, stacks, source key] whose period came round this tick, run once the counting is done
 	var ended: Array[Effect] = []
+	# Claude 2026-11-16 (pawn spec 8.21): every count advances by the ticks this run covers: 1, or more for a pawn running every Nth
+	# tick. A period that came round more than once in that time is due that many times, so the totals stay the same.
+	var elapsed: int = pawn.ticks_elapsed if pawn else 1
 	var at := _entries.size() - STRIDE
 	while at >= 0: # from the end, so removing one doesn't move the ones still to come
-		_entries[at + TICKS_LEFT] -= 1
 		var effect := Effect.find(_entries[at + ID])
+		# Periods first, for the ticks after which the effect was still running, as before: the tick it runs out on counts for nothing,
+		# and one ending inside this run still gets the periods before that.
+		if effect and effect.period_seconds > 0.0:
+			var lasted := mini(elapsed, maxi(int(_entries[at + TICKS_LEFT]) - 1, 0))
+			_entries[at + PERIOD_LEFT] -= lasted
+			while _entries[at + PERIOD_LEFT] <= 0 and lasted > 0:
+				_entries[at + PERIOD_LEFT] += maxi(TickDriver.seconds_to_ticks(effect.period_seconds), 1)
+				due.append([effect, int(_entries[at + STACKS]), _entries[at + SOURCE]])
+		_entries[at + TICKS_LEFT] -= elapsed
 		if _entries[at + TICKS_LEFT] <= 0:
 			_remove_at(at)
 			if effect:
 				ended.append(effect)
-		elif effect and effect.period_seconds > 0.0:
-			_entries[at + PERIOD_LEFT] -= 1
-			if _entries[at + PERIOD_LEFT] <= 0:
-				_entries[at + PERIOD_LEFT] = TickDriver.seconds_to_ticks(effect.period_seconds)
-				due.append([effect, int(_entries[at + STACKS]), _entries[at + SOURCE]])
 		at -= STRIDE
 	if not ended.is_empty():
 		_refresh() # what ended stops holding before this tick's abilities run

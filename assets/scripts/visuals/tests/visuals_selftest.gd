@@ -77,6 +77,9 @@ func _test_sword() -> void:
 	var sword: FloatingSword = pawn.get_node(^"Visual/FloatingSword")
 	var swing: MeleeAttackAbility = pawn.ability_manager.get_node("FinisherSwing") # the vertical chop
 	await _frames(40)
+	# Claude 2026-11-16 (pawn spec 8.20): the finisher only starts as the third of a combo, so the test opens that window.
+	pawn.ability_manager.combo_position = 2
+	pawn.ability_manager.open_combo_window(600)
 	var right := Vector3(cos(pawn.yaw), 0, -sin(pawn.yaw))
 	var hovering := sword.global_position - pawn.global_position
 	_check(hovering.dot(right) > 0.5 and absf(hovering.y - sword.hover_height) < 0.2, "hovering: at the pawn's right, about chest high (%.2f right, %.2f up)" % [hovering.dot(right), hovering.y])
@@ -143,6 +146,7 @@ func _test_alternating_sides() -> void:
 	await _frames(4)
 	var after_second := (sword.global_position - pawn.global_position).dot(right)
 	_check(at_windup < 0.0 and after_second > 0.5, "the second swing starts from the left and leaves it at the right (%.2f, then %.2f)" % [at_windup, after_second])
+	swing.cooldown_ticks_left = 0 # Claude 2026-11-16: the swing's 1.2 s cooldown would stop it starting again so soon
 	pawn.ability_manager.start_ability(swing)
 	await _until_done(swing)
 	var longest_wait := int((sword.return_seconds + sword.side_change_seconds) * 60.0) + 20

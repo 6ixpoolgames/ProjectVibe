@@ -343,6 +343,8 @@ Today the AI is about a third of a fighting pawn's cost.
 
 ### 7.1 Later: rates that change during play
 
+*(Claude 2026-11-16: per-pawn rates for distant units, and the whole game's AI dropping under load, are built: pawn spec 8.21. The whole game changing its tick length mid-match is still later.)*
+
 **Not tier 1** (the owner's call, v0.4). Kept here so tier 1 doesn't get in their way.
 
 - **The whole game changing rate mid-match** needs every running timer and setting rescaled on the same tick on every machine, announced ahead, and a rollback history that can hold ticks of two lengths.

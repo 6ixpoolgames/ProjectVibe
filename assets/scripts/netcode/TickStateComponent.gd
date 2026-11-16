@@ -520,6 +520,13 @@ func get_sync_encodings() -> Array:
 	return _encodings_of(_syncs)
 
 
+## Claude 2026-11-16 (networking N4): how many entries each list has: [state, sync, input, custom]. A snapshot's lists must have
+## these sizes; NetworkSession checks them before using one, so a mismatch is refused and reported rather than read as empty.
+## GDScript note: a PackedInt32Array is a plain list of whole numbers, cheaper than an Array for this.
+func get_list_sizes() -> PackedInt32Array:
+	return PackedInt32Array([_states.size(), _syncs.size(), _inputs.size(), _custom_paths.size()])
+
+
 func state_values_to_dictionary(values: Array) -> Dictionary:
 	return _to_dictionary(_states, values) if values.size() == _states.size() else {}
 

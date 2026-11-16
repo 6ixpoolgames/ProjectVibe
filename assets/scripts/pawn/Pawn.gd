@@ -161,6 +161,21 @@ var _driver: Node = null
 ## (through its timer, so a rollback updates it too), and read directly by C++, which is much cheaper than calling is_dead().
 ## Read it; don't set it.
 var dead := false
+## Claude 2026-11-16 (pawn spec 8.21, scaling spec 7.1, the owner's call): how often this pawn simulates: every tick (1), every 2nd (2)
+## or every 4th (4). The AIActivationManager sets it for AI pawns far from every player and camera, and raises it for every AI pawn
+## while the game is overloaded (TickDriver.load_step). A pawn a player has always runs every tick, whatever this says. Rolls back.
+## A pawn that runs every Nth tick does N ticks' worth each time it runs (ticks_elapsed), so it walks as far and its timers last as
+## long; it only reacts less often. Which ticks: spread by its own number, so a crowd at every 4th tick doesn't all run on one.
+var tick_step := 1
+## Claude 2026-11-16: the ticks since this pawn last ran, for this run: 1 normally, up to tick_step (at most MAX_TICK_STEP). Its parts
+## advance their timers by it (cooldowns, effects, the AI's schedules), and its simulate step is this many ticks long. Read it; don't set it.
+var ticks_elapsed := 1
+## Claude 2026-11-16: the longest step, and so the most ticks one run can cover. A pawn frozen for a while comes back with at most this.
+const MAX_TICK_STEP := 4
+var _last_run_tick := -1 # Claude 2026-11-16: the tick this pawn last simulated; rolls back. -1: not yet
+var _prepared_tick := -1 # the tick _runs_this_tick and ticks_elapsed were worked out for
+var _runs_this_tick := true
+var _last_run_span := 1 # ticks_elapsed of the last run, for smoothing Visual across it
 var _entity: NetworkEntity = null
 var _game_mode: Node = null # Claude 2026-11-16 (pawn M2): found when entering the tree, for the distances
 var _last_streamed_position := Vector3.ZERO # for distance_moved_since_last_check
@@ -248,6 +263,12 @@ func _ready() -> void:
 	_current_position = global_position
 	_previous_yaw = yaw
 	_current_yaw = yaw
+	# Claude 2026-11-16 (pawn spec 8.21): how often it runs, and when it last did, roll back, so a replay runs on the same ticks.
+	for child in get_children():
+		if child is TickStateComponent:
+			var entries: Array[String] = ["tick_step", "_last_run_tick"] # GDScript note: typed, as add_state_properties asks
+			child.add_state_properties(entries)
+			break
 	# Claude 2026-11-16 (pawn M2): every pawn is watched by the AI switch-off, which leaves alone those that keep the world loaded, checking each time.
 	var ai := _ai_activation_manager()
 	if ai:
@@ -400,6 +421,10 @@ func get_network_entity() -> NetworkEntity:
 ## Claude 2026-11-07: the input phase. Asks the controller in charge for this tick's input, where this pawn's input is decided here.
 ## A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
 func _tick_input(_dt: float, tick: int) -> void:
+	# Claude 2026-11-16 (pawn spec 8.21): a pawn that runs every Nth tick skips the others: no AI, no input.
+	_prepare_run(tick)
+	if not _runs_this_tick:
+		return
 	if is_dead():
 		if controller_manager:
 			controller_manager.clear_input() # Claude 2026-11-09: a dead pawn ignores its controllers and its AI
@@ -418,6 +443,14 @@ func _tick_input(_dt: float, tick: int) -> void:
 
 
 func _tick_simulate(dt: float, tick: int) -> void:
+	# Claude 2026-11-16 (pawn spec 8.21): skipped on ticks it doesn't run; on those it does, a step as long as the ticks since its last.
+	# A rollback replay calls only this, not _tick_input, so it works out the same thing here.
+	_prepare_run(tick)
+	if not _runs_this_tick:
+		return
+	dt *= ticks_elapsed
+	_last_run_span = ticks_elapsed
+	_last_run_tick = tick
 	# Claude 2026-11-09: sleeping (pawn spec 15.3). Checked before _current_position is overwritten, because "nothing moved it since
 	# its last tick" compares against it. A sleeping pawn only does the bookkeeping at the end.
 	var sleeping := _can_sleep(tick)
@@ -445,7 +478,8 @@ func _tick_simulate(dt: float, tick: int) -> void:
 		PerfScopes.add(&"pawn.move_skipped", 0)
 		_finish_tick()
 		return
-	var factor: float = _driver.get_physics_factor() if _driver else 1.0
+	# Claude 2026-11-16: times ticks_elapsed, so a pawn running every Nth tick moves N ticks' worth.
+	var factor: float = (_driver.get_physics_factor() if _driver else 1.0) * ticks_elapsed
 	velocity *= factor
 	var move_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	move_and_slide()
@@ -492,12 +526,45 @@ func _can_sleep(tick: int) -> bool:
 # a full tick anyway so ground that went away under it is noticed. Claude 2026-11-16 (movement experiments): moved into its own function.
 func _is_check_tick(tick: int) -> bool:
 	var stagger: int = _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
-	return (tick + stagger) % TickDriver.ticks_at_rate(sleep_check_ticks) == 0 # Claude 2026-11-09 (scaling spec step 6)
+	# Claude 2026-11-16 (pawn spec 8.21): "< ticks_elapsed" rather than "== 0", so a pawn running every Nth tick still finds the check
+	# tick that fell between its runs. With ticks_elapsed 1 it's the same rule as before.
+	return posmod(tick + stagger, TickDriver.ticks_at_rate(sleep_check_ticks)) < ticks_elapsed # Claude 2026-11-09 (scaling spec step 6)
+
+
+## Claude 2026-11-16 (pawn spec 8.21): true if a rule that fires every interval ticks, on the ticks where (tick + offset) is a multiple
+## of interval, fired on this tick or on one this pawn skipped since its last run. For the AI's schedules and the like, so a pawn that
+## runs every Nth tick keeps them. With ticks_elapsed 1, it's (tick + offset) % interval == 0.
+func fired_since_last_run(tick: int, offset: int, interval: int) -> bool:
+	return interval <= 1 or posmod(tick + offset, interval) < ticks_elapsed
+
+
+## Claude 2026-11-16 (pawn spec 8.21): true while it runs every tick: tick_step 1, or a player has it.
+func runs_every_tick() -> bool:
+	return tick_step <= 1 or _has_a_player()
+
+
+# Claude 2026-11-16 (pawn spec 8.21): works out, once per tick, whether this pawn runs this tick and how many ticks the run covers.
+# Due when its step is 1, when it's never run, when the tick lines up with its step (spread by its own number), or when a whole step
+# has passed since its last run (after its step changed). ticks_elapsed is the ticks since its last run, from 1 to MAX_TICK_STEP.
+func _prepare_run(tick: int) -> void:
+	if _prepared_tick == tick:
+		return
+	_prepared_tick = tick
+	var step := 1 if _has_a_player() else clampi(tick_step, 1, MAX_TICK_STEP)
+	if step <= 1 or _last_run_tick < 0:
+		_runs_this_tick = true
+	else:
+		var since := tick - _last_run_tick
+		var stagger: int = _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
+		_runs_this_tick = since >= step or (since > 0 and posmod(tick + stagger, step) == 0)
+	if _runs_this_tick: # on ticks it skips, ticks_elapsed keeps its last run's value
+		ticks_elapsed = clampi(tick - _last_run_tick, 1, MAX_TICK_STEP) if _last_run_tick >= 0 else 1
 
 
 ## TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is
 ## doing now. Nothing can set it directly, so this makes the engine work it out again, then puts things back.
 func _on_state_loaded(_tick: int) -> void:
+	_prepared_tick = -1 # Claude 2026-11-16 (pawn spec 8.21): worked out again from the loaded _last_run_tick
 	# Claude 2026-11-07: previous_held_actions is restored by the TickState itself now, as rollback state.
 	var saved_position := position
 	var saved_velocity := velocity
@@ -535,6 +602,9 @@ func _process(delta: float) -> void:
 	# Fades over about 100 ms, so the player sees a quick slide rather than a jump (netcode spec section 6.2).
 	_correction_offset = _correction_offset.lerp(Vector3.ZERO, 1.0 - exp(-delta / 0.04))
 	var fraction: float = _driver.get_interpolation_fraction() if _driver else 1.0
+	# Claude 2026-11-16 (pawn spec 8.21): a pawn running every Nth tick moves once per run, so Visual glides across the whole run.
+	if _last_run_span > 1 and _driver and is_simulated_here():
+		fraction = clampf((float(_driver.tick - _last_run_tick) + fraction) / float(_last_run_span), 0.0, 1.0)
 	_visual.global_position = _previous_position.lerp(_current_position, fraction) + _correction_offset
 	if _model:
 		_model.rotation.y = lerp_angle(_previous_yaw, _current_yaw, fraction)

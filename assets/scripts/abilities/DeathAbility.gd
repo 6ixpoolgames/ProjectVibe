@@ -50,4 +50,4 @@ func duration_ticks() -> int:
 func tick(_dt: float) -> void:
 	var stats := pawn.stat_manager if pawn else null
 	if stats == null or stats.get_current(health_stat, 0.0) <= 0.0:
-		ticks_left += 1 # the manager takes one away after this, so it stays running
+		ticks_left += ticks_elapsed() # the manager takes as many away after this, so it stays running (Claude 2026-11-16: was 1)

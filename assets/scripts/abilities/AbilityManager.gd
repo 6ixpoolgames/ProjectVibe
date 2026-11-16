@@ -50,6 +50,13 @@ signal ability_started(ability: AbilityBase)
 signal ability_finished(ability: AbilityBase)
 ## Claude 2026-11-09: sent when an ability is cancelled by another starting, after ability_finished for it.
 signal ability_cancelled(ability: AbilityBase, by: AbilityBase)
+## Claude 2026-11-16 (pawn spec 8.20): a step of a stepped ability started.
+## GDScript note: the abilities send these two (AbilityBase.start_step), so the editor's "never used in this class" warning is switched off.
+@warning_ignore("unused_signal")
+signal step_started(ability: AbilityBase, step: AbilityStep)
+## Claude 2026-11-16: a step stopped: reason is "done", "failed" or "cancelled".
+@warning_ignore("unused_signal")
+signal step_finished(ability: AbilityBase, step: AbilityStep, reason: String)
 ## Claude 2026-11-16 (pawn M3): a hit reached this pawn, on the server: it isn't dead or invulnerable. Sent before a parry can turn it away and before its
 ## effects land, so the AI notes every attack (AIContextComponent listens).
 signal hit_arrived(hit: HitInfo)
@@ -65,6 +72,7 @@ signal died(pawn: Pawn, hit: HitInfo)
 var _invulnerable_abilities: Array[AbilityBase] = [] # Claude 2026-11-10: those with invulnerable_while_running, usually just Dash
 var _parry_abilities: Array[AbilityBase] = [] # Claude 2026-11-15: ParryAbility nodes, asked about each hit (parry_hit)
 var _locomotion_pausers: Array[AbilityBase] = [] # Claude 2026-11-10: those with pauses_locomotion, usually just Dash
+var _stepped: Array[AbilityBase] = [] # Claude 2026-11-16 (pawn spec 8.20): abilities built from steps
 
 var pawn: Pawn = null
 var _driver: Node = null # Claude 2026-11-16 (pawn M3): for hits during simulate
@@ -82,6 +90,14 @@ var _locked_mask := 0 # categories locked right now, as bits
 var _tick_rate := 60.0
 # Claude 2026-11-09, gates and channels (pawn spec 15.2): only what has a reason to run this tick runs.
 var _timed: Array[AbilityBase] = [] # abilities with a timer running (a run, a cooldown or a buffered press)
+
+# Claude 2026-11-16 (pawn spec 8.20, the owner's design): the combo counter, shared by every ability with combo_positions. Both roll
+# back. A combo ability starting takes the next position if the window is open and it fits there, else 1; the window closes as it
+# starts, and its OpenComboStep opens it again after its hit.
+## The combo position the last combo ability took (0: none yet).
+var combo_position := 0
+## Ticks left in the combo window: while above 0, a follow-up whose positions include combo_position + 1 can start.
+var combo_window_ticks_left := 0
 var _timers_dirty := true # a timer started or reached 0, so _timed is rebuilt before it's next used
 var _locks_dirty := true # an action started or stopped, so the locks are worked out again before they're next used
 var _every_tick_abilities: Array[AbilityBase] = [] # abilities whose script overrides every_tick()
@@ -121,13 +137,17 @@ func tick_abilities(dt: float) -> void:
 		_recompute_locks()
 	if _timers_dirty:
 		_rebuild_timed()
+	# Claude 2026-11-16 (pawn spec 8.21): every timer advances by the ticks this run covers (1, or more for a pawn running every Nth tick).
+	var elapsed := pawn.ticks_elapsed
 	for ability in _timed:
 		if ability.cooldown_ticks_left > 0:
-			ability.cooldown_ticks_left -= 1
+			ability.cooldown_ticks_left = maxi(ability.cooldown_ticks_left - elapsed, 0)
 		if ability.buffer_ticks_left > 0:
-			ability.buffer_ticks_left -= 1
+			ability.buffer_ticks_left = maxi(ability.buffer_ticks_left - elapsed, 0)
 	for ability in _every_tick_abilities:
 		ability.every_tick(dt)
+	if combo_window_ticks_left > 0: # Claude 2026-11-16 (pawn spec 8.20)
+		combo_window_ticks_left = maxi(combo_window_ticks_left - elapsed, 0)
 	_run_locomotion(dt)
 	if _actions_have_work():
 		_run_actions(dt)
@@ -145,6 +165,8 @@ func can_sleep() -> bool:
 	if _timers_dirty:
 		_rebuild_timed()
 	if not _timed.is_empty():
+		return false
+	if combo_window_ticks_left > 0: # Claude 2026-11-16: the combo window counts down every tick
 		return false
 	for ability in _every_tick_abilities:
 		if not ability.can_sleep():
@@ -205,6 +227,10 @@ func parry_hit(hit: HitInfo) -> bool:
 ## Claude 2026-11-10: true while an ability with invulnerable_while_running runs, such as a Dash: hits don't land (Pawn.is_invulnerable).
 ## Claude 2026-11-10: only for its first invulnerable_seconds, when that's above 0.
 func is_invulnerable() -> bool:
+	# Claude 2026-11-16 (pawn spec 8.20): or a running step with invulnerable on.
+	for ability in _stepped:
+		if ability.is_running_timed() and ability.has_invulnerable_step():
+			return true
 	for ability in _invulnerable_abilities:
 		if not ability.is_running_timed():
 			continue
@@ -295,8 +321,13 @@ func _run_locomotion(dt: float) -> void:
 		if ability.is_running_timed():
 			return
 	chosen.tick(dt)
+	if chosen.is_stepped() and chosen.is_running_timed():
+		chosen.run_steps(dt) # Claude 2026-11-16 (pawn spec 8.20)
+		if not chosen.is_running_timed():
+			_finish(chosen) # its last step ended: stopped, with its cooldown, as a timed one running out is
+			return
 	if chosen.is_running_timed():
-		chosen.ticks_left -= 1
+		chosen.ticks_left -= pawn.ticks_elapsed # Claude 2026-11-16 (pawn spec 8.21): was 1
 		if chosen.ticks_left <= 0:
 			_finish(chosen)
 
@@ -315,7 +346,9 @@ func _run_actions(dt: float) -> void:
 	for ability in _actions:
 		if ability.is_running_timed():
 			ability.tick(dt)
-			ability.ticks_left -= 1
+			if ability.is_stepped():
+				ability.run_steps(dt) # Claude 2026-11-16 (pawn spec 8.20): may end it, by setting ticks_left to 0
+			ability.ticks_left -= pawn.ticks_elapsed # Claude 2026-11-16 (pawn spec 8.21): was 1
 			if ability.ticks_left <= 0:
 				_finish(ability)
 			continue
@@ -385,8 +418,9 @@ func interrupt_priority_now(ability: AbilityBase) -> int:
 
 
 ## Claude 2026-11-10: its interrupt_threshold right now, with what effects add.
+## Claude 2026-11-16 (pawn spec 8.20): for a stepped ability, the strictest of its running steps' thresholds (current_interrupt_threshold).
 func interrupt_threshold_now(ability: AbilityBase) -> int:
-	return ability.interrupt_threshold + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD)
+	return ability.current_interrupt_threshold() + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD)
 
 
 # Claude 2026-11-10: what the pawn's effects add to one of an ability's numbers; 0 with no EffectManager or nothing held.
@@ -400,7 +434,28 @@ func _bonus(ability: AbilityBase, number: int) -> int:
 # Claude 2026-11-09: "not locked out" became "every conflicting running ability can be cancelled by it", which is the same thing
 # when nothing can be cancelled.
 func _is_ready(ability: AbilityBase) -> bool:
-	return ability.cooldown_ticks_left <= 0 and _conflicts_allow(ability) and ability.can_start()
+	return ability.cooldown_ticks_left <= 0 and _combo_allows(ability) and _conflicts_allow(ability) and ability.can_start()
+
+
+## Claude 2026-11-16 (pawn spec 8.20): opens the combo window for this many ticks. An OpenComboStep calls it after its ability's hit.
+func open_combo_window(ticks: int) -> void:
+	combo_window_ticks_left = maxi(ticks, 0)
+
+
+## Claude 2026-11-16: the combo position this ability would take if it started now: the next one, if the window is open and it fits
+## there; else 1, if it's an opener; else 0, meaning it can't start now. 0 too for an ability with no combo_positions.
+func combo_position_for(ability: AbilityBase) -> int:
+	if ability.combo_positions.is_empty():
+		return 0
+	var next := combo_position + 1
+	if combo_window_ticks_left > 0 and ability.combo_positions.has(next):
+		return next
+	return 1 if ability.combo_positions.has(1) else 0
+
+
+# Claude 2026-11-16: a combo follow-up can only start where it fits; anything else isn't held back by combos.
+func _combo_allows(ability: AbilityBase) -> bool:
+	return ability.combo_positions.is_empty() or combo_position_for(ability) > 0
 
 
 # Claude 2026-11-09: two abilities conflict when either one's locks_out covers the other's category.
@@ -537,6 +592,12 @@ static func _script_overrides_every_tick(script: Script) -> bool:
 
 func _start(ability: AbilityBase) -> void:
 	ability.buffer_ticks_left = 0
+	ability.pawns_hit_this_run.clear() # Claude 2026-11-16 (pawn spec 8.20)
+	# Claude 2026-11-16: a combo ability takes its position, and the window closes until its OpenComboStep opens it again.
+	var taken := combo_position_for(ability)
+	if taken > 0:
+		combo_position = taken
+		combo_window_ticks_left = 0
 	ability.ticks_left = ability.duration_ticks() # Claude 2026-11-09: was ticks_for(duration); MeleeAttack counts its phases
 	if ability.kind == AbilityBase.Kind.ACTION and ability.is_running_timed():
 		_locked_mask |= ability.locks_out_mask # later abilities this tick respect it at once
@@ -546,11 +607,14 @@ func _start(ability: AbilityBase) -> void:
 	if not ability.on_start_effects.is_empty() and pawn.effect_manager:
 		pawn.effect_manager.apply_effects(ability.on_start_effects, pawn, ability)
 	ability_started.emit(ability)
+	if ability.is_stepped() and ability.is_running_timed():
+		ability.begin_steps() # Claude 2026-11-16 (pawn spec 8.20): after ability_started, so a replay lists the ability before its steps
 	if ability.kind == AbilityBase.Kind.ACTION and not ability.is_running_timed():
 		_finish(ability) # an action with no duration is done as soon as it starts
 
 
 func _finish(ability: AbilityBase) -> void:
+	ability.end_steps("cancelled") # Claude 2026-11-16 (pawn spec 8.20): steps still running when it ends early; none when they finished
 	ability.ticks_left = 0
 	ability.cooldown_ticks_left = ticks_for(ability.cooldown)
 	ability.stop()
@@ -673,6 +737,7 @@ func _collect_abilities() -> void:
 			child.locks_out_mask = TagRegistry.mask_of_list(child.locks_out)
 			child.cancelled_by_mask = TagRegistry.mask_of_list(child.cancelled_by) # Claude 2026-11-10
 			_collect_effects(child) # Claude 2026-11-10
+			child.collect_steps() # Claude 2026-11-16 (pawn spec 8.20)
 			_abilities.append(child)
 	# GDScript note: sort_custom keeps this rule; abilities with equal priority keep their tree order because each has a distinct index.
 	# Claude 2026-11-09: highest priority first (it was lowest first).
@@ -682,8 +747,11 @@ func _collect_abilities() -> void:
 	_invulnerable_abilities.clear() # Claude 2026-11-10
 	_parry_abilities.clear() # Claude 2026-11-15
 	_locomotion_pausers.clear() # Claude 2026-11-10
+	_stepped.clear() # Claude 2026-11-16
 	for ability in _abilities:
 		ability.jitter_salt = hash(String(ability.name))
+		if ability.is_stepped():
+			_stepped.append(ability)
 		if ability.invulnerable_while_running:
 			_invulnerable_abilities.append(ability)
 		if ability is ParryAbility: # Claude 2026-11-15
@@ -753,10 +821,20 @@ func _register_rollback_state() -> void:
 	if tick_state == null:
 		return
 	var entries: Array[String] = []
+	# Claude 2026-11-16 (pawn spec 8.20): the combo counter, when any ability takes part in combos.
+	if _abilities.any(func(ability: AbilityBase) -> bool: return not ability.combo_positions.is_empty()):
+		var own_path := String(pawn.get_path_to(self))
+		entries.append("%s:combo_position" % own_path)
+		entries.append("%s:combo_window_ticks_left" % own_path)
 	for ability in _abilities:
 		var path := String(pawn.get_path_to(ability))
 		for property in ability.get_rollback_properties():
 			entries.append("%s:%s" % [path, property])
+		# Claude 2026-11-16 (pawn spec 8.20): and its steps' state, so a replay lands in the same steps on the same tick.
+		for step in ability.steps:
+			var step_path := String(pawn.get_path_to(step))
+			for property in step.get_rollback_properties():
+				entries.append("%s:%s" % [step_path, property])
 	if not entries.is_empty():
 		tick_state.add_state_properties(entries)
 

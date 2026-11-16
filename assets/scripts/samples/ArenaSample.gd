@@ -6,6 +6,11 @@
 ## to zoom. Esc frees the mouse, and a click takes it back. R fills the spawners up at once (Claude 2026-11-10: it sent a new wave of
 ## six on top of the others). Tab possesses a goblin (then it fights for
 ## you, on its team; Tab again goes back). F3 shows or hides the readout over each goblin, and the debug shapes.
+## Claude 2026-11-16 (the owner's request): U lets go of the pawn you have, which its AI controller takes over, and you fly around as a
+## spectator (FreeFlyCamera: WASD, Q up, E down, the wheel zooms and the middle button resets it, Shift faster, Shift and the wheel for faster still); U again takes back the pawn you
+## left. Tab while flying possesses a goblin.
+## A player's own pawn has no AI behaviours here, so it stands where it was left. Let go of, it keeps the world loaded around it (on the
+## server or offline), so the fight there carries on wherever you fly.
 ## Claude 2026-11-09: debug shapes (AbilityDebugDraw): each swing leaves its hit sphere for 2 s, and each dash a trail of
 ## capsules for 1 s, fading. The readout also shows each goblin's last ability. Goblins sprint and dash while chasing. Cooldowns
 ## are longer here than in the base (DEBUG_COOLDOWNS), so the switching is easy to see.
@@ -67,6 +72,8 @@ var _debug_draw: AbilityDebugDraw = null # Claude 2026-11-09: swing spheres and 
 var _port := PORT # Claude 2026-11-09: --port= changes it, so a scripted check doesn't land in a game already hosting on PORT
 var _timeline: AIDebugTimeline = null # Claude 2026-11-09: the view-only rewind, for P and the arrow keys
 var _paused_note := "" # Claude 2026-11-09: why P did nothing, shown in the status lines
+var _left_pawn: Pawn = null # Claude 2026-11-16: the pawn U let go of, which U takes back
+var _released_connected := false # Claude 2026-11-16
 
 
 func _ready() -> void:
@@ -112,6 +119,10 @@ func _process(_delta: float) -> void:
 	if not _kill_self_key_bound and GameMode.possession_coordinator and GameMode.possession_coordinator.controller:
 		GameMode.possession_coordinator.controller.action_keys[&"kill_self"] = KILL_SELF_KEY_ACTION
 		_kill_self_key_bound = true
+	# Claude 2026-11-16: hears about pawns let go of, for U.
+	if not _released_connected and GameMode.possession_coordinator:
+		GameMode.possession_coordinator.released.connect(_on_pawn_released)
+		_released_connected = true
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -130,6 +141,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_spawn_wave()
 		KEY_TAB:
 			_swap_pawn()
+		KEY_U:
+			_toggle_spectating() # Claude 2026-11-16
 		KEY_F3:
 			_show_readouts = not _show_readouts
 			_debug_draw.visible = _show_readouts # Claude 2026-11-09
@@ -341,6 +354,41 @@ func _swap_pawn() -> void:
 			return
 
 
+## Claude 2026-11-16: U: let go of the pawn you have (its AI controller takes over) and fly as a spectator, or, while flying, take back
+## the pawn you left. On a client both are requests to the server; the view switches when it answers, or at once for letting go.
+func _toggle_spectating() -> void:
+	var coordinator := GameMode.possession_coordinator
+	if coordinator == null or coordinator.controller == null:
+		return
+	if not coordinator.is_spectating():
+		_start_spectating()
+		return
+	var back := _left_pawn if is_instance_valid(_left_pawn) else _player_pawn
+	if is_instance_valid(back):
+		coordinator.possess(back) # taking it stops the spectating; if it's refused (someone else has it), you keep flying
+
+
+## Claude 2026-11-16: lets go of the pawn this machine's player has (remembered for U to take back) and flies the spectator. Returns
+## the free-fly camera, or null with no player controller. The mass battle's V uses it too.
+func _start_spectating() -> FreeFlyCamera:
+	var coordinator := GameMode.possession_coordinator
+	if coordinator == null or coordinator.controller == null:
+		return null
+	var current := coordinator.get_pawn_of()
+	if current != null:
+		_left_pawn = current
+	coordinator.spectate() # lets go of the pawn and flies
+	return coordinator.controller.get_spectator()
+
+
+## Claude 2026-11-16: server or offline: a player's own pawn they let go of keeps the world loaded around it, so it isn't frozen once
+## the spectator flies away (the arenas have no other streaming source). A goblin let go of goes back to how it was.
+func _on_pawn_released(_peer: int, pawn: Pawn) -> void:
+	if NetworkSession.is_client() or not is_instance_valid(pawn) or _is_npc(pawn):
+		return
+	pawn.keeps_world_loaded = true
+
+
 # --- Display ---
 
 
@@ -390,7 +438,9 @@ func _readout_text(pawn: Pawn) -> String:
 		# Claude 2026-11-09: the last ability it started, marked while it's still running (Sprint lasts up to 3 s).
 		var last: AbilityBase = _last_ability.get(pawn)
 		if is_instance_valid(last):
-			lines.append("last: %s%s" % [last.name, " (running)" if last.is_running_timed() else ""])
+			# Claude 2026-11-16 (pawn spec 8.20): with the steps running, for a stepped ability.
+			var steps_now := last.get_running_step_names() if last.is_running_timed() else PackedStringArray()
+			lines.append("last: %s%s%s" % [last.name, ": " + " + ".join(steps_now) if not steps_now.is_empty() else "", " (running)" if last.is_running_timed() else ""])
 		else:
 			lines.append("last: —")
 	lines.append_array(_effect_lines(pawn)) # Claude 2026-11-10
@@ -477,7 +527,7 @@ func _status_text() -> String:
 
 ## Claude 2026-11-09: the key reminder in the status lines.
 func _keys_text() -> String:
-	return "WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: refill the spawners    Tab: possess a goblin    F3: readouts and debug shapes    P: pause, then ←/→ step    K: respawn (if stuck)    Esc: free the mouse"
+	return "WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: refill the spawners    Tab: possess a goblin    U: let go and fly (Q/E up/down, wheel zoom, middle button unzoom, Shift+wheel speed)    F3: readouts and debug shapes    P: pause, then ←/→ step    K: respawn (if stuck)    Esc: free the mouse"
 
 
 func _read_command_line() -> void:

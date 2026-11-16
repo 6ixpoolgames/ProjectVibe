@@ -54,8 +54,11 @@ func _ready() -> void:
 	_check(is_equal_approx(label.pixel_size, 0.005), "the readouts are a little bigger (pixel_size 0.005)")
 	_check(arena._keys_text().contains("right mouse"), "and the key reminder mentions the special attack")
 	# Claude 2026-11-10 (pawn spec 8.11): the player's pawn has a readout too, which lists the effects on it, such as a combo boost.
+	# Claude 2026-11-16 (pawn spec 8.20): swings no longer carry boosts, so one is applied directly.
 	var swing: AbilityBase = player.ability_manager.get_node("MeleeAttack")
-	player.effect_manager.apply_effects(swing.on_start_effects, player, swing)
+	var boost: Effect = load("res://assets/scripts/resources/effects/combo_second_boost.tres")
+	boost.register()
+	player.effect_manager.apply_effects([boost] as Array[Effect], player, swing)
 	var player_text: String = arena._player_readout_text(player)
 	_check(arena._player_readouts.has(player) and player_text.contains("combo second boost") and arena._readout_text(red[0]).contains("HP"), "the player's pawn has a readout, listing its effects (%s)" % player_text.replace("\n", " | "))
 	player.effect_manager.remove_all()

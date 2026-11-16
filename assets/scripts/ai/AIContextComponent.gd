@@ -289,7 +289,8 @@ func run_ai(tick: int) -> void:
 
 ## True on this pawn's regular decision ticks, every decision_interval_ticks, offset by its own number.
 func is_decision_tick(tick: int) -> bool:
-	return posmod(tick + pawn_number(), TickDriver.ticks_at_rate(decision_interval_ticks)) == 0 # Claude 2026-11-09 (scaling spec step 6)
+	# Claude 2026-11-16 (pawn spec 8.21): or one it skipped since its last run, for a pawn running every Nth tick.
+	return pawn.fired_since_last_run(tick, pawn_number(), TickDriver.ticks_at_rate(decision_interval_ticks)) # Claude 2026-11-09 (scaling spec step 6)
 
 
 ## Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state

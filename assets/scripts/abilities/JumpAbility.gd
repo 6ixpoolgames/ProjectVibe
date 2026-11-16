@@ -35,7 +35,7 @@ func get_rollback_properties() -> Array[String]:
 
 
 func every_tick(_dt: float) -> void:
-	ticks_off_ground = 0 if pawn.grounded else mini(ticks_off_ground + 1, COUNT_CAP)
+	ticks_off_ground = 0 if pawn.grounded else mini(ticks_off_ground + pawn.ticks_elapsed, COUNT_CAP) # Claude 2026-11-16 (pawn spec 8.21): was + 1
 
 
 ## Claude 2026-11-09: a sleeping pawn is grounded, so every_tick() would only keep this at 0 (pawn spec 15.3).

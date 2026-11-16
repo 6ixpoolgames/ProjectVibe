@@ -220,7 +220,10 @@ func check_force_expiry(tick: int) -> void:
 func _set_target(entity: Node3D, reason: String, tick: int) -> void:
 	if entity == _current:
 		return
-	var old := _current
+	# Claude 2026-11-16 (the owner's playtest errors): a target that has been freed since (a dead pawn's body removed) is announced as
+	# null. Sent as the freed object, listeners with typed parameters (the replay's gameplay channel, the AI debug timeline) failed with
+	# "Cannot convert argument 1 from Object to Object".
+	var old: Node3D = _current if is_instance_valid(_current) else null
 	_current = entity
 	_picked_tick = tick
 	if pawn.ai_context:

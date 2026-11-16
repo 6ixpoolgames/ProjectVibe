@@ -246,13 +246,17 @@ func get_move_direction() -> Vector3     # which way to walk now; zero when ther
 func is_following_path() -> bool
 func has_arrived() -> bool               # true from reaching the end until the next move_to or stop()
 func get_path_corners() -> PackedVector3Array   # the corners ahead, for debug drawing
+func get_path_state() -> PathState      # (2026-11-16) NONE, FOLLOWING, PENDING, ARRIVED or UNREACHABLE
+func is_under_way() -> bool              # (2026-11-16) following, or waiting for nav (PENDING); controllers ask for a direction while true
+func is_partial() -> bool                # (2026-11-16) the path ends at the closest reachable place, not the point
 ```
 
 - It asks `NavServer` for a path and follows the corners. The waypoints stay private.
 - It never ticks on its own. The controller in charge asks it for a direction once per tick and puts it in the input command.
 - Settings: `corner_reached_distance` (0.5 m), `arrival_distance` (0.3 m), `nav_tier` (0).
-- With no nav at all, it walks in a straight line. That covers no navcore library, and no nav under the pawn (a level that feeds no nav).
-- A point nowhere near nav: `move_to` returns false. A point on nav it can't reach, such as an island: the path goes as close as it can.
+- With no nav at all, it walks in a straight line. That covers no navcore library, and no nav under the pawn (a level that feeds no nav). *(2026-11-16: a choice, `straight_line_without_nav`, on by default; off, it's UNREACHABLE.)*
+- A point nowhere near nav: `move_to` returns false. A point on nav it can't reach, such as an island: the path goes as close as it can. *(2026-11-16: `is_partial()` says so, while following and after arriving; only for paths with `use_links` on until the C++ bundle.)*
+- **Path states (2026-11-16, the navigation and terrain track):** while `NavServer` is still building and there's no nav yet under the pawn, the request waits (PENDING): `move_to` returns true, the pawn stands, it tries again every `pending_retry_ticks` (10) and gives up after `pending_give_up_ticks` (300, 5 s), both in ticks at 60. A link missed twice, or a point nowhere near nav, is UNREACHABLE, even while nav is building elsewhere: a streaming game nearly always is, and Go To Point's legs pick a nearer point when told no.
 - `ControllerManager` drops the path whenever control changes hands, so the AI never walks the rest of a player's click.
 - The path is found at once, on the main thread (`find_path_now`), as the stress test already does. Asking in the background is there (`NavServer.find_path`) if a crowd's paths ever cost too much.
 - Not yet: noticing it's stuck, and finding a new path when nav changes.
@@ -873,6 +877,128 @@ The owner's call: there's no health manager. Health is a stat, and death is an a
 - **Pawn-pawn collision off:** `move_and_slide` −27% and the tick −1.5 ms at the clash, almost nothing while marching. Kept on for now. Off for distant pawns is a rung of the tick driver update's load ladder (the owner's idea).
 - **`rebuild_floor_on_rollback`:** gates the zero-length `move_and_slide` a rollback restore does to rebuild Godot's floor flag. It stays on; only clients roll back, and by default only their own pawn.
 - **The lever:** fewer calls. That means per-pawn tick steps for distant pawns (the tick driver update), since each call has a fixed cost.
+
+### 8.20 Ability steps: the plan *(Claude 2026-11-16, agreed with the owner over several rounds; being built)*
+
+Defaults here are for testing that things work and feel right. Game balance isn't the aim yet: every number is a setting, for designers to dial in later.
+
+**1. What an ability is now**
+- An ability stays the unit that owns the rules: starting on a named action, priority, cooldown, the interrupt table, tags and effects.
+- It can be built from **optional `AbilityStep` child nodes**. An ability with none works exactly as before, so Walk, Sprint, Jump and Dash don't change until they need to.
+- **Steps start each other** (Unreal's ability-task model, the owner's call): when a step finishes, the steps in its `starts_when_finished` start, and a step's own code can start or stop other steps (`ability.start_step()`, `ability.stop_step()`). Several steps can run at once, so running side by side needs no container. Steps marked `starts_first` start with the ability; with none marked, the first step does.
+- **The ability ends when no step is running**, with a `max_steps_ticks` safety (600, 10 s at 60). A step failing ends the ability, and the steps still running get `exit("failed")`.
+- **One action ability at a time per pawn** (the owner's direction): locomotion (walking, sprinting) is the background layer that runs when no action pauses it; reactions (knockback, death) are actions that take over through interrupts; an instant action (jump) holds nothing. Combining movement with an action is one ability with steps running side by side, `moving_attack`, planned but not built yet. This keeps the AI simple: it picks one ability, and the ability holds the detail.
+
+**2. `AbilityStep`, the base class** (`abilities/steps/AbilityStep.gd`, a Node, a child of an ability)
+- **Lifecycle:** `enter()`, `tick(dt) -> Status` (RUNNING, DONE or FAILED, the AI behaviours' Status idea), `exit(reason)` with "done", "failed" or "cancelled".
+- **Settings:** `starts_first`, `starts_when_finished` (steps to start when this one is done), `length_ticks` (at 60 a second, converted for the match's rate; 0 means until `tick()` says DONE), `interrupt_threshold` (-1 uses the ability's), `invulnerable`.
+- **Counting:** a step's length counts only the ticks `counts_this_tick()` allows (always, by default). The windup uses it to wait for the turn.
+- **Rollback:** each step's `running` and `step_ticks` roll back, registered by the AbilityManager like the abilities' own state. A step keeps nothing else between ticks unless it names it in `get_rollback_properties()`.
+- **Timing:** a step started during a tick enters at once and gets its first tick on the next, so a step finishing hands over with no gap and the order never depends on where steps sit in the tree.
+- **Reaches:** `ability`, `pawn`, and the ability's helpers (`move_input()`, `look_yaw()`, `held_actions()`, `read_stat()`).
+
+**3. The AbilityManager**
+- Runs an ability's steps right after its `tick()`, for actions and locomotion alike.
+- Cancelling uses the **strictest threshold of the running steps**, falling back to the ability's (cancel windows). Effects still add to it.
+- A running step with `invulnerable` on makes the pawn invulnerable.
+- Signals `step_started(ability, step)` and `step_finished(ability, step, reason)`. The **replay's gameplay channel records them** as ability.step, and the arena readouts and the diagnostics pawn inspector show the running steps ("MeleeAttack: Windup + TurnToFace").
+
+**4. The melee steps** (`abilities/steps/`)
+- **`WindupStep`:** started first. If the pawn is more than `start_within_degrees` (90) from where it looks, it starts the ability's TurnToFace. Its timer only counts while within that angle, or once the turn has stopped (the button let go). Done when its timer is, which starts the sweep.
+- **`TurnToFaceStep`:** turns toward where the pawn looks, following it as it moves, at the TurnSpeed stat (fallback 720 degrees a second). *(The owner, 2026-11-16.)* It runs only while the ability's action is held: let go, and it stops; held, it keeps turning through the swing until the ability ends. The AI holds its attack action through its swings for the same reason.
+- **`MeleeSweepStep`:** the hit window, from a `start` to an `end` point, each an `angle` (degrees, positive to the left), a `height` (metres above the feet) and a `reach` (metres to the hit sphere's far edge), relative to the pawn's facing at each tick. Each of the three goes straight from start to end, so a slash changes angle, a thrust reach, a chop height. Longer patterns are several sweeps. With `hit_radius`, `hits_own_team`, `warns_targets` and the lag-compensated hit checks, as the swing has today; each pawn is hit at most once per ability. The signals stay on the ability (`hit_landed`, `hit_window_started`, `hit_area_moved`).
+- **`WaitStep`:** a timed pause (recovery).
+- **`ApplyEffectStep`:** applies effects to its own pawn at that point.
+- **`OpenComboStep`:** opens the combo window (section 6).
+- **Where the weapon is:** each step can answer `weapon_point()`, and the ability answers with its running steps': a sweep moves along its line, a windup holds at the sweep's start, a recovery at the last sweep's end. `FloatingSword`, and the animation module after it, draws exactly that, so a new slash pattern needs no visual work.
+- The basic swing: Windup (starts TurnToFace if needed; then Sweep), Sweep (then OpenCombo and Recovery), Recovery.
+
+**5. Hits, guard and parry**
+- **Interrupts happen only through the hit's knockback** *(the owner, 2026-11-16)*: an attack's hit applies a knockback effect carrying the attack's interrupt priority (`KnockbackPart.interrupt_priority`, default 30), and that knockback starts the target's Knockback ability by the usual interrupt rule. A hit with no knockback interrupts nothing.
+- **Intercepting:** after `hit_arrived`, running steps that intercept are asked about the hit, before its effects land. They act only when the hit's knockback wouldn't break them (its priority below their threshold); otherwise the hit lands in full and its knockback interrupts.
+- **`GuardStep`:** reduces damage by `damage_reduction` (0.7) and stops the knockback of hits below its threshold. A hit that breaks the guard still has its damage reduced by `broken_damage_reduction` (0.35, half the normal strength). Both are settings.
+- **Guard**, a new ability: press and hold, up to `max_hold_ticks`; one GuardStep with threshold 50. Dash cancels it through `cancelled_by`, whatever the numbers.
+- **`PerfectParryStep`:** stops a hit below its threshold (70) completely and pushes the attacker back with a hit of its own (the parry's reply effects). **Parry** becomes PerfectParry for its first 6 ticks, then a GuardStep: a late parry guards. This replaces ParryAbility's special case (the parry list, the ON_PARRY trigger and parry effect lists on every ability).
+- **Dash's invulnerable start** becomes a step with `invulnerable` on.
+
+| | interrupt priority (hit) or threshold |
+|---|---|
+| Swing, SecondSwing | 30 |
+| FinisherSwing | 35 |
+| HeavyAttack | 40 |
+| Guard, and a late parry | 50 |
+| HeavySmash | 55: breaks a guard, not a perfect parry |
+| Perfect parry | 70 |
+
+**6. Combos and cooldowns**
+- A combo is counted by position, the usual combo counter, and positions are shared between light and heavy attacks *(the owner, 2026-11-16)*. Each attack lists `combo_positions`: [1] for an opener (the default), [2] SecondSwing, [3] FinisherSwing, [2, 3] HeavySmash.
+- The AbilityManager keeps `combo_position` (the last filled, 0 for none) and `combo_window_ticks_left`, both rolled back. An OpenComboStep opens the window (30 ticks) after a hit. A follow-up can start only while the window is open and its positions include the next one; openers always can; follow-ups have a higher `priority` than the opener on their key. Outside a window, any attack starts a new combo.
+- So Swing, Second, Finisher; Swing, Smash, Finisher; HeavyAttack, Second, Smash; and so on. This replaces the combo boosts (`ComboBoost` and its two effects); boosts stay in the base for other uses.
+- Cooldowns: the basic swing 1.2 s, the heavy attack 1.9 s.
+- HeavyAttack: reach 2.7 m (was 2.4), windup 22 ticks (was 18). HeavySmash, new, on the same key: a downward smash, angle 0, height 2.2 m down to 0.2 m, reach 3.0 m, windup 20, 5 hit ticks, recovery 22.
+
+**Build order**
+1. `AbilityStep` and the runner: starting and finishing, steps side by side, failing, the safety limit, cancel thresholds from steps, invulnerable steps, rollback of step state, the step signals, recording and display. Tested with test steps. **Built 2026-11-16** (`abilities/steps/AbilityStep.gd`, the runner in `AbilityBase`, hooks in `AbilityManager`, `step_started` and `step_finished` in the replay's gameplay channel, running steps in the arena readouts and the F7 inspector; `ability_steps_selftest`).
+2. The melee steps, `weapon_point()`, the swings moved onto them in the scenes, the heavy changes and HeavySmash, the AI holding its attack action. **Built 2026-11-16:** `WindupStep`, `TurnToFaceStep`, `MeleeSweepStep`, `WaitStep`, `ApplyEffectStep` and `weapon_point()`. A MeleeAttack with no step children makes the four default steps from its settings, so every swing in every scene moved onto steps with its numbers unchanged and no scene edits. `FloatingSword` follows `swing_phase()`, read from the steps. The AI holds its attack action through a swing. The heavy attack's reach is now 2.7 m and its windup 22 ticks. Two things changed from the plan:
+   - The windup starts the turn on every swing, not only beyond 90 degrees, so a swing 60 degrees off still turns to the crosshair while held. The 90 degrees only decide when the windup's timer counts.
+   - A step can be marked as only going along with the others (`keeps_ability_running` off, as TurnToFace is), so a turn held past the recovery doesn't keep the attack running.
+   - HeavySmash and `OpenComboStep` moved to step 3, since they need combo positions.
+   - A safeguard was added: at most 32 step starts per ability per tick (`MAX_STEP_STARTS_PER_TICK`), so steps whose own code starts and stops each other can't loop forever within a tick. Every step runs at most once at a time, and loops across ticks end at `max_steps_ticks`.
+3. Combo positions and the cooldowns. **Built 2026-11-16:**
+   - Code: `AbilityBase.combo_positions`, `AbilityManager.combo_position`, `combo_window_ticks_left` and `open_combo_window()` (both values roll back), and `OpenComboStep`. A MeleeAttack's default steps include an OpenCombo after the sweep (`combo_window_ticks`, 30).
+   - The faction arena's attacks: MeleeAttack [1] (cooldown 1.2 s), SecondSwing [2], FinisherSwing [3], HeavyAttack [1] (cooldown 1.9 s), and the new HeavySmash [2, 3] (right mouse; reach 3.0 m; from 2.2 m down to 0.2 m; windup 20, hit 5, recovery 22, the heavy hit's effects for now). The follow-ups have priority 20.
+   - The combo boosts are gone from the scene. Their two effect files remain, unused.
+   - **Later the same day (the owner's calls):**
+     - Holding is the base class's job, because it's important to track. Any step can set `ends_when_released` (with `while_held`, or its ability's action). On the first tick that action isn't held, the step ends with its own reason, **"released"**, which the replay and readouts record, and its next steps start.
+     - `TurnToFaceStep` uses that. It always turns at least `min_turn_degrees` (45) before a release can stop it, unless it faces the look sooner.
+     - TurnToFace reads the pawn's existing `TurnRate` stat (which Walk and Sprint turn with), rather than a new TurnSpeed. `TurnRate` went from 720 to **540** degrees a second (9 a tick), so the turn can be tested more. A swing's `windup_turn_degrees_per_second` is now -1 by default, meaning the pawn's TurnRate.
+     - The AI's Attack behaviour lets go for one tick before holding again, when its last input still held the attack. Two ticks held in a row are no press.
+     - **Measured** (the owner's 6 fps playtest; `mass_battle_measure` at 50 a faction against a worktree of the last commit). Two values recorded per step added 2.4 ms a tick, so the steps' state is now one `step_state` array per ability (0 = not running, else step_ticks + 1), and the steps read it through `running` and `step_ticks`. The tick is now 11.5 ms marching and 13.4 ms at the clash, against the last commit's 13.4 and 13.1.
+4. Knockback priority from hits, interception, GuardStep and PerfectParryStep, the Guard ability, Parry rebuilt, dash's invulnerability as a step, the parry special case removed.
+5. Later: one action at a time enforced by the manager, and `moving_attack`.
+
+**Testing:** `ability_selftest` for the runner; `combat_selftest`, `attack_feel_selftest`, `attack_request_selftest`, `fight_selftest`, `parry_selftest` and `visuals_selftest` for the swings, guard and parry; `net_pawn_selftest`, since rolled-back state changes; the arena smokes; the full suite before a commit.
+
+### 8.21 Pawns that run every 2nd or 4th tick, and the load ladder *(Claude 2026-11-16, the owner's call: "the full pass"; built)*
+
+The tick-driver update's dynamic tick rate (roadmap item 3), built on scaling spec 7.1. Tick numbers don't change: everything still counts in 60-a-second ticks, so nothing in the netcode changes. What changes is how often each AI pawn runs.
+
+**A pawn's step** (`Pawn.tick_step`: 1, 2 or 4, rolled back):
+- A pawn at step N runs every Nth tick. Its runs are spread over the ticks by its own number, so a crowd doesn't all run on one tick, and it runs at once when a whole step has passed since its last run (after its step changed).
+- **On the ticks it runs, it does N ticks' worth** (`Pawn.ticks_elapsed`): its simulate step is N ticks long (move_and_slide moves N ticks' worth), and every timer advances by N:
+  - the abilities' run, cooldown, waiting-press and combo-window timers; ability steps' counts, and a sweep covers all N ticks of its path, so it still hits
+  - Jump's time off the ground, Death's hold
+  - effects' durations and periods: a period that came round more than once is due that many times, so damage over time totals the same
+  - navigation's pending and link counters
+- **The rules that fire on "tick number modulo interval"** (the AI's decision, sensing, refresh and behaviour ticks; the pawn's sleep check) use `Pawn.fired_since_last_run`, true if the rule fired on this tick or one skipped since the last run. With `ticks_elapsed` 1 it's the old rule exactly, so pawns at step 1 behave as before.
+- Sight's awareness already fills by the real ticks since its last check. The sensing job's answers are for the next tick, so only pawns at step 1 use the job; a stepping pawn senses the old way, less often.
+- On the ticks it skips, it does nothing: no AI, no input, no simulate. Visual glides across the whole run, so it doesn't judder.
+- A pawn a player has always runs every tick, whatever its step says, so input stays responsive and a client's prediction never steps.
+- Rollback: `tick_step` and `_last_run_tick` are rolled-back state, so a replay runs the pawn on the same ticks (`tick_step_selftest`). They're also in snapshots, which costs a few bytes a pawn.
+
+**Who sets it: the AIActivationManager**, which already froze AI pawns where no ground is loaded, now picks their step too, with the rest of its checks:
+- by distance from the nearest viewer, measured flat, in chunks: every tick within `full_rate_within_chunks` (2), every 2nd tick up to `every_4th_tick_beyond_chunks` (4), every 4th beyond. Viewers are pawns a player has, and this machine's player's camera (spectating, or the overview). With no viewer at all, distance changes nothing. `steps_by_distance` off turns it off.
+- at least TickDriver's `load_step` (below).
+- a pawn a player takes goes to every tick at once.
+- `get_step_counts()` says how many run at each step. F4 and the session log show it, with the load step.
+- Only the server or offline sets steps; a client gets them in snapshots.
+
+**The load ladder** (TickDriver, for "the whole game dropping to 30 under load"):
+- Each tick's cost is measured against its budget and averaged over about ten ticks (`load_average`).
+- Over `raise_above` (85%) for `raise_after_ticks` (30), `load_step` doubles: 1, 2, 4 (up to `max_load_step`). Under `lower_below` (40%) for `lower_after_ticks` (180, three seconds), it halves. The low threshold is because stepping down roughly doubles what the AI pawns cost.
+- Every AI pawn then runs at least every `load_step`-th tick: the whole game's AI at 30, or 15, ticks a second, with everything lasting as long. Players' pawns still run every tick.
+- `load_step_override` forces a step (testing a level, or a game that wants one); `load_ladder_enabled` off keeps it at 1. `load_step_changed` is sent on each change.
+- It needs no announcement to clients: only the server runs AI pawns, and the steps reach clients as state.
+
+**Also today:** catch-up is capped at 3 ticks a frame, with Godot's own physics-step limit following TickDriver's (it was 8, and was the real cap); dropped time is counted, so a slowed-down game shows in diagnostics.
+
+**Measured** (`mass_battle_measure -- --size=50`, headless, `--fixed-fps 60`; `--no-steps` runs every AI pawn every tick, for comparing): the tick went from 11.5 ms marching and 13.4 at the clash to **6.6–8.3 ms** and **7.0 ms**, about 40 to 49% of the budget. The 51 pawns near the player run every tick and the far armies every 4th. The fight is unchanged (30 dead at 70 s). The load ladder stayed at 1: it wasn't needed.
+
+**Left for later:**
+- **The 120-unit fine clock and changing the base rate mid-match.** Only needed to run above 60 or change the tick length itself; dropping the AI to 30 works without it. With networking T1.1.
+- **A stepping pawn's motion on clients and in replays.** It moves every Nth tick, so far-away pawns show as small hops between snapshots on a client and in the replay viewer. Fine at distance; smoothing them on clients goes with T1.1's per-entity state time.
+- **The batched mover** (one central move step), still on the roadmap.
+- **The scheduler's main-thread budget** (scaling rule 5) beyond this: other main-thread work moving to workers stays with scaling step 5.
 
 ## 9. Stats (built 2026-11-07, step 5)
 

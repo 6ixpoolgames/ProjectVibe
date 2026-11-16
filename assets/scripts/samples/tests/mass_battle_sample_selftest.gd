@@ -26,6 +26,7 @@ func _ready() -> void:
 	await _test_hero_switch()
 	await _test_centre_switch()
 	await _test_outrunning()
+	await _test_overview() # Claude 2026-11-16
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -135,6 +136,37 @@ func _test_outrunning() -> void:
 	# Sprinting is 9 m/s on flat ground; hills and the dashes' wind-down bring the average to about 7.
 	_check(went > 100.0 and off_ground == 0, "sprinting and dashing for 20 s into unloaded land (%.0f m, %.1f m/s), it never runs off built ground (%d ticks off)" % [went, went / 20.0, off_ground])
 	runner.queue_free()
+
+
+# Claude 2026-11-16: V lets go of the pawn and flies the spectator from the overview point, keeping nothing loaded; pressed while flying,
+# it only goes back there; U takes the pawn back.
+func _test_overview() -> void:
+	var coordinator: PossessionCoordinator = GameMode.possession_coordinator
+	var own: Pawn = coordinator.get_pawn_of()
+	var point: Node3D = _arena.get_node("WaitingCamera")
+	_arena._go_to_overview()
+	var spectator: FreeFlyCamera = coordinator.controller.get_spectator()
+	_check(own != null and coordinator.get_pawn_of() == null and coordinator.is_spectating(), "V lets go of the pawn and flies the spectator")
+	_check(spectator.global_position.is_equal_approx(point.global_position), "from the overview point")
+	var forward := Vector3(-sin(coordinator.controller.look_yaw), 0.0, -cos(coordinator.controller.look_yaw))
+	var point_forward := -point.global_basis.z
+	var point_flat := Vector3(point_forward.x, 0.0, point_forward.z).normalized() # compared flat, as yaw is
+	_check(forward.dot(point_flat) > 0.99 and is_equal_approx(sin(coordinator.controller.look_pitch), point_forward.normalized().y),
+			"facing the way it does, down at the middle (pitch %.0f°)" % rad_to_deg(coordinator.controller.look_pitch))
+	_check(not spectator.streaming_source.counts_on_this_machine(), "keeping nothing loaded, as the old overhead camera")
+	# Claude 2026-11-16: the pawn let go of follows the heroes' switch.
+	_check(own.counts_on_this_machine(), "the pawn let go of keeps the world loaded while the heroes' sources are on")
+	_arena.set_hero_sources(false)
+	_check(not own.counts_on_this_machine(), "and not once H turns them off")
+	_arena.set_hero_sources(true)
+	_check(own.counts_on_this_machine(), "and again when H turns them back on")
+	spectator.teleport(Vector3(50, 60, 50))
+	_arena._go_to_overview()
+	_check(coordinator.is_spectating() and coordinator.get_pawn_of() == null and spectator.global_position.is_equal_approx(point.global_position),
+			"V while flying only goes back to the point")
+	_arena._toggle_spectating()
+	_check(coordinator.get_pawn_of() == own and not coordinator.is_spectating(), "U takes the pawn back")
+	await _ticks(2)
 
 
 func _alive(team: int) -> int:

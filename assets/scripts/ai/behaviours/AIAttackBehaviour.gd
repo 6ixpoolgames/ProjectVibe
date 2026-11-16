@@ -21,6 +21,7 @@ extends AIBehaviourBase
 
 var _melee: MeleeAttackAbility = null
 var _started_tick := 0
+var _hold_from_tick := -1 # Claude 2026-11-16: the tick to start holding on, when a press had to wait a tick; -1: none waiting
 
 
 func _init() -> void:
@@ -48,12 +49,28 @@ func enter(context: AIContextComponent) -> void:
 	var hands := context.controller
 	hands.stop()
 	_look_at_target(context)
-	hands.press(attack_action)
+	# Claude 2026-11-16 (pawn spec 8.20): held, not pressed once: a swing keeps turning toward its target only while its action is held
+	# (TurnToFaceStep). The first tick held is the press, so if the pawn's last input still had it held (the swing before ended this
+	# very tick), it's let go for one tick first: held twice in a row is no press, and the swing would never start.
 	_started_tick = context.current_tick
+	if pawn.controller_manager and pawn.controller_manager.held_actions & InputActions.mask_of(attack_action) != 0:
+		hands.hold(attack_action, false)
+		_hold_from_tick = context.current_tick + 1
+	else:
+		hands.hold(attack_action, true)
+		_hold_from_tick = -1
 
 
 func tick(context: AIContextComponent) -> Status:
 	_look_at_target(context)
+	# Claude 2026-11-16: the press that had to wait a tick (see enter()).
+	if _hold_from_tick >= 0:
+		if context.current_tick < _hold_from_tick:
+			return Status.RUNNING
+		context.controller.hold(attack_action, true)
+		_hold_from_tick = -1
+		_started_tick = context.current_tick
+		return Status.RUNNING
 	# The press reaches the ability on the next input; give it two ticks to start before checking whether it's over.
 	if context.current_tick - _started_tick < 2:
 		return Status.RUNNING
@@ -63,11 +80,13 @@ func tick(context: AIContextComponent) -> Status:
 	for ability in abilities:
 		if ability.trigger_action == attack_action and ability.is_running_timed():
 			return Status.RUNNING
+	context.controller.hold(attack_action, false) # Claude 2026-11-16: let go as the swing ends, so the next attack is a fresh press
 	return Status.SUCCEEDED
 
 
 func exit(context: AIContextComponent, _reason: String) -> void:
 	if context.controller:
+		context.controller.hold(attack_action, false) # Claude 2026-11-16: never left held
 		context.controller.stop_looking()
 
 

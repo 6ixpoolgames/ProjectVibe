@@ -37,18 +37,33 @@
 ## StatChangePart for damage, a KnockbackPart for the push and hop), and the target applies them. The default swing's are in
 ## resources/effects/swing_hit.tres, with the same numbers as before (20 damage, 6 m/s for 10 ticks, a 2 m/s hop). A swing with no
 ## on-hit effects hits and does nothing, and warns once.
+##
+## Claude 2026-11-16 (pawn spec 8.20, the owner's design): built from steps now (abilities/steps/). A swing is a WindupStep, which starts
+## a TurnToFaceStep, then a MeleeSweepStep, then a WaitStep for the recovery; the hit checks above moved into MeleeSweepStep. With no
+## AbilityStep children of its own, it makes those four from its settings below (windup_ticks, hit_ticks, recovery_ticks, attack_range,
+## hit_radius, hit_height, sweep_degrees, sweep_from_left, the two heights, windup_turn_degrees_per_second), so every swing in every
+## scene became a stepped one with the same numbers. A designer wanting another pattern places steps of their own instead, and these
+## settings then only matter for attack_range (the AI's reach) and warns_targets.
+## What changed in feel (the owner's calls):
+##   - The turn follows where the pawn looks only while the attack's action is held, and keeps turning through the hit while it is.
+##     Let go, and it swings where it faces. The AI holds its attack action through its swings for this.
+##   - The windup's timer only counts once the pawn is within 90 degrees of where it looks (or the turn has stopped), so a swing
+##     started facing away turns first and hits later. Within 90 degrees, it's as quick as before.
 class_name MeleeAttackAbility
 extends AbilityBase
 
 ## Sent on the server for each pawn this swing hits, when the swing finds it. For effects, sounds and UI. Claude 2026-11-09: the
 ## target takes the hit (its damage, knockback and hit_received) later in the same tick, after every pawn has simulated.
+@warning_ignore("unused_signal") # Claude 2026-11-16: sent by its MeleeSweepStep now
 signal hit_landed(hit: HitInfo)
 ## Claude 2026-11-09: sent once per swing, on its first hit tick, with where the hit sphere is and its radius. Sent on every machine
 ## that runs the swing (the server, offline, and a client predicting its own pawn), never during a rollback replay. For effects,
 ## sounds and debug drawing (AbilityDebugDraw). It says where the swing can hit, not whether it hit anything: see hit_landed.
+@warning_ignore("unused_signal") # Claude 2026-11-16: sent by its MeleeSweepStep now
 signal hit_window_started(centre: Vector3, radius: float)
 ## Claude 2026-11-10: sent on every hit tick, on the same machines as hit_window_started, with where the hit sphere was at the start and
 ## the end of this tick's part of the sweep. For effects and debug drawing (AbilityDebugDraw draws the sweep with it).
+@warning_ignore("unused_signal") # Claude 2026-11-16: sent by its MeleeSweepStep now
 signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
 
 ## Ticks from the start of the swing to when it can hit.
@@ -77,13 +92,18 @@ signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
 @export_range(-3.0, 3.0, 0.05, "or_greater", "or_less") var height_at_sweep_end := 0.0
 ## Claude 2026-11-10: how fast it turns toward where the pawn looks during the windup, in degrees per second. 0: no turning.
 ## Claude 2026-11-12: the attack's turn speed: it no longer snaps to the look when it starts, so this is all the turning it does.
-@export_range(0.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second := 720.0
+## Claude 2026-11-16 (pawn spec 8.20): its TurnToFace step's speed. -1 (now the default): the pawn's TurnRate stat (540 without one),
+## so a turn speed limits every attack the same way. 0: no turning. Above 0: this speed, for this attack only.
+@export_range(-1.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second := -1.0
+## Claude 2026-11-16 (pawn spec 8.20): how long the combo window stays open after its hit, in ticks at 60 a second (its default
+## OpenCombo step). Follow-ups are other abilities with combo_positions 2 or 3.
+@export_range(1, 600, 1, "or_greater") var combo_window_ticks := 30
 ## Claude 2026-11-15: on: when a swing starts, on the server, enemies within its reach and in front of the pawn are told it's coming
 ## (Pawn.notice_incoming_attack), so their AI can parry. One sphere query a swing.
 @export var warns_targets := true
 
-var _hit_this_swing: Array[int] = [] # instance ids, on the server only
-var _warned_no_effects := false # Claude 2026-11-10
+# Claude 2026-11-16: _hit_this_swing is AbilityBase.pawns_hit_this_run now, and _warned_no_effects is MeleeSweepStep's.
+var _made_default_steps := false # Claude 2026-11-16: true when it made its own steps from its settings
 
 
 func _init() -> void:
@@ -96,34 +116,121 @@ func _init() -> void:
 	interrupt_priority = 15
 	interrupt_threshold = 15
 	buffer_window = 0.15 # a press near the end of a dash waits for it
+	combo_positions = [1] # Claude 2026-11-16 (pawn spec 8.20): an opener, unless a scene says it's a follow-up
 
 
-# Claude 2026-11-09 (scaling spec step 6): the phases are written for 60 ticks a second, and converted to this match's rate.
-func duration_ticks() -> int:
-	return _windup() + _hit() + TickDriver.ticks_at_rate(recovery_ticks)
+# Claude 2026-11-16 (pawn spec 8.20): duration_ticks, get_rollback_properties and tick are gone: its steps time and run the swing, and
+# the base handles a stepped ability's timer and rollback.
 
 
-func _windup() -> int:
-	return TickDriver.ticks_at_rate(windup_ticks)
-
-
-func _hit() -> int:
-	return TickDriver.ticks_at_rate(hit_ticks)
-
-
-func get_rollback_properties() -> Array[String]:
-	var out := super()
-	if not out.has("ticks_left"):
-		out.append("ticks_left") # its length comes from its phases, not duration, so the base doesn't know it's timed
-	return out
+## Claude 2026-11-16: finds its steps, after making the default four from its settings if it has none of its own.
+func collect_steps() -> void:
+	var has_own := false
+	for child in get_children():
+		if child is AbilityStep:
+			has_own = true
+			break
+	if not has_own:
+		_make_default_steps()
+	super()
+	if _made_default_steps:
+		_sync_default_steps()
 
 
 func start() -> void:
 	# Claude 2026-11-12, the owner's request: no snap to where the pawn looks. It turns there during the windup at
 	# windup_turn_degrees_per_second, so a turn speed limits every attack.
-	_hit_this_swing.clear()
+	# Claude 2026-11-16: its made steps take its settings again, in case they were changed while playing (a test, a tuning panel).
+	if _made_default_steps:
+		_sync_default_steps()
 	if warns_targets and pawn.is_authority() and not _is_replaying(): # Claude 2026-11-15
 		_warn_targets()
+
+
+# Claude 2026-11-16: the steps of a swing, from its settings: Windup (starts TurnToFace; then Sweep), TurnToFace, Sweep (then OpenCombo
+# and Recovery), OpenCombo, Recovery. Named the same everywhere, so their rolled-back state has the same paths on every machine.
+func _make_default_steps() -> void:
+	var windup := WindupStep.new()
+	windup.name = "Windup"
+	windup.starts_first = true
+	windup.turn_step = NodePath("../TurnToFace")
+	windup.starts_when_finished = [NodePath("../Sweep")]
+	add_child(windup)
+	var turn := TurnToFaceStep.new()
+	turn.name = "TurnToFace"
+	add_child(turn)
+	var sweep := MeleeSweepStep.new()
+	sweep.name = "Sweep"
+	sweep.starts_when_finished = [NodePath("../OpenCombo"), NodePath("../Recovery")]
+	add_child(sweep)
+	var combo := OpenComboStep.new()
+	combo.name = "OpenCombo"
+	add_child(combo)
+	var recovery := WaitStep.new()
+	recovery.name = "Recovery"
+	add_child(recovery)
+	_made_default_steps = true
+
+
+# Claude 2026-11-16: copies its settings onto the steps it made.
+func _sync_default_steps() -> void:
+	var windup := get_node(^"Windup") as WindupStep
+	var turn := get_node(^"TurnToFace") as TurnToFaceStep
+	var sweep := get_node(^"Sweep") as MeleeSweepStep
+	var recovery := get_node(^"Recovery") as WaitStep
+	windup.length_ticks = windup_ticks
+	turn.degrees_per_second = windup_turn_degrees_per_second
+	sweep.length_ticks = hit_ticks
+	sweep.hit_radius = hit_radius
+	sweep.hits_own_team = hits_own_team
+	# Right to left by default: the right is a negative angle. sweep_from_left turns it round.
+	var side := 1.0 if sweep_from_left else -1.0
+	sweep.start_angle = side * sweep_degrees * 0.5
+	sweep.end_angle = -side * sweep_degrees * 0.5
+	sweep.start_height = hit_height + height_at_sweep_start
+	sweep.end_height = hit_height + height_at_sweep_end
+	sweep.start_reach = attack_range
+	sweep.end_reach = attack_range
+	recovery.length_ticks = recovery_ticks
+	(get_node(^"OpenCombo") as OpenComboStep).window_ticks = combo_window_ticks
+
+
+# Claude 2026-11-16: its first windup and first sweep, or null. The visuals and the target warning read the swing's shape through them.
+func _first_windup() -> WindupStep:
+	for step in steps:
+		if step is WindupStep:
+			return step
+	return null
+
+
+# Claude 2026-11-16: how fast its first TurnToFace step turns now, in degrees a second; 0 with none.
+func _turn_speed() -> float:
+	for step in steps:
+		if step is TurnToFaceStep:
+			return (step as TurnToFaceStep).current_speed()
+	return 0.0
+
+
+func _first_sweep() -> MeleeSweepStep:
+	for step in steps:
+		if step is MeleeSweepStep:
+			return step
+	return null
+
+
+## Claude 2026-11-16: where the swing is, for visuals that follow its phases, such as the floating sword: "windup", "hit" or
+## "recovery" with how far through it is (0 to 1, smooth between ticks), or "none" when it isn't swinging. Read from its running steps.
+func swing_phase() -> Dictionary:
+	for step in steps:
+		if step.running and step is MeleeSweepStep:
+			return {"phase": "hit", "progress": step.progress()}
+	for step in steps:
+		if step.running and step is WindupStep:
+			return {"phase": "windup", "progress": step.progress()}
+	for step in steps:
+		if step.running and step is WaitStep:
+			return {"phase": "recovery", "progress": step.progress()}
+	return {"phase": "none", "progress": 0.0}
 
 
 # Claude 2026-11-15: tells enemies this swing may reach that it's coming, and when its hit starts. Within attack_range plus hit_radius,
@@ -138,7 +245,7 @@ func _warn_targets() -> void:
 	query.transform = Transform3D(Basis.IDENTITY, pawn.global_position + Vector3(0.0, 0.9, 0.0))
 	query.collision_mask = pawn.collision_layer
 	query.exclude = [pawn.get_rid()]
-	var turn := deg_to_rad(windup_turn_degrees_per_second) * float(_windup()) / TickDriver.get_tick_rate()
+	var turn := deg_to_rad(_turn_speed()) * float(windup_length()) / TickDriver.get_tick_rate() # Claude 2026-11-16: was _windup(), and the setting's own speed
 	var hit_yaw := rotate_toward(pawn.yaw, look_yaw(), turn) # Claude 2026-11-16 (pawn M4)
 	var facing := Vector3(-sin(hit_yaw), 0.0, -cos(hit_yaw))
 	var widest := deg_to_rad(sweep_degrees * 0.5 + 30.0)
@@ -153,39 +260,12 @@ func _warn_targets() -> void:
 			continue
 		# Claude 2026-11-16 (pawn M3): straight to the target's AI (was Pawn.notice_incoming_attack), on the server, while it's alive.
 		if other.ai_context and other.is_authority() and not other.is_dead():
-			other.ai_context.note_incoming_attack(pawn, now, now + _windup())
+			other.ai_context.note_incoming_attack(pawn, now, now + windup_length()) # Claude 2026-11-16: was _windup()
 
 
 func _is_replaying() -> bool:
 	var driver: Node = pawn.get_node_or_null("/root/TickDriver")
 	return driver != null and driver.is_resimulating()
-
-
-func tick(dt: float) -> void:
-	# GDScript note: the manager counts ticks_left down after each tick, so on the first tick after starting, elapsed is 0.
-	var elapsed := duration_ticks() - ticks_left
-	# Claude 2026-11-10: the windup turns toward where the pawn looks. yaw rolls back, and look_yaw is input, so a replay turns the
-	# same way. GDScript note: rotate_toward() turns an angle toward another by at most the step, the short way round.
-	if elapsed < _windup():
-		if windup_turn_degrees_per_second > 0.0:
-			pawn.yaw = rotate_toward(pawn.yaw, look_yaw(), deg_to_rad(windup_turn_degrees_per_second) * dt) # Claude 2026-11-16 (pawn M4)
-		return
-	if elapsed >= _windup() + _hit():
-		return
-	# Claude 2026-11-09: the replay check moved up, so hit_window_started can use it on every machine. The hit rules are unchanged.
-	var driver: Node = pawn.get_node_or_null("/root/TickDriver")
-	var replaying: bool = driver != null and driver.is_resimulating()
-	# Claude 2026-11-10: this tick's part of the sweep, as spots along it.
-	var centres := _sweep_centres(elapsed - _windup())
-	if not replaying:
-		if elapsed == _windup():
-			hit_window_started.emit(centres[0], hit_radius)
-		hit_area_moved.emit(centres[0], centres[centres.size() - 1], hit_radius)
-	if not pawn.is_authority():
-		return # hits are decided on the server
-	if replaying:
-		return # a replay never hits again
-	_check_hits(driver.tick if driver else 0, centres)
 
 
 ## Where the hit sphere is straight ahead: the middle of the sweep. Claude 2026-11-10: with a sweep, see hit_centre_at.
@@ -194,108 +274,46 @@ func hit_centre() -> Vector3:
 
 
 ## Claude 2026-11-10: where the hit sphere is at this point of the sweep, from 0 (its start) to 1 (its end), for the pawn's facing now.
-## The sphere stays at the same reach, so its far edge is always attack_range from the pawn.
-## Claude 2026-11-12: and at hit_height plus height_at_sweep_start, moving to hit_height plus height_at_sweep_end.
+## Claude 2026-11-16: answered by its first sweep step.
 func hit_centre_at(progress: float) -> Vector3:
 	return pawn.global_position + hit_offset_at(progress, pawn.yaw)
 
 
 ## Claude 2026-11-12: the same as hit_centre_at, from the pawn's feet, for a facing given in radians. The floating sword uses it with the
-## facing it draws, which is smoothed between ticks, so it swings through exactly the spots the hit checks.
+## facing it draws, which is smoothed between ticks, so it swings through exactly the spots the hit checks. Claude 2026-11-16: from its
+## first sweep step (MeleeSweepStep.offset_at); straight ahead at chest height if it has none.
 func hit_offset_at(progress: float, facing: float) -> Vector3:
-	# Godot's forward is -Z, and a pawn's right is a smaller yaw: forward at yaw - 90 degrees is +X.
-	var side := 1.0 if sweep_from_left else -1.0
-	var angle := facing + side * deg_to_rad(sweep_degrees) * (0.5 - progress)
-	var forward := Vector3(-sin(angle), 0.0, -cos(angle))
-	var height := hit_height + lerpf(height_at_sweep_start, height_at_sweep_end, progress)
-	return forward * maxf(attack_range - hit_radius, 0.0) + Vector3(0.0, height, 0.0)
+	var sweep := _first_sweep()
+	if sweep == null:
+		return Vector3(-sin(facing), 0.0, -cos(facing)) * maxf(attack_range - hit_radius, 0.0) + Vector3(0.0, hit_height, 0.0)
+	return sweep.offset_at(progress, facing)
+
+
+## Claude 2026-11-16: how long a swing takes when it doesn't wait for its turn: its first windup, sweep and recovery, at this match's
+## tick rate. 0 with none of them. For tests and tools; a real swing can take longer while its windup waits.
+func planned_ticks() -> int:
+	var total := windup_length() + hit_length()
+	for step in steps:
+		if step is WaitStep:
+			total += step.length()
+			break
+	return total
 
 
 ## Claude 2026-11-12: how many ticks the windup lasts, and then how many it can hit for, at this match's tick rate. For visuals that
-## follow the swing's phases, such as the floating sword.
+## follow the swing's phases, such as the floating sword. Claude 2026-11-16: its first windup's and first sweep's lengths; the windup can
+## take longer while it waits for the turn (swing_phase() says where it really is).
 func windup_length() -> int:
-	return _windup()
+	var windup := _first_windup()
+	return windup.length() if windup else 0
 
 
 func hit_length() -> int:
-	return _hit()
+	var sweep := _first_sweep()
+	return sweep.length() if sweep else 0
 
 
-## Claude 2026-11-10: the spots the sphere passes through on this hit tick (0 for the first): from where it was at the start of the tick
-## to where it is at the end, no more than half its radius apart, so the checks overlap with no gaps. One spot with no sweep.
+## Claude 2026-11-10: the spots the sphere passes through on this hit tick (0 for the first). Claude 2026-11-16: its first sweep's.
 func _sweep_centres(hit_tick: int) -> Array[Vector3]:
-	var out: Array[Vector3] = []
-	if sweep_degrees <= 0.0 and height_at_sweep_start == height_at_sweep_end: # Claude 2026-11-12: a chop with no sweep still moves
-		out.append(hit_centre_at(0.5))
-		return out
-	var ticks := float(_hit())
-	# Claude 2026-11-12: named from_progress and to_progress: "start" clashed with the ability's start(), which the editor warned about.
-	var from_progress := hit_tick / ticks
-	var to_progress := (hit_tick + 1) / ticks
-	var arc_length := maxf(attack_range - hit_radius, 0.0) * deg_to_rad(sweep_degrees) / ticks # metres this tick sweeps
-	# Claude 2026-11-12: plus the distance it moves up or down, so a chop that drops fast still leaves no gaps.
-	var drop := absf(height_at_sweep_end - height_at_sweep_start) / ticks
-	arc_length = sqrt(arc_length * arc_length + drop * drop)
-	var steps := maxi(1, ceili(arc_length / maxf(hit_radius * 0.5, 0.01)))
-	for i in steps + 1:
-		out.append(hit_centre_at(lerpf(from_progress, to_progress, float(i) / steps)))
-	return out
-
-
-# Claude 2026-11-12: the parameter is on_tick: "tick" clashed with the ability's tick(), which the editor warned about.
-func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
-	var targets: Array[Pawn] = []
-	var entity := pawn.get_network_entity()
-	# Through lag compensation in a network session; offline there's nobody to rewind, and pawns aren't tagged for it.
-	if entity and entity.session:
-		for found in LagCompensation.melee_spheres(entity, centres, hit_radius, view_ticks_behind()): # Claude 2026-11-10: was melee
-			var other := found.get_parent() as Pawn
-			if other:
-				targets.append(other)
-	else:
-		targets = _plain_spheres(centres) # Claude 2026-11-10: was one sphere
-	for target in targets:
-		if target == pawn or target.is_dead() or _hit_this_swing.has(target.get_instance_id()):
-			continue
-		# Claude 2026-11-10: a dashing pawn isn't hit, and isn't marked as hit either, so the rest of the sweep can catch it once its
-		# dash ends.
-		if target.ability_manager and target.ability_manager.is_invulnerable(): # Claude 2026-11-16 (pawn M3): moved from Pawn
-			continue
-		if target.team == pawn.team and not hits_own_team:
-			continue
-		_hit_this_swing.append(target.get_instance_id())
-		var hit := HitInfo.new()
-		hit.attacker = pawn
-		hit.target = target
-		hit.ability = self
-		hit.tick = on_tick
-		var away := target.global_position - pawn.global_position
-		away.y = 0.0
-		hit.direction = away.normalized() if away.length_squared() > 0.0001 else Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
-		# Claude 2026-11-10 (pawn spec 8.11): its effects, from its EffectApplier children, instead of damage and knockback numbers.
-		hit.effects = on_hit_effects
-		hit.attacker_effects = on_hit_self_effects
-		if on_hit_effects.is_empty() and on_hit_self_effects.is_empty() and not _warned_no_effects:
-			_warned_no_effects = true
-			push_warning("MeleeAttackAbility %s hit %s but has no on-hit effects (EffectApplier children), so the hit does nothing." % [name, target.name])
-		if target.ability_manager: # Claude 2026-11-16 (pawn M3): moved from Pawn; a pawn with no abilities can't be hit
-			target.ability_manager.receive_hit(hit)
-		hit_landed.emit(hit)
-
-
-# Offline, or for a pawn without a NetworkEntity: the same spheres, with no rewinding. Claude 2026-11-10: several, for the sweep.
-func _plain_spheres(centres: Array[Vector3]) -> Array[Pawn]:
-	var found: Array[Pawn] = []
-	var sphere := SphereShape3D.new()
-	sphere.radius = hit_radius
-	var query := PhysicsShapeQueryParameters3D.new()
-	query.shape = sphere
-	query.exclude = [pawn.get_rid()]
-	var space := pawn.get_world_3d().direct_space_state
-	for centre in centres:
-		query.transform = Transform3D(Basis.IDENTITY, centre)
-		for hit in space.intersect_shape(query):
-			var other := hit.collider as Pawn
-			if other and not found.has(other):
-				found.append(other)
-	return found
+	var sweep := _first_sweep()
+	return sweep.centres_for_tick(hit_tick) if sweep else [hit_centre()] as Array[Vector3]

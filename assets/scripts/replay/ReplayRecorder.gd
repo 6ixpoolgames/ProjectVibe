@@ -62,8 +62,9 @@ const LOCAL_IDS_START := 1 << 30
 @export_range(0, 100000, 1, "or_greater") var min_free_megabytes := 1024
 ## The most a role's folder may hold, in megabytes. Older recordings are deleted to stay under it.
 @export_range(0, 1000000, 1, "or_greater") var max_folder_megabytes := 4096
-## How many finished blocks may wait for the writer before the recording gives up.
-@export_range(1, 3600, 1, "or_greater") var max_queued_blocks := 30
+## How many finished blocks may wait for the writer before the recording gives up: with 1 s blocks, how many seconds the disk may
+## fall behind. Claude 2026-11-16: 60 (about a minute), the owner's call, was 30; at mass-battle sizes a full queue is a few MB.
+@export_range(1, 3600, 1, "or_greater") var max_queued_blocks := 60
 
 var _channels: Array[ReplayChannel] = []
 var _recording := false

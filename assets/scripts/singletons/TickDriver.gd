@@ -30,6 +30,13 @@
 ##   - A freed participant is skipped and dropped, never called.
 ##   - Spiral of death: at most max_ticks_per_frame ticks per frame. Time beyond that is dropped (the game
 ##     slows down instead of freezing) and counted in dropped_ticks.
+##   - Claude 2026-11-16 (pawn spec 8.21, the owner's call): the load ladder. Each tick's cost is measured against its budget (the
+##     tick's length). While ticks use more than raise_above of it for raise_after_ticks, load_step doubles (1, 2, 4); while they use
+##     less than lower_below for lower_after_ticks, it halves again. The AIActivationManager makes every AI pawn run at most every
+##     load_step-th tick, so an overloaded game sheds AI work, the bulk of a tick, instead of falling behind: the whole game's AI at 30
+##     (or 15) ticks a second, with every timer still lasting as long (Pawn.ticks_elapsed). Players' pawns always run every tick.
+##     Tick numbers don't change, so nothing in the netcode does either. load_step_override forces a step; load_ladder_enabled off
+##     keeps it at 1.
 ##   - tick_factor scales how fast ticks happen (time dilation, later). Always 1.0 offline and on the server.
 ##   - A frame running more than one tick (dilation, catching up, or a tick_rate above the physics rate) calls each
 ##     participant's optional _sync_collision() between its ticks, so bodies collide with each other's latest positions,
@@ -92,7 +99,14 @@ const REFERENCE_RATE := 60
 		tick_rate = value
 		_refresh_rate()
 ## Most ticks one frame may run (stops a slow frame from causing ever more ticks).
-@export var max_ticks_per_frame: int = 6
+## Claude 2026-11-16 (the owner's 6 fps playtest): was 6, now 3, and the autoload sets Godot's own limit on physics steps a frame
+## (Engine.max_physics_steps_per_frame, 8 by default) to the same number. Each physics step runs one tick, so Godot's limit was the
+## real one: a frame ran up to 8 ticks to catch up, which made the next frame later still (a catch-up spiral), and nothing was ever
+## dropped. Now a frame runs at most 3, and the rest of the time is dropped: an overloaded game slows down instead of freezing.
+@export var max_ticks_per_frame: int = 3:
+	set(value):
+		max_ticks_per_frame = maxi(1, value)
+		_apply_physics_rate()
 ## Claude 2026-11-09 (scaling spec step 6): the autoload sets Godot's physics rate to the tick rate whenever the rate is chosen, so
 ## there's one tick per physics step and the physics engine doesn't step twice for every tick at 30. Pawns are drawn between ticks
 ## anyway (Visual's smoothing). Turn it off to keep physics at the project's rate with ticks at another.
@@ -106,6 +120,32 @@ var tick: int = 0
 var tick_factor: float = 1.0
 ## Ticks skipped by the max_ticks_per_frame limit, for diagnostics.
 var dropped_ticks: int = 0
+
+## Claude 2026-11-16 (pawn spec 8.21): the load ladder (see the top of the file). Sent when load_step changes.
+signal load_step_changed(step: int)
+## Claude 2026-11-16: on, load_step follows how loaded the ticks are. Off, it stays at 1 (unless load_step_override says otherwise).
+@export var load_ladder_enabled := true
+## Claude 2026-11-16: the highest load_step the ladder goes to: 1, 2 or 4.
+@export_enum("1:1", "2:2", "4:4") var max_load_step := 4
+## Claude 2026-11-16: 0 (the default): automatic. 1, 2 or 4: forced, for testing a level or a game that wants one.
+@export_enum("Automatic:0", "1:1", "2:2", "4:4") var load_step_override := 0
+## Claude 2026-11-16: the share of a tick's budget above which the ladder steps up, after raise_after_ticks in a row.
+@export_range(0.1, 2.0, 0.05) var raise_above := 0.85
+## Claude 2026-11-16: how many ticks in a row over raise_above before it steps up, at 60 a second. 30: half a second.
+@export_range(1, 600, 1) var raise_after_ticks := 30
+## Claude 2026-11-16: the share of a tick's budget below which the ladder steps down, after lower_after_ticks in a row. Low, because
+## stepping down roughly doubles what the AI pawns cost.
+@export_range(0.0, 1.0, 0.05) var lower_below := 0.4
+## Claude 2026-11-16: how many ticks in a row under lower_below before it steps down, at 60 a second. 180: three seconds.
+@export_range(1, 3600, 1) var lower_after_ticks := 180
+## Claude 2026-11-16: the most every AI pawn may run, as a step: 1 every tick, 2 every 2nd, 4 every 4th. Read it; set
+## load_step_override to force it.
+var load_step := 1
+## Claude 2026-11-16: how much of its budget a tick has used lately, smoothed over about ten ticks: 1.0 is the whole tick's length.
+var load_average := 0.0
+var _over_ticks := 0
+var _under_ticks := 0
+var _physics_steps_this_frame := 0 # Claude 2026-11-16: physics steps since the last rendered frame
 ## Claude 2026-11-05: on, each tick phase adds up its time in microseconds into profile, for finding what's slow. Off, it costs
 ## a few checks of this flag per tick.
 var profile_enabled: bool = false
@@ -148,7 +188,22 @@ func _init() -> void:
 
 func _physics_process(delta: float) -> void:
 	if active:
+		_physics_steps_this_frame += 1 # Claude 2026-11-16: for counting the time Godot drops (_process)
 		advance(delta)
+
+
+# Claude 2026-11-16: Godot drops the time beyond max_physics_steps_per_frame itself, before advance() sees it, so it's counted here,
+# once a rendered frame: a frame that ran the most steps it may, and was longer than they cover, dropped the rest. Counted in
+# dropped_ticks with the driver's own, so diagnostics show when the game slows down. Only the autoload, which sets Godot's limit.
+func _process(delta: float) -> void:
+	var steps := _physics_steps_this_frame
+	_physics_steps_this_frame = 0
+	if not active or steps < max_ticks_per_frame or not (is_inside_tree() and get_parent() == get_tree().root):
+		return
+	var dt := get_tick_dt()
+	var behind := delta * tick_factor - steps * dt
+	if behind >= dt:
+		dropped_ticks += int(behind / dt)
 
 
 # --- Registry ----------------------------------------------------------------------------------
@@ -415,6 +470,7 @@ func is_authority() -> bool:
 # --- Internals ---------------------------------------------------------------------------------
 
 func _run_tick(dt: float) -> void:
+	var tick_started := Time.get_ticks_usec() # Claude 2026-11-16: for the load ladder
 	if _dirty:
 		_rebuild_phases()
 	tick += 1
@@ -459,6 +515,35 @@ func _run_tick(dt: float) -> void:
 	if profile_enabled:
 		profile["ticks"] += 1
 	_removed_now.clear()
+	_note_tick_cost(Time.get_ticks_usec() - tick_started, dt) # Claude 2026-11-16: the load ladder
+
+
+# Claude 2026-11-16 (pawn spec 8.21): the load ladder's rule, from one tick's cost in microseconds. See the top of the file.
+func _note_tick_cost(microseconds: int, dt: float) -> void:
+	var share := float(microseconds) / maxf(dt * 1000000.0, 1.0)
+	load_average = lerpf(load_average, share, 0.1)
+	if load_step_override > 0:
+		_set_load_step(load_step_override)
+		return
+	if not load_ladder_enabled:
+		_set_load_step(1)
+		return
+	_over_ticks = _over_ticks + 1 if load_average > raise_above else 0
+	_under_ticks = _under_ticks + 1 if load_average < lower_below else 0
+	if _over_ticks >= ticks_at_rate(raise_after_ticks) and load_step < max_load_step:
+		_over_ticks = 0
+		_set_load_step(load_step * 2)
+	elif _under_ticks >= ticks_at_rate(lower_after_ticks) and load_step > 1:
+		_under_ticks = 0
+		_set_load_step(load_step >> 1) # GDScript note: >> 1 halves a whole number, with no warning about dropping a fraction
+
+
+func _set_load_step(wanted: int) -> void:
+	var allowed := 4 if wanted >= 4 else (2 if wanted >= 2 else 1)
+	if allowed == load_step:
+		return
+	load_step = allowed
+	load_step_changed.emit(load_step)
 
 
 ## Claude 2026-11-05: adds the time since mark to this phase, and returns the new mark.
@@ -518,5 +603,9 @@ func _refresh_rate() -> void:
 
 # Claude 2026-11-09 (scaling spec step 6): only the autoload, never a test's own driver, and only when it's in the tree.
 func _apply_physics_rate() -> void:
-	if physics_follows_tick_rate and is_inside_tree() and get_parent() == get_tree().root and Engine.physics_ticks_per_second != _rate:
+	if not (physics_follows_tick_rate and is_inside_tree() and get_parent() == get_tree().root):
+		return
+	if Engine.physics_ticks_per_second != _rate:
 		Engine.physics_ticks_per_second = _rate
+	# Claude 2026-11-16: Godot's catch-up limit follows this one, so a frame never runs more ticks than max_ticks_per_frame (see there).
+	Engine.max_physics_steps_per_frame = max_ticks_per_frame

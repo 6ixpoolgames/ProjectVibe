@@ -30,6 +30,7 @@ class GivenCornersNavigation extends NavigationManager:
 		_corners.append_array(given)
 		_corners.append(point)
 		_next_corner = 1
+		_state = PathState.FOLLOWING # Claude 2026-11-16: path states; following is now said by the state
 		return true
 
 
@@ -41,6 +42,7 @@ func _ready() -> void:
 	await _test_straight_line_with_no_nav()
 	await _test_without_a_navigation_manager()
 	await _test_corner_by_corner()
+	await _test_waiting_for_nav() # Claude 2026-11-16: path states
 	await _test_following_a_nav_path()
 	await _test_crossing_links()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
@@ -73,13 +75,23 @@ func _test_straight_line_with_no_nav() -> void:
 	var target := Vector3(6.0, 0.0, 2.0)
 	_check(ai.move_to(target), "with no nav anywhere, AIController.move_to still works")
 	_check(navigation.get_path_corners().size() == 1, "as a straight line: one corner ahead, the point itself")
+	_check(navigation.get_path_state() == NavigationManager.PathState.FOLLOWING and not navigation.is_partial(),
+			"in the FOLLOWING state, not partial") # Claude 2026-11-16
 	var ticks := await _walk_until_done(navigation, 600)
 	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
 	_check(navigation.has_arrived() and not navigation.is_following_path(), "it gets there (%d ticks)" % ticks)
 	_check(distance < navigation.arrival_distance + 0.4, "close to the point (%.2f m)" % distance)
 	_check(arrivals[0] == 1, "arrived is sent once (%d)" % arrivals[0])
+	_check(navigation.get_path_state() == NavigationManager.PathState.ARRIVED, "and the state is ARRIVED") # Claude 2026-11-16
 	await _ticks(30)
 	_check(pawn.velocity.length() < 0.05, "and the pawn stands still there")
+
+	# Claude 2026-11-16: the straight line is a choice. Off, no nav means no way there.
+	navigation.straight_line_without_nav = false
+	_check(not ai.move_to(Vector3(2.0, 0.0, 2.0)), "straight_line_without_nav off: with no nav, move_to says no")
+	_check(navigation.get_path_state() == NavigationManager.PathState.UNREACHABLE and not navigation.is_under_way(),
+			"UNREACHABLE, and not under way")
+	navigation.straight_line_without_nav = true
 
 	# A direction from the manager is flat and length 1.
 	ai.move_to(Vector3(-4.0, 3.0, 0.0))
@@ -168,6 +180,61 @@ func _test_corner_by_corner() -> void:
 	floor_body.free()
 
 
+# Claude 2026-11-16: path states. While nav is still being built, move_to waits (PENDING) instead of walking a straight line,
+# tries again, and gives up after pending_give_up_ticks. NavServer only builds when it's ticked, so the test controls when it's done.
+func _test_waiting_for_nav() -> void:
+	NavServer.configure({"worker_threads": 4})
+	var terrain := TerrainGenerator.new()
+	terrain.name = "WaitTerrain"
+	terrain.chunk_size = 64.0
+	terrain.chunk_resolution = 11
+	terrain.chunk_radius = 1
+	var feeder := TerrainNavFeeder.new()
+	feeder.nav_hooks = NavHooks.new()
+	terrain.add_child(feeder)
+	add_child(terrain)
+	var interest := NavServer.add_interest(Vector3.ZERO, 60.0, 70.0, 1)
+	var start := Vector3(5.0, terrain.height_at(5.0, 5.0) + 0.1, 5.0)
+	var pawn := _make_pawn(start)
+	await _ticks(10)
+	var navigation := pawn.navigation_manager
+	var ai: AIController = pawn.controller_manager.ai_controller
+	var target := Vector3(-20.0, 0.0, 15.0)
+	target.y = terrain.height_at(target.x, target.z)
+	_check(not NavServer.is_idle(), "(nav isn't built yet)")
+
+	# Giving up: nav never finishes, because nothing ticks it.
+	navigation.pending_give_up_ticks = 20
+	_check(ai.move_to(target), "nav still being built: move_to says yes")
+	_check(navigation.get_path_state() == NavigationManager.PathState.PENDING and navigation.is_under_way() and not navigation.is_following_path(),
+			"it's PENDING: under way, but no path yet")
+	_check(ai.is_following_order(), "AIController counts the wait as its order under way")
+	await _ticks(10)
+	_check(pawn.controller_manager.move_input.length() < 0.01, "the pawn stands while it waits, rather than walking a straight line")
+	await _ticks(20)
+	_check(navigation.get_path_state() == NavigationManager.PathState.UNREACHABLE and not ai.is_following_order(),
+			"past pending_give_up_ticks it gives up: UNREACHABLE")
+
+	# Finding the path: nav is built while it waits, and a retry finds it.
+	navigation.pending_give_up_ticks = 100000
+	ai.move_to(target)
+	_check(navigation.get_path_state() == NavigationManager.PathState.PENDING, "PENDING again")
+	var ticks := 0
+	while navigation.get_path_state() == NavigationManager.PathState.PENDING and ticks < 3000:
+		NavServer.tick(1.0 / 60.0)
+		await get_tree().physics_frame
+		ticks += 1
+	_check(navigation.is_following_path(), "once nav is built, a retry finds the path and it walks (%d ticks waiting)" % ticks)
+	ticks = await _walk_until_done(navigation, 900)
+	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
+	_check(navigation.has_arrived() and not navigation.is_partial() and distance < 1.0, "and gets there (%.2f m, %d ticks)" % [distance, ticks])
+
+	pawn.free()
+	terrain.free()
+	NavServer.remove_interest(interest)
+	_settle()
+
+
 func _test_following_a_nav_path() -> void:
 	NavServer.configure({"worker_threads": 4})
 	var terrain := TerrainGenerator.new()
@@ -209,6 +276,7 @@ func _test_following_a_nav_path() -> void:
 	_check(navigation.is_following_path(), "(walking again)")
 	_check(not ai.move_to(Vector3(5000.0, 0.0, 5000.0)), "a point nowhere near nav: move_to says no")
 	_check(not navigation.is_following_path(), "and the path it had is dropped, so it doesn't wander off on the old one")
+	_check(navigation.get_path_state() == NavigationManager.PathState.UNREACHABLE, "UNREACHABLE, since nav is built and it isn't there") # Claude 2026-11-16
 
 	pawn.free()
 	terrain.free()
@@ -254,12 +322,19 @@ func _test_crossing_links() -> void:
 	# A link it can't cross: a placed ladder from C up to B that presses nothing. It tries, finds one new path, misses again, and
 	# gives up rather than trying forever.
 	await _walk_course_leg(pawn, ai, Vector3(16, -2, 0))
+	# Claude 2026-11-16: path states. From C there's no way up to B yet, so the path ends at the closest place it can reach.
+	_check(ai.move_to(Vector3(6, 0, 0)) and navigation.is_partial(), "from C to B with no way up: a partial path, and is_partial() says so")
+	var partial := await _walk_course_leg(pawn, ai, Vector3(6, 0, 0))
+	_check(navigation.has_arrived() and navigation.is_partial() and partial.distance > 1.0,
+			"it arrives at the closest place, and is_partial() still says it isn't the point (%.1f m away)" % partial.distance)
+	_check(absf(pawn.position.y + 2.0) < 0.3, "still down on C")
 	var ladder: int = NavServer.add_link(Vector3(13.5, -2, 0), Vector3(10.5, 0, 0), false, &"")
 	_settle()
 	navigation.link_timeout = 1.0
 	var stuck := await _walk_course_leg(pawn, ai, Vector3(6, 0, 0), 900)
 	_check(stuck.crossed_link and not navigation.is_following_path() and not navigation.has_arrived(),
 			"a link it can't cross: after one new path and a second miss, it stops, neither following nor arrived (%d ticks)" % stuck.ticks)
+	_check(navigation.get_path_state() == NavigationManager.PathState.UNREACHABLE, "UNREACHABLE") # Claude 2026-11-16
 	_check(absf(pawn.position.y + 2.0) < 0.3, "still down on C")
 	NavServer.remove_link(ladder)
 

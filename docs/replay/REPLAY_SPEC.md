@@ -62,7 +62,7 @@ A recording can never run away, outnumber the cap, or grow without limit. Each s
 | `min_free_megabytes` | 1024 | A recording doesn't start, or stops, with less disk space than this. Checked every minute |
 | `keep_recordings` | 10 | Recordings kept in each role's folder |
 | `max_folder_megabytes` | 4096 | Old recordings are deleted, oldest first, to keep a role's folder under this. The file being recorded is never deleted, and one another instance has open is skipped |
-| `max_queued_blocks` | 30 | If the disk falls this far behind, the recording stops rather than filling memory. After a failed write, the writer writes nothing more |
+| `max_queued_blocks` | 60 (about a minute; was 30, raised 2026-11-16) | If the disk falls this far behind, the recording stops rather than filling memory. After a failed write, the writer writes nothing more |
 
 ## 4. Classes (`assets/scripts/replay/`)
 

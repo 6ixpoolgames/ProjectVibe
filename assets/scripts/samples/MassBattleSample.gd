@@ -20,8 +20,9 @@
 ##     source on and off, apart from the centre's.
 ##   - The player starts at the players' spawner, 285 m from the middle, so they can watch the march or walk in.
 ##
-## Keys, besides the faction arena's: C the centre's source, H the heroes' sources, V an overhead view of the middle (the camera
-## only: your pawn stays where it is), = and - team_size up or down by 10 (the
+## Keys, besides the faction arena's: C the centre's source, H the heroes' sources, V the overview of the middle (Claude 2026-11-16,
+## the owner's call: as U, it lets go of your pawn, which its AI takes over, and you fly the spectator, starting at the overview point
+## high above the middle; pressed while flying, it only takes you back there; U takes your pawn back), = and - team_size up or down by 10 (the
 ## spawners top up to it; lowering it removes nobody, those that die just aren't replaced). F3 still shows the readouts and debug
 ## shapes, which are off to begin with: hundreds of floating labels cost more than the AI. The AI debug timeline (← to step back)
 ## isn't recorded here, for the same reason; P still pauses.
@@ -32,7 +33,11 @@
 ## from the command line, after "--":
 ##   --perf-log       prints the diagnostics summary every 5 s, as the session log has it
 ##   --near-middle    the player's pawn starts 30 m from the middle instead of at its spawner, so the fight comes to it
-##   --overhead       starts in the overhead view of the middle (V), the owner's way of watching the fight
+##   --overhead       starts at the overview of the middle (V), the owner's way of watching the fight
+##
+## Claude 2026-11-16: the spectator here doesn't keep the world loaded, as V's old camera didn't: the spawners, heroes and the centre
+## have their own sources, and C still freezes the middle while you watch it from above. A player's pawn let go of (U or V) follows the
+## heroes' switch (H), the owner's call: it keeps the world loaded around it while H is on, and not while it's off.
 extends "res://assets/scripts/samples/FactionArenaSample.gd"
 
 const HERO_RED_SCENE := preload("res://assets/scenes/samples/hero_red.tscn")
@@ -47,9 +52,9 @@ const HERO_ALLY_SCENE := preload("res://assets/scenes/samples/hero_ally.tscn")
 var _defaults_before: PawnDefaultsRes = null
 
 var _heroes: Array[Pawn] = []
+var _player_pawns: Array[Pawn] = [] # Claude 2026-11-16: players' pawns, which follow H once let go of
 var _hero_sources_on := true
-var _overhead := false
-var _camera_before: Camera3D = null
+# Claude 2026-11-16: _overhead and _camera_before are gone: V flies the spectator now, so there's no view to switch back to.
 var _perf_log := false # Claude 2026-11-16: diagnostics, see the top of the file
 var _near_middle := false
 var _next_print_msec := 0
@@ -76,7 +81,7 @@ func _ready() -> void:
 		elif argument == "--near-middle":
 			_near_middle = true
 		elif argument == "--overhead":
-			_toggle_overhead.call_deferred() # once the scene's cameras are ready
+			_go_to_overview.call_deferred() # once the scene's cameras are ready. Claude 2026-11-16: was _toggle_overhead
 
 
 # Claude 2026-11-16: --perf-log prints the diagnostics summary every 5 s. Samples, like debug tools, aren't in release builds, so a
@@ -109,6 +114,9 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 	if pawn.scene_file_path == FACTION_PLAYER_SCENE.resource_path:
 		if _near_middle: # Claude 2026-11-16: diagnostics
 			pawn.global_position = $RallyPoint.global_position + Vector3(0, 3, 30)
+		# Claude 2026-11-16: follows H. While a player has it, it keeps the world loaded whatever this says.
+		_player_pawns.append(pawn)
+		pawn.keeps_world_loaded = _hero_sources_on
 	elif _is_hero(pawn):
 		_heroes.append(pawn)
 		if not _hero_sources_on:
@@ -126,7 +134,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				set_hero_sources(not _hero_sources_on)
 				return
 			KEY_V:
-				_toggle_overhead()
+				_go_to_overview() # Claude 2026-11-16: was _toggle_overhead
 				return
 			KEY_EQUAL:
 				_change_team_size(10)
@@ -153,6 +161,19 @@ func set_hero_sources(on: bool) -> void:
 	_hero_sources_on = on
 	for hero in get_heroes():
 		hero.keeps_world_loaded = on # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
+	# Claude 2026-11-16: and players' pawns, which counts once nobody plays them (U or V).
+	for i in range(_player_pawns.size() - 1, -1, -1):
+		if is_instance_valid(_player_pawns[i]):
+			_player_pawns[i].keeps_world_loaded = on
+		else:
+			_player_pawns.remove_at(i)
+
+
+# Claude 2026-11-16: a player's pawn let go of follows H here, rather than always keeping the world loaded as in the other arenas.
+func _on_pawn_released(_peer: int, pawn: Pawn) -> void:
+	if NetworkSession.is_client() or not is_instance_valid(pawn) or _is_npc(pawn):
+		return
+	pawn.keeps_world_loaded = _hero_sources_on
 
 
 ## The heroes alive in the level right now.
@@ -175,15 +196,26 @@ func _change_team_size(by: int) -> void:
 	_update_team_sizes()
 
 
-# V: the waiting camera, high above the middle, and back to whatever camera was showing. Only the view moves: nothing loads ground there.
-func _toggle_overhead() -> void:
-	var camera: Camera3D = $WaitingCamera
-	_overhead = not _overhead
-	if _overhead:
-		_camera_before = get_viewport().get_camera_3d()
-		camera.make_current()
-	elif is_instance_valid(_camera_before):
-		_camera_before.make_current()
+# Claude 2026-11-16: the arena's spectating (U, and V below), with the spectator keeping nothing loaded here (see the top of the file).
+func _start_spectating() -> FreeFlyCamera:
+	var spectator := super()
+	if spectator:
+		spectator.keeps_world_loaded = false
+	return spectator
+
+
+# Claude 2026-11-16 (the owner's call; was _toggle_overhead, which switched to the waiting camera and back): V. Not spectating, it does
+# what U does, letting go of your pawn and flying the spectator, and then puts the spectator at the overview point (the waiting camera,
+# high above the middle, facing the same way). Spectating, it only puts it there. U takes your pawn back. The spectator here keeps
+# nothing loaded (see the top of the file).
+func _go_to_overview() -> void:
+	var coordinator := GameMode.possession_coordinator
+	if coordinator == null or coordinator.controller == null:
+		return
+	if not coordinator.is_spectating():
+		_start_spectating()
+	var point: Node3D = $WaitingCamera
+	coordinator.controller.place_spectator(point.global_transform)
 
 
 # Claude 2026-11-16: the mass battle's lines in the status text (they were the PerformanceOverlay's extra lines): each faction's living
@@ -198,9 +230,10 @@ func _mass_battle_lines() -> String:
 		if is_instance_valid(pawn) and not pawn.is_dead():
 			alive[pawn.team] = alive.get(pawn.team, 0) + 1
 	var heroes := get_heroes().size()
-	return "team_size %d (= and -)    alive: red %d, blue %d, soldiers %d    heroes %d\ncentre source %s (C)    hero sources %s (H)    overhead view %s (V)" % [
-		team_size, alive[1], alive[2], alive[0], heroes, "on" if is_centre_source_on() else "off", "on" if _hero_sources_on else "off", "on" if _overhead else "off"]
+	return "team_size %d (= and -)    alive: red %d, blue %d, soldiers %d    heroes %d\ncentre source %s (C)    hero sources %s (H)    V: fly over the middle%s" % [
+		team_size, alive[1], alive[2], alive[0], heroes, "on" if is_centre_source_on() else "off", "on" if _hero_sources_on else "off",
+		" (flying: U goes back to your pawn)" if GameMode.possession_coordinator and GameMode.possession_coordinator.is_spectating() else ""]
 
 
 func _keys_text() -> String:
-	return super() + "\nMass battle: C centre source, H hero sources, V view the middle, = and - team size, F3 readouts (off). F1 diagnostics"
+	return super() + "\nMass battle: C centre source, H hero sources, V fly over the middle, = and - team size, F3 readouts (off). F1 diagnostics"

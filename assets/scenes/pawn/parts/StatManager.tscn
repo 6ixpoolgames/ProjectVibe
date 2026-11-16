@@ -28,7 +28,7 @@ base_value = 0.3
 
 [node name="TurnRate" type="Node" parent="."]
 script = ExtResource("2_stat")
-base_value = 720.0
+base_value = 540.0
 
 [node name="JumpVelocity" type="Node" parent="."]
 script = ExtResource("2_stat")

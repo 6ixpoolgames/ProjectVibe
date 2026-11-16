@@ -15,13 +15,18 @@ class ScriptedController extends PlayerController:
 	var scripted_move := Vector2.ZERO
 	var scripted_jump := false
 	var scripted_look := Vector2.ZERO
+	var scripted_up := 0.0 # Claude 2026-11-16: spectating's Q and E
+	var scripted_sprint := false # Claude 2026-11-16: spectating's fast flying
 
 	func _read_move() -> Vector2:
 		return scripted_move
 
+	func _read_fly_up_down() -> float:
+		return scripted_up
+
 	# Claude 2026-11-07: the controller now reads named actions, not sprint and jump on their own.
-	func _read_action_held(_action: StringName) -> bool:
-		return false
+	func _read_action_held(action: StringName) -> bool:
+		return action == &"sprint" and scripted_sprint # Claude 2026-11-16: was always false
 
 	func _read_action_pressed(action: StringName) -> bool:
 		if action != &"jump":
@@ -53,7 +58,9 @@ func _ready() -> void:
 	await _test_camera_arm()
 	await _test_streaming_and_ai()
 	await _test_scene_camera_left_alone()
+	_test_coordinator_spectating() # Claude 2026-11-16: before _test_no_module, which removes the coordinator
 	await _test_no_module()
+	await _test_spectating() # Claude 2026-11-16
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -449,6 +456,123 @@ func _test_no_module() -> void:
 
 
 # --- Helpers ---
+
+
+# Claude 2026-11-16: spectating with a FreeFlyCamera, and taking a pawn stopping it. Its own controller, so the keys can be scripted.
+func _test_spectating() -> void:
+	var floor_body := _make_floor()
+	var controller := ScriptedController.new()
+	controller.name = "SpectatingController"
+	add_child(controller)
+	_check(controller.get_spectator() == null and not controller.is_spectating(), "spectating: no spectator until it first spectates")
+	controller.start_spectating()
+	var spectator := controller.get_spectator()
+	_check(controller.is_spectating() and spectator is FreeFlyCamera and spectator.is_flying(), "start_spectating() with no pawn flies a FreeFlyCamera")
+	_check(controller.camera.get_view() == spectator.view and controller.camera.current, "the camera follows its view")
+	_check(spectator.streaming_source.counts_on_this_machine(), "and it keeps the world loaded around it")
+
+	controller.look_yaw = 0.0
+	controller.look_pitch = 0.0
+	var start := spectator.global_position
+	controller.scripted_move = Vector2(0.0, -1.0) # W
+	await get_tree().create_timer(0.5).timeout
+	controller.scripted_move = Vector2.ZERO
+	var moved := spectator.global_position - start
+	_check(moved.z < -2.0 and absf(moved.x) < 0.1 and absf(moved.y) < 0.1, "W flies forward, the way it looks (%s)" % str(moved))
+	await get_tree().create_timer(0.3).timeout # stops within seconds_to_full_speed
+	start = spectator.global_position
+	controller.scripted_up = 1.0 # Q
+	await get_tree().create_timer(0.3).timeout
+	controller.scripted_up = 0.0
+	_check(spectator.global_position.y - start.y > 1.0, "Q flies straight up (%.1f m)" % (spectator.global_position.y - start.y))
+	controller.look_pitch = 3.0
+	# GDScript note: process_frame is sent before nodes run _process that frame, so two make sure the controller has had one.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check(controller.look_pitch < PI / 2.0, "looking up stops short of straight up, so the view never flips")
+	_check(not spectator.is_physics_processing() and not spectator.is_processing(), "it does nothing per tick or frame of its own: the controller flies it")
+
+	# Speeds: 10, 25 with sprint, and the wheel with sprint held ramps that between 10 and 75.
+	_check(spectator.speed == 10.0 and spectator.get_fast_speed() == 25.0, "it flies at 10 m/s, and 25 with sprint")
+	controller._zoom_steps = -3.0 # three notches of wheel up, without sprint
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check(spectator.get_fast_speed() == 25.0, "the wheel without sprint leaves the speed alone")
+	# Claude 2026-11-16: it zooms instead: three notches in, 1.25 times each.
+	_check(is_equal_approx(spectator.get_zoom(), pow(1.25, 3.0)) and spectator.view.fov < spectator.fov - 20.0,
+			"and zooms instead: three notches in, %.2f times, the view narrowing to %.0f°" % [spectator.get_zoom(), spectator.view.fov])
+	spectator.change_zoom(100.0)
+	_check(spectator.get_zoom() == spectator.max_zoom, "no more than max_zoom")
+	var middle := InputEventMouseButton.new()
+	middle.button_index = MOUSE_BUTTON_MIDDLE
+	middle.pressed = true
+	controller._unhandled_input(middle)
+	_check(spectator.get_zoom() == 1.0 and is_equal_approx(spectator.view.fov, spectator.fov), "the middle mouse button resets it")
+	spectator.change_zoom(100.0)
+	spectator.change_zoom(-100.0)
+	_check(spectator.get_zoom() == 1.0 and is_equal_approx(spectator.view.fov, spectator.fov), "and out to no zoom, at its own fov")
+	controller.scripted_sprint = true
+	controller._zoom_steps = -3.0
+	await get_tree().process_frame
+	await get_tree().process_frame
+	_check(spectator.get_fast_speed() == 40.0 and spectator.get_zoom() == 1.0, "with sprint held, three notches up: 40 m/s (%.0f), and no zoom" % spectator.get_fast_speed())
+	spectator.change_fast_speed(100.0)
+	_check(spectator.get_fast_speed() == 75.0, "no faster than 75")
+	spectator.change_fast_speed(-100.0)
+	_check(spectator.get_fast_speed() == 10.0, "and no slower than the plain speed")
+	controller.scripted_sprint = false
+	spectator.change_fast_speed(3.0) # back to 25 for the rest
+
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	controller.take_pawn(pawn)
+	_check(not controller.is_spectating() and not spectator.is_flying() and not spectator.streaming_source.counts_on_this_machine(),
+			"taking a pawn stops spectating, and its source stops counting")
+	_check(controller.camera.get_view() == pawn.get_default_view(), "and the camera goes to the pawn's view")
+	# A client asks to let go and spectates before the server answers: the keys fly the spectator, and the pawn gets nothing from them.
+	controller.start_spectating()
+	controller.scripted_move = Vector2(0.0, -1.0)
+	var command := controller.take_input_command(0)
+	controller.scripted_move = Vector2.ZERO
+	_check(controller.is_spectating() and command.move == Vector3.ZERO and command.held_actions == 0,
+			"spectating with a pawn still attached: the pawn gets no movement or actions")
+	controller.take_pawn(null)
+	_check(controller.is_spectating() and controller.camera.get_view() == spectator.view, "and letting go of it afterwards keeps spectating")
+	controller.stop_spectating()
+	_check(not controller.is_spectating() and controller.camera.get_view() == null, "stop_spectating() with no pawn: the camera holds where it is")
+
+	var other := ScriptedController.new()
+	var scene := PackedScene.new()
+	var wrong_root := Node3D.new()
+	scene.pack(wrong_root)
+	wrong_root.free()
+	other.spectator_scene = scene
+	add_child(other)
+	other.start_spectating()
+	_check(other.get_spectator() is FreeFlyCamera, "a spectator_scene whose root isn't a FreeFlyCamera: the default, with a warning")
+	other.free()
+	pawn.free()
+	controller.free()
+	floor_body.free()
+
+
+# Claude 2026-11-16: the PossessionCoordinator recognises the spectator: spectate() lets go and flies, possessing ends it.
+func _test_coordinator_spectating() -> void:
+	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
+	var heard: Array[bool] = []
+	var on_changed := func(spectating: bool) -> void: heard.append(spectating)
+	_possession.spectating_changed.connect(on_changed)
+	_possession.possess(pawn)
+	_check(_possession.spectate(), "spectate() through the coordinator")
+	_check(_possession.get_pawn_of() == null and not pawn.controller_manager.has_player(), "lets go of the pawn, so its AI controller has it")
+	_check(_possession.is_spectating() and _controller.is_spectating(), "and the player flies the spectator")
+	_check(_possession.possess(pawn) and not _possession.is_spectating() and not _controller.is_spectating(), "possessing a pawn ends it")
+	_possession.release()
+	_check(_possession.spectate() and _possession.is_spectating(), "spectate() with no pawn works too")
+	_possession.stop_spectating()
+	_check(not _possession.is_spectating() and not _controller.is_spectating(), "and stop_spectating() ends it")
+	_check(heard == [true, false, true, false], "spectating_changed says each change (%s)" % str(heard))
+	_possession.spectating_changed.disconnect(on_changed)
+	pawn.free()
 
 
 func _make_floor() -> StaticBody3D:

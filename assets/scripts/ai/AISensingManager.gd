@@ -93,13 +93,17 @@ func tick_sensing(tick: int) -> void:
 		return
 	var offset := pawn.ai_context.pawn_number() if pawn.ai_context else 0
 	var interval := TickDriver.ticks_at_rate(sense_interval_ticks) # Claude 2026-11-09 (scaling spec step 6): written for 60 a second
-	if posmod(tick + offset, interval) == 0:
+	# Claude 2026-11-16 (pawn spec 8.21): fired_since_last_run, so a pawn running every Nth tick still gets the passes that fell between its
+	# runs. Sight's awareness already fills by the real ticks since its last check.
+	if pawn.fired_since_last_run(tick, offset, interval):
 		full_pass(tick)
-	elif posmod(tick + offset, TickDriver.ticks_at_rate(refresh_interval_ticks)) == 0:
+	elif pawn.fired_since_last_run(tick, offset, TickDriver.ticks_at_rate(refresh_interval_ticks)):
 		for sense in _senses:
 			sense.refresh(tick)
 	# Claude 2026-11-09 (scaling spec step 2): if next tick is a full pass, ask the sensing job for it at the end of this tick.
-	if _use_job and posmod(tick + 1 + offset, interval) == 0:
+	# Claude 2026-11-16: only for a pawn that runs every tick: the job's answer is for the next tick, which a stepping pawn doesn't run.
+	# It senses the old way, and less often.
+	if _use_job and pawn.runs_every_tick() and posmod(tick + 1 + offset, interval) == 0:
 		_due_next.append(self)
 		if _job_driver == null and pawn._driver:
 			_job_driver = pawn._driver

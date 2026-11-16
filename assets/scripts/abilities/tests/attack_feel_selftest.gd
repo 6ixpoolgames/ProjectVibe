@@ -37,6 +37,7 @@ func _ready() -> void:
 	add_child(floor_body)
 	await _test_sweep()
 	await _test_windup_turn()
+	await _test_turn_while_held() # Claude 2026-11-16
 	await _test_no_snap() # Claude 2026-11-12
 	await _test_hop()
 	await _test_invulnerable()
@@ -89,7 +90,7 @@ func _test_windup_turn() -> void:
 		var ai := _ai(pawn)
 		ai.look_at_point(origin + Vector3(0, 1, -10)) # yaw 0
 		await _ticks(5)
-		ai.press(&"primary")
+		ai.hold(&"primary", true) # Claude 2026-11-16 (pawn spec 8.20): the swing turns only while its action is held
 		await _ticks(2)
 		ai.look_at_point(origin + Vector3(10, 1, 0)) # to the right: yaw -90 degrees
 		await _until(func() -> bool: return melee.duration_ticks() - melee.ticks_left >= melee.windup_ticks, 30)
@@ -99,6 +100,7 @@ func _test_windup_turn() -> void:
 			_check(degrees < -75.0 and degrees > -91.0, "during the windup, the swing turns toward where the pawn looks (%.0f of -90 degrees)" % degrees)
 		else:
 			_check(absf(degrees) < 0.5, "with windup turning at 0, it holds where it started (%.0f degrees)" % degrees)
+		ai.hold(&"primary", false)
 		pawn.free()
 
 
@@ -111,14 +113,60 @@ func _test_no_snap() -> void:
 	var ai := _ai(pawn)
 	ai.look_at_point(origin + Vector3(0, 1, 10)) # behind: yaw 180 degrees
 	await _ticks(2)
-	ai.press(&"primary")
+	ai.hold(&"primary", true) # Claude 2026-11-16: held, so it keeps turning
 	await _until(func() -> bool: return melee.is_running_timed(), 10)
 	var first := absf(rad_to_deg(angle_difference(0.0, pawn.yaw)))
-	var per_tick := melee.windup_turn_degrees_per_second / 60.0
+	var per_tick := (melee.get_node("TurnToFace") as TurnToFaceStep).current_speed() / 60.0 # Claude 2026-11-16: the pawn's TurnRate now
 	_check(melee.is_running_timed() and first <= per_tick * 2.0 + 0.5, "on its first tick a swing turns at most its turn speed allows, not all the way round (%.0f degrees)" % first)
 	await _until(func() -> bool: return melee.duration_ticks() - melee.ticks_left >= melee.windup_ticks, 30)
 	var by_hit := absf(rad_to_deg(angle_difference(0.0, pawn.yaw)))
 	_check(by_hit > 60.0 and by_hit < 179.0, "and keeps turning through the windup, without reaching a target behind it (%.0f of 180 degrees)" % by_hit)
+	ai.hold(&"primary", false)
+	pawn.free()
+
+
+# Claude 2026-11-16 (pawn spec 8.20, the owner's calls): the windup waits until the pawn is within 90 degrees of its look; held, the turn
+# goes on through the hit; let go, it stops and the swing goes where the pawn faces.
+func _test_turn_while_held() -> void:
+	var origin := Vector3(60, 0.1, 30)
+	var pawn := _pawn(origin, 0)
+	var melee: MeleeAttackAbility = pawn.ability_manager.get_node("MeleeAttack")
+	var ai := _ai(pawn)
+	ai.look_at_point(origin + Vector3(0, 1, 10)) # behind: 180 degrees from where it faces
+	await _ticks(2)
+	ai.hold(&"primary", true)
+	await _until(func() -> bool: return melee.is_running_timed(), 10)
+	var started := TickDriver.tick
+	await _until(func() -> bool: return melee.swing_phase().phase == "hit", 60)
+	var waited := TickDriver.tick - started
+	# 90 degrees at the pawn's TurnRate (540: 9 a tick) before the windup counts, then its 8 ticks.
+	_check(waited >= melee.windup_ticks + 6, "facing away, the windup waits until it's within 90 degrees: the hit comes later (%d ticks, %d with no turn)" % [waited, melee.windup_ticks])
+	var at_hit := pawn.yaw
+	ai.look_at_point(origin + Vector3(10, 1, 0)) # the crosshair moves during the hit
+	await _ticks(2)
+	_check(absf(angle_difference(at_hit, pawn.yaw)) > 0.05 and melee.swing_phase().phase == "hit", "held, it keeps following the look during the hit")
+	await _until(func() -> bool: return not melee.is_running_timed(), 60)
+	_check(not melee.is_running_timed(), "and the swing still ends, turn and all")
+	ai.hold(&"primary", false)
+	await _ticks(10)
+	# Claude 2026-11-16: let go straight after pressing: it still turns its minimum, 45 degrees, then stops, and the swing goes where
+	# it faces then. Released is its own reason, so it can be tracked.
+	ai.look_at_point(origin + Vector3(0, 1, -10)) # 90 degrees round from where it faces
+	await _ticks(2)
+	var before := pawn.yaw
+	var reasons: Array[String] = []
+	pawn.ability_manager.step_finished.connect(func(_ability: AbilityBase, step: AbilityStep, reason: String) -> void:
+		if step.name == "TurnToFace":
+			reasons.append(reason))
+	ai.press(&"primary") # held for one tick only
+	await _until(func() -> bool: return melee.is_running_timed(), 10)
+	await _ticks(12)
+	var turned := rad_to_deg(absf(angle_difference(before, pawn.yaw)))
+	var turn: TurnToFaceStep = melee.get_node("TurnToFace")
+	_check(not turn.running and turned >= turn.min_turn_degrees - 1.0 and turned < turn.min_turn_degrees + 15.0,
+			"let go at once, it still turns its minimum (%.0f of %.0f degrees), then stops" % [turned, turn.min_turn_degrees])
+	_check(reasons == ["released"], "and the turn ends as released, not done (%s)" % str(reasons))
+	await _until(func() -> bool: return not melee.is_running_timed(), 60)
 	pawn.free()
 
 

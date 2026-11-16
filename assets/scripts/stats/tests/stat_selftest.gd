@@ -61,11 +61,11 @@ func _test_the_default_stats() -> void:
 	var stats := pawn.stat_manager
 	_check(stats != null, "a pawn gets a StatManager by default")
 	var wanted := {&"MoveSpeed": 5.0, &"SprintSpeed": 9.0, &"Acceleration": 30.0, &"Deceleration": 40.0, &"AirControl": 0.3,
-			&"TurnRate": 720.0, &"JumpVelocity": 5.0}
+			&"TurnRate": 540.0, &"JumpVelocity": 5.0} # Claude 2026-11-16: TurnRate 540 (was 720), the owner's call, so turning can be tested more
 	var all_there := true
 	for stat_name: StringName in wanted:
 		all_there = all_there and is_equal_approx(stats.get_value(stat_name, -1.0), wanted[stat_name])
-	_check(all_there, "with the movement stats GroundMovement used to hold, at the same values")
+	_check(all_there, "with the movement stats GroundMovement used to hold, at the same values (TurnRate now 540)")
 	pawn.free()
 
 

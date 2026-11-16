@@ -2,6 +2,7 @@
 ## action, the highest priority that can start wins (it was the lowest), priority_jitter varies the choice from tick to tick but never
 ## within one tick, and the faction arena's attacks: the attack request gives the normal swing, then a follow-up while that cools
 ## down, and the special request gives the heavy attack. Claude 2026-11-10: the follow-up is now a combo made of boosts (_test_combo).
+## Claude 2026-11-16 (pawn spec 8.20): and now a combo counted by position, light and heavy mixed (_test_combo).
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/attack_request_selftest.tscn"
 extends Node
@@ -81,8 +82,8 @@ func _test_jitter() -> void:
 	plain.free()
 
 
-## Claude 2026-11-10 (pawn spec 8.11): replaces the follow-up test. The faction arena's combo, made of boosts: pressing again quickly
-## gives swing, second, finisher; pressing slowly gives swing, swing.
+## Claude 2026-11-16 (pawn spec 8.20, the owner's design): replaces the combo of boosts. Combos are counted by position, shared by light
+## and heavy attacks: an attack's hit opens a window, and the follow-up that fits the next position wins its key.
 func _test_combo() -> void:
 	var pawn: Pawn = load(PLAYER_SCENE).instantiate()
 	pawn.skip_default_parts = NO_AI
@@ -91,34 +92,82 @@ func _test_combo() -> void:
 	var swing: MeleeAttackAbility = manager.get_node("MeleeAttack")
 	var second: MeleeAttackAbility = manager.get_node("SecondSwing")
 	var finisher: MeleeAttackAbility = manager.get_node("FinisherSwing")
+	var heavy: MeleeAttackAbility = manager.get_node("HeavyAttack")
+	var smash: MeleeAttackAbility = manager.get_node("HeavySmash")
+	var ai := _ai(pawn)
 	await _ticks(5)
-	_check(swing.trigger_action == second.trigger_action and second.trigger_action == finisher.trigger_action and swing.priority == 10 and second.priority == 0 and finisher.priority == -10, "three swings answer the attack request, at priorities 10, 0 and -10")
-	_ai(pawn).press(&"primary")
+	_check(swing.combo_positions == [1] and second.combo_positions == [2] and finisher.combo_positions == [3] and heavy.combo_positions == [1] and smash.combo_positions == [2, 3],
+			"the openers fill position 1, SecondSwing 2, FinisherSwing 3, HeavySmash 2 or 3")
+	_check(second.priority > swing.priority and finisher.priority > swing.priority and smash.priority > heavy.priority, "and follow-ups outrank the opener on their key")
+
+	# Swing, second, finisher.
+	ai.press(&"primary")
 	await _ticks(2)
-	_check(swing.is_running_timed() and manager.press_priority_now(second) == 20, "the request starts the swing, which boosts the second swing to 20 for a moment (%d)" % manager.press_priority_now(second))
+	_check(swing.is_running_timed() and manager.combo_position == 1 and manager.combo_window_ticks_left == 0, "the attack request starts the swing at position 1, with the window shut")
+	await _until(func() -> bool: return swing.swing_phase().phase == "recovery", 60)
+	_check(manager.combo_window_ticks_left > 0, "its hit opens the window")
 	await _until(func() -> bool: return not swing.is_running_timed(), 60)
-	_ai(pawn).press(&"primary")
+	ai.press(&"primary")
 	await _ticks(2)
-	_check(second.is_running_timed() and manager.press_priority_now(finisher) == 30, "pressed again quickly: the second swing, which boosts the finisher to 30 (%d)" % manager.press_priority_now(finisher))
+	_check(second.is_running_timed() and manager.combo_position == 2, "pressed again in the window: the second swing, position 2")
 	await _until(func() -> bool: return not second.is_running_timed(), 60)
-	_ai(pawn).press(&"primary")
+	ai.press(&"primary")
 	await _ticks(2)
-	_check(finisher.is_running_timed(), "and again: the finisher")
+	_check(finisher.is_running_timed() and manager.combo_position == 3, "and again: the finisher, position 3")
 	await _until(func() -> bool: return not finisher.is_running_timed(), 60)
-	await _ticks(40) # past every boost
-	_check(manager.press_priority_now(second) == 0 and manager.press_priority_now(finisher) == -10 and pawn.effect_manager.get_active_effects().is_empty(), "the boosts end at their deadline: back to 0 and -10, nothing left on the pawn")
-	_ai(pawn).press(&"primary")
+
+	# Light then heavy: swing, smash, finisher.
+	await _until(func() -> bool: return manager.combo_window_ticks_left == 0 and swing.cooldown_ticks_left == 0, 120)
+	ai.press(&"primary")
 	await _ticks(2)
-	_check(swing.is_running_timed(), "a press after that: the swing again")
+	_check(swing.is_running_timed() and manager.combo_position == 1, "once the window shuts, an attack starts a new combo at 1")
 	await _until(func() -> bool: return not swing.is_running_timed(), 60)
-	await _ticks(40)
-	_ai(pawn).press(&"primary")
+	ai.press(&"secondary")
 	await _ticks(2)
-	_check(swing.is_running_timed(), "pressing slowly: swing, swing")
-	# Mashing: a press near the end of the swing can't cancel it (10 against 15), so it waits in the buffer and the second starts
-	# as soon as the swing ends.
-	await _until(func() -> bool: return swing.ticks_left <= 4, 60)
-	_ai(pawn).press(&"primary")
+	_check(smash.is_running_timed() and manager.combo_position == 2, "mixing: the heavy key in the swing's window gives the smash, at position 2")
+	await _until(func() -> bool: return not smash.is_running_timed(), 80)
+	ai.press(&"primary")
+	await _ticks(2)
+	_check(finisher.is_running_timed() and manager.combo_position == 3, "and the light key after it gives the finisher, at 3")
+	await _until(func() -> bool: return not finisher.is_running_timed(), 60)
+
+	# Heavy opener: heavy, second, smash.
+	await _until(func() -> bool: return manager.combo_window_ticks_left == 0 and heavy.cooldown_ticks_left == 0, 150)
+	ai.press(&"secondary")
+	await _ticks(2)
+	_check(heavy.is_running_timed() and manager.combo_position == 1, "a heavy attack opens a combo too")
+	await _until(func() -> bool: return not heavy.is_running_timed(), 80)
+	ai.press(&"primary")
+	await _ticks(2)
+	_check(second.is_running_timed() and manager.combo_position == 2, "the light key after it: the second swing")
+	await _until(func() -> bool: return not second.is_running_timed(), 60)
+	ai.press(&"secondary")
+	await _ticks(2)
+	_check(smash.is_running_timed() and manager.combo_position == 3, "and the heavy key: the smash, this time at 3")
+	await _until(func() -> bool: return not smash.is_running_timed(), 80)
+
+	# Outside a window, a follow-up can't start.
+	await _until(func() -> bool: return manager.combo_window_ticks_left == 0, 60)
+	swing.cooldown_ticks_left = 600 # the opener can't start either
+	ai.press(&"primary")
+	await _ticks(2)
+	_check(not swing.is_running_timed() and not second.is_running_timed() and not finisher.is_running_timed(), "outside a window, with the opener cooling down, the attack request starts nothing")
+	swing.cooldown_ticks_left = 0
+
+	# Cancelled in its windup: no window.
+	ai.press(&"primary")
+	await _ticks(2)
+	manager.cancel(&"primary")
+	_check(not swing.is_running_timed() and manager.combo_window_ticks_left == 0, "a swing cancelled in its windup opens no window")
+	swing.cooldown_ticks_left = 0
+
+	# Mashing: a press near the end of the swing can't cancel it (10 against 15), so it waits in the buffer, and the second swing starts
+	# as soon as the swing ends, in its window.
+	ai.press(&"primary")
+	await _ticks(2)
+	var recovery: AbilityStep = swing.get_node("Recovery")
+	await _until(func() -> bool: return recovery.running and recovery.step_ticks >= recovery.length() - 4, 60)
+	ai.press(&"primary")
 	await _ticks(2)
 	_check(swing.is_running_timed() and not second.is_running_timed(), "a press during the swing doesn't cut it short")
 	await _until(func() -> bool: return not swing.is_running_timed(), 60)
@@ -132,12 +181,19 @@ func _test_special() -> void:
 	pawn.skip_default_parts = NO_AI
 	add_child(pawn)
 	var heavy: MeleeAttackAbility = pawn.ability_manager.get_node("HeavyAttack")
+	var smash: MeleeAttackAbility = pawn.ability_manager.get_node("HeavySmash")
 	await _ticks(5)
 	_ai(pawn).press(&"secondary")
 	await _ticks(2)
-	_check(heavy.is_running_timed() and heavy.duration_ticks() == 41, "the special request starts the heavy attack (41 ticks: 18, 5 and 18)")
+	# Claude 2026-11-16 (pawn spec 8.20, the owner's numbers): a longer windup and reach than before (22 ticks, 2.7 m; were 18, 2.4).
+	var recovery: AbilityStep = heavy.get_node("Recovery")
+	_check(heavy.is_running_timed() and heavy.windup_length() == 22 and heavy.hit_length() == 5 and recovery.length() == 18 and is_equal_approx(heavy.attack_range, 2.7),
+			"the special request starts the heavy attack: 22, 5 and 18 ticks, 2.7 m reach")
 	await _until(func() -> bool: return not heavy.is_running_timed(), 80)
-	_check(heavy.cooldown_ticks_left > 300, "then a long cooldown (6 s)")
+	_check(heavy.cooldown_ticks_left > 100 and heavy.cooldown_ticks_left <= 114, "then its cooldown, 1.9 s (%d ticks left)" % heavy.cooldown_ticks_left)
+	var feet := pawn.global_position
+	_check(smash.attack_range > heavy.attack_range and smash.hit_centre_at(0.0).y - feet.y > smash.hit_centre_at(1.0).y - feet.y + 1.5,
+			"the smash reaches further (%.1f m) and comes down from high to low" % smash.attack_range)
 	pawn.free()
 
 

@@ -183,6 +183,12 @@ func _process(delta: float) -> void:
 		_last_tick = _driver.tick
 		record["dropped"] = _driver.dropped_ticks - _last_dropped
 		_last_dropped = _driver.dropped_ticks
+		record["load_step"] = _driver.load_step # Claude 2026-11-16 (pawn spec 8.21): the load ladder
+	# Claude 2026-11-16: how many AI pawns run every tick, every 2nd and every 4th (AIActivationManager).
+	var game_mode: Node = get_node_or_null(^"/root/GameMode")
+	var activation: AIActivationManager = game_mode.ai_activation_manager if game_mode else null
+	if activation:
+		record["step_counts"] = activation.get_step_counts()
 	record["scopes"] = scopes
 	_frames.append(record)
 	var oldest: float = record.time - history_seconds
@@ -238,6 +244,13 @@ func get_log_path() -> String:
 
 
 ## Averages over the last seconds of history. Keys: seconds, frames, fps, frame_ms, physics_ms, scripts_ms, rest_ms, steps_per_frame,
+## Claude 2026-11-16: "a/b/c" for how many AI pawns run every tick, every 2nd and every 4th, or "-" without the counts.
+static func steps_text(counts: Variant) -> String:
+	if not (counts is Dictionary) or counts.is_empty():
+		return "-"
+	return "%d/%d/%d" % [counts.get(1, 0), counts.get(2, 0), counts.get(4, 0)]
+
+
 ## frame_worst_ms, over_60_percent (frames over 20 ms), over_30_percent (over 34 ms), ticks_per_second, dropped_per_second, render_cpu_ms, render_gpu_ms, draw_calls,
 ## objects, nodes, orphans, memory_mb, scopes (name -> [ms a frame, calls a frame], most expensive first), tick_ms (TickDriver's
 ## phases a tick), tick_parts (each phase and network part -> ms a tick), pawns, dead, frozen, role, window, vsync.
@@ -292,6 +305,8 @@ func _summary(seconds: float) -> Dictionary:
 	var span := maxf(seconds, 0.001)
 	out["ticks_per_second"] = sums.ticks / span
 	out["dropped_per_second"] = sums.dropped / span
+	out["load_step"] = int(last.get("load_step", 1)) # Claude 2026-11-16 (pawn spec 8.21)
+	out["step_counts"] = last.get("step_counts", {})
 	for key: String in ["draw_calls", "objects", "nodes", "orphans"]:
 		out[key] = int(last.get(key, 0))
 	out["memory_mb"] = last.get("memory_kb", 0) / 1024.0
@@ -422,9 +437,9 @@ func summary_text(n: Dictionary) -> String:
 		if top.size() >= 6:
 			break
 		top.append("%s %.2f" % [scope, n.scopes[scope][0]])
-	return "[summary %.0fs] %s, %d fps, frame %.1f ms (worst %.0f, late >20 ms %.0f%%, very late >34 ms %.0f%%) = physics %.1f (%.2f steps) + scripts %.1f + rest %.1f | tick %.2f ms, %.0f ticks/s, dropped %.1f/s | draw CPU %.1f GPU %.1f, %d calls | memory %.0f MB, objects %d, nodes %d, orphans %d | pawns %d, dead %d, frozen %d | %s, vsync %s | top ms/frame: %s" % [
+	return "[summary %.0fs] %s, %d fps, frame %.1f ms (worst %.0f, late >20 ms %.0f%%, very late >34 ms %.0f%%) = physics %.1f (%.2f steps) + scripts %.1f + rest %.1f | tick %.2f ms, %.0f ticks/s, dropped %.1f/s, load step %d, AI every tick/2nd/4th %s | draw CPU %.1f GPU %.1f, %d calls | memory %.0f MB, objects %d, nodes %d, orphans %d | pawns %d, dead %d, frozen %d | %s, vsync %s | top ms/frame: %s" % [
 		n.seconds, n.role, n.fps, n.frame_ms, n.frame_worst_ms, n.over_60_percent, n.over_30_percent, n.physics_ms, n.steps_per_frame,
-		n.scripts_ms, n.rest_ms, n.tick_ms, n.ticks_per_second, n.dropped_per_second, n.render_cpu_ms, n.render_gpu_ms, n.draw_calls,
+		n.scripts_ms, n.rest_ms, n.tick_ms, n.ticks_per_second, n.dropped_per_second, n.load_step, DiagnosticsManager.steps_text(n.step_counts), n.render_cpu_ms, n.render_gpu_ms, n.draw_calls,
 		n.memory_mb, n.objects, n.nodes, n.orphans, n.pawns, n.dead, n.frozen, n.window, n.vsync, ", ".join(top)]
 
 

@@ -236,6 +236,12 @@ func _test_bytes() -> void:
 	var different_log := _add_log(different)
 	_check(not different_log.from_bytes(bytes), "and so are edits made for different ground")
 	_check(different_log.get_edit_count() == 0, "(so the world stays at its default)")
+	# Claude 2026-11-16: a new generator_version means different ground too, though every setting is the same.
+	var newer := _make_terrain()
+	newer.generator_version = 2
+	var newer_log := _add_log(newer)
+	_check(not newer_log.from_bytes(bytes), "and edits made for an older generator_version, with every setting the same")
+	newer.free()
 	terrain.free()
 	other.free()
 	third.free()

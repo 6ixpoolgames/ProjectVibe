@@ -64,7 +64,7 @@ func is_following_order() -> bool:
 	if _has_waiting_point:
 		return true
 	var navigation := _navigation()
-	return navigation != null and _is_in_charge() and navigation.is_following_path()
+	return navigation != null and _is_in_charge() and navigation.is_under_way() # Claude 2026-11-16: waiting for nav counts too
 
 
 ## Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
@@ -133,7 +133,8 @@ func take_input_command(_tick: int) -> InputCommand:
 		_has_waiting_point = false
 		navigation.move_to(_waiting_point)
 	var link_press := 0
-	if navigation and navigation.is_following_path():
+	# Claude 2026-11-16: is_under_way, so a path waiting for nav (PENDING) gets asked each tick, which is when it tries again.
+	if navigation and navigation.is_under_way():
 		_command.move = navigation.get_move_direction()
 		# Claude 2026-11-08: a link it just reached may need an action, such as jump, pressed for this tick.
 		var action := navigation.take_link_action()

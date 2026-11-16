@@ -112,6 +112,16 @@ func _ready() -> void:
 	arena._spawn_wave()
 	await _ticks(5)
 	_check(before < wanted and living.call() == wanted, "R refills the spawners at once (%d living, was %d)" % [living.call(), before])
+
+	# Claude 2026-11-16: U lets go of the pawn (its AI controller takes over) and flies as a spectator; U again takes it back.
+	var coordinator: PossessionCoordinator = GameMode.possession_coordinator
+	var own: Pawn = coordinator.get_pawn_of()
+	arena._toggle_spectating()
+	_check(own != null and coordinator.get_pawn_of() == null and coordinator.controller.is_spectating(), "U lets go of the pawn and flies as a spectator")
+	_check(not own.controller_manager.has_player() and own.keeps_world_loaded, "the pawn's AI controller has it now, and it keeps the world loaded")
+	await _ticks(5)
+	arena._toggle_spectating()
+	_check(coordinator.get_pawn_of() == own and not coordinator.controller.is_spectating(), "U again takes it back")
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 

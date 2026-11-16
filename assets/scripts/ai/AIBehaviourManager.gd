@@ -198,7 +198,8 @@ func tick_running(tick: int) -> void:
 	# Claude 2026-11-09: only every tick_interval_ticks, counted from when it started (ai_stress: Chase ticking every tick was 1.8 ms
 	# of a 200-pawn crowd).
 	var interval := TickDriver.ticks_at_rate(_running.tick_interval_ticks) # Claude 2026-11-09 (scaling spec step 6)
-	if interval > 1 and posmod(tick - _running.started_tick, interval) != 0:
+	# Claude 2026-11-16 (pawn spec 8.21): or one skipped since its pawn's last run, for a pawn running every Nth tick.
+	if interval > 1 and not pawn.fired_since_last_run(tick, -_running.started_tick, interval):
 		return
 	var context := pawn.ai_context
 	var status := _running.tick(context)

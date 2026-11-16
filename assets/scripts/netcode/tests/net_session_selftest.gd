@@ -31,6 +31,7 @@ func _ready() -> void:
 	await _test_sync_only_entity_is_in_snapshots() # Claude 2026-11-16 (networking T1.0)
 	await _test_no_snapshots_without_clients()
 	_test_unusable_inputs_dont_count()
+	_test_snapshot_lists_must_fit() # Claude 2026-11-16 (networking N4)
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -157,6 +158,35 @@ func _test_unusable_inputs_dont_count() -> void:
 	session._peers.erase(peer)
 	session._entities.erase(entity_id)
 	session.leave()
+	root.free()
+
+
+# Claude 2026-11-16 (networking N4): a snapshot whose lists for an entity have the wrong sizes is refused, counted and warned about,
+# rather than read as empty. Empty lists are fine (nothing that tick), and the right sizes pass.
+func _test_snapshot_lists_must_fit() -> void:
+	var session: NetworkSessionSingleton = NetworkSession
+	var root := InputOnly.new()
+	root.name = "SchemaCheck"
+	var state := TickStateComponent.new()
+	state.name = "TickState"
+	state.state_properties = ["wanted"]
+	root.add_child(state)
+	var entity := NetworkEntity.new()
+	entity.name = "NetworkEntity"
+	root.add_child(entity)
+	add_child(root)
+	entity.configure(9002, "schema_test", 1, NetworkEntity.Role.REMOTE_FOLLOWING, false, session)
+	_check(entity.state.get_list_sizes() == PackedInt32Array([1, 0, 0, 0]), "get_list_sizes gives state, sync, input and custom (%s)" % str(entity.state.get_list_sizes()))
+	var mismatches: int = session.stats["schema_mismatches"]
+	_check(session._snapshot_lists_fit(entity, [9002, [3], [], [], []]), "lists of the declared sizes fit")
+	_check(session._snapshot_lists_fit(entity, [9002, [], [], [], []]), "and so do empty ones (nothing that tick)")
+	_check(session.stats["schema_mismatches"] == mismatches, "neither counts as a mismatch")
+	_check(not session._snapshot_lists_fit(entity, [9002, [3, 4], [], [], []]), "two state values where one is declared: refused")
+	_check(not session._snapshot_lists_fit(entity, [9002, [3], [], [7], []]), "an input value where none is declared: refused")
+	_check(session.stats["schema_mismatches"] == mismatches + 2, "each counted in stats.schema_mismatches")
+	_check(session._schema_warned.has("schema_test"), "and warned about, once for the entity type")
+	session.leave()
+	_check(not session._schema_warned.has("schema_test"), "a new session warns afresh")
 	root.free()
 
 

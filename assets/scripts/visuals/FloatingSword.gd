@@ -157,18 +157,17 @@ func _target(facing: float) -> Transform3D:
 	var swing := _running_swing()
 	if swing == null:
 		return hover
-	var windup := float(swing.windup_length())
-	var hit := float(swing.hit_length())
-	var total := float(swing.duration_ticks())
-	# Ticks since the swing started, plus how far the tick driver is toward the next tick, for a smooth sweep between ticks.
-	var elapsed := float(swing.ticks_running()) + TickDriver.get_interpolation_fraction()
-	if elapsed < windup:
-		var t := _ease_out(elapsed / maxf(windup, 1.0))
-		return hover.interpolate_with(_swing_pose(swing, feet, facing, -windup_pull_back), t)
-	if elapsed < windup + hit:
-		return _swing_pose(swing, feet, facing, (elapsed - windup) / maxf(hit, 1.0))
-	var recovery := maxf(total - windup - hit, 1.0)
-	return _swing_pose(swing, feet, facing, 1.0).interpolate_with(hover, _ease_in_out((elapsed - windup - hit) / recovery))
+	# Claude 2026-11-16 (pawn spec 8.20): where the swing is comes from its steps (swing_phase), not from counting ticks since it started,
+	# since a windup can wait for its turn. The progress is smooth between ticks.
+	var phase := swing.swing_phase()
+	match phase.phase:
+		"windup":
+			return hover.interpolate_with(_swing_pose(swing, feet, facing, -windup_pull_back), _ease_out(phase.progress))
+		"hit":
+			return _swing_pose(swing, feet, facing, phase.progress)
+		"recovery":
+			return _swing_pose(swing, feet, facing, 1.0).interpolate_with(hover, _ease_in_out(phase.progress))
+	return hover
 
 
 # Hovering beside the pawn, bobbing, the blade leaning out a little and swaying with the bob. Claude 2026-11-12: on the side it rests
@@ -188,7 +187,7 @@ func _update_rest_side(delta: float, facing: float) -> void:
 	var swing := _running_swing()
 	if swing:
 		_idle_seconds = 0.0
-		if swing.ticks_running() >= swing.windup_length() + swing.hit_length():
+		if swing.swing_phase().phase == "recovery": # Claude 2026-11-16: was counting ticks since it started
 			var right := Vector3(cos(facing), 0.0, -sin(facing))
 			var end := swing.hit_offset_at(1.0, facing)
 			end.y = 0.0

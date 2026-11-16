@@ -150,7 +150,7 @@ var packet_filter: Object = null
 ## Bytes and packets sent and received, for diagnostics.
 var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_received": 0, "snapshots_received": 0,
 		"corrections": 0, "correction_total": 0.0, "correction_worst": 0.0, "jump_total": 0.0, "jump_worst": 0.0, "resyncs": 0,
-		"bad_packets": 0, "packets_over_limit": 0, "rejected_inputs": 0, "snapshots_encoded": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
+		"bad_packets": 0, "packets_over_limit": 0, "rejected_inputs": 0, "snapshots_encoded": 0, "schema_mismatches": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
 		"margin_lowest": NO_MARGIN, "speed_lowest": 1.0, "speed_highest": 1.0}
 ## Client: which tick of the server's remote entities are being drawn at. -1 before the first snapshot.
 var render_tick: float = -1.0
@@ -181,6 +181,7 @@ var _inbox: Array = []               # [peer, bytes] waiting for the next tick
 var _world_channels := {} # Claude 2026-11-07: channel name's hash -> {"receive": Callable, "catch_up": Callable}
 var _world_inbox: Array[PackedByteArray] = []
 var _client_channels := {} # Claude 2026-11-07: channel name's hash -> Callable(peer, bytes)
+var _schema_warned := {} # Claude 2026-11-16 (networking N4): entity types already warned about a schema mismatch, so it's said once each
 var _inbox_counts: Dictionary = {}   # peer -> how many of those are theirs
 var _codec: Object = null             # NetCodec, or null to use NetPackets. Claude 2026-11-05
 var _cached_hash := 0                # content_hash is costly and a client can ask for it, so it's kept
@@ -308,6 +309,7 @@ func leave() -> void:
 	_inbox_counts.clear()
 	_world_inbox.clear() # Claude 2026-11-07, from the audit of 6df1464: world messages from the last session mustn't reach the next one
 	_reconcile_values.clear()
+	_schema_warned.clear() # Claude 2026-11-16 (networking N4): a new session warns afresh
 	_reconcile_tick = -1
 	_clock.reset()
 	_clock_ready = false
@@ -1300,11 +1302,36 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 		var entity: NetworkEntity = get_entity(item[0])
 		if entity == null or entity.state == null:
 			continue # its spawn hasn't arrived yet; the next snapshot covers it
+		# Claude 2026-11-16 (networking N4): lists of the wrong size are refused and reported. They used to be read as empty, so
+		# the entity silently stopped updating.
+		if not _snapshot_lists_fit(entity, item):
+			continue
 		var values := entity.state.state_values_to_dictionary(item[1])
 		entity.state.apply_sync_values(item[2])
 		entity.state.receive_authoritative_state(tick, values) # kept for all, so a switch takes effect at once
 		if not entity.follows_snapshots():
 			_reconcile_values[item[0]] = {"state": values, "input": entity.state.input_values_to_dictionary(item[3]), "custom": item[4]}
+
+
+# Claude 2026-11-16 (networking N4, from the networking assessment): true if a snapshot's lists for this entity have the sizes its
+# TickStateComponent expects: state, sync, input, custom (item[1] to item[4]). An empty list is fine: it means the server had
+# nothing for it that tick (an input that's gone, no custom state). Any other size means the two machines declare different
+# properties for this entity, which the handshake's content hash should have caught; it's counted in stats.schema_mismatches and
+# warned about once per entity type, and the entity is skipped for this snapshot.
+func _snapshot_lists_fit(entity: NetworkEntity, item: Array) -> bool:
+	var sizes := entity.state.get_list_sizes()
+	for i in sizes.size():
+		var list: Variant = item[i + 1]
+		var size := (list as Array).size() if list is Array else -1
+		if size == 0 or size == sizes[i]:
+			continue
+		stats["schema_mismatches"] += 1
+		if not _schema_warned.has(entity.type_name):
+			_schema_warned[entity.type_name] = true
+			var which: String = ["state", "sync", "input", "custom"][i]
+			push_warning("[NetworkSession] entity type '%s': the server sent %d %s values, this machine declares %d. The two builds differ; its snapshots are ignored." % [entity.type_name, size, which, sizes[i]])
+		return false
+	return true
 
 
 ## Client: compares predictions with the newest snapshot, and if any are wrong, corrects them and resimulates from there.

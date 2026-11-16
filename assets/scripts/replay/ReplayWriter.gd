@@ -21,7 +21,7 @@ extends RefCounted
 var use_thread := true
 ## Claude 2026-11-16: the most blocks that may wait to be written. push_block refuses more, so a disk that can't keep up never fills
 ## memory; the recorder then stops recording.
-var max_queued_blocks := 30
+var max_queued_blocks := 60 # Claude 2026-11-16: the recorder sets it; 60 by default, was 30
 
 var _file: FileAccess = null
 var _thread: Thread = null
