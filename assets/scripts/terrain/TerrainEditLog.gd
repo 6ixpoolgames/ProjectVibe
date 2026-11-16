@@ -58,6 +58,10 @@ var _session: Node = null
 var _channel := ""
 var _warned_about_client_edit := false
 var _since_save := 0.0 # Claude 2026-11-09: seconds since the last timed save
+# Claude 2026-11-16 (wider audit): on once the file at save_path was there but refused (broken, or made for ground with other settings).
+# The log then stops saving itself over it, so one run with a different seed doesn't delete the saved edits. Saving by code
+# (save_to_file) still works, and turns it off.
+var _load_refused := false
 
 
 func _enter_tree() -> void:
@@ -65,7 +69,7 @@ func _enter_tree() -> void:
 	if _terrain == null:
 		push_warning("TerrainEditLog: its parent isn't a TerrainGenerator, so it does nothing.")
 		return
-	_terrain._edit_log_arrived(self)
+	_terrain.edit_log_arrived(self)
 	_session = get_node_or_null("/root/NetworkSession")
 	if _session:
 		# The path is the same on every machine, so this names the same terrain everywhere.
@@ -80,12 +84,12 @@ func _enter_tree() -> void:
 func _exit_tree() -> void:
 	# Claude 2026-11-09: save on the way out, while the terrain is still here.
 	if save_path != "" and _terrain != null and _may_use_files():
-		save_to_file(save_path)
+		_save_itself()
 	if _session and _channel != "":
 		_session.unregister_world_channel(_channel)
 	_channel = ""
 	if _terrain != null:
-		_terrain._edit_log_left(self)
+		_terrain.edit_log_left(self)
 
 
 ## Claude 2026-11-09: saves the log to a file: a temporary file first, then renamed over the old one. OK, or why not. Does nothing
@@ -93,6 +97,8 @@ func _exit_tree() -> void:
 func save_to_file(path: String = save_path) -> Error:
 	if path == "" or not _may_use_files():
 		return ERR_UNAVAILABLE
+	if path == save_path:
+		_load_refused = false # saved on purpose: this log is the file now
 	var temporary := path + ".tmp"
 	var file := FileAccess.open(temporary, FileAccess.WRITE)
 	if file == null:
@@ -117,10 +123,25 @@ func load_from_file(path: String = save_path) -> bool:
 	if not FileAccess.file_exists(source):
 		return false
 	var bytes := FileAccess.get_file_as_bytes(source)
+	var loaded := false
 	if bytes.size() < 4 or bytes.slice(0, 4).get_string_from_ascii() != FILE_HEADER:
 		push_warning("TerrainEditLog: %s isn't a terrain edits file, so it was ignored." % source)
-		return false
-	return from_bytes(bytes.slice(4))
+	else:
+		loaded = from_bytes(bytes.slice(4))
+	if path == save_path:
+		_load_refused = not loaded # Claude 2026-11-16 (wider audit): a refused file is left alone by the log's own saves
+	return loaded
+
+
+# Claude 2026-11-16 (wider audit): the log's own saves (leaving the tree, the timer). Skipped, with a warning the first time, while
+# the file there is one this log refused to load.
+var _refusal_warned := false
+func _save_itself() -> void:
+	if not _load_refused:
+		save_to_file(save_path)
+	elif not _refusal_warned:
+		_refusal_warned = true
+		push_warning("TerrainEditLog: %s couldn't be loaded, so it isn't being saved over. Move or delete it, or call save_to_file() to replace it." % save_path)
 
 
 func _process(delta: float) -> void:
@@ -128,7 +149,7 @@ func _process(delta: float) -> void:
 	_since_save += delta
 	if save_every_seconds > 0.0 and _since_save >= save_every_seconds:
 		_since_save = 0.0
-		save_to_file(save_path)
+		_save_itself()
 
 
 ## How many edits there are.
@@ -266,13 +287,13 @@ func from_bytes(bytes: PackedByteArray) -> bool:
 		ticks.append(tick)
 	# All good: now it's replaced. Half-built chunks finish first, with the old log, and are rebuilt below like the others.
 	if _terrain != null:
-		_terrain._finish_building_chunks()
+		_terrain.finish_building_chunks()
 	var chunks_before: Array = _by_chunk.keys()
 	clear()
 	for i in incoming.size():
 		_add(incoming[i][0], incoming[i][1], incoming[i][2], incoming[i][3], ticks[i])
 	if _terrain != null:
-		_terrain._rebuild_chunks_for_log(chunks_before + _by_chunk.keys())
+		_terrain.rebuild_chunks_for_log(chunks_before + _by_chunk.keys())
 	return true
 
 
@@ -297,17 +318,16 @@ func _on_network_message(bytes: PackedByteArray) -> void:
 func _receive_edit(bytes: PackedByteArray) -> int:
 	if _terrain == null or bytes.size() != BYTES_PER_EDIT:
 		return -1
-	_terrain._finish_building_chunks()
+	_terrain.finish_building_chunks()
 	var index := record_from_bytes(bytes)
 	if index >= 0:
-		_terrain._apply_edit_from_log(_x[index], _z[index], _radius[index], _amount[index])
+		_terrain.apply_edit_from_log(_x[index], _z[index], _radius[index], _amount[index])
 	return index
 
 
-## Server: what a late joiner needs. Empty means nothing to send.
+## Server: what a late joiner needs: the whole log. Claude 2026-11-16 (wider audit): an empty one too. It used to send nothing then,
+## so a client that had loaded edits from its own file before joining kept ground the server doesn't have.
 func _catch_up_message() -> PackedByteArray:
-	if _x.is_empty():
-		return PackedByteArray()
 	var bytes := to_bytes()
 	bytes.insert(0, MESSAGE_WHOLE_LOG)
 	return bytes

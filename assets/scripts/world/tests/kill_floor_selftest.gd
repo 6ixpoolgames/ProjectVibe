@@ -3,12 +3,10 @@
 ## SpawnManager's, checked in game_mode/tests/spawn_manager_selftest.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/world/tests/kill_floor_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -37,7 +35,7 @@ func _ready() -> void:
 		if falling.is_dead():
 			break
 	_check(falling.is_dead() and falling.global_position.y < -20.0 and falling.global_position.y > -40.0, "a pawn that falls below it dies soon after (at %.1f m)" % falling.global_position.y)
-	_check(not standing.is_dead() and standing.get_health() == 100.0, "one standing on the ground above it is left alone")
+	_check(not standing.is_dead() and standing.stat_manager.get_health() == 100.0, "one standing on the ground above it is left alone")
 	await _ticks(60)
 	_check(deaths.size() == 1, "a dead pawn below it isn't hit again (%d deaths)" % deaths.size())
 	falling.ability_manager.revive()
@@ -92,9 +90,3 @@ func _pawn(at: Vector3) -> Pawn:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

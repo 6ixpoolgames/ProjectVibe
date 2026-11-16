@@ -16,7 +16,17 @@ extends RefCounted
 const PROTOCOL_VERSION := 5 # Claude 2026-11-05: 4 adds custom state to snapshots. Claude 2026-11-07: 5 adds small ints (INT8, INT16)
 
 # Claude 2026-11-07: WORLD_MESSAGE, OWNER_CHANGED and CLIENT_MESSAGE added. NetCodec only handles inputs and snapshots, so it doesn't need to know.
-enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, WORLD_MESSAGE, OWNER_CHANGED, CLIENT_MESSAGE }
+# Claude 2026-11-16: ACK added at the end, so the numbers before it don't move: a client says which parts of which snapshots it read
+# (Claude 2026-11-17: per part, not whole snapshots as this said first). NetCodec doesn't need to know.
+enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, WORLD_MESSAGE, OWNER_CHANGED, CLIENT_MESSAGE, ACK }
+## Claude 2026-11-16 (audit): the types sent unreliably, in one place, so a new type is added here once (NetDebugModule reads it; it
+## had to be patched by hand for ACK). Everything else goes reliably.
+const UNRELIABLE_TYPES: Array[int] = [Type.INPUT, Type.SNAPSHOT, Type.PING, Type.PONG, Type.ACK]
+
+
+## Claude 2026-11-16 (audit): true if packets of this type go unreliably (UNRELIABLE_TYPES).
+static func is_unreliable(type: int) -> bool:
+	return UNRELIABLE_TYPES.has(type)
 
 ## What read_value returns for a broken packet. Stop reading when you see it.
 const BAD := &"__net_bad_packet__"
@@ -107,11 +117,11 @@ static func read_value(buffer: StreamPeerBuffer) -> Variant:
 		Tag.ANGLE_U16:
 			if not has_bytes(buffer, 2):
 				return BAD
-			return StateEncoding._as_float32(buffer.get_16() * StateEncoding.U16_STEP)
+			return StateEncoding.as_float32(buffer.get_16() * StateEncoding.U16_STEP)
 		Tag.ANGLE_BYTE:
 			if not has_bytes(buffer, 1):
 				return BAD
-			return StateEncoding._as_float32(buffer.get_8() * StateEncoding.BYTE_STEP)
+			return StateEncoding.as_float32(buffer.get_8() * StateEncoding.BYTE_STEP)
 		Tag.FLOAT32:
 			if not has_bytes(buffer, 4):
 				return BAD

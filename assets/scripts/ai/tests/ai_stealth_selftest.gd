@@ -5,12 +5,10 @@
 ## Claude 2026-11-09: add "-- --gdscript-store" to check the GDScript memory store where the C++ one is available.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_stealth_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const FAR_AWAY := Vector3(80, 0, 80) # out of sight range
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -45,7 +43,7 @@ func _test_walkthrough() -> void:
 	_check(ticks >= 0, "a glimpse at 22 m: Alert after %d ticks" % ticks)
 	_check(_running(goblin) == &"LookToward", "it stops and looks (Look Toward)")
 	_check(not _certain(goblin, intruder), "still uncertain")
-	var last_known: Vector3 = goblin.ai_memory.last_known_position_at(goblin.ai_memory.find(intruder))
+	var last_known: Vector3 = goblin.ai_context.memory.last_known_position_at(goblin.ai_context.memory.find(intruder))
 	intruder.global_position = FAR_AWAY # it ducks out of sight
 	ticks = await _until(func() -> bool: return _running(goblin) == &"Investigate", 120)
 	_check(ticks >= 0, "after looking, it goes to investigate (%d ticks later)" % ticks)
@@ -66,7 +64,7 @@ func _test_walkthrough() -> void:
 	_check(ticks >= 0, "it closes in on the intruder, and stops near it (%d ticks)" % ticks)
 
 	# 3. The intruder vanishes: two seconds later the goblin is Alert again, searching where it was.
-	goblin.ai_memory.certain_fade = _straight_line(400) # shorter than the default 1200, to keep the test quick
+	goblin.ai_context.memory.certain_fade = _straight_line(400) # shorter than the default 1200, to keep the test quick
 	var vanished_at: Vector3 = intruder.global_position
 	intruder.global_position = FAR_AWAY
 	await _ticks(100)
@@ -75,7 +73,7 @@ func _test_walkthrough() -> void:
 	_check(ticks >= 0, "after 2 s unseen: back to Alert")
 	await _ticks(2)
 	_check(_running(goblin) == &"Search", "searching, because it became certain (Search, not Investigate)")
-	_check(goblin.ai_memory.last_known_position_at(goblin.ai_memory.find(intruder)).distance_to(vanished_at) < 1.0, "around where it was last seen")
+	_check(goblin.ai_context.memory.last_known_position_at(goblin.ai_context.memory.find(intruder)).distance_to(vanished_at) < 1.0, "around where it was last seen")
 
 	# 4. It forgets: the certain entry fades below Alert's 0.3, and it wanders again.
 	ticks = await _until(func() -> bool: return _state(goblin) == &"Idle", 600)
@@ -96,7 +94,7 @@ func _test_never_alerted() -> void:
 		_put_in_front(friend, goblin, 4.0)
 		_put_in_front(ghost, goblin, 3.0)
 		await get_tree().physics_frame
-	_check(_state(goblin) == &"Idle" and goblin.ai_memory.entry_count() == 0, "a pawn on its own team, and an invisible one, close in front for 2 s: never noticed")
+	_check(_state(goblin) == &"Idle" and goblin.ai_context.memory.entry_count() == 0, "a pawn on its own team, and an invisible one, close in front for 2 s: never noticed")
 	goblin.free()
 	friend.free()
 	ghost.free()
@@ -136,7 +134,7 @@ func _make_pawn(team: int, at: Vector3) -> Pawn:
 
 ## Puts a pawn this far in front of the goblin's eyes.
 func _put_in_front(pawn: Pawn, goblin: Pawn, distance: float) -> void:
-	var sight: SightSense = goblin.ai_sensing_manager.get_node("Sight")
+	var sight: SightSense = goblin.ai_context.sensing_manager.get_node("Sight")
 	var yaw: float = sight._eye_yaw()
 	pawn.global_position = goblin.global_position + Vector3(-sin(yaw), 0.0, -cos(yaw)) * distance
 	pawn.velocity = Vector3.ZERO
@@ -147,13 +145,13 @@ func _state(pawn: Pawn) -> StringName:
 
 
 func _running(pawn: Pawn) -> StringName:
-	var behaviour := pawn.ai_behaviour_manager.get_running_behaviour()
+	var behaviour := pawn.ai_context.behaviour_manager.get_running_behaviour()
 	return behaviour.name if behaviour else &""
 
 
 func _certain(goblin: Pawn, other: Pawn) -> bool:
-	var i := goblin.ai_memory.find(other)
-	return i >= 0 and goblin.ai_memory.is_certain_at(i)
+	var i := goblin.ai_context.memory.find(other)
+	return i >= 0 and goblin.ai_context.memory.is_certain_at(i)
 
 
 func _flat_distance(a: Vector3, b: Vector3) -> float:
@@ -178,9 +176,3 @@ func _until(condition: Callable, max_ticks: int) -> int:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

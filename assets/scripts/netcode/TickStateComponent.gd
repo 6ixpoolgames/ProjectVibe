@@ -24,7 +24,7 @@
 ##
 ## Rules and corner cases (all checked in tests/tick_state_selftest.gd):
 ##   - Entries are matched to nodes when ticks run, not at ready, because children become ready before their parent and
-##     the nexus may add parts later. An entry whose node or property isn't there warns once and is looked for again
+##     PawnInitializer may add parts later (Claude 2026-11-17: this said "the nexus", which was never built). An entry whose node or property isn't there warns once and is looked for again
 ##     every tick, so it starts working as soon as the part exists. An unusable entry never causes an error.
 ##   - A listed node that gets freed (an ability removed at runtime) just stops being saved. Ticks saved while it was
 ##     there leave whatever replaced it alone: only properties saved for that tick are restored.
@@ -47,7 +47,8 @@
 ##                       drawn between snapshots with follow_server_at. NetworkEntity stops its parent ticking live. During a
 ##                       rollback it normally stays where it's drawn. With follows_during_rollback on, it stands where the
 ##                       server says instead, so that predicted bodies bump into it there.
-## The snapshot code passes what the server says to receive_authoritative_state(tick, values). With follows_during_rollback
+## The snapshot code passes what the server says to receive_authoritative_values(tick, list) (Claude 2026-11-17: the dictionary
+## version, receive_authoritative_state, is for tests and hands its list to that one). With follows_during_rollback
 ## on, during a replay, each tick:
 ##   - The server sent this tick: the entity stands exactly there.
 ##   - Otherwise: it starts from the newest server state before this tick and moves on that state's velocity, up to
@@ -92,6 +93,11 @@ enum RollbackMode { RESIMULATE, FOLLOW_SERVER }
 @export var extrapolation_cap_seconds: float = 0.2
 ## Also move it up and down on its velocity. Off by default: with no gravity in the estimate, a falling pawn would sink.
 @export var extrapolate_vertical: bool = false
+## Claude 2026-11-16 (audit double-check): how often a FOLLOW_SERVER entity writes every value again, including those the server says
+## haven't changed. Between these it only writes what changes (see _follow_before), which trusts that nothing else writes the
+## properties. If something does (a script on the node, an animation), the value is wrong until the server next changes it; with
+## this, for at most this long. Entities take turns, so they don't all do it on the same tick. 0: never.
+@export var follow_refresh_seconds: float = 0.5
 ## Claude 2026-11-04: during a rollback, stand on server data and extrapolate, instead of staying where it's drawn. Off by
 ## default, which is the standard behaviour: over real connections it made no clear difference (netcode spec section 6.5).
 @export var follows_during_rollback: bool = false
@@ -117,6 +123,9 @@ static var use_native: bool = true
 
 ## Stored in a history slot for a property that didn't exist that tick.
 const MISSING := &"__tick_state_missing__"
+## Claude 2026-11-16 (profiling the networked mass battle): in the follow cache, a value this component hasn't written, or can't be
+## sure of any more.
+const UNWRITTEN := &"__tick_state_unwritten__"
 
 
 ## One list entry, and the node it's currently matched to.
@@ -149,6 +158,21 @@ var _live_values: Array = []     # following: what the entity had before the rep
 var _authoritative_ticks := PackedInt64Array() # following: ring buffer of what the server said, one slot per tick
 var _authoritative_values: Array = []
 var _newest_authoritative_tick := -1
+# Claude 2026-11-16 (profiling the networked mass battle): what follow_server_at last did, so a remote entity only writes what changes.
+# A client placed 154 remote pawns by writing all 42 of each one's values every tick, 9.5 ms a tick. Now, when it moves on to a new
+# pair of snapshots, it writes the values that differ from what it last wrote, and notes which ones move between the two (position,
+# velocity, facing); on the ticks in between, only those are blended and written. _follow_before and _follow_after are the pair,
+# _follow_moving the indices that blend, _follow_written what was last written at each index. Anything else that writes the
+# properties (a rollback, a correction, extrapolating) clears it with _forget_follow(), so the next placement writes everything.
+var _follow_before := -1
+var _follow_after := -1
+var _follow_moving := PackedInt32Array()
+var _follow_written: Array = []
+var _follow_refreshed := -1 # Claude 2026-11-16: the tick of the last write of everything (follow_refresh_seconds); -1 before the first
+var _auto_encodings_settled := false # Claude 2026-11-16 (audit): renamed; whether every "auto" encoding has been worked out
+# Claude 2026-11-16 (audit): each list's encodings, made once and kept until a list is rebuilt or an encoding is settled. Snapshots ask
+# for them for every entity every time; the lists were rebuilt for each ask.
+var _encodings_cache := {}
 var _replay_base_tick := -1      # following: the server tick the replay is currently estimating from; -1 is none
 var _position_index := -1        # following: where "position" and "velocity" are in the state list; -1 is not listed
 var _velocity_index := -1
@@ -187,6 +211,7 @@ func _ready() -> void:
 	_custom_nodes.resize(_custom_paths.size())
 	_inputs = _parse_list(input_properties)
 	_syncs = _parse_list(sync_properties)
+	_encodings_cache.clear() # Claude 2026-11-16 (audit)
 	_build_state_list() # Claude 2026-11-07: moved into a function, which add_state_properties() uses too
 	_state_ticks.resize(history_size)
 	_state_ticks.fill(-1)
@@ -230,6 +255,7 @@ func _build_state_list() -> void:
 		if "velocity" in _root:
 			listed.append("velocity")
 	_states = _parse_list(listed)
+	_encodings_cache.clear() # Claude 2026-11-16 (audit)
 	_recorder_ready = false # Claude 2026-11-09: the list changed, so the C++ recorder is filled again
 	_position_index = -1
 	_velocity_index = -1
@@ -242,6 +268,20 @@ func _build_state_list() -> void:
 				_position_index = i
 		elif property_name == "velocity" and (_velocity_index < 0 or p.node_path == ""):
 			_velocity_index = i
+
+
+## Claude 2026-11-16 (pawn spec 8.22, the owner's call: fold the crowd mover's guardrail into quantisation): a position rounded the way
+## this component's recording rounds its "position" entry (its encoding, such as millimetres), when it rounds every tick
+## (quantize_each_tick). Something that sets the position itself during a tick, such as the CrowdMover, rounds with this so the
+## position is already what the recording will make it, and the recording changes nothing: a still pawn stays exactly still. As is
+## if there's no position entry, its encoding isn't settled yet, or this doesn't round each tick.
+func round_position(value: Vector3) -> Vector3:
+	if not quantize_each_tick or _position_index < 0:
+		return value
+	var encoding := _states[_position_index].encoding
+	if encoding == StateEncoding.AUTO:
+		return value
+	return StateEncoding.quantize(value, encoding)
 
 
 # --- Called by the tick driver -----------------------------------------------------------------
@@ -383,6 +423,7 @@ func _rollback_finished() -> void:
 	if rollback_mode != RollbackMode.FOLLOW_SERVER:
 		return
 	_apply(_states, _live_values)
+	_forget_follow() # Claude 2026-11-16 (audit): written here, not by following, so the follow cache can't be trusted
 	_sync_collision()
 
 
@@ -420,18 +461,44 @@ func is_near_any(centres: Array) -> bool:
 ## Claude 2026-11-04: what the server says this entity's state was on a tick, as {entry: value}. Called by the snapshot code
 ## for a FOLLOW_SERVER entity. Entries not given stay as they are during that tick; names not in state_properties are ignored.
 func receive_authoritative_state(tick: int, values: Dictionary) -> void:
+	# Claude 2026-11-16 (wider audit): it makes the list and hands it to receive_authoritative_values, which snapshots use and which
+	# holds the rules (a late packet, the newest tick). The two had a copy each. Only tests call this one now.
 	if tick < 0 or _authoritative_ticks.is_empty():
 		return
-	var slot := tick % history_size
-	if _authoritative_ticks[slot] > tick:
-		return # a late packet; this slot already holds something newer
 	var saved: Array = []
 	saved.resize(_states.size())
 	for i in _states.size():
 		var p := _states[i]
 		saved[i] = _rounded_copy(p, values[p.key]) if values.has(p.key) else MISSING
+	receive_authoritative_values(tick, saved)
+
+
+## Claude 2026-11-16 (profiling the networked mass battle): receive_authoritative_state for a whole list in declared order, as a
+## snapshot carries it, without building a dictionary first. The list is kept as it is, not copied: the caller hands over a list of
+## its own, already rounded by the server's encodings, and nothing changes it afterwards. A list of the wrong size is ignored.
+func receive_authoritative_values(tick: int, values: Array) -> void:
+	# Claude 2026-11-16 (audit): an empty list means the server had nothing for it that tick: every entry MISSING, as the dictionary
+	# version does with an empty dictionary.
+	if values.is_empty() and not _states.is_empty():
+		values = []
+		values.resize(_states.size())
+		values.fill(MISSING)
+	if tick < 0 or _authoritative_ticks.is_empty() or values.size() != _states.size():
+		return
+	var slot := tick % history_size
+	if _authoritative_ticks[slot] > tick:
+		return # a late packet; this slot already holds something newer
+	if not _auto_encodings_settled:
+		# An "auto" encoding is settled from its first real value, as _rounded_copy does on the dictionary path.
+		_auto_encodings_settled = true
+		for i in _states.size():
+			if _states[i].encoding == StateEncoding.AUTO:
+				if is_same(values[i], MISSING) or values[i] == null:
+					_auto_encodings_settled = false
+				else:
+					_settle_encoding(_states[i], values[i])
 	_authoritative_ticks[slot] = tick
-	_authoritative_values[slot] = saved
+	_authoritative_values[slot] = values
 	_newest_authoritative_tick = maxi(_newest_authoritative_tick, tick)
 
 
@@ -439,6 +506,7 @@ func receive_authoritative_state(tick: int, values: Dictionary) -> void:
 func clear_authoritative_state() -> void:
 	_authoritative_ticks.fill(-1)
 	_newest_authoritative_tick = -1
+	_forget_follow() # Claude 2026-11-16 (audit): a teleport or respawn: the next placement writes everything again
 
 
 ## Claude 2026-11-04: places the entity for drawing, part way between the two snapshots around this tick. If nothing newer
@@ -448,25 +516,99 @@ func follow_server_at(render_tick: float, allow_extrapolation: bool = true) -> v
 	if _authoritative_ticks.is_empty() or _newest_authoritative_tick < 0:
 		return
 	var whole := floori(render_tick)
+	# Claude 2026-11-16 (wider audit): two short cuts with the same result as the searches below. An entity the server stopped
+	# sending (frozen) has nothing near this tick, and used to search 32 slots back and 32 forward every tick to find that out.
+	# And when the newest data is the tick before, there's nothing after it to look for.
+	@warning_ignore("integer_division") # whole numbers on purpose
+	if whole - _newest_authoritative_tick > history_size / 2:
+		return
 	var before := _find_authoritative(whole, -1)
-	var after := _find_authoritative(before + 1 if before >= 0 else whole + 1, 1)
+	var after := -1
+	if before != _newest_authoritative_tick:
+		after = _find_authoritative(before + 1 if before >= 0 else whole + 1, 1)
+	# Claude 2026-11-16 (profiling): each case goes through _place_between, which only writes what changed (see _follow_before).
 	if before < 0:
 		if after >= 0:
-			_apply(_states, _authoritative_values[after % history_size]) # all the data is newer: hold at the oldest
+			var oldest: Array = _authoritative_values[after % history_size] # all the data is newer: hold at the oldest
+			_place_between(after, after, oldest, oldest, 0.0)
 		return
 	var older: Array = _authoritative_values[before % history_size]
 	if after < 0:
-		_apply(_states, older)
+		_place_between(before, before, older, older, 0.0)
 		if allow_extrapolation:
 			_replay_base_tick = before
 			_extrapolate(render_tick - before)
 		return
 	var newer: Array = _authoritative_values[after % history_size]
 	var weight := clampf((render_tick - before) / float(after - before), 0.0, 1.0)
-	for i in _states.size():
+	_place_between(before, after, older, newer, weight)
+
+
+## Claude 2026-11-16 (profiling the networked mass battle): places a following entity weight of the way from older (tick before) to
+## newer (tick after), writing as little as it can. The result is the same as writing StateEncoding.blend() of every value, as it
+## used to: values that can't blend, or are the same in both, hold at older's; positions, velocities and angles that differ blend.
+func _place_between(before: int, after: int, older: Array, newer: Array, weight: float) -> void:
+	if _follow_written.size() != _states.size():
+		_follow_written.resize(_states.size())
+		_follow_written.fill(UNWRITTEN)
+		_follow_before = -1
+	if before != _follow_before or after != _follow_after:
+		_refresh_follow_if_due(before)
+		# A new pair: write what differs from what was last written, and note what moves.
+		_follow_before = before
+		_follow_after = after
+		_follow_moving.clear()
+		for i in _states.size():
+			var value: Variant = older[i]
+			if is_same(value, MISSING):
+				continue
+			if _blends(value, newer[i]):
+				_follow_moving.append(i)
+				_follow_written[i] = UNWRITTEN # written every tick below; a later pair compares with the real value again
+				continue
+			var written: Variant = _follow_written[i]
+			if typeof(written) == typeof(value) and written == value:
+				continue
+			var p := _states[i]
+			if _bind(p):
+				# GDScript note: arrays are shared, not copied, when assigned, so the node gets its own copy of one.
+				p.write(StateEncoding.copy_value(value))
+				_follow_written[i] = value
+	for i in _follow_moving:
 		var p := _states[i]
-		if not is_same(older[i], MISSING) and _bind(p):
+		if _bind(p):
 			p.write(StateEncoding.blend(older[i], newer[i], weight, p.encoding))
+
+
+## Claude 2026-11-16 (audit double-check): on a new pair of snapshots, forgets what was last written if follow_refresh_seconds has
+## passed, so this pair writes every value. The first time, it only picks this entity's turn: its instance id spreads entities over
+## the interval, so 150 pawns that appeared together refresh a few a tick, not all on one.
+func _refresh_follow_if_due(tick: int) -> void:
+	if follow_refresh_seconds <= 0.0 or _driver == null:
+		return
+	var interval: int = _driver.seconds_to_ticks(follow_refresh_seconds)
+	if _follow_refreshed < 0:
+		_follow_refreshed = tick - int(get_instance_id() % interval)
+	# GDScript note: absi, so a clock that jumped back (a resync) still counts as time passed.
+	elif absi(tick - _follow_refreshed) >= interval:
+		_follow_refreshed = tick
+		_follow_written.fill(UNWRITTEN)
+
+
+## Claude 2026-11-16 (profiling): true if a value changes between the two snapshots in a way blend() moves smoothly: vectors and
+## floats of the same type that differ.
+static func _blends(a: Variant, b: Variant) -> bool:
+	var type := typeof(a)
+	if type != typeof(b) or not (type == TYPE_VECTOR3 or type == TYPE_VECTOR2 or type == TYPE_FLOAT):
+		return false
+	return a != b
+
+
+## Claude 2026-11-16 (profiling): something else wrote the properties, so the next placement writes everything.
+func _forget_follow() -> void:
+	_follow_before = -1
+	_follow_after = -1
+	_follow_written.fill(UNWRITTEN)
 
 
 ## The nearest tick with server data, starting at from_tick and looking one way (step is 1 or -1). -1 if there's none near.
@@ -508,16 +650,17 @@ func get_sync_values() -> Array:
 	return values
 
 
+## Claude 2026-11-16 (audit): the same list each time until it changes, so don't change what you're given.
 func get_state_encodings() -> Array:
-	return _encodings_of(_states)
+	return _cached_encodings(&"state", _states)
 
 
 func get_input_encodings() -> Array:
-	return _encodings_of(_inputs)
+	return _cached_encodings(&"input", _inputs) # Claude 2026-11-16 (audit): kept, like the state list's
 
 
 func get_sync_encodings() -> Array:
-	return _encodings_of(_syncs)
+	return _cached_encodings(&"sync", _syncs) # Claude 2026-11-16 (audit): kept, like the state list's
 
 
 ## Claude 2026-11-16 (networking N4): how many entries each list has: [state, sync, input, custom]. A snapshot's lists must have
@@ -659,6 +802,7 @@ func correct_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 	if tick < 0 or tick > _newest_state_tick:
 		return false
 	_warn_once("correct_expired", "[TickStateComponent] %s: correction for tick %d is older than the history (%d ticks kept); snapping without a replay" % [_root.name, tick, history_size])
+	_forget_follow() # Claude 2026-11-16 (profiling)
 	for p in _states:
 		if values.has(p.key) and _bind(p):
 			p.write(_rounded_copy(p, values[p.key]))
@@ -731,6 +875,7 @@ func _settle_encoding(p: Prop, value: Variant) -> void:
 	if p.encoding != StateEncoding.AUTO or value == null:
 		return
 	p.encoding = StateEncoding.resolve(StateEncoding.AUTO, value)
+	_encodings_cache.clear() # Claude 2026-11-16 (audit): an encoding changed
 	if value is Object:
 		_warn_once(p.entry, "[TickStateComponent] %s: '%s' holds an Object, which can't be copied into the history, so it won't roll back. Use save_state/load_state, or list an id." % [_root.name, p.entry])
 
@@ -777,6 +922,7 @@ func _follow_tick(tick: int) -> void:
 	if _replay_base_tick < 0:
 		return
 	_apply(_states, _authoritative_values[_replay_base_tick % history_size])
+	_forget_follow() # Claude 2026-11-16 (audit): see _rollback_finished
 	if tick > _replay_base_tick:
 		_extrapolate(float(tick - _replay_base_tick))
 
@@ -797,6 +943,12 @@ func _extrapolate(ticks: float) -> void:
 	var seconds: float = capped * _driver.get_tick_dt()
 	if _bind(_states[_position_index]):
 		_states[_position_index].write(from_position + velocity * seconds)
+		# Claude 2026-11-16 (profiling): the next placement writes the position again, even between the same pair (net_selftest's
+		# "extrapolation off" check caught it holding the extrapolated position). Only the position differs from what was written, so
+		# that placement writes just it.
+		if _position_index < _follow_written.size():
+			_follow_written[_position_index] = UNWRITTEN
+		_follow_before = -1
 
 
 ## True if a value from the network fits the property it's meant for, and has no not-a-number or infinity in it.
@@ -818,8 +970,16 @@ func _encodings_of(props: Array[Prop]) -> Array:
 	return out
 
 
+# Claude 2026-11-16 (audit): a list's encodings, made once under its name and kept (see _encodings_cache).
+func _cached_encodings(list_name: StringName, props: Array[Prop]) -> Array:
+	if not _encodings_cache.has(list_name):
+		_encodings_cache[list_name] = _encodings_of(props)
+	return _encodings_cache[list_name]
+
+
 func _restore_slot(slot: int) -> void:
 	_apply(_states, _state_values[slot])
+	_forget_follow() # Claude 2026-11-16 (audit): see _rollback_finished
 	_load_customs(_state_custom[slot])
 
 

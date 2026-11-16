@@ -38,8 +38,16 @@ func _init() -> void:
 	tick_interval_ticks = 5 # it only needs to notice when a leg ends
 
 
-func is_available(_context: AIContextComponent) -> bool:
-	_point = _nearest_point()
+# Claude 2026-11-16 (wider audit): how long a point found is kept before looking for the nearest again, in ticks at 60 a second.
+const LOOK_AGAIN_TICKS := 120
+var _looked_tick := -1000000
+
+func is_available(context: AIContextComponent) -> bool:
+	# Claude 2026-11-16 (wider audit): the point is kept while it's still there, and looked for again every 2 seconds in case a
+	# nearer one has appeared. This asked the tree for the whole group on every decision of every marching pawn.
+	if not is_instance_valid(_point) or not _point.is_inside_tree() or context.current_tick - _looked_tick >= TickDriver.ticks_at_rate(LOOK_AGAIN_TICKS):
+		_point = _nearest_point()
+		_looked_tick = context.current_tick
 	return _point != null and _flat_distance(_point.global_position) > arrive_radius
 
 

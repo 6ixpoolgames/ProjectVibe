@@ -224,9 +224,12 @@ func _timings_text(n: Dictionary) -> String:
 	lines.append("frame %6.1f ms %4.0f fps  worst %4.0f  late %3.0f%%  very late %3.0f%%" % [n.frame_ms, n.fps, n.frame_worst_ms, n.over_60_percent, n.over_30_percent])
 	lines.append("  (late: over 20 ms, a missed 1/60 s; very late: over 34 ms)")
 	lines.append("  physics %6.1f ms (%.2f steps)   scripts %5.1f   rest %5.1f" % [n.physics_ms, n.steps_per_frame, n.scripts_ms, n.rest_ms])
+	# Claude 2026-11-16 (the owner's request): the animation category, the part of the scripts spent animating (every animation.* scope)
+	lines.append("    of which animation %5.2f ms" % n.get("animation_ms", 0.0))
 	lines.append("  tick    %6.2f ms   %3.0f ticks/s   dropped %.1f/s" % [n.tick_ms, n.ticks_per_second, n.dropped_per_second])
 	# Claude 2026-11-16 (pawn spec 8.21): the load ladder, and how many AI pawns run every tick, every 2nd and every 4th.
 	lines.append("  load step %d   AI every tick/2nd/4th %s" % [n.get("load_step", 1), DiagnosticsManager.steps_text(n.get("step_counts", {}))])
+	lines.append("  " + DiagnosticsManager.server_text(n.get("server", {}))) # Claude 2026-11-16: the server's tick rate (a client's from snapshots)
 	lines.append("  drawing CPU %.1f  GPU %.1f ms   %d draw calls" % [n.render_cpu_ms, n.render_gpu_ms, n.draw_calls])
 	lines.append("  memory %.0f MB   objects %d   nodes %d   orphan nodes %d" % [n.memory_mb, n.objects, n.nodes, n.orphans])
 	lines.append("  pawns %d   dead %d   frozen %d" % [n.pawns, n.dead, n.frozen])
@@ -267,7 +270,7 @@ func _inspector_text() -> String:
 	lines.append("  at (%.1f, %.1f, %.1f)   moving %.1f m/s   facing %.0f°" % [at.x, at.y, at.z, pawn.velocity.length(), rad_to_deg(pawn.yaw)])
 	lines.append("  flags: %s%s%s%s%s%s   Health %.0f" % ["grounded " if pawn.grounded else "", "DEAD " if pawn.is_dead() else "",
 		"FROZEN " if pawn.is_frozen() else "", "sleeping " if pawn.is_sleeping else "", "source " if pawn.is_keeping_world_loaded() else "",
-		"player" if pawn.controller_manager and pawn.controller_manager.has_player() else "", pawn.get_health()])
+		"player" if pawn.controller_manager and pawn.controller_manager.has_player() else "", pawn.stat_manager.get_health() if pawn.stat_manager else 0.0]) # Claude 2026-11-17: was pawn.stat_manager.get_health()
 	var controllers := pawn.controller_manager # Claude 2026-11-16 (pawn M4)
 	if controllers:
 		lines.append("  input: move (%.2f, %.2f), look %.0f°, held %d" % [controllers.move_input.x, controllers.move_input.z, rad_to_deg(controllers.look_yaw), controllers.held_actions])
@@ -298,8 +301,8 @@ func _inspector_text() -> String:
 			effects.append("%s x%d (%d)" % [String(effect.effect_name) if effect else "?", entry.stacks, entry.ticks_left])
 		lines.append("  effects: %s" % (", ".join(effects) if not effects.is_empty() else "-"))
 	if pawn.ai_context:
-		var behaviour: AIBehaviourBase = pawn.ai_behaviour_manager.get_running_behaviour() if pawn.ai_behaviour_manager else null
-		var target: Node3D = pawn.ai_target_selector.get_current_target() if pawn.ai_target_selector else null
+		var behaviour: AIBehaviourBase = pawn.ai_context.behaviour_manager.get_running_behaviour() if pawn.ai_context.behaviour_manager else null
+		var target: Node3D = pawn.ai_context.target_selector.get_current_target() if pawn.ai_context.target_selector else null
 		lines.append("  AI: state %s, behaviour %s, target %s" % [pawn.ai_context.current_state_name(), String(behaviour.name) if behaviour else "-",
 			String(target.name) if is_instance_valid(target) else "-"])
 	return "\n".join(lines)

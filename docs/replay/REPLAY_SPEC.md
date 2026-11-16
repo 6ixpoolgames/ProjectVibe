@@ -11,7 +11,7 @@
 | What's recorded | Every pawn, AI ones included: position, facing, velocity, flags (grounded, dead, frozen, sleeping, has a chunk source, has a player). Their **inputs**. Spawns and despawns. Chunks built and removed, and the chunk sources. Gameplay events: hits, deaths, abilities, AI state and behaviour changes, freezes, possession, kill floor reports | the owner |
 | How often | Every tick, at the TickDriver's tick rate | the owner |
 | When it starts | When the game starts: on the host when the player picks Offline or Host, on a client when Join has connected. It stops when the session ends | the owner |
-| Where files go | `user://replays/host/` (host and offline) and `user://replays/client/`, kept apart. The newest 10 of each are kept | the owner: "sensible default saves, host and client folders separate" |
+| Where files go | `user://replays/host/` (host and offline) and `user://replays/client/`, kept apart. The newest 10 of each are kept. *Claude 2026-11-16: runs with no display (tests, dedicated servers) use `user://replays/headless/host/` and `.../client/`, with their own 10, so test runs don't push out played games (`headless_runs_apart`)* | the owner: "sensible default saves, host and client folders separate" |
 | Physics | Keyframes correct any drift, so no deterministic physics of our own for now. Revisit when a game truly depends on physics | the owner |
 | Writing to disk | On a thread of its own, not one of the job scheduler's workers: those run work a tick waits for, and a slow disk would hold ticks up | the owner asked; Claude's design |
 

@@ -3,11 +3,9 @@
 ## state rolls back.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/ability_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-
-var _failures := 0
 
 
 ## A timed action that roots the pawn: while it runs, nothing in "movement" can start or steer.
@@ -75,6 +73,7 @@ func _ready() -> void:
 	await _test_no_stats()
 	await _test_rollback_restores_ability_state()
 	await _test_gates() # Claude 2026-11-09
+	await _test_restart_and_first_tick() # Claude 2026-11-16 (wider audit)
 	_test_odd_setups()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -297,6 +296,74 @@ func _test_gates() -> void:
 	floor_body.free()
 
 
+# Claude 2026-11-16 (wider audit): a timed action that counts its ticks, for the two checks below.
+class CountedAction extends AbilityBase:
+	var starts := 0
+	var stops := 0
+	var ticked := 0
+
+	func _init() -> void:
+		super()
+		kind = Kind.ACTION
+		category = &"combat.melee"
+		duration = 0.5
+
+	func start() -> void:
+		starts += 1
+		ticked = 0
+
+	func stop() -> void:
+		stops += 1
+
+	func tick(_dt: float) -> void:
+		ticked += 1
+
+
+func _test_restart_and_first_tick() -> void:
+	var floor_body := _make_floor(400.0)
+	var pawn: Pawn = load(PAWN_SCENE).instantiate()
+	pawn.position = Vector3(0, 0.1, 0)
+	var manager := AbilityManager.new()
+	manager.name = "AbilityManager"
+	# Two abilities on one action. The second has the higher priority, so a press handled at the first one's place starts it.
+	var weak := CountedAction.new()
+	weak.name = "Weak"
+	weak.trigger_action = &"primary"
+	manager.add_child(weak)
+	var strong := CountedAction.new()
+	strong.name = "Strong"
+	strong.trigger_action = &"primary"
+	strong.priority = 10
+	manager.add_child(strong)
+	# One started by code, with no action.
+	var coded := CountedAction.new()
+	coded.name = "Coded"
+	coded.category = &"movement.knockback"
+	manager.add_child(coded)
+	pawn.add_child(manager)
+	add_child(pawn)
+	var finished: Array = []
+	manager.ability_finished.connect(func(ability: AbilityBase) -> void: finished.append(ability.name))
+	await _ticks(20)
+
+	# Starting a running ability again ends the run it has first.
+	_check(manager.start_ability(coded) and coded.starts == 1, "(an ability started by code)")
+	await _ticks(5)
+	_check(manager.start_ability(coded), "restart: a running ability can be started again")
+	_check(coded.starts == 2 and coded.stops == 1 and finished == [&"Coded"], "restart: the run it had is stopped and reported finished first (%d starts, %d stops, finished %s)" % [coded.starts, coded.stops, str(finished)])
+	_check(coded.ticks_left == coded.duration_ticks() and coded.cooldown_ticks_left == 0, "restart: and it runs its whole length again, with no cooldown in between")
+
+	# An ability a press starts gets its first tick on the next tick, wherever it is in the list.
+	_ai(pawn).press(&"primary")
+	await _ticks(1)
+	_check(strong.starts == 1 and weak.starts == 0, "(the press starts the one with the higher priority, later in the list)")
+	_check(strong.ticked == 0 and strong.ticks_left == strong.duration_ticks(), "first tick: an ability started in place of an earlier one isn't also ticked on that tick (%d ticks, %d of %d left)" % [strong.ticked, strong.ticks_left, strong.duration_ticks()])
+	await _ticks(1)
+	_check(strong.ticked == 1, "first tick: its first tick is the next one")
+	pawn.free()
+	floor_body.free()
+
+
 func _test_odd_setups() -> void:
 	var loose := AbilityManager.new()
 	print("  (a warning about an AbilityManager outside a pawn is expected next)")
@@ -354,9 +421,3 @@ func _make_floor(size: float) -> StaticBody3D:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

@@ -8,12 +8,20 @@
 ##   pawn.stat_manager.change_current(&"Health", -20) # the server: adds, kept between 0 and the stat's value; returns the new amount
 ## A Stat's name is its node's name. Stats can be added and removed while running; the manager notices.
 ##
+## Claude 2026-11-17 (the owner's call): Health has one name, HEALTH below, which everything that means "the pawn's health" reads
+## (Death, hits, the kill floor, the readouts). Death had a setting for which stat it watched while other code always read "Health",
+## so changing the setting would have split the death rule in two. A fuller stats pass comes with the game mechanics.
+##   pawn.stat_manager.get_health()                   # how much Health the pawn has now, 0 without a Health stat
+##
 ## What happens in odd cases (all checked in tests/stat_selftest.gd):
 ##   - A stat that isn't there: get_value gives the fallback, and get_stat gives null. Never an error.
 ##   - A child that isn't a Stat: ignored.
 ##   - Two stats with the same name can't happen, because Godot renames a second child with the same name.
 class_name StatManager
 extends Node
+
+## Claude 2026-11-17: the name of the Health stat. A pawn without a stat of this name can't be hurt or die from damage.
+const HEALTH := &"Health"
 
 var _stats := {} # StringName -> Stat
 var pawn: Pawn = null # Claude 2026-11-09
@@ -48,6 +56,11 @@ func _ready() -> void:
 			if child is TickStateComponent:
 				child.add_state_properties(entries)
 				break
+
+
+## Claude 2026-11-17: how much Health the pawn has now, or 0 without a Health stat. Moved here from Pawn.stat_manager.get_health().
+func get_health() -> float:
+	return get_current(HEALTH, 0.0)
 
 
 ## Claude 2026-11-09: how much a stat that changes during play has now, or the fallback if there's no such stat.

@@ -46,6 +46,10 @@
 class_name AbilityManager
 extends Node
 
+# Claude 2026-11-16 (wider audit): abilities _run_actions started this tick in place of the one it was looking at, so the same pass
+# doesn't also tick them. Only used inside that function; kept here so it isn't made anew every tick.
+var _started_later: Array[AbilityBase] = []
+
 signal ability_started(ability: AbilityBase)
 signal ability_finished(ability: AbilityBase)
 ## Claude 2026-11-09: sent when an ability is cancelled by another starting, after ability_finished for it.
@@ -70,6 +74,7 @@ signal died(pawn: Pawn, hit: HitInfo)
 
 # Claude 2026-11-10: _any_jitter is gone: a press always compares the abilities on its action now, since effects can boost them.
 var _invulnerable_abilities: Array[AbilityBase] = [] # Claude 2026-11-10: those with invulnerable_while_running, usually just Dash
+var _full_movement_abilities: Array[AbilityBase] = [] # Claude 2026-11-16 (pawn spec 8.22): those with needs_full_movement
 var _parry_abilities: Array[AbilityBase] = [] # Claude 2026-11-15: ParryAbility nodes, asked about each hit (parry_hit)
 var _locomotion_pausers: Array[AbilityBase] = [] # Claude 2026-11-10: those with pauses_locomotion, usually just Dash
 var _stepped: Array[AbilityBase] = [] # Claude 2026-11-16 (pawn spec 8.20): abilities built from steps
@@ -77,6 +82,7 @@ var _stepped: Array[AbilityBase] = [] # Claude 2026-11-16 (pawn spec 8.20): abil
 var pawn: Pawn = null
 var _driver: Node = null # Claude 2026-11-16 (pawn M3): for hits during simulate
 var _death: DeathAbility = null # Claude 2026-11-16 (pawn M3): found with the abilities (was on Pawn)
+var _knockback: KnockbackAbility = null # Claude 2026-11-16 (wider audit): likewise, for get_knockback()
 # Claude 2026-11-09: hits queued during simulate, for every pawn, and the tick driver that delivers them (pawn spec 15.4).
 # Claude 2026-11-16 (pawn M3): moved here from Pawn. GDScript note: static, so one queue is shared by every manager.
 static var _queued_hits: Array = [] # [attacker's entity id, target's entity id, place in the queue, HitInfo]
@@ -164,8 +170,11 @@ func timers_changed() -> void:
 func can_sleep() -> bool:
 	if _timers_dirty:
 		_rebuild_timed()
-	if not _timed.is_empty():
-		return false
+	# Claude 2026-11-16 (wider audit): a running ability keeps the pawn awake unless it says it can wait (Death, while Health is 0).
+	# Any running ability used to, so a corpse ran its abilities and movement every tick for as long as it lay there.
+	for ability in _timed:
+		if not ability.can_sleep_while_running():
+			return false
 	if combo_window_ticks_left > 0: # Claude 2026-11-16: the combo window counts down every tick
 		return false
 	for ability in _every_tick_abilities:
@@ -207,7 +216,18 @@ func start_ability(ability: AbilityBase) -> bool:
 	if ability == null or ability.manager != self:
 		return false
 	if ability.is_running_timed():
-		ability.ticks_left = 0 # starts again from the beginning, without a cooldown in between
+		# Claude 2026-11-16 (wider audit): starting again ends the run it has properly first: its steps end, stop() runs and
+		# ability_finished goes out, as for any ability that ends. This used to only set its timer to 0, so ability_started went
+		# out twice with no finish between, and steps still running were never started again. Whether it may start is checked
+		# first, as if it weren't running; if it may not, the run it has carries on (it used to end without a word).
+		var left := ability.ticks_left
+		ability.ticks_left = 0
+		var may_restart := _is_ready(ability)
+		ability.ticks_left = left
+		if not may_restart:
+			return false
+		_finish(ability)
+		ability.cooldown_ticks_left = 0 # starts again from the beginning, without a cooldown in between
 	if not _is_ready(ability):
 		return false
 	_clear_way(ability)
@@ -280,9 +300,35 @@ func ticks_for(seconds: float) -> int:
 	return 0 if seconds <= 0.0 else maxi(1, roundi(seconds * _tick_rate))
 
 
+## Claude 2026-11-16 (pawn spec 8.22): true while an ability with needs_full_movement runs (Dash, Knockback), so the pawn moves by
+## physics instead of with the CrowdMover.
+func needs_full_movement() -> bool:
+	for ability in _full_movement_abilities:
+		if ability.is_running_timed():
+			return true
+	return false
+
+
 ## Every ability, in run order.
 func get_abilities() -> Array[AbilityBase]:
 	return _abilities.duplicate()
+
+
+## Claude 2026-11-16 (wider audit): this pawn's Knockback ability, or null. A KnockbackPart asks on every push; it used to copy the
+## ability list and search it by type each time.
+func get_knockback() -> KnockbackAbility:
+	return _knockback
+
+
+## Claude 2026-11-16 (wider audit): true while any ability on this action runs. For asking every tick (the AI's attack does): it
+## looks through the few abilities with a timer going, where get_abilities() copies the whole list.
+func is_action_running(action: StringName) -> bool:
+	if _timers_dirty:
+		_rebuild_timed()
+	for ability in _timed:
+		if ability.trigger_action == action and ability.is_running_timed():
+			return true
+	return false
 
 
 # --- Internals ---
@@ -343,8 +389,14 @@ func _run_actions(dt: float) -> void:
 	for ability in _timed:
 		if ability.buffer_ticks_left > 0:
 			waiting_bits |= ability.trigger_bit
+	_started_later.clear()
 	for ability in _actions:
 		if ability.is_running_timed():
+			# Claude 2026-11-16 (wider audit): started a moment ago in this same pass, by a press an earlier ability in the list
+			# handled (_best_ready picked this one). Its first tick is the next one, as for an ability started at its own place
+			# in the list; it used to get one tick more on the tick it started.
+			if not _started_later.is_empty() and _started_later.has(ability):
+				continue
 			ability.tick(dt)
 			if ability.is_stepped():
 				ability.run_steps(dt) # Claude 2026-11-16 (pawn spec 8.20): may end it, by setting ticks_left to 0
@@ -363,6 +415,8 @@ func _run_actions(dt: float) -> void:
 			var chosen := _best_ready(ability, pressed_bits | waiting_bits)
 			_clear_way(chosen) # Claude 2026-11-09: cancels what it's strong enough to cancel
 			_start(chosen)
+			if chosen != ability:
+				_started_later.append(chosen) # Claude 2026-11-16 (wider audit): see the top of this loop
 			used_bits |= ability.trigger_bit
 		elif pressed and ability.buffer_window > 0.0:
 			ability.buffer_ticks_left = ticks_for(ability.buffer_window)
@@ -653,7 +707,7 @@ func health_ran_out(hit: HitInfo) -> void:
 func revive() -> void:
 	if pawn == null or not pawn.is_authority() or pawn.stat_manager == null:
 		return
-	var stat := pawn.stat_manager.get_stat(&"Health")
+	var stat := pawn.stat_manager.get_stat(StatManager.HEALTH)
 	if stat and stat.changes_during_play:
 		stat.current = stat.value
 
@@ -744,7 +798,9 @@ func _collect_abilities() -> void:
 	_abilities.sort_custom(func(a: AbilityBase, b: AbilityBase) -> bool:
 		return a.priority > b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
 	_death = null # Claude 2026-11-16 (pawn M3)
+	_knockback = null
 	_invulnerable_abilities.clear() # Claude 2026-11-10
+	_full_movement_abilities.clear() # Claude 2026-11-16
 	_parry_abilities.clear() # Claude 2026-11-15
 	_locomotion_pausers.clear() # Claude 2026-11-10
 	_stepped.clear() # Claude 2026-11-16
@@ -754,10 +810,14 @@ func _collect_abilities() -> void:
 			_stepped.append(ability)
 		if ability.invulnerable_while_running:
 			_invulnerable_abilities.append(ability)
+		if ability.needs_full_movement: # Claude 2026-11-16 (pawn spec 8.22)
+			_full_movement_abilities.append(ability)
 		if ability is ParryAbility: # Claude 2026-11-15
 			_parry_abilities.append(ability)
 		if ability is DeathAbility and _death == null: # Claude 2026-11-16 (pawn M3)
 			_death = ability
+		if ability is KnockbackAbility and _knockback == null: # Claude 2026-11-16 (wider audit)
+			_knockback = ability
 		if ability.pauses_locomotion and ability.kind != AbilityBase.Kind.LOCOMOTION:
 			_locomotion_pausers.append(ability)
 	_locomotions.clear()

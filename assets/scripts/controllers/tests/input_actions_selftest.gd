@@ -2,9 +2,7 @@
 ## PlayerController turns keys into named actions. Checks the odd cases listed at the top of InputActions.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/controllers/tests/input_actions_selftest.tscn"
-extends Node
-
-var _failures := 0
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 
 ## A controller with scripted keys, as a test needs. GDScript note: an inner class is a class declared inside this file.
@@ -131,9 +129,3 @@ func _test_player_controller_actions() -> void:
 	controller.free()
 	pawn.free()
 	await get_tree().process_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

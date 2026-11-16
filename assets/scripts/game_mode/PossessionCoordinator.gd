@@ -11,7 +11,7 @@
 ##   GameMode.possession_coordinator.stop_spectating()          # stops flying; possessing a pawn stops it too
 ##   GameMode.possession_coordinator.is_spectating()
 ##
-## Every request comes here, and the pawn's possessable flag is the check. Claude 2026-11-07: the simplest version, as the owner
+## Every request comes here, and the possessable flag on the pawn's ControllerManager is the check (Claude 2026-11-17: was on Pawn). Claude 2026-11-07: the simplest version, as the owner
 ## asked. An AI controller will ask here too, when there is one. In multiplayer the server decides, and a client's call is only a
 ## request. A possessed pawn's owner_peer is its player, so its inputs come from that player and it's predicted on their machine.
 ## Letting go sets owner_peer to 0, so the server runs it, and it stands idle with nothing driving it.
@@ -226,7 +226,11 @@ func _make_controller() -> PlayerController:
 func _why_not(peer: int, pawn: Pawn) -> String:
 	if not is_instance_valid(pawn):
 		return "there's no such pawn"
-	if not pawn.possessable:
+	# Claude 2026-11-16 (wider audit): refused here, before anything changes. It used to get as far as changing the pawn's owner,
+	# then stop on an error.
+	if pawn.controller_manager == null:
+		return "this pawn has no ControllerManager, so a player's input couldn't reach it"
+	if not pawn.controller_manager.possessable: # Claude 2026-11-17: the flag is the ControllerManager's now
 		return "this pawn can't be possessed"
 	var holder := get_peer_of(pawn)
 	if holder != 0 and holder != peer:
@@ -236,7 +240,8 @@ func _why_not(peer: int, pawn: Pawn) -> String:
 
 func _assign(peer: int, pawn: Pawn) -> void:
 	_by_peer[peer] = pawn
-	pawn.controller_manager.set_has_player(true) # Claude 2026-11-16 (pawn M4)
+	if pawn.controller_manager: # Claude 2026-11-16 (pawn M4); the check (wider audit): a pawn built without one, as _clear allows for
+		pawn.controller_manager.set_has_player(true)
 	if not pawn.tree_exiting.is_connected(_on_pawn_leaving):
 		pawn.tree_exiting.connect(_on_pawn_leaving.bind(pawn), CONNECT_ONE_SHOT)
 	if peer == _local_peer() and controller:
@@ -342,6 +347,11 @@ func _on_network_message(bytes: PackedByteArray) -> void:
 func _apply_from_server(peer: int, entity_id: int) -> void:
 	if _by_peer.has(peer):
 		_clear(peer)
+	# Claude 2026-11-16 (wider audit): whatever this peer was waiting to be given is out of date now. It stayed listed, so a pawn
+	# that spawned here later was handed to a peer that had since let go or taken another.
+	for waiting_id: int in _waiting.keys():
+		if _waiting[waiting_id] == peer:
+			_waiting.erase(waiting_id)
 	if entity_id == 0:
 		return
 	var entity: NetworkEntity = _session.get_entity(entity_id)

@@ -1,13 +1,11 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-05: headless test for TerrainGenerator. It checks the merged features, and
 ## that each bug found in procgen_tile.gd stays fixed. Exits 0 on success, 1 on failure. Run from the project folder:
 ##   Godot_v4.4.1-stable_win64.exe --headless --path . "res://assets/scripts/terrain/tests/terrain_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 # GDScript note: preload reads a file when this script compiles, and const keeps it under a name. COURSE.new() then
 # makes one. This script has no class_name, so this is how to reach it.
 const COURSE := preload("res://assets/scripts/terrain/tests/terrain_test_course.gd")
-
-var _failures := 0
 
 
 # GDScript note: a function that uses "await" pauses there and carries on later, while the game keeps running. Calling
@@ -33,7 +31,8 @@ func _ready() -> void:
 	await _test_moved_node()
 	_test_nav()
 	_measure_nav_inputs()
-	print("--- %s (%d failed) ---" % ["PASS" if _failures == 0 else "FAIL", _failures])
+	# Claude 2026-11-16 (wider audit): the same last line as every other test, which tools/run_tests.sh looks for.
+	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(1 if _failures > 0 else 0)
 
 
@@ -612,9 +611,3 @@ func _path_length(points: PackedVector3Array) -> float:
 	for i in range(1, points.size()):
 		total += points[i - 1].distance_to(points[i])
 	return total
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

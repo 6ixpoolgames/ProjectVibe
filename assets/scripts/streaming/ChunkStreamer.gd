@@ -94,6 +94,9 @@ func _ready() -> void:
 	if _driver:
 		_driver.before_tick.connect(_on_before_tick)
 		_driver.rollback_state_loaded.connect(_on_rollback_state_loaded)
+	# Claude 2026-11-16 (wider audit): with a TickDriver, the check before each tick is the one that matters, so the per-frame one is
+	# only for a scene with no driver. Both used to run, every physics frame.
+	set_physics_process(_driver == null)
 
 
 ## How things stand right now, as numbers for tests, stress runs and on-screen displays.
@@ -117,13 +120,18 @@ func refresh_now() -> void:
 
 
 func _physics_process(_delta: float) -> void:
-	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
-	_build_ground_under_sources()
-	PerfScopes.end(&"streaming.ground_under_sources", started)
+	_timed_ground_check()
 
 
 func _on_before_tick(_dt: float, _tick: int) -> void:
+	_timed_ground_check()
+
+
+# Claude 2026-11-16: timed for diagnostics (PerfScopes); (wider audit) in one place, so whichever of the two above runs is the one timed.
+func _timed_ground_check() -> void:
+	var started := PerfScopes.begin()
 	_build_ground_under_sources()
+	PerfScopes.end(&"streaming.ground_under_sources", started)
 
 
 ## A correction may have just moved a pawn somewhere new, and the replay's ticks are about to move it from there.

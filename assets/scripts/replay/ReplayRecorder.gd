@@ -47,12 +47,17 @@ const LOCAL_IDS_START := 1 << 30
 @export var enabled := true
 ## Where recordings go. Each role gets a folder of its own inside it.
 @export var folder := "user://replays"
+## Claude 2026-11-16 (the owner's call: test runs were deleting their playtest recordings): on, a run with no display (a test, or a
+## dedicated server) records into folder/headless/<role> instead, with its own keep_recordings, so the many headless runs never push
+## out recordings of games played in a window. The replay viewer's default (the newest in folder/host) is then always a played game.
+@export var headless_runs_apart := true
 ## How many recordings to keep in each role's folder. Older ones are deleted when a new one starts. 0 keeps them all.
 @export_range(0, 1000, 1, "or_greater") var keep_recordings := 10
 ## How long each block is, in seconds. Seeking starts from a block's keyframe, so shorter blocks seek faster but make bigger files.
 @export_range(0.1, 10.0, 0.1) var block_seconds := 1.0
-## Off: blocks are written on the main thread, at once (ReplayWriter.use_thread). For tests.
-@export var write_on_thread := true
+## Off: blocks are written on the main thread, at once (ReplayWriter.use_thread). For tests, which set it in code.
+## Claude 2026-11-16 (wider audit): no longer shown in the inspector, since it's no setting for a game.
+var write_on_thread := true
 ## Claude 2026-11-16, safeguards (see the top of the file). 0 switches each one off.
 ## The longest a recording may be, in seconds: 3 hours by default (the owner's call).
 @export_range(0.0, 86400.0, 60.0, "or_greater") var max_recording_seconds := 10800.0
@@ -79,8 +84,15 @@ var _block: Array[StreamPeerBuffer] = [] # one buffer per channel, in the order 
 var _block_first_tick := -1
 var _block_ticks := 0
 var _ticks_recorded := 0
+var _last_tick_recorded := -1 # Claude 2026-11-16 (wider audit): see _record_tick
 var _stopped_reason := "" # Claude 2026-11-16: why the last recording stopped, if a safeguard stopped it
 var _next_space_check_msec := 0
+
+
+
+## Claude 2026-11-16: the settings a start menu may offer (GameModeModule.get_match_options): whether this match is recorded.
+func get_match_options() -> PackedStringArray:
+	return PackedStringArray(["enabled"])
 
 
 func _init() -> void:
@@ -129,7 +141,7 @@ func start_recording(role: String) -> Error:
 	stop_recording()
 	if not enabled or _driver == null:
 		return ERR_UNAVAILABLE
-	var role_folder := folder.path_join(role)
+	var role_folder := _role_folder(role) # Claude 2026-11-16: headless runs apart (headless_runs_apart)
 	var made := DirAccess.make_dir_recursive_absolute(role_folder)
 	if made != OK:
 		push_warning("ReplayRecorder: couldn't make %s (error %d), so nothing is recorded." % [role_folder, made])
@@ -164,11 +176,12 @@ func start_recording(role: String) -> Error:
 	_arrived.clear()
 	_next_local_id = LOCAL_IDS_START
 	_ticks_recorded = 0
+	_last_tick_recorded = -1
 	_start_block()
 	for channel in _channels:
 		channel.begin(self)
 	# Pawns already here are handed over at the first tick, like any that arrive later.
-	for node in get_tree().get_nodes_in_group(TerrainBodyLifter.GROUP): # every Pawn joins this group when it enters the tree
+	for node in get_tree().get_nodes_in_group(Pawn.GROUP): # Claude 2026-11-16 (wider audit): the list of all pawns, already here when the recording starts
 		if node is Pawn:
 			_arrived.append(node)
 	get_tree().node_added.connect(_on_node_added)
@@ -248,6 +261,12 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 
 # Claude 2026-11-16: the work itself, timed by _on_after_tick.
 func _record_tick(tick: int) -> void:
+	# Claude 2026-11-16 (wider audit): a tick that isn't after the last one recorded is left out. A client's clock can jump back (a
+	# resync), and the reader finds frames by their tick, counting on ticks only going up; a file with the same ticks twice gave
+	# it the wrong frames around the jump. The recording carries on when the clock passes where it was.
+	if tick <= _last_tick_recorded:
+		return
+	_last_tick_recorded = tick
 	_hand_over_arrivals()
 	if _block_first_tick < 0:
 		_block_first_tick = tick
@@ -399,6 +418,13 @@ func _header(role: String) -> PackedByteArray:
 	out.put_u32(body.size())
 	out.put_data(body)
 	return out.data_array
+
+
+# Claude 2026-11-16: the folder a role's recordings go in: folder/<role>, or folder/headless/<role> for a run with no display.
+func _role_folder(role: String) -> String:
+	if headless_runs_apart and RunEnvironment.is_headless():
+		return folder.path_join("headless").path_join(role)
+	return folder.path_join(role)
 
 
 # Deletes the oldest recordings in a folder until at most keep are left. File names start with the date and time, so sorting them

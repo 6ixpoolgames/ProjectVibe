@@ -1,6 +1,6 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: the tier -1 pawn: a body something can possess, with movement in a module.
-## No nexus, managers or abilities yet. This is enough to test cameras, nav and netcode with real ground movement. Spec:
-## docs/pawn/PLAYER_AND_CAMERA.md. Claude 2026-11-07: it now has managers and abilities (docs/pawn/PAWN_SPEC.md); still no nexus. The old CharacterPawn3D is untouched, and carries on working in test scene.tscn
+## Written by Claude (claude-opus-5-5), 2026-11-07: the tier -1 pawn: a body something can possess. Its parts (managers, abilities,
+## AI) are child nodes that PawnInitializer adds from the game's defaults; there is no nexus. Specs: docs/pawn/PAWN_SPEC.md and
+## docs/pawn/PLAYER_AND_CAMERA.md. (Claude 2026-11-17: the first lines said it had no managers or abilities yet.) The old CharacterPawn3D is untouched, and carries on working in test scene.tscn
 ## (Claude 2026-11-08: both are now in assets/legacy/).
 ##
 ## How to use it: use assets/scenes/pawn/pawn.tscn as it is, or inherit from it. Something writes this pawn's input each tick,
@@ -51,17 +51,18 @@ signal team_changed(pawn: Pawn, old_team: int, new_team: int)
 # Claude 2026-11-16 (pawn M4): possession_changed moved to the ControllerManager, with whether a player has the pawn.
 # Claude 2026-11-16 (pawn M3): hit_received and died moved to the AbilityManager, which handles hits and death now (pawn.ability_manager.died).
 
-## Whether a player may take control of this pawn. Turn it off on pawns players should never control.
-# Claude 2026-11-07: on by default, the owner's choice. Off, people would be left wondering why their pawn doesn't work. Something
-# still has to ask for a possession, so a wrong one is a clear bug that gets looked at.
-@export var possessable := true
+# Claude 2026-11-17 (the owner's call): possessable moved to the ControllerManager, with the rest of possession (has_player).
 ## On: this pawn keeps the world loaded around it even without a player, as a player's pawn always does: a hero, say. Off, it's
 ## frozen wherever nothing else keeps the ground loaded, which is what you want for a horde.
 ## Claude 2026-11-16 (pawn M2): renamed from ai_loads_chunks, and now only a flag: the pawn makes no StreamingSource node. The chunk streamer, the nav
 ## feeder and the AI switch-off read it whenever they look (counts_on_this_machine below), so changing it needs nothing told. That
 ## also ends the bug where switching it off left a hero unwatched (2026-11-15). How far it loads is the game's setting
 ## (PawnDefaultsRes.world_load_distance), not the pawn's.
-@export var keeps_world_loaded := false
+## Claude 2026-11-16 (wider audit): setting it also puts the pawn in or out of the sources' group (_update_source_group).
+@export var keeps_world_loaded := false:
+	set(value):
+		keeps_world_loaded = value
+		_update_source_group()
 # Claude 2026-11-16 (pawn M5): always_has_camera_arm is gone: the player's one arm moves to whichever pawn they take, so there's no delay to save.
 ## Claude 2026-11-16 (pawn M2): how far this pawn keeps the world loaded when it does, in metres: the game's setting (PawnDefaultsRes, read through
 ## GameMode's PawnInitializer), 320 without one. Read-only. Named as a StreamingSource's is, because the chunk streamer reads both the
@@ -111,6 +112,11 @@ var nav_distance: float:
 ## Claude 2026-11-16: on by default, the owner's call after the mass battle measurement (24 to 31 skipped moves a frame at the first
 ## clash, about 0.2 ms; nothing skipped while marching, when everyone moves).
 @export var skip_move_when_still := true
+## Claude 2026-11-16 (pawn spec 8.22): on (the default): while an AI drives this pawn on the server or offline and it walks on the
+## ground, the GameMode's CrowdMover moves it with the rest of the crowd instead of move_and_slide (much cheaper; AI pawns are kept
+## apart by separation rather than by colliding). A player's pawn, one in the air, one on a client, or one running an ability with
+## needs_full_movement always moves by physics. Off: this pawn always moves by physics.
+@export var crowd_movement := true
 ## Claude 2026-11-16 (movement experiments): on (the default, as before): after a rollback restores this pawn, a zero-length move_and_slide rebuilds Godot's own
 ## "on the floor" flag, which the first replayed tick's floor snap reads. Off: it's left as it was, which saves a physics solve per
 ## restored pawn but can make that first replayed tick differ. Only clients roll back, and by default only their own pawn.
@@ -130,6 +136,9 @@ static var _next_table_key := TABLE_KEYS_WITHOUT_ID
 var yaw := 0.0
 ## Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
 var grounded := false
+var _body_radius := -1.0 # Claude 2026-11-16: the capsule's radius, found once (get_body_radius)
+var _body_shape: CollisionShape3D = null # Claude 2026-11-16: the collision shape, found once (get_body_shape)
+var _tick_state: TickStateComponent = null # Claude 2026-11-16: its rollback state, if it has one, for rounding crowd moves
 
 ## Claude 2026-11-07: runs this pawn's abilities, which steer it. Null if it has none. Replaces the old movement module.
 var ability_manager: AbilityManager = null
@@ -144,16 +153,8 @@ var controller_manager: ControllerManager = null
 var navigation_manager: NavigationManager = null
 ## Claude 2026-11-09: shared data and settings for this pawn's AI (pawn spec 10). Null if the pawn has no AI.
 var ai_context: AIContextComponent = null
-## Claude 2026-11-09: picks the AI's current state. Null if the pawn has none.
-var ai_state_manager: AIStateManager = null
-## Claude 2026-11-09: picks and runs the AI's behaviour. Null if the pawn has none.
-var ai_behaviour_manager: AIBehaviourManager = null
-## Claude 2026-11-09: the AI's senses, which write into its memory. Null if the pawn has none.
-var ai_sensing_manager: AISensingManager = null
-## Claude 2026-11-09: what the AI has sensed, and how aware of each it is. Null if the pawn has none.
-var ai_memory: AIMemory = null
-## Claude 2026-11-09: picks the AI's current target from its memory. Null if the pawn has none.
-var ai_target_selector: AITargetSelector = null
+# Claude 2026-11-17 (the owner's call): the other AI parts (state manager, behaviour manager, sensing, memory, target selector) are
+# found by the AI's core, ai_context, not by the pawn: pawn.ai_context.memory and so on. The pawn knows only that it has an AI.
 
 
 var _driver: Node = null
@@ -172,6 +173,11 @@ var tick_step := 1
 var ticks_elapsed := 1
 ## Claude 2026-11-16: the longest step, and so the most ticks one run can cover. A pawn frozen for a while comes back with at most this.
 const MAX_TICK_STEP := 4
+## Claude 2026-11-16 (wider audit): the Godot group every pawn is in while it's in the tree: the one list of "all pawns". Systems
+## that need every pawn (the crowd mover, the kill floor, the team registry, diagnostics, the replay) read it:
+##   for node in get_tree().get_nodes_in_group(Pawn.GROUP): ...
+## They used to borrow TerrainBodyLifter's group, whose name says something else, or the streaming sources' group.
+const GROUP := &"pawns"
 var _last_run_tick := -1 # Claude 2026-11-16: the tick this pawn last simulated; rolls back. -1: not yet
 var _prepared_tick := -1 # the tick _runs_this_tick and ticks_elapsed were worked out for
 var _runs_this_tick := true
@@ -200,8 +206,8 @@ func _init() -> void:
 
 
 func _enter_tree() -> void:
+	add_to_group(GROUP) # Claude 2026-11-16 (wider audit): the list of all pawns
 	add_to_group(TerrainBodyLifter.GROUP)
-	add_to_group(StreamingSource.GROUP) # Claude 2026-11-16 (pawn M2): the streamer, nav feeder and replay find sources here; this pawn counts when it keeps the world loaded
 	_join_table() # Claude 2026-11-09: the shared table of plain pawn data, which AI sensing's grid reads (C++ only; scaling spec step 1)
 	# Claude 2026-11-07: default parts first, so they're children before anything below or any _ready looks for them. A node may
 	# add children to itself here: Godot enters them right after.
@@ -212,6 +218,14 @@ func _enter_tree() -> void:
 	_driver = get_node_or_null("/root/TickDriver")
 	if _driver:
 		_driver.register(self)
+	# Claude 2026-11-16 (wider audit): a pawn coming back into the tree (taken out and put back, or moved under another parent) joins
+	# the AI switch-off again. _exit_tree takes it off that list, and _ready, which adds it the first time, only ever runs once.
+	# GDScript note: is_node_ready() is false the first time a node enters the tree, and true every time after.
+	if is_node_ready():
+		var ai := _ai_activation_manager()
+		if ai:
+			ai.add_pawn(self)
+		_update_source_group()
 
 
 func _exit_tree() -> void:
@@ -242,18 +256,8 @@ func _ready() -> void:
 			controller_manager = child
 		elif child is NavigationManager and navigation_manager == null: # Claude 2026-11-08
 			navigation_manager = child
-		elif child is AIContextComponent and ai_context == null: # Claude 2026-11-09: the AI parts
+		elif child is AIContextComponent and ai_context == null: # Claude 2026-11-09: the AI's core; it finds the other AI parts (2026-11-17)
 			ai_context = child
-		elif child is AIStateManager and ai_state_manager == null:
-			ai_state_manager = child
-		elif child is AIBehaviourManager and ai_behaviour_manager == null:
-			ai_behaviour_manager = child
-		elif child is AISensingManager and ai_sensing_manager == null:
-			ai_sensing_manager = child
-		elif child is AIMemory and ai_memory == null:
-			ai_memory = child
-		elif child is AITargetSelector and ai_target_selector == null:
-			ai_target_selector = child
 
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
@@ -268,11 +272,17 @@ func _ready() -> void:
 		if child is TickStateComponent:
 			var entries: Array[String] = ["tick_step", "_last_run_tick"] # GDScript note: typed, as add_state_properties asks
 			child.add_state_properties(entries)
+			_tick_state = child # Claude 2026-11-16 (pawn spec 8.22)
 			break
 	# Claude 2026-11-16 (pawn M2): every pawn is watched by the AI switch-off, which leaves alone those that keep the world loaded, checking each time.
 	var ai := _ai_activation_manager()
 	if ai:
 		ai.add_pawn(self)
+	# Claude 2026-11-16 (wider audit): in the sources' group only while it might keep the world loaded; a player taking or leaving it
+	# changes that. GDScript note: unbind(2) drops the signal's two arguments, which _update_source_group doesn't take.
+	if controller_manager:
+		controller_manager.possession_changed.connect(_update_source_group.unbind(2))
+	_update_source_group()
 
 
 # --- Things other scripts can call ---
@@ -283,6 +293,23 @@ func _ready() -> void:
 ## counts_on_this_machine(), under a name that says what it means outside streaming.
 func is_keeping_world_loaded() -> bool:
 	return counts_on_this_machine()
+
+
+## Claude 2026-11-16 (wider audit): keeps this pawn in the streaming sources' group (StreamingSource.GROUP) exactly while it might keep
+## the world loaded: keeps_world_loaded is on, or a player has it. Every pawn used to be in that group, so the chunk streamer (twice
+## a frame), the nav feeder and the replay each went through the whole army to find the two or three pawns that count. Whether it
+## really counts on this machine is still counts_on_this_machine(), asked each time; this only keeps the list they look through short.
+## Called when either of the two changes, and when the pawn enters the tree.
+func _update_source_group() -> void:
+	if not is_inside_tree():
+		return
+	var wanted := keeps_world_loaded or _has_a_player()
+	if wanted == is_in_group(StreamingSource.GROUP):
+		return
+	if wanted:
+		add_to_group(StreamingSource.GROUP)
+	else:
+		remove_from_group(StreamingSource.GROUP)
 
 
 ## Claude 2026-11-16 (pawn M2): the source contract (StreamingSource.gd): whether this pawn loads the world around it on this machine now. The chunk
@@ -306,35 +333,8 @@ func get_visual() -> Node3D:
 	return _visual if _visual else self
 
 
-## This pawn's arm, or null: one placed in its scene, or the player's while they have it. Claude 2026-11-16 (pawn M5): looks on the CameraMount too.
-func get_camera_arm() -> CameraArm:
-	for parent: Node in [get_visual(), get_camera_mount()]:
-		for child in parent.get_children():
-			if child is CameraArm:
-				return child
-	return null
-
-
-## Claude 2026-11-16 (pawn M5): where a player's arm attaches: the CameraMount under Visual if the scene has one, else Visual itself.
-func get_camera_mount() -> Node3D:
-	for child in get_visual().get_children():
-		if child is CameraMount:
-			return child
-	return get_visual()
-
-
-## Claude 2026-11-16 (pawn M5): the arm's settings for this pawn: its CameraMount's preset, or null for the defaults.
-func get_camera_preset() -> CameraPreset:
-	var mount := get_camera_mount() as CameraMount
-	return mount.preset if mount else null
-
-
-## The view a camera should attach to when this pawn is possessed: the first VirtualCamera in its scene, or null.
-func get_default_view() -> VirtualCamera:
-	var arm := get_camera_arm()
-	if arm:
-		return arm.get_view()
-	return _find_view(self)
+# Claude 2026-11-16 (wider audit): get_camera_arm, get_camera_mount, get_camera_preset and get_default_view moved to CameraMount
+# (CameraMount.arm_of(pawn), mount_of, preset_of, view_of). Only the PlayerController used them, and the camera isn't the pawn's business.
 
 
 ## Freezes or unfreezes the pawn: frozen, it doesn't tick at all, and everything about it stays as it is. AIActivationManager calls this
@@ -377,9 +377,7 @@ func is_dead() -> bool:
 	return dead
 
 
-## Claude 2026-11-09: how much Health this pawn has now, from its Health stat. A pawn with no such stat reports 0 and can't be hurt.
-func get_health() -> float:
-	return stat_manager.get_current(&"Health", 0.0) if stat_manager else 0.0
+# Claude 2026-11-17 (the owner's call): get_health() moved to the StatManager (pawn.stat_manager.get_health()), with the one Health name.
 
 
 # Claude 2026-11-16 (pawn M3): revive, receive_hit, is_invulnerable, notice_incoming_attack, health_ran_out and the hit queue moved to the
@@ -478,6 +476,17 @@ func _tick_simulate(dt: float, tick: int) -> void:
 		PerfScopes.add(&"pawn.move_skipped", 0)
 		_finish_tick()
 		return
+	# Claude 2026-11-16 (pawn spec 8.22): the CrowdMover takes the move of an AI pawn walking on the ground (its rule, try_take_move),
+	# moves the whole crowd once every pawn has simulated, then finishes this tick for it (finish_crowd_move). dt is this run's length.
+	if CrowdMover.current and CrowdMover.current.try_take_move(self, was_grounded, dt):
+		return
+	_move_with_physics() # Claude 2026-11-16 (pawn spec 8.22): moved into a function, which the CrowdMover's fallback runs too
+	_finish_tick() # Claude 2026-11-09: moved into a function, which a sleeping tick runs too
+
+
+# Claude 2026-11-16 (pawn spec 8.22): one move by physics, as every pawn moved before the CrowdMover: move_and_slide with this run's
+# velocity, then whether it's on the floor.
+func _move_with_physics() -> void:
 	# Claude 2026-11-16: times ticks_elapsed, so a pawn running every Nth tick moves N ticks' worth.
 	var factor: float = (_driver.get_physics_factor() if _driver else 1.0) * ticks_elapsed
 	velocity *= factor
@@ -486,7 +495,53 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	PerfScopes.end(&"pawn.move_and_slide", move_started)
 	velocity /= factor
 	grounded = is_on_floor()
-	_finish_tick() # Claude 2026-11-09: moved into a function, which a sleeping tick runs too
+
+
+## Claude 2026-11-16 (pawn spec 8.22): the CrowdMover moved this pawn to at, over seconds: it stands there on the ground, its velocity
+## is what it really moved (as move_and_slide leaves it), and its tick finishes. Claude 2026-11-16 (the owner's call): the position is
+## rounded as the rollback recording will round it (TickStateComponent.round_position), so the recording changes nothing afterwards
+## and a still pawn is exactly still, and sleeps. That replaced a millimetre tolerance in the mover, which did the same by hand.
+func finish_crowd_move(at: Vector3, seconds: float) -> void: # Claude 2026-11-16 (audit): public, since the CrowdMover calls it
+	# The velocity from the real move, before rounding, as move_and_slide leaves it: from the rounded one it would wobble by up to a
+	# millimetre a tick, 0.06 m/s at 60 ticks a second.
+	var moved := at - global_position
+	velocity = Vector3(moved.x, 0.0, moved.z) / seconds if seconds > 0.0 else Vector3.ZERO
+	global_position = at
+	if _tick_state:
+		position = _tick_state.round_position(position) # its own position, as the recording rounds it, not the world one
+	grounded = true
+	_finish_tick()
+
+
+## Claude 2026-11-16 (pawn spec 8.22): the CrowdMover couldn't move this pawn (a wall, an edge, no ground under where it was going), so
+## it moves by physics now, in the same tick, which handles those, and finishes its tick. Its velocity is still this run's.
+func finish_move_by_physics() -> void: # Claude 2026-11-16 (audit): public, since the CrowdMover calls it
+	_move_with_physics()
+	_finish_tick()
+
+
+## Claude 2026-11-16: how wide this pawn's body is: its collision capsule's (or sphere's, or cylinder's) radius, scaled, in metres.
+## 0.4 without one. Found once.
+func get_body_radius() -> float:
+	if _body_radius < 0.0:
+		_body_radius = 0.4
+		var body := get_body_shape()
+		if body and (body.shape is CapsuleShape3D or body.shape is SphereShape3D or body.shape is CylinderShape3D):
+			_body_radius = float(body.shape.get(&"radius")) * absf(body.global_basis.get_scale().x)
+	return _body_radius
+
+
+## Claude 2026-11-16 (pawn spec 8.22): this pawn's collision shape node (its first CollisionShape3D child with a shape), or null. The
+## CrowdMover sweeps it along a move to find walls. Found once.
+func get_body_shape() -> CollisionShape3D:
+	if _body_shape == null or not is_instance_valid(_body_shape):
+		_body_shape = null
+		for child in get_children():
+			var shape := child as CollisionShape3D
+			if shape and shape.shape:
+				_body_shape = shape
+				break
+	return _body_shape
 
 
 # Claude 2026-11-09: the end of every tick, sleeping or not: where the body is now, for smoothing Visual and for the sleeping check,
@@ -535,7 +590,37 @@ func _is_check_tick(tick: int) -> bool:
 ## of interval, fired on this tick or on one this pawn skipped since its last run. For the AI's schedules and the like, so a pawn that
 ## runs every Nth tick keeps them. With ticks_elapsed 1, it's (tick + offset) % interval == 0.
 func fired_since_last_run(tick: int, offset: int, interval: int) -> bool:
-	return interval <= 1 or posmod(tick + offset, interval) < ticks_elapsed
+	return fires_in_run(tick, ticks_elapsed, offset, interval)
+
+
+## Claude 2026-11-16 (audit): the same rule for any run: true if a rule that fires every interval ticks (where (tick + offset) is a
+## multiple of interval) fires on run_tick or on one of the run_length - 1 ticks before it. AISensingManager asks it about a pawn's
+## next run, before that run happens, so both use one rule.
+static func fires_in_run(run_tick: int, run_length: int, offset: int, interval: int) -> bool:
+	return interval <= 1 or posmod(run_tick + offset, interval) < run_length
+
+
+## Claude 2026-11-16 (profiling the networked mass battle): the tick this pawn will next run after tick, if its step doesn't change
+## before then. The same rule as _prepare_run, looking ahead from a tick it ran on: the first later tick that lines up with its step,
+## or a whole step on. AISensingManager uses it to ask the worker-thread sensing job in time for a stepping pawn's next run.
+func next_run_tick(tick: int) -> int:
+	var step := _current_step()
+	if step <= 1:
+		return tick + 1
+	# Claude 2026-11-16 (audit): as a formula: how many ticks until (tick + ahead + stagger) is a multiple of step; none within the step
+	# (ahead 0) means a whole step on, when "a whole step has passed" makes it run.
+	var ahead := posmod(-(tick + _stagger()), step)
+	return tick + (ahead if ahead > 0 else step)
+
+
+# Claude 2026-11-16 (profiling): the step this pawn runs at now, and the number that spreads a crowd's runs over the ticks. Split out of
+# _prepare_run so next_run_tick uses the same rule.
+func _current_step() -> int:
+	return 1 if _has_a_player() else clampi(tick_step, 1, MAX_TICK_STEP)
+
+
+func _stagger() -> int:
+	return _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
 
 
 ## Claude 2026-11-16 (pawn spec 8.21): true while it runs every tick: tick_step 1, or a player has it.
@@ -550,13 +635,12 @@ func _prepare_run(tick: int) -> void:
 	if _prepared_tick == tick:
 		return
 	_prepared_tick = tick
-	var step := 1 if _has_a_player() else clampi(tick_step, 1, MAX_TICK_STEP)
+	var step := _current_step()
 	if step <= 1 or _last_run_tick < 0:
 		_runs_this_tick = true
 	else:
 		var since := tick - _last_run_tick
-		var stagger: int = _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
-		_runs_this_tick = since >= step or (since > 0 and posmod(tick + stagger, step) == 0)
+		_runs_this_tick = since >= step or (since > 0 and posmod(tick + _stagger(), step) == 0)
 	if _runs_this_tick: # on ticks it skips, ticks_elapsed keeps its last run's value
 		ticks_elapsed = clampi(tick - _last_run_tick, 1, MAX_TICK_STEP) if _last_run_tick >= 0 else 1
 
@@ -608,7 +692,7 @@ func _process(delta: float) -> void:
 	_visual.global_position = _previous_position.lerp(_current_position, fraction) + _correction_offset
 	if _model:
 		_model.rotation.y = lerp_angle(_previous_yaw, _current_yaw, fraction)
-	PerfScopes.end(&"visuals.smoothing", started)
+	PerfScopes.end(&"animation.smoothing", started) # Claude 2026-11-16: was visuals.smoothing, now in diagnostics' animation category
 
 
 # --- Multiplayer: optional hooks from NetworkEntity ---
@@ -640,16 +724,6 @@ func _on_network_corrected(jump: Variant) -> void:
 
 
 # --- Helpers ---
-
-
-func _find_view(node: Node) -> VirtualCamera:
-	for child in node.get_children():
-		if child is VirtualCamera:
-			return child
-		var found := _find_view(child)
-		if found:
-			return found
-	return null
 
 
 # Claude 2026-11-16 (pawn M2): the game's pawn defaults, for the distances, or null without a PawnInitializer.

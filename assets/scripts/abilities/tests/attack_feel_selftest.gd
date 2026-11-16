@@ -5,12 +5,10 @@
 ## hit at all.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/attack_feel_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
-
-var _failures := 0
 
 
 ## A test-only shield: runs for 2 s on the secondary action, and the pawn is invulnerable while it does. Locks nothing out.
@@ -208,7 +206,7 @@ func _test_invulnerable() -> void:
 	await _ticks(2)
 	_check(shield.is_running_timed() and target.ability_manager.is_invulnerable(), "an ability with invulnerable_while_running makes its pawn invulnerable while it runs")
 	await _swing(attacker, origin + Vector3(0, 1, -10))
-	_check(hits.is_empty() and target.get_health() == 100.0, "a swing doesn't hit an invulnerable pawn (HP %d)" % int(target.get_health()))
+	_check(hits.is_empty() and target.stat_manager.get_health() == 100.0, "a swing doesn't hit an invulnerable pawn (HP %d)" % int(target.stat_manager.get_health()))
 	attacker.free()
 	target.free()
 	# Dashing: a hit straight to receive_hit does nothing.
@@ -222,7 +220,7 @@ func _test_invulnerable() -> void:
 	var hit := _hit(dasher, 2.0)
 	hit.effects.append(Effect.make_damage(30)) # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	dasher.ability_manager.receive_hit(hit)
-	_check(dash.is_running_timed() and received.is_empty() and dasher.get_health() == 100.0, "a dashing pawn takes no hit: no damage and no hit_received (dashing %s, %d received, HP %d, grounded %s)" % [dash.is_running_timed(), received.size(), int(dasher.get_health()), dasher.grounded])
+	_check(dash.is_running_timed() and received.is_empty() and dasher.stat_manager.get_health() == 100.0, "a dashing pawn takes no hit: no damage and no hit_received (dashing %s, %d received, HP %d, grounded %s)" % [dash.is_running_timed(), received.size(), int(dasher.stat_manager.get_health()), dasher.grounded])
 	dasher.free()
 
 
@@ -284,9 +282,3 @@ func _until(condition: Callable, max_ticks: int) -> void:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

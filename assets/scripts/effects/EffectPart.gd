@@ -4,8 +4,9 @@
 ## Two kinds:
 ##   do once  runs when an effect is applied (an instant one), or when an over-time one is first applied and then every period.
 ##            Override apply_once(). On the authority only (EffectManager calls it), so it may change Health and start abilities.
-##   held     holds while an over-time effect lasts, and stops when it ends. Override is_held() to return true; the EffectManager
-##            reads the part's settings whenever its active list changes. Works on every machine.
+##   held     holds while an over-time effect lasts, and stops when it ends. Override is_held() to return true, and add_held() to
+##            add what it does to the pawn's totals (EffectHeldTotals); the EffectManager asks whenever its active list changes.
+##            Works on every machine.
 ##
 ## A new kind of part: extend this (or a part like it), give it @export settings, and do one of the two above. Parts keep no state
 ## of their own while playing: one part is shared by every pawn the effect lands on, so anything that changes lives on the pawn.
@@ -16,6 +17,12 @@ extends Resource
 ## True for a part that holds while its effect lasts, instead of running once.
 func is_held() -> bool:
 	return false
+
+
+## Claude 2026-11-16 (wider audit): a held part adds what it does to the pawn's totals, stacks times. Called whenever the pawn's list
+## of effects changes, on every machine. Override it in a held part; the base does nothing.
+func add_held(_totals: EffectHeldTotals, _stacks: int) -> void:
+	pass
 
 
 ## Runs a do-once part on the pawn the effect landed on. application says who, from whom, how many stacks and what resistance

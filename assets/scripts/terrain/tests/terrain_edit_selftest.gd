@@ -1,14 +1,12 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for TerrainEditLog, and for bodies staying above raised ground.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/terrain/tests/terrain_edit_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const KEY_A := Vector2i(0, 0)
 const KEY_B := Vector2i(1, 0)
 # A patch right on the border between chunks A and B, which are 32 m wide.
 const ON_BORDER := Vector3(32.0, 0.0, 16.0)
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -491,12 +489,6 @@ func _physics_frames(count: int) -> void:
 		await get_tree().physics_frame
 
 
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1
-
-
 # Claude 2026-11-09, step 11: saving the log to a file and loading it back.
 func _test_save_file() -> void:
 	var path := "user://terrain_edit_selftest.tedits"
@@ -549,6 +541,23 @@ func _test_save_file() -> void:
 	_check(second_log.get_edit_count() == 1, "and load_on_start loads it when a log with that save_path enters the tree")
 	second_log.save_path = "" # so freeing it doesn't save again
 	second.free()
+	# Claude 2026-11-16 (wider audit): a file the log refused to load (made for other ground) isn't saved over when it leaves.
+	var size_before := FileAccess.get_file_as_bytes(path).size()
+	var other_ground := _make_terrain()
+	other_ground.noise_seed = 999
+	var refusing_log := TerrainEditLog.new()
+	refusing_log.save_path = path
+	other_ground.add_child(refusing_log)
+	_check(refusing_log.get_edit_count() == 0, "(edits saved for different ground aren't loaded on start)")
+	other_ground.edit(Vector3(5.0, 0.0, 5.0), 3.0, 2.0)
+	other_ground.edit(Vector3(9.0, 0.0, 5.0), 3.0, 2.0)
+	other_ground.free()
+	_check(FileAccess.get_file_as_bytes(path).size() == size_before, "a save file the log refused to load isn't saved over when it leaves the tree")
+	# An empty log still has something to tell a late joiner: that there are no edits.
+	var empty_ground := _make_terrain()
+	var empty_log := _add_log(empty_ground)
+	_check(empty_log._catch_up_message().size() > 1, "an empty log still sends itself to a late joiner, so the joiner drops edits of its own")
+	empty_ground.free()
 	_remove_save(path)
 
 

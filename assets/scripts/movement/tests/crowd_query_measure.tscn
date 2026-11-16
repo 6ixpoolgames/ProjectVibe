@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/movement/tests/crowd_query_measure.gd" id="1_measure"]
+
+[node name="CrowdQueryMeasure" type="Node"]
+script = ExtResource("1_measure")

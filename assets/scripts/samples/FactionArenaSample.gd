@@ -39,6 +39,9 @@ const FACTION_PLAYER_SCENE := preload("res://assets/scenes/samples/faction_playe
 const RED_GOBLIN_SCENE := preload("res://assets/scenes/samples/faction_goblin.tscn")
 const BLUE_GOBLIN_SCENE := preload("res://assets/scenes/samples/faction_goblin_blue.tscn")
 const ALLY_SCENE := preload("res://assets/scenes/samples/faction_ally.tscn") # Claude 2026-11-13
+## Claude 2026-11-16 (the owner's call): this game mode's default AI brain: the soldiers' behaviours (the arena's, plus the heavy attack,
+## parry and going to the rally point), so a player's pawn let go of fights like its team.
+const FACTION_BRAIN := preload("res://assets/scenes/samples/faction_brain.tscn")
 # Claude 2026-11-10: GOBLINS_PER_TEAM is gone. The scene's RedSpawner and BlueSpawner keep four of each alive, 12 m either side of
 # the middle and facing each other, and the arena's script switches them on when a game starts.
 ## The key action for the special attack. The project has none for the right mouse button, so this sample adds one.
@@ -134,6 +137,16 @@ func _is_npc(pawn: Pawn) -> bool:
 
 
 # Claude 2026-11-10: _spawn_wave() is gone from here: the arena's version refills the spawners, which this scene has one per colour.
+
+
+## Claude 2026-11-16: this level's settings for the start menu's match options (ArenaSample._build_match_options).
+func _level_match_options() -> PackedStringArray:
+	return PackedStringArray(["team_size"])
+
+
+## Claude 2026-11-16: this game mode's default AI brain (see ArenaSample._ai_brain).
+func _ai_brain() -> PackedScene:
+	return FACTION_BRAIN
 
 
 func _keys_text() -> String:

@@ -2,11 +2,9 @@
 ## interrupt rules (pawn spec 8.6), hits on the server only, rollback, the lag compensation input, and the AI's Attack behaviour.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/combat_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-
-var _failures := 0
 
 
 ## A timed action a test can give any threshold, locking out walking, sprinting and jumping, like an emote or a reload.
@@ -334,7 +332,7 @@ func _test_melee_multi_hit() -> void:
 	_check(landed.size() == 2 and hit_both, "multi-hit: one swing hits both enemies inside its sphere, each once (%d hits)" % landed.size())
 	# Claude 2026-11-10: the damage is the swing's on-hit effect now (swing_hit.tres, 20), not a number on the swing.
 	var damage := -melee.on_hit_effects[0].planned_change(&"Health")
-	_check(damage == 20.0 and left.get_health() == 100.0 - damage and right.get_health() == 100.0 - damage, "and each takes the damage from the swing's on-hit effect (%d and %d HP)" % [int(left.get_health()), int(right.get_health())])
+	_check(damage == 20.0 and left.stat_manager.get_health() == 100.0 - damage and right.stat_manager.get_health() == 100.0 - damage, "and each takes the damage from the swing's on-hit effect (%d and %d HP)" % [int(left.stat_manager.get_health()), int(right.stat_manager.get_health())])
 	_check(left.global_position.x < 29.45 and right.global_position.x > 30.55, "and each is knocked back away from the attacker, to its own side (%.2f and %.2f m sideways)" % [left.global_position.x - 29.5, right.global_position.x - 30.5])
 	attacker.free()
 	left.free()
@@ -370,7 +368,7 @@ func _test_hits_after_simulate() -> void:
 		for i in 30:
 			await _ticks(1)
 			path.append(target.global_position)
-		results.append({"seen": seen.map(func(e): return [e[0], e[1] - pressed_at] + e.slice(2)), "path": path, "health": target.get_health()})
+		results.append({"seen": seen.map(func(e): return [e[0], e[1] - pressed_at] + e.slice(2)), "path": path, "health": target.stat_manager.get_health()})
 		attacker.free()
 		target.free()
 	var first: Dictionary = results[0]
@@ -486,7 +484,7 @@ func _test_ai_attacks() -> void:
 	melee.hit_landed.connect(func(hit): landed.append(hit))
 	# GDScript note: a lambda gets a copy of a local number, so it records into an array, which it shares.
 	var attack_started := []
-	goblin.ai_behaviour_manager.behaviour_changed.connect(func(_old, new, _reason):
+	goblin.ai_context.behaviour_manager.behaviour_changed.connect(func(_old, new, _reason):
 		if new and new.name == &"Attack":
 			attack_started.append(TickDriver.tick))
 	for i in 240:
@@ -531,9 +529,3 @@ func _until(condition: Callable, max_ticks: int) -> void:
 		if condition.call():
 			return
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

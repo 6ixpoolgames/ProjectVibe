@@ -6,6 +6,7 @@
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --fixed-fps 60 --path . "res://assets/scripts/samples/tests/mass_battle_measure.tscn" -- --size=50 --seconds=150
 ## --fixed-fps 60 runs it as fast as the computer can while every frame still counts as 1/60 s, so the game time is the same however
 ## slow the ticks are. Leave it out to measure in real time, where slow ticks get dropped (the dropped column).
+## Claude 2026-11-16: --scopes adds a line per row with every timed part in ms a tick, to see what each phase spends its time on.
 ## Claude 2026-11-15: the sample records a replay, as playing it does; --no-record leaves that out, to measure what recording costs.
 ## Recording runs in TickDriver's after_tick, so it shows in the "other" column.
 ## Claude 2026-11-16, for windowed runs (leave out --headless and --fixed-fps to measure what playing feels like): each row also
@@ -22,6 +23,7 @@ var _max_slides := -1 # Claude 2026-11-16 (movement experiments): -1: as the sce
 var _pawn_collision := true
 var _skip_still_moves := false
 var _steps := true # Claude 2026-11-16 (pawn spec 8.21): off with --no-steps
+var _scopes := false # Claude 2026-11-16: --scopes prints every timed part each row (the owner's question: what does simulate spend it on?)
 
 
 func _ready() -> void:
@@ -44,6 +46,8 @@ func _ready() -> void:
 			_skip_still_moves = true
 		elif argument == "--no-steps": # Claude 2026-11-16 (pawn spec 8.21): every AI pawn every tick, for comparing
 			_steps = false
+		elif argument == "--scopes": # Claude 2026-11-16
+			_scopes = true
 	if not _visuals:
 		get_tree().node_added.connect(_on_node_added)
 	# Claude 2026-11-16 (movement experiments): each pawn's movement settings, set as it enters the tree.
@@ -76,7 +80,8 @@ func _ready() -> void:
 	# overview point (V), keeping nothing loaded, as the old overhead camera did; the player's pawn stands where it started, under its AI.
 	if DisplayServer.get_name() != "headless":
 		arena._go_to_overview()
-	print("--- Mass battle, %d a faction, %d ticks a second, %s%s%s%s%s%s ---" % [_size, TickDriver.get_tick_rate(), "recording a replay" if _record else "no replay",
+	# Claude 2026-11-16: and how far out the factions start (the sample's --spawn-distance=, 300 as laid out)
+	print("--- Mass battle, %d a faction, spawns %.0f m out, %d ticks a second, %s%s%s%s%s%s ---" % [_size, arena.spawn_distance, TickDriver.get_tick_rate(), "recording a replay" if _record else "no replay",
 		"" if _visuals else ", no toy visuals", "" if _shadows else ", no shadows", ", max_slides %d" % _max_slides if _max_slides > 0 else "",
 		"" if _pawn_collision else ", no pawn-pawn collision", ", skipping still moves" if _skip_still_moves else ""])
 	# Claude 2026-11-16 (pawn spec 8.21): --no-steps runs every AI pawn every tick (no distance steps, no load ladder), for comparing.
@@ -111,6 +116,21 @@ func _ready() -> void:
 		print("        move_and_slide %.2f ms a frame, %.0f calls, %.1f us each; %.0f skipped" % [moves[0], moves[1], 1000.0 * moves[0] / maxf(moves[1], 1.0), skipped[1]])
 		# Claude 2026-11-16: the frame as a whole, for windowed runs
 		print("        frame %.1f ms (%d fps)   scripts %.1f ms   drawing CPU %.1f ms, GPU %.1f ms   %d draw calls, %d objects" % [n["frame_ms"], n["fps"], n["process_ms"], n["render_cpu_ms"], n["render_gpu_ms"], n["draw_calls"], n["objects"]])
+		# Claude 2026-11-16: --scopes: every timed part, most expensive first. Claude 2026-11-16 (audit): TickDriver's phases ("tick.")
+		# as ms a tick, from the summary's tick_parts; everything else as ms a frame, as it's summed, since some run once a frame
+		# (animation.*) and others inside ticks (pawn.move_and_slide is inside simulate), and a frame can hold more or fewer ticks.
+		if _scopes:
+			var per_tick := PackedStringArray()
+			var per_frame := PackedStringArray()
+			for part: String in s.tick_parts:
+				if float(s.tick_parts[part]) >= 0.02:
+					per_tick.append("%s %.2f" % [part, s.tick_parts[part]])
+			for scope: StringName in s.scopes:
+				var entry: Array = s.scopes[scope]
+				if not String(scope).begins_with("tick.") and float(entry[0]) >= 0.02:
+					per_frame.append("%s %.2f (%.0f calls)" % [scope, entry[0], entry[1]])
+			print("        ms a tick: " + ", ".join(per_tick))
+			print("        ms a frame (%.2f ticks a frame): %s" % [s.steps_per_frame, ", ".join(per_frame)])
 	# Claude 2026-11-15: the replay's size, before stopping it
 	var recorder: ReplayRecorder = GameMode.replay_recorder
 	if recorder and recorder.is_recording():

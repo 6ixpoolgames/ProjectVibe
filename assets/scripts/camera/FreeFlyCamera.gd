@@ -16,8 +16,8 @@
 ## How to use it: nothing to set up for the default. A game wanting different settings or a model for its spectator makes a scene whose
 ## root is a FreeFlyCamera and sets it as the PlayerController's spectator_scene.
 ##
-## Controls (read by the PlayerController): WASD flies where the view looks, Q and E go straight up and down (move_upward,
-## move_downward, as the old free-floating camera had), and the mouse looks. Claude 2026-11-16 (the owner's numbers): 10 m/s, 25 with
+## Controls (read by the PlayerController): WASD flies where the view looks, Space and Ctrl go straight up and down (Claude
+## 2026-11-16, the owner's call: the jump and crouch keys, the PlayerController's fly_up_key and fly_down_key; it was Q and E), and the mouse looks. Claude 2026-11-16 (the owner's numbers): 10 m/s, 25 with
 ## the sprint key held, and with it held the wheel ramps that fast speed up or down, up to 75. Claude 2026-11-16 (the owner's request):
 ## the wheel on its own zooms, by narrowing the field of view as a lens does, so it stays where it is; the mouse turns slower to match.
 ## The middle mouse button (middleMouse_button) resets the zoom.

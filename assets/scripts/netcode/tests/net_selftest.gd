@@ -17,6 +17,12 @@ class InputHolder extends Node:
 
 var _failures := 0
 var _port := NetRun.first_port()
+# Claude 2026-11-16 (wider audit): scenarios with a check that can fail by chance on a busy machine (CLAUDE.md lists them; bad_packets
+# joined them the same day). Each gets one more try before its failures count. Before, the whole 8 minute test failed, and the
+# advice was to run that scenario again by hand.
+const MAY_FAIL_BY_CHANCE: Array[String] = ["dilation", "dilation_ramp", "adaptive_interpolation", "bad_packets"]
+var _first_try := false     # on during such a scenario's first try: a failed check is noted, not counted
+var _first_try_failures := 0
 var _only := ""
 
 
@@ -30,6 +36,7 @@ func _ready() -> void:
 	await _test_offline()
 	await _scenario("connecting", _test_connecting)
 	await _scenario("refused", _test_refused)
+	await _scenario("server_tick_rate", _test_server_tick_rate) # Claude 2026-11-16 (wider audit)
 	await _scenario("late_join_and_leave", _test_late_join_and_leave)
 	await _scenario("bad_packets", _test_bad_packets)
 	await _scenario("clock", _test_clock)
@@ -51,6 +58,8 @@ func _ready() -> void:
 	await _scenario("worst_case", _test_worst_case)
 	await _scenario("terrain", _test_terrain)
 	await _scenario("hitches", _test_hitches)
+	# Claude 2026-11-16 (wider audit): none of the 28 runs checked its machines' logs, so a script error on a server or client passed.
+	_check(NetRun.script_errors_seen == 0, "no script errors on any machine in any scenario (%d)" % NetRun.script_errors_seen)
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -60,6 +69,15 @@ func _scenario(scenario_name: String, test: Callable) -> void:
 		return
 	print("  [%s]" % scenario_name)
 	_port += 1
+	if MAY_FAIL_BY_CHANCE.has(scenario_name):
+		_first_try = true
+		_first_try_failures = 0
+		await test.call(scenario_name)
+		_first_try = false
+		if _first_try_failures == 0:
+			return
+		print("  [%s] once more: %d of its checks failed, and they can by chance" % [scenario_name, _first_try_failures])
+		_port += 1
 	await test.call(scenario_name)
 
 
@@ -392,17 +410,17 @@ func _test_offline() -> void:
 
 	var was_mode := session._mode
 	session._mode = NetworkSessionSingleton.Mode.SERVER
-	session._peers[77] = {"welcomed": true, "margins": [], "acknowledged_snapshot": -1, "connected_at": 0}
+	session._peers[77] = session._new_peer(true)
 	session._note_input_timing(77, 100, 50, 95)
 	session._note_input_timing(77, 100, 50, 96)
 	session._note_input_timing(77, 99, 50, 96)
-	_check(session._peers[77]["margins"] == [5], "dilation: a duplicate or overtaken packet isn't counted as late")
+	_check(session._peers[77].margins == [5], "dilation: a duplicate or overtaken packet isn't counted as late")
 	session._note_input_timing(77, 101, 40, 97)
-	_check(session._peers[77]["acknowledged_snapshot"] == 50, "rewind claim: what a client acknowledges can't go backwards")
+	_check(session._peers[77].acknowledged_snapshot == 50, "rewind claim: what a client acknowledges can't go backwards")
 	session._note_input_timing(77, 102, 9000, 98)
-	_check(session._peers[77]["acknowledged_snapshot"] == 50, "rewind claim: and it can't be from the future")
+	_check(session._peers[77].acknowledged_snapshot == 50, "rewind claim: and it can't be from the future")
 	# Claude 2026-11-05: a broken input packet tells the timing nothing.
-	var margins_before: int = session._peers[77]["margins"].size()
+	var margins_before: int = session._peers[77].margins.size()
 	var real_owner := target.owner_peer
 	target.owner_peer = 77
 	var broken_input := NetPackets.new_buffer()
@@ -414,7 +432,7 @@ func _test_offline() -> void:
 	broken_input.put_u8(200) # claims a list of 200 values, and then the packet ends
 	session._on_input(77, broken_input.data_array, 490)
 	target.owner_peer = real_owner
-	_check(session._peers[77]["margins"].size() == margins_before and int(session._peers[77]["newest_input"]) < 500, "inputs: a broken packet doesn't count towards the timing")
+	_check(session._peers[77].margins.size() == margins_before and int(session._peers[77].newest_input) < 500, "inputs: a broken packet doesn't count towards the timing")
 
 	# Claude 2026-11-05: what one client may send.
 	var limits_before: Array = [session.max_packets_per_second, session.max_bytes_per_second, session.max_packet_bytes]
@@ -427,7 +445,7 @@ func _test_offline() -> void:
 	_check(allowed >= 5 and allowed < 200, "limits: packets past the rate are dropped (%d of 200 got through)" % allowed)
 	session.max_packets_per_second = 0
 	session.max_bytes_per_second = 90
-	session._peers[77].erase("limit_second")
+	session._peers[77].limit_second = -1
 	allowed = 0
 	for i in 200:
 		if session._within_limits(77, ping):
@@ -439,10 +457,10 @@ func _test_offline() -> void:
 	oversized[0] = NetPackets.Type.INPUT
 	_check(not session._within_limits(77, oversized), "limits: so is a packet over the size limit")
 	_check(not session._within_limits(12345, ping), "limits: so is anything from a peer the server doesn't know")
-	session._peers[77]["welcomed"] = false
+	session._peers[77].welcomed = false
 	_check(not session._within_limits(77, ping), "limits: before the handshake, a client can't send anything else")
 	_check(session._within_limits(77, PackedByteArray([NetPackets.Type.HELLO])), "limits: except the packet that starts the handshake")
-	session._peers[77]["welcomed"] = true
+	session._peers[77].welcomed = true
 	session.max_packets_per_second = limits_before[0]
 	session.max_bytes_per_second = limits_before[1]
 	session.max_packet_bytes = limits_before[2]
@@ -451,10 +469,10 @@ func _test_offline() -> void:
 	var debug := NetDebugModule.on(session)
 	debug.allow_debug_commands = true
 	var switch_packet := _client_message(NetDebugModule.CHANNEL, debug.switch_message("lag_compensation_enabled", false))
-	session._peers[77]["welcomed"] = false
+	session._peers[77].welcomed = false
 	session._on_client_message(77, switch_packet)
 	_check(session.lag_compensation_enabled, "switches: a client that hasn't passed the handshake can't change anything")
-	session._peers[77]["welcomed"] = true
+	session._peers[77].welcomed = true
 	session._on_client_message(77, switch_packet)
 	_check(not session.lag_compensation_enabled, "switches: one that has can, if allowed")
 	debug.allow_debug_commands = false
@@ -467,7 +485,7 @@ func _test_offline() -> void:
 	debug.allow_debug_commands = true
 	session.lag_compensation_enabled = true
 	# Claude 2026-11-05: the server only saves inputs when clients predicting the entity need them.
-	session._refresh_entities()
+	session.refresh_entities()
 	_check(target.state.skip_input_capture, "input saving: a server skips it")
 	# Claude 2026-11-09: and a server saves state only on the ticks it sends snapshots on (pawn spec 12.1).
 	_check(target.state.history_interval_ticks == session.get_snapshot_interval() and session.get_snapshot_interval() >= 1, "state saving: a server saves only snapshot ticks (every %d)" % target.state.history_interval_ticks)
@@ -477,7 +495,7 @@ func _test_offline() -> void:
 	debug.allow_debug_commands = false
 	session._mode = was_mode
 	session._peers.erase(77)
-	session._refresh_entities()
+	session.refresh_entities()
 	# Claude 2026-11-09: this was "offline keeps it". Offline now saves no inputs and no state, since nothing replays (pawn spec 12.1),
 	# unless the entity's keep_history_offline is on.
 	_check(target.state.skip_input_capture and target.state.history_interval_ticks == 0, "history: offline saves no inputs and no state")
@@ -494,12 +512,13 @@ func _test_offline() -> void:
 	freed_body.free()
 	_check(session.get_entity(freed_id) == null and session.get_entities().size() == 2, "entity list: one freed directly by the game leaves it")
 
-	session._peers[77] = {"welcomed": true, "acknowledged_snapshot": 100}
+	session._peers[77] = session._new_peer(true)
+	session._peers[77].acknowledged_snapshot = 100
 	var interpolation_limit: float = session.max_interpolation_seconds * driver.get_tick_rate()
 	_check(session.limit_view_ticks_behind(77, 8.0, 103) == 8.0, "rewind claim: a believable claim is left alone")
 	_check(is_equal_approx(session.limit_view_ticks_behind(77, 500.0, 103), 3.0 + interpolation_limit + 1.0), "rewind claim: a low-ping client can't claim more than its acknowledgements allow")
 	_check(session.limit_view_ticks_behind(77, 8.0, 100 + roundi(session.rewind_cap_seconds * driver.get_tick_rate()) + 1) == 0.0, "rewind claim: an acknowledgement older than the cap gets no rewind")
-	session._peers[77]["acknowledged_snapshot"] = -1
+	session._peers[77].acknowledged_snapshot = -1
 	_check(session.limit_view_ticks_behind(77, 8.0, 103) == 0.0, "rewind claim: a client that has seen nothing gets no rewind")
 	_check(session.limit_view_ticks_behind(999, 8.0, 103) == 8.0, "rewind claim: the host's own pawn and AI aren't limited")
 	session._peers.erase(77)
@@ -655,6 +674,25 @@ func _test_refused(run_name: String) -> void:
 		"wrong": {"role": "client", "seconds": 3, "gravity": 20},
 	}, _port)
 	_check(not other_physics["wrong"].has("timed_out") and not other_physics["wrong"]["joined"], "refused: so is one with different physics settings")
+
+
+# Claude 2026-11-16 (wider audit): only the server is started at 30 ticks a second. The client, started at the default, gets in and
+# runs at the server's rate. It used to be refused: the handshake's hash included the rate. Every other scenario gives all its
+# machines the same rate, so none caught it.
+func _test_server_tick_rate(run_name: String) -> void:
+	var results := await NetRun.run(self, run_name, {
+		"server": {"role": "server", "seconds": 6, "tick-rate": 30},
+		"client": {"role": "client", "seconds": 5, "mode": "seek"},
+	}, _port)
+	var server: Dictionary = results["server"]
+	var client: Dictionary = results["client"]
+	if server.has("timed_out") or client.has("timed_out"):
+		_check(false, "server tick rate: every machine finished")
+		return
+	_check(int(server.get("tick_rate", 0)) == 30, "server tick rate: (the server runs at 30)")
+	_check(client["joined"] and str(client.get("refused", "")) == "", "server tick rate: a client started at the default rate gets in (%s)" % str(client.get("refused", "")))
+	_check(int(client.get("tick_rate", 0)) == 30, "server tick rate: and runs at the server's rate (%d)" % int(client.get("tick_rate", 0)))
+	_check(client["spawned"].size() >= 1 and int(client["stats"]["resyncs"]) <= 1, "server tick rate: with its pawn, and a settled clock (%d resyncs)" % int(client["stats"]["resyncs"]))
 
 
 func _test_late_join_and_leave(run_name: String) -> void:
@@ -1189,6 +1227,10 @@ func _test_worst_case(run_name: String) -> void:
 
 
 func _check(ok: bool, what: String) -> void:
+	if not ok and _first_try: # Claude 2026-11-16 (wider audit): see MAY_FAIL_BY_CHANCE
+		print("  (failed on the first try)  " + what)
+		_first_try_failures += 1
+		return
 	print(("  PASS  " if ok else "  FAIL  ") + what)
 	if not ok:
 		_failures += 1

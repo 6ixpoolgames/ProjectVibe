@@ -21,11 +21,11 @@
 ## SUCCEEDED or FAILED, the manager decides at once.
 ##
 ## How to use it (outside code only talks to the manager):
-##   pawn.ai_behaviour_manager.get_running_behaviour()
-##   pawn.ai_behaviour_manager.add_persistence_ticks(&"Chase", 60)       # say after landing a hit
-##   pawn.ai_behaviour_manager.set_persistence_speed(&"Chase", 0.5)
-##   pawn.ai_behaviour_manager.set_interrupt_threshold(&"Chase", 25)     # say for a berserk effect
-##   pawn.ai_behaviour_manager.set_score_jitter(&"Wander", 0.2)          # say for a confused effect
+##   pawn.ai_context.behaviour_manager.get_running_behaviour()
+##   pawn.ai_context.behaviour_manager.add_persistence_ticks(&"Chase", 60)       # say after landing a hit
+##   pawn.ai_context.behaviour_manager.set_persistence_speed(&"Chase", 0.5)
+##   pawn.ai_context.behaviour_manager.set_interrupt_threshold(&"Chase", 25)     # say for a berserk effect
+##   pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)          # say for a confused effect
 ##   behaviour_changed(old_behaviour, new_behaviour, reason)
 ##
 ## The fixed order: behaviours are sorted by name once, when the manager is ready. Never by the order they were added.
@@ -309,11 +309,10 @@ func _find(behaviour_name: StringName) -> AIBehaviourBase:
 	return null
 
 
+# Claude 2026-11-16 (wider audit): the TickDriver autoload, as the rest of this file uses it; this looked it up by path each time,
+# with a fallback that could never run.
 func _now() -> int:
-	var driver: Node = get_node_or_null("/root/TickDriver")
-	if driver:
-		return driver.tick
-	return pawn.ai_context.current_tick if pawn and pawn.ai_context else 0
+	return TickDriver.tick
 
 
 func _collect_behaviours() -> void:

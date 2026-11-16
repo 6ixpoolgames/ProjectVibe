@@ -4,18 +4,18 @@
 ## and the heights move the hit area.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/visuals/tests/visuals_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PLAYER_SCENE := "res://assets/scenes/samples/faction_player.tscn"
 const RED_SCENE := "res://assets/scenes/samples/faction_goblin.tscn"
 const BLUE_SCENE := "res://assets/scenes/samples/faction_goblin_blue.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 
-var _failures := 0
-
 
 func _ready() -> void:
 	print("--- Visuals self-test ---")
+	# Claude 2026-11-16: the visuals switch themselves off with no display; this test runs headless and checks them, so it keeps them on.
+	RunEnvironment.visuals_without_display = true
 	TickDriver.tick_rate = TickDriver.REFERENCE_RATE
 	var floor_body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()
@@ -210,9 +210,3 @@ func _ai(pawn: Pawn) -> AIController:
 func _frames(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

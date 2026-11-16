@@ -13,3 +13,10 @@ func _on_module_added(_game_mode: GameModeSingleton) -> void:
 ## About to be removed. Clear your line on GameMode here, and undo anything you've changed in the world.
 func _on_module_removed(_game_mode: GameModeSingleton) -> void:
 	pass
+
+
+## Claude 2026-11-16 (the owner's request: match options in the start menu, proving out the GameMode's modularity): the names of this
+## module's settings a start menu may offer before a match, each a property of this module (an @export, so its range and type show).
+## MatchOptionsPanel.add_from_game_mode() lists them for every module the game has. Empty: none.
+func get_match_options() -> PackedStringArray:
+	return PackedStringArray()

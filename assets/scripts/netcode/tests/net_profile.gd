@@ -61,7 +61,7 @@ func _micro_timings() -> void:
 	nav.add_interest(Vector3.ZERO, 130.0, 160.0, 1)
 	var world := Node3D.new()
 	add_child(world)
-	var terrain: Node3D = load("res://assets/scripts/navigation/nav_test_terrain.gd").new()
+	var terrain: Node3D = load("res://assets/scripts/samples/nav_demo/nav_test_terrain.gd").new()
 	terrain.set("nav_hooks", NavHooks.new())
 	terrain.set("build_collision", true)
 	world.add_child(terrain)

@@ -3,6 +3,8 @@
 ## (heights come from world positions, so neighbours share edge rows exactly) and live edits.
 ## It also builds a test course: a flat plaza in the middle and a 3 m wall with a narrow gap,
 ## so the clearance tiers are easy to see (small pawns fit through the gap, big ones go around).
+## Claude 2026-11-16 (wider audit): moved with the other nav demo scripts from scripts/navigation/ to scripts/samples/nav_demo/. They
+## serve nav_test.tscn and tests only, so they don't belong beside the code that ships.
 class_name NavTestTerrain
 extends Node3D
 

@@ -4,11 +4,9 @@
 ## the step signals, and step state rolling back.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/ability_steps_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-
-var _failures := 0
 
 
 ## A step that logs its enter, ticks and exit, and finishes or fails after a number of its own ticks.
@@ -391,9 +389,3 @@ func _make_floor() -> StaticBody3D:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

@@ -2,11 +2,9 @@
 ## Claude 2026-11-07: GroundMovement is gone; the same checks now run through the Walk, Sprint and Jump abilities and the pawn's stats.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/pawn_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -220,6 +218,9 @@ func _test_rollback_is_exact() -> void:
 	add_child(terrain)
 	await get_tree().physics_frame
 	var pawn := _make_pawn(Vector3(5.0, terrain.height_at(5.0, 5.0) + 0.1, 5.0))
+	# Claude 2026-11-16 (pawn spec 8.22): this checks physics replays. An AI-driven pawn offline would walk with the CrowdMover, which a
+	# replay doesn't use; in a real game only clients replay, and only pawns that move by physics there.
+	pawn.crowd_movement = false
 	await _ticks(20)
 	var pick := RandomNumberGenerator.new()
 	pick.seed = 11
@@ -331,15 +332,17 @@ func _test_bad_input() -> void:
 func _test_source_rules() -> void:
 	# Claude 2026-11-16 (pawn M2): a flag, read through the source contract: the pawn makes no StreamingSource node any more.
 	var pawn := _make_pawn(Vector3.ZERO)
-	_check(not pawn.counts_on_this_machine() and pawn.is_in_group(StreamingSource.GROUP), "an AI pawn doesn't keep the world loaded by default")
+	# Claude 2026-11-16 (wider audit): and it's in the sources' group only while it might count, so the streamer's list stays short.
+	_check(pawn.is_in_group(Pawn.GROUP), "every pawn is in the pawns group")
+	_check(not pawn.counts_on_this_machine() and not pawn.is_in_group(StreamingSource.GROUP), "an AI pawn doesn't keep the world loaded by default, and isn't among the sources")
 	pawn.keeps_world_loaded = true
-	_check(pawn.counts_on_this_machine() and pawn.is_keeping_world_loaded(), "with keeps_world_loaded on, it does")
+	_check(pawn.counts_on_this_machine() and pawn.is_keeping_world_loaded() and pawn.is_in_group(StreamingSource.GROUP), "with keeps_world_loaded on, it does, and joins the sources")
 	pawn.keeps_world_loaded = false
 	_check(not pawn.counts_on_this_machine(), "and stops when it goes off")
 	pawn.controller_manager.set_has_player(true)
-	_check(pawn.counts_on_this_machine(), "a pawn with a player does")
+	_check(pawn.counts_on_this_machine() and pawn.is_in_group(StreamingSource.GROUP), "a pawn with a player does, and is among the sources")
 	pawn.controller_manager.set_has_player(false)
-	_check(not pawn.counts_on_this_machine(), "until the player leaves")
+	_check(not pawn.counts_on_this_machine() and not pawn.is_in_group(StreamingSource.GROUP), "until the player leaves")
 	_check(pawn.get_node_or_null("StreamingSource") == null and pawn.load_distance == 320.0 and pawn.nav_distance == 128.0,
 		"with no StreamingSource node, and the game's distances (%.0f, %.0f)" % [pawn.load_distance, pawn.nav_distance])
 	pawn.free()
@@ -375,8 +378,8 @@ func _test_ai_with_no_ground() -> void:
 
 func _test_no_arms_by_default() -> void:
 	var pawn := _make_pawn(Vector3.ZERO)
-	_check(pawn.get_camera_arm() == null, "a pawn has no camera arm by default")
-	_check(pawn.get_camera_mount() == pawn.get_visual() and pawn.get_camera_preset() == null, "and with no CameraMount, the arm would go on Visual, with the defaults") # Claude 2026-11-16 (pawn M5)
+	_check(CameraMount.arm_of(pawn) == null, "a pawn has no camera arm by default")
+	_check(CameraMount.mount_of(pawn) == pawn.get_visual() and CameraMount.preset_of(pawn) == null, "and with no CameraMount, the arm would go on Visual, with the defaults") # Claude 2026-11-16 (pawn M5)
 	pawn.free()
 
 
@@ -423,6 +426,35 @@ func _measure_a_crowd() -> void:
 func _test_resting() -> void:
 	var floor_body := _make_floor()
 	var pawn := _make_pawn(Vector3(0.0, 0.2, 0.0))
+	# Claude 2026-11-16 (wider audit): taken out of the tree and put back, a pawn is watched by the AI switch-off again.
+	var watched: int = GameMode.ai_activation_manager.get_watched_count()
+	var pawn_parent := pawn.get_parent()
+	pawn_parent.remove_child(pawn)
+	_check(GameMode.ai_activation_manager.get_watched_count() == watched - 1, "(a pawn taken out of the tree leaves the AI switch-off's list)")
+	pawn_parent.add_child(pawn)
+	_check(GameMode.ai_activation_manager.get_watched_count() == watched, "a pawn put back into the tree is watched by the AI switch-off again")
+	# Claude 2026-11-16 (wider audit): a corpse lying still sleeps, and wakes when it's revived.
+	var corpse := _make_pawn(Vector3(6.0, 0.2, 0.0))
+	await _ticks(40)
+	var killing_hit := HitInfo.new() # a hit with enough damage: Death starts when a hit takes Health to 0
+	killing_hit.attacker = pawn
+	killing_hit.target = corpse
+	killing_hit.tick = TickDriver.tick
+	killing_hit.effects = [Effect.make_damage(100000)]
+	corpse.ability_manager.receive_hit(killing_hit)
+	await _ticks(40)
+	# Claude 2026-11-17: counted over 15 ticks. A sleeping pawn still runs one full tick in every sleep_check_ticks (15), so a check
+	# of one tick failed about 1 time in 15 (it did once, in a full run).
+	var asleep := 0
+	for i in 15:
+		await _ticks(1)
+		if corpse.is_sleeping:
+			asleep += 1
+	_check(corpse.is_dead() and asleep >= 13, "a dead pawn lying still sleeps (dead %s, asleep %d of 15 ticks)" % [corpse.is_dead(), asleep])
+	corpse.ability_manager.revive()
+	await _ticks(3)
+	_check(not corpse.is_dead(), "and a revived one wakes and is alive again within a few ticks")
+	corpse.free()
 	await _ticks(40)
 	var rested := 0
 	for i in 30:
@@ -572,9 +604,3 @@ func _drive(pawn: Pawn, move: Vector3, sprint := false, jump := false) -> void:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

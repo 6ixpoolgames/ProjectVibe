@@ -1,11 +1,10 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for possession, PlayerController, PlayerCamera and CameraArm, offline.
 ## Over a network is in net_pawn_selftest. Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/possession_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 
-var _failures := 0
 var _possession: PossessionCoordinator
 var _controller: PlayerController
 
@@ -15,7 +14,7 @@ class ScriptedController extends PlayerController:
 	var scripted_move := Vector2.ZERO
 	var scripted_jump := false
 	var scripted_look := Vector2.ZERO
-	var scripted_up := 0.0 # Claude 2026-11-16: spectating's Q and E
+	var scripted_up := 0.0 # Claude 2026-11-16: spectating's up and down keys (Space and Ctrl)
 	var scripted_sprint := false # Claude 2026-11-16: spectating's fast flying
 
 	func _read_move() -> Vector2:
@@ -94,11 +93,11 @@ func _test_possessing() -> void:
 	_check(_controller.pawn == pawn, "and the controller has it")
 	_check(pawn.controller_manager.has_player(), "and the pawn knows")
 	_check(pawn.is_keeping_world_loaded(), "and it keeps the world loaded now") # Claude 2026-11-16 (pawn M2): a flag, not a StreamingSource node
-	_check(_controller.camera.get_view() == pawn.get_default_view(), "and the camera is on its view")
+	_check(_controller.camera.get_view() == CameraMount.view_of(pawn), "and the camera is on its view")
 	_check(_controller.camera.current, "and in use")
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_check(_controller.camera.global_position.is_equal_approx(pawn.get_default_view().global_position), "and it's at the view")
+	_check(_controller.camera.global_position.is_equal_approx(CameraMount.view_of(pawn).global_position), "and it's at the view")
 
 	_possession.release()
 	_check(_possession.get_pawn_of() == null and _controller.pawn == null, "letting go leaves the controller with no pawn")
@@ -109,14 +108,14 @@ func _test_possessing() -> void:
 
 func _test_refusals() -> void:
 	var pawn := _make_pawn(Vector3.ZERO)
-	pawn.possessable = false
+	pawn.controller_manager.possessable = false
 	var reason := [""]
 	var on_refused := func(_p: int, _pawn: Pawn, why: String) -> void: reason[0] = why
 	_possession.refused.connect(on_refused)
 	_check(not _possession.possess(pawn), "a pawn with possessable off refuses")
 	_check(reason[0] != "", "and says why (%s)" % reason[0])
 	_check(_controller.pawn == null, "and nothing changes")
-	pawn.possessable = true
+	pawn.controller_manager.possessable = true
 	_check(_possession.possess_for(7, pawn), "(another player takes it)")
 	reason[0] = ""
 	_check(not _possession.possess(pawn), "a pawn someone else has refuses")
@@ -127,7 +126,7 @@ func _test_refusals() -> void:
 
 	# Claude 2026-11-07: the flag only stops new possessions. Removing someone is its own call.
 	_check(_possession.possess(pawn), "(possessed again)")
-	pawn.possessable = false
+	pawn.controller_manager.possessable = false
 	_check(_controller.pawn == pawn and _possession.get_pawn_of() == pawn, "turning possessable off doesn't evict whoever has the pawn")
 	_possession.release_pawn(pawn)
 	_check(_controller.pawn == null and _possession.get_peer_of(pawn) == 0, "release_pawn does")
@@ -169,15 +168,15 @@ func _test_jump_with_no_pawn() -> void:
 func _test_arm_rules() -> void:
 	# A plain pawn gets the player's arm on possession, which leaves again afterwards. Claude 2026-11-16 (pawn M5): the player's one arm, moved here.
 	var plain := _make_pawn(Vector3.ZERO)
-	_check(plain.get_camera_arm() == null, "a plain pawn has no arm")
+	_check(CameraMount.arm_of(plain) == null, "a plain pawn has no arm")
 	_possession.possess(plain)
-	var arm := plain.get_camera_arm()
+	var arm := CameraMount.arm_of(plain)
 	_check(arm != null and arm == _controller._own_arm, "possession brings the player's own arm")
 	_check(arm.is_processing(), "and it's active")
 	_check(is_equal_approx(arm.get_length(), CameraPreset.new().arm_length), "with the default settings")
 	_possession.release()
 	await get_tree().process_frame
-	_check(plain.get_camera_arm() == null and is_instance_valid(arm) and arm.get_parent() == _controller, "and it goes back to the player when possession ends")
+	_check(CameraMount.arm_of(plain) == null and is_instance_valid(arm) and arm.get_parent() == _controller, "and it goes back to the player when possession ends")
 	plain.free()
 
 	# A preset chooses the settings.
@@ -190,7 +189,7 @@ func _test_arm_rules() -> void:
 	with_preset.get_node("Visual").add_child(mount)
 	add_child(with_preset)
 	_possession.possess(with_preset)
-	_check(is_equal_approx(with_preset.get_camera_arm().get_length(), 3.0) and with_preset.get_camera_arm().get_parent() == mount, "a pawn's CameraMount places the arm and its preset sets the length")
+	_check(is_equal_approx(CameraMount.arm_of(with_preset).get_length(), 3.0) and CameraMount.arm_of(with_preset).get_parent() == mount, "a pawn's CameraMount places the arm and its preset sets the length")
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_check(is_equal_approx(_controller.camera.fov, 50.0), "and the field of view")
@@ -201,9 +200,9 @@ func _test_arm_rules() -> void:
 	var one := _make_pawn(Vector3(-3.0, 0.0, 0.0))
 	var two := _make_pawn(Vector3(3.0, 0.0, 0.0))
 	_possession.possess(one)
-	var moving_arm := one.get_camera_arm()
+	var moving_arm := CameraMount.arm_of(one)
 	_possession.possess(two)
-	_check(two.get_camera_arm() == moving_arm and one.get_camera_arm() == null and moving_arm.is_processing(), "the player's one arm moves to the next pawn they take")
+	_check(CameraMount.arm_of(two) == moving_arm and CameraMount.arm_of(one) == null and moving_arm.is_processing(), "the player's one arm moves to the next pawn they take")
 	_check(is_equal_approx(moving_arm.get_length(), CameraPreset.new().arm_length), "and takes that pawn's settings (the defaults here, after the last pawn's 3 m)")
 	_possession.release()
 	one.free()
@@ -215,10 +214,10 @@ func _test_arm_rules() -> void:
 	placed.get_node("Visual").add_child(placed_arm)
 	add_child(placed)
 	_possession.possess(placed)
-	_check(placed.get_camera_arm() == placed_arm, "an arm placed in the scene is used")
+	_check(CameraMount.arm_of(placed) == placed_arm, "an arm placed in the scene is used")
 	_possession.release()
 	await get_tree().process_frame
-	_check(placed.get_camera_arm() == placed_arm, "and it stays")
+	_check(CameraMount.arm_of(placed) == placed_arm, "and it stays")
 	placed.free()
 
 	# A view placed by itself, such as at the eyes, with no arm at all.
@@ -228,7 +227,7 @@ func _test_arm_rules() -> void:
 	eyes.get_node("Visual").add_child(eye_view)
 	add_child(eyes)
 	_possession.possess(eyes)
-	_check(eyes.get_camera_arm() == null, "a pawn with its own view gets no arm")
+	_check(CameraMount.arm_of(eyes) == null, "a pawn with its own view gets no arm")
 	_check(_controller.camera.get_view() == eye_view, "and the camera uses that view")
 	_possession.release()
 	eyes.free()
@@ -243,7 +242,7 @@ func _test_swapping() -> void:
 	_check(_controller.pawn == second and _possession.get_pawn_of() == second, "taking another pawn swaps to it")
 	_check(not first.controller_manager.has_player(), "and lets go of the first")
 	await get_tree().process_frame
-	_check(first.get_camera_arm() == null, "and its arm goes")
+	_check(CameraMount.arm_of(first) == null, "and its arm goes")
 	_check(is_equal_approx(_controller.look_yaw, 1.0), "and the player keeps looking the same way")
 	_possession.release()
 	first.free()
@@ -300,7 +299,7 @@ func _test_driving() -> void:
 	scripted.scripted_look = Vector2(0.0, 100.0)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	var limit := deg_to_rad(pawn.get_camera_arm().preset.max_pitch)
+	var limit := deg_to_rad(CameraMount.arm_of(pawn).preset.max_pitch)
 	_check(is_equal_approx(scripted.look_pitch, limit), "and looking up stops at the arm's limit (%.2f)" % scripted.look_pitch)
 
 	scripted.take_pawn(null)
@@ -322,7 +321,7 @@ func _test_camera_arm() -> void:
 	add_child(scripted)
 	await _ticks(10)
 	scripted.take_pawn(pawn)
-	var arm := pawn.get_camera_arm()
+	var arm := CameraMount.arm_of(pawn)
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var view := arm.get_view()
@@ -395,7 +394,7 @@ func _test_camera_arm() -> void:
 	scripted.take_pawn(fp_pawn)
 	await get_tree().process_frame
 	await get_tree().process_frame
-	_check(fp_pawn.get_default_view().global_position.distance_to(fp_pawn.get_visual().global_position + Vector3(0.0, 1.6, 0.0)) < 0.01, "an arm length of 0 is first person, at the set height")
+	_check(CameraMount.view_of(fp_pawn).global_position.distance_to(fp_pawn.get_visual().global_position + Vector3(0.0, 1.6, 0.0)) < 0.01, "an arm length of 0 is first person, at the set height")
 	scripted.take_pawn(null)
 	fp_pawn.free()
 	pawn.free()
@@ -527,7 +526,7 @@ func _test_spectating() -> void:
 	controller.take_pawn(pawn)
 	_check(not controller.is_spectating() and not spectator.is_flying() and not spectator.streaming_source.counts_on_this_machine(),
 			"taking a pawn stops spectating, and its source stops counting")
-	_check(controller.camera.get_view() == pawn.get_default_view(), "and the camera goes to the pawn's view")
+	_check(controller.camera.get_view() == CameraMount.view_of(pawn), "and the camera goes to the pawn's view")
 	# A client asks to let go and spectates before the server answers: the keys fly the spectator, and the pawn gets nothing from them.
 	controller.start_spectating()
 	controller.scripted_move = Vector2(0.0, -1.0)
@@ -597,9 +596,3 @@ func _make_pawn(at: Vector3) -> Pawn:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

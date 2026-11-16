@@ -3,11 +3,9 @@
 ## AIStateManager.gd. Claude 2026-11-09 (scaling spec step 3): and forces asked for during a tick, which wait for the next AI step.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_state_manager_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-
-var _failures := 0
 
 
 ## A state a test can switch on and off, with a tunable threshold the way real states should have.
@@ -45,7 +43,7 @@ func _test_priority_order() -> void:
 	var combat := _state("Combat", 20)
 	var alert := _state("Alert", 10)
 	var pawn := _make_pawn([alert, combat]) # added lowest first on purpose
-	var states := pawn.ai_state_manager
+	var states := pawn.ai_context.state_manager
 	var changes := []
 	states.state_changed.connect(func(old, new, reason): changes.append([old, new, reason]))
 	await _ticks(3) # decisions every tick in this test
@@ -73,14 +71,14 @@ func _test_fixed_order() -> void:
 	var second := _make_pawn([_state("Alpha", 5, 0), _state("Bravo", 5, 0)])
 	var a: Array[StringName] = []
 	var b: Array[StringName] = []
-	for state in first.ai_state_manager.get_states():
+	for state in first.ai_context.state_manager.get_states():
 		a.append(state.name)
-	for state in second.ai_state_manager.get_states():
+	for state in second.ai_context.state_manager.get_states():
 		b.append(state.name)
 	_check(a == b and a[0] == &"Alpha", "the same order whatever order they were added in: %s" % str(a))
-	first.ai_state_manager.update_state(0)
-	second.ai_state_manager.update_state(0)
-	_check(first.ai_state_manager.get_current_state().name == &"Alpha" and second.ai_state_manager.get_current_state().name == &"Alpha", "so both pick the same state")
+	first.ai_context.state_manager.update_state(0)
+	second.ai_context.state_manager.update_state(0)
+	_check(first.ai_context.state_manager.get_current_state().name == &"Alpha" and second.ai_context.state_manager.get_current_state().name == &"Alpha", "so both pick the same state")
 	first.free()
 	second.free()
 
@@ -89,7 +87,7 @@ func _test_forcing() -> void:
 	var combat := _state("Combat", 20)
 	var flee := _state("Flee", 30)
 	var pawn := _make_pawn([combat, flee])
-	var states := pawn.ai_state_manager
+	var states := pawn.ai_context.state_manager
 	await _ticks(2)
 	_check(states.force_state(&"Combat", 10, 50, "test"), "a force is accepted")
 	_check(states.get_current_state() == combat, "and takes effect at once, though Combat's prerequisites don't hold")
@@ -133,8 +131,8 @@ func _test_forcing_during_a_tick() -> void:
 	taunter.team = 5
 	taunter.position = Vector3(30, 0, 0)
 	add_child(taunter)
-	var states := pawn.ai_state_manager
-	var selector := pawn.ai_target_selector
+	var states := pawn.ai_context.state_manager
+	var selector := pawn.ai_context.target_selector
 	await _ticks(2)
 	var seen := {}
 	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
@@ -176,11 +174,11 @@ func _test_odd_cases() -> void:
 	var only := _state("Only", 1)
 	var pawn := _make_pawn([only], false)
 	only.level = 1
-	pawn.ai_state_manager.update_state(0)
+	pawn.ai_context.state_manager.update_state(0)
 	only.level = 0
 	print("  (a warning about no state fitting is expected next)")
-	pawn.ai_state_manager.update_state(1)
-	_check(pawn.ai_state_manager.get_current_state() == only, "no state fits: it keeps the current one")
+	pawn.ai_context.state_manager.update_state(1)
+	_check(pawn.ai_context.state_manager.get_current_state() == only, "no state fits: it keeps the current one")
 	pawn.free()
 	var automatic := SwitchState.new() # no name set
 	var holder := AIStateManager.new()
@@ -225,9 +223,3 @@ func _make_pawn(states: Array, with_idle := true) -> Pawn:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

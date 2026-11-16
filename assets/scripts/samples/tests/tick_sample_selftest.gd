@@ -10,6 +10,9 @@ var _failures := 0
 func _ready() -> void:
 	print("--- Tick sample self-test ---")
 	var nt: TickDriverSingleton = get_node("/root/TickDriver")
+	# Claude 2026-11-16 (pawn spec 8.22): the driver has participants of its own before the sample (the CrowdMover module is one), so
+	# "freed pawns leave" compares with this.
+	var before_sample := nt.get_participant_count()
 	# Claude 2026-11-06: the sample scenes moved to assets/scenes/samples.
 	var sample: Node3D = load("res://assets/scenes/samples/tick_pawn_sample.tscn").instantiate()
 	add_child(sample)
@@ -52,7 +55,7 @@ func _ready() -> void:
 
 	sample.queue_free()
 	await _frames(2)
-	_check(nt.get_participant_count() == 0, "freed pawns leave the driver")
+	_check(nt.get_participant_count() == before_sample, "freed pawns leave the driver")
 
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)

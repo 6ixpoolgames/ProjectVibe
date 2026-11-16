@@ -9,9 +9,9 @@
 ## manager decides at once and the running behaviour may be interrupted (pawn spec 10.7).
 ##
 ## How to use it (outside code only talks to the manager):
-##   pawn.ai_state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
-##   pawn.ai_state_manager.force_state(&"Combat", 120, 50, "scripted")   # skip the normal check for 120 ticks
-##   pawn.ai_state_manager.release_forced_state()
+##   pawn.ai_context.state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
+##   pawn.ai_context.state_manager.force_state(&"Combat", 120, 50, "scripted")   # skip the normal check for 120 ticks
+##   pawn.ai_context.state_manager.release_forced_state()
 ##   state_changed(old_state, new_state, reason)                       # for debug readouts and, later, animation
 ##
 ## Forcing a state (pawn spec 10.6):
@@ -169,8 +169,7 @@ func release_forced_state() -> void:
 
 # Claude 2026-11-09 (step 3): true while a tick runs, when a request must wait for the pawn's next AI step.
 func _during_tick() -> bool:
-	var driver: Node = get_node_or_null("/root/TickDriver")
-	return driver != null and driver.is_in_tick()
+	return TickDriver.is_in_tick() # Claude 2026-11-16 (wider audit): the autoload, not a lookup by path
 
 
 # --- Internals ---
@@ -205,11 +204,10 @@ func _find(state_name: StringName) -> AIStateBase:
 	return null
 
 
+# Claude 2026-11-16 (wider audit): the TickDriver autoload, as the rest of this file uses it; this looked it up by path each time,
+# with a fallback that could never run.
 func _now() -> int:
-	var driver: Node = get_node_or_null("/root/TickDriver")
-	if driver:
-		return driver.tick
-	return pawn.ai_context.current_tick if pawn and pawn.ai_context else 0
+	return TickDriver.tick
 
 
 func _collect_states() -> void:

@@ -61,8 +61,11 @@ func watch(pawn: Pawn) -> void:
 		return
 	for ability in pawn.ability_manager.get_abilities():
 		if ability is MeleeAttackAbility:
-			# Claude 2026-11-09: _swings stops a second watch() of the same pawn from drawing everything twice (it was is_connected,
-			# which doesn't work with bind). GDScript note: bind() adds the ability as an extra last argument to each call.
+			# Claude 2026-11-09: _swings stops a second watch() of the same pawn from drawing everything twice. GDScript note: bind()
+			# adds the ability as an extra last argument to each call. Claude 2026-11-16 (wider audit, checked in Godot 4.7): a
+			# signal counts a function as connected whatever is bound to it, so is_connected can't tell two abilities' connections
+			# to the same signal apart, and a second connect with another bind is refused. Hence the dictionary here; the parry
+			# check below is one connection per pawn's manager, where is_connected is right.
 			if not _swings.has(ability):
 				_swings[ability] = null
 				ability.hit_window_started.connect(_on_hit_window_started.bind(ability))

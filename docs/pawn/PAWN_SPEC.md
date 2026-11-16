@@ -971,7 +971,7 @@ The tick-driver update's dynamic tick rate (roadmap item 3), built on scaling sp
   - effects' durations and periods: a period that came round more than once is due that many times, so damage over time totals the same
   - navigation's pending and link counters
 - **The rules that fire on "tick number modulo interval"** (the AI's decision, sensing, refresh and behaviour ticks; the pawn's sleep check) use `Pawn.fired_since_last_run`, true if the rule fired on this tick or one skipped since the last run. With `ticks_elapsed` 1 it's the old rule exactly, so pawns at step 1 behave as before.
-- Sight's awareness already fills by the real ticks since its last check. The sensing job's answers are for the next tick, so only pawns at step 1 use the job; a stepping pawn senses the old way, less often.
+- Sight's awareness already fills by the real ticks since its last check. The sensing job's answers are for the next tick. *(Claude 2026-11-16: a stepping pawn used to sense on the main thread, so the load ladder took every pawn's sensing off the workers. Now, when a stepping pawn runs, it works out its next run (`Pawn.next_run_tick`), and if that run does a full pass it asks the job at the end of the tick before, as a pawn at step 1 does. If its step changes in between, the answer goes unused and that pass is done the old way.)*
 - On the ticks it skips, it does nothing: no AI, no input, no simulate. Visual glides across the whole run, so it doesn't judder.
 - A pawn a player has always runs every tick, whatever its step says, so input stays responsive and a client's prediction never steps.
 - Rollback: `tick_step` and `_last_run_tick` are rolled-back state, so a replay runs the pawn on the same ticks (`tick_step_selftest`). They're also in snapshots, which costs a few bytes a pawn.
@@ -985,7 +985,7 @@ The tick-driver update's dynamic tick rate (roadmap item 3), built on scaling sp
 
 **The load ladder** (TickDriver, for "the whole game dropping to 30 under load"):
 - Each tick's cost is measured against its budget and averaged over about ten ticks (`load_average`).
-- Over `raise_above` (85%) for `raise_after_ticks` (30), `load_step` doubles: 1, 2, 4 (up to `max_load_step`). Under `lower_below` (40%) for `lower_after_ticks` (180, three seconds), it halves. The low threshold is because stepping down roughly doubles what the AI pawns cost.
+- Over `raise_above` (85%) for `raise_after_ticks` (30), `load_step` doubles: 1, 2, 4 (up to `max_load_step`). Under `lower_below` (40%) for `lower_after_ticks` (180, three seconds), it halves. The low threshold is because stepping down roughly doubles what the AI pawns cost. *(Claude 2026-11-16, the owner's question "why doesn't it step back down?": in the owner's editor run it stepped up to 4 and stayed there, because much of a tick doesn't shrink with the AI's step (recording every pawn, the player's pawn, the replay, the AI's schedules), so the tick sat at about half its budget: under 85%, never under 40%. Now it also steps down when it predicts the lower step fits: when it steps up it notes the load before and, once settled, after, which is what that step saved; it steps down while the load now plus that saving is under `raise_above` less `step_down_headroom` (15%) for `lower_after_ticks`. With nothing measured it assumes the load doubles. `tick_step_selftest` checks both ways.)*
 - Every AI pawn then runs at least every `load_step`-th tick: the whole game's AI at 30, or 15, ticks a second, with everything lasting as long. Players' pawns still run every tick.
 - `load_step_override` forces a step (testing a level, or a game that wants one); `load_ladder_enabled` off keeps it at 1. `load_step_changed` is sent on each change.
 - It needs no announcement to clients: only the server runs AI pawns, and the steps reach clients as state.
@@ -997,8 +997,42 @@ The tick-driver update's dynamic tick rate (roadmap item 3), built on scaling sp
 **Left for later:**
 - **The 120-unit fine clock and changing the base rate mid-match.** Only needed to run above 60 or change the tick length itself; dropping the AI to 30 works without it. With networking T1.1.
 - **A stepping pawn's motion on clients and in replays.** It moves every Nth tick, so far-away pawns show as small hops between snapshots on a client and in the replay viewer. Fine at distance; smoothing them on clients goes with T1.1's per-entity state time.
-- **The batched mover** (one central move step), still on the roadmap.
+- **The batched mover** (one central move step): *(Claude 2026-11-16: built the same day for AI pawns as the CrowdMover, section 8.22, in GDScript; its C++ batch is on the C++ bundle list.)*
 - **The scheduler's main-thread budget** (scaling rule 5) beyond this: other main-thread work moving to workers stays with scaling step 5.
+
+### 8.22 The crowd mover *(Claude 2026-11-16, the owner's call: "agree with roadmap ... go with all"; built in GDScript, C++ to come)*
+
+Measured first (`mass_battle_measure -- --size=50 --spawn-distance=40 --scopes`, offline, headless): simulate was 5.4 to 5.7 ms of an 11.5 to 12.3 ms tick, of which `move_and_slide` was 3.0 to 3.4 ms (about 22.5 microseconds for each of 135 to 145 moving pawns) and abilities 1.4 to 1.9. Fewer slides (`--max-slides=2`) saved nothing; no collisions between pawns made each move about a quarter cheaper. So the cost is Godot's character solve itself.
+
+**What's built:** the standard way crowds are moved (Unreal's "NavWalking" is one): AI pawns walking on the ground skip `move_and_slide` and are moved together.
+- **`CrowdMover`** (`assets/scripts/movement/`), a GameMode module (in the project setting's lists, and `GameMode.crowd_mover`). It's a TickDriver participant that runs last in the simulate phase. A pawn hands it its move (`queue_move`) after its abilities and gravity, and the mover moves them all:
+  1. each by its velocity, flat
+  2. separation: pushed apart where it overlaps any pawn, from a grid built once a tick; two crowd pawns each take half, a pawn moving by physics none. With `separation_strength` 1 (the default) an overlap is removed in one tick, so two pawns walking straight at each other stop as if they'd collided
+  3. walls and ground *(Claude 2026-11-16, the owner's call: collision rather than a wall ray)*: the pawn's own collision shape swept along the move against the level (not pawns), lifted by `max_step` plus what the pawn's `floor_max_angle` allows over the distance, then one ray down for the ground within that same step. Taller than the step is a wall; lower is a step. A wall, no ground, or ground too steep: that pawn moves by physics instead, at once (`Pawn.finish_move_by_physics`). (It was a ray at knee height, which missed low and thin things.)
+
+  Then each pawn finishes its tick (`Pawn.finish_crowd_move`): it stands there, its velocity is what it really moved, and it's grounded. Its position is rounded as its rollback recording rounds it (`TickStateComponent.round_position`, millimetres for a pawn), so the recording changes nothing afterwards and a still pawn is exactly still and sleeps. *(Claude 2026-11-16, the owner's call: this replaced a millimetre tolerance in the mover. Without either, no still pawn slept: a ray finds the floor 3e-8 m off, and the recording rounded that back every tick, so it always looked moved. A capsule sweep down for the floor would be worse: 1.6 mm high on flat ground, 15 mm on a slope.)*
+- **Who uses it** (`CrowdMover.try_take_move`; *Claude 2026-11-16, the audit: the rule was on the pawn, which now only asks*): a pawn with `crowd_movement` on (the default), driven by its AI (no player), where its state is decided (offline or the server), on the ground and not heading up, with no running ability that `needs_full_movement` (a new ability setting, on for Dash and Knockback), and only in a live tick's simulate phase of the tick driver the mover runs on. Everything else moves by physics as before: a player's pawn, anything on a client, a jump or a fall, a dash, a knockback, a rollback replay, a test calling `_tick_simulate` itself. So client prediction and rollback never meet it.
+- **AI pawns no longer collide with each other physically** while it moves them; separation keeps them apart. A player's pawn still collides with them, and they keep clear of it.
+- **Settings:** `enabled` and `separation_strength` (also in the start menu's match options), `separation_margin`, `max_push_speed`, `max_step`, `ground_layers`, `cell_size`. Diagnostics: `movement.crowd`, `movement.crowd_queries` (the sweeps and rays), `movement.crowd_fallbacks` (moves handed back to physics; was `crowd_blocked`).
+- **Written to be replaced by C++:** the batch (`_move_batch`) takes plain lists (positions, motions, radii, seconds, slopes, shapes, the other pawns) and gives back positions and ok flags, asking the physics world only for one sweep and one ray a pawn. The C++ version should find neighbours with the existing `AIPawnGrid` rather than port the GDScript grid, and keep walls to the navmesh (Detour's `moveAlongSurface`, the owner's call: walls belong in navigation). A pawn with no collision shape moves by physics until then.
+- Test: `movement/tests/crowd_mover_selftest` (the same distance as physics, up a ramp, two pawns walking at each other, a wall, an edge, a jump, a dash, a player's pawn, switched off).
+
+**Measured** (the same run): `movement.crowd` 1.3 to 1.4 ms for about 130 pawns, of which the rays (two then) are about 0.45 ms (about 1.8 microseconds each) and the rest GDScript; `move_and_slide` down to 0.2 ms (the moves still by physics). Simulate went from 5.4 to 5.7 ms to 3.9 to 4.4 ms, the tick from 11.5 to 12.3 ms to 10.0 to 10.8 ms.
+
+**The queries in a worst case** *(Claude 2026-11-16, the owner's request; `movement/tests/crowd_query_measure`, microseconds a call, the middle pawn of 12 touching it and 24 just outside)*:
+
+| | alone, flat | crowd of 36, flat | crowd of 36, 25 degree slope |
+|---|---|---|---|
+| wall sweep (the level only, as used) | 0.5 | 0.5 | 0.8 |
+| the same sweep with pawns included (not used) | 0.6 | 0.7 | 1.5 |
+| ground ray | 1.7 | 1.8 | 1.7 |
+| `move_and_slide` colliding with pawns (as before) | 9.1 | 9.9 | 29.8 |
+| `move_and_slide`, the level only | 9.0 | 9.5 | 17.8 |
+| the whole CrowdMover batch, per pawn | 19.8 (one pawn) | 12.5 | 12.1 |
+
+The sweep and ray together are about 2.5 microseconds in any of these; the rest of the batch's 12 is GDScript. So in GDScript the batch only pays where `move_and_slide` is dear (slopes in a crowd, and the mass battle's terrain at 22 to 26), not on a plain box floor (9 to 10). Still pawns sleep as before, alone and in a crowd placed overlapping (`crowd_mover_selftest`).
+
+**Next, with the C++ bundle:** the batch in C++, rays against `SightGeometry`'s copy of the ground, on the worker threads: the GDScript part (about 0.9 ms) should mostly go. Also there: swing hit checks through the pawn grid instead of physics shape queries.
 
 ## 9. Stats (built 2026-11-07, step 5)
 
@@ -1499,6 +1533,7 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
   - For t0 it lists today's parts: `scenes/pawn/parts/ControllerManager.tscn` (with its `AIController`), `NavigationManager.tscn`, `StatManager.tscn`, `AbilityManager.tscn`, and, from step 8, `AIContextComponent.tscn`, `AISensingManager.tscn` (with Sight), `AIMemory.tscn`, `AITargetSelector.tscn`, `AIStateManager.tscn` (with Idle, Alert and Combat) and `AIBehaviourManager.tscn` (with no behaviours). *(Claude 2026-11-08: this line still named `GroundMovement`.)*
   - Each part is a small scene, so its settings can be changed in the editor.
 - A part's name is its scene's root node name. Parts are added in the list's order, the same on every machine.
+- **The game's default AI brain** *(Claude 2026-11-16, the owner's call: "give it the default AI brain for this game mode ... behaviour we can set via the game mode")*: `PawnDefaultsRes.ai_brain`, an `AIBehaviourManager` scene with behaviours as children. "Brain" is the everyday name; formally it's a **behaviour set**, the utility-AI term (Dave Mark's IAUS, Apex) for the behaviours a scoring manager picks between, since ours isn't a behaviour tree. The owner kept the name. A shared-resource version (one `.tres` for every pawn, per-pawn state in the manager) was discussed and set aside: its gains are spawning and memory, which have cheaper fixes first. A pawn whose scene has no `AIBehaviourManager` gets it instead of the plain one. That's the players' pawns: the ControllerManager runs the player's controller while they have the pawn, its AI only senses and remembers (`while_possessed`), and when they let go (U, V) the AI takes over with this brain. Before, their behaviour list was empty, so a pawn let go of stood still. The arena samples set it on their copy of the game's defaults while they run (`ArenaSample._use_level_defaults`, `_ai_brain()`): `samples/arena_brain.tscn` (the goblins' six behaviours) in the arena, and `samples/faction_brain.tscn` (those plus heavy attack, parry and going to the rally point, the soldiers' set) in the faction arena and mass battle. No orders or RTS commands: that's a separate design.
 - **Ways out:**
   - One pawn, every default: `Pawn.fill_in_default_parts` off.
   - One pawn, some defaults: `Pawn.skip_default_parts`.

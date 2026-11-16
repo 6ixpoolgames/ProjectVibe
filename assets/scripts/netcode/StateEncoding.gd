@@ -76,19 +76,20 @@ static func quantize(value: Variant, encoding: StringName) -> Variant:
 				return value.snapped(Vector3(CM, CM, CM))
 		ANGLE_U16:
 			if value is float:
-				return _as_float32(snappedf(wrapf(value, -PI, PI), U16_STEP))
+				return as_float32(snappedf(wrapf(value, -PI, PI), U16_STEP))
 		ANGLE_BYTE:
 			if value is float:
-				return _as_float32(snappedf(wrapf(value, -PI, PI), BYTE_STEP))
+				return as_float32(snappedf(wrapf(value, -PI, PI), BYTE_STEP))
 		FLOAT:
 			if value is float:
-				return _as_float32(value)
+				return as_float32(value)
 	return value
 
 
 ## GDScript floats are 64-bit, but engine properties like rotation store 32 bits. Rounded values go through this so a
 ## value reads back from such a property exactly as it was written, and doesn't look changed on the next tick.
-static func _as_float32(value: float) -> float:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (NetPackets calls it); it was _as_float32.
+static func as_float32(value: float) -> float:
 	return Vector2(value, 0.0).x
 
 

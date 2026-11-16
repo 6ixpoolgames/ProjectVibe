@@ -35,7 +35,8 @@ signal pawn_died(pawn: Pawn)
 		if active and is_inside_tree():
 			_update.call_deferred() # GDScript note: deferred, so setting it from _ready or a signal doesn't spawn halfway through
 ## The NetworkSession type name to spawn (NetworkSession.register_type).
-@export var pawn_type := "goblin"
+## Claude 2026-11-16 (wider audit): empty by default; it was "goblin", a type only the samples register. Empty, it spawns nothing.
+@export var pawn_type := ""
 ## How many living pawns it keeps.
 @export_range(0, 1000, 1, "or_greater") var keep_alive := 3
 ## Seconds from a death to its replacement.
@@ -89,6 +90,8 @@ func get_spawned_total() -> int:
 
 
 # Between ticks, and when switched on: drop pawns that are gone, then spawn what's missing and not waiting.
+var _warned_no_type := false # Claude 2026-11-16 (wider audit)
+
 func _update() -> void:
 	if not active or not is_inside_tree():
 		return
@@ -109,6 +112,11 @@ func _update() -> void:
 	if missing <= 0:
 		return
 	if only_where_loaded and not _ground_loaded():
+		return
+	if pawn_type == "": # Claude 2026-11-16 (wider audit): nothing chosen to spawn; said once, where it used to try "goblin"
+		if not _warned_no_type:
+			_warned_no_type = true
+			push_warning("PawnSpawner '%s' has no pawn_type, so it spawns nothing. Set it to a type registered with NetworkSession.register_type." % name)
 		return
 	for i in missing:
 		if total_limit > 0 and _spawned_total >= total_limit:

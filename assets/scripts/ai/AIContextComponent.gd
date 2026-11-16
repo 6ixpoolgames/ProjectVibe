@@ -62,10 +62,22 @@ func _enter_tree() -> void:
 	pawn = get_parent() as Pawn # GDScript note: "as" gives null when the parent isn't a Pawn, rather than an error
 	if pawn == null:
 		push_warning("AIContextComponent: its parent isn't a Pawn, so this AI has nothing to drive.")
+		return
+	_parts_found = false # Claude 2026-11-17: see _find_parts_if_needed
+	if not pawn.child_entered_tree.is_connected(_on_pawn_parts_changed):
+		pawn.child_entered_tree.connect(_on_pawn_parts_changed)
+		pawn.child_exiting_tree.connect(_on_pawn_parts_changed)
 
 
 # Claude 2026-11-16 (pawn M3): the AI notes every hit that reaches the pawn, parried ones included: it listens for them now, where Pawn._take_hit
 # used to call note_hit.
+# Claude 2026-11-17: stops listening to the pawn it leaves.
+func _exit_tree() -> void:
+	if pawn and pawn.child_entered_tree.is_connected(_on_pawn_parts_changed):
+		pawn.child_entered_tree.disconnect(_on_pawn_parts_changed)
+		pawn.child_exiting_tree.disconnect(_on_pawn_parts_changed)
+
+
 func _ready() -> void:
 	var abilities := _sibling_ability_manager()
 	if abilities:
@@ -82,25 +94,74 @@ var controller: AIController:
 			return pawn.controller_manager.ai_controller as AIController
 		return null
 
+# Claude 2026-11-17 (the owner's call): the context finds the pawn's other AI parts itself; the pawn used to hold a reference to
+# each. They're looked for the first time one is asked for, and again after a part is added to or removed from the pawn.
+# GDScript note: "get:" under a variable runs whenever it's read, so pawn.ai_context.memory works like a plain variable.
+
 ## The pawn's state manager, or null.
 var state_manager: AIStateManager:
 	get:
-		return pawn.ai_state_manager if pawn else null
+		_find_parts_if_needed()
+		return _state_manager
 
 ## The pawn's behaviour manager, or null.
 var behaviour_manager: AIBehaviourManager:
 	get:
-		return pawn.ai_behaviour_manager if pawn else null
+		_find_parts_if_needed()
+		return _behaviour_manager
+
+## Claude 2026-11-17: the pawn's sensing manager, or null.
+var sensing_manager: AISensingManager:
+	get:
+		_find_parts_if_needed()
+		return _sensing_manager
 
 ## Claude 2026-11-09: the pawn's memory, or null.
 var memory: AIMemory:
 	get:
-		return pawn.ai_memory if pawn else null
+		_find_parts_if_needed()
+		return _memory
 
 ## Claude 2026-11-09: the pawn's target selector, or null.
 var target_selector: AITargetSelector:
 	get:
-		return pawn.ai_target_selector if pawn else null
+		_find_parts_if_needed()
+		return _target_selector
+
+var _parts_found := false
+var _state_manager: AIStateManager = null
+var _behaviour_manager: AIBehaviourManager = null
+var _sensing_manager: AISensingManager = null
+var _memory: AIMemory = null
+var _target_selector: AITargetSelector = null
+
+
+# Claude 2026-11-17: the first of each AI part among the pawn's children, as the pawn found them before.
+func _find_parts_if_needed() -> void:
+	if _parts_found or pawn == null:
+		return
+	_parts_found = true
+	_state_manager = null
+	_behaviour_manager = null
+	_sensing_manager = null
+	_memory = null
+	_target_selector = null
+	for child in pawn.get_children():
+		if child is AIStateManager and _state_manager == null:
+			_state_manager = child
+		elif child is AIBehaviourManager and _behaviour_manager == null:
+			_behaviour_manager = child
+		elif child is AISensingManager and _sensing_manager == null:
+			_sensing_manager = child
+		elif child is AIMemory and _memory == null:
+			_memory = child
+		elif child is AITargetSelector and _target_selector == null:
+			_target_selector = child
+
+
+# Claude 2026-11-17: a part added or removed: look again next time one is asked for.
+func _on_pawn_parts_changed(_node: Node) -> void:
+	_parts_found = false
 
 
 # --- Shared inputs (Claude 2026-11-09, pawn spec 10.8) ---
@@ -245,7 +306,7 @@ func run_ai(tick: int) -> void:
 	var ai_state_manager := state_manager
 	var ai_target_selector := target_selector
 	var ai_behaviour_manager := behaviour_manager
-	var ai_sensing_manager := pawn.ai_sensing_manager
+	var ai_sensing_manager := sensing_manager # Claude 2026-11-17: was pawn.ai_context.sensing_manager
 	# Claude 2026-11-09 (scaling spec step 3): forces asked for during the last tick (a taunt from another pawn, say), in the order
 	# they were asked for. Before anything else, and even while possessed, as a force between ticks would have been.
 	if ai_state_manager:
@@ -355,6 +416,9 @@ func random_signed(salt: int) -> float:
 	return random_unit(salt) * 2.0 - 1.0
 
 
+var _number_name: StringName = &"" # Claude 2026-11-16 (wider audit): the name _name_number was worked out from
+var _name_number := 0
+
 ## This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on
 ## every machine, or else a hash of its name.
 func pawn_number() -> int:
@@ -363,7 +427,12 @@ func pawn_number() -> int:
 	var entity := pawn.get_network_entity()
 	if entity and entity.entity_id >= 0:
 		return entity.entity_id
-	return String(pawn.name).hash() & 0x7FFFFFFF
+	# Claude 2026-11-16 (wider audit): the hash is kept until the name changes. Offline this hashed the name at least twice a tick
+	# for every pawn. GDScript note: comparing two StringNames is one pointer comparison, far cheaper than hashing the text.
+	if pawn.name != _number_name:
+		_number_name = pawn.name
+		_name_number = String(pawn.name).hash() & 0x7FFFFFFF
+	return _name_number
 
 # Claude 2026-11-16 (pawn M3): the pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
 func _sibling_ability_manager() -> AbilityManager:

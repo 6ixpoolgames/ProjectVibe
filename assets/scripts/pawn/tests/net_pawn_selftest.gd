@@ -14,11 +14,10 @@
 ##
 ## Exits 0 on success, 1 on failure. About 4 minutes. Add -- --only=name to run one scenario. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/net_pawn_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const SECONDS := 20
 
-var _failures := 0
 var _port := NetRun.first_port() + 200
 var _only := ""
 
@@ -337,9 +336,3 @@ func _error_from(client: Dictionary, server: Dictionary, entity_id: int, from_ti
 		worst = maxf(worst, error)
 		count += 1
 	return {"average": total / maxi(count, 1), "worst": worst, "ticks": count}
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

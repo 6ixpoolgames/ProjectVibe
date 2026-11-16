@@ -3,11 +3,9 @@
 ## with no point in the level it isn't available, so the pawn just wanders.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_go_to_point_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const GOBLIN_SCENE := "res://assets/scenes/samples/faction_goblin.tscn" # has GoToPoint and Wander, among others
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -30,7 +28,7 @@ func _ready() -> void:
 func _test_no_point() -> void:
 	var goblin := _make_goblin(Vector3(0, 0.1, 0))
 	await _ticks(60)
-	var running := goblin.ai_behaviour_manager.get_running_behaviour()
+	var running := goblin.ai_context.behaviour_manager.get_running_behaviour()
 	_check(running != null and running.name == &"Wander", "with no rally point in the level, it wanders (%s)" % (String(running.name) if running else "nothing"))
 	goblin.queue_free()
 	await _ticks(2)
@@ -43,7 +41,7 @@ func _test_march() -> void:
 	add_child(point)
 	var goblin := _make_goblin(Vector3(0, 0.1, 0))
 	await _ticks(30)
-	var running := goblin.ai_behaviour_manager.get_running_behaviour()
+	var running := goblin.ai_context.behaviour_manager.get_running_behaviour()
 	_check(running != null and running.name == &"GoToPoint", "with one, an idle pawn walks to it (%s)" % (String(running.name) if running else "nothing"))
 	var go: AIGoToPointBehaviour = goblin.get_node("AIBehaviourManager/GoToPoint")
 	for i in 1200:
@@ -53,7 +51,7 @@ func _test_march() -> void:
 	var left := Vector2(goblin.global_position.x - 70.0, goblin.global_position.z).length()
 	_check(left <= go.arrive_radius, "it gets there, 70 m in legs of up to %d m (%.1f m left)" % [go.leg_metres, left])
 	await _ticks(40)
-	running = goblin.ai_behaviour_manager.get_running_behaviour()
+	running = goblin.ai_context.behaviour_manager.get_running_behaviour()
 	_check(running != null and running.name == &"Wander", "then Wander takes over (%s)" % (String(running.name) if running else "nothing"))
 	goblin.queue_free()
 	point.queue_free()
@@ -70,9 +68,3 @@ func _make_goblin(at: Vector3) -> Pawn:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

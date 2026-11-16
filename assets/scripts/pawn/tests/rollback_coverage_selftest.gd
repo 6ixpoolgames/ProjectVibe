@@ -9,7 +9,7 @@
 ## never rolls back.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/rollback_coverage_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
@@ -57,6 +57,11 @@ const NOT_ROLLED_BACK := {
 	"EffectManager:_resistance_bits": "worked out from active_effects",
 	# A stat's value, while a held StatModifierPart changes it: base_value with the parts' changes, worked out the same way.
 	"Stat:value": "worked out from active_effects",
+	# Claude 2026-11-16 (wider audit): the totals the EffectManager hands a stat (Stat.set_modifiers), which value is worked out from.
+	# Claude 2026-11-17: run_steps' working list (AbilityBase._steps_this_tick), emptied and filled again at the start of every tick.
+	"MeleeAttackAbility:_steps_this_tick": "a working list, refilled every tick from the steps' running flags, which roll back",
+	"Stat:_added": "worked out from the effects list, like Stat:value",
+	"Stat:_multiplied": "worked out from the effects list, like Stat:value",
 	# Goes up whenever a stat's value changes, so abilities that keep stat values read them again (pawn spec 15.2). A rollback that
 	# puts a value back changes it again, so it never needs to go back itself.
 	"StatManager:version": "a change counter for caches",
@@ -75,8 +80,6 @@ const NOT_ROLLED_BACK := {
 	"MeleeAttackAbility:_starts_tick": "counted per tick from the tick number",
 	"MeleeAttackAbility:_starts_this_tick": "counted per tick from the tick number",
 }
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -274,9 +277,3 @@ func _ai(pawn: Pawn) -> AIController:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

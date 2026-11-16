@@ -38,6 +38,14 @@ signal controller_changed(controller: ControllerBase)
 ## Sent when a player takes this pawn, or lets it go. Claude 2026-11-16 (pawn M4): moved here from Pawn.
 signal possession_changed(pawn: Pawn, has_player: bool)
 
+## Whether a player may take control of this pawn. Turn it off on pawns players should never control.
+## Claude 2026-11-07: on by default, the owner's choice. Off, people would be left wondering why their pawn doesn't work. Something
+## still has to ask for a possession, so a wrong one is a clear bug that gets looked at.
+## Claude 2026-11-17 (the owner's call): moved here from Pawn, with the rest of possession. To turn it off in a pawn scene whose
+## ControllerManager comes from the game's defaults, add parts/ControllerManager.tscn to the scene yourself and untick it there:
+## PawnInitializer leaves a part the scene already has alone.
+@export var possessable := true
+
 ## On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's
 ## setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own. Claude 2026-11-16 (pawn M4): moved from Pawn.
 @export_range(-1, 60, 1, "or_greater") var missing_input_hold_ticks := -1

@@ -2,9 +2,7 @@
 ## ends, the odd cases at the top of FadeProfile.gd, and that a script extending it is picked up.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/fade_profile_selftest.tscn"
-extends Node
-
-var _failures := 0
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 
 ## A fade no mode covers: steps straight from full to nothing at tick 10.
@@ -94,9 +92,3 @@ func _test_odd_cases() -> void:
 func _test_extended() -> void:
 	var fade: FadeProfile = StepFade.new()
 	_check(fade.value_at(9) == 1.0 and fade.value_at(10) == 0.0 and fade.ends_after() == 10, "a script extending it replaces both functions")
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

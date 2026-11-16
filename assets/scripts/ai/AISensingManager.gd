@@ -43,11 +43,15 @@ static var _grid: Object = null
 # whose full pass is next tick, collected during this tick; and the tick driver whose after_tick starts the job.
 static var _job: Object = null
 static var _due_next: Array[AISensingManager] = []
+# Claude 2026-11-16 (profiling the networked mass battle): managers of stepping pawns, by the tick at whose end they ask the job (the
+# tick before their next run), since they don't run in between to ask then. tick -> Array of managers.
+static var _due_later: Dictionary = {}
 static var _job_driver: Node = null
 
 var _senses: Array[AISenseBase] = []
 var _use_grid := false # decided once, when ready
 var _use_job := false # Claude 2026-11-09 (step 2): decided once, when ready
+var _asked_for_tick := -1 # Claude 2026-11-16 (audit): the tick at whose end this manager last asked the job, so it asks once
 var _sight: SightSense = null # Claude 2026-11-09 (step 2): the first sight sense, which the job serves
 var _candidates: Array[Pawn] = [] # reused every pass
 # Reused for every query, so a pass makes no new query objects.
@@ -89,7 +93,7 @@ func get_senses() -> Array[AISenseBase]:
 
 ## The pawn calls this each tick its AI runs.
 func tick_sensing(tick: int) -> void:
-	if pawn == null or pawn.ai_memory == null or _senses.is_empty():
+	if pawn == null or pawn.ai_context == null or pawn.ai_context.memory == null or _senses.is_empty():
 		return
 	var offset := pawn.ai_context.pawn_number() if pawn.ai_context else 0
 	var interval := TickDriver.ticks_at_rate(sense_interval_ticks) # Claude 2026-11-09 (scaling spec step 6): written for 60 a second
@@ -101,13 +105,29 @@ func tick_sensing(tick: int) -> void:
 		for sense in _senses:
 			sense.refresh(tick)
 	# Claude 2026-11-09 (scaling spec step 2): if next tick is a full pass, ask the sensing job for it at the end of this tick.
-	# Claude 2026-11-16: only for a pawn that runs every tick: the job's answer is for the next tick, which a stepping pawn doesn't run.
-	# It senses the old way, and less often.
-	if _use_job and pawn.runs_every_tick() and posmod(tick + 1 + offset, interval) == 0:
+	# Claude 2026-11-16 (profiling the networked mass battle): a stepping pawn too, which used to sense on the main thread: when its
+	# next run (Pawn.next_run_tick) will do a full pass, it asks at the end of the tick before that run, so the job's answer, which is
+	# always for the next tick, is for that run. If its step changes first, it runs on another tick, the answer goes unused, and that
+	# pass is done the old way, as before.
+	if not _use_job:
+		return
+	var next_run := pawn.next_run_tick(tick)
+	if not Pawn.fires_in_run(next_run, next_run - tick, offset, interval):
+		return # no full pass on its next run
+	# Claude 2026-11-16 (audit, the owner's call): a repeat ask for the same tick is dropped (its step can shrink between runs, which
+	# would otherwise ask twice).
+	if _asked_for_tick == next_run - 1:
+		return
+	_asked_for_tick = next_run - 1
+	if next_run == tick + 1:
 		_due_next.append(self)
-		if _job_driver == null and pawn._driver:
-			_job_driver = pawn._driver
-			_job_driver.after_tick.connect(AISensingManager._start_job)
+	else:
+		if not _due_later.has(next_run - 1):
+			_due_later[next_run - 1] = []
+		_due_later[next_run - 1].append(self)
+	if _job_driver == null: # Claude 2026-11-16 (wider audit): the autoload; this read the pawn's private _driver
+		_job_driver = TickDriver
+		_job_driver.after_tick.connect(AISensingManager._start_job)
 
 
 ## One full pass now. The pawn's tick calls it on schedule; tests may call it directly.
@@ -122,12 +142,12 @@ func full_pass(tick: int) -> void:
 				_sight.full_pass_prepared(_job, tick)
 			else:
 				sense.full_pass(_candidates, tick)
-		pawn.ai_memory.forget_old(tick)
+		pawn.ai_context.memory.forget_old(tick)
 		return
 	_find_candidates(tick)
 	for sense in _senses:
 		sense.full_pass(_candidates, tick)
-	pawn.ai_memory.forget_old(tick)
+	pawn.ai_context.memory.forget_old(tick)
 
 
 ## The longest range among the senses, in metres.
@@ -162,6 +182,14 @@ static func _shared_job() -> Object:
 static func _start_job(_dt: float, tick: int) -> void:
 	var due := _due_next
 	_due_next = []
+	# Claude 2026-11-16 (profiling): plus the stepping pawns that asked ahead for this tick. Older entries (a rollback, a skipped tick)
+	# are dropped.
+	if not _due_later.is_empty():
+		for at: int in _due_later.keys():
+			if at == tick:
+				due.append_array(_due_later[at])
+			if at <= tick:
+				_due_later.erase(at)
 	for manager in due:
 		if is_instance_valid(manager) and manager.is_inside_tree():
 			manager._ask_job()
@@ -171,7 +199,7 @@ static func _start_job(_dt: float, tick: int) -> void:
 # Claude 2026-11-09 (step 2): this pawn's request, skipped in the same cases _find_candidates finds nothing, so that pass runs the
 # old way and gives the same answer.
 func _ask_job() -> void:
-	if pawn == null or pawn.ai_memory == null or not pawn.is_inside_tree():
+	if pawn == null or pawn.ai_context == null or pawn.ai_context.memory == null or not pawn.is_inside_tree():
 		return
 	# A pawn that died during this tick, after it asked: a dead pawn's AI doesn't run (Pawn._tick_input), so the pass won't happen.
 	if pawn.is_dead():

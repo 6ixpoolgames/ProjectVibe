@@ -2,11 +2,9 @@
 ## tier 1 step 1) and the AI grid built from it (AIPawnGrid). Needs the navcore C++ library; without it, it says so and passes.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/pawn_table_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -166,9 +164,3 @@ func _make_pawn(at: Vector3, entity_id := -1) -> Pawn:
 				child.entity_id = entity_id
 	add_child(pawn)
 	return pawn
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

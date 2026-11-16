@@ -2,12 +2,10 @@
 ## AIController.move_to, which uses it. Checks the odd cases at the top of NavigationManager.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/navigation/tests/navigation_manager_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const Course := preload("res://assets/scripts/navigation/tests/nav_links_selftest.gd") # Claude 2026-11-08: the links course
-
-var _failures := 0
 
 
 ## A player controller that presses nothing, so tests can hand the pawn to "a player" without real devices.
@@ -418,9 +416,3 @@ func _settle() -> void:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

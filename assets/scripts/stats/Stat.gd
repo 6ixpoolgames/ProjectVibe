@@ -4,7 +4,8 @@
 ## The stat's name is this node's name, such as MoveSpeed or JumpVelocity. Abilities and behaviours ask the StatManager for a stat by
 ## that name, and use a fallback of their own if there's none, so a missing stat is never a crash.
 ##
-## For now a stat is a plain value. Later: modifiers (buffs and debuffs).
+## Its value is base_value plus what held effects add, times what they multiply (set_modifiers, from the EffectManager). Claude
+## 2026-11-17: this said modifiers were still to come.
 ##
 ## Claude 2026-11-09, step 10: a stat that changes during play, such as Health, has changes_during_play on. Then it also has a
 ## current value, from 0 up to its value, which starts full, rolls back (the StatManager lists it with the pawn's TickStateComponent)
@@ -12,12 +13,12 @@
 class_name Stat
 extends Node
 
-## The value it starts with. Setting it sets value too.
+## The value it starts with. Setting it works value out again.
 # GDScript note: "set(new_value):" under a variable runs every time it's assigned, including when the scene loads it.
 @export var base_value := 0.0:
 	set(new_value):
 		base_value = new_value
-		value = new_value
+		value = (base_value + _added) * _multiplied
 
 ## The value right now. Starts as base_value.
 ## Claude 2026-11-09: a change tells the StatManager (its version), so abilities that keep stat values read them again.
@@ -34,6 +35,21 @@ var value := 0.0:
 @export var changes_during_play := false
 ## Claude 2026-11-09: with changes_during_play, how much there is now, from 0 to value. Starts full. Rolls back.
 var current := 0.0
+
+
+# Claude 2026-11-16 (wider audit): what effects add to and multiply this stat by right now (set_modifiers). Kept here so a new
+# base_value keeps them: the EffectManager used to write value itself, and setting base_value then dropped the effect until the
+# pawn's effects next changed.
+var _added := 0.0
+var _multiplied := 1.0
+
+
+## Claude 2026-11-16 (wider audit): the effects on this stat, all together: value becomes (base_value + added) x multiplied.
+## 0 and 1 mean none. The pawn's EffectManager calls this whenever its held effects change.
+func set_modifiers(added: float, multiplied: float) -> void:
+	_added = added
+	_multiplied = multiplied
+	value = (base_value + _added) * _multiplied
 
 
 func _init() -> void:

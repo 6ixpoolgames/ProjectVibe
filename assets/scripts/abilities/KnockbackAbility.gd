@@ -26,6 +26,7 @@ func _init() -> void:
 	kind = Kind.ACTION
 	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
 	category = Tags.COMBAT_KNOCKBACK
+	needs_full_movement = true # Claude 2026-11-16 (pawn spec 8.22): a push should collide properly, and may lift
 	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
 	interrupt_priority = 30
 	# Claude 2026-11-10, the owner's call: only Dash (40) cancels a knockback. Walking, sprinting, jumping and attacking stay locked

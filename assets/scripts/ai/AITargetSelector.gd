@@ -27,8 +27,8 @@
 ## by that function in GDScript instead, so a game's own rules always win.
 ##
 ## How to use it (outside code only talks to the selector):
-##   pawn.ai_target_selector.get_current_target()
-##   pawn.ai_target_selector.force_target(player_pawn, 180, 40, "taunt")
+##   pawn.ai_context.target_selector.get_current_target()
+##   pawn.ai_context.target_selector.force_target(player_pawn, 180, 40, "taunt")
 ##   target_changed(old_target, new_target, reason)
 class_name AITargetSelector
 extends Node
@@ -112,7 +112,7 @@ func update_target(tick: int) -> void:
 		else:
 			_set_target(_forced, "forced", tick)
 			return
-	var memory := pawn.ai_memory
+	var memory := pawn.ai_context.memory
 	var best: Node3D = null
 	var best_priority := -INF
 	var best_distance := INF
@@ -241,12 +241,10 @@ func _end_force() -> void:
 
 # Claude 2026-11-09 (step 3): true while a tick runs, when a request must wait for the pawn's next AI step.
 func _during_tick() -> bool:
-	var driver: Node = get_node_or_null("/root/TickDriver")
-	return driver != null and driver.is_in_tick()
+	return TickDriver.is_in_tick() # Claude 2026-11-16 (wider audit): the autoload, not a lookup by path
 
 
+# Claude 2026-11-16 (wider audit): the TickDriver autoload, as the rest of this file uses it; this looked it up by path each time,
+# with a fallback that could never run.
 func _now() -> int:
-	var driver: Node = get_node_or_null("/root/TickDriver")
-	if driver:
-		return driver.tick
-	return pawn.ai_context.current_tick if pawn and pawn.ai_context else 0
+	return TickDriver.tick

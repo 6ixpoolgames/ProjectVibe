@@ -30,13 +30,13 @@
 ## tick rather than at its next decision.
 ##
 ## How to use it (indexes stay valid until the next forget_old, so use them within one tick):
-##   var i := pawn.ai_memory.find(entity)          # -1 when it isn't remembered
-##   pawn.ai_memory.awareness_at(i, tick)
-##   pawn.ai_memory.is_certain_at(i)
-##   pawn.ai_memory.last_known_position_at(i)
-##   pawn.ai_memory.ticks_since_seen_at(i, tick)
-##   pawn.ai_memory.add_threat(entity, 5.0)
-##   pawn.ai_memory.is_native()                    # true when the C++ store runs
+##   var i := pawn.ai_context.memory.find(entity)          # -1 when it isn't remembered
+##   pawn.ai_context.memory.awareness_at(i, tick)
+##   pawn.ai_context.memory.is_certain_at(i)
+##   pawn.ai_context.memory.last_known_position_at(i)
+##   pawn.ai_context.memory.ticks_since_seen_at(i, tick)
+##   pawn.ai_context.memory.add_threat(entity, 5.0)
+##   pawn.ai_context.memory.is_native()                    # true when the C++ store runs
 ##   entity_became_certain(entity), entity_forgotten(entity)
 class_name AIMemory
 extends Node

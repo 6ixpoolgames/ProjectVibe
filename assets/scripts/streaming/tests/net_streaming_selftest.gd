@@ -13,7 +13,7 @@
 ##
 ## Exits 0 on success, 1 on failure. About 2 minutes. Add -- --only=name to run one scenario. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/streaming/tests/net_streaming_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const SECONDS := 20
 const CHUNK_SIZE := 128.0
@@ -23,7 +23,6 @@ const FAR_APART := 1000
 const TIGHT_LOAD := 64
 const TIGHT_MARGIN := 16
 
-var _failures := 0
 var _port := NetRun.first_port()
 var _only := ""
 
@@ -404,9 +403,3 @@ func _print_comparison(terrain: String, label: String, results: Dictionary) -> v
 		int(client["missed_inputs"]) - int(client.get("missed_inputs_start", 0)), stuck, path_failures,
 		float(client["loop_average_ms"]), float(client["loop_worst_ms"]),
 	])
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

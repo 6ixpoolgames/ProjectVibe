@@ -3,7 +3,7 @@
 ## AI sensing asks it whether there's anyone on another team at all, and skips looking when there isn't (pawn spec 10.4). This was a
 ## shared counter on Pawn (count_pawns_not_on_team) until pawn M1.
 ##
-## How it keeps count: every pawn joins TerrainBodyLifter.GROUP when it enters the tree, so the pawns already there are counted when this
+## How it keeps count: every pawn joins Pawn.GROUP when it enters the tree (Claude 2026-11-16, wider audit: its own group now), so the pawns already there are counted when this
 ## module starts; after that, the tree's node_added and node_removed signals, and each pawn's team_changed signal.
 ##
 ## Without this module (a game that leaves it out), nothing breaks: sensing just looks every time, as if someone might be there.
@@ -24,7 +24,7 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 	game_mode.team_registry = self
 	_counts.clear()
 	_watched.clear()
-	for node in get_tree().get_nodes_in_group(TerrainBodyLifter.GROUP):
+	for node in get_tree().get_nodes_in_group(Pawn.GROUP): # Claude 2026-11-16 (wider audit): the list of all pawns
 		if node is Pawn:
 			_add(node)
 	get_tree().node_added.connect(_on_node_added)

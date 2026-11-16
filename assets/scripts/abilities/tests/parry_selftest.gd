@@ -4,14 +4,12 @@
 ## told a swing is coming, it parries as often as its parry_chance says.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/parry_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 # The faction samples' pawn: its abilities (faction_abilities.tscn) include Parry, with parry_knockback.tres on its ON_PARRY applier.
 const PAWN_SCENE := "res://assets/scenes/samples/faction_player.tscn"
 const GOBLIN_SCENE := "res://assets/scenes/samples/faction_goblin.tscn" # with AI, including AIParryBehaviour
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -49,17 +47,17 @@ func _test_front_and_back() -> void:
 	var before := front.global_position.distance_to(defender.global_position)
 	defender.ability_manager.receive_hit(_hit(front, defender, 20))
 	var knockback: AbilityBase = front.ability_manager.get_node("Knockback")
-	_check(defender.get_health() == 100.0 and parried.size() == 1, "a hit from the front does nothing to it (Health %d), and parried goes out" % defender.get_health())
+	_check(defender.stat_manager.get_health() == 100.0 and parried.size() == 1, "a hit from the front does nothing to it (Health %d), and parried goes out" % defender.stat_manager.get_health())
 	_check(knockback.is_running_timed(), "the attacker is knocked back")
 	await _ticks(10)
 	var after := front.global_position.distance_to(defender.global_position)
 	_check(after > before + 1.0, "pushed away, a long way (%.1f m to %.1f m)" % [before, after])
 	defender.ability_manager.receive_hit(_hit(behind, defender, 20))
-	_check(defender.get_health() == 80.0, "a hit from behind still lands (Health %d)" % defender.get_health())
+	_check(defender.stat_manager.get_health() == 80.0, "a hit from behind still lands (Health %d)" % defender.stat_manager.get_health())
 	await _ticks(30)
 	_check(not parry.is_running_timed(), "it ends after its duration (0.35 s)")
 	defender.ability_manager.receive_hit(_hit(front, defender, 20))
-	_check(defender.get_health() == 60.0, "then a hit from the front lands again (Health %d)" % defender.get_health())
+	_check(defender.stat_manager.get_health() == 60.0, "then a hit from the front lands again (Health %d)" % defender.stat_manager.get_health())
 	_check(not defender.ability_manager.can_start(&"parry"), "and it's cooling down")
 	for pawn in [defender, front, behind]:
 		pawn.queue_free()
@@ -79,7 +77,7 @@ func _test_real_swing() -> void:
 	defender.ability_manager.start_ability(_parry_of(defender))
 	for i in 30:
 		await get_tree().physics_frame
-	_check(defender.get_health() == 100.0, "a swing into a parry does no damage (Health %d)" % defender.get_health())
+	_check(defender.stat_manager.get_health() == 100.0, "a swing into a parry does no damage (Health %d)" % defender.stat_manager.get_health())
 	_check(not swing.is_running_timed() and attacker.global_position.distance_to(defender.global_position) > 3.0, "and the attacker's swing is cut short as it's pushed away (%.1f m)" % attacker.global_position.distance_to(defender.global_position))
 	defender.queue_free()
 	attacker.queue_free()
@@ -98,7 +96,7 @@ func _test_no_parry_back() -> void:
 	await _ticks(1)
 	one.ability_manager.receive_hit(_hit(two, one, 20))
 	var knockback: AbilityBase = two.ability_manager.get_node("Knockback")
-	_check(one.get_health() == 100.0 and knockback.is_running_timed(), "a parry's push can't be parried back: it lands on the parrying attacker")
+	_check(one.stat_manager.get_health() == 100.0 and knockback.is_running_timed(), "a parry's push can't be parried back: it lands on the parrying attacker")
 	one.queue_free()
 	two.queue_free()
 	await _ticks(2)
@@ -130,9 +128,9 @@ func _test_ai_parries(chance: float) -> void:
 		attacker.ability_manager.start_ability(swing)
 		await _ticks(130)
 	if chance >= 1.0:
-		_check(parries.size() == 4 and goblin.get_health() == 100.0, "the AI, told a swing is coming, parries it (%d of 4, Health %d)" % [parries.size(), goblin.get_health()])
+		_check(parries.size() == 4 and goblin.stat_manager.get_health() == 100.0, "the AI, told a swing is coming, parries it (%d of 4, Health %d)" % [parries.size(), goblin.stat_manager.get_health()])
 	else:
-		_check(parries.is_empty() and goblin.get_health() < 100.0, "and with parry_chance 0 it never does (%d parried, Health %d)" % [parries.size(), goblin.get_health()])
+		_check(parries.is_empty() and goblin.stat_manager.get_health() < 100.0, "and with parry_chance 0 it never does (%d parried, Health %d)" % [parries.size(), goblin.stat_manager.get_health()])
 	goblin.queue_free()
 	attacker.queue_free()
 	await _ticks(2)
@@ -169,9 +167,3 @@ func _make_pawn(at: Vector3, team: int) -> Pawn:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

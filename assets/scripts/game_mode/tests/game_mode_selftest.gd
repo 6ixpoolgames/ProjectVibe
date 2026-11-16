@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for the GameMode shell and AIActivationManager.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/game_mode/tests/game_mode_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 
 ## A pawn that only records what it's told.
@@ -25,12 +25,18 @@ class StubModule extends GameModeModule:
 		removed = true
 
 
+# Claude 2026-11-16: a game's own module with match options: a number with a range and a choice.
+class OptionsModule extends GameModeModule:
+	@export_range(0, 10, 1) var waves := 3
+	@export_enum("Easy:0", "Hard:5") var difficulty := 0
+
+	func get_match_options() -> PackedStringArray:
+		return PackedStringArray(["waves", "difficulty"])
+
+
 class FakeClientSession extends Node:
 	func is_client() -> bool:
 		return true
-
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -44,6 +50,7 @@ func _ready() -> void:
 	await _test_on_a_client()
 	await _test_freed_pawns()
 	_test_module_removed()
+	_test_match_options() # Claude 2026-11-16
 	await _measure_a_horde()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -79,6 +86,49 @@ func _test_adding_and_removing() -> void:
 	_check(GameMode.get_module(StubModule) == null, "and it's gone")
 	GameMode.remove_module(null)
 	_check(true, "removing nothing does nothing")
+
+
+# Claude 2026-11-16 (the owner's request: match options in the start menu, proving out the GameMode's modularity): the panel lists the
+# options of whichever modules the game has, a row sets its setting, and a module taken out takes its options with it.
+func _test_match_options() -> void:
+	var module := OptionsModule.new()
+	GameMode.add_module(module)
+	var panel := MatchOptionsPanel.new()
+	add_child(panel)
+	panel.add_from_game_mode()
+	var rows := {}
+	for row: Array in panel._rows:
+		rows[[row[0], row[1]]] = row[2]
+	var activation: AIActivationManager = GameMode.ai_activation_manager
+	_check(rows.has([activation, "steps_by_distance"]) and rows[[activation, "steps_by_distance"]] is CheckBox, "the panel has the AIActivationManager's options, a bool as a check box")
+	var waves: Variant = rows.get([module, "waves"])
+	_check(waves is SpinBox and is_equal_approx((waves as SpinBox).max_value, 10.0) and is_equal_approx((waves as SpinBox).value, 3.0), "and a game's own module's: a number with its range and value")
+	(waves as SpinBox).value = 7
+	_check(module.waves == 7, "changing a row sets the setting")
+	var difficulty: Variant = rows.get([module, "difficulty"])
+	_check(difficulty is OptionButton and (difficulty as OptionButton).item_count == 2, "an enum is a drop-down of its names")
+	(difficulty as OptionButton).select(1)
+	(difficulty as OptionButton).item_selected.emit(1)
+	_check(module.difficulty == 5, "and picking one sets its value")
+	activation.steps_by_distance = false
+	panel.refresh()
+	_check(not (rows[[activation, "steps_by_distance"]] as CheckBox).button_pressed, "refresh() reads changed values back")
+	activation.steps_by_distance = true
+	panel.free()
+	GameMode.remove_module(module)
+	var without := MatchOptionsPanel.new()
+	add_child(without)
+	without.add_from_game_mode()
+	_check(without._rows.all(func(row: Array) -> bool: return not (row[0] is OptionsModule)), "with the module taken out, its options are gone, and nothing names it")
+	without.free()
+	# Claude 2026-11-16: autoloads name their own too (the tick driver's load ladder, the network session's snapshots).
+	var autoloads := MatchOptionsPanel.new()
+	add_child(autoloads)
+	autoloads.add_from_autoloads()
+	var found := autoloads._rows.map(func(row: Array) -> String: return String(row[1]))
+	_check(found.has("load_ladder_enabled") and found.has("delta_snapshots_enabled") and autoloads._rows.all(func(row: Array) -> bool: return not (row[0] is GameModeSingleton)),
+		"autoloads that name options get sections too, and GameMode itself doesn't (%s)" % ", ".join(found))
+	autoloads.free()
 
 
 func _test_bad_settings() -> void:
@@ -237,9 +287,3 @@ func _make_pawn(at: Vector3) -> StubPawn:
 func _physics_frames(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

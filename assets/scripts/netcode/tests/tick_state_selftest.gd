@@ -243,6 +243,7 @@ func _ready() -> void:
 	_test_custom_state()
 	_test_containers()
 	_test_late_and_removed_nodes()
+	_test_follow_refresh() # Claude 2026-11-16
 	_test_follow_server()
 	# Different pushes and jump timings, because a path that only grazes the wall hid most of what's below.
 	await _test_real_body(0.6, 47)
@@ -1024,6 +1025,58 @@ func _test_follow_server() -> void:
 	_check(first_hook.other_value_during_load == 42, "load hooks run after every entity is loaded, so they see the others put back")
 	first_hook.free()
 	second_hook.free()
+
+
+# Claude 2026-11-16 (audit double-check): a followed entity only writes values the server changed, so a value something else wrote
+# stays wrong. Every follow_refresh_seconds it writes them all again.
+class RefreshTarget extends Node3D:
+	var number := 0
+
+
+func _test_follow_refresh() -> void:
+	var target := RefreshTarget.new()
+	var state := TickStateComponent.new()
+	state.rollback_mode = TickStateComponent.RollbackMode.FOLLOW_SERVER
+	state.state_properties = ["position", "number"]
+	state.follow_refresh_seconds = 0.5
+	target.add_child(state)
+	add_child(target)
+	var interval: int = TickDriver.seconds_to_ticks(0.5)
+	# The server sends the same number every 2 ticks while the entity moves.
+	# GDScript note: a lambda gets a copy of a plain local variable, so adding to a number inside one is lost when it returns. An
+	# Array is shared, not copied, so the tick is kept in one.
+	var newest: Array[int] = [1000]
+	state.receive_authoritative_state(newest[0], {"position": Vector3(newest[0], 0, 0), "number": 3})
+	var advance := func() -> void:
+		newest[0] += 2
+		state.receive_authoritative_state(newest[0], {"position": Vector3(newest[0], 0, 0), "number": 3})
+		state.follow_server_at(newest[0] - 1.5) # between the newest two: a new pair each time
+	advance.call()
+	advance.call()
+	_check(target.number == 3, "follow refresh: (the server's number is written)")
+	# Its first refresh comes at this entity's turn, some time within the interval. Find it: something else writes the number, and
+	# the refresh puts it back.
+	var waited := 0
+	target.number = 99
+	while target.number == 99 and waited <= interval + 2:
+		advance.call()
+		waited += 2
+	_check(target.number == 3, "follow refresh: a value something else wrote is put back within the interval (%d ticks of %d)" % [waited, interval])
+	# From a refresh, the next is a whole interval away.
+	target.number = 99
+	advance.call()
+	_check(target.number == 99, "follow refresh: between refreshes, a value the server didn't change isn't written again")
+	waited = 2
+	while target.number == 99 and waited <= interval + 2:
+		advance.call()
+		waited += 2
+	_check(target.number == 3 and waited >= interval, "follow refresh: and the next refresh is an interval later (%d ticks of %d)" % [waited, interval])
+	state.follow_refresh_seconds = 0.0
+	target.number = 99
+	for i in interval:
+		advance.call()
+	_check(target.number == 99, "follow refresh: 0 turns it off")
+	target.free()
 
 
 func _follow_server_state(entity: Node) -> TickStateComponent:

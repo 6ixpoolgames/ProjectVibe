@@ -24,6 +24,10 @@ A base class may offer one empty slot for a module to fill, such as a packet fil
 
 *(Claude 2026-11-16, diagnostics v0.)* `PerfScopes` (`assets/scripts/diagnostics/`) is base code of this kind. Its timing marks cost one check when nothing listens, and they're spread through the systems they time. The tools that listen are in `diagnostics/` too. *(2026-11-16: they ship in release builds, the owner's call, for bug reports; they were in `debug/`.)* The `DiagnosticsManager` module is switched on by the project setting `project_base/game_mode/modules` and its `.release` override, so `GameMode` never names it. Samples and tests may name it, since they aren't in release builds either.
 
+## Running tests
+
+*(Claude 2026-11-17, from the wider code audit.)* `bash tools/run_tests.sh full` runs every local test scene one at a time, and `full net` adds the two shorter network suites. A suite passes only if it exits 0, prints `ALL PASSED`, and prints no `FAIL` and no `SCRIPT ERROR`. Tests extend `assets/scripts/tests/SelfTest.gd`, which holds `_check`, `_check_equal`, `_check_near` and `_finish`, and pins the tick driver's load step to 1. Both are test code: nothing that ships uses them.
+
 ## How to check it
 
 Release exports should leave out `tests/`, `samples/` and `debug/`. Any base code that still names something from those folders then breaks loudly. To test this, delete those folders from a temporary copy and check that the project still runs.

@@ -1,0 +1,20 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/arena_brain.tscn" id="1_brain"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIAttackBehaviour.gd" id="2_attack"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIParryBehaviour.gd" id="3_parry"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIGoToPointBehaviour.gd" id="4_go_to_point"]
+
+[node name="AIBehaviourManager" instance=ExtResource("1_brain")]
+
+[node name="HeavyAttack" type="Node" parent="."]
+script = ExtResource("2_attack")
+presses_action = &"secondary"
+max_score = 0.95
+min_score = 0.95
+
+[node name="Parry" type="Node" parent="."]
+script = ExtResource("3_parry")
+
+[node name="GoToPoint" type="Node" parent="."]
+script = ExtResource("4_go_to_point")

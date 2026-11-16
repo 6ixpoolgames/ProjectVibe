@@ -2,9 +2,7 @@
 ## StatManager.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/stats/tests/stat_selftest.tscn"
-extends Node
-
-var _failures := 0
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 
 func _ready() -> void:
@@ -67,9 +65,3 @@ func _test_the_default_stats() -> void:
 		all_there = all_there and is_equal_approx(stats.get_value(stat_name, -1.0), wanted[stat_name])
 	_check(all_there, "with the movement stats GroundMovement used to hold, at the same values (TurnRate now 540)")
 	pawn.free()
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

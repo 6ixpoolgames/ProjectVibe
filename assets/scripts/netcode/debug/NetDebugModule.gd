@@ -71,9 +71,9 @@ func set_feature(feature: String, enabled: bool) -> void:
 		_session.send_to_server(CHANNEL, switch_message(feature, enabled))
 		return
 	_session.set(feature, enabled)
-	_session._refresh_entities()
-	if not _session.time_dilation_enabled and _session._driver:
-		_session._set_tick_factor(1.0)
+	_session.refresh_entities()
+	if not _session.time_dilation_enabled: # Claude 2026-11-16 (wider audit): no longer reads the session's private _driver
+		_session.set_tick_factor(1.0)
 
 
 ## What a client sends to ask for a switch.
@@ -96,7 +96,7 @@ func _on_switch_request(_peer: int, bytes: PackedByteArray) -> void:
 	var enabled: Variant = NetPackets.read_value(buffer)
 	if feature is String and NetworkSessionSingleton.SERVER_FEATURES.has(feature) and enabled is bool:
 		_session.set(feature, enabled)
-		_session._refresh_entities()
+		_session.refresh_entities()
 	else:
 		_session.stats["bad_packets"] += 1
 
@@ -122,8 +122,8 @@ func hold_incoming(peer: int, bytes: PackedByteArray) -> bool:
 
 ## Lets go of whatever has waited long enough.
 func release_due(now_usec: int) -> void:
-	fake.release_due(now_usec, _session._send_now)
-	fake_in.release_due(now_usec, _session._handle_packet)
+	fake.release_due(now_usec, _session.send_now)
+	fake_in.release_due(now_usec, _session.handle_packet)
 
 
 ## The session has ended.
@@ -133,4 +133,4 @@ func clear() -> void:
 
 
 func _is_reliable_type(type: int) -> bool:
-	return type != NetPackets.Type.INPUT and type != NetPackets.Type.SNAPSHOT and type != NetPackets.Type.PING and type != NetPackets.Type.PONG
+	return not NetPackets.is_unreliable(type) # Claude 2026-11-16 (audit): the one list of unreliable types, in NetPackets

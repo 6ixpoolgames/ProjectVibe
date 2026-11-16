@@ -77,7 +77,12 @@ static func _rewind_others(shooter: NetworkEntity, view_ticks_behind: float) -> 
 		return rewound
 	var cap: float = session.rewind_cap_seconds * driver.get_tick_rate()
 	var believable: float = session.limit_view_ticks_behind(shooter.owner_peer, view_ticks_behind, driver.tick)
-	var view_tick: float = driver.tick - clampf(believable, 0.0, cap)
+	# Claude 2026-11-16 (wider audit): with no time to go back (every AI swing, and all offline play), nothing is rewound. It used
+	# to ask every entity to rewind to the present, which each refused after a lookup: pawns x swings at the clash.
+	var back := clampf(believable, 0.0, cap)
+	if back <= 0.0:
+		return rewound
+	var view_tick: float = driver.tick - back
 	for entity: NetworkEntity in session.get_entities():
 		if entity != shooter and entity.rewind_to(view_tick):
 			rewound.append(entity)

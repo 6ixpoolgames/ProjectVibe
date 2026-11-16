@@ -3,11 +3,9 @@
 ## agree at 30, and a goblin notices someone about as fast at 30 as at 60.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/singletons/tests/tick_rate_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -116,8 +114,8 @@ func _test_noticing() -> void:
 		var certain_at := -1
 		for i in 200:
 			await get_tree().physics_frame
-			var index: int = goblin.ai_memory.find(other)
-			if index >= 0 and goblin.ai_memory.is_certain_at(index):
+			var index: int = goblin.ai_context.memory.find(other)
+			if index >= 0 and goblin.ai_context.memory.is_certain_at(index):
 				certain_at = TickDriver.tick
 				break
 		took[rate] = float(certain_at - started) / rate if certain_at >= 0 else -1.0
@@ -126,9 +124,3 @@ func _test_noticing() -> void:
 		await get_tree().physics_frame
 	print("        certain after %.3f s at 60, %.3f s at 30" % [took[60], took[30]])
 	_check(took[60] > 0.0 and took[30] > 0.0 and absf(took[60] - took[30]) <= 0.2, "a goblin becomes certain of someone in front of it about as fast at 30 as at 60 (within 0.2 s: a sensing pass is 1/6 s)")
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

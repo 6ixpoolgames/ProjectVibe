@@ -9,6 +9,9 @@
 ## Claude 2026-11-07: Pawn makes its own while a player possesses it, or while its ai_loads_chunks bool is on.
 ## Claude 2026-11-16 (pawn M2): not any more: a Pawn is a source itself (the owner's call: a flag on the pawn, the streamer holding the code).
 ##
+## Claude 2026-11-16 (wider audit): a Pawn is in the group only while it might keep the world loaded (Pawn._update_source_group), so the
+## group is the few sources, not every pawn.
+##
 ## The source contract: anything in the GROUP below with these counts as a source, a StreamingSource node or a Pawn, and the chunk
 ## streamer, the nav feeder and the replay read them only through these:
 ##   global_position                      where it is

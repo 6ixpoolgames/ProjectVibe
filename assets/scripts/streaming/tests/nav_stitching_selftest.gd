@@ -17,7 +17,7 @@
 ##
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/streaming/tests/nav_stitching_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const TIER_SMALLEST := 0
 const TIER_LARGEST := 3
@@ -26,8 +26,6 @@ const HOP := 3.0
 # The area each hop sweep covers: this far either side of where four chunks meet.
 const SWEEP := 48.0
 const SWEEP_STEP := 2.0
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -416,9 +414,3 @@ func _settle() -> void:
 			return
 		OS.delay_msec(2)
 	_check(false, "nav became idle within the time limit")
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

@@ -27,3 +27,9 @@ enum Number { PRESS_PRIORITY, INTERRUPT_PRIORITY, INTERRUPT_THRESHOLD }
 
 func is_held() -> bool:
 	return true
+
+
+# Claude 2026-11-16 (wider audit): its share of the pawn's totals (the EffectManager did this sum itself, by class).
+func add_held(totals: EffectHeldTotals, stacks: int) -> void:
+	if ability_tag != &"":
+		totals.ability_bonuses[number].append([TagRegistry.own_bit(ability_tag), amount * stacks])

@@ -53,6 +53,7 @@ func _init() -> void:
 	trigger_action = &"dash"
 	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
 	category = Tags.MOVEMENT_DASH
+	needs_full_movement = true # Claude 2026-11-16 (pawn spec 8.22): a dash is too fast for the crowd mover's checks
 	extra_categories = [Tags.MOVEMENT_ADVANCED] # Claude 2026-11-10: the AI asks for this group, not for "dash"
 	# Claude 2026-11-10: its length comes from its two phases (duration_ticks), not duration, as MeleeAttack's comes from its phases.
 	duration = 0.0

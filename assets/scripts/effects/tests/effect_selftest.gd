@@ -4,12 +4,10 @@
 ## and the odd cases at the top of EffectManager.gd and Effect.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/effects/tests/effect_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -59,29 +57,29 @@ func _test_instant() -> void:
 	await _ticks(3)
 	_check(a.effect_manager != null and a.effect_manager.name == &"EffectManager", "a pawn gets an EffectManager as a default part")
 	a.effect_manager.apply_effect(Effect.make_damage(20), b)
-	_check(a.get_health() == 80.0, "damage takes Health (%d)" % a.get_health())
+	_check(a.stat_manager.get_health() == 80.0, "damage takes Health (%d)" % a.stat_manager.get_health())
 	a.effect_manager.resistances[EffectTags.DAMAGE_ELEMENTAL] = 0.2
 	a.effect_manager.resistances[EffectTags.DAMAGE_ELEMENTAL_FIRE] = 0.3
 	a.effect_manager.active_effects = a.effect_manager.active_effects # the inspector's resistances are read when the list changes
 	var fire := Effect.make_damage(20, [EffectTags.DAMAGE_ELEMENTAL_FIRE])
 	_check(is_equal_approx(a.effect_manager.resistance_to(fire), 0.5), "resistances to a tag and its parent add up (0.2 + 0.3 = %.2f)" % a.effect_manager.resistance_to(fire))
 	a.effect_manager.apply_effect(fire, b)
-	_check(a.get_health() == 70.0, "and take that share off (20 fire damage takes 10: %d)" % a.get_health())
+	_check(a.stat_manager.get_health() == 70.0, "and take that share off (20 fire damage takes 10: %d)" % a.stat_manager.get_health())
 	a.effect_manager.resistances[EffectTags.DAMAGE_ELEMENTAL_FROST] = -0.5
 	a.effect_manager.active_effects = a.effect_manager.active_effects
 	a.effect_manager.apply_effect(Effect.make_damage(10, [EffectTags.DAMAGE_ELEMENTAL_FROST]), b)
-	_check(a.get_health() == 57.0, "a weakness adds to it (10 frost with 0.2 - 0.5 takes 13: %d)" % a.get_health())
+	_check(a.stat_manager.get_health() == 57.0, "a weakness adds to it (10 frost with 0.2 - 0.5 takes 13: %d)" % a.stat_manager.get_health())
 	a.effect_manager.resistances[EffectTags.DAMAGE_POISON] = 1.0
 	a.effect_manager.active_effects = a.effect_manager.active_effects
-	_check(not a.effect_manager.apply_effect(Effect.make_damage(10, [EffectTags.DAMAGE_POISON]), b) and a.get_health() == 57.0, "1 or more: immune, the effect is refused")
+	_check(not a.effect_manager.apply_effect(Effect.make_damage(10, [EffectTags.DAMAGE_POISON]), b) and a.stat_manager.get_health() == 57.0, "1 or more: immune, the effect is refused")
 	var heal := _effect(&"test heal", false, 0.0, [_change(&"Health", 15.0)])
 	a.effect_manager.apply_effect(heal, a)
-	_check(a.get_health() == 72.0, "a heal adds Health, and resistances don't touch it (%d)" % a.get_health())
+	_check(a.stat_manager.get_health() == 72.0, "a heal adds Health, and resistances don't touch it (%d)" % a.stat_manager.get_health())
 	# Lifesteal: b hits a for 20 physical and gets 30% back.
 	b.stat_manager.change_current(&"Health", -50.0)
 	var vampire := _effect(&"vampire hit", true, 0.0, [_change(&"Health", -20.0), _lifesteal(0.3)])
 	a.effect_manager.apply_effect(vampire, b)
-	_check(a.get_health() == 52.0 and is_equal_approx(b.get_health(), 56.0), "lifesteal gives the source a share of the damage just dealt (a %d, b %.1f)" % [a.get_health(), b.get_health()])
+	_check(a.stat_manager.get_health() == 52.0 and is_equal_approx(b.stat_manager.get_health(), 56.0), "lifesteal gives the source a share of the damage just dealt (a %d, b %.1f)" % [a.stat_manager.get_health(), b.stat_manager.get_health()])
 	# A hit's damage_dealt, and the attacker's own on-hit effects.
 	var hit := HitInfo.new()
 	hit.attacker = b
@@ -90,15 +88,15 @@ func _test_instant() -> void:
 	hit.effects = [Effect.make_damage(10)]
 	hit.attacker_effects = [heal]
 	a.ability_manager.receive_hit(hit)
-	_check(hit.damage_dealt == 10.0 and a.get_health() == 42.0 and is_equal_approx(b.get_health(), 71.0), "a hit fills in damage_dealt, and its attacker effects go on the attacker (dealt %d, b %.1f)" % [hit.damage_dealt, b.get_health()])
+	_check(hit.damage_dealt == 10.0 and a.stat_manager.get_health() == 42.0 and is_equal_approx(b.stat_manager.get_health(), 71.0), "a hit fills in damage_dealt, and its attacker effects go on the attacker (dealt %d, b %.1f)" % [hit.damage_dealt, b.stat_manager.get_health()])
 	# Invulnerability stops harmful effects and lets helpful ones through.
 	_ai(a).move_in_direction(Vector3(0, 0, 1))
 	await _ticks(2)
 	_ai(a).press(&"dash")
 	await _ticks(2)
 	_check(a.ability_manager.is_invulnerable(), "(a is dashing)")
-	_check(not a.effect_manager.apply_effect(Effect.make_damage(10), b) and a.get_health() == 42.0, "a dashing pawn refuses harmful effects")
-	_check(a.effect_manager.apply_effect(heal, a) and a.get_health() == 57.0, "and takes helpful ones (%d)" % a.get_health())
+	_check(not a.effect_manager.apply_effect(Effect.make_damage(10), b) and a.stat_manager.get_health() == 42.0, "a dashing pawn refuses harmful effects")
+	_check(a.effect_manager.apply_effect(heal, a) and a.stat_manager.get_health() == 57.0, "and takes helpful ones (%d)" % a.stat_manager.get_health())
 	_ai(a).stop()
 	await _ticks(30)
 	# Instant effects with held parts warn and do nothing.
@@ -108,7 +106,7 @@ func _test_instant() -> void:
 	# Death: an effect that takes the last Health kills, and the parts after it are skipped.
 	var after_death := _effect(&"overkill", true, 0.0, [_change(&"Health", -1000.0), _change(&"Health", 50.0)])
 	a.effect_manager.apply_effect(after_death, b)
-	_check(a.is_dead() and a.get_health() == 0.0, "an effect that takes the last Health kills the pawn, and the parts after it don't run")
+	_check(a.is_dead() and a.stat_manager.get_health() == 0.0, "an effect that takes the last Health kills the pawn, and the parts after it don't run")
 	_check(not a.effect_manager.apply_effect(heal, a), "a dead pawn takes no effects")
 	a.free()
 	b.free()
@@ -122,6 +120,11 @@ func _test_over_time() -> void:
 	a.effect_manager.apply_effect(slow, null)
 	_check(a.effect_manager.has_effect(slow) and is_equal_approx(a.stat_manager.get_value(&"MoveSpeed"), 3.0), "a slow holds while it lasts: MoveSpeed 5 x0.6 = %.2f" % a.stat_manager.get_value(&"MoveSpeed"))
 	_check(not a.effect_manager.can_sleep() and a.effect_manager.get_ticks_left(slow) == 30, "a pawn with an effect on it doesn't rest; 0.5 s is 30 ticks (%d)" % a.effect_manager.get_ticks_left(slow))
+	# Claude 2026-11-16 (wider audit): a new base value while the slow holds keeps the slow.
+	var move_speed := a.stat_manager.get_stat(&"MoveSpeed")
+	move_speed.base_value = 10.0
+	_check(is_equal_approx(move_speed.value, 6.0), "a new base_value while an effect holds keeps the effect: 10 x0.6 = %.2f" % move_speed.value)
+	move_speed.base_value = 5.0
 	_ai(a).move_in_direction(Vector3(1, 0, 0))
 	await _ticks(20)
 	var slowed_speed := Vector2(a.velocity.x, a.velocity.z).length()
@@ -133,9 +136,9 @@ func _test_over_time() -> void:
 	var frailty := _effect(&"test less health", true, 0.2, [_modifier(&"Health", -40.0, 1.0)])
 	a.effect_manager.apply_effect(frailty, null)
 	await _ticks(1)
-	_check(a.stat_manager.get_value(&"Health") == 60.0 and a.get_health() == 60.0, "a lower most Health brings what it has down with it (%d of %d)" % [a.get_health(), a.stat_manager.get_value(&"Health")])
+	_check(a.stat_manager.get_value(&"Health") == 60.0 and a.stat_manager.get_health() == 60.0, "a lower most Health brings what it has down with it (%d of %d)" % [a.stat_manager.get_health(), a.stat_manager.get_value(&"Health")])
 	await _ticks(20)
-	_check(a.stat_manager.get_value(&"Health") == 100.0 and a.get_health() == 60.0, "and when it ends, the most goes back, and what it has stays (%d of %d)" % [a.get_health(), a.stat_manager.get_value(&"Health")])
+	_check(a.stat_manager.get_value(&"Health") == 100.0 and a.stat_manager.get_health() == 60.0, "and when it ends, the most goes back, and what it has stays (%d of %d)" % [a.stat_manager.get_health(), a.stat_manager.get_value(&"Health")])
 	a.free()
 
 
@@ -147,9 +150,9 @@ func _test_poison() -> void:
 	poison.period_seconds = 0.1
 	poison.tags = [EffectTags.DAMAGE_POISON]
 	a.effect_manager.apply_effect(poison, b)
-	_check(a.get_health() == 95.0, "a poison runs once when first applied (%d)" % a.get_health())
+	_check(a.stat_manager.get_health() == 95.0, "a poison runs once when first applied (%d)" % a.stat_manager.get_health())
 	await _ticks(40)
-	_check(a.get_health() == 75.0 and not a.effect_manager.has_effect(poison), "then every period while it lasts: 0.5 s at 0.1 s is 5 times, 25 Health (%d)" % a.get_health())
+	_check(a.stat_manager.get_health() == 75.0 and not a.effect_manager.has_effect(poison), "then every period while it lasts: 0.5 s at 0.1 s is 5 times, 25 Health (%d)" % a.stat_manager.get_health())
 	var source: Array = []
 	a.effect_manager.apply_effect(poison, b)
 	source.append(a.effect_manager.get_active_effects()[0]["source"])
@@ -300,9 +303,3 @@ func _ai(pawn: Pawn) -> AIController:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

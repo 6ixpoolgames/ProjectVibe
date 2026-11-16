@@ -45,11 +45,40 @@ const HERO_BLUE_SCENE := preload("res://assets/scenes/samples/hero_blue.tscn")
 const HERO_ALLY_SCENE := preload("res://assets/scenes/samples/hero_ally.tscn")
 
 ## How far players' pawns and heroes keep ground loaded here, in metres, the same as the level's other sources. Claude 2026-11-16 (pawn M2): the
-## game's setting now (PawnDefaultsRes.world_load_distance), so this level sets it on a copy of the defaults while it runs, and puts
-## the old ones back when it closes.
-@export_range(0.0, 2000.0, 1.0, "or_greater") var load_distance := 160.0
+## game's setting now (PawnDefaultsRes.world_load_distance), so this level sets it on its copy of the defaults while it runs
+## (ArenaSample makes the copy and puts the old ones back). A setter, so the start menu's match options can change it too.
+@export_range(0.0, 2000.0, 1.0, "or_greater") var load_distance := 160.0:
+	set(value):
+		load_distance = value
+		var defaults := _level_defaults() # Claude 2026-11-16 (audit): ArenaSample's copy, or null before the level is set up
+		if defaults:
+			defaults.world_load_distance = value
+## Claude 2026-11-16 (the owner's request: spawns closer together, for a quick peak-capacity test): how far the factions' spawners
+## are from the middle, in metres. The scene is laid out at 300, where the march takes about a minute; at 40 they meet within seconds.
+## The heroes' spawners and the player's start keep their distances from their faction's spawner. From the command line:
+## --spawn-distance=40.
+@export_range(10.0, 1000.0, 5.0, "or_greater") var spawn_distance := 300.0:
+	set(value):
+		spawn_distance = value
+		if is_node_ready():
+			_place_spawners()
+## Claude 2026-11-16: the centre's source (C) and the heroes' (H) as settings, so the start menu's match options can set them.
+var centre_source_on: bool:
+	get:
+		return is_centre_source_on() if is_node_ready() else true
+	set(value):
+		if is_node_ready():
+			set_centre_source(value)
+var hero_sources_on: bool:
+	get:
+		return _hero_sources_on
+	set(value):
+		set_hero_sources(value)
 
-var _defaults_before: PawnDefaultsRes = null
+## Claude 2026-11-16: the distance the scene's spawners are laid out at.
+const LAID_OUT_SPAWN_DISTANCE := 300.0
+
+var _laid_out := {} # Claude 2026-11-16: each spawning node -> its position as the scene lays it out
 
 var _heroes: Array[Pawn] = []
 var _player_pawns: Array[Pawn] = [] # Claude 2026-11-16: players' pawns, which follow H once let go of
@@ -66,11 +95,8 @@ func _ready() -> void:
 	NetworkSession.register_type("hero_blue", HERO_BLUE_SCENE)
 	NetworkSession.register_type("hero_ally", HERO_ALLY_SCENE)
 	# Claude 2026-11-16 (pawn M2): this level's load distance, as the game's setting while it runs.
-	var initializer: PawnInitializer = GameMode.pawn_initializer
-	if initializer and initializer.defaults:
-		_defaults_before = initializer.defaults
-		initializer.defaults = _defaults_before.duplicate()
-		initializer.defaults.world_load_distance = load_distance
+	# Claude 2026-11-16: on ArenaSample's copy of the defaults (it makes it, with the AI brain, and puts the old ones back)
+	load_distance = load_distance # Claude 2026-11-16 (audit): its setter puts it on the level's defaults, now they exist
 	# Off to begin with: with hundreds of pawns, the readouts and shapes cost more than what they show. F3 brings them back.
 	_show_readouts = false
 	_debug_draw.visible = false
@@ -82,6 +108,9 @@ func _ready() -> void:
 			_near_middle = true
 		elif argument == "--overhead":
 			_go_to_overview.call_deferred() # once the scene's cameras are ready. Claude 2026-11-16: was _toggle_overhead
+		elif argument.begins_with("--spawn-distance="): # Claude 2026-11-16
+			spawn_distance = float(argument.trim_prefix("--spawn-distance="))
+	_place_spawners() # Claude 2026-11-16: also when nothing changed it, since the setter waits for the level to be ready
 
 
 # Claude 2026-11-16: --perf-log prints the diagnostics summary every 5 s. Samples, like debug tools, aren't in release builds, so a
@@ -95,11 +124,6 @@ func _process(delta: float) -> void:
 	if diagnostics:
 		print(diagnostics.summary_text(diagnostics.get_summary(5.0)))
 
-
-# Claude 2026-11-16 (pawn M2): the game's defaults back as they were.
-func _exit_tree() -> void:
-	if _defaults_before and GameMode.pawn_initializer:
-		GameMode.pawn_initializer.defaults = _defaults_before
 
 
 func _records_timeline() -> bool:
@@ -143,6 +167,28 @@ func _unhandled_key_input(event: InputEvent) -> void:
 				_change_team_size(-10)
 				return
 	super(event)
+
+
+## Claude 2026-11-16: moves every spawner, hero spawner and the player's start in or out along its line from the middle, so the
+## factions start spawn_distance away. Each keeps its distance from the others on its line (a hero 15 m behind its faction, the
+## player 15 m in front), and nothing comes closer than 5 m.
+func _place_spawners() -> void:
+	if _laid_out.is_empty():
+		for node in $Spawning.get_children():
+			if node is Node3D:
+				_laid_out[node] = (node as Node3D).position
+	for node: Node3D in _laid_out:
+		var at: Vector3 = _laid_out[node]
+		var flat := Vector2(at.x, at.z)
+		if flat.length() < 0.01:
+			continue
+		var moved := flat.normalized() * maxf(flat.length() - LAID_OUT_SPAWN_DISTANCE + spawn_distance, 5.0)
+		node.position = Vector3(moved.x, at.y, moved.y)
+
+
+## Claude 2026-11-16: this level's settings for the start menu's match options (ArenaSample._build_match_options).
+func _level_match_options() -> PackedStringArray:
+	return PackedStringArray(["team_size", "spawn_distance", "centre_source_on", "hero_sources_on", "load_distance"])
 
 
 ## True while the middle's StreamingSource is on.
@@ -230,8 +276,8 @@ func _mass_battle_lines() -> String:
 		if is_instance_valid(pawn) and not pawn.is_dead():
 			alive[pawn.team] = alive.get(pawn.team, 0) + 1
 	var heroes := get_heroes().size()
-	return "team_size %d (= and -)    alive: red %d, blue %d, soldiers %d    heroes %d\ncentre source %s (C)    hero sources %s (H)    V: fly over the middle%s" % [
-		team_size, alive[1], alive[2], alive[0], heroes, "on" if is_centre_source_on() else "off", "on" if _hero_sources_on else "off",
+	return "team_size %d (= and -)    spawns %.0f m out    alive: red %d, blue %d, soldiers %d    heroes %d\ncentre source %s (C)    hero sources %s (H)    V: fly over the middle%s" % [
+		team_size, spawn_distance, alive[1], alive[2], alive[0], heroes, "on" if is_centre_source_on() else "off", "on" if _hero_sources_on else "off",
 		" (flying: U goes back to your pawn)" if GameMode.possession_coordinator and GameMode.possession_coordinator.is_spectating() else ""]
 
 

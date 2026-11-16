@@ -5,11 +5,9 @@
 ## swinging while they chase, and the readout's last ability.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/samples/tests/arena_sample_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const ARENA := "res://assets/scenes/samples/arena_sample.tscn"
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -67,7 +65,7 @@ func _ready() -> void:
 	for i in 900:
 		await get_tree().physics_frame
 		noticed = noticed or goblins.any(func(g: Pawn) -> bool: return is_instance_valid(g) and g.ai_context.current_state_name() == &"Combat")
-		hurt = player.get_health() < 100.0 or player.is_dead()
+		hurt = player.stat_manager.get_health() < 100.0 or player.is_dead()
 		for last: AbilityBase in arena._last_ability.values():
 			if is_instance_valid(last):
 				used[String(last.name)] = true
@@ -75,7 +73,7 @@ func _ready() -> void:
 		if noticed and hurt and labelled and used.has("Sprint") and used.has("Dash") and used.has("MeleeAttack"):
 			break
 	_check(noticed, "the goblins notice the player and go into Combat")
-	_check(hurt, "and hit the player (HP %d)" % int(player.get_health()))
+	_check(hurt, "and hit the player (HP %d)" % int(player.stat_manager.get_health()))
 	_check(used.has("Sprint") and used.has("Dash") and used.has("MeleeAttack"), "chasing goblins sprint, dash and swing (%s)" % ", ".join(used.keys()))
 	var label: Label3D = arena._readouts.values()[0] if not arena._readouts.is_empty() else null
 	_check(label != null and label.text.contains("HP") and label.text.contains("last: "), "each goblin shows a readout with its last ability (\"%s\")" % (label.text.replace("\n", " / ") if label else ""))
@@ -98,7 +96,7 @@ func _ready() -> void:
 		info.target = victim
 		info.effects = [Effect.make_damage(20)] # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 		victim.ability_manager.receive_hit(info)
-	_check(victim.is_dead() and arena._kills == 1, "a goblin killed counts as a kill (dead %s, %d kills, invulnerable %s, HP %d)" % [victim.is_dead(), arena._kills, victim.ability_manager.is_invulnerable(), victim.get_health()]) # Claude 2026-11-12: says why
+	_check(victim.is_dead() and arena._kills == 1, "a goblin killed counts as a kill (dead %s, %d kills, invulnerable %s, HP %d)" % [victim.is_dead(), arena._kills, victim.ability_manager.is_invulnerable(), victim.stat_manager.get_health()]) # Claude 2026-11-12: says why
 	# Claude 2026-11-10: its spawner removes the body and sends a replacement; R (_spawn_wave) refills at once.
 	var body_seconds: float = arena.get_spawners()[0].body_seconds
 	await get_tree().create_timer(body_seconds + 0.5).timeout
@@ -153,9 +151,3 @@ func _ground(arena: Node, at: Vector3) -> float:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

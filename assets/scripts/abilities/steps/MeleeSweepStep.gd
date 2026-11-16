@@ -86,16 +86,17 @@ func centres_for_ticks(sweep_tick: int, count: int) -> Array[Vector3]:
 
 
 func tick(_dt: float) -> Status:
-	var driver: Node = pawn.get_node_or_null(^"/root/TickDriver")
-	var replaying: bool = driver != null and driver.is_resimulating()
+	# Claude 2026-11-16 (wider audit): in a rollback replay nothing below happens (no signals, no hits), so it leaves before working
+	# out the spots; and the TickDriver autoload is used directly, where it was looked up by path every hit tick.
+	if TickDriver.is_resimulating():
+		return Status.RUNNING
 	var centres := centres_for_ticks(step_ticks, ability.ticks_elapsed()) # Claude 2026-11-16 (pawn spec 8.21): every tick this run covers
-	if not replaying:
-		if step_ticks == 0 and ability.has_signal(&"hit_window_started"):
-			ability.emit_signal(&"hit_window_started", centres[0], hit_radius)
-		if ability.has_signal(&"hit_area_moved"):
-			ability.emit_signal(&"hit_area_moved", centres[0], centres[centres.size() - 1], hit_radius)
-	if pawn.is_authority() and not replaying: # hits are decided once, on the server
-		_check_hits(driver.tick if driver else 0, centres)
+	if step_ticks == 0 and ability.has_signal(&"hit_window_started"):
+		ability.emit_signal(&"hit_window_started", centres[0], hit_radius)
+	if ability.has_signal(&"hit_area_moved"):
+		ability.emit_signal(&"hit_area_moved", centres[0], centres[centres.size() - 1], hit_radius)
+	if pawn.is_authority(): # hits are decided once, on the server
+		_check_hits(TickDriver.tick, centres)
 	return Status.RUNNING # done after length_ticks
 
 
@@ -142,14 +143,18 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 			ability.emit_signal(&"hit_landed", hit)
 
 
+var _query: PhysicsShapeQueryParameters3D = null # Claude 2026-11-16 (wider audit): kept between hit ticks (_plain_spheres)
+
 # Offline, or for a pawn without a NetworkEntity: the same spheres, with no rewinding.
 func _plain_spheres(centres: Array[Vector3]) -> Array[Pawn]:
 	var found: Array[Pawn] = []
-	var sphere := SphereShape3D.new()
-	sphere.radius = hit_radius
-	var query := PhysicsShapeQueryParameters3D.new()
-	query.shape = sphere
-	query.exclude = [pawn.get_rid()]
+	# Claude 2026-11-16 (wider audit): the sphere and the query are made once and kept; a new pair was made on every hit tick.
+	if _query == null:
+		_query = PhysicsShapeQueryParameters3D.new()
+		_query.shape = SphereShape3D.new()
+		_query.exclude = [pawn.get_rid()]
+	(_query.shape as SphereShape3D).radius = hit_radius
+	var query := _query
 	var space := pawn.get_world_3d().direct_space_state
 	for centre in centres:
 		query.transform = Transform3D(Basis.IDENTITY, centre)

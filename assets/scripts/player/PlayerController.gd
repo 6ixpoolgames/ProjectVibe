@@ -52,6 +52,9 @@ enum LookMode {
 ## Claude 2026-11-16: the free-flying camera used while spectating (start_spectating()). Its root must be a FreeFlyCamera. Empty: a
 ## FreeFlyCamera with its default settings.
 @export var spectator_scene: PackedScene
+## Claude 2026-11-16 (the owner's call: match jump and crouch): the keys (InputMap actions) that fly the spectator straight up and down.
+@export var fly_up_key: StringName = &"move_jump"
+@export var fly_down_key: StringName = &"move_crouch"
 
 ## The real camera. It holds where it is while there's no view to follow.
 var camera: PlayerCamera = null
@@ -116,8 +119,8 @@ func take_pawn(new_pawn: Pawn) -> void:
 		_latched_actions = 0 # Claude 2026-11-07: a press before letting go doesn't belong to the next pawn
 	else:
 		# Claude 2026-11-16 (pawn M5): a pawn's own placed arm or view is used as it is; otherwise the player's one arm moves to the pawn's mount.
-		_arm = pawn.get_camera_arm()
-		if _arm == null and pawn.get_default_view() == null:
+		_arm = CameraMount.arm_of(pawn)
+		if _arm == null and CameraMount.view_of(pawn) == null:
 			_arm = _attach_own_arm(pawn)
 		if _arm:
 			_arm.set_active(true)
@@ -125,7 +128,7 @@ func take_pawn(new_pawn: Pawn) -> void:
 			look_pitch = _arm.set_look(look_yaw, look_pitch if _had_pawn else _arm.get_pitch())
 		if not camera.is_inside_tree():
 			add_child(camera)
-		camera.set_view(pawn.get_default_view())
+		camera.set_view(CameraMount.view_of(pawn))
 		_capture_mouse()
 		_had_pawn = true
 	pawn_changed.emit(pawn)
@@ -329,11 +332,12 @@ func _read_action_pressed(action: StringName) -> bool:
 	return key != &"" and InputMap.has_action(key) and Input.is_action_just_pressed(key)
 
 
-## Claude 2026-11-16: spectating: up (1) or down (-1), from move_upward (Q) and move_downward (E), as the old free-floating camera had.
+## Claude 2026-11-16: spectating: up (1) or down (-1). Claude 2026-11-16 (the owner's call): from the jump key (Space) and the crouch
+## key (Ctrl), fly_up_key and fly_down_key, instead of Q and E, so flying matches walking.
 func _read_fly_up_down() -> float:
-	if not _has_actions([&"move_upward", &"move_downward"]):
+	if not _has_actions([fly_up_key, fly_down_key]):
 		return 0.0
-	return Input.get_action_strength(&"move_upward") - Input.get_action_strength(&"move_downward")
+	return Input.get_action_strength(fly_up_key) - Input.get_action_strength(fly_down_key)
 
 
 ## Any turning this frame beyond the mouse, as yaw and pitch in radians. For scripts, and later for gamepads.
@@ -384,8 +388,8 @@ func _attach_own_arm(target: Pawn) -> CameraArm:
 		_own_arm = CameraArm.new()
 		_own_arm.name = "CameraArm"
 		add_child(_own_arm)
-	_own_arm.reparent(target.get_camera_mount(), false)
-	_own_arm.apply_preset(target.get_camera_preset())
+	_own_arm.reparent(CameraMount.mount_of(target), false)
+	_own_arm.apply_preset(CameraMount.preset_of(target))
 	_own_arm.clear_ignored()
 	_own_arm.ignore_body(target)
 	return _own_arm

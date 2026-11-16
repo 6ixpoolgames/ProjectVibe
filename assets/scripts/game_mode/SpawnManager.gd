@@ -66,7 +66,6 @@ var _game_mode: GameModeSingleton = null
 var _pending: Array = [] # [due tick, Callable], run between ticks
 var _players := {} # pawn instance id -> peer
 var _team_of_type := {} # type name -> team, read once from its scene
-var _spawn_count := 0 # how many it has spawned
 # Claude 2026-11-13: every roll counts, so each one differs, even several in one tick. Rolls went by _spawn_count, which a respawn
 # doesn't add to, so players brought back in the same tick rolled the same numbers and tried the same spots.
 var _roll_count := 0
@@ -92,6 +91,11 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	if _driver and _driver.after_tick_loop.is_connected(_run_due):
 		_driver.after_tick_loop.disconnect(_run_due)
 	_pending.clear()
+
+
+## Claude 2026-11-16: the settings a start menu may offer (GameModeModule.get_match_options).
+func get_match_options() -> PackedStringArray:
+	return PackedStringArray(["respawn_players", "player_respawn_seconds"])
 
 
 # --- Spawning ---
@@ -216,8 +220,7 @@ func _spawn_at(type_name: String, owner_peer: int, place: Dictionary) -> Pawn:
 		return null
 	pawn.yaw = place["yaw"]
 	_claim(place["position"]) # Claude 2026-11-13: so the next pawn spawned this tick goes somewhere else
-	_spawn_count += 1
-	pawn_spawned.emit(pawn)
+	pawn_spawned.emit(pawn) # Claude 2026-11-17: _spawn_count went; nothing read it since rolls moved to _roll_count
 	return pawn
 
 

@@ -174,9 +174,14 @@ func apply_effects(effects: Array[Effect], source: Pawn = null, source_ability: 
 
 ## Called by AbilityManager._take_hit (Pawn's until pawn M3), on the authority: the hit's effects, from its attacker. Fills in hit.damage_dealt.
 func take_hit(hit: HitInfo) -> void:
-	var before := pawn.get_health()
+	var before := _health() # Claude 2026-11-17: was pawn.stat_manager.get_health()
 	apply_effects(hit.effects, hit.attacker, hit.ability, hit)
-	hit.damage_dealt = maxf(before - pawn.get_health(), 0.0)
+	hit.damage_dealt = maxf(before - _health(), 0.0)
+
+
+# Claude 2026-11-17: the pawn's Health now, or 0 without stats.
+func _health() -> float:
+	return pawn.stat_manager.get_health() if pawn.stat_manager else 0.0
 
 
 # --- Each tick -----------------------------------------------------------------------------------
@@ -337,14 +342,15 @@ func _run_once(application: EffectApplication) -> void:
 		if part == null or part.is_held():
 			continue
 		part.apply_once(application)
-		if not pawn.is_dead() and pawn.stat_manager and pawn.stat_manager.has_stat(&"Health") and pawn.get_health() <= 0.0:
+		if not pawn.is_dead() and pawn.stat_manager and pawn.stat_manager.has_stat(StatManager.HEALTH) and _health() <= 0.0:
 			if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): moved from Pawn
 				pawn.ability_manager.health_ran_out(application.hit)
 		if pawn.is_dead():
 			break
 	var source := application.source
-	if application.damage_dealt > 0.0 and pawn.ai_memory and is_instance_valid(source) and source != pawn:
-		pawn.ai_memory.add_threat(source, application.damage_dealt * pawn.ai_memory.threat_per_damage)
+	var memory: AIMemory = pawn.ai_context.memory if pawn.ai_context else null # Claude 2026-11-17: through the AI's core
+	if application.damage_dealt > 0.0 and memory and is_instance_valid(source) and source != pawn:
+		memory.add_threat(source, application.damage_dealt * memory.threat_per_damage)
 
 
 # Where this effect's id is in the list (the index of its first number), or -1.
@@ -365,11 +371,11 @@ func _remove_at(at: int) -> void:
 # Works out what every held part in the list adds up to, and puts the stats right.
 func _refresh() -> void:
 	_dirty = false
-	var stat_changes := {}
-	_ability_bonuses = [[], [], []]
-	_resistance_bits = []
+	# Claude 2026-11-16 (wider audit): each held part adds itself to the totals (EffectPart.add_held). The three kinds were named
+	# here by class, so a new kind of held part did nothing until this function was edited as well.
+	var totals := EffectHeldTotals.new()
 	for tag: StringName in resistances:
-		_resistance_bits.append([EffectTags.own_bit(tag), resistances[tag]])
+		totals.resistance_bits.append([EffectTags.own_bit(tag), resistances[tag]])
 	for at in range(0, _entries.size(), STRIDE):
 		var effect := Effect.find(_entries[at + ID])
 		if effect == null:
@@ -377,18 +383,11 @@ func _refresh() -> void:
 			continue
 		var stacks := int(_entries[at + STACKS])
 		for part in effect.parts:
-			if part is StatModifierPart:
-				var change: Array = stat_changes.get(part.stat, [0.0, 1.0])
-				change[0] += part.add * stacks
-				change[1] *= pow(part.multiply, stacks)
-				stat_changes[part.stat] = change
-			elif part is AbilityPriorityPart:
-				if part.ability_tag != &"":
-					_ability_bonuses[part.number].append([TagRegistry.own_bit(part.ability_tag), part.amount * stacks])
-			elif part is ResistancePart:
-				if part.tag != &"":
-					_resistance_bits.append([EffectTags.own_bit(part.tag), part.amount * stacks])
-	_stat_changes = stat_changes
+			if part and part.is_held():
+				part.add_held(totals, stacks)
+	_ability_bonuses = totals.ability_bonuses
+	_resistance_bits = totals.resistance_bits
+	_stat_changes = totals.stat_changes
 	_apply_stat_changes()
 
 
@@ -403,7 +402,7 @@ func _apply_stat_changes() -> void:
 		if stat == null:
 			continue
 		var change: Array = _stat_changes.get(stat_name, [0.0, 1.0])
-		stat.value = (stat.base_value + change[0]) * change[1]
+		stat.set_modifiers(change[0], change[1]) # Claude 2026-11-16 (wider audit): the stat works its value out, and keeps it through a new base_value
 		if stat.changes_during_play and stat.current > stat.value:
 			stat.current = stat.value
 		if not _stat_changes.has(stat_name):

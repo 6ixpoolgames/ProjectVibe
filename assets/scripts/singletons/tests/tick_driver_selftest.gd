@@ -155,6 +155,17 @@ func _test_registry_changes() -> void:
 	_log.clear()
 	d.step()
 	_check(_log.has("late:sim:2") and not _log.any(func(e): return e.begins_with("b:")), "...from the next tick: the new one runs, the removed one doesn't")
+	# Claude 2026-11-16 (wider audit): taken out and put straight back, between ticks: in once, now after those that stayed. And a
+	# lower order still goes first, however late it registers.
+	d.unregister(a)
+	d.register(a)
+	var first := Full.new("first", _log)
+	d.register(first, -5)
+	_check(d.get_participant_count() == 3 and d.is_registered(a) and not d.is_registered(b), "out and back in: counted once (%d participants)" % d.get_participant_count())
+	_log.clear()
+	d.step()
+	var simulated: Array = _log.filter(func(e): return e.contains(":sim:"))
+	_check(simulated == ["first:sim:3", "late:sim:3", "a:sim:3"], "and it runs once, after those that stayed, with a lower order still first (%s)" % str(simulated))
 	d.free()
 
 

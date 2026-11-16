@@ -3,11 +3,9 @@
 ## fighting an intruder to the death.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/fight_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -33,16 +31,16 @@ func _test_health_and_death() -> void:
 	var attacker := _make_pawn(Vector3(0, 0.1, 0), 1)
 	var victim := _make_pawn(Vector3(0, 0.1, -2), 0)
 	await _ticks(10)
-	_check(is_equal_approx(victim.get_health(), 100.0), "Health is a stat that starts full (100)")
+	_check(is_equal_approx(victim.stat_manager.get_health(), 100.0), "Health is a stat that starts full (100)")
 	var listed: Array[String] = (victim.get_node("TickState") as TickStateComponent).state_properties
 	_check(listed.has("StatManager/Health:current") and listed.has("AbilityManager/Death:ticks_left"), "Health's current value and the Death ability roll back")
 	var deaths := []
 	victim.ability_manager.died.connect(func(who, hit): deaths.append([who, hit]))
 	for i in 4:
 		victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
-	_check(is_equal_approx(victim.get_health(), 20.0) and not victim.is_dead(), "four hits of 20: 20 left, alive")
+	_check(is_equal_approx(victim.stat_manager.get_health(), 20.0) and not victim.is_dead(), "four hits of 20: 20 left, alive")
 	victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
-	_check(victim.get_health() == 0.0 and victim.is_dead(), "the fifth: Health 0, and the Death ability runs")
+	_check(victim.stat_manager.get_health() == 0.0 and victim.is_dead(), "the fifth: Health 0, and the Death ability runs")
 	_check(deaths.size() == 1 and deaths[0][0] == victim, "died goes out once")
 	victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
 	_check(deaths.size() == 1, "a hit on a dead pawn does nothing")
@@ -55,7 +53,7 @@ func _test_health_and_death() -> void:
 	_check(not pressed_dash, "and no ability can start")
 	victim.ability_manager.revive()
 	await _ticks(2)
-	_check(not victim.is_dead() and is_equal_approx(victim.get_health(), 100.0), "revive: full Health, and Death ends on its next tick")
+	_check(not victim.is_dead() and is_equal_approx(victim.stat_manager.get_health(), 100.0), "revive: full Health, and Death ends on its next tick")
 	await _ticks(15)
 	_check(victim.velocity.x > 1.0, "alive again, it follows its input")
 	# On a client, hits are ignored: only the server decides them.
@@ -64,7 +62,7 @@ func _test_health_and_death() -> void:
 	client_entity.role = NetworkEntity.Role.REMOTE_FOLLOWING
 	victim._entity = client_entity
 	victim.ability_manager.receive_hit(_hit(attacker, victim, 50))
-	_check(is_equal_approx(victim.get_health(), 100.0), "on a client, receive_hit does nothing")
+	_check(is_equal_approx(victim.stat_manager.get_health(), 100.0), "on a client, receive_hit does nothing")
 	victim._entity = real_entity
 	client_entity.free()
 	attacker.free()
@@ -79,9 +77,9 @@ func _test_being_hit_states() -> void:
 	goblin.ability_manager.receive_hit(_hit(sneak, goblin, 10))
 	await _ticks(3)
 	_check(goblin.ai_context.current_state_name() == &"Alert", "hit by an attacker it doesn't know: Alert at once (the hit rule)")
-	_check(goblin.ai_behaviour_manager.get_running_behaviour().name == &"LookToward", "and it looks toward where the hit came from")
+	_check(goblin.ai_context.behaviour_manager.get_running_behaviour().name == &"LookToward", "and it looks toward where the hit came from")
 	await _ticks(20)
-	var sight: SightSense = goblin.ai_sensing_manager.get_node("Sight")
+	var sight: SightSense = goblin.ai_context.sensing_manager.get_node("Sight")
 	_check(sight.visibility_of(sneak) > 0.5, "turning its eyes there, it can now see the attacker")
 	goblin.free()
 	sneak.free()
@@ -89,11 +87,11 @@ func _test_being_hit_states() -> void:
 	goblin = _make_goblin(Vector3(60, 0.1, 0))
 	var known := _make_pawn(Vector3(60, 0.1, 6), 0)
 	await _ticks(20)
-	goblin.ai_memory.record_sighting(known, 0.4, TickDriver.tick, known.global_position) # half-noticed earlier
+	goblin.ai_context.memory.record_sighting(known, 0.4, TickDriver.tick, known.global_position) # half-noticed earlier
 	goblin.ability_manager.receive_hit(_hit(known, goblin, 10))
 	await _ticks(3)
 	_check(goblin.ai_context.current_state_name() == &"Combat", "hit by an attacker it knows: straight to Combat")
-	_check(goblin.ai_memory.threat_at(goblin.ai_memory.find(known)) > 0.09, "and the damage added threat to the attacker's entry (%.2f)" % goblin.ai_memory.threat_at(goblin.ai_memory.find(known)))
+	_check(goblin.ai_context.memory.threat_at(goblin.ai_context.memory.find(known)) > 0.09, "and the damage added threat to the attacker's entry (%.2f)" % goblin.ai_context.memory.threat_at(goblin.ai_context.memory.find(known)))
 	goblin.free()
 	known.free()
 
@@ -102,12 +100,12 @@ func _test_dead_are_ignored() -> void:
 	var watcher := _make_pawn(Vector3(80, 0.1, 0), 1)
 	var corpse := _make_pawn(Vector3(80, 0.1, -5), 0)
 	await _ticks(30)
-	_check(watcher.ai_memory.find(corpse) >= 0, "a living enemy in front is sensed")
+	_check(watcher.ai_context.memory.find(corpse) >= 0, "a living enemy in front is sensed")
 	for i in 5:
 		corpse.ability_manager.receive_hit(_hit(watcher, corpse, 20))
 	_check(corpse.is_dead(), "it dies")
 	await _ticks(25) # past a full sensing pass
-	_check(watcher.ai_memory.find(corpse) < 0, "and memory forgets it on the next pass; sensing doesn't put it back")
+	_check(watcher.ai_context.memory.find(corpse) < 0, "and memory forgets it on the next pass; sensing doesn't put it back")
 	watcher.free()
 	corpse.free()
 
@@ -123,7 +121,7 @@ func _test_fight_to_the_death() -> void:
 			break
 	_check(deaths.size() == 1, "the goblin chases and swings until the intruder dies (5 hits of 20)")
 	await _ticks(90)
-	_check(goblin.ai_context.current_state_name() != &"Combat" and goblin.ai_memory.find(intruder) < 0, "then it forgets the body and leaves Combat")
+	_check(goblin.ai_context.current_state_name() != &"Combat" and goblin.ai_context.memory.find(intruder) < 0, "then it forgets the body and leaves Combat")
 	goblin.free()
 	intruder.free()
 
@@ -181,16 +179,10 @@ func _test_kill_self() -> void:
 	var dodging := pawn.ability_manager.is_invulnerable()
 	ai.press(&"kill_self")
 	await _ticks(3)
-	_check(dodging and pawn.is_dead() and pawn.get_health() == 0.0, "pressing it kills the pawn at once, even mid-dash")
+	_check(dodging and pawn.is_dead() and pawn.stat_manager.get_health() == 0.0, "pressing it kills the pawn at once, even mid-dash")
 	pawn.free()
 
 
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

@@ -45,8 +45,10 @@ Names are dotted, from the general to the particular. The same name used many ti
 | `tick.flush`, `tick.reconcile`, `tick.remote`, `tick.send_inputs`, `tick.send_snapshots` | The network session's parts, which it already times into TickDriver's profile |
 | `ai` (`ai.sensing`, `ai.decide`, `ai.behaviours`) | Each pawn's AI step |
 | `pawn.input`, `pawn.abilities`, `pawn.move_and_slide`, `pawn.hits` | Each pawn's input, effects and abilities, its one move, and hit delivery |
-| `visuals.smoothing`, `visuals.waddle`, `visuals.sword` | The per-frame visual scripts |
+| `animation.smoothing`, `animation.waddle`, `animation.sword` | The per-frame animation scripts *(Claude 2026-11-16: were `visuals.*`)* |
 | `ai.activation`, `streaming.chunks`, `streaming.ground_under_sources`, `nav.tick`, `nav.refresh`, `replay.record`, `world.kill_floor`, `debug.ability_draw` | The game-wide systems |
+
+*Claude 2026-11-16 (the owner's request):* **the animation category.** Every `animation.*` scope in a frame is added up as `animation_ms`: in each summary and the session log line ("scripts 5.0 (animation 2.1)"), F4's "of which animation", and the editor's Monitors. It's the part of the frame's scripts spent animating; a new animation system joins it by naming its scopes `animation.something`. Godot's own animation players run in the same part of the frame, but inside the engine, so they're only in "scripts". With no display (a headless server), the sword and toy figures don't run at all.
 
 To time something new, wrap it: `var started := PerfScopes.begin()` … `PerfScopes.end(&"group.part", started)`. A C++ class that times itself can report with `PerfScopes.add(name, microseconds)`.
 
@@ -66,12 +68,15 @@ The samples' own keys (F3 readouts, P pause, and so on) are unchanged. The mass 
 
 ## 6. Session logs
 
-Each run of the game writes `user://diagnostics/sessions/<date>_<time>_<process id>.log`, keeping the newest 30. The log contains:
+Each run of the game writes `user://diagnostics/sessions/<date>_<time>_<process id>.log`, keeping the newest 30. *(Claude 2026-11-16, the owner's call: a run with no display, a test or a dedicated server, writes to `user://diagnostics/headless/sessions/` instead, with its own 30, and its captures to `headless/captures/`, so test runs no longer push out the logs of games played in a window; `headless_runs_apart`. The replay recorder does the same with `user://replays/headless/<role>/`.)* The log contains:
 - **A header:** the date, the game's name and version, Godot's version, debug or release, and whether the editor's debugger is attached. Then the command line, the CPU, thread count, GPU, display, tick rate and job worker setting.
 - **A summary every 5 s:** fps, the frame's parts, late and very late frames, the tick, ticks a second, dropped ticks, drawing, memory and counts, pawns, the role, the window and vsync, and the top scopes.
 - **Every spike**, with its breakdown.
 - **Every warning and error,** written in full 3 times (`repeats_logged`), then counted, with a count line in later summaries. A flood can't slow the game: the logger keeps at most 500 between frames.
 - **Role changes:** offline, host, client.
+- *Claude 2026-11-16 (profiling the networked mass battle):* **the network, while in a session.** Each summary ends with `net:` KB a second sent and received, snapshots a second and their average size (encoded on a host, received on a client), the biggest packet each way, the worst connection's round trip and packet loss (as ENet measures them) and how long since it was last heard from, and a client's corrections, clock resyncs and interpolation underruns. Each frame keeps what the session's counters added (`net_` keys), so the numbers are for the summary's own seconds.
+- *Claude 2026-11-16 (the owner's request, for profiling different hardware):* **the server's tick rate.** Each summary (and F4, and the editor's Monitors) has `server`: the tick rate it's set to, how fast its ticks really went, and its load (percent of a tick's budget) and load step. Offline and hosting, that's this machine. On a client the rate is measured from the snapshots' ticks, and the load and step come in each snapshot's header (2 bytes), so a client's log shows how the host's machine is coping. `get_server_ticks(seconds)` gives the same cheaply every frame, for a game's HUD (the arena samples' status line uses it), and `server_text()` writes it as one line.
+- *Claude 2026-11-16:* **every connection that ends,** as a `[network]` line: which peer, why (`NetworkSession.connection_ended`: this game left, the other side closed or stopped answering, couldn't reach the server, refused, or no handshake), and its last numbers. ENet can't tell a closed connection from one that stopped answering; a long "last heard from" says which.
 
 The window title shows the role and process id, so several instances can be told apart.
 

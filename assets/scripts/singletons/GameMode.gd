@@ -37,6 +37,7 @@ const DEFAULT_MODULES: Array[String] = [
 	"res://assets/scripts/game_mode/SpawnManager.gd", # Claude 2026-11-10: does nothing with no spawn points placed
 	"res://assets/scripts/replay/ReplayRecorder.gd", # Claude 2026-11-15: records nothing until the game starts a recording
 	"res://assets/scripts/game_mode/TeamRegistry.gd", # Claude 2026-11-16 (pawn M1)
+	"res://assets/scripts/movement/CrowdMover.gd", # Claude 2026-11-16 (pawn spec 8.22): does nothing until an AI pawn walks
 ]
 
 ## The module that switches AI pawns off, or null without one. Each module fills in its own line when it starts.
@@ -52,6 +53,8 @@ var spawn_manager: SpawnManager = null
 var replay_recorder: ReplayRecorder = null
 ## Claude 2026-11-16 (pawn M1): how many pawns are on each team, or null without one.
 var team_registry: TeamRegistry = null
+## Claude 2026-11-16 (pawn spec 8.22): moves AI pawns walking on the ground as one crowd, or null.
+var crowd_mover: CrowdMover = null
 
 var _modules: Array[GameModeModule] = []
 

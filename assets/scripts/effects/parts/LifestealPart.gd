@@ -9,7 +9,7 @@ extends EffectPart
 ## The share of the damage dealt that comes back, such as 0.3 for 30%.
 @export_range(0.0, 1.0, 0.01, "or_greater") var fraction := 0.3
 ## The stat the source gets it back in.
-@export var stat: StringName = &"Health"
+@export var stat: StringName = StatManager.HEALTH
 
 
 func apply_once(application: EffectApplication) -> void:

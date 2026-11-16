@@ -2,13 +2,11 @@
 ## Uses the course from nav_links_selftest, where nothing leads from the low platform C back up to B, so a placed link is the only
 ## way up. Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/navigation/tests/nav_link_module_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const Course := preload("res://assets/scripts/navigation/tests/nav_links_selftest.gd")
 const ON_C := Vector3(16, -2, 0)
 const ON_B := Vector3(6, 0, 0)
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -77,9 +75,3 @@ func _settle() -> void:
 			return
 		OS.delay_msec(2)
 	_check(false, "nav became idle within the time limit")
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

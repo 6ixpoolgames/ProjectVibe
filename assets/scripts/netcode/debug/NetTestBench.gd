@@ -6,7 +6,8 @@
 ##   [ ]      ping down / up by 10 ms          - =      jitter down / up by 5 ms
 ##   , .      loss down / up by 1%             ; '      how much jitter wanders, down / up
 ##   B        a 1 s burst of lost packets      N        a 1 s lag spike of 300 ms
-##   F1-F5    presets: off, good, wifi, mobile, worst
+##   Shift+F1-F5   presets: off, good, wifi, mobile, worst (Claude 2026-11-16, wider audit: with Shift, because F1, F2 and F4 alone
+##            open diagnostics panels, and F4 for the timings also switched the fake network to "mobile")
 ##   1-9, 0   switch a feature on or off, listed on screen
 ##   H        hide or show this panel
 ##
@@ -50,8 +51,13 @@ func _process(_delta: float) -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key and key.pressed and not key.echo:
-		handle_key(key.keycode)
+	if key == null or not key.pressed or key.echo:
+		return
+	if PRESET_KEYS.has(key.keycode) and not key.shift_pressed:
+		return # Claude 2026-11-16 (wider audit): left for the diagnostics panels
+	# Claude 2026-11-16 (wider audit): a key that meant something here is used up, so nothing else acts on it as well.
+	if handle_key(key.keycode):
+		get_viewport().set_input_as_handled()
 
 
 ## Does what a key does. True if the key meant something here.
@@ -148,7 +154,7 @@ func status_text() -> String:
 	if _debug.fake.is_in_spike(now):
 		events.append("SPIKE")
 	lines.append("fake network: %s, ping %.0f ms, jitter %.0f ms (now %.0f), loss %.0f%%, jitter wander %.0f%% %s" % [preset_name, _ping_ms, _jitter_ms, _debug.fake.get_current_jitter_ms() * 2.0, _debug.fake.loss * 200.0, _debug.fake.jitter_variation * 100.0, " ".join(events)])
-	lines.append("[ ] ping   - = jitter   , . loss   ; ' wander   B burst   N spike   F1-F5 presets   H hide")
+	lines.append("[ ] ping   - = jitter   , . loss   ; ' wander   B burst   N spike   Shift+F1-F5 presets   H hide")
 	var stats := session.stats
 	lines.append("client: speed %.3f, input margin %d ticks, drawn %.1f ticks behind, late drawing %d, missed inputs %d, resyncs %d" % [session.get_tick_factor(), session.get_input_margin(), session.get_view_ticks_behind(), stats["interpolation_underruns"], session.get_missed_inputs(), stats["resyncs"]])
 	for i in NetDebugModule.FEATURES.size():

@@ -2,7 +2,7 @@
 ## functions, ChunkStreamer, StreamingSource, and StreamingSamplePawn walking around. Nav is in nav_stitching_selftest.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/streaming/tests/chunk_streaming_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 
 ## An example terrain with exactly one marker per chunk, so counts are easy to check.
@@ -13,9 +13,6 @@ class OneMarkerTerrain extends TerrainGenerator:
 		marker.position = _point_at(key.x * chunk_resolution, key.y * chunk_resolution)
 		var markers: Array[NavMarker] = [marker]
 		return markers
-
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -834,9 +831,3 @@ func _physics_frames(count: int) -> void:
 func _ray_down(terrain: Node3D, from: Vector3) -> Dictionary:
 	var query := PhysicsRayQueryParameters3D.create(from, from + Vector3.DOWN * 300.0)
 	return terrain.get_world_3d().direct_space_state.intersect_ray(query)
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

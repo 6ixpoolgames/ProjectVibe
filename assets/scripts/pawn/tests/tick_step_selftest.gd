@@ -5,12 +5,11 @@
 ## load, down when there's room, and can be forced.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/tick_step_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 
-var _failures := 0
 var _activation: AIActivationManager = null
 
 
@@ -135,10 +134,10 @@ func _test_effect_over_time() -> void:
 		await _ticks(5)
 		pawn.tick_step = step
 		await _ticks(4)
-		var before := pawn.get_health()
+		var before := pawn.stat_manager.get_health()
 		pawn.effect_manager.apply_effect(poison)
 		await _ticks(90)
-		lost[step] = before - pawn.get_health()
+		lost[step] = before - pawn.stat_manager.get_health()
 		pawn.free()
 	_check(lost[1] > 0.0 and is_equal_approx(lost[4], lost[1]), "an effect over time does the same total at step 4 (%.0f Health, %.0f at step 1)" % [lost[4], lost[1]])
 
@@ -153,13 +152,13 @@ func _test_swing() -> void:
 	var ai := _ai(attacker)
 	ai.look_at_point(target.global_position + Vector3(0, 1, 0))
 	await _ticks(4)
-	var before := target.get_health()
+	var before := target.stat_manager.get_health()
 	ai.hold(&"primary", true)
 	var melee: MeleeAttackAbility = attacker.ability_manager.get_node("MeleeAttack")
 	await _until(func() -> bool: return melee.is_running_timed(), 10)
 	await _until(func() -> bool: return not melee.is_running_timed(), 80)
 	ai.hold(&"primary", false)
-	_check(target.get_health() < before, "a swing from a pawn at step 2 still sweeps through its target and hits (%.0f to %.0f)" % [before, target.get_health()])
+	_check(target.stat_manager.get_health() < before, "a swing from a pawn at step 2 still sweeps through its target and hits (%.0f to %.0f)" % [before, target.stat_manager.get_health()])
 	attacker.free()
 	target.free()
 
@@ -263,6 +262,25 @@ func _test_load_ladder() -> void:
 	driver._note_tick_cost(int(budget * 3.0), dt)
 	_check(driver.load_step == 1, "with the ladder off, it stays at 1")
 	driver.free()
+	# Claude 2026-11-16 (the owner's question: why doesn't it step back down?): the ladder predicts the lower step from what stepping up
+	# saved. A step up that saved little (95% to 80%) steps back down at 50%, which the 40% line alone never allowed; one that saved a
+	# lot (95% to 45%) stays up at 50%, since stepping down would put it back near 95%.
+	for saved_little: bool in [true, false]:
+		var ladder := TickDriverSingleton.new()
+		ladder.active = false
+		ladder.tick_rate = 60
+		add_child(ladder)
+		for i in 60:
+			ladder._note_tick_cost(int(budget * 0.95), dt)
+		for i in 40:
+			ladder._note_tick_cost(int(budget * (0.8 if saved_little else 0.45)), dt)
+		for i in 250:
+			ladder._note_tick_cost(int(budget * 0.5), dt)
+		if saved_little:
+			_check(ladder.load_step == 1, "a step up that saved little (95% to 80%) steps back down at 50%% (%d, saving %.2f)" % [ladder.load_step, float(ladder._saving_at.get(2, -1.0))])
+		else:
+			_check(ladder.load_step == 2, "one that saved a lot (95% to 45%) stays up at 50%% (%d, saving %.2f)" % [ladder.load_step, float(ladder._saving_at.get(2, -1.0))])
+		ladder.free()
 
 
 # --- Helpers ---
@@ -323,9 +341,3 @@ func _until(condition: Callable, max_ticks: int) -> void:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

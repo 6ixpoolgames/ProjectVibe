@@ -23,6 +23,8 @@ static var _geometry: Object = null
 
 ## The shared geometry, or null without the C++ library or with enabled off.
 static func get_geometry() -> Object:
+	if enabled and _geometry != null:
+		return _geometry # Claude 2026-11-16 (wider audit): already made; this asked the engine whether the class exists on every sight pass
 	if not enabled or not ClassDB.class_exists(&"SightGeometry"):
 		return null
 	if _geometry == null:

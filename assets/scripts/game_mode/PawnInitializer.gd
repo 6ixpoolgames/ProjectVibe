@@ -12,6 +12,9 @@
 ## "project_base/game_mode/pawn_defaults". For t0 it holds today's parts: ControllerManager (with its AIController), StatManager (with
 ## movement stats) and AbilityManager (with Walk, Sprint and Jump). Claude 2026-11-07: GroundMovement was here until abilities replaced it.
 ##
+## Claude 2026-11-16: a game can set a default AI brain (PawnDefaultsRes.ai_brain), an AIBehaviourManager with behaviours, which a pawn
+## whose scene has no AIBehaviourManager gets instead of the plain one. The arena samples set theirs while they run.
+##
 ## What it never adds: TickStateComponent and NetworkEntity. NetworkSession reads those as soon as it creates a pawn, before the pawn
 ## joins the tree, so they have to be in the pawn's scene.
 ##
@@ -32,6 +35,7 @@ const DEFAULT_DEFAULTS_PATH := "res://assets/scripts/resources/pawn_defaults.tre
 
 ## The defaults in use. Read from the file when the module starts. A test or a game can set its own.
 var defaults: PawnDefaultsRes = null
+var _brain_warned := false # Claude 2026-11-16 (audit): whether the brain-matches-nothing warning was given
 
 
 func _init() -> void:
@@ -53,13 +57,30 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 func initialize(pawn: Pawn) -> void:
 	if pawn == null or defaults == null or not pawn.fill_in_default_parts:
 		return
+	# Claude 2026-11-16: the game's AI brain, if it sets one, goes in place of the part of the same name (PawnDefaultsRes.ai_brain).
+	# Its name is read once here, not for every part (audit).
+	var brain_part: StringName = part_name_of(defaults.ai_brain) if defaults.ai_brain else &""
 	for scene in defaults.parts:
 		if scene == null:
 			continue
 		var part_name := part_name_of(scene)
 		if part_name == &"" or pawn.skip_default_parts.has(part_name) or pawn.has_node(NodePath(String(part_name))):
 			continue
+		if part_name == brain_part:
+			scene = defaults.ai_brain
 		pawn.add_child(scene.instantiate())
+	_warn_if_brain_matches_nothing(brain_part)
+
+
+# Claude 2026-11-16 (audit): a brain whose root isn't named like any part in the list is never used, which would be silent. Said once.
+func _warn_if_brain_matches_nothing(brain_part: StringName) -> void:
+	if brain_part == &"" or _brain_warned:
+		return
+	for scene in defaults.parts:
+		if scene and part_name_of(scene) == brain_part:
+			return
+	_brain_warned = true
+	push_warning("[PawnInitializer] the AI brain's root is named '%s', but no part in the defaults list has that name, so it's never used. Name its root like the list's AIBehaviourManager." % brain_part)
 
 
 ## The name a part gets on the pawn: its scene's root node name. Read without making the scene.

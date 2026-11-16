@@ -7,6 +7,11 @@ const NODE_SCENE := "res://assets/scripts/netcode/tests/net_test_node.tscn"
 ## Extra time for processes to start and finish, on top of how long the longest machine plays.
 const EXTRA_SECONDS := 15.0
 
+## Claude 2026-11-16 (wider audit): every script error on any machine, over every run() so far in this test. A test checks it is 0
+## at its end, so a script error on a client or server fails the test even where no check looked at that machine's results.
+## GDScript note: a static var belongs to the class, so it keeps counting across calls.
+static var script_errors_seen := 0
+
 
 ## A range of ports for this run of a test, so two runs at once can't connect to each other. Each test adds to this as it goes.
 static func first_port() -> int:
@@ -71,6 +76,7 @@ static func run(owner: Node, run_name: String, machines: Dictionary, port: int) 
 	for machine_name: String in results:
 		var errors := _script_errors_in("%s/%s.log" % [folder, machine_name])
 		results[machine_name]["script_errors"] = errors.size()
+		script_errors_seen += errors.size()
 		results[machine_name]["script_error_lines"] = errors.slice(0, 5)
 		# On Windows nobody would see these otherwise, so they're printed here, where the test's own log shows them. On Linux the
 		# child already printed them to this process's output.

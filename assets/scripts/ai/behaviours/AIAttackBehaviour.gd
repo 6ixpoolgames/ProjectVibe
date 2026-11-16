@@ -8,7 +8,7 @@
 ##
 ## It faces the target, presses the attack's action once, and finishes when the swing is over. Claude 2026-11-09: the press is a
 ## request; the ability manager picks what it starts (the normal swing, or a follow-up when that can't), and this waits for whichever
-## runs. A second Attack behaviour with attack_action and presses_action set to another action, and a higher score, uses a special
+## runs. A second Attack behaviour with presses_action set to another action, and a higher score, uses a special
 ## attack whenever it's ready (faction_arena_sample's goblins). Its interrupt_threshold (15) keeps an
 ## ordinary decision from cutting it off mid-swing; the swing itself follows the ability rules (pawn spec 8.6).
 class_name AIAttackBehaviour
@@ -16,8 +16,8 @@ extends AIBehaviourBase
 
 ## How much closer than the attack's range the AI steps before swinging, in metres.
 @export_range(0.0, 5.0, 0.05, "or_greater") var approach_margin := 0.3
-## The action that starts the swing.
-@export var attack_action: StringName = &"primary"
+# Claude 2026-11-16 (wider audit): attack_action is gone. The action that starts the swing is presses_action (AIBehaviourBase), which
+# the behaviour manager already reads to skip an attack it couldn't press. The two had to be set to the same thing by hand.
 
 var _melee: MeleeAttackAbility = null
 var _started_tick := 0
@@ -53,11 +53,11 @@ func enter(context: AIContextComponent) -> void:
 	# (TurnToFaceStep). The first tick held is the press, so if the pawn's last input still had it held (the swing before ended this
 	# very tick), it's let go for one tick first: held twice in a row is no press, and the swing would never start.
 	_started_tick = context.current_tick
-	if pawn.controller_manager and pawn.controller_manager.held_actions & InputActions.mask_of(attack_action) != 0:
-		hands.hold(attack_action, false)
+	if pawn.controller_manager and pawn.controller_manager.held_actions & InputActions.mask_of(presses_action) != 0:
+		hands.hold(presses_action, false)
 		_hold_from_tick = context.current_tick + 1
 	else:
-		hands.hold(attack_action, true)
+		hands.hold(presses_action, true)
 		_hold_from_tick = -1
 
 
@@ -67,7 +67,7 @@ func tick(context: AIContextComponent) -> Status:
 	if _hold_from_tick >= 0:
 		if context.current_tick < _hold_from_tick:
 			return Status.RUNNING
-		context.controller.hold(attack_action, true)
+		context.controller.hold(presses_action, true)
 		_hold_from_tick = -1
 		_started_tick = context.current_tick
 		return Status.RUNNING
@@ -76,17 +76,17 @@ func tick(context: AIContextComponent) -> Status:
 		return Status.RUNNING
 	# Claude 2026-11-09: any swing on the action, since the manager may have picked a follow-up instead. Claude 2026-11-10: such as
 	# the second swing of a combo, which a boost picks (pawn spec 8.11).
-	var abilities: Array = pawn.ability_manager.get_abilities() if pawn.ability_manager else []
-	for ability in abilities:
-		if ability.trigger_action == attack_action and ability.is_running_timed():
-			return Status.RUNNING
-	context.controller.hold(attack_action, false) # Claude 2026-11-16: let go as the swing ends, so the next attack is a fresh press
+	# Claude 2026-11-16 (wider audit): asked of the manager, which looks at its running abilities only; this copied the pawn's whole
+	# ability list every tick of every swing.
+	if pawn.ability_manager and pawn.ability_manager.is_action_running(presses_action):
+		return Status.RUNNING
+	context.controller.hold(presses_action, false) # Claude 2026-11-16: let go as the swing ends, so the next attack is a fresh press
 	return Status.SUCCEEDED
 
 
 func exit(context: AIContextComponent, _reason: String) -> void:
 	if context.controller:
-		context.controller.hold(attack_action, false) # Claude 2026-11-16: never left held
+		context.controller.hold(presses_action, false) # Claude 2026-11-16: never left held
 		context.controller.stop_looking()
 
 
@@ -99,7 +99,7 @@ func _look_at_target(context: AIContextComponent) -> void:
 func _find_melee() -> MeleeAttackAbility:
 	if _melee == null and pawn and pawn.ability_manager:
 		for ability in pawn.ability_manager.get_abilities():
-			if ability is MeleeAttackAbility and ability.trigger_action == attack_action:
+			if ability is MeleeAttackAbility and ability.trigger_action == presses_action:
 				_melee = ability
 				break
 	return _melee

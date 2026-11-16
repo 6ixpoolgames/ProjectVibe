@@ -2,10 +2,10 @@
 ## Claude 2026-11-07: renamed from NetworkTime, to the name the netcode spec already used. It drives ticks online and offline.
 ## Autoload "TickDriver". Every machine runs it, online and offline. All gameplay simulation runs inside its
 ## numbered, fixed-length ticks, in a fixed phase order, instead of in each node's own _process/_physics_process.
-## Nothing is networked yet; this is the foundation the abilities and, later, the netcode are built on.
+## The abilities, the AI and the netcode all run on it. (Claude 2026-11-17: this said nothing was networked yet.)
 ##
 ## How an entity takes part:
-##   TickDriver.register(self)    # usually done by the nexus at spawn
+##   TickDriver.register(self)    # a Pawn, TickStateComponent or NetworkEntity does this itself in _enter_tree
 ##   TickDriver.unregister(self)  # or just get freed; freed participants are dropped automatically
 ## and implements any of these (all optional; a participant only gets the calls it has):
 ##   func _tick_input(dt: float, tick: int) -> void      # phase 1: controllers write this tick's input command
@@ -23,7 +23,7 @@
 ##
 ## Rules and corner cases (all checked in tests/tick_driver_selftest.gd):
 ##   - Order within a phase: lower `order` first (register's second argument, default 0); equal order keeps
-##     registration order. Online, the nexus will pass the entity id so every machine runs the same order.
+##     registration order. Every machine registers a level's pawns in the same order, so they run in the same order.
 ##   - Registering twice changes nothing (the first registration stands). Unregistering an unknown object is a no-op.
 ##   - Registering DURING a tick takes effect from the next tick. Unregistering during a tick stops its calls
 ##     immediately (a pawn despawned mid-tick isn't simulated or recorded afterwards).
@@ -32,7 +32,8 @@
 ##     slows down instead of freezing) and counted in dropped_ticks.
 ##   - Claude 2026-11-16 (pawn spec 8.21, the owner's call): the load ladder. Each tick's cost is measured against its budget (the
 ##     tick's length). While ticks use more than raise_above of it for raise_after_ticks, load_step doubles (1, 2, 4); while they use
-##     less than lower_below for lower_after_ticks, it halves again. The AIActivationManager makes every AI pawn run at most every
+##     less than lower_below for lower_after_ticks, it halves again (Claude 2026-11-16: or while the load it predicts for the lower
+##     step, from what stepping up saved, fits under raise_above less step_down_headroom; see _lower_step_fits). The AIActivationManager makes every AI pawn run at most every
 ##     load_step-th tick, so an overloaded game sheds AI work, the bulk of a tick, instead of falling behind: the whole game's AI at 30
 ##     (or 15) ticks a second, with every timer still lasting as long (Pawn.ticks_elapsed). Players' pawns always run every tick.
 ##     Tick numbers don't change, so nothing in the netcode does either. load_step_override forces a step; load_ladder_enabled off
@@ -133,9 +134,22 @@ signal load_step_changed(step: int)
 @export_range(0.1, 2.0, 0.05) var raise_above := 0.85
 ## Claude 2026-11-16: how many ticks in a row over raise_above before it steps up, at 60 a second. 30: half a second.
 @export_range(1, 600, 1) var raise_after_ticks := 30
-## Claude 2026-11-16: the share of a tick's budget below which the ladder steps down, after lower_after_ticks in a row. Low, because
-## stepping down roughly doubles what the AI pawns cost.
+## Claude 2026-11-16: the share of a tick's budget below which the ladder always steps down, after lower_after_ticks in a row.
+## Claude 2026-11-16 (the owner's question: why doesn't it step back down?): it also steps down when it predicts the lower step fits,
+## below. This line alone kept it at 4 for good in the owner's run: much of a tick doesn't shrink with the AI's step (recording, the
+## player's pawn, the replay), so the tick sat at about half its budget, under 85% and never under 40%.
 @export_range(0.0, 1.0, 0.05) var lower_below := 0.4
+## Claude 2026-11-16: the ladder also steps down when the load it predicts for the lower step is under raise_above minus this, after
+## lower_after_ticks in a row. The prediction is the load now plus what stepping up saved when it last did (measured: the load just
+## before the step up, less the load once it had settled). With no measurement yet, it assumes the load doubles.
+@export_range(0.0, 1.0, 0.05) var step_down_headroom := 0.15
+## Claude 2026-11-16 (audit): how long after a step up the load is measured again to work out what it saved, in ticks at 60 a second.
+## About three times what the average takes to settle. Its own setting (it borrowed raise_after_ticks).
+@export_range(1, 600, 1) var saving_measured_after_ticks := 30
+## Claude 2026-11-16 (audit): a measured saving under this share of the budget is treated as not measured (the load probably rose
+## for another reason while measuring, such as a fight starting), so stepping down assumes the load doubles instead of that it
+## barely changes, which would bounce the ladder up and down.
+@export_range(0.0, 1.0, 0.01) var smallest_believable_saving := 0.05
 ## Claude 2026-11-16: how many ticks in a row under lower_below before it steps down, at 60 a second. 180: three seconds.
 @export_range(1, 3600, 1) var lower_after_ticks := 180
 ## Claude 2026-11-16: the most every AI pawn may run, as a step: 1 every tick, 2 every 2nd, 4 every 4th. Read it; set
@@ -143,12 +157,20 @@ signal load_step_changed(step: int)
 var load_step := 1
 ## Claude 2026-11-16: how much of its budget a tick has used lately, smoothed over about ten ticks: 1.0 is the whole tick's length.
 var load_average := 0.0
+# Claude 2026-11-16 (the ladder's prediction): step -> how much of the budget stepping up to it saved (load before less load after),
+# measured once the average has settled after the step up; and the step being measured, the load before it, and the ticks left.
+var _saving_at := {}
+var _measuring_step := 0
+var _load_before_raise := 0.0
+var _measure_ticks_left := 0
 var _over_ticks := 0
 var _under_ticks := 0
 var _physics_steps_this_frame := 0 # Claude 2026-11-16: physics steps since the last rendered frame
 ## Claude 2026-11-05: on, each tick phase adds up its time in microseconds into profile, for finding what's slow. Off, it costs
 ## a few checks of this flag per tick.
 var profile_enabled: bool = false
+## Claude 2026-11-16 (wider audit): the entries of profile that count things. The rest are times in microseconds.
+const PROFILE_COUNTS: Array[String] = ["ticks", "rollbacks", "rollback_ticks"]
 var profile: Dictionary = {}
 
 var _rate: int = 60
@@ -160,7 +182,18 @@ var _in_simulate := false         # Claude 2026-11-09: inside a tick's simulate 
 var _removed_now: Dictionary = {} # unregistered during the current tick
 var _tick_random := RandomNumberGenerator.new()
 
-var _entries: Array = []      # [{object, order, seq}] sorted by order, then seq
+# Claude 2026-11-16 (wider audit): each entry also keeps its object's id and which phases it takes part in (worked out once, when it
+# registers), and the list is kept in order as entries arrive. _registered answers "is this one in?" without a search. Before, every
+# register and unregister searched the whole list, and any change had the next tick sort it again and ask every participant about
+# nine functions: about 450 entries at 150 pawns, each time one spawned, died or froze.
+var _entries: Array = []      # [{object, order, seq, id, phases}] in order: by order, then seq
+var _registered: Dictionary = {} # instance id -> the seq of its entry
+const _PHASE_INPUT := 1
+const _PHASE_CAPTURE := 2
+const _PHASE_PREDICTED := 4
+const _PHASE_SYNCING := 8
+const _PHASE_SIMULATE := 16
+const _PHASE_RECORD := 32
 var _input: Array = []        # participants per phase, rebuilt when the registry changes
 var _capture: Array = []
 var _simulate: Array = []
@@ -210,28 +243,59 @@ func _process(delta: float) -> void:
 
 ## Adds a participant. `order`: lower runs first within each phase.
 func register(participant: Object, order: int = 0) -> void:
-	if participant == null or _find(participant) >= 0:
+	if participant == null:
 		return
-	_entries.append({"object": participant, "order": order, "seq": _seq})
+	var id := participant.get_instance_id()
+	if _registered.has(id):
+		return
+	_registered[id] = _seq
+	var entry := {"object": participant, "order": order, "seq": _seq, "id": id, "phases": _phases_of(participant)}
 	_seq += 1
+	# Kept in order: after every entry with the same or a lower order. Nearly always that's the end of the list, or a step or two
+	# before it, so this loop is short.
+	var at := _entries.size()
+	while at > 0 and _entries[at - 1].order > order:
+		at -= 1
+	_entries.insert(at, entry)
 	_dirty = true
 
 
 func unregister(participant: Object) -> void:
-	var i := _find(participant)
-	if i >= 0:
-		_entries.remove_at(i)
-		_dirty = true
-		if _in_tick:
-			_removed_now[participant] = true
+	if participant == null:
+		return
+	var id := participant.get_instance_id()
+	if not _registered.has(id):
+		return
+	_registered.erase(id) # its entry is dropped the next time the phases are rebuilt
+	_dirty = true
+	if _in_tick:
+		_removed_now[participant] = true
 
 
 func is_registered(participant: Object) -> bool:
-	return _find(participant) >= 0
+	return participant != null and _registered.has(participant.get_instance_id())
 
 
 func get_participant_count() -> int:
-	return _entries.size()
+	return _registered.size()
+
+
+# Claude 2026-11-16 (wider audit): which phases a participant takes part in, as bits, from the functions it has.
+func _phases_of(o: Object) -> int:
+	var phases := 0
+	if o.has_method(&"_tick_input"):
+		phases |= _PHASE_INPUT
+	if o.has_method(&"_tick_capture_input"):
+		phases |= _PHASE_CAPTURE
+	if o.has_method(&"_rollback_load") and o.has_method(&"_rollback_input") and o.has_method(&"_rollback_simulate") and o.has_method(&"_tick_record"):
+		phases |= _PHASE_PREDICTED
+	if o.has_method(&"_sync_collision"):
+		phases |= _PHASE_SYNCING
+	if o.has_method(&"_tick_simulate"):
+		phases |= _PHASE_SIMULATE
+	if o.has_method(&"_tick_record"):
+		phases |= _PHASE_RECORD
+	return phases
 
 
 # --- Time --------------------------------------------------------------------------------------
@@ -518,6 +582,11 @@ func _run_tick(dt: float) -> void:
 	_note_tick_cost(Time.get_ticks_usec() - tick_started, dt) # Claude 2026-11-16: the load ladder
 
 
+## Claude 2026-11-16: the settings a start menu may offer before a match (MatchOptionsPanel.add_from_autoloads): the load ladder.
+func get_match_options() -> PackedStringArray:
+	return PackedStringArray(["load_ladder_enabled", "load_step_override"])
+
+
 # Claude 2026-11-16 (pawn spec 8.21): the load ladder's rule, from one tick's cost in microseconds. See the top of the file.
 func _note_tick_cost(microseconds: int, dt: float) -> void:
 	var share := float(microseconds) / maxf(dt * 1000000.0, 1.0)
@@ -528,14 +597,38 @@ func _note_tick_cost(microseconds: int, dt: float) -> void:
 	if not load_ladder_enabled:
 		_set_load_step(1)
 		return
+	# Claude 2026-11-16 (the ladder's prediction): once the average has settled after a step up, note what that step saved.
+	if _measure_ticks_left > 0:
+		_measure_ticks_left -= 1
+		if _measure_ticks_left == 0 and load_step == _measuring_step:
+			var saving := _load_before_raise - load_average
+			if saving >= smallest_believable_saving:
+				_saving_at[_measuring_step] = saving
+			else:
+				_saving_at.erase(_measuring_step) # Claude 2026-11-16 (audit): not believable; assume the load doubles
 	_over_ticks = _over_ticks + 1 if load_average > raise_above else 0
-	_under_ticks = _under_ticks + 1 if load_average < lower_below else 0
+	_under_ticks = _under_ticks + 1 if _lower_step_fits() else 0
 	if _over_ticks >= ticks_at_rate(raise_after_ticks) and load_step < max_load_step:
 		_over_ticks = 0
+		_under_ticks = 0
+		_load_before_raise = load_average
 		_set_load_step(load_step * 2)
+		_measuring_step = load_step
+		_measure_ticks_left = ticks_at_rate(saving_measured_after_ticks)
 	elif _under_ticks >= ticks_at_rate(lower_after_ticks) and load_step > 1:
 		_under_ticks = 0
 		_set_load_step(load_step >> 1) # GDScript note: >> 1 halves a whole number, with no warning about dropping a fraction
+
+
+## Claude 2026-11-16: true if the next step down looks safe now: the load is under lower_below, or the load predicted for the lower
+## step (the load now plus what this step saved, or twice the load if that isn't known) is under raise_above less step_down_headroom.
+func _lower_step_fits() -> bool:
+	if load_step <= 1:
+		return false
+	if load_average < lower_below:
+		return true
+	var predicted: float = load_average + float(_saving_at.get(load_step, load_average))
+	return predicted < raise_above - step_down_headroom
 
 
 func _set_load_step(wanted: int) -> void:
@@ -559,8 +652,17 @@ func _profile_phase(phase: StringName, mark: int) -> int:
 ## changed, never per tick. Also drops freed participants.
 func _rebuild_phases() -> void:
 	_dirty = false
-	_entries = _entries.filter(func(e): return is_instance_valid(e.object))
-	_entries.sort_custom(func(a, b): return a.order < b.order or (a.order == b.order and a.seq < b.seq))
+	# Claude 2026-11-16 (wider audit): one pass. Entries unregistered since (their id is gone from _registered, or belongs to a newer
+	# entry of the same object) and freed ones are dropped; the rest are already in order, with their phases known.
+	var kept: Array = []
+	for e in _entries:
+		if _registered.get(e.id, -1) != e.seq:
+			continue
+		if not is_instance_valid(e.object):
+			_registered.erase(e.id)
+			continue
+		kept.append(e)
+	_entries = kept
 	_input.clear()
 	_capture.clear()
 	_simulate.clear()
@@ -569,26 +671,19 @@ func _rebuild_phases() -> void:
 	_syncing.clear()
 	for e in _entries:
 		var o: Object = e.object
-		if o.has_method(&"_tick_input"):
+		var phases: int = e.phases
+		if phases & _PHASE_INPUT:
 			_input.append(o)
-		if o.has_method(&"_tick_capture_input"):
+		if phases & _PHASE_CAPTURE:
 			_capture.append(o)
-		if o.has_method(&"_rollback_load") and o.has_method(&"_rollback_input") and o.has_method(&"_rollback_simulate") and o.has_method(&"_tick_record"):
+		if phases & _PHASE_PREDICTED:
 			_predicted.append(o)
-		if o.has_method(&"_sync_collision"):
+		if phases & _PHASE_SYNCING:
 			_syncing.append(o)
-		if o.has_method(&"_tick_simulate"):
+		if phases & _PHASE_SIMULATE:
 			_simulate.append(o)
-		if o.has_method(&"_tick_record"):
+		if phases & _PHASE_RECORD:
 			_record.append(o)
-
-
-func _find(participant: Object) -> int:
-	for i in _entries.size():
-		var o = _entries[i].object
-		if is_instance_valid(o) and o == participant:
-			return i
-	return -1
 
 
 func _refresh_rate() -> void:

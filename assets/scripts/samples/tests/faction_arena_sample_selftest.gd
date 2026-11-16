@@ -4,11 +4,9 @@
 ## Claude 2026-11-13: also teams of team_size (8), soldiers filling the players' team, and the usual Health.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/samples/tests/faction_arena_sample_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const ARENA := "res://assets/scenes/samples/faction_arena_sample.tscn"
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -37,7 +35,7 @@ func _ready() -> void:
 			soldiers.append(pawn)
 	_check(player != null and player.team == 0 and player.ability_manager.has_node("HeavyAttack") and player.ability_manager.has_node("SecondSwing") and player.ability_manager.has_node("FinisherSwing"), "the player is on team 0, with the heavy attack and the combo's swings") # Claude 2026-11-10
 	# Claude 2026-11-13: the usual Health again (it was ten times that from 2026-11-12), and teams of team_size (8).
-	_check(player.get_health() == 100.0 and red[0].get_health() == 100.0 and red[0].stat_manager.get_value(&"Health") == 100.0, "every pawn has the usual Health (%d)" % red[0].get_health())
+	_check(player.stat_manager.get_health() == 100.0 and red[0].stat_manager.get_health() == 100.0 and red[0].stat_manager.get_value(&"Health") == 100.0, "every pawn has the usual Health (%d)" % red[0].stat_manager.get_health())
 	_check(arena.team_size == 8 and red.size() == 8 and blue.size() == 8, "the spawners fill up: %d red goblins on team 1 and %d blue on team 2" % [red.size(), blue.size()])
 	# Claude 2026-11-13: soldiers fill the players' team up to team_size: 7, with the one player.
 	_check(soldiers.size() == 7 and soldiers.all(func(p: Pawn) -> bool: return p.scene_file_path == arena.ALLY_SCENE.resource_path), "and %d soldiers on the players' team (team_size less 1 player)" % soldiers.size())
@@ -110,6 +108,25 @@ func _ready() -> void:
 	arena._toggle_pause()
 	await _ticks(5)
 	_check(TickDriver.active and TickDriver.tick > paused_at + 1, "P again plays on")
+	# Claude 2026-11-16 (the owner's call): the player's pawn has this game mode's default AI brain, the soldiers' behaviours, idle while
+	# the player has it; let go of (U), its AI takes over and picks one.
+	var brain: AIBehaviourManager = player.get_node_or_null(^"AIBehaviourManager")
+	var behaviour_names: Array = brain.get_behaviours().map(func(b: AIBehaviourBase) -> String: return String(b.name)) if brain else []
+	_check(brain != null and behaviour_names.has("Chase") and behaviour_names.has("HeavyAttack") and behaviour_names.has("GoToPoint"),
+		"the player's pawn has the game mode's AI brain (%s)" % ", ".join(behaviour_names))
+	_check(brain != null and brain.get_running_behaviour() == null, "which does nothing while the player has the pawn")
+	arena._toggle_spectating()
+	var picked: AIBehaviourBase = null
+	for i in 120:
+		await _ticks(1)
+		if brain.get_running_behaviour():
+			picked = brain.get_running_behaviour()
+			break
+	_check(picked != null, "let go of (U), its AI takes over and picks a behaviour (%s)" % (String(picked.name) if picked else "none"))
+	arena._toggle_spectating()
+	await _ticks(5)
+	_check(GameMode.possession_coordinator.get_pawn_of() == player, "U again takes it back")
+	_check(GameMode.pawn_initializer.defaults.ai_brain == arena.FACTION_BRAIN, "(while the level runs, the game's defaults carry its brain)")
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -117,9 +134,3 @@ func _ready() -> void:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

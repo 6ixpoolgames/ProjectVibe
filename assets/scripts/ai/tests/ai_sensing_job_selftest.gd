@@ -5,15 +5,13 @@
 ## Needs the navcore C++ library; without it, it says so and passes.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_sensing_job_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const GOBLIN_SCENE := "res://assets/scenes/samples/arena_goblin.tscn"
 const NO_AI: Array[StringName] = [&"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 # Worker counts compared: none (everything on the main thread), 1, 2, 3 (the target machine's dedicated server), and the machine's.
 const WORKER_COUNTS := [0, 1, 2, 3, -1]
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -210,11 +208,11 @@ func _run_fight(use_job: bool, workers: int) -> Dictionary:
 		await get_tree().physics_frame
 	var state := []
 	for goblin in goblins:
-		var memory := goblin.ai_memory
+		var memory := goblin.ai_context.memory
 		var entries := []
 		for e in memory.entry_count():
 			entries.append([String(memory.get_store().entity_at(e).name), memory.get_store().awareness_at(e, 5240), memory.get_store().last_known_position_at(e)])
-		state.append([goblin.global_position, goblin.get_health(), entries])
+		state.append([goblin.global_position, goblin.stat_manager.get_health(), entries])
 	var stats: Dictionary = job.get_stats() if job else {"requests": 0, "taken": 0, "last_requests": 0}
 	for goblin in goblins:
 		goblin.free()
@@ -242,9 +240,3 @@ func _snapshot(stores: Array, pawns: Array[Pawn], tick: int) -> Array:
 			entries.append([pawns.find(store.entity_at(e)), store.awareness_at(e, tick), store.is_certain_at(e), store.last_known_position_at(e), store.ticks_since_seen_at(e, tick)])
 		out.append(entries)
 	return out
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

@@ -33,6 +33,11 @@ Owner's decisions, 2026-11-16:
      - updating godot-cpp from the 4.4 bindings to 4.7 (10.0.0-stable, already fetched; `api_version=4.7`, then `compatibility_minimum = "4.7"` in `bin/navcore.gdextension`)
      - the tile commit fix (navigation and terrain track below)
      - a partial flag for paths found without links: `find_path_now` gives only points, so `NavigationManager.is_partial()` is false with `use_links` off. One method giving `{points, link_ids, partial}` either way.
+     - *(Claude 2026-11-16, the owner's call)* the delta snapshots' change check in C++: `NetworkSession._delta_entity_bytes` compares each entity's state list with its baseline and builds the masks in GDScript, which raised the host's snapshot sending from 1.9 to 2.3 ms a tick at 154 pawns (netcode spec 11.4.1). A `NetCodec` method taking both lists and returning the encoded delta, with `net_codec_selftest` comparing it to the GDScript one
+     - *(Claude 2026-11-16, the owner's call in the code audit: walls belong in navigation)* the crowd mover's wall check against the navmesh, Detour's `moveAlongSurface`, so nav walking stays on the navmesh like Unreal's NavWalking and works for any pawn, shaped or not (today: a sweep of its collision shape, and a pawn with none moves by physics)
+     - *(Claude 2026-11-16, the owner's call)* the crowd mover's batch in C++ (pawn spec 8.22): `CrowdMover._move_batch` takes plain lists already, so a C++ version takes the same, with its rays against `SightGeometry`'s copy of the ground instead of the physics world, on the job scheduler's worker threads. The GDScript batch costs about 10 microseconds a pawn (0.9 ms of 1.35 at 130 pawns is GDScript)
+     - *(Claude 2026-11-16)* swing hit checks through the pawn grid (`AIPawnGrid`) in C++ instead of physics sphere queries
+     - *(Claude 2026-11-17, from the wider code audit; the owner kept C++ out of that round)* pawn paths through the budgeted queue across links (`PathQueue` with `use_links`), so a mass repath is spread over ticks instead of all on the main thread at once; bounds and null checks on `AIMemoryStore`'s `*_at` functions, `NavServer` with no tier radii and `TileManager`'s dirty rectangles; fewer engine calls per sensed candidate after the sensing job; one `state_encoding.h` for the encoding rules the codec and the recorder each copy; one connection per shape in `SightGeometry` (Godot counts a function as connected whatever is bound to it, checked in 4.7, so a second body sharing a shape isn't watched today); the sensing job's mutation guard on the table, grid and geometry themselves; `SightGeometry.sync` skipping static bodies; tile builds editing span columns in place; a terrain edit dirtying only the nav tiles it touches
      - rebuild on Windows and Linux, then the nav, codec and tick_state tests
 3. **Tick driver update** (variable tick rate):
    - fine ticks counting at 120, with 60 by default *(left for later, with networking T1.1: not needed for dropping to 30)*
@@ -86,7 +91,7 @@ Owner's decisions, 2026-11-16:
   - step schedules decided by the server and announced ahead
   - each entity's state time, and presses kept within slower steps
 - **T1.2:** capturing an unchanging copy of state, then encoding it on workers, with an overload rule for each consumer. This is the performance phase's "recording on workers first".
-- **T1.3:** deltas against acknowledged baselines, with full-state recovery (netcode v1).
+- **T1.3:** deltas against acknowledged baselines, with full-state recovery (netcode v1). *(Claude 2026-11-16: built in GDScript, with snapshots cut into parts under ENet's packet size and cheaper placing of remote pawns, after the networked mass battle lagged and dropped its client: netcode spec 11.4.1. Acknowledgements from a client that controls nothing: built the same day, an `ACK` packet. Still to do: the change check in C++, in the C++ bundle.)*
 - **T1.4:** input batching, and making lifecycle, teleport and late join wait on the world state they need.
 - **T1.5:** a soak test and validation across machines.
 - **Later, if it's needed:** relevance and priority (netcode v2).

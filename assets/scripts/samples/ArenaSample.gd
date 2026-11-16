@@ -7,7 +7,7 @@
 ## six on top of the others). Tab possesses a goblin (then it fights for
 ## you, on its team; Tab again goes back). F3 shows or hides the readout over each goblin, and the debug shapes.
 ## Claude 2026-11-16 (the owner's request): U lets go of the pawn you have, which its AI controller takes over, and you fly around as a
-## spectator (FreeFlyCamera: WASD, Q up, E down, the wheel zooms and the middle button resets it, Shift faster, Shift and the wheel for faster still); U again takes back the pawn you
+## spectator (FreeFlyCamera: WASD, Space up, Ctrl down (Claude 2026-11-16: was Q and E), the wheel zooms and the middle button resets it, Shift faster, Shift and the wheel for faster still); U again takes back the pawn you
 ## left. Tab while flying possesses a goblin.
 ## A player's own pawn has no AI behaviours here, so it stands where it was left. Let go of, it keeps the world loaded around it (on the
 ## server or offline), so the fight there carries on wherever you fly.
@@ -40,6 +40,9 @@ extends Node3D
 const PORT := 24896
 const PAWN_SCENE := preload("res://assets/scenes/pawn/pawn.tscn")
 const GOBLIN_SCENE := preload("res://assets/scenes/samples/arena_goblin.tscn")
+## Claude 2026-11-16 (the owner's call): this game mode's default AI brain: the goblins' behaviours, for any pawn without its own (the
+## players' pawns, whose AI takes over when they let go with U).
+const ARENA_BRAIN := preload("res://assets/scenes/samples/arena_brain.tscn")
 # Claude 2026-11-10: GOBLINS_PER_WAVE, BODY_REMOVAL_SECONDS and PLAYER_REVIVE_SECONDS are gone: the spawners and SpawnManager
 # have those settings now.
 ## Claude 2026-11-09: longer cooldowns in this level only, in seconds by ability name, so switching between abilities is easy to see
@@ -74,9 +77,12 @@ var _timeline: AIDebugTimeline = null # Claude 2026-11-09: the view-only rewind,
 var _paused_note := "" # Claude 2026-11-09: why P did nothing, shown in the status lines
 var _left_pawn: Pawn = null # Claude 2026-11-16: the pawn U let go of, which U takes back
 var _released_connected := false # Claude 2026-11-16
+var _options: MatchOptionsPanel = null # Claude 2026-11-16: the start menu's match options
+var _defaults_before: PawnDefaultsRes = null # Claude 2026-11-16: the game's pawn defaults before this level put its own copy in
 
 
 func _ready() -> void:
+	_use_level_defaults() # Claude 2026-11-16: first, before any pawn is made
 	_debug_draw = AbilityDebugDraw.new() # Claude 2026-11-09
 	_debug_draw.name = "AbilityDebugDraw"
 	add_child(_debug_draw)
@@ -105,6 +111,8 @@ func _ready() -> void:
 	$Display/Menu/Box/Offline.pressed.connect(_start_offline)
 	$Display/Menu/Box/Host.pressed.connect(_host)
 	$Display/Menu/Box/Join.pressed.connect(func() -> void: _join(_address.text))
+	_build_match_options() # Claude 2026-11-16
+	NetworkSession.disconnected.connect(func() -> void: _options.refresh())
 	# Claude 2026-11-13: deferred, so a scripted --host or --offline starts once the whole scene is ready, including the _ready of a
 	# script that extends this one. FactionArenaSample registers its own pawn scenes after calling super(), so a --host read right
 	# here spawned the host's player from the plain pawn.tscn: a capsule, without the faction arena's attacks (the owner spotted it).
@@ -291,7 +299,7 @@ func _health_multiplier() -> float:
 ## and fills it. Health's most is the same on every machine this way; how much it has now rolls back and comes in snapshots anyway.
 func _scale_health(pawn: Pawn) -> void:
 	var multiplier := _health_multiplier()
-	var health := pawn.stat_manager.get_stat(&"Health") if pawn.stat_manager else null
+	var health := pawn.stat_manager.get_stat(StatManager.HEALTH) if pawn.stat_manager else null
 	if health == null or is_equal_approx(multiplier, 1.0):
 		return
 	health.base_value *= multiplier # GDScript note: base_value's setter sets value too
@@ -424,17 +432,17 @@ func _readout_text(pawn: Pawn) -> String:
 	if pawn.is_dead():
 		lines.append("dead")
 	elif pawn.runs_ai_here() and pawn.ai_context:
-		var running := pawn.ai_behaviour_manager.get_running_behaviour() if pawn.ai_behaviour_manager else null
+		var running := pawn.ai_context.behaviour_manager.get_running_behaviour() if pawn.ai_context.behaviour_manager else null
 		lines.append("%s · %s" % [pawn.ai_context.current_state_name(), String(running.name) if running else "—"]) # Claude 2026-11-12: String(), so both sides are text
 		# Claude 2026-11-12: has_target() first: casting a target that was freed (a body removed) is a script error.
 		var target := pawn.ai_context.current_target as Pawn if pawn.ai_context.has_target() else null
 		if not is_instance_valid(target):
 			target = _player_pawn if is_instance_valid(_player_pawn) else null
-		if target and pawn.ai_memory:
-			var index := pawn.ai_memory.find(target)
+		if target and pawn.ai_context.memory:
+			var index := pawn.ai_context.memory.find(target)
 			if index >= 0:
-				var awareness := pawn.ai_memory.awareness_at(index, pawn.ai_context.current_tick)
-				lines.append("%s: aware %d%%%s" % [target.name, int(awareness * 100.0), " (certain)" if pawn.ai_memory.is_certain_at(index) else ""])
+				var awareness := pawn.ai_context.memory.awareness_at(index, pawn.ai_context.current_tick)
+				lines.append("%s: aware %d%%%s" % [target.name, int(awareness * 100.0), " (certain)" if pawn.ai_context.memory.is_certain_at(index) else ""])
 		# Claude 2026-11-09: the last ability it started, marked while it's still running (Sprint lasts up to 3 s).
 		var last: AbilityBase = _last_ability.get(pawn)
 		if is_instance_valid(last):
@@ -444,7 +452,7 @@ func _readout_text(pawn: Pawn) -> String:
 		else:
 			lines.append("last: —")
 	lines.append_array(_effect_lines(pawn)) # Claude 2026-11-10
-	lines.append("HP %d" % int(pawn.get_health()))
+	lines.append("HP %d" % int(pawn.stat_manager.get_health()))
 	return "\n".join(lines)
 
 
@@ -454,7 +462,7 @@ func _player_readout_text(pawn: Pawn) -> String:
 	var last: AbilityBase = _last_ability.get(pawn)
 	lines.append("last: %s%s" % [last.name, " (running)" if last.is_running_timed() else ""] if is_instance_valid(last) else "last: —")
 	lines.append_array(_effect_lines(pawn))
-	lines.append("HP %d" % int(pawn.get_health()))
+	lines.append("HP %d" % int(pawn.stat_manager.get_health()))
 	return "\n".join(lines)
 
 
@@ -509,13 +517,13 @@ func _status_text() -> String:
 			alive += 1
 	var pawn := GameMode.possession_coordinator.get_pawn_of() if GameMode.possession_coordinator else null
 	var lines := PackedStringArray()
-	lines.append("%s    %d fps" % [mode, Engine.get_frames_per_second()])
+	lines.append("%s    %d fps    %s" % [mode, Engine.get_frames_per_second(), _server_tick_text()]) # Claude 2026-11-16: and the server's tick rate
 	# Claude 2026-11-15: the replay recording, if one is running
 	var recorder: ReplayRecorder = GameMode.replay_recorder
 	if recorder and recorder.is_recording():
 		lines.append("recording %s (%.1f MB)" % [recorder.get_recording_path().get_file(), recorder.get_bytes_written() / 1048576.0])
 	if pawn:
-		lines.append("HP %d%s    speed %.1f m/s" % [int(pawn.get_health()), "  (dead: reviving)" if pawn.is_dead() else "", Vector2(pawn.velocity.x, pawn.velocity.z).length()])
+		lines.append("HP %d%s    speed %.1f m/s" % [int(pawn.stat_manager.get_health()), "  (dead: reviving)" if pawn.is_dead() else "", Vector2(pawn.velocity.x, pawn.velocity.z).length()])
 	lines.append("goblins %d    kills %d    deaths %d" % [alive, _kills, _deaths])
 	lines.append(_keys_text()) # Claude 2026-11-09: a function, so faction_arena_sample can add its special attack
 	if not TickDriver.active:
@@ -525,9 +533,89 @@ func _status_text() -> String:
 	return "\n".join(lines)
 
 
-## Claude 2026-11-09: the key reminder in the status lines.
+## Claude 2026-11-16 (the owner's call: the default AI brain is the game mode's): while this level runs, the game's pawn defaults are a copy
+## of its own, with this level's brain (_ai_brain()), and the old ones go back when it closes. A level that extends this one changes
+## its copy too (the mass battle's load distance). GDScript note: duplicate() makes a new resource with the same settings, so changing
+## it leaves the game's file as it was.
+func _use_level_defaults() -> void:
+	var initializer: PawnInitializer = GameMode.pawn_initializer
+	if initializer == null or initializer.defaults == null:
+		return
+	_defaults_before = initializer.defaults
+	initializer.defaults = _defaults_before.duplicate()
+	initializer.defaults.ai_brain = _ai_brain()
+
+
+## Claude 2026-11-16 (audit): this level's copy of the game's pawn defaults, or null if it couldn't make one (no PawnInitializer). An
+## arena sample that extends this one changes its own settings on it (the mass battle's load distance).
+func _level_defaults() -> PawnDefaultsRes:
+	if _defaults_before == null or GameMode.pawn_initializer == null:
+		return null
+	return GameMode.pawn_initializer.defaults
+
+
+## Claude 2026-11-16: this game mode's default AI brain, for pawns without their own. The faction arena and mass battle change it.
+func _ai_brain() -> PackedScene:
+	return ARENA_BRAIN
+
+
+func _exit_tree() -> void:
+	# Claude 2026-11-16: the game's own pawn defaults back (see _use_level_defaults).
+	if _defaults_before and GameMode.pawn_initializer:
+		GameMode.pawn_initializer.defaults = _defaults_before
+
+
+## Claude 2026-11-16 (the owner's request): the start menu's match options. A "Match options" button under Join shows or hides a panel
+## (MatchOptionsPanel) of settings, each set on its object as it's changed, so they take effect when Offline or Host starts the
+## game. Three kinds of section:
+##   - this level's own, from _level_match_options() (each arena sample adds its own: team size, spawn distance and so on)
+##   - every GameMode module that names some (GameModeModule.get_match_options): nothing here names a module, so a game with
+##     different modules gets different options
+##   - every autoload that names some (the tick driver's load ladder, the network session's snapshots): Claude 2026-11-16, they name
+##     their own now (MatchOptionsPanel.add_from_autoloads), so this sample lists nobody's settings but its own
+## They're the host's settings: a client joining a game plays by the server's.
+func _build_match_options() -> void:
+	var box: VBoxContainer = $Display/Menu/Box
+	var toggle := Button.new()
+	toggle.text = "Match options"
+	toggle.toggle_mode = true
+	box.add_child(toggle)
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(420, 320)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.visible = false
+	box.add_child(scroll)
+	_options = MatchOptionsPanel.new()
+	_options.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_options)
+	_options.add_section("This level (host and offline)", self, _level_match_options())
+	_options.add_from_game_mode()
+	_options.add_from_autoloads()
+	toggle.toggled.connect(func(on: bool) -> void:
+		scroll.visible = on
+		if on:
+			_options.refresh())
+
+
+## Claude 2026-11-16: this level's settings for the start menu. None here; the arena samples that extend this add theirs.
+func _level_match_options() -> PackedStringArray:
+	return PackedStringArray()
+
+
+## Claude 2026-11-16 (the owner's request: the server tick rate in the HUD; then: hooked up to diagnostics): "server 60 ticks/s, running
+## 59.8, load 63%, step 1", from DiagnosticsManager.get_server_ticks(), which measures it for the session log and F4 too: offline and
+## hosting it's this machine's own tick, on a client the server's, from its snapshots. A sample may name DiagnosticsManager (samples,
+## like debug tools, aren't shipped); without that module, just the rate it's set to.
+func _server_tick_text() -> String:
+	var diagnostics := GameMode.get_module(DiagnosticsManager) as DiagnosticsManager
+	if diagnostics == null:
+		return "server %d ticks/s" % TickDriver.get_tick_rate()
+	return DiagnosticsManager.server_text(diagnostics.get_server_ticks(1.0))
+
+
+## Claude 2026-11-09: the key reminder in the status lines. Claude 2026-11-16: flying up and down is Space and Ctrl now.
 func _keys_text() -> String:
-	return "WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: refill the spawners    Tab: possess a goblin    U: let go and fly (Q/E up/down, wheel zoom, middle button unzoom, Shift+wheel speed)    F3: readouts and debug shapes    P: pause, then ←/→ step    K: respawn (if stuck)    Esc: free the mouse"
+	return "WASD, Shift sprint, Space jump, Alt dash, left mouse swing    R: refill the spawners    Tab: possess a goblin    U: let go and fly (Space/Ctrl up/down, wheel zoom, middle button unzoom, Shift+wheel speed)    F3: readouts and debug shapes    P: pause, then ←/→ step    K: respawn (if stuck)    Esc: free the mouse"
 
 
 func _read_command_line() -> void:

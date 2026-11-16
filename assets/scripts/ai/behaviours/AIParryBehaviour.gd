@@ -47,7 +47,7 @@ func enter(context: AIContextComponent) -> void:
 		return
 	hands.stop()
 	hands.look_at_point(context.incoming_attacker.global_position)
-	hands.press(&"parry")
+	hands.press(presses_action) # Claude 2026-11-16 (wider audit): the setting, where "parry" was written in here whatever it said
 
 
 func tick(context: AIContextComponent) -> Status:

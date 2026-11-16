@@ -5,14 +5,12 @@
 ## Claude 2026-11-16 (pawn spec 8.20): and now a combo counted by position, light and heavy mixed (_test_combo).
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/attack_request_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const PLAYER_SCENE := "res://assets/scenes/samples/faction_player.tscn"
 const ABILITY_PART := "res://assets/scenes/pawn/parts/AbilityManager.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
-
-var _failures := 0
 
 
 ## A test-only action: runs for a tenth of a second on ability_1, and counts its starts.
@@ -234,9 +232,3 @@ func _until(condition: Callable, max_ticks: int) -> void:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

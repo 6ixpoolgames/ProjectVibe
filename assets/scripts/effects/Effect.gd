@@ -140,7 +140,7 @@ static func make_damage(amount: float, damage_tags: Array[StringName] = [EffectT
 	effect.effect_name = &"damage"
 	effect.tags = damage_tags
 	var part := StatChangePart.new()
-	part.stat = &"Health"
+	part.stat = StatManager.HEALTH
 	part.amount = -absf(amount)
 	effect.parts = [part]
 	return effect

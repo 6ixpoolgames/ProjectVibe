@@ -78,7 +78,6 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 	_session = get_node_or_null("/root/NetworkSession")
 
 
-
 func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	game_mode.ai_activation_manager = null
 	for pawn: Node3D in _inactive.keys():
@@ -88,6 +87,11 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	for pawn: Node3D in _pawns: # Claude 2026-11-16: back to every tick
 		if is_instance_valid(pawn) and &"tick_step" in pawn:
 			pawn.tick_step = 1
+
+
+## Claude 2026-11-16: the settings a start menu may offer (GameModeModule.get_match_options).
+func get_match_options() -> PackedStringArray:
+	return PackedStringArray(["steps_by_distance", "full_rate_within_chunks", "every_4th_tick_beyond_chunks"])
 
 
 ## Starts watching an AI pawn. Adding the same one twice does nothing.
@@ -205,10 +209,7 @@ func step_for(pawn: Node3D) -> int:
 			step = 4
 		elif nearest >= full_rate_within_chunks * _chunk_size:
 			step = 2
-	var driver: Node = get_node_or_null(^"/root/TickDriver")
-	if driver:
-		step = maxi(step, driver.load_step)
-	return step
+	return maxi(step, TickDriver.load_step) # Claude 2026-11-16 (wider audit): the autoload, where it was looked up by path for every pawn
 
 
 # Claude 2026-11-16 (pawn spec 8.21): the viewers this frame: pawns a player has, and this machine's player's camera while it's in use.
@@ -219,11 +220,11 @@ func _find_viewers() -> void:
 		if is_instance_valid(terrain):
 			_chunk_size = terrain.chunk_size
 			break
-	for pawn: Node3D in _pawns:
-		if not is_instance_valid(pawn) or not pawn.is_inside_tree():
-			continue
-		var controllers: Node = pawn.get(&"controller_manager")
-		if controllers and controllers.has_player():
+	# Claude 2026-11-16 (wider audit): a pawn with a player is among the streaming sources (Pawn._update_source_group), so only those
+	# few are looked at. This went through every watched pawn every frame.
+	for node in get_tree().get_nodes_in_group(StreamingSource.GROUP):
+		var pawn := node as Pawn
+		if pawn and pawn.controller_manager and pawn.controller_manager.has_player():
 			_viewers.append(pawn.global_position)
 	var game_mode: Node = get_node_or_null(^"/root/GameMode")
 	var coordinator: PossessionCoordinator = game_mode.possession_coordinator if game_mode else null

@@ -4,7 +4,7 @@
 ## know, and old recordings being pruned.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/replay/tests/replay_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
@@ -26,7 +26,6 @@ class TestChannel extends ReplayChannel:
 		state["last"] = data.get_u32()
 
 
-var _failures := 0
 var _expected := {} # tick -> replay id -> [position, velocity, flags, move_input, held_actions]
 var _recorder: ReplayRecorder = null
 
@@ -41,6 +40,7 @@ func _ready() -> void:
 		return
 	_clear_folder()
 	_recorder.folder = FOLDER
+	_recorder.headless_runs_apart = false # Claude 2026-11-16: this test checks the folder rules themselves, and always runs headless
 	_recorder.keep_recordings = 3
 	_recorder.block_seconds = 0.5 # 30 ticks a block, so the run spans several
 	_recorder.add_channel(TestChannel.new())
@@ -123,6 +123,10 @@ func _scene_and_run() -> void:
 	var arriving_id := _recorder.get_replay_id(arriving)
 	TickDriver.after_tick.disconnect(_capture)
 	_check(bytes_after_one_second > 200, "blocks are written while recording, on the writer's thread (%d bytes after 1.5 s)" % bytes_after_one_second)
+	# Claude 2026-11-16 (wider audit): a tick that isn't after the last one recorded (a client's clock jumping back) is left out.
+	var before_repeat := _recorder.get_ticks_recorded()
+	_recorder._record_tick(TickDriver.tick - 3)
+	_check(_recorder.get_ticks_recorded() == before_repeat, "a tick that isn't after the last one recorded is left out, so the file's ticks only go up")
 	var ticks := _recorder.get_ticks_recorded()
 	_recorder.stop_recording()
 	_check(not _recorder.is_recording(), "it stops")
@@ -371,9 +375,3 @@ func _ticks(count: int) -> void:
 func _finish() -> void:
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

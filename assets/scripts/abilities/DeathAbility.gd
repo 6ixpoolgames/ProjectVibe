@@ -15,8 +15,8 @@
 class_name DeathAbility
 extends AbilityBase
 
-## The stat that, at 0, keeps the pawn dead.
-@export var health_stat: StringName = &"Health"
+# Claude 2026-11-17 (the owner's call): health_stat is gone. Death watches the one Health stat (StatManager.HEALTH), the same one hits
+# and the EffectManager's death check read; a setting here would only have let the two disagree.
 
 
 func _init() -> void:
@@ -47,7 +47,17 @@ func duration_ticks() -> int:
 	return 1
 
 
-func tick(_dt: float) -> void:
+# Claude 2026-11-16 (wider audit): a corpse lying still may sleep: Death only waits for Health to come back. The moment it does
+# (revive), this answers false, the pawn wakes on its next tick, and Death ends as before.
+func can_sleep_while_running() -> bool:
+	return _health_is_gone()
+
+
+func _health_is_gone() -> bool:
 	var stats := pawn.stat_manager if pawn else null
-	if stats == null or stats.get_current(health_stat, 0.0) <= 0.0:
+	return stats == null or stats.get_health() <= 0.0
+
+
+func tick(_dt: float) -> void:
+	if _health_is_gone():
 		ticks_left += ticks_elapsed() # the manager takes as many away after this, so it stays running (Claude 2026-11-16: was 1)

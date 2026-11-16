@@ -2,9 +2,9 @@
 ## The client sends pings; each pong says which tick the server was on. A ping that came back quickly spent little time
 ## waiting in queues, so the estimate uses the fastest recent one, while the round trip uses the average of them all.
 ##
-## Stage v0, fixed lead: a client runs ahead of the server by half the round trip plus a safety margin, set when it
-## starts ticking. It's only set again if the client has drifted well away, after a hitch say. Stage v1 will use these
-## numbers to nudge TickDriver.tick_factor gently instead of jumping.
+## A client runs ahead of the server by half the round trip plus a safety margin, set when it starts ticking, and set again only if
+## it drifts well away (a hitch, say). Day to day it's kept right by time dilation, which nudges TickDriver.tick_factor from the
+## margins the server reports (NetworkSession._update_dilation). Claude 2026-11-17: this said that was still to come.
 class_name NetClock
 extends RefCounted
 

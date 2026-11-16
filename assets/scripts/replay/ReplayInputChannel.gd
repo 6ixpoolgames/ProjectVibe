@@ -18,10 +18,15 @@ func _init() -> void:
 
 
 # Claude 2026-11-16 (pawn M4): the input is the ControllerManager's now; a pawn without one records nothing pressed.
+# Claude 2026-11-16 (wider audit): compared value by value. It built the five-value list to compare, again to keep, and a third time to
+# write, for every pawn every tick.
 func same_as_last(pawn: Pawn, last: Variant) -> bool:
 	if last == null:
 		return false
-	return last == remember(pawn)
+	var c := pawn.controller_manager
+	if c == null:
+		return last[0] == Vector3.ZERO and last[1] == pawn.yaw and last[2] == 0.0 and last[3] == 0 and last[4] == 0.0
+	return last[0] == c.move_input and last[1] == c.look_yaw and last[2] == c.look_pitch and last[3] == c.held_actions and last[4] == c.view_ticks_behind
 
 
 func remember(pawn: Pawn) -> Variant:
@@ -32,14 +37,16 @@ func remember(pawn: Pawn) -> Variant:
 
 
 func write_record(pawn: Pawn, out: StreamPeerBuffer) -> void:
-	var values: Array = remember(pawn)
-	out.put_half(values[0].x)
-	out.put_half(values[0].y)
-	out.put_half(values[0].z)
-	out.put_half(wrapf(values[1], -PI, PI))
-	out.put_half(values[2])
-	out.put_u64(values[3])
-	out.put_half(values[4])
+	# Claude 2026-11-16 (wider audit): written straight from the controller manager, without building remember()'s list again.
+	var c := pawn.controller_manager
+	var move: Vector3 = c.move_input if c else Vector3.ZERO
+	out.put_half(move.x)
+	out.put_half(move.y)
+	out.put_half(move.z)
+	out.put_half(wrapf(c.look_yaw if c else pawn.yaw, -PI, PI))
+	out.put_half(c.look_pitch if c else 0.0)
+	out.put_u64(c.held_actions if c else 0)
+	out.put_half(c.view_ticks_behind if c else 0.0)
 
 
 func read_record(data: StreamPeerBuffer) -> Variant:

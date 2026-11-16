@@ -453,7 +453,7 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 		return
 	# Claude 2026-11-06: a half-built chunk would finish with a mesh made from the heights before this edit, so finish
 	# them first. It costs a stutter only if an edit lands while a chunk is loading.
-	_finish_building_chunks() # Claude 2026-11-07: moved into a helper, which the client's path uses too
+	finish_building_chunks() # Claude 2026-11-07: moved into a helper, which the client's path uses too
 	var local_center := center - _terrain_origin()
 	# Claude 2026-11-07: rounded to 32 bits first, the same as what the log stores, so that every machine gets identical ground.
 	var rounded := PackedFloat32Array([local_center.x, local_center.z, radius, amount])
@@ -463,17 +463,19 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 
 
 ## An edit from the server has reached this client, and the log has it already.
-# Claude 2026-11-07, from the audit of 6df1464: the caller now finishes half-built chunks with _finish_building_chunks() BEFORE it
+# Claude 2026-11-07, from the audit of 6df1464: the caller now finishes half-built chunks with finish_building_chunks() BEFORE it
 # records the edit. Finishing them here, after recording, made them read the new edit from the log and then get it again below:
 # the ground ended up raised twice.
-func _apply_edit_from_log(x: float, z: float, radius: float, amount: float) -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _apply_edit_from_log.
+func apply_edit_from_log(x: float, z: float, radius: float, amount: float) -> void:
 	_apply_edit_to_loaded_chunks(x, z, radius, amount)
 
 
 ## Claude 2026-11-07: finishes every half-built chunk right now. Called before an edit goes into the log, so that no chunk is
 ## caught halfway: it either finished before the edit was recorded, and gets the edit from the loaded-chunk pass, or it starts
 ## later and reads the edit from the log. Never both.
-func _finish_building_chunks() -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _finish_building_chunks.
+func finish_building_chunks() -> void:
 	for key: Vector2i in _building.keys():
 		load_chunk(key)
 
@@ -578,11 +580,13 @@ func _make_chunk_markers(_key: Vector2i) -> Array[NavMarker]:
 # module isn't there.
 
 
-func _edit_log_arrived(log_module: TerrainEditLog) -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _edit_log_arrived.
+func edit_log_arrived(log_module: TerrainEditLog) -> void:
 	_edit_log = log_module
 
 
-func _edit_log_left(log_module: TerrainEditLog) -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _edit_log_left.
+func edit_log_left(log_module: TerrainEditLog) -> void:
 	if _edit_log == log_module:
 		_edit_log = null
 		# Deferred, so that this can tell the module being deleted apart from the whole terrain leaving the scene.
@@ -593,12 +597,13 @@ func _edit_log_left(log_module: TerrainEditLog) -> void:
 func _return_to_default_ground() -> void:
 	if _edit_log != null or not is_inside_tree():
 		return
-	_rebuild_chunks_for_log(_edited_chunks.keys())
+	rebuild_chunks_for_log(_edited_chunks.keys())
 	_edited_chunks.clear()
 
 
 ## Queues the built ones among these chunks to be rebuilt from scratch, with whatever the log now says.
-func _rebuild_chunks_for_log(chunks: Array) -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _rebuild_chunks_for_log.
+func rebuild_chunks_for_log(chunks: Array) -> void:
 	for key: Vector2i in _building.keys():
 		load_chunk(key) # so a half-built chunk can't finish with what it read before
 	for key: Vector2i in chunks:

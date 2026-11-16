@@ -4,15 +4,13 @@
 ## Claude 2026-11-08: NavigationManager added, second in the list.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/game_mode/tests/pawn_initializer_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const STATS_PART := "res://assets/scenes/pawn/parts/StatManager.tscn"
 # Claude 2026-11-09: the AI parts joined the defaults (pawn spec steps 8a and 8b).
 # Claude 2026-11-10: EffectManager is a default part now (pawn spec 8.11).
 const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"EffectManager", &"AbilityManager", &"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -146,9 +144,3 @@ func _test_without_the_module() -> void:
 	pawn.free()
 	GameMode.add_module(PawnInitializer.new())
 	_check(GameMode.pawn_initializer != null and GameMode.pawn_initializer.defaults != null, "adding it back reads the defaults again")
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

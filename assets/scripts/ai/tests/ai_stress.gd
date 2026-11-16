@@ -199,10 +199,10 @@ func _measure(count: int, with_ai: bool) -> float:
 			pawn.skip_default_parts = AI_PARTS.duplicate()
 		add_child(pawn)
 		if with_ai and _no_sensing:
-			pawn.ai_sensing_manager.sense_interval_ticks = 100000000
-			pawn.ai_sensing_manager.refresh_interval_ticks = 100000000
+			pawn.ai_context.sensing_manager.sense_interval_ticks = 100000000
+			pawn.ai_context.sensing_manager.refresh_interval_ticks = 100000000
 		elif with_ai and _no_refresh:
-			pawn.ai_sensing_manager.refresh_interval_ticks = 100000000
+			pawn.ai_context.sensing_manager.refresh_interval_ticks = 100000000
 		pawns.append(pawn)
 	for i in WARM_UP_TICKS:
 		await get_tree().physics_frame

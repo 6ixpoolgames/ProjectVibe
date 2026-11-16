@@ -65,7 +65,7 @@ func _check_pawns(tick: int) -> void:
 		return
 	var height := global_position.y
 	var seen := {} # Claude 2026-11-12: the next _last_on_ground
-	for node in get_tree().get_nodes_in_group(TerrainBodyLifter.GROUP): # every pawn joins this group when it enters the tree
+	for node in get_tree().get_nodes_in_group(Pawn.GROUP): # Claude 2026-11-16 (wider audit): the list of all pawns
 		var pawn := node as Pawn
 		if pawn == null or not pawn.is_authority() or pawn.is_dead():
 			continue
@@ -91,7 +91,7 @@ func kill(pawn: Pawn) -> bool:
 	if kill_effect == null:
 		_warn_once("no effect", "KillFloor %s has no kill_effect, so pawns that fall below it carry on falling." % name)
 		return false
-	if pawn.effect_manager == null or pawn.stat_manager == null or not pawn.stat_manager.has_stat(&"Health"):
+	if pawn.effect_manager == null or pawn.stat_manager == null or not pawn.stat_manager.has_stat(StatManager.HEALTH):
 		_warn_once(String(pawn.name), "KillFloor: %s fell below it but has no Health or no EffectManager, so it can't die there." % pawn.name)
 		return false
 	pawn.effect_manager.apply_effect(kill_effect, null)

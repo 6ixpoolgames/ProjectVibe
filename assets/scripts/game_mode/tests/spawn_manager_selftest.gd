@@ -7,12 +7,11 @@
 ##     removed some other way as a death, and refill_now skips the wait
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/game_mode/tests/spawn_manager_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := preload("res://assets/scenes/pawn/pawn.tscn")
 const GOBLIN_SCENE := preload("res://assets/scenes/samples/arena_goblin.tscn") # team 1
 
-var _failures := 0
 var _manager: SpawnManager = null
 
 
@@ -98,7 +97,7 @@ func _test_player_respawn() -> void:
 	_check(pawn.is_dead(), "and stays dead until its respawn time")
 	await _until(func() -> bool: return not pawn.is_dead(), 40)
 	await _ticks(2)
-	_check(not pawn.is_dead() and pawn.get_health() == 100.0, "then comes back, with full Health")
+	_check(not pawn.is_dead() and pawn.stat_manager.get_health() == 100.0, "then comes back, with full Health")
 	_check(Vector2(pawn.global_position.x, pawn.global_position.z).length() < 0.5, "at PlayerStart, not where it fell")
 	_check(GameMode.possession_coordinator.get_pawn_of() == pawn, "and still possessed by its player")
 	GameMode.possession_coordinator.release()
@@ -223,9 +222,3 @@ func _until(condition: Callable, max_ticks: int) -> void:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

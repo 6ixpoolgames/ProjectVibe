@@ -32,5 +32,5 @@ func planned_damage() -> float:
 	var total := 0.0
 	for effect in effects:
 		if effect:
-			total -= effect.planned_change(&"Health")
+			total -= effect.planned_change(StatManager.HEALTH)
 	return maxf(total, 0.0)

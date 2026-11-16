@@ -17,7 +17,8 @@
 ##   # on the server, whenever the game wants something to exist. Claude 2026-11-07: a player joining spawns nothing by itself.
 ##   NetworkSession.spawn("pawn", peer_id, Vector3(0, 1, 0))
 ##
-## Snapshots are still full, of everything to everyone; delta compression is a later stage.
+## Snapshots carry each entity's changes since the last snapshot of it the client acknowledged (delta snapshots, netcode spec 11.4.1),
+## cut into parts under ENet's packet size. Claude 2026-11-17: this line said snapshots were still full.
 ##
 ## Time dilation (netcode spec section 4.2, Claude 2026-11-04): the server reports how early each client's inputs have been
 ## arriving. A client cutting it too fine speeds up at once, going by the last half second. It only slows down again if the
@@ -54,6 +55,11 @@ signal player_left(peer: int)
 signal entity_spawned(entity: NetworkEntity)
 signal entity_despawned(entity_id: int)
 signal entity_owner_changed(entity: NetworkEntity) # Claude 2026-11-07: on every machine
+## Claude 2026-11-16 (profiling the networked mass battle): a connection ended, and why, for diagnostics. On a client, peer is 1 (the
+## server), sent just before disconnected. On a server, once for each client that goes, and once with peer 0 when the server itself
+## stops. reason is plain text. details has "seconds_connected", "seconds_since_heard" (since the last packet from that peer), and
+## "rtt_ms" and "loss_percent" (the connection's last round trip and packet loss as ENet measured them, -1 if never measured).
+signal connection_ended(peer: int, reason: String, details: Dictionary)
 
 enum Mode { OFFLINE, SERVER, CLIENT }
 
@@ -114,6 +120,10 @@ const MARGIN_LONG_WINDOW := 300
 @export var time_dilation_enabled: bool = true
 ## More jitter draws remote entities further in the past. Off: always interpolation_seconds.
 @export var adaptive_interpolation_enabled: bool = true
+## Claude 2026-11-16 (profiling the networked mass battle; networking T1.3, netcode v1): snapshots send each entity's changes since
+## its baseline for that client: the newest snapshot whose part holding it the client acknowledged reading (per-part ACKs), instead
+## of everything. Off: every entity in full, as before, to compare.
+@export var delta_snapshots_enabled: bool = true
 @export_group("")
 ## How far back lag compensation may go. At 200 ms ping a shooter sees others about 350 ms behind its own tick (round trip,
 ## margin and interpolation), so this covers that and not much more. Past it, players have to lead their shots.
@@ -148,25 +158,98 @@ var max_packet_bytes: int = 64 * 1024
 ## bytes, reliable), hold_incoming(peer, bytes), release_due(now_usec) and clear().
 var packet_filter: Object = null
 ## Bytes and packets sent and received, for diagnostics.
+## Claude 2026-11-16 (profiling; tidied in the audit): also, on a server, snapshots_sent and snapshot_bytes (one per client per snapshot,
+## and the bytes those carried), so their ratio is a client's average snapshot; on a client, snapshot_bytes_received with
+## snapshots_received; snapshot_parts_received and deltas_without_baseline; and the biggest packet each way since the start.
 var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_received": 0, "snapshots_received": 0,
 		"corrections": 0, "correction_total": 0.0, "correction_worst": 0.0, "jump_total": 0.0, "jump_worst": 0.0, "resyncs": 0,
 		"bad_packets": 0, "packets_over_limit": 0, "rejected_inputs": 0, "snapshots_encoded": 0, "schema_mismatches": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
-		"margin_lowest": NO_MARGIN, "speed_lowest": 1.0, "speed_highest": 1.0}
+		"margin_lowest": NO_MARGIN, "speed_lowest": 1.0, "speed_highest": 1.0, "snapshots_sent": 0, "snapshot_bytes": 0, "snapshot_bytes_received": 0,
+		"snapshot_parts_received": 0, "deltas_without_baseline": 0, "largest_packet_sent": 0, "largest_packet_received": 0}
+## Claude 2026-11-16 (audit, the owner's call: no hard-coded names in diagnostics): the stats that only ever count up, which diagnostics
+## turns into rates and averages per frame. Renaming one here renames it there.
+const COUNTING_STATS: Array[String] = ["bytes_sent", "bytes_received", "snapshots_encoded", "snapshots_sent", "snapshot_bytes", "snapshots_received",
+	"snapshot_bytes_received", "corrections", "resyncs", "interpolation_underruns"]
 ## Client: which tick of the server's remote entities are being drawn at. -1 before the first snapshot.
 var render_tick: float = -1.0
+## Claude 2026-11-16 (the owner's request: the server's tick rate in diagnostics, for profiling different hardware): client: how
+## loaded the server's ticks are, as a percentage of their budget (TickDriver.load_average), and its load ladder's step, from the
+## newest snapshot. -1 before the first.
+var server_load_percent: int = -1
+var server_load_step: int = -1
 
 const HANDSHAKE_TIMEOUT := 5.0
 const SAMPLES_BEFORE_TICKING := 6
 const PING_INTERVAL_STARTING := 0.05
 const PING_INTERVAL := 0.25
-## Most packets kept from one peer between ticks, so one client can't crowd out others. A client sends one per pawn per tick, and
-## they pile up while the server is frozen, so this has room for 4 pawns through a freeze of half a second.
 ## Claude 2026-11-05: the project setting that names a build. See content_hash.
 const BUILD_ID_SETTING := "project_base/network/build_id"
 const HASHED_FILE_TYPES: PackedStringArray = ["gd", "gdc", "tscn", "scn", "tres", "res"]
+## Most packets the server keeps from one client between ticks, so one client can't crowd out others. A client sends one per pawn per
+## tick, and they pile up while the server is frozen, so this has room for 4 pawns through a freeze of half a second. (Claude
+## 2026-11-17: moved under its own comment; a client doesn't cap what its server sends, see _on_packet.)
 const MAX_INBOX_PER_PEER := 128
 ## Most inputs one packet may carry. Fixed, because input_redundancy is a setting each machine has its own copy of.
 const MAX_INPUTS_PER_PACKET := 16
+## Claude 2026-11-16 (profiling the networked mass battle): snapshots are split into parts of at most this many bytes of entities,
+## each its own packet, so none goes over ENet's packet size (1392 bytes; Godot warned at 45 KB) and the loss of one piece doesn't
+## lose the whole snapshot.
+const SNAPSHOT_PART_BYTES := 1100
+## Claude 2026-11-16 (delta snapshots): an entity's id with this bit set means its state list is a delta: [ticks back to the baseline,
+## the change masks, the changed values]. Ids never get this high.
+const DELTA_ID_BIT := 1 << 31
+## Claude 2026-11-16 (delta snapshots): how many state entries each change mask covers. 30 keeps a mask an int of at most 5 bytes,
+## and 1 or 2 when only the first few entries changed.
+const DELTA_MASK_BITS := 30
+## Claude 2026-11-16 (delta snapshots): the oldest baseline a delta may use, in ticks. Both sides keep 64 ticks, so this leaves room.
+## A client that hasn't acknowledged anything this recent gets everything in full.
+const DELTA_MAX_BASELINE_AGE := 48
+## Claude 2026-11-16 (delta snapshots): how many ticks of received state a client keeps per entity, for decoding deltas.
+const BASELINE_RING := 64
+## Claude 2026-11-16 (wider audit): the debugger graphs' script, loaded only if it's there (see _ready).
+const NET_MONITORS_SCRIPT := "res://assets/scripts/netcode/debug/NetMonitors.gd"
+## Claude 2026-11-16 (audit double-check): the most ticks one ACK packet may name. A client sends at most this many, and the server
+## refuses a packet claiming more, so one packet can't make it walk through a long made-up list.
+const MAX_ACK_ENTRIES := 8
+
+# Claude 2026-11-16 (audit): small records with named fields, instead of lists read by position.
+## Claude 2026-11-16 (wider audit): what the server keeps about one connected client. It was a Dictionary whose keys appeared as they
+## were first needed, so code guarded every read, and tests built their own with whichever keys they remembered.
+class PeerRecord:
+	var welcomed := false             # passed the handshake
+	var connected_at := 0             # Time.get_ticks_usec() when it connected, for the handshake's time limit
+	var margins: Array = []           # how early its recent inputs arrived, in ticks, for time dilation
+	var newest_input := -1            # the newest tick it has sent input for
+	var acknowledged_snapshot := -1   # the newest snapshot tick it says it read, for lag compensation
+	var baselines: Dictionary = {}    # entity id -> the tick it last acknowledged that entity at (delta snapshots)
+	var sent_parts: Dictionary = {}   # tick -> each part's entity ids, for the snapshots it may still acknowledge
+	var limit_second := -1            # the second its packet counts below are for
+	var limit_packets := 0
+	var limit_bytes := 0
+
+
+## Claude 2026-11-16 (wider audit): a new client's record. Tests make theirs with this too.
+func _new_peer(welcomed: bool) -> PeerRecord:
+	var record := PeerRecord.new()
+	record.welcomed = welcomed
+	record.connected_at = Time.get_ticks_usec()
+	return record
+
+## One part of a snapshot on its way to a client: its encoded entities and their ids, so the client's ACK can say which arrived.
+class SnapshotPart:
+	var bytes := PackedByteArray()
+	var ids := PackedInt32Array()
+
+## Client: the parts of one snapshot read since the last ACK: how many parts it has, and a bit for each read.
+class PartsRead:
+	var part_count := 0
+	var bits := PackedByteArray()
+
+## Client: what the server sent for one entity over the last BASELINE_RING ticks: the tick in each slot and its state list.
+class BaselineRing:
+	var ticks := PackedInt64Array()
+	var lists: Array = []
+
 
 var _mode: Mode = Mode.OFFLINE
 var _driver: Node = null
@@ -190,6 +273,16 @@ var _clock := NetClock.new()
 var _clock_ready := false
 var _next_ping_usec := 0
 var _newest_snapshot_tick := -1
+# Claude 2026-11-16 (delta snapshots): client: which parts of the newest snapshot have come (part -> true), so a duplicate is read once.
+var _parts_got: Dictionary = {}
+# Claude 2026-11-16 (per-part acknowledgements): client: the parts read since the last ACK went, tick -> PartsRead, sent at the end
+# of the tick; and the newest tick with any part read, which input packets carry for lag
+# compensation. Was one acknowledgement for a whole snapshot, which at 300 pawns almost never arrived whole (netcode spec 11.4.1).
+var _acks_to_send: Dictionary = {}
+var _newest_read_tick := -1
+# Claude 2026-11-16 (delta snapshots): client: entity id -> BaselineRing (BASELINE_RING slots of ticks and state lists),
+# what the server sent for it, to decode deltas against. Separate from the TickStateComponent's history, which a respawn clears.
+var _baselines: Dictionary = {}
 var _reconcile_values: Dictionary = {} # entity id -> {"state": Dictionary, "input": Dictionary} for the newest snapshot
 var _reconcile_tick := -1
 var _input_margin := NO_MARGIN         # client: the worst margin the server last reported
@@ -198,6 +291,14 @@ var _last_feedback_usec := 0
 var _last_snapshot_usec := 0
 var _last_snapshot_tick := -1
 var _snapshot_jitter_usec := 0.0
+# Claude 2026-11-16 (profiling): each connection's last known numbers, peer -> {"connected_usec", "heard_usec", "rtt_ms",
+# "loss_percent", "reason"}, kept so they can still be reported once the connection has gone. On a client the one link is peer 1.
+var _links: Dictionary = {}
+var _next_link_check_usec := 0
+# Claude 2026-11-16 (profiling): why this game is about to call leave(), when it knows; leave() reports it and clears it.
+var _ending_reason := ""
+## Claude 2026-11-16 (profiling): how often each connection's round trip and packet loss are read from ENet, in microseconds.
+const LINK_CHECK_INTERVAL_USEC := 500000
 
 
 func _ready() -> void:
@@ -219,8 +320,10 @@ func _ready() -> void:
 	(multiplayer as SceneMultiplayer).server_relay = false
 	# Claude 2026-11-10: the netcode's graphs in the editor's Debugger > Monitors, only while that debugger is attached (a game run from
 	# the editor), so an exported game or a headless test never has them. See netcode/debug/NetMonitors.gd.
-	if EngineDebugger.is_active():
-		NetMonitors.on.call_deferred(self)
+	# Claude 2026-11-16 (wider audit): found by its file, not its class name, so a game exported without the netcode/debug/ folder
+	# still loads this script. GDScript note: call_deferred on a script runs one of its static functions after this frame's setup.
+	if EngineDebugger.is_active() and ResourceLoader.exists(NET_MONITORS_SCRIPT):
+		(load(NET_MONITORS_SCRIPT) as GDScript).call_deferred(&"on", self)
 
 
 func _process(_delta: float) -> void:
@@ -241,9 +344,10 @@ func _pump() -> void:
 		_ping_if_due()
 		# No news for a while, in a dropout say: don't keep correcting on an old answer.
 		if _clock_ready and now - _last_feedback_usec > 500000:
-			_set_tick_factor(1.0)
+			set_tick_factor(1.0)
 	if _mode == Mode.SERVER:
 		_drop_silent_peers()
+	_check_links(now) # Claude 2026-11-16 (profiling)
 
 
 # --- Connecting --------------------------------------------------------------------------------
@@ -293,6 +397,7 @@ func join(address: String, port: int) -> Error:
 		return error
 	multiplayer.multiplayer_peer = peer
 	_mode = Mode.CLIENT
+	_links[1] = _new_link() # Claude 2026-11-16 (profiling): the server's connection, from the moment of trying
 	_driver.active = false # nothing ticks until the clock is set
 	return OK
 
@@ -300,6 +405,16 @@ func join(address: String, port: int) -> Error:
 ## Ends the session and removes everything it spawned. Safe to call at any time.
 func leave() -> void:
 	var was_online := _mode != Mode.OFFLINE
+	# Claude 2026-11-16 (profiling): say why it ended, while the connection's numbers are still here. A client reports its link to the
+	# server; a server reports that it stopped, as peer 0. With no reason given, this game chose to leave.
+	if was_online:
+		var reason := _ending_reason if _ending_reason != "" else "this game left the session"
+		if _mode == Mode.CLIENT:
+			connection_ended.emit(1, reason, _link_details(1))
+		else:
+			connection_ended.emit(0, reason, {})
+	_ending_reason = ""
+	_links.clear()
 	for entity_id: int in _entities.keys():
 		_remove_entity(entity_id)
 	_entities.clear()
@@ -314,6 +429,12 @@ func leave() -> void:
 	_clock.reset()
 	_clock_ready = false
 	_newest_snapshot_tick = -1
+	server_load_percent = -1
+	server_load_step = -1
+	_parts_got.clear()
+	_acks_to_send.clear() # Claude 2026-11-16 (per-part acknowledgements)
+	_newest_read_tick = -1
+	_baselines.clear()
 	render_tick = -1.0
 	_next_entity_id = 1
 	if packet_filter:
@@ -342,6 +463,18 @@ func get_mode() -> Mode:
 
 func is_server() -> bool:
 	return _mode == Mode.SERVER
+
+
+## Claude 2026-11-16: the settings a start menu may offer before a match (MatchOptionsPanel.add_from_autoloads): the snapshots. The
+## host's decide for everyone.
+func get_match_options() -> PackedStringArray:
+	return PackedStringArray(["snapshot_rate", "delta_snapshots_enabled"])
+
+
+## Claude 2026-11-16: client: the tick of the newest snapshot that has arrived, -1 before any. How fast it climbs is how fast the server
+## is really ticking, which the samples' status line shows.
+func get_newest_snapshot_tick() -> int:
+	return _newest_snapshot_tick
 
 
 func is_client() -> bool:
@@ -400,7 +533,7 @@ func get_missed_inputs() -> int:
 func limit_view_ticks_behind(peer: int, claimed: float, tick: int) -> float:
 	if not _peers.has(peer):
 		return claimed
-	var acknowledged: int = _peers[peer].get("acknowledged_snapshot", -1)
+	var acknowledged: int = _peers[peer].acknowledged_snapshot
 	var age: int = tick - acknowledged
 	if acknowledged < 0 or age > rewind_cap_seconds * _driver.get_tick_rate():
 		return 0.0
@@ -427,7 +560,8 @@ func content_hash() -> int:
 	# even when a build id replaces the file part below.
 	parts.append(",".join(InputActions.get_actions()))
 	parts.append(String(Engine.get_version_info()["hash"]))
-	parts.append(str(_driver.get_tick_rate() if _driver else 0))
+	# Claude 2026-11-16 (wider audit): the tick rate is no longer part of this. The server chooses it for the match and hands it over
+	# in WELCOME, but the hash is checked before that, so a client started at the default rate was refused by a 30-tick server.
 	var setting_names: Array[String] = []
 	for property: Dictionary in ProjectSettings.get_property_list():
 		if String(property["name"]).begins_with("physics/"):
@@ -485,7 +619,7 @@ func spawn(type_name: String, owner_peer: int, at: Variant) -> Node:
 	if entity and entity.is_replicated and _mode == Mode.SERVER:
 		var bytes := _spawn_packet(entity)
 		for peer: int in _peers:
-			if _peers[peer]["welcomed"]:
+			if _peers[peer].welcomed:
 				_send(peer, bytes, true)
 	return entity.get_parent() if entity else null
 
@@ -501,7 +635,7 @@ func despawn(entity_id: int) -> void:
 		buffer.put_u8(NetPackets.Type.DESPAWN)
 		buffer.put_u32(entity_id)
 		for peer: int in _peers:
-			if _peers[peer]["welcomed"]:
+			if _peers[peer].welcomed:
 				_send(peer, buffer.data_array, true)
 
 
@@ -518,7 +652,7 @@ func set_entity_owner(entity_id: int, new_owner: int) -> void:
 		buffer.put_u32(entity_id)
 		buffer.put_u32(new_owner)
 		for peer: int in _peers:
-			if _peers[peer]["welcomed"]:
+			if _peers[peer].welcomed:
 				_send(peer, buffer.data_array, true)
 
 
@@ -598,7 +732,8 @@ func _role_for(entity: NetworkEntity, local: bool) -> NetworkEntity.Role:
 
 
 ## A switch changed: every entity works out its role again.
-func _refresh_entities() -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (NetDebugModule calls it after a feature switch); it was _refresh_entities.
+func refresh_entities() -> void:
 	for entity: NetworkEntity in get_entities():
 		entity.set_role(_role_for(entity, entity.is_local))
 		entity.refresh_input_saving() # Claude 2026-11-05: a server's role doesn't change with default_predicted, but this does
@@ -608,6 +743,9 @@ func _refresh_entities() -> void:
 
 func _forget_entity(entity_id: int) -> void:
 	_entities.erase(entity_id)
+	_baselines.erase(entity_id) # Claude 2026-11-16 (delta snapshots)
+	for info: PeerRecord in _peers.values(): # Claude 2026-11-16 (per-part acknowledgements): server: and each client's baseline for it
+		info.baselines.erase(entity_id) # Claude 2026-11-16 (wider audit): a PeerRecord always has its baselines
 	_entity_list_dirty = true
 
 
@@ -637,11 +775,13 @@ func _spawn_packet(entity: NetworkEntity) -> PackedByteArray:
 func _send(peer: int, bytes: PackedByteArray, reliable: bool) -> void:
 	stats["bytes_sent"] += bytes.size()
 	stats["packets_sent"] += 1
+	stats["largest_packet_sent"] = maxi(stats["largest_packet_sent"], bytes.size()) # Claude 2026-11-16 (profiling)
 	if packet_filter == null or not packet_filter.hold_outgoing(peer, bytes, reliable):
-		_send_now(peer, bytes, reliable)
+		send_now(peer, bytes, reliable)
 
 
-func _send_now(peer: int, bytes: PackedByteArray, reliable: bool) -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (NetDebugModule hands it to the fake network); it was _send_now.
+func send_now(peer: int, bytes: PackedByteArray, reliable: bool) -> void:
 	if not is_connected_to_session():
 		return
 	if _mode == Mode.SERVER and not multiplayer.get_peers().has(peer):
@@ -655,6 +795,11 @@ func _send_now(peer: int, bytes: PackedByteArray, reliable: bool) -> void:
 func _on_packet(peer: int, bytes: PackedByteArray) -> void:
 	stats["bytes_received"] += bytes.size()
 	stats["packets_received"] += 1
+	# Claude 2026-11-16 (profiling): the biggest packet so far, and when this peer was last heard from (before any limit drops it:
+	# a peer over the limit is still talking).
+	stats["largest_packet_received"] = maxi(stats["largest_packet_received"], bytes.size())
+	if _links.has(peer):
+		_links[peer]["heard_usec"] = Time.get_ticks_usec()
 	if bytes.is_empty():
 		stats["bad_packets"] += 1
 		return
@@ -663,7 +808,7 @@ func _on_packet(peer: int, bytes: PackedByteArray) -> void:
 		stats["packets_over_limit"] += 1
 		return
 	if packet_filter == null or not packet_filter.hold_incoming(peer, bytes):
-		_handle_packet(peer, bytes, true)
+		handle_packet(peer, bytes, true)
 
 
 ## Claude 2026-11-05: server: may this client send this packet now? Until it has passed the handshake, it may only send the
@@ -671,25 +816,26 @@ func _on_packet(peer: int, bytes: PackedByteArray) -> void:
 func _within_limits(peer: int, bytes: PackedByteArray) -> bool:
 	if not _peers.has(peer):
 		return false
-	var info: Dictionary = _peers[peer]
-	if not info["welcomed"] and int(bytes[0]) != NetPackets.Type.HELLO:
+	var info: PeerRecord = _peers[peer]
+	if not info.welcomed and int(bytes[0]) != NetPackets.Type.HELLO:
 		return false
 	if max_packet_bytes > 0 and bytes.size() > max_packet_bytes:
 		return false
 	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
 	var second := Time.get_ticks_msec() / 1000
-	if int(info.get("limit_second", -1)) != second:
-		info["limit_second"] = second
-		info["limit_packets"] = 0
-		info["limit_bytes"] = 0
-	info["limit_packets"] += 1
-	info["limit_bytes"] += bytes.size()
-	if max_packets_per_second > 0 and int(info["limit_packets"]) > max_packets_per_second:
+	if int(info.limit_second) != second:
+		info.limit_second = second
+		info.limit_packets = 0
+		info.limit_bytes = 0
+	info.limit_packets += 1
+	info.limit_bytes += bytes.size()
+	if max_packets_per_second > 0 and int(info.limit_packets) > max_packets_per_second:
 		return false
-	return max_bytes_per_second <= 0 or int(info["limit_bytes"]) <= max_bytes_per_second
+	return max_bytes_per_second <= 0 or int(info.limit_bytes) <= max_bytes_per_second
 
 
-func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (NetDebugModule hands it to the fake network); it was _handle_packet.
+func handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 	match int(bytes[0]):
 		NetPackets.Type.HELLO:
 			_on_hello(peer, bytes)
@@ -711,11 +857,15 @@ func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 			_on_owner_changed(peer, bytes)
 		NetPackets.Type.CLIENT_MESSAGE:
 			_on_client_message(peer, bytes)
+		NetPackets.Type.ACK: # Claude 2026-11-16
+			_on_ack(peer, bytes)
 		NetPackets.Type.INPUT, NetPackets.Type.SNAPSHOT:
 			var from_peer: int = _inbox_counts.get(peer, 0)
 			if not _driver.active:
 				pass
-			elif from_peer >= MAX_INBOX_PER_PEER:
+			# Claude 2026-11-16 (wider audit): the cap is the server's guard against a client flooding it. A client doesn't cap what
+			# its server sends: a large snapshot is many parts, and two arriving in one frame went over the cap and lost the newest.
+			elif _mode == Mode.SERVER and from_peer >= MAX_INBOX_PER_PEER:
 				stats["bad_packets"] += 1
 			else:
 				_inbox_counts[peer] = from_peer + 1
@@ -728,13 +878,22 @@ func _handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 
 func _on_peer_connected(peer: int) -> void:
 	if _mode == Mode.SERVER:
-		_peers[peer] = {"welcomed": false, "connected_at": Time.get_ticks_usec(), "margins": [], "acknowledged_snapshot": -1}
+		# Claude 2026-11-16 (audit): with the delta snapshots' per-client records declared here, so the whole shape is in one place:
+		# baselines, entity id -> the tick it was last acknowledged at; sent_parts, tick -> each part's entity ids (PackedInt32Array).
+		_peers[peer] = _new_peer(false)
+		_links[peer] = _new_link() # Claude 2026-11-16 (profiling)
 
 
 func _on_peer_disconnected(peer: int) -> void:
+	# Claude 2026-11-16 (profiling): reported first, including a peer _drop_silent_peers already removed from _peers. ENet can't tell a
+	# client closing the connection from one that stopped answering; seconds_since_heard in the details can.
+	if _mode == Mode.SERVER and _links.has(peer):
+		var given: String = _links[peer]["reason"]
+		connection_ended.emit(peer, given if given != "" else "the client closed the connection or stopped answering", _link_details(peer))
+		_links.erase(peer)
 	if _mode != Mode.SERVER or not _peers.has(peer):
 		return
-	var welcomed: bool = _peers[peer]["welcomed"]
+	var welcomed: bool = _peers[peer].welcomed
 	_peers.erase(peer)
 	# Claude 2026-11-07: after the erase, so nothing is sent to the peer that's gone, and before the loop, so anything given a new
 	# owner here isn't removed. A listener can also despawn things, because the loop below only looks at what's left afterwards.
@@ -757,16 +916,20 @@ func _on_connected_to_server() -> void:
 
 
 func _on_connection_failed() -> void:
+	_ending_reason = "could not reach the server" # Claude 2026-11-16 (profiling)
 	leave()
 	refused.emit("could not reach the server")
 
 
 func _on_server_disconnected() -> void:
+	# Claude 2026-11-16 (profiling): ENet can't tell the server closing the connection from it no longer answering. ENet gives up on a
+	# connection whose reliable packets go unanswered for several seconds, so a long seconds_since_heard in the details means that.
+	_ending_reason = "the server closed the connection or stopped answering"
 	leave()
 
 
 func _on_hello(peer: int, bytes: PackedByteArray) -> void:
-	if _mode != Mode.SERVER or not _peers.has(peer) or _peers[peer]["welcomed"]:
+	if _mode != Mode.SERVER or not _peers.has(peer) or _peers[peer].welcomed:
 		stats["bad_packets"] += 1
 		return
 	var buffer := NetPackets.reader(bytes)
@@ -782,7 +945,7 @@ func _on_hello(peer: int, bytes: PackedByteArray) -> void:
 		refusal.put_utf8_string("version mismatch: this server runs protocol %d, content %d" % [NetPackets.PROTOCOL_VERSION, content_hash()])
 		_send(peer, refusal.data_array, true)
 		return # they leave when they read it; if they don't, _drop_silent_peers removes them
-	_peers[peer]["welcomed"] = true
+	_peers[peer].welcomed = true
 	var welcome := NetPackets.new_buffer()
 	welcome.put_u8(NetPackets.Type.WELCOME)
 	welcome.put_u16(_driver.get_tick_rate())
@@ -811,6 +974,7 @@ func _on_refused(peer: int, bytes: PackedByteArray) -> void:
 	var buffer := NetPackets.reader(bytes)
 	buffer.get_u8()
 	var reason := buffer.get_utf8_string()
+	_ending_reason = "refused: " + reason # Claude 2026-11-16 (profiling)
 	leave()
 	refused.emit(reason)
 
@@ -819,11 +983,58 @@ func _on_refused(peer: int, bytes: PackedByteArray) -> void:
 func _drop_silent_peers() -> void:
 	var now := Time.get_ticks_usec()
 	for peer: int in _peers.keys():
-		var info: Dictionary = _peers[peer]
-		if not info["welcomed"] and now - int(info["connected_at"]) > int(HANDSHAKE_TIMEOUT * 1000000.0):
+		var info: PeerRecord = _peers[peer]
+		if not info.welcomed and now - int(info.connected_at) > int(HANDSHAKE_TIMEOUT * 1000000.0):
 			_peers.erase(peer)
+			if _links.has(peer): # Claude 2026-11-16 (profiling): reported when ENet says it's gone
+				_links[peer]["reason"] = "dropped: no handshake within %.0f s" % HANDSHAKE_TIMEOUT
 			if multiplayer.multiplayer_peer:
 				multiplayer.multiplayer_peer.disconnect_peer(peer)
+
+
+## Claude 2026-11-16 (profiling): a new connection's numbers.
+func _new_link() -> Dictionary:
+	var now := Time.get_ticks_usec()
+	return {"connected_usec": now, "heard_usec": now, "rtt_ms": -1, "loss_percent": -1.0, "reason": ""}
+
+
+## Claude 2026-11-16 (profiling): every LINK_CHECK_INTERVAL_USEC, each connection's round trip and packet loss as ENet measures them,
+## kept because ENet can't be asked once a connection has gone. GDScript note: "as" gives null when the peer isn't an
+## ENetMultiplayerPeer (a test's own kind of peer), so those are skipped.
+func _check_links(now: int) -> void:
+	if now < _next_link_check_usec or _links.is_empty():
+		return
+	_next_link_check_usec = now + LINK_CHECK_INTERVAL_USEC
+	var enet := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if enet == null:
+		return
+	var connected := multiplayer.get_peers() # asked first: ENet complains about a peer it no longer has
+	for peer: int in _links:
+		if not connected.has(peer):
+			continue
+		var connection := enet.get_peer(peer)
+		if connection == null:
+			continue
+		_links[peer]["rtt_ms"] = int(connection.get_statistic(ENetPacketPeer.PEER_ROUND_TRIP_TIME))
+		_links[peer]["loss_percent"] = 100.0 * connection.get_statistic(ENetPacketPeer.PEER_PACKET_LOSS) / ENetPacketPeer.PACKET_LOSS_SCALE
+
+
+## Claude 2026-11-16 (profiling): each connection's last known numbers, peer -> {"seconds_connected", "seconds_since_heard", "rtt_ms",
+## "loss_percent"}. On a client the one connection is peer 1, the server. Diagnostics shows these in its summaries.
+func get_link_stats() -> Dictionary:
+	var out := {}
+	for peer: int in _links:
+		out[peer] = _link_details(peer)
+	return out
+
+
+func _link_details(peer: int) -> Dictionary:
+	var link: Dictionary = _links.get(peer, {})
+	if link.is_empty():
+		return {}
+	var now := Time.get_ticks_usec()
+	return {"seconds_connected": (now - int(link["connected_usec"])) / 1000000.0, "seconds_since_heard": (now - int(link["heard_usec"])) / 1000000.0,
+		"rtt_ms": link["rtt_ms"], "loss_percent": link["loss_percent"]}
 
 
 # --- Clock -------------------------------------------------------------------------------------
@@ -944,7 +1155,7 @@ func send_world_message(channel: String, bytes: PackedByteArray) -> void:
 		return
 	var packet := _world_packet(hash(channel), bytes)
 	for peer: int in _peers:
-		if _peers[peer]["welcomed"]:
+		if _peers[peer].welcomed:
 			_send(peer, packet, true)
 
 
@@ -1011,7 +1222,7 @@ func send_to_server(channel: String, bytes: PackedByteArray) -> void:
 
 
 func _on_client_message(peer: int, bytes: PackedByteArray) -> void:
-	if _mode != Mode.SERVER or not _peers.has(peer) or not _peers[peer]["welcomed"] or bytes.size() < 5:
+	if _mode != Mode.SERVER or not _peers.has(peer) or not _peers[peer].welcomed or bytes.size() < 5:
 		stats["bad_packets"] += 1
 		return
 	var buffer := NetPackets.reader(bytes)
@@ -1056,6 +1267,10 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 	var mark := Time.get_ticks_usec() if profiling else 0
 	if _mode == Mode.CLIENT:
 		_send_inputs(tick)
+		# Claude 2026-11-16 (per-part acknowledgements): which snapshot parts it read, in an ACK of their own, whether or not it
+		# controls anything. It began as the owner's question about a client with no pawn: the acknowledgement rode only in input
+		# packets, which a client sends only for entities it controls, so a spectating one never acknowledged anything.
+		_send_part_acks()
 		if profiling:
 			_profile_part(&"send_inputs", mark)
 	elif _mode == Mode.SERVER and tick % _snapshot_interval() == 0:
@@ -1091,7 +1306,9 @@ func _send_inputs(tick: int) -> void:
 		buffer.put_u8(NetPackets.Type.INPUT)
 		buffer.put_u32(entity.entity_id)
 		buffer.put_u32(tick)
-		buffer.put_32(_newest_snapshot_tick) # -1 if it hasn't seen one yet
+		# Claude 2026-11-16 (per-part acknowledgements): the newest snapshot this client has read any of, for lag compensation (how far
+		# back it can be seeing). Delta baselines come from ACK packets now. -1 if none yet.
+		buffer.put_32(_newest_read_tick)
 		var count := 0
 		for t in range(tick, tick - mini(input_redundancy, MAX_INPUTS_PER_PACKET), -1):
 			if entity.state.get_input_values(t).is_empty():
@@ -1104,11 +1321,95 @@ func _send_inputs(tick: int) -> void:
 		_send(1, buffer.data_array, false)
 
 
+## Claude 2026-11-16 (per-part acknowledgements): client: says which snapshot parts it has read since the last time, one ACK packet a
+## tick at most: [ACK, how many ticks (up to 8, newest first), then for each: the tick (u32), its part count (u8), and a bit per part
+## (1 = read, every entity in it)]. Sent unreliably: a lost ACK only means the server keeps using older baselines for those
+## entities, and the next snapshot's parts are acknowledged as usual.
+func _send_part_acks() -> void:
+	if _acks_to_send.is_empty():
+		return
+	var ticks: Array = _acks_to_send.keys()
+	ticks.sort()
+	ticks.reverse()
+	ticks = ticks.slice(0, MAX_ACK_ENTRIES)
+	var buffer := NetPackets.new_buffer()
+	buffer.put_u8(NetPackets.Type.ACK)
+	buffer.put_u8(ticks.size())
+	for tick: int in ticks:
+		var entry: PartsRead = _acks_to_send[tick]
+		buffer.put_u32(tick)
+		buffer.put_u8(entry.part_count)
+		buffer.put_data(entry.bits)
+	_acks_to_send.clear()
+	_send(1, buffer.data_array, false)
+
+
+## Claude 2026-11-16 (per-part acknowledgements): client: notes that it read a part of a snapshot, every entity in it, for the next ACK.
+func _note_part_read(tick: int, part: int, part_count: int) -> void:
+	if not _acks_to_send.has(tick):
+		var entry := PartsRead.new()
+		entry.part_count = part_count
+		entry.bits.resize(ceili(part_count / 8.0))
+		entry.bits.fill(0)
+		_acks_to_send[tick] = entry
+	var read: PartsRead = _acks_to_send[tick]
+	@warning_ignore("integer_division") # whole numbers on purpose: which byte
+	read.bits[part / 8] |= 1 << (part % 8)
+	_newest_read_tick = maxi(_newest_read_tick, tick)
+
+
+## Claude 2026-11-16 (per-part acknowledgements): server: a client says which parts of which snapshots it read. Every entity that was in
+## a part it read now has that tick as its baseline for this client (if newer than the one it had), so the next snapshot can send it
+## as changes since then. Parts of a snapshot the server no longer remembers sending, and ticks that haven't happened, are ignored.
+## It also counts for lag compensation, like the field in input packets: it only moves forward.
+func _on_ack(peer: int, bytes: PackedByteArray) -> void:
+	if _mode != Mode.SERVER or not _peers.has(peer) or not _peers[peer].welcomed or bytes.size() < 2:
+		stats["bad_packets"] += 1
+		return
+	var info: PeerRecord = _peers[peer]
+	var sent_parts: Dictionary = info.sent_parts
+	var baselines: Dictionary = info.baselines
+	var buffer := NetPackets.reader(bytes)
+	buffer.get_u8()
+	var entries := buffer.get_u8()
+	# Claude 2026-11-16 (audit double-check): no more entries than a real client sends, and each tick once. Without these, one packet
+	# could name the same snapshot over and over and have the server go through all its entities each time.
+	if entries > MAX_ACK_ENTRIES:
+		stats["bad_packets"] += 1
+		return
+	var ticks_done := PackedInt64Array()
+	for e in entries:
+		if not NetPackets.has_bytes(buffer, 5):
+			stats["bad_packets"] += 1
+			return
+		var tick := buffer.get_u32()
+		var part_count := buffer.get_u8()
+		var mask_size := ceili(part_count / 8.0)
+		if not NetPackets.has_bytes(buffer, mask_size):
+			stats["bad_packets"] += 1
+			return
+		var mask: PackedByteArray = buffer.get_data(mask_size)[1]
+		if tick > _driver.tick or ticks_done.has(tick):
+			continue
+		ticks_done.append(tick)
+		info.acknowledged_snapshot = maxi(int(info.acknowledged_snapshot), tick)
+		var parts: Variant = sent_parts.get(tick)
+		if parts == null or (parts as Array).size() != part_count:
+			continue
+		for part in part_count:
+			@warning_ignore("integer_division") # whole numbers on purpose: which byte
+			if mask[part / 8] & (1 << (part % 8)) == 0:
+				continue
+			for entity_id in (parts[part] as PackedInt32Array):
+				if int(baselines.get(entity_id, -1)) < tick:
+					baselines[entity_id] = tick
+
+
 ## Server: stores a client's inputs for the ticks they belong to. Only the owner may send them, and they're cleaned first.
 func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 	if not _peers.has(peer):
 		return # its last packets, still waiting here when it left
-	if _mode != Mode.SERVER or not _peers[peer]["welcomed"]:
+	if _mode != Mode.SERVER or not _peers[peer].welcomed:
 		stats["bad_packets"] += 1
 		return
 	var buffer := NetPackets.reader(bytes)
@@ -1149,19 +1450,33 @@ func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 		entity.state.receive_input(input_tick, entity.clean_input(entity.state.input_values_to_dictionary(values)))
 
 
+## Claude 2026-11-16 (wider audit): server: the two timing reports for a client's next snapshot, [the worst margin over the last half
+## second, over the last 5]. NO_MARGIN for either that isn't known. A client whose newest input is older than the short window
+## (it stopped sending: spectating, or its pawn died) gets NO_MARGIN for both, and its old margins are dropped. It used to be told
+## its last margins for as long as it stayed, and kept speeding up or slowing down on them until its clock had to resync.
+func _margins_to_report(info: PeerRecord, tick: int) -> PackedInt32Array:
+	var margins: Array = info.margins
+	if not margins.is_empty() and tick - int(info.newest_input) > _driver.ticks_at_rate(MARGIN_SHORT_WINDOW):
+		margins.clear()
+	if margins.is_empty():
+		return PackedInt32Array([NO_MARGIN, NO_MARGIN])
+	# The long check only counts once it covers the whole 5 seconds. A few calm packets prove nothing.
+	return PackedInt32Array([margins.slice(-MARGIN_SHORT_WINDOW).min(), margins.min() if margins.size() >= MARGIN_LONG_WINDOW else NO_MARGIN])
+
+
 ## Server: how early this input packet arrived, for time dilation. Only packets bringing something new count: a duplicate, or one
 ## overtaken on the way, isn't late input, because the server already has what it carries. What a client acknowledges only
 ## moves forward, and a client can't have seen the future.
 func _note_input_timing(peer: int, newest: int, acknowledged: int, tick: int) -> void:
-	var info: Dictionary = _peers[peer]
-	if newest > int(info.get("newest_input", -1)):
-		info["newest_input"] = newest
-		var margins: Array = info["margins"]
+	var info: PeerRecord = _peers[peer]
+	if newest > int(info.newest_input):
+		info.newest_input = newest
+		var margins: Array = info.margins
 		margins.append(clampi(newest - tick, -30000, 30000))
 		if margins.size() > MARGIN_LONG_WINDOW:
 			margins.pop_front()
 	if acknowledged <= tick:
-		info["acknowledged_snapshot"] = maxi(int(info.get("acknowledged_snapshot", -1)), acknowledged)
+		info.acknowledged_snapshot = maxi(int(info.acknowledged_snapshot), acknowledged)
 
 
 # --- Snapshots ---------------------------------------------------------------------------------
@@ -1194,7 +1509,7 @@ func _is_in_snapshot(entity: NetworkEntity, tick: int) -> bool:
 # Claude 2026-11-16 (networking T1.0, from the networking assessment): N1: true if at least one client has passed the handshake.
 func _has_welcomed_peer() -> bool:
 	for peer: int in _peers:
-		if _peers[peer]["welcomed"]:
+		if _peers[peer].welcomed:
 			return true
 	return false
 
@@ -1206,31 +1521,20 @@ func _send_snapshots(tick: int) -> void:
 	# TickStateComponent's and carries on regardless; a client that joins later gets a full snapshot at the next snapshot tick.
 	if not _has_welcomed_peer():
 		return
-	# Claude 2026-11-05: everything is gathered first and encoded in one call, so C++ is only called into once per snapshot.
-	var all_entities := get_entities()
-	var entries: Array = []
-	entries.resize(all_entities.size() * NetPackets.WORLD_ENTRY_SIZE)
-	var at := 0
-	for entity: NetworkEntity in all_entities:
-		if not _is_in_snapshot(entity, tick):
-			continue
-		var values := entity.state.get_state_values(tick)
-		entries[at] = entity.entity_id
-		entries[at + 1] = values
-		entries[at + 2] = entity.state.get_state_encodings()
-		entries[at + 3] = entity.state.get_sync_values()
-		entries[at + 4] = entity.state.get_sync_encodings()
-		# Other clients predicting this entity need to know what it wants. An empty list keeps it small otherwise.
-		entries[at + 5] = entity.state.get_input_values(tick) if (entity.is_predicted or default_predicted) else []
-		entries[at + 6] = entity.state.get_input_encodings()
-		# Claude 2026-11-05: what save_state returned, so clients can correct it. One byte if there's none.
-		entries[at + 7] = entity.state.get_custom_values(tick)
-		at += NetPackets.WORLD_ENTRY_SIZE
-	entries.resize(at)
-	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose: divided as a float, it went into put_u16 as one (a narrowing warning)
-	var count := at / NetPackets.WORLD_ENTRY_SIZE
-	var world_bytes: PackedByteArray = _codec.write_world(entries) if _codec != null else NetPackets.write_world(entries)
-	stats["snapshots_encoded"] += 1 # Claude 2026-11-16 (networking T1.0): counted, so N1 (nothing encoded with nobody to send to) can be seen
+	# Claude 2026-11-16 (profiling the networked mass battle): rebuilt. It used to encode every entity in full once and send that one
+	# packet (44 KB for the mass battle) to every client. Now:
+	#   - Each client gets each entity's changes since a baseline (networking T1.3, the standard delta against an acknowledged
+	#     baseline). Claude 2026-11-16 (per-part acknowledgements): the baseline is per entity: the newest snapshot in which the part
+	#     holding that entity reached this client (_on_ack). It was the newest snapshot the client had whole, which at 300 pawns, with
+	#     about 70 parts and pawns respawning all the time, almost never happened, so everything went in full. An encoding is made
+	#     once per entity and baseline and shared by every client that needs it.
+	#   - Each entity is encoded on its own (the codec's world bytes are just its entities one after another), so the snapshot can be
+	#     cut into parts of up to SNAPSHOT_PART_BYTES, each sent as its own packet with the same tick. Which entities went in which part
+	#     is kept per client for DELTA_MAX_BASELINE_AGE ticks, so an ACK can say which of them arrived.
+	var in_snapshot: Array[NetworkEntity] = []
+	for entity: NetworkEntity in get_entities():
+		if _is_in_snapshot(entity, tick):
+			in_snapshot.append(entity)
 	var server_features := 0
 	for i in SERVER_FEATURES.size():
 		if get(SERVER_FEATURES[i]):
@@ -1238,21 +1542,132 @@ func _send_snapshots(tick: int) -> void:
 	var missed_by_peer: Dictionary = {}
 	for entity: NetworkEntity in get_entities():
 		missed_by_peer[entity.owner_peer] = int(missed_by_peer.get(entity.owner_peer, 0)) + entity.missed_inputs
+	# GDScript note: a Vector2i (entity id, baseline tick) works as a dictionary key, compared by value. Baseline -1 is "in full".
+	var encoded: Dictionary = {}
+	stats["snapshots_encoded"] += 1 # Claude 2026-11-16 (networking T1.0)
+	# Claude 2026-11-16 (audit): the server's load, the same for every client and part, worked out once.
+	var load_byte := clampi(roundi(_driver.load_average * 100.0), 0, 255)
 	for peer: int in _peers:
-		if not _peers[peer]["welcomed"]:
+		var info: PeerRecord = _peers[peer]
+		if not info.welcomed:
 			continue
-		var packet := NetPackets.new_buffer()
-		packet.put_u8(NetPackets.Type.SNAPSHOT)
-		packet.put_u32(tick)
-		var margins: Array = _peers[peer]["margins"]
-		packet.put_16(NO_MARGIN if margins.is_empty() else margins.slice(-MARGIN_SHORT_WINDOW).min())
-		# The long check only counts once it covers the whole 5 seconds. A few calm packets prove nothing.
-		packet.put_16(margins.min() if margins.size() >= MARGIN_LONG_WINDOW else NO_MARGIN)
-		packet.put_u32(missed_by_peer.get(peer, 0))
-		packet.put_u8(server_features)
-		packet.put_u16(count)
-		packet.put_data(world_bytes)
-		_send(peer, packet.data_array, false)
+		var baselines: Dictionary = info.baselines
+		var sent_parts: Dictionary = info.sent_parts
+		var chunks: Array[PackedByteArray] = []
+		var ids := PackedInt32Array()
+		for entity: NetworkEntity in in_snapshot:
+			var baseline: int = baselines.get(entity.entity_id, -1) if delta_snapshots_enabled else -1
+			if baseline >= tick or tick - baseline > DELTA_MAX_BASELINE_AGE:
+				baseline = -1
+			var key := Vector2i(entity.entity_id, baseline)
+			if not encoded.has(key):
+				var bytes := _delta_entity_bytes(entity, tick, baseline) if baseline >= 0 else PackedByteArray()
+				if bytes.is_empty():
+					var full := Vector2i(entity.entity_id, -1)
+					if not encoded.has(full):
+						encoded[full] = _encode_entities(_snapshot_entry(entity, tick, entity.entity_id, entity.state.get_state_values(tick), entity.state.get_state_encodings()))
+					bytes = encoded[full]
+				encoded[key] = bytes
+			chunks.append(encoded[key])
+			ids.append(entity.entity_id)
+		var parts := _cut_into_parts(chunks, ids)
+		# Which entities went in which part, for this client's ACKs; older snapshots than a baseline may use are forgotten.
+		var part_ids: Array[PackedInt32Array] = []
+		for part in parts:
+			part_ids.append(part.ids)
+		sent_parts[tick] = part_ids
+		for old_tick: int in sent_parts.keys():
+			if old_tick < tick - DELTA_MAX_BASELINE_AGE:
+				sent_parts.erase(old_tick)
+		# Claude 2026-11-16 (audit): the header, the same for every part of this client's snapshot, made once; each part adds its number.
+		var margins := _margins_to_report(info, tick)
+		var header := NetPackets.new_buffer()
+		header.put_u8(NetPackets.Type.SNAPSHOT)
+		header.put_u32(tick)
+		header.put_16(margins[0])
+		header.put_16(margins[1])
+		header.put_u32(missed_by_peer.get(peer, 0))
+		header.put_u8(server_features)
+		header.put_u8(load_byte) # Claude 2026-11-16: the server's tick load (percent of the budget) and load step, for clients' diagnostics
+		header.put_u8(_driver.load_step)
+		var header_bytes := header.data_array
+		stats["snapshots_sent"] += 1 # Claude 2026-11-16 (audit): one per client, with the bytes it carries below
+		for i in parts.size():
+			var packet := NetPackets.new_buffer()
+			packet.put_data(header_bytes)
+			packet.put_u8(i) # Claude 2026-11-16: which part this is, and how many there are
+			packet.put_u8(parts.size())
+			packet.put_u16(parts[i].ids.size())
+			packet.put_data(parts[i].bytes)
+			stats["snapshot_bytes"] += parts[i].bytes.size()
+			_send(peer, packet.data_array, false)
+
+
+## Claude 2026-11-16 (delta snapshots): one entity's lists for the codec, as write_world takes them, with the given id and state list.
+func _snapshot_entry(entity: NetworkEntity, tick: int, id: int, state_values: Array, state_encodings: Array) -> Array:
+	return [id, state_values, state_encodings, entity.state.get_sync_values(), entity.state.get_sync_encodings(),
+		# Other clients predicting this entity need to know what it wants. An empty list keeps it small otherwise.
+		entity.state.get_input_values(tick) if (entity.is_predicted or default_predicted) else [], entity.state.get_input_encodings(),
+		# Claude 2026-11-05: what save_state returned, so clients can correct it. One byte if there's none.
+		entity.state.get_custom_values(tick)]
+
+
+func _encode_entities(entries: Array) -> PackedByteArray:
+	return _codec.write_world(entries) if _codec != null else NetPackets.write_world(entries)
+
+
+## Claude 2026-11-16 (delta snapshots): an entity encoded as its changes since baseline, or empty if it has to go in full (no state
+## list, nothing saved for the baseline tick, or a list too long for one).
+##   The state list becomes [tick - baseline, mask, mask, ..., the changed values], and the id gets DELTA_ID_BIT. Each mask covers
+##   DELTA_MASK_BITS entries in order, a bit set for each that changed. An entity that changed nothing still sends its id, the ticks back and its empty masks.
+## GDScript note: two Arrays compared with == compare every element (in C++), so an unchanged entity costs one comparison.
+func _delta_entity_bytes(entity: NetworkEntity, tick: int, baseline: int) -> PackedByteArray:
+	var now := entity.state.get_state_values(tick)
+	if now.is_empty() or not entity.state.has_state(baseline):
+		return PackedByteArray()
+	var then := entity.state.get_state_values(baseline)
+	if then.size() != now.size():
+		return PackedByteArray()
+	var encodings := entity.state.get_state_encodings()
+	var masks_needed := ceili(now.size() / float(DELTA_MASK_BITS))
+	var values: Array = [tick - baseline]
+	var codes: Array = [StateEncoding.RAW]
+	var masks: Array = []
+	masks.resize(masks_needed)
+	masks.fill(0)
+	values.append_array(masks)
+	for i in masks_needed:
+		codes.append(StateEncoding.RAW)
+	if now != then:
+		for i in now.size():
+			var a: Variant = now[i]
+			var b: Variant = then[i]
+			if typeof(a) == typeof(b) and a == b:
+				continue
+			@warning_ignore("integer_division") # whole numbers on purpose: which mask
+			values[1 + i / DELTA_MASK_BITS] |= 1 << (i % DELTA_MASK_BITS)
+			values.append(a)
+			codes.append(encodings[i])
+	if values.size() > NetPackets.MAX_LIST_SIZE:
+		return PackedByteArray()
+	return _encode_entities(_snapshot_entry(entity, tick, entity.entity_id | DELTA_ID_BIT, values, codes))
+
+
+## Claude 2026-11-16: groups encoded entities into parts of at most SNAPSHOT_PART_BYTES each (one bigger than that goes alone), with the
+## entity id of each chunk (ids, in the same order). Always at least one part, so a snapshot with no entities still arrives. At most
+## 255 parts.
+func _cut_into_parts(chunks: Array[PackedByteArray], ids: PackedInt32Array) -> Array[SnapshotPart]:
+	var parts: Array[SnapshotPart] = []
+	var part := SnapshotPart.new()
+	for i in chunks.size():
+		var chunk := chunks[i]
+		if not part.ids.is_empty() and part.bytes.size() + chunk.size() > SNAPSHOT_PART_BYTES and parts.size() < 254:
+			parts.append(part)
+			part = SnapshotPart.new()
+		part.bytes.append_array(chunk)
+		part.ids.append(ids[i])
+	parts.append(part)
+	return parts
 
 
 ## Client: the features the server decides are whatever it says. default_predicted changes roles here, so this matters in a real game too.
@@ -1264,7 +1679,7 @@ func _apply_server_features(mask: int) -> void:
 			set(SERVER_FEATURES[i], on)
 			changed = true
 	if changed:
-		_refresh_entities()
+		refresh_entities()
 
 
 ## Client: remote entities store what the snapshot says. Predicted ones keep it aside for _reconcile, newest only.
@@ -1274,7 +1689,7 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 		return
 	var buffer := NetPackets.reader(bytes)
 	buffer.get_u8()
-	if not NetPackets.has_bytes(buffer, 15):
+	if not NetPackets.has_bytes(buffer, 19): # Claude 2026-11-16: 4 more: the server's load and step, the part number and count
 		stats["bad_packets"] += 1
 		return
 	var tick := buffer.get_u32()
@@ -1282,35 +1697,121 @@ func _on_snapshot(peer: int, bytes: PackedByteArray) -> void:
 	var margin_long := buffer.get_16()
 	var missed := buffer.get_u32()
 	var server_features := buffer.get_u8()
+	var load_percent := buffer.get_u8() # Claude 2026-11-16
+	var load_step := buffer.get_u8()
+	var part := buffer.get_u8()
+	var part_count := buffer.get_u8()
 	var count := buffer.get_u16()
-	if tick <= _newest_snapshot_tick:
-		return # arrived out of order; the newer one already replaced it
+	# Claude 2026-11-16 (delta snapshots): a snapshot comes in parts with the same tick, so only an older tick is out of date now.
+	if tick < _newest_snapshot_tick or part >= part_count:
+		return # arrived out of order; a newer one already replaced it
 	# Claude 2026-11-05: the header above stays in GDScript, and the entities are read in one call.
 	var parsed: Variant = _codec.read_world(bytes, buffer.get_position(), count) if _codec != null else NetPackets.read_world(buffer, count)
 	if parsed == null:
 		stats["bad_packets"] += 1
 		return
-	_note_snapshot_timing(tick)
-	_newest_snapshot_tick = tick
-	_missed_inputs = missed
-	stats["snapshots_received"] += 1
-	_update_dilation(margin, margin_long)
-	_apply_server_features(server_features)
-	_reconcile_values.clear()
-	_reconcile_tick = tick
+	if tick > _newest_snapshot_tick:
+		# The first part of a new snapshot: what the header says applies once per snapshot.
+		_note_snapshot_timing(tick)
+		_newest_snapshot_tick = tick
+		_missed_inputs = missed
+		stats["snapshots_received"] += 1
+		_update_dilation(margin, margin_long)
+		_apply_server_features(server_features)
+		server_load_percent = load_percent # Claude 2026-11-16
+		server_load_step = load_step
+		_reconcile_values.clear()
+		_parts_got.clear()
+	if _parts_got.has(part):
+		return # a duplicate
+	_parts_got[part] = true
+	stats["snapshot_parts_received"] += 1
+	stats["snapshot_bytes_received"] += bytes.size() # Claude 2026-11-16 (audit): snapshots only, for their average size
+	_reconcile_tick = tick # Claude 2026-11-16: per part, so a part that comes after this tick's reconcile is still checked
+	var all_read := true # Claude 2026-11-16 (per-part acknowledgements): every entity in this part read, so it can be acknowledged
 	for item: Array in parsed:
-		var entity: NetworkEntity = get_entity(item[0])
+		var entity_id: int = item[0] & ~DELTA_ID_BIT
+		var entity: NetworkEntity = get_entity(entity_id)
 		if entity == null or entity.state == null:
-			continue # its spawn hasn't arrived yet; the next snapshot covers it
+			all_read = false # its spawn hasn't arrived yet; the next snapshot covers it, and this part isn't acknowledged
+			continue
+		# Claude 2026-11-16 (delta snapshots): a delta is rebuilt into the full list from the baseline it names.
+		if item[0] & DELTA_ID_BIT:
+			var rebuilt: Variant = _rebuild_from_delta(entity, tick, item[1])
+			if rebuilt == null:
+				all_read = false
+				stats["deltas_without_baseline"] += 1
+				continue
+			item[1] = rebuilt
 		# Claude 2026-11-16 (networking N4): lists of the wrong size are refused and reported. They used to be read as empty, so
 		# the entity silently stopped updating.
 		if not _snapshot_lists_fit(entity, item):
+			all_read = false
 			continue
-		var values := entity.state.state_values_to_dictionary(item[1])
+		var state_list: Array = item[1]
+		_keep_baseline(entity_id, tick, state_list)
 		entity.state.apply_sync_values(item[2])
-		entity.state.receive_authoritative_state(tick, values) # kept for all, so a switch takes effect at once
+		# Claude 2026-11-16 (profiling): the list as it is, without a dictionary in between (receive_authoritative_values). Kept for
+		# all, so a switch takes effect at once. Only entities this client predicts need the dictionary, for reconciling.
+		entity.state.receive_authoritative_values(tick, state_list) # an empty list is fine: nothing that tick
 		if not entity.follows_snapshots():
-			_reconcile_values[item[0]] = {"state": values, "input": entity.state.input_values_to_dictionary(item[3]), "custom": item[4]}
+			_reconcile_values[entity_id] = {"state": entity.state.state_values_to_dictionary(state_list), "input": entity.state.input_values_to_dictionary(item[3]), "custom": item[4]}
+	# Claude 2026-11-16 (per-part acknowledgements): every entity in it read: this part goes in the next ACK.
+	if all_read:
+		_note_part_read(tick, part, part_count)
+
+
+## Claude 2026-11-16 (delta snapshots): client: the full state list from a delta ([ticks back, masks..., changed values]) and what this
+## client kept for that entity at the baseline tick. Null if the baseline isn't here or the delta doesn't fit.
+func _rebuild_from_delta(entity: NetworkEntity, tick: int, delta: Array) -> Variant:
+	var size: int = entity.state.get_list_sizes()[0]
+	var masks_needed := ceili(size / float(DELTA_MASK_BITS))
+	if size == 0 or delta.size() < 1 + masks_needed or typeof(delta[0]) != TYPE_INT:
+		return null
+	var base: Variant = _baseline_at(entity.entity_id, tick - int(delta[0]))
+	if base == null or (base as Array).size() != size:
+		return null
+	var rebuilt: Array = (base as Array).duplicate() # GDScript note: shallow, so an array inside is shared; nothing changes them
+	var next := 1 + masks_needed
+	for m in masks_needed:
+		var mask: Variant = delta[1 + m]
+		if typeof(mask) != TYPE_INT:
+			return null
+		var bit := 0
+		while mask != 0 and bit < DELTA_MASK_BITS:
+			if mask & 1:
+				var i := m * DELTA_MASK_BITS + bit
+				if i >= size or next >= delta.size():
+					return null
+				rebuilt[i] = delta[next]
+				next += 1
+			mask >>= 1
+			bit += 1
+	# GDScript note: an if, not "a if b else null", because an Array and null aren't one type and the editor warns about that.
+	if next != delta.size():
+		return null
+	return rebuilt
+
+
+## Claude 2026-11-16 (delta snapshots): client: keeps what the server sent for an entity on a tick, to decode later deltas against.
+func _keep_baseline(entity_id: int, tick: int, values: Array) -> void:
+	var ring: BaselineRing = _baselines.get(entity_id)
+	if ring == null:
+		ring = BaselineRing.new()
+		ring.ticks.resize(BASELINE_RING)
+		ring.ticks.fill(-1)
+		ring.lists.resize(BASELINE_RING)
+		_baselines[entity_id] = ring
+	var slot := tick % BASELINE_RING
+	ring.ticks[slot] = tick
+	ring.lists[slot] = values
+
+
+func _baseline_at(entity_id: int, tick: int) -> Variant:
+	var ring: BaselineRing = _baselines.get(entity_id)
+	if ring == null or tick < 0 or ring.ticks[tick % BASELINE_RING] != tick:
+		return null
+	return ring.lists[tick % BASELINE_RING]
 
 
 # Claude 2026-11-16 (networking N4, from the networking assessment): true if a snapshot's lists for this entity have the sizes its
@@ -1429,6 +1930,10 @@ func _note_snapshot_timing(tick: int) -> void:
 func _update_dilation(margin: int, margin_long: int) -> void:
 	_last_feedback_usec = Time.get_ticks_usec()
 	if margin == NO_MARGIN:
+		# Claude 2026-11-16 (wider audit): nothing known about our timing (we aren't sending inputs): normal speed, not the last
+		# correction held for ever.
+		_input_margin = NO_MARGIN
+		set_tick_factor(1.0)
 		return
 	_input_margin = margin
 	stats["margin_total"] += margin
@@ -1441,10 +1946,11 @@ func _update_dilation(margin: int, margin_long: int) -> void:
 		error = margin - dilation_margin_low_ticks
 	elif margin_long != NO_MARGIN and margin_long > dilation_margin_high_ticks:
 		error = margin_long - dilation_margin_high_ticks
-	_set_tick_factor(1.0 - clampf(error * dilation_gain, -dilation_max_speedup, dilation_max_slowdown))
+	set_tick_factor(1.0 - clampf(error * dilation_gain, -dilation_max_speedup, dilation_max_slowdown))
 
 
-func _set_tick_factor(factor: float) -> void:
+# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (NetDebugModule calls it); it was _set_tick_factor.
+func set_tick_factor(factor: float) -> void:
 	_driver.tick_factor = factor
 	stats["speed_lowest"] = minf(stats["speed_lowest"], factor)
 	stats["speed_highest"] = maxf(stats["speed_highest"], factor)

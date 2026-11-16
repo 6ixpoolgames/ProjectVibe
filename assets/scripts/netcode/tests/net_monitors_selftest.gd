@@ -3,15 +3,16 @@
 ## follow rollbacks, corrections and bytes, and the monitors go away with it.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/netcode/tests/net_monitors_selftest.tscn"
-extends Node
-
-var _failures := 0
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 
 func _ready() -> void:
 	print("--- Net monitors self-test ---")
 	await get_tree().process_frame
 	_check(NetworkSession.get_node_or_null(^"NetMonitors") == null, "without the editor's debugger attached, the session doesn't add them")
+	# Claude 2026-11-16 (wider audit): the session finds the script by its file and calls on() like this (NetworkSession._ready).
+	var by_path: Variant = (load(NetworkSessionSingleton.NET_MONITORS_SCRIPT) as GDScript).call(&"on", NetworkSession)
+	_check(by_path is NetMonitors, "the session's way of adding them, by the script's file, works")
 	var monitors := NetMonitors.on(NetworkSession)
 	_check(NetMonitors.on(NetworkSession) == monitors, "on() finds the one it added instead of adding another")
 	var ids := monitors.get_monitor_ids()
@@ -49,9 +50,3 @@ func _ready() -> void:
 	_check(gone, "removed, the monitors go too")
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

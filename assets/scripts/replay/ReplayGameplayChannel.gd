@@ -82,15 +82,15 @@ func pawn_added(pawn: Pawn, id: int) -> void:
 			add_event("step_started", id, {"ability": _name_of(ability), "step": _name_of(step)}))
 		_connect(connections, pawn.ability_manager.step_finished, func(ability: AbilityBase, step: AbilityStep, reason: String) -> void:
 			add_event("step_finished", id, {"ability": _name_of(ability), "step": _name_of(step), "reason": reason}))
-	if pawn.ai_state_manager:
-		_connect(connections, pawn.ai_state_manager.state_changed, func(old: AIStateBase, new: AIStateBase, reason: String) -> void:
+	if pawn.ai_context and pawn.ai_context.state_manager: # Claude 2026-11-17: through the AI's core
+		_connect(connections, pawn.ai_context.state_manager.state_changed, func(old: AIStateBase, new: AIStateBase, reason: String) -> void:
 			add_event("ai_state", id, {"from": _name_of(old), "to": _name_of(new), "reason": reason}))
-	if pawn.ai_behaviour_manager:
-		_connect(connections, pawn.ai_behaviour_manager.behaviour_changed,
+	if pawn.ai_context and pawn.ai_context.behaviour_manager: # Claude 2026-11-17: through the AI's core
+		_connect(connections, pawn.ai_context.behaviour_manager.behaviour_changed,
 			func(old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
 				add_event("ai_behaviour", id, {"from": _name_of(old), "to": _name_of(new), "reason": reason}))
-	if pawn.ai_target_selector:
-		_connect(connections, pawn.ai_target_selector.target_changed, func(old: Node3D, new: Node3D, reason: String) -> void:
+	if pawn.ai_context and pawn.ai_context.target_selector: # Claude 2026-11-17: through the AI's core
+		_connect(connections, pawn.ai_context.target_selector.target_changed, func(old: Node3D, new: Node3D, reason: String) -> void:
 			add_event("ai_target", id, {"from": recorder.get_replay_id(old) if recorder else 0,
 				"to": recorder.get_replay_id(new) if recorder else 0, "reason": reason}))
 	_per_pawn[id] = connections

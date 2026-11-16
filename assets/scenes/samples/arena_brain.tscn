@@ -1,0 +1,31 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/ai/AIBehaviourManager.gd" id="1_manager"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIWanderBehaviour.gd" id="2_wander"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AILookTowardBehaviour.gd" id="3_look"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIInvestigateBehaviour.gd" id="4_investigate"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AISearchBehaviour.gd" id="5_search"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIChaseBehaviour.gd" id="6_chase"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIAttackBehaviour.gd" id="7_attack"]
+
+[node name="AIBehaviourManager" type="Node"]
+script = ExtResource("1_manager")
+
+[node name="Wander" type="Node" parent="."]
+script = ExtResource("2_wander")
+
+[node name="LookToward" type="Node" parent="."]
+script = ExtResource("3_look")
+
+[node name="Investigate" type="Node" parent="."]
+script = ExtResource("4_investigate")
+
+[node name="Search" type="Node" parent="."]
+script = ExtResource("5_search")
+
+[node name="Chase" type="Node" parent="."]
+script = ExtResource("6_chase")
+dash_to_close = true
+
+[node name="Attack" type="Node" parent="."]
+script = ExtResource("7_attack")

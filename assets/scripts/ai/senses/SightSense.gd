@@ -72,11 +72,13 @@ func full_pass(candidates: Array[Pawn], tick: int) -> void:
 ## Claude 2026-11-09 (scaling spec step 2): the full pass with the sensing job's result: the job found the candidates and how visible
 ## each is, on a worker thread; this casts the rays and records, the same as full_pass would. AISensingManager calls it.
 func full_pass_prepared(job: Object, tick: int) -> void:
-	var memory := pawn.ai_memory if pawn else null
+	var memory := pawn.ai_context.memory if pawn and pawn.ai_context else null
 	if memory == null:
 		return
 	var store: Object = memory.get_store()
-	_fill_settings()
+	# Claude 2026-11-16 (wider audit): the settings ask_job filled a tick ago, for this same pass; they were worked out again here.
+	if _settings.size() != 11:
+		_fill_settings()
 	store.set_sight_settings(_settings)
 	store.set_sight_geometry(SightGeometryFeeder.get_geometry()) # Claude 2026-11-09 (step 4)
 	memory.announce_sight_results(store.sight_check_prepared(job, pawn, tick))
@@ -163,7 +165,7 @@ func _visibility(target: Pawn) -> float:
 
 # Claude 2026-11-09: hands the checks to memory's store, then lets memory wake a decision and send its signals.
 func _check_all(targets: Array, tick: int) -> void:
-	var memory := pawn.ai_memory if pawn else null
+	var memory := pawn.ai_context.memory if pawn and pawn.ai_context else null
 	if memory == null:
 		return
 	var store: Object = memory.get_store()

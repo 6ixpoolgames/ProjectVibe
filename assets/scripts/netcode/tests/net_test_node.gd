@@ -321,7 +321,7 @@ func _set_up_real_pawn(entity: NetworkEntity) -> void:
 	if (entity.owner_peer == 0 and settings.has("ai-loads")) or (entity.owner_peer != 0 and earlier_pawns > 0):
 		pawn.keeps_world_loaded = true # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
 	if entity.owner_peer == 0 and settings.has("ai-not-possessable"):
-		pawn.possessable = false # Claude 2026-11-07
+		pawn.controller_manager.possessable = false # Claude 2026-11-07
 	if settings.has("no-server-brain") and session.is_server():
 		return # Claude 2026-11-07
 	var brain := PawnWalkerBrain.new()
@@ -505,6 +505,7 @@ func _capture_summary() -> void:
 	result["stats"] = session.stats.duplicate()
 	result["native_encoding"] = session.is_using_native_encoding() # Claude 2026-11-05
 	result["tick"] = driver.tick
+	result["tick_rate"] = driver.get_tick_rate() # Claude 2026-11-16 (wider audit): for the server_tick_rate scenario
 	result["rtt_ms"] = session.get_rtt_ms()
 	result["lead_ticks"] = session.get_lead_ticks()
 	# The session may already have ended by now, if the server quit first.
@@ -636,7 +637,7 @@ func _count_arms() -> int:
 	var count := 0
 	for entity: NetworkEntity in session.get_entities():
 		var pawn := entity.get_parent() as Pawn
-		if pawn and pawn.get_camera_arm():
+		if pawn and CameraMount.arm_of(pawn):
 			count += 1
 	return count
 
@@ -797,7 +798,7 @@ func _build_terrain() -> void:
 		_build_new_terrain()
 		return
 	nav.add_interest(Vector3.ZERO, 130.0, 160.0, 1)
-	var terrain: Node3D = load("res://assets/scripts/navigation/nav_test_terrain.gd").new()
+	var terrain: Node3D = load("res://assets/scripts/samples/nav_demo/nav_test_terrain.gd").new()
 	terrain.set("nav_hooks", NavHooks.new())
 	terrain.set("build_collision", true)
 	add_child(terrain)

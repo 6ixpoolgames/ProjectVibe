@@ -4,12 +4,11 @@
 ## dashing out into unloaded land at a player's speeds never running off the ground its own source builds.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/samples/tests/mass_battle_sample_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const ARENA := "res://assets/scenes/samples/mass_battle_sample.tscn"
 const ALLY_SCENE := "res://assets/scenes/samples/faction_ally.tscn"
 
-var _failures := 0
 var _arena: Node = null
 
 
@@ -21,6 +20,7 @@ func _ready() -> void:
 	await get_tree().physics_frame
 	_arena._start_offline()
 	_test_layout()
+	_test_spawn_distance() # Claude 2026-11-16
 	await _test_filling()
 	await _test_march()
 	await _test_hero_switch()
@@ -43,6 +43,19 @@ func _test_layout() -> void:
 	_check(_arena.is_centre_source_on() and get_tree().get_nodes_in_group(&"rally_point").size() == 1, "a rally point in the middle, with its own source, on to begin with")
 
 
+# Claude 2026-11-16 (the owner's request: spawns closer together for a quick peak-capacity test): spawn_distance moves the spawners in
+# along their lines, each keeping its place on the line, and back out again.
+func _test_spawn_distance() -> void:
+	var flat := func(path: String) -> float:
+		var node: Node3D = _arena.get_node(path)
+		return Vector2(node.position.x, node.position.z).length()
+	_arena.spawn_distance = 40.0
+	_check(absf(flat.call("Spawning/RedSpawner") - 40.0) < 0.1 and absf(flat.call("Spawning/HeroRedSpawner") - 55.0) < 0.1 and absf(flat.call("Spawning/PlayerStart") - 25.0) < 0.1,
+		"spawn distance 40: the spawners 40 m out, a hero 15 m behind, the player 15 m in front (%.1f, %.1f, %.1f)" % [flat.call("Spawning/RedSpawner"), flat.call("Spawning/HeroRedSpawner"), flat.call("Spawning/PlayerStart")])
+	_arena.spawn_distance = 300.0
+	_check(absf(flat.call("Spawning/AllySpawner") - 300.0) < 0.1, "and back to 300 as laid out")
+
+
 func _test_filling() -> void:
 	# 4 of each colour plus a hero each; the players' team: 3 soldiers (4 less the one player) and a hero.
 	for i in 600:
@@ -51,7 +64,7 @@ func _test_filling() -> void:
 			break
 	_check(_alive(1) == 5 and _alive(2) == 5 and _alive(0) == 4, "the teams fill up: red %d, blue %d, soldiers %d (each with a hero)" % [_alive(1), _alive(2), _alive(0)])
 	var heroes: Array[Pawn] = _arena.get_heroes()
-	_check(heroes.size() == 3 and heroes.all(func(h: Pawn) -> bool: return h.is_keeping_world_loaded() and h.get_health() == 1000.0), "three heroes, each a chunk source, with 1000 Health")
+	_check(heroes.size() == 3 and heroes.all(func(h: Pawn) -> bool: return h.is_keeping_world_loaded() and h.stat_manager.get_health() == 1000.0), "three heroes, each a chunk source, with 1000 Health")
 	# Claude 2026-11-16 (pawn M2): sources are flags on pawns now, with the level's distance as the game's setting.
 	var player: Pawn = GameMode.possession_coordinator.get_pawn_of()
 	_check(player.is_keeping_world_loaded() and is_equal_approx(player.load_distance, 160.0) and player.global_position.x > 270.0, "the player starts at the players' spawner, loading 160 m like the rest")
@@ -191,9 +204,3 @@ func _average_distance() -> float:
 func _ticks(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

@@ -3,13 +3,12 @@
 ## captures, the panels, and always-on recordings.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/diagnostics/tests/diagnostics_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 const FOLDER := "user://diagnostics_selftest"
 
-var _failures := 0
 var _slow_frames := 0 # a frame that busy-waits this many times 40 ms, to make a spike
 
 
@@ -75,12 +74,23 @@ func _test_history(manager: DiagnosticsManager) -> void:
 	for record: Dictionary in frames:
 		for scope: StringName in record.scopes:
 			seen[scope] = true
-	_check(seen.has(&"pawn.abilities") and seen.has(&"pawn.move_and_slide") and seen.has(&"tick.simulate"),
+	# Claude 2026-11-16 (pawn spec 8.22): its move is by physics (pawn.move_and_slide) or by the CrowdMover (movement.crowd)
+	_check(seen.has(&"pawn.abilities") and (seen.has(&"pawn.move_and_slide") or seen.has(&"movement.crowd")) and seen.has(&"tick.simulate"),
 		"the pawn's own scopes and TickDriver's phases are in it (%s)" % ", ".join(seen.keys().slice(0, 8)))
 	var summary := manager.get_summary(0.5)
 	_check(summary.frames > 0 and summary.has("tick_parts") and summary.scopes.size() > 0 and summary.pawns >= 1,
 		"a summary averages the last seconds (%d frames, %d scopes)" % [summary.frames, summary.scopes.size()])
 	_check(manager.summary_text(summary).begins_with("[summary"), "and reads as one line of text")
+	# Claude 2026-11-16 (the owner's request: the server's tick rate in diagnostics): offline, the server is this machine, so its rate is
+	# the tick rate and its ticks are this machine's.
+	var server: Dictionary = summary.get("server", {})
+	var quick := manager.get_server_ticks(0.5)
+	_check(server.get("tick_rate", 0) == TickDriver.get_tick_rate() and float(server.get("ticks_per_second", 0.0)) > 0.0 and float(quick.ticks_per_second) > 0.0,
+		"the summary has the server's tick rate and how fast it ran (%.1f ticks/s; get_server_ticks %.1f)" % [float(server.get("ticks_per_second", 0.0)), float(quick.ticks_per_second)])
+	_check(manager.summary_text(summary).contains("server %d ticks/s" % TickDriver.get_tick_rate()), "and the log line says it")
+	# Claude 2026-11-16 (the owner's request): the animation category, every animation.* scope added up, in the summary and the log line.
+	_check(summary.has("animation_ms") and manager.summary_text(summary).contains("(animation "),
+		"the animation category is in the summary and the log line (%.3f ms a frame)" % float(summary.get("animation_ms", -1.0)))
 
 
 func _test_spike(manager: DiagnosticsManager) -> void:
@@ -119,7 +129,9 @@ func _test_replay(manager: DiagnosticsManager) -> void:
 	reader.open(path)
 	var frames := reader.get_diagnostics(reader.get_first_tick(), reader.get_last_tick())
 	_check(frames.size() >= 80, "the recording holds every frame's diagnostics (%d)" % frames.size())
-	var named := frames.any(func(entry: Array) -> bool: return entry[1].scopes.has(&"pawn.move_and_slide") or entry[1].scopes.has("pawn.move_and_slide"))
+	# Claude 2026-11-16 (pawn spec 8.22): pawn.abilities, which every awake pawn records; an AI-driven pawn's move is the CrowdMover's now,
+	# not pawn.move_and_slide.
+	var named := frames.any(func(entry: Array) -> bool: return entry[1].scopes.has(&"pawn.abilities") or entry[1].scopes.has("pawn.abilities"))
 	_check(named, "with the scopes by name, even read from the middle")
 	var middle := reader.get_frame(floori((reader.get_first_tick() + reader.get_last_tick()) / 2.0))
 	_check(not middle.diagnostics.is_empty() and middle.diagnostics[0].has("frame_ms"), "a tick's frame has its diagnostics")
@@ -142,7 +154,7 @@ func _test_panels(manager: DiagnosticsManager, pawn: Pawn) -> void:
 	panels.inspect(pawn)
 	panels._refresh_left = 0.0
 	panels._process(0.0)
-	_check(panels.is_shown(KEY_F4) and panels.get_text(KEY_F4).contains("F4 timings") and panels.get_text(KEY_F4).contains("pawn.move_and_slide"),
+	_check(panels.is_shown(KEY_F4) and panels.get_text(KEY_F4).contains("F4 timings") and panels.get_text(KEY_F4).contains("pawn.abilities"), # Claude 2026-11-16: see above
 		"F4 shows the timings, scopes included")
 	_check(panels.get_text(KEY_F7).contains("Inspected") and panels.get_text(KEY_F7).contains("running:"), "F7 shows the inspected pawn")
 	_check(panels.get_text(KEY_F6).contains("spikes") and panels.get_text(KEY_F8).contains("x10"), "F6 shows spikes, and F8 the warnings with counts")
@@ -170,9 +182,3 @@ func _clear(path: String) -> void:
 func _finish() -> void:
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

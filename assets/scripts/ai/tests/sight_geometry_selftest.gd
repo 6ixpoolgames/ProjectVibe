@@ -4,11 +4,9 @@
 ## Needs the navcore C++ library; without it, it says so and passes.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/sight_geometry_selftest.tscn"
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const RAYS := 20000
-
-var _failures := 0
 
 
 func _ready() -> void:
@@ -175,9 +173,3 @@ func _add_bodies(geometry: Object, node: Node) -> void:
 		geometry.add_body(node)
 	for child in node.get_children():
 		_add_bodies(geometry, child)
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

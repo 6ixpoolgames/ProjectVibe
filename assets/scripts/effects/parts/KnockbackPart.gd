@@ -28,7 +28,6 @@ func apply_once(application: EffectApplication) -> void:
 		direction = application.hit.direction
 	else:
 		direction = Vector3(sin(target.yaw), 0.0, cos(target.yaw)) # back: a pawn faces -Z at yaw 0
-	for ability in target.ability_manager.get_abilities():
-		if ability is KnockbackAbility:
-			ability.push(direction * speed, TickDriver.ticks_at_rate(ticks), hop_speed)
-			return
+	var knockback := target.ability_manager.get_knockback() # Claude 2026-11-16 (wider audit): found once by the manager
+	if knockback:
+		knockback.push(direction * speed, TickDriver.ticks_at_rate(ticks), hop_speed)

@@ -57,7 +57,9 @@ func prerequisites_met(context: AIContextComponent) -> bool:
 func _entry_fits(memory: AIMemory, index: int, tick: int) -> bool:
 	if requires_certain and not memory.is_certain_at(index):
 		return false
-	if max_ticks_since_seen >= 0 and memory.ticks_since_seen_at(index, tick) > max_ticks_since_seen:
+	# Claude 2026-11-16 (wider audit): counted at 60 a second like hit_within_ticks, so converted for this match's rate (it wasn't,
+	# so 120 ticks was 2 s at 60 and 4 s at 30).
+	if max_ticks_since_seen >= 0 and memory.ticks_since_seen_at(index, tick) > TickDriver.ticks_at_rate(max_ticks_since_seen):
 		return false
 	return memory.awareness_at(index, tick) >= min_awareness
 

@@ -88,6 +88,10 @@ enum Kind { LOCOMOTION, ACTION }
 ## pawn and this ability's own movement isn't fought. Dash has it. Off (the default): a locked-out locomotion still slows the pawn to
 ## a stop, which is what an attack that roots the pawn wants.
 @export var pauses_locomotion := false
+## Claude 2026-11-16 (pawn spec 8.22): on: while it runs, its pawn moves by physics (move_and_slide), not with the CrowdMover, so its
+## movement collides properly: fast or forced moves such as Dash and Knockback. Off (the default): walking speeds, which the crowd
+## mover handles.
+@export var needs_full_movement := false
 ## Claude 2026-11-16 (pawn spec 8.20): for an ability with steps, the longest it can run, in ticks at 60 a second, as a safety: it ends
 ## once no step runs, and at this at the latest. Ignored without steps.
 @export_range(1, 6000, 1, "or_greater") var max_steps_ticks := 600
@@ -318,15 +322,18 @@ func begin_steps() -> void:
 		start_step(steps[0])
 
 
+var _steps_this_tick: Array[AbilityStep] = [] # Claude 2026-11-16 (wider audit): run_steps' working list, kept between ticks
+
 ## The AbilityManager calls this every tick the ability runs, after tick(): each running step's tick, in tree order. A step done starts
 ## its next steps; a step that fails ends them all. With no step left running, the ability ends (ticks_left goes to 0).
 func run_steps(dt: float) -> void:
 	# The steps running as this tick began. Those started during it get their first tick on the next one.
-	var this_tick: Array[AbilityStep] = []
+	# Claude 2026-11-16 (wider audit): one list kept and reused; a new one was made for every running ability every tick.
+	_steps_this_tick.clear()
 	for step in steps:
 		if step.running:
-			this_tick.append(step)
-	for step in this_tick:
+			_steps_this_tick.append(step)
+	for step in _steps_this_tick:
 		if not step.running:
 			continue # an earlier step stopped it this tick
 		# Claude 2026-11-16: let go, it ends before its tick, with "released", and its next steps start as if it were done.
@@ -338,7 +345,8 @@ func run_steps(dt: float) -> void:
 		var status := step.tick(dt)
 		if step.counts_this_tick():
 			step.step_ticks += ticks_elapsed() # Claude 2026-11-16 (pawn spec 8.21): was 1
-		if status == AbilityStep.Status.RUNNING and step.length() > 0 and step.step_ticks >= step.length():
+		var length := step.length() # asked once: it converts for the tick rate each time
+		if status == AbilityStep.Status.RUNNING and length > 0 and step.step_ticks >= length:
 			status = AbilityStep.Status.DONE
 		if status == AbilityStep.Status.DONE:
 			stop_step(step, "done")
@@ -438,3 +446,10 @@ func every_tick(_dt: float) -> void:
 ## would still change something with the pawn standing still. Jump answers false until its time off the ground is back to 0.
 func can_sleep() -> bool:
 	return true
+
+
+## Claude 2026-11-16 (wider audit): true if the pawn may sleep while this ability runs (pawn spec 15.3). Its timer and tick() then
+## wait with the pawn, so only an ability that does nothing while it waits answers true: Death, while Health is 0. Asked every
+## tick the pawn could otherwise sleep, so keep it cheap.
+func can_sleep_while_running() -> bool:
+	return false

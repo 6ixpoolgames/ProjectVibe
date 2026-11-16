@@ -10,11 +10,9 @@
 ##   C  x 12 .. 20,    top at -2      a 0.8 m step up to
 ##   D  x 20 .. 28,    top at -1.2
 ## So: jumps both ways between A and B, a drop from B to C and no way back up, a jump up from C to D and a drop back down.
-extends Node
+extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const AREA := AABB(Vector3(-30, -10, -10), Vector3(70, 20, 20))
-
-var _failures := 0
 
 
 ## The course's boxes, as [lowest corner, highest corner] pairs. Shared with navigation_manager_selftest, which adds collision.
@@ -184,9 +182,3 @@ func _settle() -> void:
 			return
 		OS.delay_msec(2)
 	_check(false, "nav became idle within the time limit")
-
-
-func _check(passed: bool, what: String) -> void:
-	print("  %s %s" % ["ok  " if passed else "FAIL", what])
-	if not passed:
-		_failures += 1

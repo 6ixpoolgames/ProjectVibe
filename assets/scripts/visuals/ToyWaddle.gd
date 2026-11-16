@@ -15,6 +15,9 @@
 ##
 ## The model: toy_scene is instanced as a child at toy_scale (turned round if turn_model_round is on). If it has an AnimationPlayer,
 ## the first frame of pose_animation holds the model in a still pose for the waddle to move.
+## Claude 2026-11-16 (with the owner's call not to track the sword on a server): with no display (a headless server or test), the figure
+## isn't built and its per-frame waddle never runs, since nothing can see it (RunEnvironment.runs_visuals). A host playing in a window
+## still draws it.
 class_name ToyWaddle
 extends Node3D
 
@@ -78,6 +81,10 @@ var _fall := 0.0 # radians, toward the pawn's right side
 
 
 func _ready() -> void:
+	# Claude 2026-11-16: nothing to draw on, so nothing to build or move (see the top of the file).
+	if not RunEnvironment.runs_visuals():
+		set_process(false)
+		return
 	_pawn = _find_pawn()
 	if toy_scene:
 		_toy = toy_scene.instantiate() as Node3D
@@ -109,7 +116,7 @@ func _bind() -> void:
 func _process(delta: float) -> void:
 	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	_animate(delta)
-	PerfScopes.end(&"visuals.waddle", started)
+	PerfScopes.end(&"animation.waddle", started) # Claude 2026-11-16: was visuals.waddle, now in diagnostics' animation category
 
 
 # Claude 2026-11-16: the work itself, timed by _process.

@@ -21,6 +21,8 @@
 ## Visual only: it runs once per rendered frame, only reads the pawn, and changes nothing the game simulates. The swing's progress
 ## comes from the ability's timer, which rolls back and reaches clients in snapshots, so a client sees other pawns' swings too, and
 ## the tick driver's interpolation fraction makes it smooth between ticks.
+## Claude 2026-11-16 (the owner's call: don't track the sword on a server): with no display (a headless server or test), it builds
+## nothing and never runs, since nothing can see it (RunEnvironment.runs_visuals). A host playing in a window still draws it.
 class_name FloatingSword
 extends Node3D
 
@@ -80,6 +82,10 @@ var _idle_seconds := 0.0
 
 
 func _ready() -> void:
+	# Claude 2026-11-16: nothing to draw on, so nothing to build or move (see the top of the file).
+	if not RunEnvironment.runs_visuals():
+		set_process(false)
+		return
 	top_level = true # placed in world space each frame, whatever its parents do
 	_pawn = _find_pawn()
 	if sword_scene:
@@ -101,6 +107,7 @@ func _bind() -> void:
 				_swings.append(ability)
 			elif ability is ParryAbility: # Claude 2026-11-15
 				_parries.append(ability)
+	_read_pawn()
 	global_transform = _target(_facing())
 	_shown_key = _shown()
 
@@ -108,7 +115,7 @@ func _bind() -> void:
 func _process(delta: float) -> void:
 	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
 	_animate(delta)
-	PerfScopes.end(&"visuals.sword", started)
+	PerfScopes.end(&"animation.sword", started) # Claude 2026-11-16: was visuals.sword, now in diagnostics' animation category
 
 
 # Claude 2026-11-16: the work itself, timed by _process.
@@ -117,6 +124,7 @@ func _animate(delta: float) -> void:
 		return
 	if not _bound:
 		_bind()
+	_read_pawn()
 	_bob_phase = fmod(_bob_phase + delta * bob_rate * TAU, TAU)
 	_update_rest_side(delta, _facing())
 	var target := _target(_facing())
@@ -132,34 +140,32 @@ func _animate(delta: float) -> void:
 
 # What it's showing: 1 dead, the running swing's instance id, or 0 hovering. A change starts a short glide (settle_seconds).
 func _shown() -> int:
-	if _pawn.is_dead():
+	if _dead_now:
 		return 1
-	var parry := _running_parry() # Claude 2026-11-15
-	if parry:
-		return parry.get_instance_id()
-	var swing := _running_swing()
-	return swing.get_instance_id() if swing else 0
+	if _parry_now: # Claude 2026-11-15
+		return _parry_now.get_instance_id()
+	return _swing_now.get_instance_id() if _swing_now else 0
 
 
 ## Where the sword should be this frame, in world space: hovering, swinging or lying on the ground.
 func _target(facing: float) -> Transform3D:
 	var feet := _visual.global_position
 	var right := Vector3(cos(facing), 0.0, -sin(facing))
-	if _pawn.is_dead():
+	if _dead_now:
 		# Flat on the ground at its right, blade pointing forward.
 		var forward := Vector3(-sin(facing), 0.0, -cos(facing))
 		return Transform3D(_blade_basis(forward, Vector3.UP), feet + right * hover_side + Vector3(0.0, 0.05, 0.0))
 	var hover := _hover(feet, right)
 	# Claude 2026-11-15: guarding during a parry: in front of the chest, blade flat across the pawn, edge facing out.
-	if _running_parry():
+	if _parry_now:
 		var ahead := Vector3(-sin(facing), 0.0, -cos(facing))
 		return Transform3D(_blade_basis(right, ahead), feet + ahead * guard_forward + Vector3(0.0, guard_height, 0.0) - right * 0.5)
-	var swing := _running_swing()
+	var swing := _swing_now
 	if swing == null:
 		return hover
 	# Claude 2026-11-16 (pawn spec 8.20): where the swing is comes from its steps (swing_phase), not from counting ticks since it started,
 	# since a windup can wait for its turn. The progress is smooth between ticks.
-	var phase := swing.swing_phase()
+	var phase := _phase_now
 	match phase.phase:
 		"windup":
 			return hover.interpolate_with(_swing_pose(swing, feet, facing, -windup_pull_back), _ease_out(phase.progress))
@@ -184,10 +190,10 @@ func _hover(feet: Vector3, right: Vector3) -> Transform3D:
 # Claude 2026-11-12: which side it rests on. Once a swing's hit is over, the side its sweep ended on; with no swing for
 # return_seconds, the right again, moving round the front over side_change_seconds.
 func _update_rest_side(delta: float, facing: float) -> void:
-	var swing := _running_swing()
+	var swing := _swing_now
 	if swing:
 		_idle_seconds = 0.0
-		if swing.swing_phase().phase == "recovery": # Claude 2026-11-16: was counting ticks since it started
+		if _phase_now.phase == "recovery": # Claude 2026-11-16: was counting ticks since it started
 			var right := Vector3(cos(facing), 0.0, -sin(facing))
 			var end := swing.hit_offset_at(1.0, facing)
 			end.y = 0.0
@@ -224,6 +230,20 @@ func _blade_basis(blade: Vector3, edge_toward: Vector3) -> Basis:
 	x = x.normalized()
 	var z := x.cross(y)
 	return Basis(x, y, z)
+
+
+# Claude 2026-11-16 (wider audit): what the pawn is doing this frame, read once at the top of _animate and used by everything below.
+# Each of these was asked for two or three times a frame, and swing_phase() makes a new Dictionary each time.
+var _dead_now := false
+var _parry_now: ParryAbility = null
+var _swing_now: MeleeAttackAbility = null
+var _phase_now: Dictionary = {}
+
+func _read_pawn() -> void:
+	_dead_now = _pawn.is_dead()
+	_parry_now = _running_parry()
+	_swing_now = _running_swing()
+	_phase_now = _swing_now.swing_phase() if _swing_now else {}
 
 
 # The running swing, or null. Only one can run at a time: each locks out the others.

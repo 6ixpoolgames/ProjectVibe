@@ -20,3 +20,8 @@ extends EffectPart
 
 func is_held() -> bool:
 	return true
+
+
+# Claude 2026-11-16 (wider audit): its share of the pawn's totals (the EffectManager did this sum itself, by class).
+func add_held(totals: EffectHeldTotals, stacks: int) -> void:
+	totals.change_stat(stat, add, multiply, stacks)
