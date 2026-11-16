@@ -71,6 +71,10 @@ func pawn_added(pawn: Pawn, id: int) -> void:
 		_connect(connections, pawn.ability_manager.hit_received, func(hit: HitInfo) -> void:
 			add_event("hit", id, {"attacker": recorder.get_replay_id(hit.attacker) if recorder else 0, "ability": _name_of(hit.ability),
 				"damage": hit.damage_dealt}))
+		# Claude 2026-11-17 (pawn spec 8.23): a hit a HitInterceptor stopped (a parry), with who sent it and what stopped it
+		_connect(connections, pawn.ability_manager.hit_intercepted, func(hit: HitInfo, interceptor: HitInterceptor) -> void:
+			add_event("hit_intercepted", id, {"by": recorder.get_replay_id(hit.attacker) if recorder and is_instance_valid(hit.attacker) else 0,
+				"interceptor": _name_of(interceptor)}))
 		_connect(connections, pawn.ability_manager.died, func(_who: Pawn, hit: HitInfo) -> void:
 			add_event("died", id, {"killer": recorder.get_replay_id(hit.attacker) if recorder and hit else 0}))
 		_connect(connections, pawn.ability_manager.ability_started, func(ability: AbilityBase) -> void:

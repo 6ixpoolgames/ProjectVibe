@@ -74,12 +74,8 @@ enum Kind { LOCOMOTION, ACTION }
 ## weaker one is locked out, as before. 100: nothing in t0 can cancel it. MeleeAttack uses 15, so Dash cancels a swing and Sprint
 ## doesn't. An action meant to be cancelled by sprinting (a reload, say) uses 10 or less; by just moving, 0.
 @export var interrupt_threshold := 100
-## Claude 2026-11-10: on: while this runs, hits don't land on the pawn: no damage, no knockback, nothing (invulnerability frames).
-## Dash has it, the owner's call. It's read from the running timer, which rolls back, so a replay agrees about what was dodged.
-@export var invulnerable_while_running := false
-## Claude 2026-11-10: with invulnerable_while_running on, how long it lasts from the start of the run, in seconds. 0: the whole run.
-## Dash uses 0.18 (the owner's call), so the end of its slow-down can be hit.
-@export_range(0.0, 10.0, 0.01, "or_greater") var invulnerable_seconds := 0.0
+# Claude 2026-11-17 (pawn spec 8.23): invulnerable_while_running and invulnerable_seconds are gone: an InvulnerabilityInterceptor child
+# does that now (HitInterceptor), and Dash makes one by default.
 ## Claude 2026-11-10: categories that can always cancel this while it runs, whatever the interrupt numbers say, such as
 ## &"movement.jump" for an ability a jump should cut short. Empty (the default): only the numbers decide. For the exceptions a single
 ## ladder of numbers can't express. A category covers its children, as in locks_out.
@@ -143,10 +139,10 @@ var trigger_bit := 0
 var on_start_effects: Array[Effect] = []
 var on_hit_effects: Array[Effect] = []
 var on_hit_self_effects: Array[Effect] = []
-## Claude 2026-11-15: from EffectApplier children with ON_PARRY: what a parried attacker gets (on_parry_effects), and what this
-## ability's own pawn gets (on_parry_self_effects). Only ParryAbility uses them.
-var on_parry_effects: Array[Effect] = []
-var on_parry_self_effects: Array[Effect] = []
+# Claude 2026-11-17 (pawn spec 8.23): on_parry_effects and on_parry_self_effects are gone: a HitInterceptor keeps its own
+# (on_intercept_effects), from its ON_INTERCEPT EffectApplier children.
+## Claude 2026-11-17 (pawn spec 8.23): its HitInterceptors, under it or under its steps, found by the AbilityManager. Empty: none.
+var interceptors: Array[HitInterceptor] = []
 ## Claude 2026-11-16 (pawn spec 8.20): its AbilityStep children, in tree order, found by collect_steps(). Empty: no steps.
 var steps: Array[AbilityStep] = []
 ## Claude 2026-11-16: its steps' state, one number per step: 0 while it isn't running, its step_ticks + 1 while it is. Rolled back as
@@ -280,12 +276,11 @@ func current_interrupt_threshold() -> int:
 	return strictest if strictest >= 0 else interrupt_threshold
 
 
-## True while one of its running steps has invulnerable on.
-func has_invulnerable_step() -> bool:
-	for step in steps:
-		if step.running and step.invulnerable:
-			return true
-	return false
+## Claude 2026-11-17 (pawn spec 8.23): the AbilityManager calls this when the ability has no HitInterceptor of its own, so it can make
+## the ones it should have by default (Dash its invulnerability, Parry its front guard), as MeleeAttack makes its default steps.
+## Nothing by default. has_invulnerable_step() went with the step's invulnerable flag.
+func make_default_interceptors() -> void:
+	pass
 
 
 ## The AbilityManager calls this once, with its abilities: finds the AbilityStep children and what each starts when it's done.

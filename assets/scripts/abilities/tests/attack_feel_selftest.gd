@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-10: headless self-test for the attack game feel pass (the owner's request): the swing's
 ## hit sphere sweeps across an arc, right to left (or left to right), so it hits to the side where a sphere held still doesn't; the
 ## swing turns toward where the pawn looks during its windup; a hit lifts the target in a small hop, but not one already in the air;
-## and invulnerability: a pawn whose running ability has invulnerable_while_running isn't hit by a swing, and a dashing pawn takes no
+## and invulnerability: a pawn whose running ability has an InvulnerabilityInterceptor isn't hit by a swing, and a dashing pawn takes no
 ## hit at all.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/attack_feel_selftest.tscn"
@@ -19,7 +19,10 @@ class Shield extends AbilityBase:
 		trigger_action = &"secondary"
 		category = &"utility.interact"
 		duration = 2.0
-		invulnerable_while_running = true
+		# Claude 2026-11-17 (pawn spec 8.23): invulnerable while it runs, through an interceptor (was invulnerable_while_running)
+		var dodge := InvulnerabilityInterceptor.new()
+		dodge.name = "Invulnerable"
+		add_child(dodge)
 
 
 func _ready() -> void:
@@ -204,7 +207,7 @@ func _test_invulnerable() -> void:
 	await _ticks(5)
 	_ai(target).press(&"secondary")
 	await _ticks(2)
-	_check(shield.is_running_timed() and target.ability_manager.is_invulnerable(), "an ability with invulnerable_while_running makes its pawn invulnerable while it runs")
+	_check(shield.is_running_timed() and target.ability_manager.is_invulnerable(), "an ability with an InvulnerabilityInterceptor makes its pawn invulnerable while it runs")
 	await _swing(attacker, origin + Vector3(0, 1, -10))
 	_check(hits.is_empty() and target.stat_manager.get_health() == 100.0, "a swing doesn't hit an invulnerable pawn (HP %d)" % int(target.stat_manager.get_health()))
 	attacker.free()

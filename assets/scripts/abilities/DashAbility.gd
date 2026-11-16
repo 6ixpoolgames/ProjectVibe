@@ -22,7 +22,7 @@
 ## Direction: the way the movement input points; only with no input, the way the pawn faces. The pawn turns to face the dash.
 ##
 ## Interrupts and invulnerability (the owner's calls): interrupt_priority 40, so it cancels a swing (15), a knockback (35) and a jump.
-## It's invulnerable for its first invulnerable_seconds (0.18 s): hits don't land at all. After that, a hit lands and its knockback
+## It's invulnerable for its first 0.18 s (its InvulnerabilityInterceptor; Claude 2026-11-17, pawn spec 8.23): hits don't land at all. After that, a hit lands and its knockback
 ## (30) cancels the rest of the dash, through interrupt_threshold 25.
 ##
 ## Rollback: its direction is rollback state, with its timer and cooldown, so a corrected replay dashes the same way. Where it is in
@@ -63,9 +63,17 @@ func _init() -> void:
 	interrupt_priority = 40 # Claude 2026-11-10: was 20; above knockback's threshold (35)
 	# Claude 2026-11-10: 25 again (it was 40 for a few hours): a knockback (30) cancels it, once its invulnerability is over.
 	interrupt_threshold = 25
-	invulnerable_while_running = true # Claude 2026-11-10
-	invulnerable_seconds = 0.18 # Claude 2026-11-10, the owner's call
+	# Claude 2026-11-17 (pawn spec 8.23): its invulnerability is an InvulnerabilityInterceptor now; see make_default_interceptors.
 	pauses_locomotion = true # Claude 2026-11-10: Walk would otherwise slow the pawn as well
+
+
+## Claude 2026-11-17 (pawn spec 8.23): with no interceptor of its own, a Dash is invulnerable for its first 0.18 s (the owner's call,
+## 2026-11-10), so the end of its slow-down can be hit. Give it an InvulnerabilityInterceptor child to change that.
+func make_default_interceptors() -> void:
+	var dodge := InvulnerabilityInterceptor.new()
+	dodge.name = "Invulnerable"
+	dodge.active_seconds = 0.18
+	add_child(dodge)
 
 
 func get_rollback_properties() -> Array[String]:

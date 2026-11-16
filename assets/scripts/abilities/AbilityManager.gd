@@ -50,6 +50,10 @@ extends Node
 # doesn't also tick them. Only used inside that function; kept here so it isn't made anew every tick.
 var _started_later: Array[AbilityBase] = []
 
+## Claude 2026-11-17 (pawn spec 8.23): a HitInterceptor stopped a hit, on the server, after its response went out. For debug drawing,
+## the replay and game rules (it replaces ParryAbility.parried).
+signal hit_intercepted(hit: HitInfo, interceptor: HitInterceptor)
+
 signal ability_started(ability: AbilityBase)
 signal ability_finished(ability: AbilityBase)
 ## Claude 2026-11-09: sent when an ability is cancelled by another starting, after ability_finished for it.
@@ -73,9 +77,11 @@ signal hit_received(hit: HitInfo)
 signal died(pawn: Pawn, hit: HitInfo)
 
 # Claude 2026-11-10: _any_jitter is gone: a press always compares the abilities on its action now, since effects can boost them.
-var _invulnerable_abilities: Array[AbilityBase] = [] # Claude 2026-11-10: those with invulnerable_while_running, usually just Dash
+# Claude 2026-11-17 (pawn spec 8.23): every ability's HitInterceptors, by stage, highest priority first. _invulnerable_abilities and
+# _parry_abilities went with the special cases they served.
+var _miss_interceptors: Array[HitInterceptor] = []
+var _turn_away_interceptors: Array[HitInterceptor] = []
 var _full_movement_abilities: Array[AbilityBase] = [] # Claude 2026-11-16 (pawn spec 8.22): those with needs_full_movement
-var _parry_abilities: Array[AbilityBase] = [] # Claude 2026-11-15: ParryAbility nodes, asked about each hit (parry_hit)
 var _locomotion_pausers: Array[AbilityBase] = [] # Claude 2026-11-10: those with pauses_locomotion, usually just Dash
 var _stepped: Array[AbilityBase] = [] # Claude 2026-11-16 (pawn spec 8.20): abilities built from steps
 
@@ -235,26 +241,26 @@ func start_ability(ability: AbilityBase) -> bool:
 	return true
 
 
-## Claude 2026-11-15: true if a running ParryAbility turns this hit away (from the front, while it runs). It has then already sent the
-## attacker the parry's effects. Pawn asks this for every hit, on the server, before the hit's effects land.
-func parry_hit(hit: HitInfo) -> bool:
-	for ability in _parry_abilities:
-		if (ability as ParryAbility).try_parry(hit):
-			return true
-	return false
+## Claude 2026-11-17 (pawn spec 8.23): the first active TURN_AWAY HitInterceptor that stops this hit, or null. It has already sent its
+## response (HitInterceptor.respond) and hit_intercepted has gone out. Replaces parry_hit(). A reply to an interception isn't
+## turned away.
+func intercept_hit(hit: HitInfo) -> HitInterceptor:
+	if hit.from_interception:
+		return null
+	for interceptor in _turn_away_interceptors:
+		if interceptor.is_active() and interceptor.intercept(hit) == HitInterceptor.Result.STOP:
+			interceptor.respond(hit)
+			hit_intercepted.emit(hit, interceptor)
+			return interceptor
+	return null
 
 
-## Claude 2026-11-10: true while an ability with invulnerable_while_running runs, such as a Dash: hits don't land (Pawn.is_invulnerable).
-## Claude 2026-11-10: only for its first invulnerable_seconds, when that's above 0.
+## True while no hit can reach the pawn: an InvulnerabilityInterceptor (any MISS-stage HitInterceptor) is on, such as a Dash's for its
+## first 0.18 s. Harmful effects are refused then too (EffectManager), and a swing's sweep doesn't mark the pawn (MeleeSweepStep).
+## Claude 2026-11-17 (pawn spec 8.23): asked of the interceptors; it was invulnerable_while_running and the step's invulnerable flag.
 func is_invulnerable() -> bool:
-	# Claude 2026-11-16 (pawn spec 8.20): or a running step with invulnerable on.
-	for ability in _stepped:
-		if ability.is_running_timed() and ability.has_invulnerable_step():
-			return true
-	for ability in _invulnerable_abilities:
-		if not ability.is_running_timed():
-			continue
-		if ability.invulnerable_seconds <= 0.0 or ability.ticks_running() < ticks_for(ability.invulnerable_seconds):
+	for interceptor in _miss_interceptors:
+		if interceptor.is_active():
 			return true
 	return false
 
@@ -680,7 +686,8 @@ func _finish(ability: AbilityBase) -> void:
 
 ## Something hit this pawn. Called on the server by the attacking ability, such as MeleeAttack. In order:
 ##   1. hit_arrived goes out, and the AI notes the hit (its AIContextComponent listens), for the "being hit" state rules.
-##   2. A running parry can turn it away from the front (ParryAbility): no effects land, and the attacker is pushed back instead.
+##   2. An active HitInterceptor can turn it away (a parry, from the front): no effects land, and its response goes out instead
+##      (Claude 2026-11-17, pawn spec 8.23). An invulnerable pawn (a MISS interceptor) never gets as far as step 1.
 ##   3. Its EffectManager applies the hit's effects: damage (a StatChangePart; at 0 Health the Death ability starts and died goes
 ##      out), the push (a KnockbackPart starting Knockback here), and threat for the Health taken.
 ##   4. hit_received goes out, and the attacker gets the hit's attacker_effects.
@@ -718,8 +725,8 @@ func _take_hit(hit: HitInfo) -> void:
 	if not pawn.is_authority() or pawn.is_dead() or is_invulnerable():
 		return
 	hit_arrived.emit(hit)
-	# Claude 2026-11-15: a running parry turns away a hit from the front (ParryAbility). The AI above still notes it was attacked.
-	if parry_hit(hit):
+	# Claude 2026-11-17 (pawn spec 8.23): an active interceptor can turn it away (was parry_hit). The AI above still notes it was attacked.
+	if intercept_hit(hit):
 		return
 	if pawn.effect_manager:
 		pawn.effect_manager.take_hit(hit)
@@ -782,6 +789,8 @@ static func _deliver_queued_hits(_dt: float, _tick: int) -> void:
 
 func _collect_abilities() -> void:
 	_abilities.clear()
+	_miss_interceptors.clear() # Claude 2026-11-17 (pawn spec 8.23): filled as each ability is collected below
+	_turn_away_interceptors.clear()
 	for child in get_children():
 		if child is AbilityBase:
 			child.manager = self
@@ -792,6 +801,7 @@ func _collect_abilities() -> void:
 			child.cancelled_by_mask = TagRegistry.mask_of_list(child.cancelled_by) # Claude 2026-11-10
 			_collect_effects(child) # Claude 2026-11-10
 			child.collect_steps() # Claude 2026-11-16 (pawn spec 8.20)
+			_collect_interceptors(child) # Claude 2026-11-17 (pawn spec 8.23): after its steps, which can hold them too
 			_abilities.append(child)
 	# GDScript note: sort_custom keeps this rule; abilities with equal priority keep their tree order because each has a distinct index.
 	# Claude 2026-11-09: highest priority first (it was lowest first).
@@ -799,21 +809,15 @@ func _collect_abilities() -> void:
 		return a.priority > b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
 	_death = null # Claude 2026-11-16 (pawn M3)
 	_knockback = null
-	_invulnerable_abilities.clear() # Claude 2026-11-10
 	_full_movement_abilities.clear() # Claude 2026-11-16
-	_parry_abilities.clear() # Claude 2026-11-15
 	_locomotion_pausers.clear() # Claude 2026-11-10
 	_stepped.clear() # Claude 2026-11-16
 	for ability in _abilities:
 		ability.jitter_salt = hash(String(ability.name))
 		if ability.is_stepped():
 			_stepped.append(ability)
-		if ability.invulnerable_while_running:
-			_invulnerable_abilities.append(ability)
 		if ability.needs_full_movement: # Claude 2026-11-16 (pawn spec 8.22)
 			_full_movement_abilities.append(ability)
-		if ability is ParryAbility: # Claude 2026-11-15
-			_parry_abilities.append(ability)
 		if ability is DeathAbility and _death == null: # Claude 2026-11-16 (pawn M3)
 			_death = ability
 		if ability is KnockbackAbility and _knockback == null: # Claude 2026-11-16 (wider audit)
@@ -846,8 +850,6 @@ func _collect_effects(ability: AbilityBase) -> void:
 	ability.on_start_effects.clear()
 	ability.on_hit_effects.clear()
 	ability.on_hit_self_effects.clear()
-	ability.on_parry_effects.clear() # Claude 2026-11-15
-	ability.on_parry_self_effects.clear()
 	for child in ability.get_children():
 		var applier := child as EffectApplier
 		if applier == null:
@@ -858,15 +860,57 @@ func _collect_effects(ability: AbilityBase) -> void:
 			effect.register()
 			if applier.trigger == EffectApplier.Trigger.ON_START:
 				ability.on_start_effects.append(effect)
-			elif applier.trigger == EffectApplier.Trigger.ON_PARRY: # Claude 2026-11-15
-				if applier.applies_to == EffectApplier.AppliesTo.SELF:
-					ability.on_parry_self_effects.append(effect)
-				else:
-					ability.on_parry_effects.append(effect)
+			elif applier.trigger == EffectApplier.Trigger.ON_INTERCEPT:
+				# Claude 2026-11-17 (pawn spec 8.23): these belong under a HitInterceptor, which collects its own
+				push_warning("AbilityManager: %s has an ON_INTERCEPT EffectApplier directly under it; put it under one of its HitInterceptors." % ability.name)
 			elif applier.applies_to == EffectApplier.AppliesTo.SELF:
 				ability.on_hit_self_effects.append(effect)
 			else:
 				ability.on_hit_effects.append(effect)
+
+
+# Claude 2026-11-17 (pawn spec 8.23): an ability's HitInterceptors, under it and under its steps (making its defaults first if it has
+# none), each told its ability, step and pawn, with its ON_INTERCEPT effects; and into the manager's two lists, highest priority
+# first, tree order between equals. GDScript note: sort_custom isn't stable, so the order they were found in is kept as a tie-break.
+func _collect_interceptors(ability: AbilityBase) -> void:
+	var found: Array[HitInterceptor] = []
+	_find_interceptors(ability, null, ability, found)
+	if found.is_empty():
+		ability.make_default_interceptors()
+		_find_interceptors(ability, null, ability, found)
+	ability.interceptors = found
+	for interceptor in found:
+		interceptor.ability = ability
+		interceptor.pawn = pawn
+		interceptor.on_intercept_effects.clear()
+		interceptor.on_intercept_self_effects.clear()
+		for child in interceptor.get_children():
+			var applier := child as EffectApplier
+			if applier == null or applier.trigger != EffectApplier.Trigger.ON_INTERCEPT:
+				continue
+			for effect in applier.effects:
+				if effect:
+					effect.register()
+					if applier.applies_to == EffectApplier.AppliesTo.SELF:
+						interceptor.on_intercept_self_effects.append(effect)
+					else:
+						interceptor.on_intercept_effects.append(effect)
+		var into := _miss_interceptors if interceptor.stage == HitInterceptor.Stage.MISS else _turn_away_interceptors
+		interceptor.set_meta(&"found_order", into.size())
+		into.append(interceptor)
+	for list: Array[HitInterceptor] in [_miss_interceptors, _turn_away_interceptors]:
+		list.sort_custom(func(a: HitInterceptor, b: HitInterceptor) -> bool:
+			return a.priority > b.priority or (a.priority == b.priority and int(a.get_meta(&"found_order")) < int(b.get_meta(&"found_order"))))
+
+
+# The interceptors directly under node (an ability, or one of its steps), and under its steps.
+func _find_interceptors(node: Node, step: AbilityStep, ability: AbilityBase, found: Array[HitInterceptor]) -> void:
+	for child in node.get_children():
+		if child is HitInterceptor:
+			child.step = step
+			found.append(child)
+		elif child is AbilityStep and node == ability:
+			_find_interceptors(child, child, ability, found)
 
 
 ## Tells the pawn's TickStateComponent which ability properties roll back, before the first tick is recorded.

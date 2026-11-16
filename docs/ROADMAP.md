@@ -20,7 +20,7 @@ Owner's decisions, 2026-11-16:
    - a TurnToFace step that uses a TurnSpeed stat, with a default in each ability
    - combo follow-ups gated by a tag the basic attack's timed effect switches on
    - a slightly longer basic attack cooldown
-   - hit interceptors replacing the parry and dash special cases (pawn spec 14, "Shortcuts to redo")
+   - hit interceptors replacing the parry and dash special cases (pawn spec 14, "Shortcuts to redo") *(built 2026-11-17, pawn spec 8.23; state tags wait for the stats and mechanics pass)*
 2. **Slimming the pawn** (M1 to M6). The pawn keeps the body and its tick order, its part references and its general flags:
    - **M1** *(built 2026-11-16)*: a TeamRegistry module; the sleeping and frozen renames; the AI's ordered step moved into AIContextComponent. Each part cleaning up on `died` itself moved to M3, which moves the signal
    - **M2** *(built 2026-11-16)*: a `keeps_world_loaded` flag on the pawn, with distances from the GameMode (`PawnDefaultsRes`), and the chunk streamer, nav feeder and replay reading pawns through the source contract

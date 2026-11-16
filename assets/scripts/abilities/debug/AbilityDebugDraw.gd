@@ -72,9 +72,7 @@ func watch(pawn: Pawn) -> void:
 				ability.hit_landed.connect(_on_hit_landed)
 				ability.hit_area_moved.connect(_on_hit_area_moved) # Claude 2026-11-10
 		elif ability is ParryAbility: # Claude 2026-11-15
-			if not _parries.has(ability):
-				_parries[ability] = true
-				ability.parried.connect(_on_parried)
+			_parries[ability] = true
 		elif ability is DashAbility:
 			var already := false
 			for pair in _dashes:
@@ -85,6 +83,9 @@ func watch(pawn: Pawn) -> void:
 	# Claude 2026-11-15: a parry's shield is drawn when it starts. GDScript note: bind() adds the pawn as the last argument.
 	if not _parries.is_empty() and not pawn.ability_manager.ability_started.is_connected(_on_ability_started):
 		pawn.ability_manager.ability_started.connect(_on_ability_started.bind(pawn))
+	# Claude 2026-11-17 (pawn spec 8.23): any interceptor stopping a hit flashes over the attacker (was ParryAbility.parried)
+	if not pawn.ability_manager.hit_intercepted.is_connected(_on_hit_intercepted):
+		pawn.ability_manager.hit_intercepted.connect(_on_hit_intercepted)
 
 
 func _physics_process(_delta: float) -> void:
@@ -188,7 +189,10 @@ func _on_ability_started(ability: AbilityBase, pawn: Pawn) -> void:
 	if visual == null:
 		return
 	var holder: Node3D = visual.get_node_or_null("Model") if visual.has_node("Model") else visual
-	var shape := _add_shape("ParryShield", _shield_mesh(parry.front_degrees), parry_colour, maxf(parry.duration, 0.05))
+	var guard := parry.guard() # Claude 2026-11-17 (pawn spec 8.23): the front's width is its interceptor's
+	if guard == null:
+		return
+	var shape := _add_shape("ParryShield", _shield_mesh(guard.front_degrees_now()), parry_colour, maxf(parry.duration, 0.05))
 	# GDScript note: reparent() moves a node to a new parent; keep_global_transform false puts it at the new parent's origin.
 	shape.reparent(holder, false)
 	shape.top_level = false
@@ -196,8 +200,9 @@ func _on_ability_started(ability: AbilityBase, pawn: Pawn) -> void:
 	shape.rotation = Vector3.ZERO
 
 
-# Claude 2026-11-15: a hit was parried: a flash on the attacker, with a label, in the world where it was.
-func _on_parried(hit: HitInfo) -> void:
+# Claude 2026-11-15: a hit was parried: a flash on the attacker, with a label, in the world where it was. Claude 2026-11-17 (pawn spec
+# 8.23): any interceptor's, labelled with its debug_label (PARRIED for a parry).
+func _on_hit_intercepted(hit: HitInfo, interceptor: HitInterceptor) -> void:
 	if not visible or hit == null or not is_instance_valid(hit.attacker):
 		return
 	var flash := _add_shape("ParryFlash", _sphere_mesh, parry_flash_colour, parry_flash_seconds)
@@ -205,7 +210,7 @@ func _on_parried(hit: HitInfo) -> void:
 	flash.scale = Vector3.ONE * 0.9
 	var label := Label3D.new()
 	label.name = "Hits" # faded with its shape in _process, like a swing's hit labels
-	label.text = "PARRIED"
+	label.text = interceptor.debug_label
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
 	label.font_size = 48

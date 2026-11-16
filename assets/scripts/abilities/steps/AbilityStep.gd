@@ -51,8 +51,7 @@ enum Status {
 ## While it runs, how strong a starting ability (or a hit's knockback) must be to cancel its ability. -1: the ability's own
 ## interrupt_threshold. With several steps running, the strictest counts.
 @export var interrupt_threshold := -1
-## On: hits don't land on the pawn while it runs (invulnerability frames).
-@export var invulnerable := false
+# Claude 2026-11-17 (pawn spec 8.23): invulnerable is gone: an InvulnerabilityInterceptor child of the step does that now.
 ## Claude 2026-11-16: on: it ends as soon as its action is let go (reason "released"). See the top of the file.
 @export var ends_when_released := false
 ## Claude 2026-11-16: the action that must stay held. Empty: its ability's trigger_action. With neither, it's never released.

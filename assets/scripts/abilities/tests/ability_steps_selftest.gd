@@ -226,7 +226,9 @@ func _test_invulnerable_step() -> void:
 	attack.name = "StepAttack"
 	var shield := _step(attack, "Shield", log)
 	shield.length_ticks = 5
-	shield.invulnerable = true
+	var dodge := InvulnerabilityInterceptor.new() # Claude 2026-11-17 (pawn spec 8.23): was the step's invulnerable flag
+	dodge.name = "Invulnerable"
+	shield.add_child(dodge)
 	shield.starts_when_finished = [NodePath("../Open")]
 	var open := _step(attack, "Open", log)
 	open.length_ticks = 5
@@ -235,7 +237,7 @@ func _test_invulnerable_step() -> void:
 	await _ticks(10)
 	_ai(pawn).press(&"primary")
 	await _ticks(2)
-	_check(manager.is_invulnerable(), "a running step with invulnerable on makes the pawn invulnerable")
+	_check(manager.is_invulnerable(), "a running step with an InvulnerabilityInterceptor makes the pawn invulnerable")
 	await _ticks(6)
 	_check(open.running and not manager.is_invulnerable(), "and not once the next step runs")
 	pawn.free()

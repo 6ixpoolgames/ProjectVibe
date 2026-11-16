@@ -6,7 +6,7 @@
 ##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/parry_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
-# The faction samples' pawn: its abilities (faction_abilities.tscn) include Parry, with parry_knockback.tres on its ON_PARRY applier.
+# The faction samples' pawn: its abilities (faction_abilities.tscn) include Parry, with parry_knockback.tres on its ParryInterceptor's ON_INTERCEPT applier (Claude 2026-11-17, pawn spec 8.23).
 const PAWN_SCENE := "res://assets/scenes/samples/faction_player.tscn"
 const GOBLIN_SCENE := "res://assets/scenes/samples/faction_goblin.tscn" # with AI, including AIParryBehaviour
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
@@ -39,15 +39,16 @@ func _test_front_and_back() -> void:
 	var behind := _make_pawn(Vector3(0, 0.1, 1.5), 1)
 	await _ticks(10)
 	var parry := _parry_of(defender)
-	_check(parry != null and parry.trigger_action == &"parry" and parry.on_parry_effects.size() == 1, "the faction pawns have Parry, on the parry action, with its push-back effect")
+	_check(parry != null and parry.trigger_action == &"parry" and parry.guard() != null and parry.guard().on_intercept_effects.size() == 1,
+		"the faction pawns have Parry, on the parry action, with a ParryInterceptor carrying its push-back effect")
 	var parried := []
-	parry.parried.connect(func(hit: HitInfo) -> void: parried.append(hit))
+	defender.ability_manager.hit_intercepted.connect(func(hit: HitInfo, _by: HitInterceptor) -> void: parried.append(hit))
 	_check(defender.ability_manager.start_ability(parry), "it starts")
 	await _ticks(1)
 	var before := front.global_position.distance_to(defender.global_position)
 	defender.ability_manager.receive_hit(_hit(front, defender, 20))
 	var knockback: AbilityBase = front.ability_manager.get_node("Knockback")
-	_check(defender.stat_manager.get_health() == 100.0 and parried.size() == 1, "a hit from the front does nothing to it (Health %d), and parried goes out" % defender.stat_manager.get_health())
+	_check(defender.stat_manager.get_health() == 100.0 and parried.size() == 1, "a hit from the front does nothing to it (Health %d), and hit_intercepted goes out" % defender.stat_manager.get_health())
 	_check(knockback.is_running_timed(), "the attacker is knocked back")
 	await _ticks(10)
 	var after := front.global_position.distance_to(defender.global_position)
@@ -118,7 +119,7 @@ func _test_ai_parries(chance: float) -> void:
 	var attacker := _make_pawn(Vector3(40, 0.1, -1.4), 1)
 	await _ticks(10)
 	var parries := []
-	_parry_of(goblin).parried.connect(func(hit: HitInfo) -> void: parries.append(hit))
+	goblin.ability_manager.hit_intercepted.connect(func(hit: HitInfo, _by: HitInterceptor) -> void: parries.append(hit))
 	var swing: AbilityBase = attacker.ability_manager.get_node("MeleeAttack")
 	for i in 4:
 		attacker.global_position = Vector3(40, 0.1, -1.4)

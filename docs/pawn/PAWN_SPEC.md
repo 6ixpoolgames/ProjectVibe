@@ -1034,6 +1034,31 @@ The sweep and ray together are about 2.5 microseconds in any of these; the rest 
 
 **Next, with the C++ bundle:** the batch in C++, rays against `SightGeometry`'s copy of the ground, on the worker threads: the GDScript part (about 0.9 ms) should mostly go. Also there: swing hit checks through the pawn grid instead of physics shape queries.
 
+### 8.23 Hit interceptors *(Claude 2026-11-17, the owner's call: "leave space for stats and proceed as proposed"; built)*
+
+**Why.** The parry and the dash's invulnerability were built as special cases (section 14, "Shortcuts to redo"): the AbilityManager kept a list of `ParryAbility` nodes and asked them by type, every ability carried parry-only effect lists and invulnerability settings, and `EffectApplier` had a parry-only trigger. A shield block or armour would have needed the same again.
+
+**What it is.** A `HitInterceptor` (`abilities/interceptors/`) is a node a designer adds under an ability (on while it runs) or under one of its steps (on while the step runs), optionally only for its first `active_seconds`. It's the same idea as an active ability in Unreal's Ability System examining incoming damage, built the way `EffectApplier` is.
+
+| Stage | When it acts | Used for |
+|---|---|---|
+| `MISS` | the hit never reaches the pawn: no `hit_arrived` (the AI doesn't notice), a swing's sweep can catch the pawn later, and harmful effects are refused too. `AbilityManager.is_invulnerable()` asks these | invulnerability frames (`InvulnerabilityInterceptor`) |
+| `TURN_AWAY` | the hit arrives (`hit_arrived`, so the AI notices), then `intercept(hit)` returns `PASS` or `STOP` | a parry (`ParryInterceptor`, hits from within `front_degrees`), a block |
+
+**The hit path** (`AbilityManager._take_hit`, on the server): dead → nothing; an active MISS interceptor → nothing; `hit_arrived`; the active TURN_AWAY interceptors from the highest `priority` down (tree order between equals), the first to stop it ending it (`intercept_hit`); otherwise the hit's effects, `hit_received`, then the attacker's effects.
+
+**When one stops a hit:** its `respond()` sends the attacker a hit of its own carrying the interceptor's `ON_INTERCEPT` TARGET effects (the parry's push-back), and puts its SELF effects on its own pawn; then `hit_intercepted(hit, interceptor)` goes out on the manager (the debug drawing and the replay follow it). A reply (`HitInfo.from_interception`) can't be turned away, so two parrying pawns don't bounce hits.
+
+**Defaults, for designers:** a Dash with no interceptor of its own makes an `InvulnerabilityInterceptor` for its first 0.18 s; a Parry makes a `ParryInterceptor` with a 120-degree front (`make_default_interceptors`, as MeleeAttack makes its default steps). The faction samples' Parry has its own, with the push-back under it.
+
+**Removed:** `AbilityBase.invulnerable_while_running`, `invulnerable_seconds`, `on_parry_effects`, `on_parry_self_effects`, `has_invulnerable_step()`; `AbilityStep.invulnerable`; `AbilityManager.parry_hit()`; `ParryAbility.try_parry()`, `faces()` and `parried` (now `hit_intercepted`). `EffectApplier.ON_PARRY` is `ON_INTERCEPT`, with the same saved number.
+
+**Room for stats (the owner's call).** Every number an interceptor uses is read through one function (`window_ticks()`, `ParryInterceptor.front_degrees_now()`), so it can come from a stat in the stats pass. `intercept()` returns a `Result`, so a `REDUCE` result (part of the damage, for a block scaled by a stat) can join `PASS` and `STOP`.
+
+**Not yet:** state tags switching an interceptor on with no ability running (a shield buff, say) need a tag container on the pawn, which comes with the stats and mechanics pass; `is_active()` is the one place they'd go. Interceptors keep no state, so nothing new rolls back.
+
+**Test:** `abilities/tests/hit_interceptor_selftest`, with the parry, dash and invulnerable-step checks in `parry_selftest`, `attack_feel_selftest`, `ability_steps_selftest` and `effect_selftest` unchanged.
+
 ## 9. Stats (built 2026-11-07, step 5)
 
 - `StatManager` holds `Stat` nodes, in `assets/scripts/stats/`. One node per stat, named after it: MoveSpeed, JumpVelocity and so on.
@@ -1702,7 +1727,7 @@ Measured with `pawn_stress -- --sizes=100,400` and its new `--history=` and `--g
   - Cancel windows: an action cancellable only during some of its phases, such as recovery. Noted by the owner.
   - Invulnerability during a dash, combos, and hit effects shown on clients.
 - **Shortcuts to redo** *(Claude 2026-11-15)*. These work and are tested, but were built as special cases, and need a proper implementation pass later:
-  - **Parry** *(flagged by the owner 2026-11-15: hacky)*. `AbilityManager` keeps a list of `ParryAbility` nodes by type and asks them in `parry_hit()`; `AbilityBase` carries `on_parry_effects` and `on_parry_self_effects`, which every ability has; `EffectApplier` has an `ON_PARRY` trigger; `Pawn._take_hit` asks for parries by name. The proper version: hit interceptors, abilities that can inspect an incoming hit and change or stop it, switched on by state tags.
+  - **Parry** *(flagged by the owner 2026-11-15: hacky; Claude 2026-11-17: redone as hit interceptors, section 8.23)*. `AbilityManager` keeps a list of `ParryAbility` nodes by type and asks them in `parry_hit()`; `AbilityBase` carries `on_parry_effects` and `on_parry_self_effects`, which every ability has; `EffectApplier` has an `ON_PARRY` trigger; `Pawn._take_hit` asks for parries by name. The proper version: hit interceptors, abilities that can inspect an incoming hit and change or stop it, switched on by state tags.
 
 ---
 

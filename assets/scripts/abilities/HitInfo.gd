@@ -24,6 +24,9 @@ var effects: Array[Effect] = []
 var attacker_effects: Array[Effect] = []
 ## Claude 2026-11-10: filled in when the hit lands: how much Health it took, after resistances. 0 before then.
 var damage_dealt := 0.0
+## Claude 2026-11-17 (pawn spec 8.23): true for a hit a HitInterceptor sends back after stopping one (a parry's push-back). Such a hit
+## can't be turned away in its turn.
+var from_interception := false
 
 
 ## Claude 2026-11-10: how much Health this hit's effects take before resistances, from their StatChangeParts. For readouts that show a
