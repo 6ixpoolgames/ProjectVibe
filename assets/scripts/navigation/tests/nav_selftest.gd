@@ -59,6 +59,7 @@ func _initialize() -> void:
 	_test_searches_keep_their_own_endpoints(a, b)
 	_test_cut_short_path_says_so(a, b)
 	_test_refused_tile_keeps_the_old_one(a, b)
+	_test_remade_tile_builds_once() # Claude 2026-11-17 (C++ bundle stage 2)
 
 	# 4. Edit: close the gap. Only the chunks around it are resubmitted, with tight dirty bounds.
 	_gap_open = false
@@ -170,6 +171,30 @@ func _test_refused_tile_keeps_the_old_one(a: Vector3, b: Vector3) -> void:
 	_tick_until_idle()
 	_check(NavServer.get_stats().failed == 0, "the same tiles build fine next time")
 	_check(absf(_length(NavServer.find_path_now(a, b, 0)) - before) < 0.5, "paths are back to normal")
+
+
+# Claude 2026-11-17 (C++ bundle stage 2): the tile commit fix. A tile dropped while it was building and then made again starts a
+# new build. When the old build landed, it used to clear the "building" mark of the new one (TileManager::commit_finished), so
+# the tile started a third build and was built twice. Each remade tile should now be built exactly once.
+#
+# This depends on timing: the old build has to still be running when the tile is made again. The three ticks below take
+# microseconds and a build takes milliseconds, so it nearly always is; when it isn't, the test passes without testing anything,
+# but it never fails wrongly.
+func _test_remade_tile_builds_once() -> void:
+	var before: Dictionary = NavServer.get_stats()
+	# A small change near the middle: the tile or two there start building (the old builds).
+	_submit_chunk(Vector2i(0, 0), AABB(Vector3(4, -10, 4), Vector3(1, 20, 1)))
+	NavServer.tick(1.0 / 60.0)
+	# The interest goes far away: every tile is dropped while those builds still run.
+	NavServer.move_interest(1, Vector3(5000, 0, 5000))
+	NavServer.tick(1.0 / 60.0)
+	# And comes back: every tile is made again, and the nearest start their new builds while the old ones are still running.
+	NavServer.move_interest(1, Vector3.ZERO)
+	NavServer.tick(1.0 / 60.0)
+	_tick_until_idle()
+	var after: Dictionary = NavServer.get_stats()
+	var built: int = after.builds_committed - before.builds_committed
+	_check(built == after.tiles, "each remade tile was built once (%d builds for %d tiles)" % [built, after.tiles])
 
 
 func _height(wx: float, wz: float) -> float:

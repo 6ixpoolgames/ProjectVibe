@@ -67,21 +67,34 @@ static func melee_spheres(shooter: NetworkEntity, centres: Array[Vector3], radiu
 	return found
 
 
-static func _rewind_others(shooter: NetworkEntity, view_ticks_behind: float) -> Array[NetworkEntity]:
-	var rewound: Array[NetworkEntity] = []
+## Claude 2026-11-17 (C++ bundle stage 3): true if a check for this shooter would move other entities back in time first. When it
+## wouldn't (every AI swing, and all offline play), a check can ask where pawns are now, as MeleeSweepStep does through the pawn grid.
+static func would_rewind(shooter: NetworkEntity, view_ticks_behind: float) -> bool:
+	return _ticks_to_rewind(shooter, view_ticks_behind) > 0.0
+
+
+# Claude 2026-11-17: how many ticks back the shooter's view is, as far as it's believed and allowed; 0 for none. Was in _rewind_others.
+static func _ticks_to_rewind(shooter: NetworkEntity, view_ticks_behind: float) -> float:
 	var session: Node = shooter.session
 	if session == null or not session.lag_compensation_enabled:
-		return rewound
+		return 0.0
 	var driver: Node = shooter.get_node_or_null("/root/TickDriver")
 	if driver == null:
-		return rewound
+		return 0.0
 	var cap: float = session.rewind_cap_seconds * driver.get_tick_rate()
 	var believable: float = session.limit_view_ticks_behind(shooter.owner_peer, view_ticks_behind, driver.tick)
+	return clampf(believable, 0.0, cap)
+
+
+static func _rewind_others(shooter: NetworkEntity, view_ticks_behind: float) -> Array[NetworkEntity]:
+	var rewound: Array[NetworkEntity] = []
 	# Claude 2026-11-16 (wider audit): with no time to go back (every AI swing, and all offline play), nothing is rewound. It used
 	# to ask every entity to rewind to the present, which each refused after a lookup: pawns x swings at the clash.
-	var back := clampf(believable, 0.0, cap)
+	var back := _ticks_to_rewind(shooter, view_ticks_behind) # Claude 2026-11-17: worked out there now
 	if back <= 0.0:
 		return rewound
+	var driver: Node = shooter.get_node_or_null("/root/TickDriver")
+	var session: Node = shooter.session
 	var view_tick: float = driver.tick - back
 	for entity: NetworkEntity in session.get_entities():
 		if entity != shooter and entity.rewind_to(view_tick):

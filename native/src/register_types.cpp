@@ -9,6 +9,8 @@
 #include "job_scheduler.h" // Claude 2026-11-09: worker threads for plain-data jobs, scaling spec step 2
 #include "ai_sensing_job.h" // Claude 2026-11-09: the first job kind, sensing, step 2
 #include "sight_geometry.h" // Claude 2026-11-09: line of sight in C++, step 4
+#include "replay_motion_packer.h" // Claude 2026-11-17: the replay's motion packing in C++, C++ bundle stage 3
+#include "crowd_batch.h" // Claude 2026-11-17: the crowd mover's batch in C++, C++ bundle stage 3
 
 #include <gdextension_interface.h>
 #include <godot_cpp/classes/engine.hpp>
@@ -34,6 +36,8 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	GDREGISTER_CLASS(JobScheduler); // Claude 2026-11-09, step 2
 	GDREGISTER_CLASS(AISensingJob); // Claude 2026-11-09, step 2: after the grid and the scheduler it uses
 	GDREGISTER_CLASS(TickStateRecorder); // Claude 2026-11-09
+	GDREGISTER_CLASS(ReplayMotionPacker); // Claude 2026-11-17
+	GDREGISTER_CLASS(CrowdBatch); // Claude 2026-11-17: after the scheduler and the geometry it uses
 	g_nav_server = memnew(NavServer);
 	Engine::get_singleton()->register_singleton("NavServer", g_nav_server);
 }

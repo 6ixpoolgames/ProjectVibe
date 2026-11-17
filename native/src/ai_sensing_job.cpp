@@ -15,12 +15,49 @@ AISensingJob::~AISensingJob() {
 	if (_handle != 0 && _scheduler.is_valid()) {
 		_scheduler->finish(_handle);
 	}
+	remove_guards(); // Claude 2026-11-17
+}
+
+// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): the table, the grid and the geometry never change while this job
+// reads them: each keeps a list of its readers (change_guard.h), and anything that would change one first waits for them, by
+// finishing every job the scheduler is running. Before, the job set a single guard on the table and geometry, which a second
+// job would have replaced, and the grid had none.
+void AISensingJob::add_guards() {
+	if (_scheduler.is_null()) {
+		return;
+	}
+	Ref<JobScheduler> held = _scheduler;
+	auto wait = [held]() { held->finish_all(); };
+	if (_grid.is_valid()) {
+		_grid->change_guard().add(this, wait);
+		_guarded_table = _grid->get_table();
+		if (_guarded_table.is_valid()) {
+			_guarded_table->change_guard().add(this, wait);
+		}
+	}
+	if (_geometry.is_valid()) {
+		_geometry->change_guard().add(this, wait);
+	}
+}
+
+void AISensingJob::remove_guards() {
+	if (_grid.is_valid()) {
+		_grid->change_guard().remove(this);
+	}
+	if (_guarded_table.is_valid()) {
+		_guarded_table->change_guard().remove(this);
+		_guarded_table.unref();
+	}
+	if (_geometry.is_valid()) {
+		_geometry->change_guard().remove(this);
+	}
 }
 
 void AISensingJob::setup(const Ref<JobScheduler> &scheduler, const Ref<AIPawnGrid> &grid) {
 	if (_handle != 0 && _scheduler.is_valid()) {
 		_scheduler->finish(_handle);
 	}
+	remove_guards(); // Claude 2026-11-17: off the old grid, table and geometry
 	_scheduler = scheduler;
 	_grid = grid;
 	_handle = 0;
@@ -37,18 +74,21 @@ void AISensingJob::setup(const Ref<JobScheduler> &scheduler, const Ref<AIPawnGri
 	table->require_column("detectability"); // the automatic switch: this job reads it
 	_detectability = table->column_index("detectability");
 	// The table never changes while a job reads it: anything that would change it finishes the running jobs first.
-	Ref<JobScheduler> held = _scheduler;
-	table->set_change_guard([held]() { held->finish_all(); });
+	add_guards(); // Claude 2026-11-17: the table, the grid and the geometry, see add_guards
 }
 
 void AISensingJob::set_geometry(const Ref<SightGeometry> &geometry) {
 	if (_handle != 0 && _scheduler.is_valid()) {
 		_scheduler->finish(_handle);
 	}
+	// Claude 2026-11-17 (C++ bundle stage 2): this job is a reader of the new geometry, and no longer of the old (change_guard.h).
+	if (_geometry.is_valid()) {
+		_geometry->change_guard().remove(this);
+	}
 	_geometry = geometry;
 	if (_geometry.is_valid() && _scheduler.is_valid()) {
 		Ref<JobScheduler> held = _scheduler;
-		_geometry->set_change_guard([held]() { held->finish_all(); });
+		_geometry->change_guard().add(this, [held]() { held->finish_all(); });
 	}
 }
 

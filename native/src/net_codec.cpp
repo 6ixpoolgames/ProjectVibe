@@ -33,27 +33,14 @@ enum Tag : uint8_t {
 	TAG_INT16,
 };
 
-enum Encoding : uint8_t {
-	ENC_AUTO = 0,
-	ENC_VECTOR3_MM,
-	ENC_VECTOR3_CM,
-	ENC_VECTOR2_MM,
-	ENC_ANGLE_U16,
-	ENC_ANGLE_BYTE,
-	ENC_FLOAT,
-	ENC_RAW,
-};
+// Claude 2026-11-17 (C++ bundle stage 2): the encoding numbers and the rounding steps (MM, CM, PI_VALUE, TAU_VALUE, U16_STEP and
+// BYTE_STEP) come from state_encoding.h, shared with TickStateRecorder. They were copied here.
+using namespace state_encoding;
 
 const int64_t PROTOCOL_VERSION = 5; // the same as NetPackets.PROTOCOL_VERSION: bump both when the format changes. Claude 2026-11-07: 5 adds small ints
 const int64_t WORLD_ENTRY_SIZE = 8; // the same as NetPackets.WORLD_ENTRY_SIZE
 const int64_t MAX_LIST_SIZE = 255;
 const int64_t INT24_LIMIT = 8388607;
-const double MM = 0.001;
-const double CM = 0.01;
-const double PI_VALUE = 3.14159265358979323846;
-const double TAU_VALUE = 6.28318530717958647692;
-const double U16_STEP = TAU_VALUE / 65536.0;
-const double BYTE_STEP = TAU_VALUE / 256.0;
 
 // The engine's own wrapf and roundi. godot-cpp's Math::wrapf is 32-bit and leaves out the check at the top of the range, so
 // using it could round an angle differently from GDScript.
@@ -91,43 +78,17 @@ Vector3 rounded_vector3(double x, double y, double z, double step) {
 } // namespace
 
 NetCodec::NetCodec() :
-		m_missing("__tick_state_missing__"),
-		m_auto("auto"),
-		m_vector3_mm("vector3_mm"),
-		m_vector3_cm("vector3_cm"),
-		m_vector2_mm("vector2_mm"),
-		m_angle_u16("angle_u16"),
-		m_angle_byte("angle_byte"),
-		m_float("float") {}
+		m_missing("__tick_state_missing__") {}
 
 int64_t NetCodec::get_protocol_version() const {
 	return PROTOCOL_VERSION;
 }
 
+// Claude 2026-11-17 (C++ bundle stage 2): through the shared names in state_encoding.h. A name that isn't an encoding is sent
+// raw, as NetPackets does.
 int NetCodec::encoding_id(const Variant &name) const {
-	const StringName encoding = name;
-	if (encoding == m_auto) {
-		return ENC_AUTO;
-	}
-	if (encoding == m_vector3_mm) {
-		return ENC_VECTOR3_MM;
-	}
-	if (encoding == m_angle_u16) {
-		return ENC_ANGLE_U16;
-	}
-	if (encoding == m_float) {
-		return ENC_FLOAT;
-	}
-	if (encoding == m_vector2_mm) {
-		return ENC_VECTOR2_MM;
-	}
-	if (encoding == m_vector3_cm) {
-		return ENC_VECTOR3_CM;
-	}
-	if (encoding == m_angle_byte) {
-		return ENC_ANGLE_BYTE;
-	}
-	return ENC_RAW;
+	const Encoding id = m_encoding_names.id_of(StringName(name));
+	return id == ENC_UNKNOWN ? int(ENC_RAW) : int(id);
 }
 
 // --- Writing ---------------------------------------------------------------------------------------
@@ -526,6 +487,55 @@ Variant NetCodec::read_world(const PackedByteArray &bytes, int64_t start, int64_
 	return out;
 }
 
+// Claude 2026-11-17 (C++ bundle stage 3): see the header. It was the GDScript loop in NetworkSession._delta_entity_bytes, which
+// raised the host's snapshot sending from 1.9 to 2.3 ms a tick at 154 pawns.
+Array NetCodec::delta_state(const Array &now, const Array &then, const Array &encodings, int64_t ticks_back, int64_t mask_bits) const {
+	Array result;
+	const int64_t count = now.size();
+	if (count != then.size() || mask_bits <= 0 || mask_bits > 62) {
+		return result;
+	}
+	const int64_t masks_needed = (count + mask_bits - 1) / mask_bits; // rounded up
+	std::vector<int64_t> masks(size_t(masks_needed), 0);
+	std::vector<int64_t> changed;
+	changed.reserve(size_t(count));
+	// The whole lists first, as GDScript does: an unchanged entity costs one comparison. It also has to match GDScript exactly: Godot
+	// compares whole lists in a way that counts NaN as equal to itself (inside a Vector3, say), where comparing two values doesn't.
+	const bool all_same = now == then;
+	for (int64_t i = 0; i < count && !all_same; ++i) {
+		const Variant &a = now[i];
+		const Variant &b = then[i];
+		if (a.get_type() == b.get_type() && a == b) {
+			continue;
+		}
+		masks[size_t(i / mask_bits)] |= int64_t(1) << (i % mask_bits);
+		changed.push_back(i);
+	}
+	const int64_t total = 1 + masks_needed + int64_t(changed.size());
+	if (total > MAX_LIST_SIZE) {
+		return result;
+	}
+	const StringName raw("raw");
+	Array values;
+	Array codes;
+	values.resize(total);
+	codes.resize(total);
+	int64_t at = 0;
+	values[at] = ticks_back;
+	codes[at++] = raw;
+	for (int64_t mask : masks) {
+		values[at] = mask;
+		codes[at++] = raw;
+	}
+	for (int64_t i : changed) {
+		values[at] = now[i];
+		codes[at++] = i < encodings.size() ? encodings[i] : Variant(raw);
+	}
+	result.push_back(values);
+	result.push_back(codes);
+	return result;
+}
+
 void NetCodec::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_protocol_version"), &NetCodec::get_protocol_version);
 	ClassDB::bind_method(D_METHOD("begin_write"), &NetCodec::begin_write);
@@ -538,4 +548,6 @@ void NetCodec::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("read_u32"), &NetCodec::read_u32);
 	ClassDB::bind_method(D_METHOD("read_list"), &NetCodec::read_list);
 	ClassDB::bind_method(D_METHOD("read_world", "bytes", "start", "count"), &NetCodec::read_world);
+	// Claude 2026-11-17 (C++ bundle stage 3)
+	ClassDB::bind_method(D_METHOD("delta_state", "now", "then", "encodings", "ticks_back", "mask_bits"), &NetCodec::delta_state);
 }

@@ -112,7 +112,12 @@ func _on_chunk_built(key: Vector2i, triangles: PackedVector3Array) -> void:
 	if uses_nav():
 		# Nav works in world positions, so it's told where the terrain is. If the terrain moves later, nav won't know until the next
 		# generate() or edit().
-		_nav.submit_mesh(_nav_layer, _nav_mesh_id(key), triangles, terrain.global_transform)
+		# Claude 2026-11-17 (C++ bundle stage 2): for an edit, only the part it changed is rebuilt (TerrainGenerator.edit_area).
+		# An empty area rebuilds every tile under the chunk. GDScript note: Transform3D * AABB moves a box into world space.
+		var dirty_bounds := AABB()
+		if terrain.edit_area.size != Vector3.ZERO:
+			dirty_bounds = terrain.global_transform * terrain.edit_area
+		_nav.submit_mesh(_nav_layer, _nav_mesh_id(key), triangles, terrain.global_transform, "default", dirty_bounds)
 	_announce_markers(key)
 
 

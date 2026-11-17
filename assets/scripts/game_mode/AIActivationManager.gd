@@ -23,6 +23,10 @@
 ##   - every tick within full_rate_within_chunks chunks of the nearest viewer, every 2nd tick up to every_4th_tick_beyond_chunks
 ##     chunks, and every 4th beyond that, measured flat. Viewers are pawns a player has, and this machine's player's camera (a
 ##     spectator, or the overview). With no viewer at all, distance changes nothing.
+##     Claude 2026-11-17 (C++ bundle stage 3, roadmap: "in whole chunks"): counted in whole chunks, the rings of chunks around the
+##     viewer's chunk (0 its own, 1 the eight around it, and so on), not metres. So every pawn in one chunk runs at the same rate,
+##     and two pawns fighting side by side never run at different rates because one stands a step further off. A ring counts as
+##     within a setting when it's below it: 2 means rings 0 and 1. (Left in GDScript: it's a few sums per pawn, spread over frames.)
 ##   - and at least TickDriver.load_step, the load ladder: while the game is overloaded, every AI pawn runs every 2nd or 4th tick.
 ##   - a pawn a player has always runs every tick.
 ## So a pawn far from the action costs a half or a quarter as much, and still walks as far and fights as long (Pawn.ticks_elapsed).
@@ -52,7 +56,7 @@ signal ai_activated(pawn: Node3D)
 ## Claude 2026-11-16 (pawn spec 8.21): on, AI pawns far from every viewer run every 2nd or 4th tick. Off, distance changes nothing
 ## (the load ladder still applies).
 @export var steps_by_distance := true
-## Claude 2026-11-16: within this many chunks of the nearest viewer, an AI pawn runs every tick.
+## Claude 2026-11-16: within this many chunks of the nearest viewer, an AI pawn runs every tick. Claude 2026-11-17: whole rings of chunks.
 @export_range(0.25, 64.0, 0.25, "or_greater") var full_rate_within_chunks := 2.0
 ## Claude 2026-11-16: beyond this many chunks of the nearest viewer, every 4th tick; between the two, every 2nd.
 @export_range(0.25, 64.0, 0.25, "or_greater") var every_4th_tick_beyond_chunks := 4.0
@@ -201,15 +205,24 @@ func step_for(pawn: Node3D) -> int:
 		return 1
 	var step := 1
 	if steps_by_distance and not _viewers.is_empty():
-		var nearest := INF
+		# Claude 2026-11-17 (C++ bundle stage 3): the nearest viewer's ring of chunks, in whole chunks (see the top of the file). The
+		# ring is the larger of the two grid steps between the chunks, so a ring is a square of chunks round the viewer's.
+		var at := _chunk_of(pawn.global_position)
+		var nearest := 1 << 30
 		for viewer in _viewers:
-			nearest = minf(nearest, Vector2(viewer.x - pawn.global_position.x, viewer.z - pawn.global_position.z).length_squared())
-		nearest = sqrt(nearest)
-		if nearest >= every_4th_tick_beyond_chunks * _chunk_size:
+			var from := _chunk_of(viewer)
+			nearest = mini(nearest, maxi(absi(at.x - from.x), absi(at.y - from.y)))
+		if nearest >= every_4th_tick_beyond_chunks:
 			step = 4
-		elif nearest >= full_rate_within_chunks * _chunk_size:
+		elif nearest >= full_rate_within_chunks:
 			step = 2
 	return maxi(step, TickDriver.load_step) # Claude 2026-11-16 (wider audit): the autoload, where it was looked up by path for every pawn
+
+
+# Claude 2026-11-17 (C++ bundle stage 3): the chunk-sized square a position is in, counted from the world origin (x and z). The same
+# squares as the terrain's chunks when it sits at the origin; either way, pawn and viewer are measured on the same squares.
+func _chunk_of(at: Vector3) -> Vector2i:
+	return Vector2i(floori(at.x / _chunk_size), floori(at.z / _chunk_size))
 
 
 # Claude 2026-11-16 (pawn spec 8.21): the viewers this frame: pawns a player has, and this machine's player's camera while it's in use.

@@ -24,11 +24,12 @@
 ## A player's pawn, anything on a client and anything in the air always moves by physics, so prediction and rollback, which only
 ## clients do and only for their own pawn, never meet this.
 ##
-## Written to be replaced by C++ (the C++ bundle on the roadmap): the batch is plain lists (positions, motions, radii, shapes) in and
-## new positions and ok flags out (_move_batch), with the physics world only asked for one sweep and one ray a pawn. The C++ version
-## should find neighbours with the pawn grid C++ already has (AIPawnGrid, on the PawnTable) rather than port this one, take the
-## ground from SightGeometry's copy of it, keep the walls to the navmesh (moveAlongSurface), and run on the worker threads. Its
-## per-tick allocations (the lists and the grid's dictionary below) are left for that version, the owner's call.
+## Claude 2026-11-17 (C++ bundle stage 3): the batch runs in C++ when the navcore library is there (CrowdBatch, use_cpp_batch), on the
+## job scheduler's worker threads. It does the same three steps, except that walls come from the nav mesh, the owner's call ("walls
+## belong in navigation"): a pawn on the nav mesh walks along it (Detour's moveAlongSurface for its nav tier, Unreal's NavWalking),
+## sliding along its edge instead of being handed to physics at a wall, and the ground comes from SightGeometry's copy of the level.
+## Pawns it can't walk that way (no nav mesh under them, or a body wider than their nav tier's radius) get the physics sweep and ray
+## below, as before; see crowd_batch.h. _move_batch is the GDScript batch, used without the library.
 ##
 ## Settings below; enabled and separation_strength are in the start menu's match options. Diagnostics: "movement.crowd" (the whole
 ## batch), "movement.crowd_queries" (its sweeps and rays, inside that) and "movement.crowd_fallbacks" (moves it handed back to
@@ -59,6 +60,9 @@ static var current: CrowdMover = null
 @export_flags_3d_physics var ground_layers := 1
 ## The grid's cell size for finding neighbours, in metres. About twice the widest pawn.
 @export_range(0.5, 8.0, 0.25) var cell_size := 2.0
+## Claude 2026-11-17 (C++ bundle stage 3): the batch in C++ (CrowdBatch: worker threads, walls from the nav mesh) when the navcore
+## library is there. Off: the GDScript batch, with walls from physics sweeps, as before.
+@export var use_cpp_batch := true
 
 ## Runs after every pawn in TickDriver's simulate phase (pawns register at 0).
 const TICK_ORDER := 1000000
@@ -74,6 +78,13 @@ var _motions := PackedVector3Array()
 var _seconds := PackedFloat32Array()
 var _ray := PhysicsRayQueryParameters3D.new()
 var _sweep := PhysicsShapeQueryParameters3D.new() # Claude 2026-11-16: the wall check
+var _cpp_batch: Object = null # Claude 2026-11-17: the C++ batch, made on first use (_get_cpp_batch)
+
+# Claude 2026-11-17: CrowdBatch's statuses (crowd_batch.h), the same numbers. Written here because the C++ class may not exist.
+const BATCH_BY_PHYSICS := 0
+const BATCH_MOVED := 1
+const BATCH_CHECK_WALLS := 2
+const BATCH_CHECK_GROUND := 3
 
 
 func _init() -> void:
@@ -132,7 +143,7 @@ func queue_move(pawn: Pawn, motion: Vector3, seconds: float) -> void:
 
 
 ## TickDriver's simulate phase, after every pawn: moves everything queued this tick.
-func _tick_simulate(_dt: float, _tick: int) -> void:
+func _tick_simulate(_dt: float, tick: int) -> void:
 	moved_last_tick = _queued.size()
 	fallbacks_last_tick = 0
 	if _queued.is_empty():
@@ -173,7 +184,14 @@ func _tick_simulate(_dt: float, _tick: int) -> void:
 	var moved_ok := PackedByteArray() # 1 for each pawn the batch moved, 0 for one it hands back to physics
 	moved_ok.resize(count)
 	moved_ok.fill(0)
-	var moved := _move_batch(positions, motions, radii, seconds, slopes, floor_normals, shapes, shape_offsets, _obstacles(pawns), space, moved_ok)
+	# Claude 2026-11-17 (C++ bundle stage 3): in C++ when it can be.
+	var cpp_batch := _get_cpp_batch()
+	var moved: PackedVector3Array
+	if cpp_batch != null:
+		moved = _move_batch_cpp(cpp_batch, pawns, positions, motions, radii, seconds, slopes, floor_normals, shapes, shape_offsets, space,
+				moved_ok, tick)
+	else:
+		moved = _move_batch(positions, motions, radii, seconds, slopes, floor_normals, shapes, shape_offsets, _obstacles(pawns), space, moved_ok)
 	for i in count:
 		if moved_ok[i] == 1:
 			pawns[i].finish_crowd_move(moved[i], seconds[i])
@@ -260,42 +278,101 @@ func _move_batch(positions: PackedVector3Array, motions: PackedVector3Array, rad
 		pushed[i] = wanted[i] + push
 	# 3. Walls (a sweep) and the ground (a ray). moved_ok starts at 0 for every pawn and is set once both checks pass.
 	var result := positions.duplicate()
+	var queries_started := PerfScopes.begin() # the sweeps and rays alone, to tell them from the GDScript around them (diagnostics)
+	for i in count:
+		# Claude 2026-11-17 (C++ bundle stage 3): the checks moved to _walls_and_ground, which the C++ batch's callers share.
+		var landed: Variant = _walls_and_ground(positions[i], pushed[i], slopes[i], floor_normals[i], shapes[i], shape_offsets[i], space, true)
+		if landed != null:
+			result[i] = landed
+			moved_ok[i] = 1
+	PerfScopes.end(&"movement.crowd_queries", queries_started)
+	return result
+
+
+## Claude 2026-11-17 (C++ bundle stage 3): one pawn's wall and ground checks by physics, moved out of _move_batch: where it lands
+## going from `from` to `to`, or null if physics must move it instead. With sweep off, only the ground is checked (the C++ batch
+## walked it along the nav mesh already, but couldn't tell the ground there).
+func _walls_and_ground(from: Vector3, to: Vector3, slope: float, floor_normal: float, shape: Shape3D, shape_offset: Vector3,
+		space: PhysicsDirectSpaceState3D, sweep: bool) -> Variant:
 	_ray.collision_mask = ground_layers
 	_ray.hit_from_inside = false
 	_sweep.collision_mask = ground_layers
-	var queries_started := PerfScopes.begin() # the sweeps and rays alone, to tell them from the GDScript around them (diagnostics)
-	for i in count:
-		var from := positions[i]
-		var to := pushed[i]
-		var flat := Vector2(to.x - from.x, to.z - from.z).length()
-		# How far up it may step over this move: a step plus what its slope allows over the distance.
-		var allowed := max_step + flat * slopes[i]
-		if shapes[i] == null:
-			continue # nothing to sweep for walls: physics instead
+	var flat := Vector2(to.x - from.x, to.z - from.z).length()
+	# How far up it may step over this move: a step plus what its slope allows over the distance.
+	var allowed := max_step + flat * slope
+	if sweep:
+		if shape == null:
+			return null # nothing to sweep for walls: physics instead
 		if flat > 0.00001:
 			# A wall along the way: its own shape swept along the move, lifted by that much, against the level. GDScript note:
 			# cast_motion gives how far along the motion the shape can go, 1 meaning all of it; less means something is in the way.
-			_sweep.shape = shapes[i]
-			_sweep.transform = Transform3D(Basis.IDENTITY, from + shape_offsets[i] + Vector3(0.0, allowed, 0.0))
+			_sweep.shape = shape
+			_sweep.transform = Transform3D(Basis.IDENTITY, from + shape_offset + Vector3(0.0, allowed, 0.0))
 			_sweep.motion = Vector3(to.x - from.x, 0.0, to.z - from.z)
 			var fractions := space.cast_motion(_sweep)
 			if fractions.is_empty() or fractions[0] < 1.0:
-				continue # a wall: physics instead
-		# (Not moving sideways still checks the ground under it: ground taken away, or a pawn lifted off it, falls by physics.)
-		# The ground under where it ends up, within that step.
-		_ray.from = Vector3(to.x, from.y + allowed, to.z)
-		_ray.to = Vector3(to.x, from.y - allowed - 0.05, to.z)
-		var ground := space.intersect_ray(_ray)
-		if ground.is_empty():
-			continue # no ground there, or a drop: physics instead
-		var normal: Vector3 = ground["normal"]
-		if normal.y < floor_normals[i]:
-			continue # too steep to walk on
-		var at: Vector3 = ground["position"]
-		# (A ray's answer differs from the floor by a hair, 3e-8 m on flat ground. The pawn rounds where it ends up as its rollback
-		# recording does, Pawn.finish_crowd_move, so a still pawn still lands exactly where it was.)
-		result[i] = Vector3(to.x, at.y, to.z)
-		moved_ok[i] = 1
+				return null # a wall: physics instead
+	# (Not moving sideways still checks the ground under it: ground taken away, or a pawn lifted off it, falls by physics.)
+	# The ground under where it ends up, within that step.
+	_ray.from = Vector3(to.x, from.y + allowed, to.z)
+	_ray.to = Vector3(to.x, from.y - allowed - 0.05, to.z)
+	var ground := space.intersect_ray(_ray)
+	if ground.is_empty():
+		return null # no ground there, or a drop: physics instead
+	var normal: Vector3 = ground["normal"]
+	if normal.y < floor_normal:
+		return null # too steep to walk on
+	var at: Vector3 = ground["position"]
+	# (A ray's answer differs from the floor by a hair, 3e-8 m on flat ground. The pawn rounds where it ends up as its rollback
+	# recording does, Pawn.finish_crowd_move, so a still pawn still lands exactly where it was.)
+	return Vector3(to.x, at.y, to.z)
+
+
+## Claude 2026-11-17 (C++ bundle stage 3): the C++ batch, made on first use, or null without the library or with use_cpp_batch off.
+## It's given the job scheduler (null: no worker threads), the sight geometry for the ground (null: the ground by physics rays) and
+## the NavServer for the walls (null: the walls by physics sweeps).
+func _get_cpp_batch() -> Object:
+	if not use_cpp_batch or not ClassDB.class_exists(&"CrowdBatch"):
+		return null
+	if _cpp_batch == null:
+		_cpp_batch = ClassDB.instantiate(&"CrowdBatch")
+		var nav: Object = Engine.get_singleton(&"NavServer") if Engine.has_singleton(&"NavServer") else null
+		_cpp_batch.setup(TickJobs.get_scheduler(), SightGeometryFeeder.get_geometry(), nav)
+	return _cpp_batch
+
+
+## Claude 2026-11-17 (C++ bundle stage 3): the batch through CrowdBatch, with physics for the pawns it hands back to be checked (its
+## statuses, crowd_batch.h). Fills moved_ok as _move_batch does, and returns where each pawn ends up.
+func _move_batch_cpp(cpp_batch: Object, pawns: Array[Pawn], positions: PackedVector3Array, motions: PackedVector3Array,
+		radii: PackedFloat32Array, seconds: PackedFloat32Array, slopes: PackedFloat32Array, floor_normals: PackedFloat32Array,
+		shapes: Array[Shape3D], shape_offsets: PackedVector3Array, space: PhysicsDirectSpaceState3D, moved_ok: PackedByteArray,
+		tick: int) -> PackedVector3Array:
+	var tiers := PackedInt32Array()
+	for pawn in pawns:
+		var navigation := pawn.navigation_manager
+		# Claude 2026-11-17: -1 while crossing a nav link (a jump, or a walk off a ledge), which leaves the nav mesh on purpose, so
+		# the batch checks it with physics instead of stopping it at the mesh's edge (crowd_batch.h).
+		if navigation and navigation.is_crossing_link():
+			tiers.append(-1)
+		else:
+			tiers.append(navigation.nav_tier if navigation else 0)
+	var obstacles := _obstacles(pawns)
+	cpp_batch.set_settings(separation_strength, separation_margin, max_push_speed, max_step, ground_layers, cell_size)
+	var result: PackedVector3Array = cpp_batch.move(positions, motions, radii, seconds, slopes, floor_normals, tiers, obstacles[0],
+			obstacles[1], tick)
+	var statuses: PackedByteArray = cpp_batch.get_statuses()
+	var queries_started := PerfScopes.begin()
+	for i in pawns.size():
+		var status := statuses[i]
+		if status == BATCH_MOVED:
+			moved_ok[i] = 1
+		elif status == BATCH_CHECK_WALLS or status == BATCH_CHECK_GROUND:
+			var landed: Variant = _walls_and_ground(positions[i], result[i], slopes[i], floor_normals[i], shapes[i], shape_offsets[i], space,
+					status == BATCH_CHECK_WALLS)
+			if landed != null:
+				result[i] = landed
+				moved_ok[i] = 1
+		# BATCH_BY_PHYSICS: moved_ok stays 0, and the pawn moves by physics.
 	PerfScopes.end(&"movement.crowd_queries", queries_started)
 	return result
 

@@ -42,3 +42,8 @@ base_value = 100.0
 script = ExtResource("2_stat")
 base_value = 100.0
 changes_during_play = true
+
+[node name="Detectability" type="Node" parent="."]
+script = ExtResource("2_stat")
+base_value = 1.0
+table_column = &"detectability"

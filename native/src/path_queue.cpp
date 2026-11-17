@@ -12,12 +12,13 @@ constexpr int MAX_RETRIES = 3; // a tile committed mid-search invalidates it; ju
 constexpr int REQUEST_START_COST = 16;
 }
 
-int PathQueue::push(const float *from, const float *to, int tier) {
+int PathQueue::push(const float *from, const float *to, int tier, bool use_links) {
 	Request r;
 	r.id = m_next_id++;
 	std::copy(from, from + 3, r.from);
 	std::copy(to, to + 3, r.to);
 	r.tier = tier;
+	r.use_links = use_links; // Claude 2026-11-17
 	m_queue.push_back(r);
 	return r.id;
 }
@@ -46,7 +47,7 @@ void PathQueue::process(GroundDomain &domain, int iteration_budget, std::vector<
 			PathOutcome fail;
 			fail.id = m_current.id;
 			budget -= REQUEST_START_COST;
-			if (!domain.begin_sliced(m_current.from, m_current.to, m_current.tier, fail)) {
+			if (!domain.begin_sliced(m_current.from, m_current.to, m_current.tier, fail, m_current.use_links)) { // Claude 2026-11-17: use_links
 				out.push_back(std::move(fail));
 				continue;
 			}

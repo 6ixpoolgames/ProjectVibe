@@ -6,6 +6,8 @@
 // section 14.1). It's plain data: nothing here touches the scene or the game.
 #pragma once
 
+#include "state_encoding.h" // Claude 2026-11-17 (C++ bundle stage 2)
+
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
@@ -42,6 +44,14 @@ public:
 	int64_t read_u32(); // 0 if there aren't 4 bytes left: check get_available_bytes first
 	Variant read_list(); // an Array, or null if the packet is broken
 
+	// Claude 2026-11-17 (C++ bundle stage 2/3, netcode spec 11.4.1): the delta snapshots' change check, as
+	// NetworkSession.delta_state_lists in GDScript, which tests/net_codec_selftest compares it with. now and then are an entity's
+	// state values at this tick and at its baseline, encodings its state encodings. Returns [values, encodings]: the state list
+	// and encodings to send, [ticks_back, mask, mask, ..., each changed value], with one bit per entry in each mask (mask_bits
+	// entries a mask) set when that entry changed. Empty if the lists differ in length or the result is too long for one list
+	// (it then goes in full). A value counts as unchanged when its type and value are both the same, as in GDScript.
+	Array delta_state(const Array &now, const Array &then, const Array &encodings, int64_t ticks_back, int64_t mask_bits) const;
+
 protected:
 	static void _bind_methods();
 
@@ -72,13 +82,8 @@ private:
 
 	// Godot's interned names, made once here because they can't exist before the engine has started.
 	StringName m_missing;
-	StringName m_auto;
-	StringName m_vector3_mm;
-	StringName m_vector3_cm;
-	StringName m_vector2_mm;
-	StringName m_angle_u16;
-	StringName m_angle_byte;
-	StringName m_float;
+	// Claude 2026-11-17 (C++ bundle stage 2): the encoding names, shared with TickStateRecorder (state_encoding.h).
+	state_encoding::EncodingNames m_encoding_names;
 };
 
 } // namespace godot

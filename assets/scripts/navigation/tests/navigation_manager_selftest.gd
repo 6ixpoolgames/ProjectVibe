@@ -311,10 +311,32 @@ func _test_crossing_links() -> void:
 	_check(up.crossed_link and up.fastest_up > 3.0, "C to D: it jumps up the step (%.1f m/s upward)" % up.fastest_up)
 	_check(navigation.has_arrived() and up.distance < 1.0 and absf(pawn.position.y + 1.2) < 0.3, "and gets to the goal on D (%.2f m)" % up.distance)
 
+	# Claude 2026-11-17 (C++ bundle stage 3): with no paths found straight away this tick, the path comes from NavServer's queue,
+	# across links too: back down from D to C, with the pawn waiting (PENDING) until it comes.
+	NavigationManager.paths_now_per_tick = 0
+	_check(ai.move_to(Vector3(16, -2, 0)) and navigation.get_path_state() == NavigationManager.PathState.PENDING,
+			"over this tick's budget, a path is queued and the pawn waits (PENDING)")
+	var queued_ticks := 0
+	var queued_crossed := false
+	var followed := false
+	while navigation.is_under_way() and queued_ticks < 600:
+		NavServer.tick(1.0 / 60.0)
+		await get_tree().physics_frame
+		queued_ticks += 1
+		followed = followed or navigation.is_following_path()
+		queued_crossed = queued_crossed or navigation.is_crossing_link()
+	NavigationManager.paths_now_per_tick = 8
+	await _ticks(20)
+	_check(followed and queued_crossed and navigation.has_arrived() and absf(pawn.position.y + 2.0) < 0.3,
+			"the queued path comes, crosses the link and gets there (%d ticks, at %s)" % [queued_ticks, pawn.position])
+	await _walk_course_leg(pawn, ai, Vector3(24, -1.2, 0)) # back up to D for the next check
+
 	# use_links off: a pawn that can't jump never leaves D, however far its goal.
 	navigation.use_links = false
 	var stays := await _walk_course_leg(pawn, ai, Vector3(-10, 0, 0))
 	_check(not stays.crossed_link and absf(pawn.position.y + 1.2) < 0.3, "use_links off: it goes only as far as it can walk, and stays on D")
+	# Claude 2026-11-17 (C++ bundle stage 2): a path without links says it's partial too (find_path_now_result).
+	_check(navigation.is_partial(), "and is_partial() says the path ended short, with use_links off too")
 	navigation.use_links = true
 
 	# A link it can't cross: a placed ladder from C up to B that presses nothing. It tries, finds one new path, misses again, and

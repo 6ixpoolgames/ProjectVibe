@@ -12,6 +12,9 @@
 ## as the change since that pawn's last record, so a walking pawn's is a few dozen, and a standing one writes nothing at all. A
 ## keyframe, or a pawn's first record, writes the whole position, so reading can start at any block.
 ## Version 1 (21-byte records one after another, positions as f32) is still read, for recordings made before.
+##
+## Claude 2026-11-17 (C++ bundle stage 3): the comparing and packing runs in C++ (ReplayMotionPacker) when the navcore library is
+## there, with the same bytes; this script still gathers each pawn's values. use_cpp_packing off, or no library: GDScript, as before.
 class_name ReplayMotionChannel
 extends ReplayEntityChannel
 
@@ -32,6 +35,11 @@ const FLAG_HAS_SOURCE := 16
 const FLAG_HAS_PLAYER := 32
 # Claude 2026-11-15: in the file only, version 2: this record's position is whole, not a change. Never in a record read back.
 const _WHOLE_POSITION := 128
+
+## Claude 2026-11-17 (C++ bundle stage 3): pack each tick in C++ (ReplayMotionPacker) when the library is there. Set it before
+## recording starts: the two keep their own record of what was last written, so switching mid-recording would lose the changes.
+var use_cpp_packing := true
+var _packer: Object = null # Claude 2026-11-17: the C++ packer, made on first use
 
 
 func _init() -> void:
@@ -59,30 +67,63 @@ static func flags_of(pawn: Pawn) -> int:
 
 
 # Claude 2026-11-15: version 2's writing and reading, replacing ReplayEntityChannel's record-by-record ones.
+# Claude 2026-11-17 (C++ bundle stage 3): gathers each pawn's values here, and packs them with pack_lists.
 func write_tick(_tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
+	var ids := PackedInt64Array()
+	var positions := PackedVector3Array()
+	var yaws := PackedFloat64Array()
+	var velocities := PackedVector3Array()
+	var flags := PackedByteArray()
+	for entry: Array in _pawns:
+		var pawn: Pawn = entry[0]
+		if not is_instance_valid(pawn):
+			continue
+		ids.append(entry[1])
+		positions.append(pawn.global_position)
+		yaws.append(pawn.yaw)
+		velocities.append(pawn.velocity)
+		flags.append(flags_of(pawn))
+	out.put_data(pack_lists(ids, positions, yaws, velocities, flags, keyframe))
+
+
+## Claude 2026-11-17 (C++ bundle stage 3): one tick's bytes from each pawn's id, position, yaw, velocity and flags, leaving out pawns
+## with nothing changed since they were last written (unless keyframe): in C++ (ReplayMotionPacker) when it can be, else in GDScript.
+## Both give the same bytes; replay_selftest compares them.
+func pack_lists(ids: PackedInt64Array, positions: PackedVector3Array, yaws: PackedFloat64Array, velocities: PackedVector3Array,
+		flags: PackedByteArray, keyframe: bool) -> PackedByteArray:
+	if use_cpp_packing and ClassDB.class_exists(&"ReplayMotionPacker"):
+		if _packer == null:
+			_packer = ClassDB.instantiate(&"ReplayMotionPacker")
+		return _packer.pack(ids, positions, yaws, velocities, flags, keyframe)
+	return _pack_lists_gdscript(ids, positions, yaws, velocities, flags, keyframe)
+
+
+# Claude 2026-11-17: the GDScript packing, which was write_tick's (see the top of the file for the layout).
+func _pack_lists_gdscript(given_ids: PackedInt64Array, positions: PackedVector3Array, given_yaws: PackedFloat64Array,
+		given_velocities: PackedVector3Array, given_flags: PackedByteArray, keyframe: bool) -> PackedByteArray:
+	var out := StreamPeerBuffer.new()
 	var ids := PackedInt64Array()
 	var changes: Array[Vector3i] = []
 	var yaws := PackedFloat32Array()
 	var velocities: Array[Vector3] = []
 	var flags := PackedByteArray()
-	for entry: Array in _pawns:
-		var pawn: Pawn = entry[0]
-		var id: int = entry[1]
-		if not is_instance_valid(pawn):
-			continue
-		var at := pawn.global_position
-		var pawn_flags := flags_of(pawn)
+	for i in given_ids.size():
+		var id := given_ids[i]
+		var at := positions[i]
+		var yaw := given_yaws[i]
+		var velocity := given_velocities[i]
+		var pawn_flags := given_flags[i]
 		var last: Variant = _last.get(id)
 		# GDScript note: == on Vector3 compares exactly, which is what's wanted: any change at all is written.
-		if not keyframe and last != null and last[0] == at and last[1] == pawn.yaw and last[2] == pawn.velocity and last[3] == pawn_flags:
+		if not keyframe and last != null and last[0] == at and last[1] == yaw and last[2] == velocity and last[3] == pawn_flags:
 			continue
 		var mm := Vector3i(roundi(at.x * 1000.0), roundi(at.y * 1000.0), roundi(at.z * 1000.0))
 		var whole := keyframe or last == null
-		_last[id] = [at, pawn.yaw, pawn.velocity, pawn_flags, mm]
+		_last[id] = [at, yaw, velocity, pawn_flags, mm]
 		ids.append(id)
 		changes.append(mm if whole else mm - (last[4] as Vector3i))
-		yaws.append(wrapf(pawn.yaw, -PI, PI)) # wrapped, so a pawn that has turned many times keeps its precision
-		velocities.append(pawn.velocity)
+		yaws.append(wrapf(yaw, -PI, PI)) # wrapped, so a pawn that has turned many times keeps its precision
+		velocities.append(velocity)
 		flags.append(pawn_flags | (_WHOLE_POSITION if whole else 0))
 	out.put_u16(ids.size())
 	for id in ids:
@@ -102,6 +143,20 @@ func write_tick(_tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
 	for moving in velocities:
 		out.put_half(moving.z)
 	out.put_data(flags)
+	return out.data_array
+
+
+# Claude 2026-11-17 (C++ bundle stage 3): the C++ packer keeps its own record of what was last written, so it forgets pawns too.
+func pawn_removed(pawn: Pawn, id: int) -> void:
+	super(pawn, id)
+	if _packer:
+		_packer.forget(id)
+
+
+func end() -> void:
+	if _packer:
+		_packer.clear()
+	super()
 
 
 func read_tick(tick: int, data: StreamPeerBuffer, keyframe: bool, state: Dictionary) -> void:

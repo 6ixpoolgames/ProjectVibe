@@ -49,7 +49,55 @@ func _ready() -> void:
 	for i in 5:
 		FileAccess.open(FOLDER.path_join("host/2000-01-01_00-00-0%d.pbreplay" % i), FileAccess.WRITE).store_8(0)
 	await _scene_and_run()
+	_test_motion_packing() # Claude 2026-11-17 (C++ bundle stage 3)
 	_finish()
+
+
+# Claude 2026-11-17 (C++ bundle stage 3): the motion channel's packing in C++ (ReplayMotionPacker) gives exactly the GDScript bytes,
+# over many ticks of pawns that stand, walk, turn, change flags, leave and come back, with keyframes now and then.
+func _test_motion_packing() -> void:
+	if not ClassDB.class_exists(&"ReplayMotionPacker"):
+		print("  (no C++ library: the motion packing isn't compared)")
+		return
+	var native := ReplayMotionChannel.new()
+	var gdscript := ReplayMotionChannel.new()
+	gdscript.use_cpp_packing = false
+	var random := RandomNumberGenerator.new()
+	random.seed = 20261117
+	var places: Array[Vector3] = []
+	var yaws: Array[float] = []
+	for i in 40:
+		places.append(Vector3(random.randf_range(-300, 300), random.randf_range(-5, 20), random.randf_range(-300, 300)))
+		yaws.append(random.randf_range(-20.0, 20.0))
+	var differ := 0
+	var written := 0
+	for tick in 400:
+		var ids := PackedInt64Array()
+		var positions := PackedVector3Array()
+		var tick_yaws := PackedFloat64Array()
+		var velocities := PackedVector3Array()
+		var flags := PackedByteArray()
+		for i in places.size():
+			if (i + tick / 50) % 7 == 0:
+				continue # some pawns are missing for a while, and come back
+			if random.randf() < 0.4: # the rest stand still now and then
+				places[i] += Vector3(random.randf_range(-0.2, 0.2), random.randf_range(-0.05, 0.05), random.randf_range(-0.2, 0.2))
+				yaws[i] += random.randf_range(-0.3, 0.3)
+			ids.append(1000 + i)
+			positions.append(places[i])
+			tick_yaws.append(yaws[i])
+			velocities.append(Vector3(random.randf_range(-9, 9), random.randf_range(-20, 5), random.randf_range(-9, 9)) if random.randf() < 0.5 else Vector3.ZERO)
+			flags.append(random.randi_range(0, 63) if random.randf() < 0.1 else 1)
+		var keyframe := tick % 60 == 0
+		var a: PackedByteArray = native.pack_lists(ids, positions, tick_yaws, velocities, flags, keyframe)
+		var b: PackedByteArray = gdscript.pack_lists(ids, positions, tick_yaws, velocities, flags, keyframe)
+		written += b.size()
+		if a != b:
+			differ += 1
+		if tick % 50 == 49: # a pawn leaves for good: both forget it
+			native.pawn_removed(null, 1000 + tick % 40)
+			gdscript.pawn_removed(null, 1000 + tick % 40)
+	_check(differ == 0 and written > 0, "the motion channel packs the same bytes in C++ and GDScript (%d of 400 ticks differ, %d bytes)" % [differ, written])
 
 
 func _scene_and_run() -> void:

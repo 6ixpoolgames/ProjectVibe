@@ -86,7 +86,9 @@ void NavServer::configure(const Dictionary &config) {
 	if (config.has("auto_link_jump_action")) {
 		m_auto_jump_action = StringName(config["auto_link_jump_action"]);
 	}
-	if (config.has("tier_radii")) {
+	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): an empty tier_radii list is ignored, keeping the default tiers.
+	// Before, tier_count became 1 and the loop read radii[0] from an empty list, past its end.
+	if (config.has("tier_radii") && PackedFloat32Array(config["tier_radii"]).size() > 0) {
 		PackedFloat32Array radii = config["tier_radii"];
 		c.tier_count = std::clamp(int(radii.size()), 1, navcore::MAX_TIERS);
 		for (int i = 0; i < c.tier_count; ++i) {
@@ -117,6 +119,7 @@ void NavServer::configure(const Dictionary &config) {
 	m_tiles.reset(m_cfg);
 	m_tiles.resync_after_pool_stop();
 	m_paths.clear();
+	m_path_results.clear(); // Claude 2026-11-17: answers to searches that no longer apply
 	if (!m_ground.init(m_cfg)) {
 		UtilityFunctions::push_error("NavServer: could not initialise the Detour nav mesh");
 	}
@@ -183,6 +186,27 @@ void NavServer::tick(double delta) {
 	m_last_tick_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 	m_max_tick_ms = std::max(m_max_tick_ms, m_last_tick_ms);
 	++m_ticks;
+
+	// Claude 2026-11-17 (C++ bundle stage 3): every answer is kept for take_path_result too, and old ones nobody took are dropped.
+	for (auto it = m_path_results.begin(); it != m_path_results.end();) {
+		it = m_ticks - it->second.tick > RESULT_KEEP_TICKS ? m_path_results.erase(it) : std::next(it);
+	}
+	for (const navcore::PathOutcome &o : outcomes) {
+		PackedVector3Array points;
+		PackedInt64Array link_ids;
+		for (size_t i = 0; o.ok && i + 2 < o.points.size(); i += 3) {
+			points.push_back(Vector3(o.points[i], o.points[i + 1], o.points[i + 2]));
+			const size_t corner = i / 3;
+			link_ids.push_back(corner < o.link_ids.size() ? int64_t(o.link_ids[corner]) : 0);
+		}
+		Dictionary d;
+		d["ok"] = o.ok;
+		d["points"] = points;
+		d["link_ids"] = link_ids;
+		d["partial"] = o.ok && o.partial;
+		d["reason"] = String(o.reason.c_str());
+		m_path_results[o.id] = PathResult{ d, m_ticks };
+	}
 
 	// Phase 6: tell GDScript. Done last, so handlers may safely call back into NavServer.
 	for (const navcore::PathOutcome &o : outcomes) {
@@ -266,7 +290,7 @@ void NavServer::release_chunk(int layer, Vector2i chunk) {
 }
 
 bool NavServer::submit_mesh(int layer, int64_t mesh_id, const PackedVector3Array &faces, const Transform3D &xform,
-		const String &surface) {
+		const String &surface, const AABB &dirty_bounds) {
 	if (faces.size() < 3 || faces.size() % 3 != 0) {
 		UtilityFunctions::push_error("NavServer.submit_mesh: faces must be a triangle list (Mesh.get_faces())");
 		return false;
@@ -291,7 +315,10 @@ bool NavServer::submit_mesh(int layer, int64_t mesh_id, const PackedVector3Array
 		UtilityFunctions::push_error("NavServer.submit_mesh: ", String(err.c_str()));
 		return false;
 	}
-	dirty(changed);
+	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): dirty_bounds, as submit_heightmap has, for a mesh that changed
+	// only in part (a terrain edit, TerrainNavFeeder): only the tiles under it rebuild. Empty, the whole mesh's area does, as before.
+	const bool has_bounds = dirty_bounds.size.x > 0.0 || dirty_bounds.size.z > 0.0;
+	dirty(has_bounds ? rect_from_aabb(dirty_bounds) : changed);
 	return true;
 }
 
@@ -358,14 +385,26 @@ void NavServer::remove_interest(int id) {
 
 // ---- queries -------------------------------------------------------------------------------------
 
-int NavServer::find_path(const Vector3 &from, const Vector3 &to, int tier) {
+int NavServer::find_path(const Vector3 &from, const Vector3 &to, int tier, bool use_links) {
 	const float a[3] = { float(from.x), float(from.y), float(from.z) };
 	const float b[3] = { float(to.x), float(to.y), float(to.z) };
-	return m_paths.push(a, b, tier);
+	return m_paths.push(a, b, tier, use_links); // Claude 2026-11-17: use_links
 }
 
 void NavServer::cancel_path(int request_id) {
 	m_paths.cancel(request_id);
+	m_path_results.erase(request_id); // Claude 2026-11-17
+}
+
+// Claude 2026-11-17 (C++ bundle stage 3): see the header.
+Dictionary NavServer::take_path_result(int request_id) {
+	auto found = m_path_results.find(request_id);
+	if (found == m_path_results.end()) {
+		return Dictionary();
+	}
+	Dictionary result = found->second.result;
+	m_path_results.erase(found);
+	return result;
 }
 
 PackedVector3Array NavServer::find_path_now(const Vector3 &from, const Vector3 &to, int tier) {
@@ -383,13 +422,19 @@ PackedVector3Array NavServer::find_path_now(const Vector3 &from, const Vector3 &
 }
 
 Dictionary NavServer::find_path_now_with_links(const Vector3 &from, const Vector3 &to, int tier) {
+	return find_path_now_result(from, to, tier, true); // Claude 2026-11-17: the body moved into find_path_now_result
+}
+
+// Claude 2026-11-17 (C++ bundle stage 2): was find_path_now_with_links's body, with use_links passed on instead of always true.
+// Without links, every link id is 0 (the search fills none in).
+Dictionary NavServer::find_path_now_result(const Vector3 &from, const Vector3 &to, int tier, bool use_links) {
 	ensure_started();
 	const float a[3] = { float(from.x), float(from.y), float(from.z) };
 	const float b[3] = { float(to.x), float(to.y), float(to.z) };
 	navcore::PathOutcome o;
 	PackedVector3Array points;
 	PackedInt64Array link_ids;
-	const bool ok = m_ground.find_path_now(a, b, tier, o, true);
+	const bool ok = m_ground.find_path_now(a, b, tier, o, use_links);
 	if (ok) {
 		for (size_t i = 0; i + 2 < o.points.size(); i += 3) {
 			points.push_back(Vector3(o.points[i], o.points[i + 1], o.points[i + 2]));
@@ -571,8 +616,9 @@ void NavServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("submit_heightmap", "layer", "chunk", "heights", "samples", "spacing", "materials", "dirty_bounds"),
 			&NavServer::submit_heightmap, DEFVAL(PackedByteArray()), DEFVAL(AABB()));
 	ClassDB::bind_method(D_METHOD("release_chunk", "layer", "chunk"), &NavServer::release_chunk);
-	ClassDB::bind_method(D_METHOD("submit_mesh", "layer", "mesh_id", "faces", "xform", "surface"), &NavServer::submit_mesh,
-			DEFVAL(String("default")));
+	// Claude 2026-11-17 (C++ bundle stage 2): dirty_bounds added, empty by default.
+	ClassDB::bind_method(D_METHOD("submit_mesh", "layer", "mesh_id", "faces", "xform", "surface", "dirty_bounds"), &NavServer::submit_mesh,
+			DEFVAL(String("default")), DEFVAL(AABB()));
 	ClassDB::bind_method(D_METHOD("remove_mesh", "layer", "mesh_id"), &NavServer::remove_mesh);
 	ClassDB::bind_method(D_METHOD("surface_index", "name"), &NavServer::surface_index);
 
@@ -581,12 +627,16 @@ void NavServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("move_interest", "id", "position"), &NavServer::move_interest);
 	ClassDB::bind_method(D_METHOD("remove_interest", "id"), &NavServer::remove_interest);
 
-	ClassDB::bind_method(D_METHOD("find_path", "from", "to", "tier"), &NavServer::find_path, DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("find_path", "from", "to", "tier", "use_links"), &NavServer::find_path, DEFVAL(0), DEFVAL(false)); // Claude 2026-11-17: use_links
 	ClassDB::bind_method(D_METHOD("cancel_path", "request_id"), &NavServer::cancel_path);
+	ClassDB::bind_method(D_METHOD("take_path_result", "request_id"), &NavServer::take_path_result); // Claude 2026-11-17
 	ClassDB::bind_method(D_METHOD("find_path_now", "from", "to", "tier"), &NavServer::find_path_now, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("closest_point", "point", "tier"), &NavServer::closest_point, DEFVAL(0));
 	// Claude 2026-11-08: links.
 	ClassDB::bind_method(D_METHOD("find_path_now_with_links", "from", "to", "tier"), &NavServer::find_path_now_with_links, DEFVAL(0));
+	// Claude 2026-11-17 (C++ bundle stage 2)
+	ClassDB::bind_method(D_METHOD("find_path_now_result", "from", "to", "tier", "use_links"), &NavServer::find_path_now_result,
+			DEFVAL(0), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("add_link", "start", "end", "two_way", "action"), &NavServer::add_link, DEFVAL(true), DEFVAL(StringName()));
 	ClassDB::bind_method(D_METHOD("remove_link", "link_id"), &NavServer::remove_link);
 	ClassDB::bind_method(D_METHOD("get_link_action", "link_id"), &NavServer::get_link_action);

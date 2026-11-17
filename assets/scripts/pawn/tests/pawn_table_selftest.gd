@@ -16,6 +16,7 @@ func _ready() -> void:
 		return
 	await _test_keys_and_order()
 	await _test_columns()
+	await _test_stat_columns() # Claude 2026-11-17 (C++ bundle stage 4)
 	await _test_once_a_tick()
 	await _test_leaving()
 	await _test_grid_matches_brute_force()
@@ -61,6 +62,36 @@ func _test_columns() -> void:
 	table.refresh(51)
 	_check(table.get_row(table.get_slot(pawn)).get("rest_ticks") == pawn.sleep_check_ticks and Array(table.get_column(&"rest_ticks")) == [pawn.sleep_check_ticks], "its values, in a row and as a whole column")
 	_check(not table.add_column(&"rest_ticks", TYPE_INT, &"x", 0) and not table.enable_column(&"no_such_column"), "a name that's taken, or one that doesn't exist, is refused with an error")
+	pawn.free()
+
+
+## Claude 2026-11-17 (C++ bundle stage 4): pushed columns. Detectability is a stat, copied into the table when it changes (also by an
+## effect's modifiers), and taken at the next tick's refresh; a game's own pushed column works the same through set_value.
+func _test_stat_columns() -> void:
+	var pawn := _make_pawn(Vector3(2, 0, 2))
+	var table: Object = Pawn.get_table()
+	table.enable_column(&"detectability")
+	table.refresh(200)
+	var stat: Stat = pawn.stat_manager.get_stat(StatManager.DETECTABILITY) if pawn.stat_manager else null
+	_check(stat != null and stat.table_column == &"detectability", "the default stats have Detectability, mirrored into the table's detectability column")
+	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 1.0), "it starts at 1")
+	pawn.detectability = 0.5
+	_check(is_equal_approx(stat.value, 0.5) and is_equal_approx(pawn.detectability, 0.5), "Pawn.detectability writes and reads the stat")
+	table.refresh(200)
+	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 1.0), "the table takes the change at its next tick, not mid-tick")
+	table.refresh(201)
+	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 0.5), "and has it then")
+	stat.set_modifiers(0.0, 0.5) # what a held effect does: half as easy to see
+	table.refresh(202)
+	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 0.25), "an effect on the stat reaches the table too (%.2f)" % table.get_row(table.get_slot(pawn))["detectability"])
+	stat.set_modifiers(0.0, 1.0)
+	pawn.detectability = 1.0
+	_check(table.add_pushed_column(&"armour", TYPE_FLOAT, &"no_such_property", 0.0) and table.enable_column(&"armour"), "a game's own pushed column")
+	_check(table.set_value(pawn, &"armour", 3.0), "takes a value")
+	table.refresh(203)
+	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["armour"], 3.0), "which is there after the next refresh")
+	_check(not table.set_value(pawn, &"velocity", Vector3.ONE), "set_value refuses a column that's read from the pawn (with an error)")
+	table.disable_column(&"armour")
 	pawn.free()
 
 

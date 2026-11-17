@@ -1620,7 +1620,6 @@ func _encode_entities(entries: Array) -> PackedByteArray:
 ## list, nothing saved for the baseline tick, or a list too long for one).
 ##   The state list becomes [tick - baseline, mask, mask, ..., the changed values], and the id gets DELTA_ID_BIT. Each mask covers
 ##   DELTA_MASK_BITS entries in order, a bit set for each that changed. An entity that changed nothing still sends its id, the ticks back and its empty masks.
-## GDScript note: two Arrays compared with == compare every element (in C++), so an unchanged entity costs one comparison.
 func _delta_entity_bytes(entity: NetworkEntity, tick: int, baseline: int) -> PackedByteArray:
 	var now := entity.state.get_state_values(tick)
 	if now.is_empty() or not entity.state.has_state(baseline):
@@ -1629,8 +1628,24 @@ func _delta_entity_bytes(entity: NetworkEntity, tick: int, baseline: int) -> Pac
 	if then.size() != now.size():
 		return PackedByteArray()
 	var encodings := entity.state.get_state_encodings()
+	# Claude 2026-11-17 (C++ bundle stage 3): the comparing is done by NetCodec.delta_state in C++ when the library is there, and by
+	# delta_state_lists below otherwise. They give the same lists (tests/net_codec_selftest compares them).
+	var lists: Array = _codec.delta_state(now, then, encodings, tick - baseline, DELTA_MASK_BITS) if _codec != null 			else delta_state_lists(now, then, encodings, tick - baseline)
+	if lists.is_empty():
+		return PackedByteArray()
+	return _encode_entities(_snapshot_entry(entity, tick, entity.entity_id | DELTA_ID_BIT, lists[0], lists[1]))
+
+
+## Claude 2026-11-17 (C++ bundle stage 3): the change check from _delta_entity_bytes, apart, so the C++ one (NetCodec.delta_state)
+## can be compared with it. now and then are an entity's state values at this tick and at its baseline, ticks_back the ticks between
+## them. Returns [values, encodings] to send: [ticks_back, mask, mask, ..., each changed value], or empty if the lists differ in
+## length or the result is too long for one list. A value is unchanged when its type and value are both the same.
+## GDScript note: static, so it can be called on the class without a session (NetworkSessionSingleton.delta_state_lists(...)).
+static func delta_state_lists(now: Array, then: Array, encodings: Array, ticks_back: int) -> Array:
+	if now.size() != then.size():
+		return []
 	var masks_needed := ceili(now.size() / float(DELTA_MASK_BITS))
-	var values: Array = [tick - baseline]
+	var values: Array = [ticks_back]
 	var codes: Array = [StateEncoding.RAW]
 	var masks: Array = []
 	masks.resize(masks_needed)
@@ -1638,6 +1653,7 @@ func _delta_entity_bytes(entity: NetworkEntity, tick: int, baseline: int) -> Pac
 	values.append_array(masks)
 	for i in masks_needed:
 		codes.append(StateEncoding.RAW)
+	# GDScript note: two Arrays compared with == compare every element (in C++), so an unchanged entity costs one comparison.
 	if now != then:
 		for i in now.size():
 			var a: Variant = now[i]
@@ -1647,10 +1663,10 @@ func _delta_entity_bytes(entity: NetworkEntity, tick: int, baseline: int) -> Pac
 			@warning_ignore("integer_division") # whole numbers on purpose: which mask
 			values[1 + i / DELTA_MASK_BITS] |= 1 << (i % DELTA_MASK_BITS)
 			values.append(a)
-			codes.append(encodings[i])
+			codes.append(encodings[i] if i < encodings.size() else StateEncoding.RAW)
 	if values.size() > NetPackets.MAX_LIST_SIZE:
-		return PackedByteArray()
-	return _encode_entities(_snapshot_entry(entity, tick, entity.entity_id | DELTA_ID_BIT, values, codes))
+		return []
+	return [values, codes]
 
 
 ## Claude 2026-11-16: groups encoded entities into parts of at most SNAPSHOT_PART_BYTES each (one bigger than that goes alone), with the

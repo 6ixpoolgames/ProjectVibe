@@ -524,6 +524,8 @@ Other standard savings, applied throughout: don't send derivable data (animation
 
 ---
 
+**The change check in C++** *(Claude 2026-11-17, the C++ bundle)*: `NetCodec.delta_state(now, then, encodings, ticks_back, mask_bits)` gives the state lists to send, as `NetworkSessionSingleton.delta_state_lists` does in GDScript (used without the library); `net_codec_selftest` compares the two on 5,000 random lists. Like GDScript, it compares the two whole lists first, because Godot's whole-list comparison counts NaN as equal to itself where a value-by-value one doesn't.
+
 ## 12. Security and validation
 
 The server never trusts a client:

@@ -98,7 +98,24 @@ var nav_distance: float:
 ## Claude 2026-11-09: how easy this pawn is for AI to see: 1 is normal, lower is harder, 0 is invisible. Sight multiplies its fill
 ## rate by this (pawn spec 10.4). Nothing in the base changes it: how stealth, gear or light level turn into this number is a game
 ## rule, for a GameMode module to set.
-@export_range(0.0, 4.0, 0.01, "or_greater") var detectability := 1.0
+## Claude 2026-11-17 (C++ bundle stage 4, pawn M6): a stat now, Detectability in the pawn's StatManager (StatManager.DETECTABILITY,
+## in the default stats), so effects can change it (a stealth buff, say) and it's mirrored into the pawn table for the sensing job.
+## This reads and writes that stat: set its base value on the stat in a pawn scene. A pawn without the stat keeps its own number here.
+## No longer in the inspector, so there's one place to set it.
+var detectability: float:
+	get:
+		var stat := _detectability_stat()
+		return stat.value if stat else _own_detectability
+	set(new_value):
+		var stat := _detectability_stat()
+		if stat:
+			stat.base_value = new_value # the stat copies it into the pawn table itself
+		else:
+			_own_detectability = new_value
+			var table := get_table()
+			if table and is_inside_tree():
+				table.set_value(self, &"detectability", new_value)
+var _own_detectability := 1.0 # Claude 2026-11-17: detectability, for a pawn without the stat
 ## Claude 2026-11-09: on: a pawn standing still with nothing to do sleeps, skipping its abilities, gravity and move_and_slide until
 ## something wakes it (pawn spec 15.3). Off: it simulates fully every tick.
 @export var sleep_when_idle := true
@@ -129,6 +146,7 @@ var is_sleeping := false
 # without the library. Every pawn in the tree has a row, in entity-id order. Pawns NetworkSession never configured, as in most
 # tests, have no entity id; they get keys from TABLE_KEYS_WITHOUT_ID up, after every networked pawn, in the order they joined.
 static var _table: Object = null
+static var _grid: Object = null # Claude 2026-11-17: see get_grid()
 const TABLE_KEYS_WITHOUT_ID := 1 << 40
 static var _next_table_key := TABLE_KEYS_WITHOUT_ID
 
@@ -388,6 +406,20 @@ func is_dead() -> bool:
 ## anyone but Pawn: pawns join and leave it themselves. Its rows are read from the pawns once a tick, at the first refresh(tick).
 static func get_table() -> Object:
 	return _table
+
+
+# Claude 2026-11-17 (C++ bundle stage 4): the Detectability stat, or null without one (or before the StatManager is found).
+func _detectability_stat() -> Stat:
+	return stat_manager.get_stat(StatManager.DETECTABILITY) if stat_manager else null
+
+
+## Claude 2026-11-17 (C++ bundle stage 3): the shared grid of pawns (AIPawnGrid), built from the table on first use, or null without
+## the C++ library. Was AISensingManager's own; the swing hit checks use it too (MeleeSweepStep), so it lives beside the table.
+static func get_grid() -> Object:
+	if _grid == null and _table != null and ClassDB.class_exists(&"AIPawnGrid"):
+		_grid = ClassDB.instantiate(&"AIPawnGrid")
+		_grid.set_table(_table)
+	return _grid
 
 
 # Claude 2026-11-09: joins the shared table, making it on first use. The key is the entity id, which the NetworkEntity already has:

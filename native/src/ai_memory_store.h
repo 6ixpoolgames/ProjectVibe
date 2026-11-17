@@ -18,6 +18,7 @@
 
 #include <godot_cpp/classes/curve.hpp>
 #include <godot_cpp/classes/physics_ray_query_parameters3d.hpp>
+#include <godot_cpp/classes/ref.hpp> // Claude 2026-11-17 (godot-cpp 10): Ref<T> is no longer pulled in by ref_counted.hpp
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -109,7 +110,14 @@ private:
 	// Claude 2026-11-09 (step 2): one candidate's check once its visibility is known: the ray if it could be seen, then the record.
 	// Both sight checks use it, so they record the same things in the same order.
 	// Claude 2026-11-09 (step 4): ray is what's already known about line of sight: -1 nothing (test it now), 0 clear, 1 blocked.
-	void check_one(Node3D *observer, Node3D *target, const Vector3 &eye, const Vector3 &aim, const Vector3 &target_position,
+	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): by instance id, which the sensing job already has, so the sight
+	// checks don't ask the engine for each candidate's id two or three times. The Object versions above call these.
+	int64_t find_id(uint64_t id) const;
+	int64_t record_sighting_id(uint64_t id, double gain, int64_t tick, const Vector3 &position);
+	// Claude 2026-11-17: target_id is the target's instance id, and observer_layer the observer's collision layer, both read once by
+	// the caller instead of for every candidate.
+	void check_one(Node3D *observer, uint32_t observer_layer, Node3D *target, uint64_t target_id, const Vector3 &eye, const Vector3 &aim,
+			const Vector3 &target_position,
 			double visibility, int64_t tick, int ray, PhysicsDirectSpaceState3D *&space, bool &added, Array &became_certain);
 	void remove(size_t i);
 

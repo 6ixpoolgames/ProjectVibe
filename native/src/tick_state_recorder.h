@@ -8,6 +8,8 @@
 // exactly the same values, and machines using either can play together. tests/tick_state_selftest compares them.
 #pragma once
 
+#include "state_encoding.h" // Claude 2026-11-17 (C++ bundle stage 2)
+
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/node_path.hpp>
@@ -45,23 +47,13 @@ protected:
 	static void _bind_methods();
 
 private:
-	enum Encoding {
-		ENC_UNKNOWN = -1,
-		ENC_RAW = 0,
-		ENC_VECTOR3_MM,
-		ENC_VECTOR2_MM,
-		ENC_VECTOR3_CM,
-		ENC_ANGLE_U16,
-		ENC_ANGLE_BYTE,
-		ENC_FLOAT,
-	};
-
+	// Claude 2026-11-17 (C++ bundle stage 2): the encoding numbers are state_encoding.h's, shared with NetCodec.
 	struct Entry {
 		uint64_t node_id = 0;
 		NodePath path; // used when the property has parts (":rotation:y")
 		StringName name; // used when it's a plain property name, which is faster to read
 		bool indexed = false;
-		int encoding = ENC_RAW;
+		int encoding = state_encoding::ENC_RAW;
 	};
 
 	int encoding_id(const StringName &name) const;
@@ -70,14 +62,8 @@ private:
 	std::vector<Entry> m_entries;
 	std::vector<Object *> m_nodes; // looked up at the start of each capture
 
-	// Godot's interned names, made once here because they can't exist before the engine has started.
-	StringName m_raw;
-	StringName m_vector3_mm;
-	StringName m_vector2_mm;
-	StringName m_vector3_cm;
-	StringName m_angle_u16;
-	StringName m_angle_byte;
-	StringName m_float;
+	// Claude 2026-11-17 (C++ bundle stage 2): the encoding names, shared with NetCodec (state_encoding.h).
+	state_encoding::EncodingNames m_encoding_names;
 	// The snapping steps, built the way StateEncoding builds them: Vector3(MM, MM, MM) stores 32-bit floats.
 	Variant m_step_mm3;
 	Variant m_step_mm2;

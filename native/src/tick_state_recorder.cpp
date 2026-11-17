@@ -10,12 +10,11 @@
 
 using namespace godot;
 
+// Claude 2026-11-17 (C++ bundle stage 2): MM, CM, U16_STEP, BYTE_STEP, PI_VALUE and the encoding numbers come from
+// state_encoding.h, shared with NetCodec. They were copied here (and Math_PI, which godot-cpp 10 renamed, was used for pi).
+using namespace state_encoding;
+
 namespace {
-// The same numbers as StateEncoding.gd: MM, CM, U16_STEP and BYTE_STEP. GDScript constants are 64-bit.
-const double MM = 0.001;
-const double CM = 0.01;
-const double U16_STEP = Math_TAU / 65536.0;
-const double BYTE_STEP = Math_TAU / 256.0;
 
 // StateEncoding._as_float32: a 64-bit float through 32 bits and back, as Vector2(value, 0.0).x does.
 double as_float32(double value) {
@@ -24,13 +23,6 @@ double as_float32(double value) {
 } // namespace
 
 TickStateRecorder::TickStateRecorder() :
-		m_raw("raw"),
-		m_vector3_mm("vector3_mm"),
-		m_vector2_mm("vector2_mm"),
-		m_vector3_cm("vector3_cm"),
-		m_angle_u16("angle_u16"),
-		m_angle_byte("angle_byte"),
-		m_float("float"),
 		m_step_mm3(Vector3(MM, MM, MM)),
 		m_step_mm2(Vector2(MM, MM)),
 		m_step_cm3(Vector3(CM, CM, CM)) {
@@ -135,12 +127,12 @@ Variant TickStateRecorder::quantize_by_id(const Variant &value, int encoding) co
 			break;
 		case ENC_ANGLE_U16:
 			if (type == Variant::FLOAT) {
-				return as_float32(UtilityFunctions::snappedf(UtilityFunctions::wrapf((double)value, -Math_PI, Math_PI), U16_STEP));
+				return as_float32(UtilityFunctions::snappedf(UtilityFunctions::wrapf((double)value, -PI_VALUE, PI_VALUE), U16_STEP));
 			}
 			break;
 		case ENC_ANGLE_BYTE:
 			if (type == Variant::FLOAT) {
-				return as_float32(UtilityFunctions::snappedf(UtilityFunctions::wrapf((double)value, -Math_PI, Math_PI), BYTE_STEP));
+				return as_float32(UtilityFunctions::snappedf(UtilityFunctions::wrapf((double)value, -PI_VALUE, PI_VALUE), BYTE_STEP));
 			}
 			break;
 		case ENC_FLOAT:
@@ -154,29 +146,11 @@ Variant TickStateRecorder::quantize_by_id(const Variant &value, int encoding) co
 	return value;
 }
 
+// Claude 2026-11-17 (C++ bundle stage 2): through the shared names in state_encoding.h. "auto" counts as unknown here, as before:
+// an entry's encoding is settled before it gets here.
 int TickStateRecorder::encoding_id(const StringName &name) const {
-	if (name == m_raw) {
-		return ENC_RAW;
-	}
-	if (name == m_vector3_mm) {
-		return ENC_VECTOR3_MM;
-	}
-	if (name == m_vector2_mm) {
-		return ENC_VECTOR2_MM;
-	}
-	if (name == m_vector3_cm) {
-		return ENC_VECTOR3_CM;
-	}
-	if (name == m_angle_u16) {
-		return ENC_ANGLE_U16;
-	}
-	if (name == m_angle_byte) {
-		return ENC_ANGLE_BYTE;
-	}
-	if (name == m_float) {
-		return ENC_FLOAT;
-	}
-	return ENC_UNKNOWN;
+	const Encoding id = m_encoding_names.id_of(name);
+	return id == ENC_AUTO ? int(ENC_UNKNOWN) : int(id);
 }
 
 void TickStateRecorder::_bind_methods() {

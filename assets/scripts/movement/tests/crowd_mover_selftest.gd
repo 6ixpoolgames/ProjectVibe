@@ -22,6 +22,7 @@ func _ready() -> void:
 	await _test_physics_cases()
 	await _test_sleeping() # Claude 2026-11-16: the owner asked whether still pawns sleep with the mover
 	await _test_switched_off()
+	await _test_walks_along_nav_mesh() # Claude 2026-11-17 (C++ bundle stage 3); last, since it sets NavServer up for itself
 	_finish()
 
 
@@ -221,6 +222,63 @@ func _test_switched_off() -> void:
 
 
 # --- Helpers ---
+
+
+# Claude 2026-11-17 (C++ bundle stage 3): with the C++ batch (CrowdBatch) and a nav mesh, a pawn walks along the nav mesh: it isn't
+# handed to physics at a wall, but slides along the nav mesh's edge, a body's width from the wall, and the ground under it comes from
+# the sight geometry's copy of the level. Without the library there's nothing to check here.
+func _test_walks_along_nav_mesh() -> void:
+	if not ClassDB.class_exists(&"CrowdBatch") or not Engine.has_singleton(&"NavServer"):
+		print("  (no C++ library: the nav mesh walk isn't checked)")
+		return
+	var nav: Object = Engine.get_singleton(&"NavServer")
+	# Tier 0 as wide as the pawns (0.4 m), so their walls can come from the nav mesh (crowd_batch.h).
+	nav.configure({"agent_radius": 0.4, "worker_threads": 2})
+	var layer: int = nav.add_input_layer(null, NavHooks.new(), ClassDB.class_get_integer_constant(&"NavServer", &"ADAPTER_MESH"))
+	var ground := _make_box(Vector3(0, -0.5, 0), Vector3(60, 1, 60))
+	var wall := _make_box(Vector3(5, 1.5, 0), Vector3(1, 3, 20)) # its face at x = 4.5, from z = -10 to 10
+	nav.submit_mesh(layer, 1, _box_faces(Vector3(-30, -1, -30), Vector3(30, 0, 30)), Transform3D.IDENTITY)
+	nav.submit_mesh(layer, 2, _box_faces(Vector3(4.5, 0, -10), Vector3(5.5, 3, 10)), Transform3D.IDENTITY)
+	var interest: int = nav.add_interest(Vector3.ZERO, 30.0, 40.0, 1)
+	for i in 2000:
+		nav.tick(1.0 / 60.0)
+		if i > 2 and nav.is_idle():
+			break
+		OS.delay_msec(2)
+	_check(nav.closest_point(Vector3.ZERO, 0) != null, "(a nav mesh was built for the test: %d tiles)" % nav.get_stats().live_detour_tiles)
+	var pawn := _make_pawn(Vector3(0, 0.05, 0))
+	await _ticks(20)
+	var fell_back := 0
+	var walked := 0
+	for i in 120:
+		_drive(pawn, Vector3(1, 0, 0.5)) # into the wall, at an angle
+		await _ticks(1)
+		fell_back += _mover.fallbacks_last_tick
+		walked += int(_mover._cpp_batch.get_stats().moved) if _mover._cpp_batch else 0
+	var at := pawn.global_position
+	_check(walked > 100 and fell_back == 0, "on the nav mesh, the C++ batch moves it every tick (%d moves, %d handed to physics)" % [walked, fell_back])
+	_check(at.x < 4.5 - 0.4 + 0.05 and at.x > 3.5, "it stops a body's width from the wall (at x %.2f, the wall's face at 4.5)" % at.x)
+	_check(at.z > 4.0, "and slides along it instead of stopping dead (z %.2f)" % at.z)
+	_check(absf(at.y) < 0.02 and pawn.grounded, "standing on the ground, from the sight geometry's copy of it (y %.3f)" % at.y)
+	pawn.free()
+	wall.free()
+	ground.free()
+	nav.remove_interest(interest)
+	nav.remove_input_layer(layer)
+
+
+func _box_faces(lo: Vector3, hi: Vector3) -> PackedVector3Array:
+	var c := [
+		Vector3(lo.x, lo.y, lo.z), Vector3(hi.x, lo.y, lo.z), Vector3(hi.x, lo.y, hi.z), Vector3(lo.x, lo.y, hi.z),
+		Vector3(lo.x, hi.y, lo.z), Vector3(hi.x, hi.y, lo.z), Vector3(hi.x, hi.y, hi.z), Vector3(lo.x, hi.y, hi.z),
+	]
+	# Each side wound to face out, as Godot draws front faces (clockwise seen from outside), so the top is walkable ground. GDScript
+	# note: nav_selftest's version faces in, which is fine for carving but leaves no ground.
+	var quads := [[3, 2, 1, 0], [4, 5, 6, 7], [1, 5, 4, 0], [2, 6, 5, 1], [3, 7, 6, 2], [0, 4, 7, 3]]
+	var faces := PackedVector3Array()
+	for q in quads:
+		faces.append_array([c[q[0]], c[q[1]], c[q[2]], c[q[0]], c[q[2]], c[q[3]]])
+	return faces
 
 
 func _make_box(at: Vector3, size: Vector3, tilt_z := 0.0) -> StaticBody3D:

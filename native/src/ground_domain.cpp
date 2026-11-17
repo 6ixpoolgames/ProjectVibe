@@ -218,15 +218,61 @@ bool GroundDomain::closest_point(const float *p, int tier, float *out) const {
 	return ref != 0;
 }
 
-bool GroundDomain::begin_sliced(const float *from, const float *to, int tier, PathOutcome &fail) {
+// Claude 2026-11-17 (C++ bundle stage 3): see the header.
+dtNavMeshQuery *GroundDomain::new_query() const {
+	if (!m_mesh) {
+		return nullptr;
+	}
+	dtNavMeshQuery *query = dtAllocNavMeshQuery();
+	if (query && dtStatusFailed(query->init(m_mesh, 64))) { // moveAlongSurface needs only a small node pool
+		dtFreeNavMeshQuery(query);
+		return nullptr;
+	}
+	return query;
+}
+
+void GroundDomain::free_query(dtNavMeshQuery *query) {
+	dtFreeNavMeshQuery(query);
+}
+
+bool GroundDomain::move_along_surface(dtNavMeshQuery *query, const float *from, const float *to, int tier, float tolerance, float height,
+		float *out) const {
+	if (!m_mesh || query == nullptr) {
+		return false;
+	}
+	const dtQueryFilter &filter = filter_for(tier); // never across links
+	const float extents[3] = { tolerance, height, tolerance };
+	dtPolyRef start = 0;
+	float nearest[3];
+	if (dtStatusFailed(query->findNearestPoly(from, extents, &filter, &start, nearest)) || start == 0) {
+		return false;
+	}
+	// The walk starts where the pawn is, across, if that's on the poly found; findNearestPoly gives a point on it.
+	const float dx = nearest[0] - from[0];
+	const float dz = nearest[2] - from[2];
+	if (dx * dx + dz * dz > tolerance * tolerance) {
+		return false;
+	}
+	dtPolyRef visited[16];
+	int visited_count = 0;
+	if (dtStatusFailed(query->moveAlongSurface(start, nearest, to, &filter, out, visited, &visited_count, 16))) {
+		return false;
+	}
+	out[1] = from[1];
+	return true;
+}
+
+bool GroundDomain::begin_sliced(const float *from, const float *to, int tier, PathOutcome &fail, bool use_links) {
 	if (!m_mesh) {
 		fail.reason = "nav not initialised";
 		return false;
 	}
-	if (!snap_endpoints(m_sliced_query, m_sliced_state, from, to, tier, fail)) {
+	m_sliced_links = use_links; // Claude 2026-11-17 (C++ bundle stage 3)
+	if (!snap_endpoints(m_sliced_query, m_sliced_state, from, to, tier, fail, use_links)) {
 		return false;
 	}
-	const dtStatus s = m_sliced_query->initSlicedFindPath(m_sliced_state.start_ref, m_sliced_state.end_ref, m_sliced_state.start_pos, m_sliced_state.end_pos, &filter_for(tier));
+	const dtStatus s = m_sliced_query->initSlicedFindPath(m_sliced_state.start_ref, m_sliced_state.end_ref, m_sliced_state.start_pos, m_sliced_state.end_pos,
+			&filter_for(tier, use_links));
 	if (dtStatusFailed(s)) {
 		fail.reason = "search failed to start";
 		return false;
@@ -251,7 +297,7 @@ void GroundDomain::finish_sliced(PathOutcome &out) {
 		out.reason = "search failed";
 		return;
 	}
-	straighten(m_sliced_query, m_sliced_state, npolys, (s & DT_PARTIAL_RESULT) != 0, out);
+	straighten(m_sliced_query, m_sliced_state, npolys, (s & DT_PARTIAL_RESULT) != 0, out, m_sliced_links); // Claude 2026-11-17: links
 }
 
 void GroundDomain::debug_triangles(const WorldRect &r, std::vector<float> &verts, std::vector<float> &colors) const {

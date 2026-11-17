@@ -8,6 +8,7 @@
 #include <godot_cpp/classes/physics_direct_space_state3d.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/error_macros.hpp> // Claude 2026-11-17: ERR_FAIL_INDEX_V
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -26,6 +27,12 @@ namespace {
 bool is_dead(Object *entity) {
 	static const StringName dead_name("dead");
 	return entity != nullptr && bool(entity->get(dead_name));
+}
+
+// Claude 2026-11-17 (C++ bundle stage 2): a node's collision layer, 0 if it isn't a collision object.
+uint32_t layer_of(Node3D *node) {
+	CollisionObject3D *body = Object::cast_to<CollisionObject3D>(node);
+	return body ? body->get_collision_layer() : 0;
 }
 
 // FadeProfile.HALVINGS_UNTIL_NOTHING: 0.5^7 is about 0.8%, the first step below 1%.
@@ -138,31 +145,46 @@ int64_t AIMemoryStore::find(Object *entity) const {
 	if (entity == nullptr) {
 		return -1;
 	}
-	auto found = _index_of.find(entity->get_instance_id());
+	return find_id(entity->get_instance_id()); // Claude 2026-11-17: the lookup moved to find_id
+}
+
+// Claude 2026-11-17 (C++ bundle stage 2): find by instance id.
+int64_t AIMemoryStore::find_id(uint64_t id) const {
+	auto found = _index_of.find(id);
 	return found == _index_of.end() ? -1 : int64_t(found->second);
 }
 
+// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): every *_at function checks its index first. A wrong index from
+// GDScript (a stale one after forget(), say) read past the end of the lists, which could crash the game or return garbage; now
+// it prints an error naming the index and returns a harmless value. ERR_FAIL_INDEX_V(index, size, value) is Godot's own check:
+// if index isn't in 0 .. size - 1, it reports it and returns value.
 Object *AIMemoryStore::entity_at(int64_t index) const {
+	ERR_FAIL_INDEX_V(index, entry_count(), nullptr);
 	return instance_of(_ids[size_t(index)]);
 }
 
 double AIMemoryStore::awareness_at(int64_t index, int64_t tick) const {
+	ERR_FAIL_INDEX_V(index, entry_count(), 0.0);
 	return awareness_of(size_t(index), tick);
 }
 
 bool AIMemoryStore::is_certain_at(int64_t index) const {
+	ERR_FAIL_INDEX_V(index, entry_count(), false);
 	return _certain[size_t(index)] != 0;
 }
 
 Vector3 AIMemoryStore::last_known_position_at(int64_t index) const {
+	ERR_FAIL_INDEX_V(index, entry_count(), Vector3());
 	return _last_known[size_t(index)];
 }
 
 int64_t AIMemoryStore::ticks_since_seen_at(int64_t index, int64_t tick) const {
+	ERR_FAIL_INDEX_V(index, entry_count(), 0);
 	return tick - _last_seen[size_t(index)];
 }
 
 double AIMemoryStore::threat_at(int64_t index) const {
+	ERR_FAIL_INDEX_V(index, entry_count(), 0.0);
 	return _threat[size_t(index)];
 }
 
@@ -172,12 +194,18 @@ int64_t AIMemoryStore::ticks_since_checked(Object *entity, int64_t tick, int64_t
 }
 
 int64_t AIMemoryStore::record_sighting(Object *entity, double gain, int64_t tick, const Vector3 &position) {
+	// Claude 2026-11-17 (C++ bundle stage 2): the work moved to record_sighting_id. A null entity is ignored (it used to crash).
+	ERR_FAIL_NULL_V(entity, 0);
+	return record_sighting_id(entity->get_instance_id(), gain, tick, position);
+}
+
+int64_t AIMemoryStore::record_sighting_id(uint64_t id, double gain, int64_t tick, const Vector3 &position) {
 	int64_t result = 0;
-	int64_t found = find(entity);
+	int64_t found = find_id(id);
 	size_t i;
 	if (found < 0) {
 		i = _ids.size();
-		_ids.push_back(entity->get_instance_id());
+		_ids.push_back(id);
 		_last_known.push_back(position);
 		_last_seen.push_back(tick);
 		_last_checked.push_back(tick);
@@ -334,6 +362,7 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 	}
 	const Vector3 eye = observer->get_global_position() + Vector3(0.0, _sight.eye_height, 0.0);
 	const Vector2 facing = sight_rules::facing_from_yaw(eye_yaw);
+	const uint32_t observer_layer = layer_of(observer); // Claude 2026-11-17: once, not per candidate
 	PhysicsDirectSpaceState3D *space = nullptr;
 	if (_geometry.is_valid()) {
 		_geometry->sync(tick); // Claude 2026-11-09 (step 4): what changed since the last tick; nothing to do most ticks
@@ -349,7 +378,8 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 		const Vector3 aim = target_position + Vector3(0.0, _sight.target_height, 0.0);
 		// Visibility: distance × angle × detectability, as SightSense.visibility_of.
 		const double visibility = sight_rules::visibility(_sight, eye, facing, aim, double(target->get("detectability")));
-		check_one(observer, target, eye, aim, target_position, visibility, tick, -1, space, added, became_certain);
+		check_one(observer, observer_layer, target, target->get_instance_id(), eye, aim, target_position, visibility, tick, -1, space, added,
+				became_certain);
 	}
 	Array result;
 	result.push_back(added);
@@ -372,6 +402,7 @@ Array AIMemoryStore::sight_check_prepared(Object *job_object, Object *observer_o
 		return result;
 	}
 	PhysicsDirectSpaceState3D *space = nullptr;
+	const uint32_t observer_layer = layer_of(observer); // Claude 2026-11-17: once, not per candidate
 	for (int64_t c = 0; c < count; ++c) {
 		const AISensingJob::Candidate &candidate = candidates[c];
 		// The same checks sight_check makes before visibility: the job only knew the table, not whether a pawn has died or left.
@@ -379,22 +410,29 @@ Array AIMemoryStore::sight_check_prepared(Object *job_object, Object *observer_o
 		if (target == nullptr || target == observer || !target->is_inside_tree() || is_dead(target)) {
 			continue;
 		}
-		check_one(observer, target, eye, candidate.aim, candidate.position, candidate.visibility, tick, candidate.ray, space, added, became_certain);
+		check_one(observer, observer_layer, target, candidate.id, eye, candidate.aim, candidate.position, candidate.visibility, tick,
+				candidate.ray, space, added, became_certain);
 	}
 	result.push_back(added);
 	result.push_back(became_certain);
 	return result;
 }
 
-void AIMemoryStore::check_one(Node3D *observer, Node3D *target, const Vector3 &eye, const Vector3 &aim, const Vector3 &target_position,
-		double visibility, int64_t tick, int ray, PhysicsDirectSpaceState3D *&space, bool &added, Array &became_certain) {
-	const int64_t ticks = std::clamp(ticks_since_checked(target, tick, _sight.sense_interval), int64_t(0), _sight.max_gain_ticks);
+// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): the observer's layer and the target's id come from the caller, read
+// once (see the header). The memory entry is looked up once, by id, and reused for the record; it was looked up twice, each time
+// asking the engine for the target's id.
+void AIMemoryStore::check_one(Node3D *observer, uint32_t observer_layer, Node3D *target, uint64_t target_id, const Vector3 &eye,
+		const Vector3 &aim, const Vector3 &target_position, double visibility, int64_t tick, int ray, PhysicsDirectSpaceState3D *&space,
+		bool &added, Array &became_certain) {
+	const int64_t entry = find_id(target_id);
+	const int64_t since_checked = entry < 0 ? _sight.sense_interval : tick - _last_checked[size_t(entry)];
+	const int64_t ticks = std::clamp(since_checked, int64_t(0), _sight.max_gain_ticks);
 	bool seen = false;
 	// The ray is the expensive part, so it's only cast when the target could be seen at all.
 	if (visibility > 0.0 && ticks > 0) {
 		CollisionObject3D *observer_body = Object::cast_to<CollisionObject3D>(observer);
 		CollisionObject3D *target_body = Object::cast_to<CollisionObject3D>(target);
-		const uint32_t layers = (observer_body ? observer_body->get_collision_layer() : 0) | (target_body ? target_body->get_collision_layer() : 0);
+		const uint32_t layers = observer_layer | layer_of(target);
 		if (_geometry.is_valid() && (_sight.blocking_mask & layers) == 0) {
 			// Claude 2026-11-09 (scaling spec step 4): line of sight in C++. The sensing job may already have the answer (ray 0 or 1).
 			seen = ray >= 0 ? ray == 0 : !_geometry->blocked(eye, aim, _sight.blocking_mask);
@@ -420,13 +458,13 @@ void AIMemoryStore::check_one(Node3D *observer, Node3D *target, const Vector3 &e
 		}
 	}
 	if (seen) {
-		const int64_t bits = record_sighting(target, _sight.fill_rate * double(ticks) * visibility, tick, target_position);
+		const int64_t bits = record_sighting_id(target_id, _sight.fill_rate * double(ticks) * visibility, tick, target_position);
 		added = added || (bits & 1);
 		if (bits & 2) {
 			became_certain.push_back(target);
 		}
-	} else {
-		record_check(target, tick);
+	} else if (entry >= 0) {
+		_last_checked[size_t(entry)] = tick; // record_check, with the entry already found (Claude 2026-11-17)
 	}
 }
 

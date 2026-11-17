@@ -4,7 +4,10 @@
 #                            python -m SCons target=template_release
 # Output goes to ../bin/, next to navcore.gdextension.
 
-env = SConscript("thirdparty/godot-cpp/SConstruct")
+# Claude 2026-11-17 (C++ bundle stage 1): godot-cpp 10.0.0-stable, aimed at Godot 4.7's API. From version 10, godot-cpp is
+# versioned apart from Godot and builds for any API from 4.3 up; api_version picks which one (it was the 4.4 bindings before).
+# An extension built for 4.7 won't load in an older Godot, which is why navcore.gdextension says compatibility_minimum = "4.7".
+env = SConscript("thirdparty/godot-cpp/SConstruct", {"api_version": "4.7"})
 env = env.Clone()  # don't leak our settings into the godot-cpp library build
 
 recast = "thirdparty/recastnavigation/"

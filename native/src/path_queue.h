@@ -12,7 +12,8 @@ namespace navcore {
 
 class PathQueue {
 public:
-	int push(const float *from, const float *to, int tier);
+	// Claude 2026-11-17 (C++ bundle stage 3): use_links lets the search cross links, as find_path_now_result's does.
+	int push(const float *from, const float *to, int tier, bool use_links = false);
 	void cancel(int id);
 	void clear();
 	size_t pending() const { return m_queue.size() + (m_active ? 1 : 0); }
@@ -26,6 +27,7 @@ private:
 		float from[3] = {};
 		float to[3] = {};
 		int tier = 0;
+		bool use_links = false; // Claude 2026-11-17
 		int retries = 0;
 	};
 

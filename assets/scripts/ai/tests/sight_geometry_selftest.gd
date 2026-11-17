@@ -139,24 +139,64 @@ func _test_keeps_up() -> void:
 	geometry.sync(101)
 	_check(geometry.is_blocked(from, to, 1), "a wall added to the scene blocks it at the next sync")
 	wall.position = Vector3(16, 1.5, 25)
-	geometry.sync(102)
+	# Claude 2026-11-17 (C++ bundle stage 2): a static body is checked for moves every 16 ticks (SightGeometry.FIXED_CHECK_TICKS).
+	_sync_ticks(geometry, 102, 16)
 	_check(not geometry.is_blocked(from, to, 1) and geometry.is_blocked(Vector3(4, 1, 25), Vector3(28, 1, 25), 1), "moved: the old line is clear and the new one blocked")
 	box.size = Vector3(1, 3, 30) # the resource changes: the body is read again, even within the same tick
-	geometry.sync(102)
+	geometry.sync(117)
 	_check(geometry.is_blocked(from, to, 1), "its shape made longer, it reaches the first line again")
+	# Claude 2026-11-17 (C++ bundle stage 2): a second wall sharing the same shape is read again too when it changes. Each body
+	# used to connect the shape's signal itself, and Godot refused the second connection.
+	var twin := _make_body(box, 1)
+	twin.position = Vector3(40, 1.5, 16)
+	add_child(twin)
+	geometry.sync(118)
+	var past_twin := Vector3(37, 1, 5)
+	_check(geometry.is_blocked(past_twin, past_twin + Vector3(6, 0, 0), 1), "a second wall sharing the shape blocks along its length")
+	box.size = Vector3(1, 3, 1)
+	geometry.sync(118)
+	_check(not geometry.is_blocked(past_twin, past_twin + Vector3(6, 0, 0), 1), "the shared shape made short again: both walls are read again")
+	remove_child(twin)
+	twin.free()
+	box.size = Vector3(1, 3, 30)
+	geometry.sync(119)
 	wall.collision_layer = 2
-	geometry.sync(103)
+	_sync_ticks(geometry, 120, 16)
 	_check(not geometry.is_blocked(from, to, 1) and geometry.is_blocked(from, to, 2), "on another layer: only rays looking for that layer meet it")
+	# An AnimatableBody3D, made to move, is noticed at the very next tick.
+	var mover := AnimatableBody3D.new()
+	mover.sync_to_physics = false
+	var mover_shape := CollisionShape3D.new()
+	mover_shape.shape = BoxShape3D.new()
+	(mover_shape.shape as BoxShape3D).size = Vector3(1, 3, 1)
+	mover.add_child(mover_shape)
+	mover.position = Vector3(16, 1.5, 40)
+	add_child(mover)
+	geometry.sync(136)
+	var far_line_from := Vector3(4, 1, 40)
+	var far_line_to := Vector3(28, 1, 40)
+	_check(geometry.is_blocked(far_line_from, far_line_to, 1), "a moving body blocks where it is")
+	mover.position = Vector3(16, 1.5, 50)
+	geometry.sync(137)
+	_check(not geometry.is_blocked(far_line_from, far_line_to, 1), "and is noticed moving at the next tick")
+	remove_child(mover)
+	mover.free()
 	remove_child(wall)
-	geometry.sync(104)
+	geometry.sync(138)
 	_check(not geometry.is_blocked(from, to, 3), "taken out of the scene: gone")
 	wall.free()
 	ground.edit(Vector3(16, 0, 16), 4.0, 5.0) # a hill between the two ends
-	geometry.sync(105)
+	geometry.sync(139)
 	_check(geometry.is_blocked(from, to, 1), "the terrain edited into a hill between them: blocked")
 	ground.free()
-	geometry.sync(106)
+	geometry.sync(140)
 	_check(not geometry.is_blocked(from, to, 1), "the terrain freed: nothing left")
+
+
+# Claude 2026-11-17 (C++ bundle stage 2): syncs count ticks in a row, starting at first, so every static body has had its check.
+func _sync_ticks(geometry: Object, first: int, count: int) -> void:
+	for tick in range(first, first + count):
+		geometry.sync(tick)
 
 
 func _make_body(shape: Shape3D, layer: int) -> StaticBody3D:

@@ -2,7 +2,8 @@
 [configuration]
 
 entry_symbol = "navcore_library_init"
-compatibility_minimum = "4.4"
+; Claude 2026-11-17 (C++ bundle stage 1): 4.7, since the library is now built against Godot 4.7's API (godot-cpp 10, native/SConstruct).
+compatibility_minimum = "4.7"
 ; Worker threads make hot-reloading unsafe; restart the editor after rebuilding.
 reloadable = false
 

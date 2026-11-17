@@ -1000,7 +1000,7 @@ The tick-driver update's dynamic tick rate (roadmap item 3), built on scaling sp
 - **The batched mover** (one central move step): *(Claude 2026-11-16: built the same day for AI pawns as the CrowdMover, section 8.22, in GDScript; its C++ batch is on the C++ bundle list.)*
 - **The scheduler's main-thread budget** (scaling rule 5) beyond this: other main-thread work moving to workers stays with scaling step 5.
 
-### 8.22 The crowd mover *(Claude 2026-11-16, the owner's call: "agree with roadmap ... go with all"; built in GDScript, C++ to come)*
+### 8.22 The crowd mover *(Claude 2026-11-16, the owner's call: "agree with roadmap ... go with all"; built in GDScript; Claude 2026-11-17: and in C++, below)*
 
 Measured first (`mass_battle_measure -- --size=50 --spawn-distance=40 --scopes`, offline, headless): simulate was 5.4 to 5.7 ms of an 11.5 to 12.3 ms tick, of which `move_and_slide` was 3.0 to 3.4 ms (about 22.5 microseconds for each of 135 to 145 moving pawns) and abilities 1.4 to 1.9. Fewer slides (`--max-slides=2`) saved nothing; no collisions between pawns made each move about a quarter cheaper. So the cost is Godot's character solve itself.
 
@@ -1033,6 +1033,8 @@ Measured first (`mass_battle_measure -- --size=50 --spawn-distance=40 --scopes`,
 The sweep and ray together are about 2.5 microseconds in any of these; the rest of the batch's 12 is GDScript. So in GDScript the batch only pays where `move_and_slide` is dear (slopes in a crowd, and the mass battle's terrain at 22 to 26), not on a plain box floor (9 to 10). Still pawns sleep as before, alone and in a crowd placed overlapping (`crowd_mover_selftest`).
 
 **Next, with the C++ bundle:** the batch in C++, rays against `SightGeometry`'s copy of the ground, on the worker threads: the GDScript part (about 0.9 ms) should mostly go. Also there: swing hit checks through the pawn grid instead of physics shape queries.
+
+**C++ batch** *(Claude 2026-11-17, the C++ bundle; the owner: "begin and continue through all stages")*. The batch runs in C++ (`CrowdBatch`, `native/src/crowd_batch.h`) on the job scheduler's workers when the library is there (`CrowdMover.use_cpp_batch`), with the same separation. Walls come from the nav mesh, the owner's call in the code audit ("walls belong in navigation"): a pawn on the nav mesh walks along it with Detour's moveAlongSurface for its nav tier (Unreal's NavWalking), sliding along the mesh's edge instead of being handed to physics at a wall, and the ground under it comes from `SightGeometry.ground_at`, the same triangles and shapes physics has. That needs the nav tier's radius to cover the pawn's body; a pawn wider than its tier, or with no nav mesh under it, gets the physics sweep and ray as before (a warning says to set the tiers' radii). Things the nav mesh doesn't know (a prop on the collision layer that nav wasn't fed) don't stop a nav-walking pawn: that's NavWalking's trade. Test: `crowd_mover_selftest`'s `_test_walks_along_nav_mesh`.
 
 ### 8.23 Hit interceptors *(Claude 2026-11-17, the owner's call: "leave space for stats and proceed as proposed"; built)*
 

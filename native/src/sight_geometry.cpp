@@ -1,6 +1,7 @@
 // Written by Claude (claude-opus-5-5), 2026-11-09: see sight_geometry.h.
 #include "sight_geometry.h"
 
+#include <godot_cpp/classes/animatable_body3d.hpp> // Claude 2026-11-17
 #include <godot_cpp/classes/area3d.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/box_shape3d.hpp>
@@ -10,6 +11,7 @@
 #include <godot_cpp/classes/cylinder_shape3d.hpp>
 #include <godot_cpp/classes/shape3d.hpp>
 #include <godot_cpp/classes/sphere_shape3d.hpp>
+#include <godot_cpp/classes/static_body3d.hpp> // Claude 2026-11-17
 #include <godot_cpp/classes/world_boundary_shape3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -118,8 +120,28 @@ void SightGeometry::mark_dirty(Object *object) {
 	}
 }
 
-void SightGeometry::on_shape_changed(uint64_t body_id) {
-	_pending_dirty.push_back(body_id);
+// Claude 2026-11-17 (C++ bundle stage 2): a shape changed; every body using it is read again at the next sync.
+void SightGeometry::on_shape_changed(uint64_t shape_id) {
+	auto found = _shape_watchers.find(shape_id);
+	if (found != _shape_watchers.end()) {
+		_pending_dirty.insert(_pending_dirty.end(), found->second.begin(), found->second.end());
+	}
+}
+
+// Claude 2026-11-17 (C++ bundle stage 2): a body leaving stops being marked by its shapes. The connection itself stays (it's one
+// per shape, and a shape nobody watches just marks nothing); it's dropped with the shape or this geometry.
+void SightGeometry::unwatch_shapes(const Body &body) {
+	for (uint64_t shape_id : body.watched_shapes) {
+		auto found = _shape_watchers.find(shape_id);
+		if (found == _shape_watchers.end()) {
+			continue;
+		}
+		std::vector<uint64_t> &watchers = found->second;
+		watchers.erase(std::remove(watchers.begin(), watchers.end(), body.id), watchers.end());
+		if (watchers.empty()) {
+			_shape_watchers.erase(found);
+		}
+	}
 }
 
 int64_t SightGeometry::sync(int64_t tick) {
@@ -145,6 +167,7 @@ int64_t SightGeometry::sync(int64_t tick) {
 		change();
 		const uint32_t slot = found->second;
 		unplace(slot);
+		unwatch_shapes(_bodies[slot]); // Claude 2026-11-17
 		_bodies[slot] = Body();
 		_free_slots.push_back(slot);
 		_slot_of.erase(found);
@@ -185,13 +208,17 @@ int64_t SightGeometry::sync(int64_t tick) {
 		if (node == nullptr || !node->is_inside_tree()) {
 			change(); // freed, or left the tree without telling us
 			unplace(slot);
+			unwatch_shapes(body); // Claude 2026-11-17
 			_slot_of.erase(body.id);
 			body = Body();
 			_free_slots.push_back(slot);
 			continue;
 		}
 		// A new tick checks every body for a move or a new layer; within the same tick, only the ones marked.
-		const bool moved = new_tick && (node->get_global_transform() != body.transform || node->get_collision_layer() != body.layer);
+		// Claude 2026-11-17 (C++ bundle stage 2): a static body only every FIXED_CHECK_TICKS ticks, each on its own tick of them
+		// (by its slot), so the checks are spread out instead of all landing on one tick (% is the remainder).
+		const bool due = new_tick && (!body.fixed || (uint64_t(tick) + slot) % FIXED_CHECK_TICKS == 0);
+		const bool moved = due && (node->get_global_transform() != body.transform || node->get_collision_layer() != body.layer);
 		if (body.dirty || moved) {
 			change();
 			rebuild(slot, node);
@@ -257,15 +284,14 @@ void SightGeometry::clear() {
 	_pending_add.clear();
 	_pending_remove.clear();
 	_pending_dirty.clear();
+	_shape_watchers.clear(); // Claude 2026-11-17
 	_synced_tick = -1;
 }
 
 // --- Building ---
 
 void SightGeometry::before_change() {
-	if (_change_guard) {
-		_change_guard();
-	}
+	_change_guard.before_change(); // Claude 2026-11-17: waits for every reader (change_guard.h)
 }
 
 void SightGeometry::rebuild(uint32_t slot, CollisionObject3D *node) {
@@ -276,6 +302,8 @@ void SightGeometry::rebuild(uint32_t slot, CollisionObject3D *node) {
 	body.dirty = false;
 	body.transform = node->get_global_transform();
 	body.layer = node->get_collision_layer();
+	// Claude 2026-11-17: AnimatableBody3D extends StaticBody3D, but it's made to move, so it's checked every tick.
+	body.fixed = Object::cast_to<StaticBody3D>(node) != nullptr && Object::cast_to<AnimatableBody3D>(node) == nullptr;
 	const PackedInt32Array owners = node->get_shape_owners();
 	for (int64_t o = 0; o < owners.size(); ++o) {
 		const uint32_t owner = uint32_t(owners[o]);
@@ -290,10 +318,15 @@ void SightGeometry::rebuild(uint32_t slot, CollisionObject3D *node) {
 				continue;
 			}
 			// A shape whose resource changes (a terrain chunk's triangles after an edit, a box resized) marks this body.
+			// Claude 2026-11-17 (C++ bundle stage 2): through _shape_watchers, with one connection per shape (see the header).
 			const uint64_t shape_id = shape->get_instance_id();
 			if (std::find(body.watched_shapes.begin(), body.watched_shapes.end(), shape_id) == body.watched_shapes.end()) {
 				body.watched_shapes.push_back(shape_id);
-				shape->connect("changed", callable_mp(this, &SightGeometry::on_shape_changed).bind(body.id));
+				_shape_watchers[shape_id].push_back(body.id);
+				const Callable on_changed = callable_mp(this, &SightGeometry::on_shape_changed).bind(shape_id);
+				if (!shape->is_connected("changed", on_changed)) {
+					shape->connect("changed", on_changed);
+				}
 			}
 			Piece piece;
 			piece.layer = body.layer;
@@ -496,6 +529,185 @@ bool SightGeometry::hits(const CellEntry &ref, const Vector3 &from, const Vector
 	return (piece.layer & mask) != 0 && segment_hits_piece(piece, from, to);
 }
 
+// --- The ground (Claude 2026-11-17, C++ bundle stage 3) ---
+
+int SightGeometry::ground_at(double x, double z, double top, double bottom, uint32_t mask, double &height, Vector3 &normal) const {
+	// Braces, not brackets: "Vector3 from(real_t(x), ...)" reads to C++ as a function declaration.
+	const Vector3 from{ real_t(x), real_t(top), real_t(z) };
+	const Vector3 to{ real_t(x), real_t(bottom), real_t(z) };
+	double nearest = 2.0; // as a share of the drop; anything over 1 means nothing yet
+	bool unsure = false;
+	auto test = [&](const CellEntry &ref) {
+		Vector3 hit_normal;
+		const double t = ground_hit(ref, from, to, mask, hit_normal, unsure);
+		if (t >= 0.0 && t < nearest) {
+			nearest = t;
+			normal = hit_normal;
+		}
+	};
+	for (const CellEntry &ref : _big) {
+		test(ref);
+	}
+	// A straight-down ray stays in one cell.
+	auto cell = _cells.find(cell_key(int64_t(std::floor(x / _cell_size)), int64_t(std::floor(z / _cell_size))));
+	if (cell != _cells.end() && (cell->second.layers & mask) != 0 && cell->second.top >= bottom && cell->second.bottom <= top) {
+		for (const CellEntry &ref : cell->second.entries) {
+			test(ref);
+		}
+	}
+	if (unsure) {
+		return -1;
+	}
+	if (nearest > 1.0) {
+		return 0;
+	}
+	height = top + (bottom - top) * nearest;
+	if (normal.y < 0.0) {
+		normal = -normal; // a triangle seen from below: the ground faces up
+	}
+	return 1;
+}
+
+Dictionary SightGeometry::find_ground(const Vector3 &point, double top, double bottom, int64_t mask) const {
+	double height = 0.0;
+	Vector3 normal;
+	const int found = ground_at(point.x, point.z, top, bottom, uint32_t(mask), height, normal);
+	Dictionary result;
+	result["found"] = found;
+	result["height"] = height;
+	result["normal"] = normal;
+	return result;
+}
+
+double SightGeometry::ground_hit(const CellEntry &ref, const Vector3 &from, const Vector3 &to, uint32_t mask, Vector3 &normal,
+		bool &unsure) const {
+	const Body &body = _bodies[ref.body];
+	if (ref.triangle) {
+		const Triangle &t = body.triangles[ref.index];
+		if ((t.layer & mask) == 0) {
+			return -1.0;
+		}
+		// As segment_hits_triangle, keeping how far along it hits.
+		const D3 a(t.a);
+		const D3 e1 = D3(t.b) - a;
+		const D3 e2 = D3(t.c) - a;
+		const D3 origin(from);
+		const D3 direction = D3(to) - origin;
+		const D3 p = direction.cross(e2);
+		const double det = e1.dot(p);
+		if (std::abs(det) < 1e-12) {
+			return -1.0;
+		}
+		const double inverse = 1.0 / det;
+		const D3 s = origin - a;
+		const double u = s.dot(p) * inverse;
+		if (u < 0.0 || u > 1.0) {
+			return -1.0;
+		}
+		const D3 q = s.cross(e1);
+		const double v = direction.dot(q) * inverse;
+		if (v < 0.0 || u + v > 1.0) {
+			return -1.0;
+		}
+		const double along = e2.dot(q) * inverse;
+		if (along < 0.0 || along > 1.0) {
+			return -1.0;
+		}
+		const D3 n = e1.cross(e2);
+		normal = Vector3(real_t(n.x), real_t(n.y), real_t(n.z)).normalized();
+		return along;
+	}
+	const Piece &piece = body.pieces[ref.index];
+	if ((piece.layer & mask) == 0) {
+		return -1.0;
+	}
+	if (piece.kind == BOUNDARY) {
+		const double start = piece.plane.distance_to(from);
+		const double end = piece.plane.distance_to(to);
+		if (start < 0.0 || end > 0.0 || start == end) {
+			return -1.0; // starts inside (behind it), or never reaches it
+		}
+		normal = piece.plane.normal;
+		return start / (start - end);
+	}
+	if (piece.kind == CAPSULE || piece.kind == CYLINDER) {
+		if (segment_hits_piece(piece, from, to)) {
+			unsure = true; // in the way, but where exactly isn't worked out here
+		}
+		return -1.0;
+	}
+	// A normal in the shape's own space, turned into world space by the transpose of from_world's basis, which is right for normals
+	// even when the shape is scaled.
+	const Basis to_world_normal = piece.from_world.basis.transposed();
+	const D3 p0(piece.from_world.xform(from));
+	const D3 p1(piece.from_world.xform(to));
+	const D3 d = p1 - p0;
+	if (piece.kind == BOX) {
+		const double e[3] = { piece.half_extents.x, piece.half_extents.y, piece.half_extents.z };
+		const double start[3] = { p0.x, p0.y, p0.z };
+		const double along[3] = { d.x, d.y, d.z };
+		if (std::abs(p0.x) < e[0] && std::abs(p0.y) < e[1] && std::abs(p0.z) < e[2]) {
+			return -1.0; // starts inside
+		}
+		double t0 = 0.0;
+		double t1 = 1.0;
+		int entered = -1; // the axis whose face it comes in through
+		double entered_sign = 0.0;
+		for (int axis = 0; axis < 3; ++axis) {
+			if (std::abs(along[axis]) < 1e-12) {
+				if (std::abs(start[axis]) > e[axis]) {
+					return -1.0;
+				}
+				continue;
+			}
+			double ta = (-e[axis] - start[axis]) / along[axis];
+			double tb = (e[axis] - start[axis]) / along[axis];
+			const double sign = along[axis] > 0.0 ? -1.0 : 1.0; // it comes in through the face turned back toward it
+			if (ta > tb) {
+				std::swap(ta, tb);
+			}
+			if (ta > t0) {
+				t0 = ta;
+				entered = axis;
+				entered_sign = sign;
+			}
+			t1 = std::min(t1, tb);
+			if (t0 > t1) {
+				return -1.0;
+			}
+		}
+		Vector3 local;
+		if (entered >= 0) {
+			local[entered] = real_t(entered_sign);
+		} else {
+			local = Vector3(0, 1, 0); // touching at its very start: call it the top
+		}
+		normal = to_world_normal.xform(local).normalized();
+		return t0;
+	}
+	if (piece.kind == SPHERE) {
+		const double r2 = piece.radius * piece.radius;
+		const double c = p0.dot(p0) - r2;
+		if (c < 0.0) {
+			return -1.0; // starts inside
+		}
+		const double a = d.dot(d);
+		const double b = p0.dot(d);
+		const double discriminant = b * b - a * c;
+		if (a < 1e-12 || discriminant < 0.0) {
+			return -1.0;
+		}
+		const double t = (-b - std::sqrt(discriminant)) / a;
+		if (t < 0.0 || t > 1.0) {
+			return -1.0;
+		}
+		const D3 at = p0 + d * t;
+		normal = to_world_normal.xform(Vector3(real_t(at.x), real_t(at.y), real_t(at.z))).normalized();
+		return t;
+	}
+	return -1.0;
+}
+
 // Both sides count, as Godot's rays hit the back faces of triangle meshes by default.
 bool SightGeometry::segment_hits_triangle(const Triangle &t, const Vector3 &from, const Vector3 &to) {
 	const D3 a(t.a);
@@ -619,6 +831,8 @@ bool SightGeometry::segment_hits_piece(const Piece &piece, const Vector3 &from, 
 }
 
 void SightGeometry::_bind_methods() {
+	// Claude 2026-11-17 (C++ bundle stage 3)
+	ClassDB::bind_method(D_METHOD("find_ground", "point", "top", "bottom", "mask"), &SightGeometry::find_ground);
 	ClassDB::bind_method(D_METHOD("add_body", "body"), &SightGeometry::add_body);
 	ClassDB::bind_method(D_METHOD("remove_body", "body"), &SightGeometry::remove_body);
 	ClassDB::bind_method(D_METHOD("mark_dirty", "body"), &SightGeometry::mark_dirty);

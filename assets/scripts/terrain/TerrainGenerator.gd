@@ -48,9 +48,16 @@ signal chunk_removed(chunk: Vector2i)
 ## Claude 2026-11-07: TerrainBodyLifter uses it, so moving bodies isn't this script's job.
 signal ground_raised(center: Vector2, radius: float)
 ## Sent when a chunk has been built or rebuilt, with its triangles, measured from this node. Claude 2026-11-07: TerrainNavFeeder uses it.
+## Claude 2026-11-17: while it goes out for an edit, edit_area says which part changed.
 signal chunk_built(chunk: Vector2i, triangles: PackedVector3Array)
 ## Sent when generate() or start_empty() begins, with the settings it's about to use already in place.
 signal generation_started
+
+## Claude 2026-11-17 (C++ bundle stage 2, from the code audit): while chunk_built goes out for an edit, the part of the ground the
+## edit changed, measured from this node like the triangles: X and Z only (its Y and height are 0). Outside it, the chunk's
+## triangles are the same as before. Empty (size zero) when a chunk is built whole. TerrainNavFeeder passes it on, so nav rebuilds
+## only the tiles the edit touched instead of every tile under the chunk. Not an export: it's only set during an edit.
+var edit_area := AABB()
 
 # GDScript note: a const is a value that never changes.
 # How far a point can move at full jitter, as a share of one grid square. Any further, and a triangle could flip inside
@@ -482,6 +489,9 @@ func finish_building_chunks() -> void:
 
 ## Changes the heights of the chunks that are built, and rebuilds them. The log isn't touched here.
 func _apply_edit_to_loaded_chunks(x: float, z: float, radius: float, amount: float) -> void:
+	# Claude 2026-11-17 (C++ bundle stage 2): see edit_area. Points move within radius; the triangles using them reach one square further.
+	var reach := radius + _square_size()
+	edit_area = AABB(Vector3(x - reach, 0.0, z - reach), Vector3(reach * 2.0, 0.0, reach * 2.0))
 	var flat_center := Vector2(x, z)
 	# The patch, plus two squares: enough to reach any chunk whose smooth lighting reads a point that moved.
 	var margin := radius + 2.0 * _square_size()
@@ -512,6 +522,7 @@ func _apply_edit_to_loaded_chunks(x: float, z: float, radius: float, amount: flo
 		_rebuild_mesh(key)
 	for key in changed_chunks:
 		_rebuild_solid(key)
+	edit_area = AABB() # Claude 2026-11-17: the edit's chunk_built signals have gone out
 	if amount > 0.0:
 		var origin := _terrain_origin()
 		ground_raised.emit(Vector2(flat_center.x + origin.x, flat_center.y + origin.z), radius)

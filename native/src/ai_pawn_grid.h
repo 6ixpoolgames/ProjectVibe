@@ -11,10 +11,13 @@
 // grid cells in range. It also returns the nearest pawns first, so the max_candidates cap keeps the ones that matter.
 #pragma once
 
+#include "change_guard.h" // Claude 2026-11-17
 #include "pawn_table.h"
 
+#include <godot_cpp/classes/ref.hpp> // Claude 2026-11-17 (godot-cpp 10): Ref<T> is no longer pulled in by ref_counted.hpp
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp> // Claude 2026-11-17
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
@@ -44,6 +47,17 @@ public:
 	// pawns within radius of origin whose team isn't own_team, never exclude_slot, nearest first with ties by slot, at most
 	// max_results. They go in the first entries of found (the caller's own scratch), and the count is returned.
 	void prepare(int64_t tick);
+
+	// Claude 2026-11-17 (C++ bundle stage 3): swing hit checks, instead of a physics sphere query per spot. The pawns whose bodies
+	// (PawnTable::Body) a sphere of radius at any of centres touches, every team, never exclude, in the order a physics query per
+	// centre would have listed them new: centre by centre, then by slot. The grid only finds who's near; each is then tested
+	// exactly at its node's position now, since pawns that already ran this tick have moved since the table was read. A pawn on no
+	// collision layer is never touched, as physics wouldn't find it.
+	Array find_touching(const PackedVector3Array &centres, double radius, Object *exclude, int64_t tick);
+	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): jobs reading find_slots() add themselves here (change_guard.h),
+	// and a rebuild waits for them. A rebuild used to rely on the table's guard having run first, which held when the table
+	// changed but not after set_cell_size, which rebuilds with the table as it was.
+	navcore::ChangeGuard &change_guard() { return _change_guard; }
 	size_t find_slots(const Vector3 &origin, double radius, int64_t own_team, int64_t exclude_slot, size_t max_results,
 			std::vector<std::pair<double, uint32_t>> &found) const;
 
@@ -59,6 +73,7 @@ private:
 	std::vector<std::pair<double, uint32_t>> _found; // reused by query
 	double _cell_size = 8.0;
 	int64_t _built_version = -1; // the table's version the cells were built from
+	navcore::ChangeGuard _change_guard; // Claude 2026-11-17
 };
 
 } // namespace godot

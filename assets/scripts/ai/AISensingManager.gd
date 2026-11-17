@@ -161,9 +161,8 @@ func get_range() -> float:
 ## Claude 2026-11-09 (scaling spec step 1): the shared grid, made on first use from Pawn's shared table, or null without the C++
 ## library. It replaces track_pawn and untrack_pawn: pawns join the table themselves.
 static func _shared_grid() -> Object:
-	if _grid == null and ClassDB.class_exists(&"AIPawnGrid") and Pawn.get_table() != null:
-		_grid = ClassDB.instantiate(&"AIPawnGrid")
-		_grid.set_table(Pawn.get_table())
+	if _grid == null:
+		_grid = Pawn.get_grid() # Claude 2026-11-17 (C++ bundle stage 3): made by Pawn now, which the swing hit checks share
 	return _grid
 
 

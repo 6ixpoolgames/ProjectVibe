@@ -18,12 +18,18 @@
 //   - mark_dirty(), when a collision shape node is added to or removed from a body;
 //   - a shape whose resource changes (set_faces when a terrain chunk is edited, a box resized) marks its body itself;
 //   - sync(tick), once a tick: rebuilds every body that's dirty, has moved, or changed layer, and drops freed ones.
+//     Claude 2026-11-17 (C++ bundle stage 2, from the code audit): a StaticBody3D (but not an AnimatableBody3D, which is made to
+//     move) is checked for a move or a new layer only every FIXED_CHECK_TICKS ticks, a share of them each tick, since static
+//     bodies (the terrain, walls) nearly never move. One moved by code is noticed within that many ticks; mark_dirty() makes it
+//     sooner.
 // Before it changes anything it calls the change guard, which the job scheduler sets to finish every job still reading it.
 //
 // What a ray is: from `from` to `to`, blocked if it meets any piece on its mask's layers. As with Godot's physics rays (the
 // defaults sight uses), a solid shape the ray starts inside doesn't count, and triangles block from both sides. Physics rounds box
 // corners very slightly (Jolt's convex radius), so a ray grazing a corner can disagree; sight_geometry_selftest measures how often.
 #pragma once
+
+#include "change_guard.h" // Claude 2026-11-17
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/aabb.hpp>
@@ -63,7 +69,15 @@ public:
 
 	// --- For C++ (AIMemoryStore, AISensingJob): safe on any thread while nothing changes it ---
 	bool blocked(const Vector3 &from, const Vector3 &to, uint32_t mask) const;
-	void set_change_guard(std::function<void()> guard) { _change_guard = std::move(guard); }
+	// Claude 2026-11-17 (C++ bundle stage 3): the ground under a point, for the crowd mover (CrowdBatch): a ray straight down at x, z
+	// from top to bottom, against pieces on mask's layers, as a physics ray with hit_from_inside off would give it. Returns 1 with
+	// the highest hit's height and its upward-facing normal, 0 if nothing is there, and -1 if the answer needs physics: a capsule or
+	// cylinder is in the way, which this doesn't work out exactly. Same thread rule as blocked().
+	int ground_at(double x, double z, double top, double bottom, uint32_t mask, double &height, Vector3 &normal) const;
+	// The same, for tests: {found: -1, 0 or 1, height, normal}.
+	Dictionary find_ground(const Vector3 &point, double top, double bottom, int64_t mask) const;
+	// Claude 2026-11-17 (C++ bundle stage 2): every job reading it adds itself here (change_guard.h); was one guard, set by the last job.
+	navcore::ChangeGuard &change_guard() { return _change_guard; }
 	bool empty() const { return _bodies.empty(); }
 
 protected:
@@ -102,18 +116,26 @@ private:
 		std::vector<int64_t> cells; // the cells it was put in, so it can be taken out
 		bool big = false; // some of it is in the big list
 		std::vector<uint64_t> watched_shapes; // shape resources whose changed signal marks it dirty
+		bool fixed = false; // Claude 2026-11-17: a StaticBody3D, checked for moves only now and then (see the top)
 	};
+
+	// Claude 2026-11-17: how often a static body is checked for a move or a new layer, in ticks.
+	static constexpr uint64_t FIXED_CHECK_TICKS = 16;
 
 	void before_change();
 	void rebuild(uint32_t slot, CollisionObject3D *body);
 	void unplace(uint32_t slot);
 	void place(uint32_t slot);
 	void place_bounds(uint32_t slot, const AABB &bounds, const CellEntry &ref);
-	void on_shape_changed(uint64_t body_id);
+	void on_shape_changed(uint64_t shape_id); // Claude 2026-11-17: was given a body id; now a shape's, see _shape_watchers
+	void unwatch_shapes(const Body &body); // Claude 2026-11-17
 	int64_t cell_key(int64_t x, int64_t z) const { return (x << 32) ^ (z & 0xFFFFFFFF); }
 	bool hits(const CellEntry &ref, const Vector3 &from, const Vector3 &to, uint32_t mask) const;
 	static bool segment_hits_piece(const Piece &piece, const Vector3 &from, const Vector3 &to);
 	static bool segment_hits_triangle(const Triangle &t, const Vector3 &from, const Vector3 &to);
+	// Claude 2026-11-17: for ground_at. How far down the drop (0 to 1) it meets this, or -1 for not at all, with its normal (world).
+	// unsure is set for a shape it doesn't work out (capsules, cylinders).
+	double ground_hit(const CellEntry &ref, const Vector3 &from, const Vector3 &to, uint32_t mask, Vector3 &normal, bool &unsure) const;
 
 	std::vector<Body> _bodies; // by slot; slots are reused
 	std::vector<uint32_t> _free_slots;
@@ -128,6 +150,11 @@ private:
 		uint32_t layers = 0;
 	};
 	std::unordered_map<int64_t, Cell> _cells;
+	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): shape resource id -> the bodies using it. Each shape's changed
+	// signal is connected once, and marks all of them. Before, each body connected with its own id bound to the call, but Godot
+	// counts a function as connected whatever is bound to it, so a second body sharing a shape (two walls made from one BoxShape3D)
+	// failed to connect and wasn't re-read when the shape changed.
+	std::unordered_map<uint64_t, std::vector<uint64_t>> _shape_watchers;
 	std::vector<CellEntry> _big; // pieces that reach into too many cells, tested by every ray
 	// Bodies joining, leaving or changed since the last sync. Kept apart, so a body can join while a job reads the rest.
 	std::vector<uint64_t> _pending_add;
@@ -135,7 +162,7 @@ private:
 	std::vector<uint64_t> _pending_dirty;
 	double _cell_size = 4.0;
 	int64_t _synced_tick = -1;
-	std::function<void()> _change_guard;
+	navcore::ChangeGuard _change_guard;
 };
 
 } // namespace godot

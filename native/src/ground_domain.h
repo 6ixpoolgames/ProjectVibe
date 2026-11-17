@@ -50,8 +50,21 @@ public:
 	bool find_path_now(const float *from, const float *to, int tier, PathOutcome &out, bool use_links = false);
 	bool closest_point(const float *p, int tier, float *out) const;
 
+	// ---- walking along the surface (Claude 2026-11-17, C++ bundle stage 3: the crowd mover's walls) -------------------------
+	// Safe on worker threads while the nav mesh doesn't change (it only changes in NavServer.tick, on the main thread), as long as
+	// each thread uses a query object of its own: a dtNavMeshQuery can't be shared. new_query() makes one; free it with free_query().
+	dtNavMeshQuery *new_query() const;
+	static void free_query(dtNavMeshQuery *query);
+	// Walks from `from` toward `to` along the nav mesh for this tier, sliding along its edges (where the walls are, less the tier's
+	// radius) instead of crossing them: Detour's moveAlongSurface, what Unreal's NavWalking does. Links are never taken. False if
+	// there's no nav mesh within `tolerance` of `from` across, or within `height` of it up and down: the caller moves it some other
+	// way. out gets where it ends up across; its height is from's (the ground decides that).
+	bool move_along_surface(dtNavMeshQuery *query, const float *from, const float *to, int tier, float tolerance, float height,
+			float *out) const;
+
 	// ---- sliced queries (used by PathQueue, one at a time) ------------------------------------
-	bool begin_sliced(const float *from, const float *to, int tier, PathOutcome &fail);
+	// Claude 2026-11-17 (C++ bundle stage 3): use_links, as find_path_now has; finish_sliced then fills in link_ids too.
+	bool begin_sliced(const float *from, const float *to, int tier, PathOutcome &fail, bool use_links = false);
 	// Returns: 0 = still running, 1 = done (call finish_sliced), -1 = failed (nav changed under it)
 	int step_sliced(int max_iterations, int &used);
 	void finish_sliced(PathOutcome &out);
@@ -89,6 +102,7 @@ private:
 
 	QueryState m_sync_state; // used only by find_path_now, and finished within the call
 	QueryState m_sliced_state; // lasts as long as PathQueue's current search
+	bool m_sliced_links = false; // Claude 2026-11-17: whether that search may cross links
 	int m_debug_fail_commits = 0;
 	int m_debug_corner_limit = 0;
 };

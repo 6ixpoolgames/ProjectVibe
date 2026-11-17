@@ -22,6 +22,9 @@ extends Node
 
 ## Claude 2026-11-17: the name of the Health stat. A pawn without a stat of this name can't be hurt or die from damage.
 const HEALTH := &"Health"
+## Claude 2026-11-17 (C++ bundle stage 4, pawn M6): the name of the Detectability stat: how easy the pawn is for AI to see (1 normal,
+## 0 invisible). Pawn.detectability reads and writes it, and it's mirrored into the pawn table for the sensing job (Stat.table_column).
+const DETECTABILITY := &"Detectability"
 
 var _stats := {} # StringName -> Stat
 var pawn: Pawn = null # Claude 2026-11-09

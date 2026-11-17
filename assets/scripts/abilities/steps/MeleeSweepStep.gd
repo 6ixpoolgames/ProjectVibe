@@ -108,11 +108,19 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 	var targets: Array[Pawn] = []
 	var entity := pawn.get_network_entity()
 	# Through lag compensation in a network session; offline there's nobody to rewind, and pawns aren't tagged for it.
-	if entity and entity.session:
-		for found in LagCompensation.melee_spheres(entity, centres, hit_radius, ability.view_ticks_behind()):
+	# Claude 2026-11-17 (C++ bundle stage 3): when nothing would be rewound (every AI swing, and offline play), the pawn grid finds who
+	# the spheres touch in C++ (AIPawnGrid.find_touching), instead of a physics query per spot. Same answer: the exact shapes, where
+	# they are now. Without the C++ library, physics as before.
+	var view_behind := ability.view_ticks_behind()
+	if entity and entity.session and LagCompensation.would_rewind(entity, view_behind):
+		for found in LagCompensation.melee_spheres(entity, centres, hit_radius, view_behind):
 			var other := found.get_parent() as Pawn
 			if other:
 				targets.append(other)
+	elif Pawn.get_grid() != null and pawn.is_inside_tree():
+		for found: Object in Pawn.get_grid().find_touching(PackedVector3Array(centres), hit_radius, pawn, on_tick):
+			if found is Pawn:
+				targets.append(found)
 	else:
 		targets = _plain_spheres(centres)
 	for target in targets:

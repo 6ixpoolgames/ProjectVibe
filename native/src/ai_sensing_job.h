@@ -19,6 +19,7 @@
 #include "pawn_table.h"
 #include "sight_geometry.h" // Claude 2026-11-09 (scaling spec step 4)
 
+#include <godot_cpp/classes/ref.hpp> // Claude 2026-11-17 (godot-cpp 10): Ref<T> is no longer pulled in by ref_counted.hpp
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -95,6 +96,11 @@ private:
 
 	Ref<JobScheduler> _scheduler;
 	Ref<AIPawnGrid> _grid;
+	// Claude 2026-11-17 (C++ bundle stage 2): the table this job added itself to as a reader (change_guard.h), kept so it can take
+	// itself off again even if the grid is given another table.
+	Ref<PawnTable> _guarded_table;
+	void add_guards(); // adds this job as a reader of the table, grid and geometry
+	void remove_guards(); // takes it off them again
 	Ref<SightGeometry> _geometry; // Claude 2026-11-09 (step 4)
 	const PawnTable *_table = nullptr; // the grid's table, set by start(); the grid holds the reference
 	int _kind = -1;

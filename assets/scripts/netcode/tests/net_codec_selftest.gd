@@ -45,6 +45,7 @@ func _ready() -> void:
 	_check_garbage(3000)
 	_check_oversized_list()
 	_check_world()
+	_check_delta_state(5000) # Claude 2026-11-17 (C++ bundle stage 3)
 	print("")
 	if _failed == 0:
 		_print_timings()
@@ -190,6 +191,41 @@ func _check_random_lists(count: int) -> void:
 	_check(bad_values == 0, "random lists: %d read back different values" % bad_values)
 	_check(bad_position == 0, "random lists: %d ended at a different place" % bad_position)
 	print("%d random lists: bytes and values compared" % count)
+
+
+## Claude 2026-11-17 (C++ bundle stage 3): the delta snapshots' change check. NetCodec.delta_state must give exactly the lists
+## NetworkSessionSingleton.delta_state_lists gives: a list of random values, a copy with some of them changed (some only in type,
+## 1 against 1.0), and lists too long for one packet list, which both refuse.
+func _check_delta_state(count: int) -> void:
+	var bad := 0
+	var refused := 0
+	for n in count:
+		var now: Array = []
+		var encodings: Array = []
+		var length := _rng.randi_range(0, 140) if n % 10 == 0 else _rng.randi_range(0, 40)
+		for i in length:
+			now.append(_random_value())
+			if _rng.randf() < 0.95:
+				encodings.append(_random_encoding())
+		var then := now.duplicate()
+		var change_share := _rng.randf()
+		for i in length:
+			if _rng.randf() < change_share:
+				then[i] = float(now[i]) if typeof(now[i]) == TYPE_INT and _rng.randf() < 0.3 else _random_value()
+		if n % 50 == 0 and length > 0:
+			then.append(1) # different lengths: both refuse
+		var ticks_back := _rng.randi_range(1, 60)
+		var expected: Array = NetworkSessionSingleton.delta_state_lists(now, then, encodings, ticks_back)
+		var native: Array = _codec.delta_state(now, then, encodings, ticks_back, NetworkSessionSingleton.DELTA_MASK_BITS)
+		if expected.is_empty():
+			refused += 1
+		if expected.is_empty() != native.is_empty():
+			bad += 1
+		elif not expected.is_empty() and (not _same_lists(expected[0], native[0]) or not _same_lists(expected[1], native[1])):
+			bad += 1
+	_check(bad == 0, "delta change check: %d of %d differ between GDScript and C++" % [bad, count])
+	_check(refused > 0 and refused < count, "delta change check: some lists were refused, as they should be (%d)" % refused)
+	print("%d delta change checks compared" % count)
 
 
 func _check_cut_short_packets(count: int) -> void:

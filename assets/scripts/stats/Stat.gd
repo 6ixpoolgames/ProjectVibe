@@ -24,11 +24,20 @@ extends Node
 ## Claude 2026-11-09: a change tells the StatManager (its version), so abilities that keep stat values read them again.
 var value := 0.0:
 	set(new_value):
-		if new_value != value:
+		var changed := new_value != value # Claude 2026-11-17: kept, for the table mirror below
+		if changed:
 			var manager := get_parent() as StatManager
 			if manager:
 				manager.version += 1
 		value = new_value
+		if changed and table_column != &"":
+			_push_to_table() # Claude 2026-11-17 (C++ bundle stage 4)
+
+## Claude 2026-11-17 (C++ bundle stage 4, pawn M6): stat columns. The name of a pawn table column to copy this stat's value into
+## whenever it changes, so C++ (the sensing job, say) reads it from the table instead of asking the pawn. Empty: not copied. The
+## column must be a pushed one (PawnTable.add_pushed_column), as the built-in "detectability" is, which the default Detectability stat
+## fills. The table takes the new value at its next tick.
+@export var table_column: StringName = &""
 
 ## Claude 2026-11-09: on, this stat also has a current value that goes up and down during play, such as Health. value is then its
 ## most.
@@ -55,3 +64,18 @@ func set_modifiers(added: float, multiplied: float) -> void:
 func _init() -> void:
 	set_process(false)
 	set_physics_process(false)
+
+
+# Claude 2026-11-17 (C++ bundle stage 4): the value it starts with goes into the table too.
+func _ready() -> void:
+	if table_column != &"":
+		_push_to_table()
+
+
+# Claude 2026-11-17 (C++ bundle stage 4): this stat's value into the pawn table's table_column, for the pawn it belongs to. Nothing
+# happens without the C++ library (no table) or outside a pawn.
+func _push_to_table() -> void:
+	var manager := get_parent() as StatManager
+	var table := Pawn.get_table()
+	if manager and manager.pawn and table:
+		table.set_value(manager.pawn, table_column, value)

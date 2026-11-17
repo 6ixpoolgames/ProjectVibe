@@ -108,10 +108,15 @@ func _test_whole_world() -> void:
 	var before := _length(NavServer.find_path_now(from, to, TIER_SMALLEST))
 	_check(before > 35.0 and before < 70.0, "nav finds a path across a chunk border (%.1f m)" % before)
 
+	var builds_before: int = NavServer.get_stats().builds_committed # Claude 2026-11-17
 	terrain.edit(Vector3(64.0, 0.0, 32.0), 8.0, 16.0)
 	await _until_settled(world)
 	var around := _length(NavServer.find_path_now(from, to, TIER_SMALLEST))
 	_check(around > before + 1.0, "an edit reaches nav through the link (%.1f m)" % around)
+	# Claude 2026-11-17 (C++ bundle stage 2): only the tiles under the edit rebuild (TerrainGenerator.edit_area). The edit is on the
+	# border of two 64 m chunks, which cover about 50 tiles of 12.8 m; its patch and nav's border reach over at most 4 by 4.
+	var rebuilt: int = NavServer.get_stats().builds_committed - builds_before
+	_check(rebuilt > 0 and rebuilt <= 16, "and rebuilds only the tiles under it (%d)" % rebuilt)
 
 	var far_chunk := Vector2i(1, 0)
 	var id := NavMarkerManager.chunk_marker_id(NavMarkerManager.scene_marker_id(str(terrain.get_path())), far_chunk, 0)

@@ -22,12 +22,15 @@
 // Plain data only: nothing here changes a pawn.
 #pragma once
 
+#include "change_guard.h" // Claude 2026-11-17
+
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/variant.hpp>
+#include <godot_cpp/variant/transform3d.hpp> // Claude 2026-11-17
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
@@ -67,6 +70,14 @@ public:
 	// A game's own column: type is TYPE_FLOAT, TYPE_INT, TYPE_BOOL (kept as 0 or 1) or TYPE_VECTOR3, read from property on each pawn,
 	// or default_value where a pawn doesn't have it. Switched on by hand. False if the name is taken or the type isn't one of those.
 	bool add_column(const StringName &name, int64_t type, const StringName &property, const Variant &default_value);
+	// Claude 2026-11-17 (C++ bundle stage 4, pawn M6): stat columns. A pushed column isn't read from every pawn at every refresh:
+	// its property is read once, when a pawn joins or the column is switched on, and after that only set_value() changes it. That's
+	// for values that rarely change and cost a GDScript call to read, such as a Stat (Stat.table_column mirrors one here whenever
+	// it changes) or Pawn.detectability. add_pushed_column is add_column for one; the built-in detectability column is one.
+	bool add_pushed_column(const StringName &name, int64_t type, const StringName &property, const Variant &default_value);
+	// A pawn's new value for a pushed column. It's applied at the next refresh, so a tick's reads all see the same table and a worker
+	// job never sees it change. False, with an error, for a column that isn't pushed; a pawn that isn't here is ignored.
+	bool set_value(Object *pawn, const StringName &column, const Variant &value);
 	bool is_column_on(const StringName &name) const;
 	bool has_column(const StringName &name) const;
 	PackedStringArray get_column_names() const; // every column there is, on or off, core ones first
@@ -93,8 +104,22 @@ public:
 	const std::vector<double> &numbers(int column) const { return _columns[size_t(column)].numbers; }
 	const std::vector<int64_t> &whole_numbers(int column) const { return _columns[size_t(column)].whole_numbers; }
 	const std::vector<Vector3> &vectors(int column) const { return _columns[size_t(column)].vectors; }
-	// Called before anything changes the table. JobScheduler sets it; empty means nothing to wait for.
-	void set_change_guard(std::function<void()> guard) { _change_guard = std::move(guard); }
+	// Claude 2026-11-17 (C++ bundle stage 3): each pawn's body, for swing hit checks (AIPawnGrid.find_touching), read once when it
+	// joins from its first enabled CollisionShape3D child: a capsule standing along the shape's own Y, as in physics. radius is the
+	// capsule's; half_segment half the length of its straight middle; local where the shape sits on the pawn. A sphere is a capsule
+	// with no middle; a box or cylinder is stood in for by the capsule around it, with a warning once. radius < 0: no shape, never
+	// touched (physics wouldn't find it either).
+	struct Body {
+		float radius = -1.0f;
+		float half_segment = 0.0f;
+		Transform3D local;
+	};
+	const Body &body_at(int64_t slot) const { return _bodies[size_t(slot)]; }
+	// The farthest any pawn's body reaches from its origin, so a search knows how far around a point to look.
+	float max_body_reach() const { return _max_body_reach; }
+	// Called before anything changes the table, to wait for the jobs reading it.
+	// Claude 2026-11-17 (C++ bundle stage 2): every job reading it adds itself here (change_guard.h); was one guard, set by the last job.
+	navcore::ChangeGuard &change_guard() { return _change_guard; }
 
 protected:
 	static void _bind_methods();
@@ -107,6 +132,8 @@ private:
 		Variant default_value;
 		bool required = false; // switched on by a system that reads it
 		bool enabled = false; // switched on by hand
+		bool pushed = false; // Claude 2026-11-17: read once per pawn, then changed by set_value (see add_pushed_column)
+		std::vector<uint8_t> unread; // Claude 2026-11-17: pushed columns: 1 for a slot whose property hasn't been read yet
 		std::vector<double> numbers; // TYPE_FLOAT
 		std::vector<int64_t> whole_numbers; // TYPE_INT and TYPE_BOOL
 		std::vector<Vector3> vectors; // TYPE_VECTOR3
@@ -118,6 +145,14 @@ private:
 	void before_change();
 	void resize_column(Column &column);
 	void read_column(Column &column, size_t slot, Object *node);
+	void write_column(Column &column, size_t slot, const Variant &value); // Claude 2026-11-17: what read_column does with a value
+	// Claude 2026-11-17: pushes waiting for the next refresh.
+	struct Push {
+		uint64_t id = 0;
+		int column = 0;
+		Variant value;
+	};
+	std::vector<Push> _pushes;
 	void switched(Column &column, bool was_on);
 	Column *find_column(const StringName &name, const char *asked_by);
 
@@ -127,6 +162,9 @@ private:
 	std::vector<Object *> _nodes; // set by refresh; null until then
 	std::vector<Vector3> _positions; // global position
 	std::vector<int64_t> _teams;
+	std::vector<Body> _bodies; // Claude 2026-11-17: read on add, see Body
+	float _max_body_reach = 0.0f; // Claude 2026-11-17: only grows
+	Body read_body(Object *pawn); // Claude 2026-11-17
 	// Every other column, built-in or added, on or off. Found by name with a short search: there are only a handful.
 	std::vector<Column> _columns;
 
@@ -134,7 +172,7 @@ private:
 	int64_t _refreshed_tick = -1;
 	bool _stale = true;
 	int64_t _version = 0;
-	std::function<void()> _change_guard;
+	navcore::ChangeGuard _change_guard;
 
 	// Godot's interned names, made once here because they can't exist before the engine has started.
 	StringName _team_name;

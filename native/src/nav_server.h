@@ -4,6 +4,8 @@
 #pragma once
 
 #include "ground_domain.h"
+
+#include <algorithm> // Claude 2026-11-17: std::clamp in tier_radius
 #include "input_store.h"
 #include "path_queue.h"
 #include "tile_manager.h"
@@ -56,8 +58,9 @@ public:
 	bool submit_heightmap(int layer, Vector2i chunk, const PackedFloat32Array &heights, Vector2i samples,
 			float spacing, const PackedByteArray &materials, const AABB &dirty_bounds);
 	void release_chunk(int layer, Vector2i chunk);
+	// Claude 2026-11-17: dirty_bounds, as submit_heightmap (empty: the whole mesh's area)
 	bool submit_mesh(int layer, int64_t mesh_id, const PackedVector3Array &faces, const Transform3D &xform,
-			const String &surface);
+			const String &surface, const AABB &dirty_bounds);
 	void remove_mesh(int layer, int64_t mesh_id);
 	int surface_index(const String &name); // registers new names, 1..15
 
@@ -67,14 +70,28 @@ public:
 	void remove_interest(int id);
 
 	// ---- queries ---------------------------------------------------------------------------
-	int find_path(const Vector3 &from, const Vector3 &to, int tier); // async: path_ready / path_failed
+	int find_path(const Vector3 &from, const Vector3 &to, int tier, bool use_links); // async: path_ready / path_failed
 	void cancel_path(int request_id);
+	// Claude 2026-11-17 (C++ bundle stage 3): a queued search's answer, for code that asks rather than listening to path_ready (each
+	// NavigationManager would otherwise hear every pawn's paths). Empty while it's still searching (or for an id it doesn't know);
+	// then once {ok, points, link_ids, partial, reason}, as find_path_now_result, and it's forgotten. An answer nobody takes is
+	// dropped after RESULT_KEEP_TICKS of NavServer's ticks. find_path's use_links works as find_path_now_result's.
+	Dictionary take_path_result(int request_id);
 	PackedVector3Array find_path_now(const Vector3 &from, const Vector3 &to, int tier); // sync, for tests/tools
 	Variant closest_point(const Vector3 &p, int tier); // Vector3, or null if no nav nearby
 	// Claude 2026-11-08: like find_path_now, but the path may cross links. Returns {points, link_ids, partial}: link_ids has one
 	// entry per point, not 0 where that point starts a link, which ends at the next point. points is empty if there's no way.
 	// find_path_now and find_path never cross links, so code written before links existed gets the same paths as before.
 	Dictionary find_path_now_with_links(const Vector3 &from, const Vector3 &to, int tier);
+	// Claude 2026-11-17 (C++ bundle stage 2): the one sync search that says everything, with or without links: {points, link_ids,
+	// partial}, as above. find_path_now gives only points, so a path found without links couldn't say it was partial (it ends at
+	// the closest place it can reach). find_path_now_with_links is this with use_links on.
+	Dictionary find_path_now_result(const Vector3 &from, const Vector3 &to, int tier, bool use_links);
+
+	// Claude 2026-11-17 (C++ bundle stage 3): for other C++ classes (CrowdBatch): the live ground nav mesh, read-only, and a tier's
+	// radius (how far its nav mesh keeps from walls). Not for GDScript.
+	const navcore::GroundDomain &ground() const { return m_ground; }
+	float tier_radius(int tier) const { return m_cfg.tier_radii[std::clamp(tier, 0, m_cfg.tier_count - 1)]; }
 
 	// ---- links (spec section 10, phase 3) ---------------------------------------------------
 	// Claude 2026-11-08: placed links, such as a door, a ladder or a jump a designer marked. The tile holding the start rebuilds
@@ -109,6 +126,13 @@ private:
 	navcore::TileManager m_tiles;
 	navcore::GroundDomain m_ground;
 	navcore::PathQueue m_paths;
+	// Claude 2026-11-17: answers waiting to be taken (take_path_result), with the tick each came in on.
+	struct PathResult {
+		Dictionary result;
+		uint64_t tick = 0;
+	};
+	std::unordered_map<int, PathResult> m_path_results;
+	static constexpr uint64_t RESULT_KEEP_TICKS = 600;
 	navcore::WorkerPool m_pool; // declared last: destroyed first, so no job outlives what it uses
 
 	std::vector<navcore::Interest> m_interests;

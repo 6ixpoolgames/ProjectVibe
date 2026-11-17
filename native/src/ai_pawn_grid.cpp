@@ -1,6 +1,7 @@
 // Written by Claude (claude-opus-5-5), 2026-11-09: see ai_pawn_grid.h.
 #include "ai_pawn_grid.h"
 
+#include <godot_cpp/classes/collision_object3d.hpp> // Claude 2026-11-17: find_touching
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
 
@@ -29,6 +30,7 @@ double AIPawnGrid::get_cell_size() const {
 
 // Claude 2026-11-09: from the table's rows, in slot order.
 void AIPawnGrid::rebuild() {
+	_change_guard.before_change(); // Claude 2026-11-17 (C++ bundle stage 2): no job may be reading the cells while they change
 	for (auto &cell : _cells) {
 		cell.second.clear(); // keep the vectors' memory for the next tick
 	}
@@ -103,10 +105,93 @@ size_t AIPawnGrid::find_slots(const Vector3 &origin, double radius, int64_t own_
 	return keep;
 }
 
+namespace {
+// Claude 2026-11-17: the squared distance from point p to segment a-b.
+double distance_squared_to_segment(const Vector3 &p, const Vector3 &a, const Vector3 &b) {
+	const Vector3 ab = b - a;
+	const double length_squared = ab.length_squared();
+	const double t = length_squared > 1e-12 ? std::clamp(double((p - a).dot(ab)) / length_squared, 0.0, 1.0) : 0.0;
+	return p.distance_squared_to(a + ab * real_t(t));
+}
+
+// How far a pawn may have moved since the table was read this tick: the grid finds pawns by where they were then.
+constexpr double MOVED_SINCE_READ = 2.0;
+} // namespace
+
+// Claude 2026-11-17 (C++ bundle stage 3): see the header. A sphere touches a capsule when the sphere's centre is within the two radii
+// of the capsule's middle segment; that's the whole test, the same one physics makes.
+Array AIPawnGrid::find_touching(const PackedVector3Array &centres, double radius, Object *exclude, int64_t tick) {
+	Array result;
+	if (_table.is_null() || centres.is_empty()) {
+		return result;
+	}
+	prepare(tick);
+	const PawnTable *table = _table.ptr();
+	// Who's near any centre, by the grid: a box around all the centres, grown by how far a body reaches and may have moved.
+	const double reach = radius + double(table->max_body_reach()) + MOVED_SINCE_READ;
+	Vector3 low = centres[0];
+	Vector3 high = centres[0];
+	for (int64_t i = 1; i < centres.size(); ++i) {
+		low = low.min(centres[i]);
+		high = high.max(centres[i]);
+	}
+	std::vector<uint32_t> near;
+	const int64_t x0 = int64_t(std::floor((low.x - reach) / _cell_size));
+	const int64_t x1 = int64_t(std::floor((high.x + reach) / _cell_size));
+	const int64_t z0 = int64_t(std::floor((low.z - reach) / _cell_size));
+	const int64_t z1 = int64_t(std::floor((high.z + reach) / _cell_size));
+	for (int64_t x = x0; x <= x1; ++x) {
+		for (int64_t z = z0; z <= z1; ++z) {
+			auto cell = _cells.find(cell_key(x, z));
+			if (cell != _cells.end()) {
+				near.insert(near.end(), cell->second.begin(), cell->second.end());
+			}
+		}
+	}
+	std::sort(near.begin(), near.end()); // slot order, the same on every machine
+	// Each near pawn's capsule now: its middle segment's two ends, and its radius.
+	struct Capsule {
+		Object *node;
+		Vector3 a, b;
+		double radius;
+	};
+	std::vector<Capsule> capsules;
+	capsules.reserve(near.size());
+	for (uint32_t slot : near) {
+		const PawnTable::Body &body = table->body_at(slot);
+		Object *object = table->node_at(slot);
+		CollisionObject3D *node = Object::cast_to<CollisionObject3D>(object);
+		if (body.radius < 0.0f || node == nullptr || object == exclude || !node->is_inside_tree() || node->get_collision_layer() == 0) {
+			continue;
+		}
+		const Transform3D shape = node->get_global_transform() * body.local;
+		const Vector3 up = shape.basis.get_column(1); // the capsule stands along the shape's own Y
+		capsules.push_back(Capsule{ object, shape.origin - up * body.half_segment, shape.origin + up * body.half_segment,
+				double(body.radius) * double(shape.basis.get_column(0).length()) });
+	}
+	std::vector<bool> taken(capsules.size(), false);
+	for (int64_t c = 0; c < centres.size(); ++c) {
+		const Vector3 centre = centres[c];
+		for (size_t i = 0; i < capsules.size(); ++i) {
+			if (taken[i]) {
+				continue;
+			}
+			const double touch = radius + capsules[i].radius;
+			if (distance_squared_to_segment(centre, capsules[i].a, capsules[i].b) <= touch * touch) {
+				taken[i] = true;
+				result.push_back(capsules[i].node);
+			}
+		}
+	}
+	return result;
+}
+
 void AIPawnGrid::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_table", "table"), &AIPawnGrid::set_table);
 	ClassDB::bind_method(D_METHOD("get_table"), &AIPawnGrid::get_table);
 	ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &AIPawnGrid::set_cell_size);
 	ClassDB::bind_method(D_METHOD("get_cell_size"), &AIPawnGrid::get_cell_size);
 	ClassDB::bind_method(D_METHOD("query", "origin", "radius", "own_team", "exclude", "max_results", "tick"), &AIPawnGrid::query);
+	// Claude 2026-11-17 (C++ bundle stage 3)
+	ClassDB::bind_method(D_METHOD("find_touching", "centres", "radius", "exclude", "tick"), &AIPawnGrid::find_touching);
 }

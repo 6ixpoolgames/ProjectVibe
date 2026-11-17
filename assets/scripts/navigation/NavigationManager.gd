@@ -31,8 +31,8 @@
 ##     point, such as AIGoToPointBehaviour's legs, picks a nearer one when told no, rather than standing and waiting.
 ##   - A point on nav it can't reach, such as an island: the nav library gives the path to the nearest place it can reach, so the
 ##     pawn walks as close as it can, and arrives there. is_partial() says so, while following and after arriving, so whatever
-##     asked can tell "got there" from "got as close as it could". Only paths that may cross links know this for now (use_links
-##     on, the default): find_path_now, used with use_links off, gives no partial flag (roadmap, the C++ bundle).
+##     asked can tell "got there" from "got as close as it could". Claude 2026-11-17 (C++ bundle stage 2): with use_links on or
+##     off, through NavServer.find_path_now_result (before, a path without links had no partial flag).
 ##   - Its parent isn't a Pawn: it warns, and move_to always returns false.
 ##   - The controller in charge changes: ControllerManager calls stop(), so the AI never walks the rest of a player's path.
 ##
@@ -79,7 +79,17 @@ enum PathState {
 ## Claude 2026-11-16: while PENDING, how often it tries again to find a path, in ticks at 60 a second.
 @export var pending_retry_ticks := 10
 ## Claude 2026-11-16: how long it waits, in ticks at 60 a second, for nav to be built before giving up (UNREACHABLE). 300 is 5 s.
+## Claude 2026-11-17: and for a queued path (paths_now_per_tick) to come.
 @export var pending_give_up_ticks := 300
+
+## Claude 2026-11-17 (C++ bundle stage 3, from the code audit): how many paths every pawn together finds straight away in one tick.
+## Any more go to NavServer's queue, which searches within its own budget a tick (query_iterations_per_tick, across links too) and
+## spreads them over the next ticks, and each of those pawns waits, PENDING, for its path. Most ticks need a handful; this is for a
+## mass repath, an army given a new goal in one tick, which used to search every path at once on the main thread. 0 sends every path
+## through the queue. GDScript note: a static var is shared by every NavigationManager, since the budget is the whole game's.
+static var paths_now_per_tick := 8
+static var _paths_now_tick := -1 # the tick _paths_now_used counts
+static var _paths_now_used := 0
 
 ## The pawn this manager belongs to, or null if its parent isn't one.
 var pawn: Pawn = null
@@ -96,6 +106,7 @@ var _goal := Vector3.ZERO # where the last move_to was going, for finding a new 
 var _action_to_press: StringName = &"" # waiting for the controller to take it
 var _ticks_on_link := -1 # -1: not crossing a link
 var _new_paths_left := 1 # how many more times a missed link may lead to a new path, before it gives up
+var _path_request := 0 # Claude 2026-11-17: the queued search this pawn is waiting for (NavServer.find_path), or 0
 
 
 func _init() -> void:
@@ -126,6 +137,11 @@ func move_to(point: Vector3) -> bool:
 
 ## Stops following the path. has_arrived() goes back to false, and the state to NONE.
 func stop() -> void:
+	if _path_request != 0: # Claude 2026-11-17: a queued search nobody wants any more
+		var nav := _nav_server()
+		if nav:
+			nav.cancel_path(_path_request)
+		_path_request = 0
 	_corners = PackedVector3Array()
 	_next_corner = 0
 	_state = PathState.NONE # Claude 2026-11-16
@@ -146,9 +162,17 @@ func get_move_direction() -> Vector3:
 		var elapsed := pawn.ticks_elapsed # Claude 2026-11-16 (pawn spec 8.21): the ticks since its pawn last ran
 		_pending_ticks += elapsed
 		if _pending_ticks >= TickDriver.ticks_at_rate(pending_give_up_ticks):
+			stop() # Claude 2026-11-17: which also cancels a queued search
 			_state = PathState.UNREACHABLE
 			return Vector3.ZERO
-		if _pending_ticks % maxi(1, TickDriver.ticks_at_rate(pending_retry_ticks)) < elapsed:
+		if _path_request != 0:
+			# Claude 2026-11-17 (C++ bundle stage 3): waiting for a queued path, which comes as a dictionary once it's found.
+			var nav := _nav_server()
+			var found: Dictionary = nav.take_path_result(_path_request) if nav else {}
+			if not found.is_empty():
+				_path_request = 0
+				_state = _follow(found)
+		elif _pending_ticks % maxi(1, TickDriver.ticks_at_rate(pending_retry_ticks)) < elapsed:
 			_state = _find_path(_goal)
 		if _state != PathState.FOLLOWING:
 			return Vector3.ZERO # still waiting, or found there's no way after all
@@ -258,15 +282,33 @@ func _find_path(point: Vector3) -> PathState:
 		# NavServer is idle once every tile it was asked for is built. Not idle, the nav under the pawn may just not be built yet.
 		return PathState.PENDING if not nav.is_idle() else _straight_line(start, point)
 	# Nav under the pawn. From here, no path is UNREACHABLE whether or not nav is still building (see the top of the file).
-	var points := PackedVector3Array()
-	if use_links:
-		# Claude 2026-11-08: a path that may cross links, with each link's id at the corner where it starts.
-		var found: Dictionary = nav.find_path_now_with_links(start, point, nav_tier)
-		points = found.points
-		_link_ids = found.link_ids
-		_partial = found.partial # Claude 2026-11-16: the nav library's own flag, which was dropped before
-	else:
-		points = nav.find_path_now(start, point, nav_tier) # gives no partial flag (see the top of the file)
+	# Claude 2026-11-17 (C++ bundle stage 3): straight away if this tick's budget allows (paths_now_per_tick); otherwise queued, and
+	# the pawn waits, PENDING, until get_move_direction takes the answer.
+	if not _may_search_now():
+		_path_request = nav.find_path(start, point, nav_tier, use_links)
+		return PathState.PENDING
+	# Claude 2026-11-17 (C++ bundle stage 2): one search either way, which says whether the path is partial with links or without
+	# (find_path_now gave only points). With use_links, a path may cross links, with each link's id at the corner where it starts.
+	return _follow(nav.find_path_now_result(start, point, nav_tier, use_links))
+
+
+# Claude 2026-11-17 (C++ bundle stage 3): one more path straight away this tick, if the budget allows; counts it if so.
+static func _may_search_now() -> bool:
+	if TickDriver.tick != _paths_now_tick:
+		_paths_now_tick = TickDriver.tick
+		_paths_now_used = 0
+	if _paths_now_used >= paths_now_per_tick:
+		return false
+	_paths_now_used += 1
+	return true
+
+
+# Claude 2026-11-17 (C++ bundle stage 3): sets up a found path to follow, straight away or from the queue: {points, link_ids, partial}
+# (a queued one also says ok and why not). Returns FOLLOWING, or UNREACHABLE if there's no path. Was the end of _find_path.
+func _follow(found: Dictionary) -> PathState:
+	var points: PackedVector3Array = found.points
+	_link_ids = found.link_ids
+	_partial = found.partial # Claude 2026-11-16: the nav library's own flag, which was dropped before
 	if points.size() < 2:
 		_link_ids = PackedInt64Array()
 		_partial = false

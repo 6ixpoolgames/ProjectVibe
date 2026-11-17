@@ -98,13 +98,15 @@ struct NavConfig {
 
 	// Smallest pawn.
 	float agent_height = 1.8f;
-	float agent_radius = 0.3f;
+	// Claude 2026-11-17: 0.4 (was 0.3), the default pawn's radius (pawn.tscn), so its walls come from the nav mesh
+	// (CrowdBatch needs the tier's radius to cover the body) and paths keep it a full body's width from walls.
+	float agent_radius = 0.4f;
 	float agent_max_climb = 0.4f;
 	float max_slope_deg = 45.0f;
 
 	// Clearance tiers: tier t = "at least tier_radii[t] of space around this spot".
 	// tier_radii[0] is always the smallest pawn's radius.
-	float tier_radii[MAX_TIERS] = { 0.3f, 0.6f, 1.0f, 1.5f };
+	float tier_radii[MAX_TIERS] = { 0.4f, 0.6f, 1.0f, 1.5f }; // Claude 2026-11-17: tier 0 is agent_radius, 0.4
 	int tier_count = 4;
 
 	// Vertical range of the world. (ceiling - floor) / cell_height must stay under 8191 (Recast limit).

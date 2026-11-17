@@ -36,10 +36,25 @@ void TileManager::mark_dirty(const WorldRect &world_rect) {
 	// A tile's border reads this far into its neighbours, so changes that close also concern them.
 	const WorldRect r = world_rect.expanded(m_cfg.border_cells() * m_cfg.cell_size + m_cfg.cell_size);
 	const float tw = m_cfg.tile_world();
-	const int x0 = int(std::floor(r.min_x / tw)), x1 = int(std::floor(r.max_x / tw));
-	const int z0 = int(std::floor(r.min_z / tw)), z1 = int(std::floor(r.max_z / tw));
-	for (int z = z0; z <= z1; ++z) {
-		for (int x = x0; x <= x1; ++x) {
+	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): the tile range is worked out in doubles, and a range with more
+	// tiles in it than there are tiles at all goes through the tiles instead. A huge or endless rectangle (a mesh with no bounds,
+	// say) used to loop over every tile number in it, billions of steps, and int(floor(...)) of an endless value is undefined.
+	// A rectangle with a NaN in it (a broken transform) dirties every tile, since there's no telling where it is.
+	const double x0 = std::floor(double(r.min_x) / tw), x1 = std::floor(double(r.max_x) / tw);
+	const double z0 = std::floor(double(r.min_z) / tw), z1 = std::floor(double(r.max_z) / tw);
+	const bool unknown = std::isnan(x0) || std::isnan(x1) || std::isnan(z0) || std::isnan(z1);
+	const double range_tiles = unknown ? 0.0 : (x1 - x0 + 1.0) * (z1 - z0 + 1.0);
+	if (unknown || range_tiles > double(m_tiles.size())) {
+		for (auto &kv : m_tiles) {
+			const TileKey &key = kv.first;
+			if (unknown || (key.x >= x0 && key.x <= x1 && key.z >= z0 && key.z <= z1)) {
+				kv.second.version = m_next_version++;
+			}
+		}
+		return;
+	}
+	for (int z = int(z0); z <= int(z1); ++z) {
+		for (int x = int(x0); x <= int(x1); ++x) {
 			auto it = m_tiles.find(TileKey{ x, z });
 			if (it != m_tiles.end()) {
 				it->second.version = m_next_version++;
@@ -125,7 +140,12 @@ void TileManager::commit_finished(GroundDomain &domain, double budget_ms, std::v
 			continue; // tile was unloaded while building
 		}
 		TileRecord &t = it->second;
-		t.in_flight_version = 0;
+		// Claude 2026-11-17 (C++ bundle stage 2): clear the "building" mark only if this is the build it marks. A tile dropped
+		// mid-build and made again has a new build under way; an old build landing used to clear that build's mark, so
+		// schedule() started a third and the tile was built twice. Versions never repeat, so an old build can't match.
+		if (r->version == t.in_flight_version) {
+			t.in_flight_version = 0;
+		}
 		if (r->version != t.version) {
 			++m_builds_stale; // inputs changed while building; the tile will build again
 			continue;
