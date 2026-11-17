@@ -80,6 +80,8 @@ func _ready() -> void:
 		if child is AISenseBase:
 			child.manager = self
 			child.pawn = pawn
+			child.perf_full_name = StringName("ai.sense.%s.full" % child.name)
+			child.perf_refresh_name = StringName("ai.sense.%s.refresh" % child.name)
 			_senses.append(child)
 			if _sight == null and child is SightSense:
 				_sight = child
@@ -106,7 +108,9 @@ func tick_sensing(tick: int) -> void:
 		full_pass(tick)
 	elif pawn.fired_since_last_run(tick, offset, TickDriver.ticks_at_rate(refresh_interval_ticks)):
 		for sense in _senses:
+			var started := PerfScopes.begin() # each sense timed on its own (PerfScopes)
 			sense.refresh(tick)
+			PerfScopes.end(sense.perf_refresh_name, started)
 	# If its next run (Pawn.next_run_tick) will do a full pass, ask the sensing job for it at the end of the tick before that run, so
 	# the job's answer, which is always for the next tick, is for that run. That's this tick for a pawn running every tick. If a
 	# stepping pawn's step changes first, it runs on another tick, the answer goes unused, and that pass runs on the main thread.
@@ -138,16 +142,29 @@ func full_pass(tick: int) -> void:
 		if _senses.size() > 1:
 			_candidates.assign(_job.get_candidates(pawn, tick))
 		for sense in _senses:
+			var started := PerfScopes.begin() # each sense timed on its own (PerfScopes)
 			if sense == _sight:
 				_sight.full_pass_prepared(_job, tick)
 			else:
 				sense.full_pass(_candidates, tick)
-		pawn.ai_context.memory.forget_old(tick)
+			PerfScopes.end(sense.perf_full_name, started)
+		_forget_old(tick)
 		return
+	var search_started := PerfScopes.begin()
 	_find_candidates(tick)
+	PerfScopes.end(&"ai.sense.search", search_started)
 	for sense in _senses:
+		var started := PerfScopes.begin()
 		sense.full_pass(_candidates, tick)
+		PerfScopes.end(sense.perf_full_name, started)
+	_forget_old(tick)
+
+
+# Memory drops what has faded away, after each full pass; timed as "ai.memory.forget".
+func _forget_old(tick: int) -> void:
+	var started := PerfScopes.begin()
 	pawn.ai_context.memory.forget_old(tick)
+	PerfScopes.end(&"ai.memory.forget", started)
 
 
 ## The longest range among the senses, in metres.

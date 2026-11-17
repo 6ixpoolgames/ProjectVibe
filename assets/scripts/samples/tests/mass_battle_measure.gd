@@ -12,6 +12,11 @@
 ## Claude 2026-11-16, for windowed runs (leave out --headless and --fixed-fps to measure what playing feels like): each row also
 ## shows the frame, the per-frame scripts (process), drawing on the CPU and GPU, and draw calls. --no-visuals hides the toy figures
 ## and swords and stops their per-frame scripts; --no-shadows switches the lights' shadows off. Comparing runs shows what each costs.
+## Claude 2026-11-17 (scaling spec 6.2, shadow decider step 5a): --record-decisions=<file> records every AI decision with an
+## AIDecisionRecorder and saves them as JSON lines (user:// or a full path), for checking a second decider against real fights. The
+## recording adds its own cost to the AI's timings, so measure without it.
+## Claude 2026-11-17: --ai-shadow runs the C++ decider beside GDScript (AIDecisionBatcher's shadow mode) and prints how often they
+## agreed; with --scopes, its costs show as ai.batch.gather, .build, .decide and .compare.
 extends Node
 
 var _size := 50
@@ -24,6 +29,10 @@ var _pawn_collision := true
 var _skip_still_moves := false
 var _steps := true # Claude 2026-11-16 (pawn spec 8.21): off with --no-steps
 var _scopes := false # Claude 2026-11-16: --scopes prints every timed part each row (the owner's question: what does simulate spend it on?)
+var _decisions_path := "" # Claude 2026-11-17: --record-decisions=<file>
+var _decisions: AIDecisionRecorder = null
+var _shadow := false # Claude 2026-11-17: --ai-shadow
+var _batcher: AIDecisionBatcher = null
 
 
 func _ready() -> void:
@@ -48,6 +57,10 @@ func _ready() -> void:
 			_steps = false
 		elif argument == "--scopes": # Claude 2026-11-16
 			_scopes = true
+		elif argument.begins_with("--record-decisions="): # Claude 2026-11-17
+			_decisions_path = argument.trim_prefix("--record-decisions=")
+		elif argument == "--ai-shadow": # Claude 2026-11-17
+			_shadow = true
 	if not _visuals:
 		get_tree().node_added.connect(_on_node_added)
 	# Claude 2026-11-16 (movement experiments): each pawn's movement settings, set as it enters the tree.
@@ -76,6 +89,19 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 	arena._start_offline()
+	if _decisions_path != "": # Claude 2026-11-17
+		_decisions = AIDecisionRecorder.new()
+		_decisions.max_records = 2000000 # a whole run, at any size here
+		add_child(_decisions)
+		_decisions.start()
+		print("--- recording AI decisions to %s (adds to the AI's timings) ---" % _decisions_path)
+	if _shadow: # Claude 2026-11-17: the game's own batcher if it has one, else one added here
+		_batcher = GameMode.get_module(AIDecisionBatcher) as AIDecisionBatcher
+		if _batcher == null:
+			_batcher = AIDecisionBatcher.new()
+			GameMode.add_module(_batcher)
+		_batcher.mode = AIDecisionBatcher.Mode.SHADOW
+		print("--- the C++ decider runs beside GDScript (shadow mode) ---")
 	# Claude 2026-11-16: in a window, the overview of the middle, where the fight is: the most there is to draw. Now the spectator at the
 	# overview point (V), keeping nothing loaded, as the old overhead camera did; the player's pawn stands where it started, under its AI.
 	if DisplayServer.get_name() != "headless":
@@ -138,6 +164,16 @@ func _ready() -> void:
 		recorder.stop_recording()
 		var size := FileAccess.get_file_as_bytes(recorder.get_recording_path()).size()
 		print("replay: %.2f MB for %d ticks, %.1f MB a minute, %s" % [size / 1048576.0, ticks, size / 1048576.0 / (ticks / 60.0 / 60.0) if ticks > 0 else 0.0, recorder.get_recording_path()])
+	if _batcher: # Claude 2026-11-17
+		var counts := _batcher.get_counts()
+		print("shadow decider: %d of %d decisions agree (%.3f%%), %d differ, %d unanswered, %d batches, largest %d" % [counts["agreed"],
+			counts["decisions"], 100.0 * counts["agreed"] / maxf(counts["decisions"], 1.0), counts["differs"], counts["unanswered"],
+			counts["batches"], counts["largest_batch"]])
+	# Claude 2026-11-17: the AI decisions, saved, with a summary
+	if _decisions:
+		_decisions.stop()
+		var error := _decisions.save(_decisions_path)
+		print("decisions: %s, saved to %s (%s)" % [JSON.stringify(_decisions.summary()), _decisions_path, "ok" if error == OK else "error %d" % error])
 	print("--- done in %.0f s ---" % ((Time.get_ticks_msec() - started) / 1000.0))
 	get_tree().quit(0)
 

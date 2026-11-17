@@ -100,7 +100,10 @@ func update_state(tick: int) -> void:
 			return
 	var context := pawn.ai_context
 	for state in _states:
-		if state.prerequisites_met(context):
+		var started := PerfScopes.begin() # each state's check timed on its own (PerfScopes)
+		var fits := state.prerequisites_met(context)
+		PerfScopes.end(state.perf_name, started)
+		if fits:
 			if state != _current:
 				_change_to(state, "prerequisites")
 			return
@@ -224,6 +227,7 @@ func _collect_states() -> void:
 	for child in get_children():
 		if child is AIStateBase:
 			child.manager = self
+			child.perf_name = StringName("ai.state." + String(child.name))
 			_states.append(child)
 			if String(child.name).begins_with("@"):
 				push_warning("AIStateManager: the state %s has an automatic name, which can differ between runs. Give it a name." % child.name)

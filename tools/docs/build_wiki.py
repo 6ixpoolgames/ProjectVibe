@@ -283,6 +283,9 @@ def menu(systems: list) -> list:
 # build/wiki/mkdocs.yml. The menu isn't in it: the hook (wiki_hook.py) gathers the pages and sets the menu before every build.
 def write_config() -> None:
     os.makedirs(BUILD, exist_ok=True)
+    # Claude 2026-11-17: the pages' folder too. MkDocs checks docs_dir exists before its on_config hook gathers the pages into it, so
+    # on a fresh checkout (GitHub's build) it stopped with "isn't an existing directory"; locally the folder was left from earlier builds.
+    os.makedirs(SOURCE, exist_ok=True)
     # Godot scans every folder under the project; this keeps it out of the build.
     open(os.path.join(PROJECT, "build", ".gdignore"), "a").close()
     def quoted(path):

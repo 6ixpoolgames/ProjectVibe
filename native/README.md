@@ -37,6 +37,7 @@ Registered in `src/register_types.cpp`.
 | `AISensingJob` | Sensing's search, visibility and line of sight on the workers | `AISensingManager` |
 | `AIMemoryStore` | One pawn's AI memory, sight checks and target scoring | `AIMemory`, `SightSense`, `AITargetSelector` (fallback `AIMemoryStoreGD`) |
 | `SightGeometry` | A thread-safe copy of the level's collision: rays for sight, ground for the crowd | `ai/senses/SightGeometryFeeder` (makes it), `AISensingManager`, `CrowdMover` |
+| `AIBatchDecider` | AI behaviour decisions for many pawns in one call, the same as `AIBehaviourManager.decide()` (scaling spec 6.2; not used by the game yet) | `ai/tests/decision_replay.gd` (the shadow comparison) |
 | `CrowdBatch` | The crowd mover's batch on the workers, walking pawns along the nav mesh | `CrowdMover` (`use_cpp_batch`; fallback `_move_batch`) |
 | `NetCodec` | Snapshot encoding and delta snapshots' change check | `NetworkSession`, `NetPackets` (fallback `NetPackets`) |
 | `TickStateRecorder` | The steady-state part of rollback recording | `TickStateComponent` (fallback: its own GDScript) |
@@ -58,7 +59,7 @@ Two sets of worker threads, and one rule: **workers only read plain data that ca
 Run with `bash tools/run_tests.sh <name>`. None needs a build step, but they all need the library built and loaded.
 
 - Nav: `nav_selftest` (tiles, paths, links, budgets, the stale-build fix), `nav_links_selftest`, `navigation_manager_selftest`, `nav_stitching_selftest`, `body_nav_feeder_selftest`.
-- AI: `ai_perception_selftest` and `ai_stealth_selftest` (C++ and GDScript stores give the same results; `-- --gdscript-store` runs GDScript), `ai_sensing_job_selftest`, `sight_geometry_selftest`, `pawn_table_selftest`, `combat_selftest` (swing hits, which go through `find_touching` when nothing is rewound), `tick_rate_selftest` (fades at 30 ticks a second).
+- AI: `ai_perception_selftest` and `ai_stealth_selftest` (C++ and GDScript stores give the same results; `-- --gdscript-store` runs GDScript), `ai_sensing_job_selftest`, `sight_geometry_selftest`, `pawn_table_selftest`, `combat_selftest` (swing hits, which go through `find_touching` when nothing is rewound), `tick_rate_selftest` (fades at 30 ticks a second), `ai_batch_decider_selftest` (every decision the same as GDScript's; `ai_batch_decider_compare -- --file=` for a recorded fight).
 - Netcode and replay: `net_codec_selftest` (bytes and values match `NetPackets`), `tick_state_selftest` (matches `StateEncoding.quantize`), `replay_selftest` (packing byte for byte).
 - Crowd: `crowd_mover_selftest`.
 - Costs: `ai_stress` and `pawn_stress` print what the C++ paths cost per tick.

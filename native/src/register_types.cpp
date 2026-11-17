@@ -13,6 +13,7 @@
 #include "sight_geometry.h" // line of sight in C++, step 4
 #include "replay_motion_packer.h" // the replay's motion packing in C++
 #include "crowd_batch.h" // the crowd mover's batch in C++
+#include "ai_batch_decider.h" // AI decisions in one call, scaling spec 6.2
 
 #include <gdextension_interface.h>
 #include <godot_cpp/classes/engine.hpp>
@@ -40,6 +41,7 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	GDREGISTER_CLASS(TickStateRecorder);
 	GDREGISTER_CLASS(ReplayMotionPacker);
 	GDREGISTER_CLASS(CrowdBatch); // after the scheduler and the geometry it uses
+	GDREGISTER_CLASS(AIBatchDecider);
 	g_nav_server = memnew(NavServer);
 	Engine::get_singleton()->register_singleton("NavServer", g_nav_server);
 }

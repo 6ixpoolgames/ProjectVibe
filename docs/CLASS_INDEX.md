@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 141 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 143 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -18,6 +18,8 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [AIChaseBehaviour](../assets/scripts/ai/REFERENCE.md#aichasebehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Runs after the current target, and stops within reach for Attack to take over. |
 | [AIContextComponent](../assets/scripts/ai/REFERENCE.md#aicontextcomponent) | [ai](../assets/scripts/ai/README.md) | Node | Shared data and settings for one pawn's AI, and the step that runs the AI parts in order. |
 | [AIController](../assets/scripts/controllers/REFERENCE.md#aicontroller) | [controllers](../assets/scripts/controllers/README.md) | ControllerBase | The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick. |
+| [AIDecisionBatcher](../assets/scripts/ai/REFERENCE.md#aidecisionbatcher) | [ai](../assets/scripts/ai/README.md) | GameModeModule | Gathers the AI's behaviour decisions into one batch a tick for the C++ decider (AIBatchDecider), and, in shadow mode, checks its answers against GDScript's without using them. |
+| [AIDecisionRecord](../assets/scripts/ai/REFERENCE.md#aidecisionrecord) | [ai](../assets/scripts/ai/README.md) | RefCounted | What one AI decision was made from, and what it chose: a plain record for diagnostics and for checking another decider against this one. |
 | [AIGoToPointBehaviour](../assets/scripts/ai/REFERENCE.md#aigotopointbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Walks to a meeting point: the nearest node in a Godot group, "rally_point" by default. |
 | [AIIdleState](../assets/scripts/ai/REFERENCE.md#aiidlestate) | [ai](../assets/scripts/ai/README.md) | AIStateBase | The state for when nothing else fits: its prerequisites always hold. |
 | [AIInvestigateBehaviour](../assets/scripts/ai/REFERENCE.md#aiinvestigatebehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Walks over to see what something half-noticed was. |

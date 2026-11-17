@@ -7,6 +7,8 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 - [AIBehaviourBase](#aibehaviourbase)
 - [AIBehaviourManager](#aibehaviourmanager)
 - [AIContextComponent](#aicontextcomponent)
+- [AIDecisionBatcher](#aidecisionbatcher)
+- [AIDecisionRecord](#aidecisionrecord)
 - [AIMemory](#aimemory)
 - [AIMemoryStoreGD](#aimemorystoregd)
 - [AISenseBase](#aisensebase)
@@ -72,12 +74,16 @@ Settings worth knowing (pawn spec 10.7):
 - `name_hash: int` = `0`: Worked out once by the manager: a hash of the name, for random numbers.
 - `started_tick: int` = `-1`: The tick it last started (-1: never).
 - `ended_tick: int` = `-1`: The tick it last ended (-1: never).
+- `perf_available_name: StringName` = `&""`: The timing scope names for its is_available() and its tick(), such as &"ai.available.Chase" and &"ai.behaviour.Chase" (see [`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)). Made once by the manager, so timing makes no new names.
+- `perf_tick_name: StringName` = `&""`
 - `decision_persistence: float` = `0.0`
 - `decision_jitter: float` = `0.0`
 - `decision_ceiling: float` = `0.0`
 - `decision_floor: float` = `0.0`
 - `decision_available: bool` = `false`
 - `availability_checked: bool` = `false`
+- `decision_score: float` = `0.0`
+- `decision_scored: bool` = `false`
 - `decision_index: int` = `0`
 - `warned_score_range: bool` = `false`
 
@@ -142,6 +148,10 @@ pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say f
 
 Listen to `behaviour_changed` to follow its choices.
 
+The same decision is made in C++ by AIBatchDecider (native/src/ai_batch_decider.cpp, scaling spec 6.2), step for step: a change to `decide()` goes in both, and ai/tests/ai_batch_decider_selftest checks they agree.
+
+To see what each decision was made from, set `decision_listener` (the [`AIDecisionRecorder`](https://docs.godotengine.org/en/stable/classes/class_aidecisionrecorder.html) does). While it's empty, no record is made.
+
 The fixed order: behaviours are sorted by name once, when the manager is ready. Never by the order they were added.
 
 What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd):
@@ -155,6 +165,10 @@ What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd)
 
 ### Settings and properties
 
+- `decision_listener: Callable` = `Callable()`: Called after every decision of every pawn, with an [`AIDecisionRecord`](#aidecisionrecord) of what it was made from and what it chose, and this manager: `func(record: AIDecisionRecord, manager: AIBehaviourManager)`. For diagnostics and for checking another decider against this one (scaling spec 6.2). Empty, the default: no record is made, which costs one check per decision.
+  
+  GDScript note: "static" means one for every manager, so one listener hears every pawn.
+- `decision_batcher: AIDecisionBatcher` = `null`: The [`AIDecisionBatcher`](#aidecisionbatcher) gathering decisions for the C++ decider, set by it while its mode isn't OFF; null otherwise, which costs one check per decision.
 - `default_score_jitter: float` = `0.0`: The jitter for behaviours whose own score_jitter is -1. 0: no randomness.
 - `randomize_ties: bool` = `false`: On: results that tie are picked between at random (replayably). Off: the fixed order decides.
 - `tie_margin: float` = `0.0001`: Results closer than this count as a tie.
@@ -172,7 +186,8 @@ What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd)
 
 - `get_running_behaviour() -> AIBehaviourBase`: The behaviour running now, or null.
 - `get_behaviours() -> AIBehaviourBase[]`: Every behaviour, in the fixed order.
-- `decide(tick: int) -> void`: `AIContextComponent.run_ai()` calls this when a decision is waiting (see `AIContextComponent.request_decision()`). Uses up the waiting decision.
+- `describe() -> Dictionary`: This brain as plain data: the manager's settings, the AI context's, and each behaviour's, in the fixed order. Everything a decision reads that doesn't change from one decision to the next. AIBatchDecider.add_brain() takes it, and AIDecisionRecorder saves it. The pawn's own fields are pawn_number, pawn, random_seed and decision_interval_ticks; the rest is the same for every pawn with the same behaviour set. Settings changed during play (set_score_jitter, set_interrupt_threshold) show in the next call.
+- `decide(tick: int, record: AIDecisionRecord = null) -> void`: `AIContextComponent.run_ai()` calls this when a decision is waiting (see `AIContextComponent.request_decision()`). Uses up the waiting decision. record: the [`AIDecisionRecord`](#aidecisionrecord) to fill in while `decision_listener` is set; run_ai passes one with the target and state updates in it. Null makes one here if something listens.
 - `tick_running(tick: int) -> void`: `AIContextComponent.run_ai()` calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 - `stop_running(reason: String) -> void`: Stops the running behaviour, if any; its exit() gets this reason. Called with "died" when the pawn dies.
 - `add_persistence_ticks(behaviour_name: StringName, ticks: float) -> void`: Moves a behaviour's persistence back along its fade by this many ticks, so it lasts longer. Negative: it ends sooner.
@@ -266,6 +281,111 @@ context.random_unit(salt)       # a number from 0 up to 1, the same on every run
 - `random_unit_at(tick: int, salt: int) -> float`: random_unit() for a given tick.
 - `random_signed(salt: int) -> float`: A number from -1 to 1. See random_unit().
 - `pawn_number() -> int`: This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on every machine, or else a hash of its name.
+
+## AIDecisionBatcher
+
+`res://assets/scripts/ai/AIDecisionBatcher.gd`, extends [`GameModeModule`](../game_mode/REFERENCE.md#gamemodemodule)
+
+Gathers the AI's behaviour decisions into one batch a tick for the C++ decider (AIBatchDecider), and, in shadow mode, checks its answers against GDScript's without using them.
+
+A GameMode module (`GameMode.get_module(AIDecisionBatcher)`), off by default. Scaling spec 6.2: decisions made together in C++, later on the worker threads, instead of one pawn at a time in GDScript. Each pawn deciding on its own stays the default (the owner's call); a game opts in.
+
+Modes:
+- OFF: nothing happens, and the AI pays one check per decision.
+- SHADOW: every decision still runs in GDScript, unchanged. As each one starts, this module gathers the pawn's inputs from the live pawn into a row (its brain, state, target, running behaviour, the hard-rule bitmasks, persistence, and the availability and score of every behaviour that passed the hard rules), and notes GDScript's answer when it ends. At the end of the tick, one C++ call decides every row, and the answers are compared. Disagreements are counted and the first few logged as warnings (`get_counts()`). The game plays exactly as with OFF.
+
+What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)): `ai.batch.gather` (building each row in GDScript), `ai.batch.build` (the tick's arrays), `ai.batch.decide` (the C++ call) and `ai.batch.compare`.
+
+A brain is described once per behaviour manager (`AIBehaviourManager.describe()`); pawns with the same behaviour set share one. A setting changed during play after that (set_score_jitter, say) isn't seen, and would show as disagreements.
+
+Behaviours' is_available() and score() are asked for every behaviour that passes the hard rules, not only the ones GDScript's early stop reaches, and before GDScript asks them itself, at the same tick. Batched deciding needs both to be safe to call more than once a tick, with no effect on the game. Every t0 behaviour's are (Go To Point's keeps its point for 2 s, so a second call gives the same answer).
+
+### Settings and properties
+
+- `mode: int` = `0`: What it does: OFF or SHADOW.
+- `warnings_kept: int` = `5`: How many disagreements are logged as warnings, with what each side chose. The rest are only counted.
+
+### Constants
+
+- `Mode.OFF = 0`: nothing
+- `Mode.SHADOW = 1`: decides beside GDScript and compares, without using its answers
+
+### Functions
+
+- `get_match_options() -> PackedStringArray`
+- `get_counts() -> Dictionary`: The counts so far: decisions (rows decided in C++), agreed, differs, unanswered (a row GDScript never finished, which shouldn't happen), batches (C++ calls), largest_batch (most rows in one), and examples (the disagreements logged).
+- `reset_counts() -> void`: Starts the counts afresh.
+- `gather(manager: AIBehaviourManager, behaviours: AIBehaviourBase[], running: AIBehaviourBase, tick: int, event_priority: int, event_is_normal: bool) -> int`: Gathers one decision's inputs from the live pawn, before GDScript decides. Returns the row, or -1 if the pawn can't be batched (its brain has more behaviours than the decider takes).
+- `note_answer(row: int, chosen: AIBehaviourBase) -> void`: Notes GDScript's answer for a row: what runs after the decision (null: nothing).
+- `decide_gathered() -> void`: Decides every row gathered so far in one C++ call, compares, and starts afresh. Runs at the end of each tick; a test calls it to settle decisions made by hand.
+
+## AIDecisionRecord
+
+`res://assets/scripts/ai/AIDecisionRecord.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+What one AI decision was made from, and what it chose: a plain record for diagnostics and for checking another decider against this one.
+
+The [`AIBehaviourManager`](#aibehaviourmanager) fills one in after a decision, only while `AIBehaviourManager.decision_listener` is set, and hands it to the listener. The [`AIDecisionRecorder`](https://docs.godotengine.org/en/stable/classes/class_aidecisionrecorder.html) keeps them and saves them to a file. Nothing in the game reads them.
+
+Why it exists: the plan to make decisions in C++ on the worker threads (scaling spec 6.2) starts with a "shadow" decider that decides beside this one without being used. To compare the two exactly, the C++ one needs the same inputs this decision had, and the answer this decision gave. A record holds both:
+- the reasons for deciding: `cause`, `event_priority`, `event_is_normal`
+- the situation: `state`, `has_target`, the running behaviour and when it started
+- for each behaviour, in the fixed order: which hard rule ruled it out, if any, and otherwise its persistence, jitter, ceiling and floor, whether is_available() was asked and what it said, and its score if it was scored
+- the answer: `chosen`
+
+Behaviours the early stop skipped show `available = -1` (never asked). A decider that matches asks the same ones.
+
+How to read one:
+
+```gdscript
+record.chosen                              # &"Chase", or &"" for nothing
+record.behaviours[0]["name"]               # each entry is a Dictionary, see add_behaviour()
+record.to_dict()                           # everything as plain values, for saving as JSON
+```
+
+### Settings and properties
+
+- `tick: int` = `0`: The tick of the decision.
+- `pawn_number: int` = `0`: The pawn's own number (`AIContextComponent.pawn_number()`), which also goes into its random numbers.
+- `pawn_name: StringName` = `&""`: The pawn's node name, for reading.
+- `cause: StringName` = `&"direct"`: Why it decided: one of the CAUSE_ constants.
+- `event_priority: int` = `0`: The strongest reason's priority (pawn spec 10.7).
+- `event_is_normal: bool` = `true`: True when every reason was an ordinary decision tick, the one kind min_run_ticks holds off.
+- `target_before_id: int` = `0`: The target before and after the target selector's update, as instance ids (0: none) and names. Only for `CAUSE_AI_STEP`; otherwise both are what it was.
+- `target_before_name: StringName` = `&""`
+- `target_after_id: int` = `0`
+- `target_after_name: StringName` = `&""`
+- `state_before: StringName` = `&""`: The state before and after the state manager's update. Only for `CAUSE_AI_STEP`.
+- `state_after: StringName` = `&""`
+- `state: StringName` = `&""`: The state the behaviours were judged in.
+- `has_target: bool` = `false`: True if there was a target when the behaviours were judged.
+- `running_before: StringName` = `&""`: The behaviour running before the decision (&"": none), and the tick it started (-1: none).
+- `running_started_tick: int` = `-1`
+- `kept_by_interrupt: bool` = `false`: True when the running behaviour couldn't be replaced for this reason (step 0), so no behaviour was looked at.
+- `behaviours: Dictionary[]` = `[]`: One Dictionary per behaviour, in the manager's fixed order. Empty when `kept_by_interrupt`. See `add_behaviour()`.
+- `chosen: StringName` = `&""`: What runs after the decision: a behaviour's name, or &"" for nothing.
+
+### Constants
+
+- `CAUSE_AI_STEP = &"ai_step"`: Why the decision happened: the pawn's AI step (a decision tick, or an event such as a hit or a state change).
+- `CAUSE_BEHAVIOUR_ENDED = &"behaviour_ended"`: Why: the running behaviour finished (SUCCEEDED or FAILED), which decides at once, with no target or state update first.
+- `CAUSE_DIRECT = &"direct"`: Why: something called `AIBehaviourManager.decide()` itself, such as a test.
+- `RULE_NONE = &""`: A hard rule that ruled a behaviour out before any of its own code ran (pawn spec 10.8 step 2). None: it was a candidate.
+- `RULE_STATE = &"state"`: Not allowed in the current state.
+- `RULE_COOLDOWN = &"cooldown"`: Cooling down.
+- `RULE_NO_TARGET = &"no_target"`: Needs a target, and there's none.
+- `RULE_ACTION = &"action"`: Its action couldn't start (AbilityManager.can_start).
+
+### Functions
+
+- `note_target_before(target: Node3D) -> void`: Notes the target before the selector's update.
+- `note_target_after(target: Node3D) -> void`: Notes the target after the selector's update.
+- `changed() -> bool`: True when the running behaviour changed.
+- `add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void`: Adds one behaviour's entry, from the scratch values the manager left on it this decision. rule: the hard rule that ruled it out, or `RULE_NONE`. The entry's keys:
+  - `name`, `rule`
+  - for a candidate (no rule): `persistence`, `jitter`, `ceiling`, `floor` (null for no floor), `available` (1 yes, 0 no, -1 never asked), `score` (null when not scored)
+- `entry_for(behaviour_name: StringName) -> Dictionary`: The entry for this behaviour, or an empty Dictionary.
+- `to_dict() -> Dictionary`: Everything as plain values (text, numbers, arrays, dictionaries), ready for JSON.
 
 ## AIMemory
 
@@ -393,6 +513,8 @@ t0 has only SightSense. Hearing is deferred (pawn spec section 14), and being hi
 
 - `manager: AISensingManager` = `null`: Set by the AISensingManager.
 - `pawn: Pawn` = `null`: The pawn this sense belongs to. Set by the AISensingManager.
+- `perf_full_name: StringName` = `&""`: The timing scope names for its full passes and its refreshes, such as &"ai.sense.Sight.full" and &"ai.sense.Sight.refresh" (see [`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)). Made once by the manager.
+- `perf_refresh_name: StringName` = `&""`
 
 ### Functions
 
@@ -451,6 +573,7 @@ The state's name is its node name, such as Idle. Behaviours' allowed_states and 
 
 - `priority: int` = `0`: Higher is checked first. A state change is also an interrupt event of this priority (pawn spec 10.7).
 - `manager: AIStateManager` = `null`: Set by the AIStateManager.
+- `perf_name: StringName` = `&""`: The timing scope name for its prerequisites_met(), such as &"ai.state.Combat" (see [`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)). Made once by the manager.
 
 ### Functions
 

@@ -336,14 +336,31 @@ func run_ai(tick: int) -> void:
 		request_decision()
 	var decide_started := PerfScopes.begin()
 	if has_decision_waiting():
+		# A record of this decision, only while something listens (AIBehaviourManager.decision_listener): what the target and the
+		# state were before and after their updates. The behaviour manager fills in the rest.
+		var record: AIDecisionRecord = null
+		if AIBehaviourManager.decision_listener.is_valid():
+			record = AIDecisionRecord.new()
+			record.cause = AIDecisionRecord.CAUSE_AI_STEP
+			record.note_target_before(current_target)
+			record.state_before = current_state_name()
+		var part_started := PerfScopes.begin() # each part timed on its own too (PerfScopes)
 		if ai_target_selector:
 			ai_target_selector.update_target(tick) # first, because states such as Combat look at the current target
+		PerfScopes.end(&"ai.decide.target", part_started)
+		part_started = PerfScopes.begin()
 		if ai_state_manager:
 			ai_state_manager.update_state(tick) # a change asks for a decision with the new state's priority
+		PerfScopes.end(&"ai.decide.state", part_started)
+		if record:
+			record.note_target_after(current_target)
+			record.state_after = current_state_name()
+		part_started = PerfScopes.begin()
 		if ai_behaviour_manager:
-			ai_behaviour_manager.decide(tick)
+			ai_behaviour_manager.decide(tick, record)
 		else:
 			clear_decision()
+		PerfScopes.end(&"ai.decide.behaviour", part_started)
 	PerfScopes.end(&"ai.decide", decide_started)
 	if ai_behaviour_manager:
 		var behaviours_started := PerfScopes.begin()

@@ -71,6 +71,10 @@ var name_hash := 0
 var started_tick := -1
 ## The tick it last ended (-1: never).
 var ended_tick := -1
+## The timing scope names for its is_available() and its tick(), such as &"ai.available.Chase" and &"ai.behaviour.Chase" (see
+## [PerfScopes]). Made once by the manager, so timing makes no new names.
+var perf_available_name: StringName = &""
+var perf_tick_name: StringName = &""
 
 # Scratch values for one decision, kept here so a decision creates no arrays or objects. Only the manager reads them.
 var decision_persistence := 0.0
@@ -79,6 +83,8 @@ var decision_ceiling := 0.0
 var decision_floor := 0.0 # -INF when min_score isn't set
 var decision_available := false # is_available()'s answer this decision, once availability_checked is true
 var availability_checked := false
+var decision_score := 0.0 # score()'s answer this decision, once decision_scored is true
+var decision_scored := false
 var decision_index := 0 # place in the fixed order
 var warned_score_range := false
 

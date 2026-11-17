@@ -20,6 +20,8 @@ extends Node
 
 ## Set by the AIStateManager.
 var manager: AIStateManager = null
+## The timing scope name for its prerequisites_met(), such as &"ai.state.Combat" (see [PerfScopes]). Made once by the manager.
+var perf_name: StringName = &""
 
 
 func _init() -> void:

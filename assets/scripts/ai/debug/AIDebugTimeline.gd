@@ -19,6 +19,9 @@
 ##   timeline.watch(pawn)                  # for each pawn to record
 ##   timeline.step_view(-1)                # while paused: one tick back; +1 forward. Returns ticks it couldn't move (past the present)
 ##   timeline.view_present()               # back to now
+# REFACTOR: it keeps its own recording of what replay already records for every pawn (positions and facing: ReplayMotionChannel;
+# state, behaviour, target, ability, hit and death events: ReplayGameplayChannel). It could be a view over the replay being recorded,
+# with no second copy of the data (reusable). See ai/CHANGELOG.md.
 class_name AIDebugTimeline
 extends Node3D
 

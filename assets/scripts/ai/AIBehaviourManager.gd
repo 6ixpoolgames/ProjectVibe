@@ -35,6 +35,12 @@
 ## [/codeblock]
 ## Listen to [signal behaviour_changed] to follow its choices.
 ## [br]
+## The same decision is made in C++ by AIBatchDecider (native/src/ai_batch_decider.cpp, scaling spec 6.2), step for step: a change
+## to [method decide] goes in both, and ai/tests/ai_batch_decider_selftest checks they agree.
+## [br]
+## To see what each decision was made from, set [member decision_listener] (the [AIDecisionRecorder] does). While it's empty, no
+## record is made.
+## [br]
 ## The fixed order: behaviours are sorted by name once, when the manager is ready. Never by the order they were added.
 ## [br]
 ## What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd):
@@ -50,6 +56,16 @@ extends Node
 
 ## Sent each time the running behaviour changes. Either can be null: nothing was running, or nothing runs now.
 signal behaviour_changed(old_behaviour: AIBehaviourBase, new_behaviour: AIBehaviourBase, reason: String)
+
+## Called after every decision of every pawn, with an [AIDecisionRecord] of what it was made from and what it chose, and this
+## manager: [code]func(record: AIDecisionRecord, manager: AIBehaviourManager)[/code]. For diagnostics and for checking another
+## decider against this one (scaling spec 6.2). Empty, the default: no record is made, which costs one check per decision.
+## [br]
+## GDScript note: "static" means one for every manager, so one listener hears every pawn.
+static var decision_listener := Callable()
+## The [AIDecisionBatcher] gathering decisions for the C++ decider, set by it while its mode isn't OFF; null otherwise, which costs
+## one check per decision.
+static var decision_batcher: AIDecisionBatcher = null
 
 ## The jitter for behaviours whose own score_jitter is -1. 0: no randomness.
 @export var default_score_jitter := 0.0
@@ -111,9 +127,41 @@ func get_behaviours() -> Array[AIBehaviourBase]:
 	return _behaviours.duplicate()
 
 
+## This brain as plain data: the manager's settings, the AI context's, and each behaviour's, in the fixed order. Everything a
+## decision reads that doesn't change from one decision to the next. AIBatchDecider.add_brain() takes it, and AIDecisionRecorder
+## saves it. The pawn's own fields are pawn_number, pawn, random_seed and decision_interval_ticks; the rest is the same for every pawn
+## with the same behaviour set. Settings changed during play (set_score_jitter, set_interrupt_threshold) show in the next call.
+func describe() -> Dictionary:
+	var context := pawn.ai_context if pawn else null
+	var behaviours: Array = []
+	for behaviour in _behaviours:
+		var states: Array = []
+		for state in behaviour.allowed_states:
+			states.append(String(state))
+		behaviours.append({
+			"name": String(behaviour.name), "name_hash": behaviour.name_hash, "allowed_states": states,
+			"max_score": behaviour.max_score, "min_score": behaviour.min_score if behaviour.min_score > -INF else null, # JSON has no infinity
+			"needs_target": behaviour.needs_target, "presses_action": String(behaviour.presses_action),
+			"cooldown_ticks": behaviour.cooldown_ticks, "min_run_ticks": behaviour.min_run_ticks,
+			"min_run_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.min_run_ticks), # what the interrupt rule compares with
+			"interrupt_threshold": behaviour.interrupt_threshold, "cannot_be_interrupted": behaviour.cannot_be_interrupted,
+			"score_jitter": behaviour.score_jitter, "effective_jitter": behaviour.effective_jitter(),
+			"persistence": behaviour.persistence, "has_persistence_fade": behaviour.persistence_fade != null,
+			"script": behaviour.get_script().resource_path.get_file() if behaviour.get_script() else "",
+		})
+	return {
+		"pawn_number": context.pawn_number() if context else 0, "pawn": String(pawn.name) if pawn else "",
+		"random_seed": context.random_seed if context else 0,
+		"decision_interval_ticks": context.decision_interval_ticks if context else 0,
+		"default_score_jitter": default_score_jitter, "randomize_ties": randomize_ties,
+		"tie_margin": tie_margin, "tie_salt": TIE_SALT, "behaviours": behaviours,
+	}
+
+
 ## [method AIContextComponent.run_ai] calls this when a decision is waiting (see [method AIContextComponent.request_decision]). Uses
-## up the waiting decision.
-func decide(tick: int) -> void:
+## up the waiting decision. record: the [AIDecisionRecord] to fill in while [member decision_listener] is set; run_ai passes one
+## with the target and state updates in it. Null makes one here if something listens.
+func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	if pawn == null or pawn.ai_context == null:
 		return
 	var context := pawn.ai_context
@@ -122,8 +170,18 @@ func decide(tick: int) -> void:
 	context.clear_decision()
 	if _behaviours.is_empty():
 		return
+	if record == null and decision_listener.is_valid():
+		record = AIDecisionRecord.new()
+	# The batcher's row, gathered from the live pawn before anything is decided (shadow mode).
+	var batch_row := decision_batcher.gather(self, _behaviours, _running, tick, event_priority, event_is_normal) if decision_batcher else -1
 	# 0. Interrupts.
 	if _running and not _can_replace_running(event_priority, event_is_normal, tick):
+		if record:
+			_fill_record(record, tick, event_priority, event_is_normal, true)
+			record.chosen = _running.name
+			decision_listener.call(record, self)
+		if batch_row >= 0:
+			decision_batcher.note_answer(batch_row, _running)
 		return
 	# 1 and 2. Valid behaviours, and the hard rules.
 	var state_name := context.current_state_name()
@@ -147,6 +205,7 @@ func decide(tick: int) -> void:
 		behaviour.decision_ceiling = behaviour.max_score + behaviour.decision_persistence + jitter
 		behaviour.decision_floor = behaviour.min_score + behaviour.decision_persistence - jitter if behaviour.min_score > -INF else -INF
 		behaviour.availability_checked = false
+		behaviour.decision_scored = false
 		_candidates.append(behaviour)
 	if not any_allowed and not _warned_states.has(state_name):
 		_warned_states[state_name] = true
@@ -176,6 +235,8 @@ func decide(tick: int) -> void:
 			continue
 		var raw := behaviour.score(context)
 		_check_score_range(behaviour, raw)
+		behaviour.decision_score = raw
+		behaviour.decision_scored = true
 		var result := raw + behaviour.decision_persistence + behaviour.decision_jitter
 		if best == null or result > best_result + tie_margin:
 			best = behaviour
@@ -188,16 +249,25 @@ func decide(tick: int) -> void:
 	if _ties.size() > 1:
 		_ties.sort_custom(_by_index)
 		best = _ties[mini(int(context.random_unit(TIE_SALT) * _ties.size()), _ties.size() - 1)] if randomize_ties else _ties[0]
+	# The record is filled in before switching, which changes cooldowns.
+	if record:
+		_fill_record(record, tick, event_priority, event_is_normal, false)
+		record.chosen = best.name if best else &""
 	# 7. Switching.
-	if best == _running:
-		return
-	var reason := "decision" if event_is_normal else "interrupted"
-	if best == null:
-		_stop_running(reason, tick)
-		if context.controller:
-			context.controller.release_all() # nothing can run: stand still
-		return
-	_start(best, reason, tick)
+	if best != _running:
+		var switch_started := PerfScopes.begin()
+		var reason := "decision" if event_is_normal else "interrupted"
+		if best == null:
+			_stop_running(reason, tick)
+			if context.controller:
+				context.controller.release_all() # nothing can run: stand still
+		else:
+			_start(best, reason, tick)
+		PerfScopes.end(&"ai.decide.switch", switch_started)
+	if record:
+		decision_listener.call(record, self)
+	if batch_row >= 0:
+		decision_batcher.note_answer(batch_row, _running)
 
 
 ## [method AIContextComponent.run_ai] calls this every tick the AI runs, after any decision. Ticks the running behaviour.
@@ -210,12 +280,20 @@ func tick_running(tick: int) -> void:
 	if interval > 1 and not pawn.fired_since_last_run(tick, -_running.started_tick, interval):
 		return
 	var context := pawn.ai_context
+	var tick_started := PerfScopes.begin() # each behaviour's tick timed on its own (PerfScopes)
 	var status := _running.tick(context)
+	PerfScopes.end(_running.perf_tick_name, tick_started)
 	if status == AIBehaviourBase.Status.RUNNING:
 		return
 	_stop_running("succeeded" if status == AIBehaviourBase.Status.SUCCEEDED else "failed", tick)
 	context.request_decision()
-	decide(tick)
+	var record: AIDecisionRecord = null
+	if decision_listener.is_valid():
+		record = AIDecisionRecord.new()
+		record.cause = AIDecisionRecord.CAUSE_BEHAVIOUR_ENDED
+	var decide_started := PerfScopes.begin()
+	decide(tick, record)
+	PerfScopes.end(&"ai.decide.behaviour", decide_started)
 
 
 ## Stops the running behaviour, if any; its exit() gets this reason. Called with "died" when the pawn dies.
@@ -293,8 +371,44 @@ func _stop_running(reason: String, tick: int) -> void:
 func _is_available(behaviour: AIBehaviourBase, context: AIContextComponent) -> bool:
 	if not behaviour.availability_checked:
 		behaviour.availability_checked = true
+		var started := PerfScopes.begin() # each behaviour's check timed on its own (PerfScopes)
 		behaviour.decision_available = behaviour.is_available(context)
+		PerfScopes.end(behaviour.perf_available_name, started)
 	return behaviour.decision_available
+
+
+# Writes what this decision was made from into record: the reasons, the running behaviour, and each behaviour's hard rule, range,
+# availability and score, in the fixed order. Called before switching, so the hard rules are asked again exactly as the decision
+# asked them (nothing between changes them). Only runs while decision_listener is set.
+func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, event_is_normal: bool, kept_by_interrupt: bool) -> void:
+	var context := pawn.ai_context
+	record.tick = tick
+	record.pawn_number = context.pawn_number()
+	record.pawn_name = pawn.name
+	record.event_priority = event_priority
+	record.event_is_normal = event_is_normal
+	record.has_target = context.has_target()
+	record.state = context.current_state_name()
+	record.running_before = _running.name if _running else &""
+	record.running_started_tick = _running.started_tick if _running else -1
+	record.kept_by_interrupt = kept_by_interrupt
+	if record.cause != AIDecisionRecord.CAUSE_AI_STEP: # no target or state update ran, so before and after are what they are now
+		record.note_target_before(context.current_target)
+		record.state_before = record.state
+		record.state_after = record.state
+	if kept_by_interrupt:
+		return # no behaviour was looked at
+	for behaviour in _behaviours:
+		var rule := AIDecisionRecord.RULE_NONE
+		if not behaviour.is_allowed_in(record.state):
+			rule = AIDecisionRecord.RULE_STATE
+		elif behaviour != _running and behaviour.is_cooling_down(tick):
+			rule = AIDecisionRecord.RULE_COOLDOWN
+		elif behaviour.needs_target and not record.has_target:
+			rule = AIDecisionRecord.RULE_NO_TARGET
+		elif behaviour.presses_action != &"" and behaviour != _running and not _could_press(behaviour.presses_action):
+			rule = AIDecisionRecord.RULE_ACTION
+		record.add_behaviour(behaviour, rule)
 
 
 func _could_press(action: StringName) -> bool:
@@ -329,6 +443,8 @@ func _collect_behaviours() -> void:
 			child.manager = self
 			child.pawn = pawn
 			child.name_hash = String(child.name).hash()
+			child.perf_available_name = StringName("ai.available." + String(child.name))
+			child.perf_tick_name = StringName("ai.behaviour." + String(child.name))
 			_behaviours.append(child)
 			if String(child.name).begins_with("@"):
 				push_warning("AIBehaviourManager: the behaviour %s has an automatic name, which can differ between runs. Give it a name." % child.name)

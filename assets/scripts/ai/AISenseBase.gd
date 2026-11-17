@@ -18,6 +18,10 @@ extends Node
 var manager: AISensingManager = null
 ## The pawn this sense belongs to. Set by the AISensingManager.
 var pawn: Pawn = null
+## The timing scope names for its full passes and its refreshes, such as &"ai.sense.Sight.full" and &"ai.sense.Sight.refresh" (see
+## [PerfScopes]). Made once by the manager.
+var perf_full_name: StringName = &""
+var perf_refresh_name: StringName = &""
 
 
 func _init() -> void:
