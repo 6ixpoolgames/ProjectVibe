@@ -489,8 +489,17 @@ func _test_offline() -> void:
 	_check(target.state.skip_input_capture, "input saving: a server skips it")
 	# Claude 2026-11-09: and a server saves state only on the ticks it sends snapshots on (pawn spec 12.1).
 	_check(target.state.history_interval_ticks == session.get_snapshot_interval() and session.get_snapshot_interval() >= 1, "state saving: a server saves only snapshot ticks (every %d)" % target.state.history_interval_ticks)
+	# Claude 2026-11-17: and rounds every tick only what some client predicts (TickStateComponent.rounds_every_tick).
+	_check(not target.state.rounds_every_tick, "rounding: a server doesn't round every tick an entity no client predicts (owned by nobody)")
+	var owner_before := target.owner_peer
+	target.owner_peer = 77 # a client owns it now, as after possession (change_owner refreshes the same way)
+	target.refresh_input_saving()
+	_check(target.state.rounds_every_tick, "rounding: a pawn a client owns is rounded every tick, since that client replays it")
+	target.owner_peer = owner_before
+	target.refresh_input_saving()
 	session._on_client_message(77, _client_message(NetDebugModule.CHANNEL, debug.switch_message("default_predicted", true)))
 	_check(not target.state.skip_input_capture, "input saving: unless clients are predicting, even when switched on live")
+	_check(target.state.rounds_every_tick, "rounding: once clients predict it, a server rounds it every tick, so their replays match")
 	session.default_predicted = false
 	debug.allow_debug_commands = false
 	session._mode = was_mode
@@ -499,8 +508,10 @@ func _test_offline() -> void:
 	# Claude 2026-11-09: this was "offline keeps it". Offline now saves no inputs and no state, since nothing replays (pawn spec 12.1),
 	# unless the entity's keep_history_offline is on.
 	_check(target.state.skip_input_capture and target.state.history_interval_ticks == 0, "history: offline saves no inputs and no state")
+	_check(not target.state.rounds_every_tick, "rounding: offline doesn't round every tick either, since nothing replays")
 	target.keep_history_offline = true
 	_check(not target.state.skip_input_capture and target.state.history_interval_ticks == 1, "history: unless keep_history_offline is on, then every tick")
+	_check(target.state.rounds_every_tick, "rounding: and with keep_history_offline on, it rounds every tick again")
 	target.keep_history_offline = false
 
 	var list_before: Array[NetworkEntity] = session.get_entities()

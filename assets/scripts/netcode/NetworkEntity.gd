@@ -41,8 +41,8 @@ enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED, LOCA
 @export var is_predicted: bool = false
 ## On: offline, keep a history of state and inputs every tick, for a single-player game that rolls back (a rewind power, say).
 ## [br]
-## Off (the default): offline, values are still rounded every tick, exactly as online, but nothing is saved, because nothing replays.
-## Saving is the biggest cost per pawn (pawn spec 12.1). Online it changes nothing.
+## Off (the default): offline, nothing is saved and values aren't rounded every tick, because nothing replays. Saving and rounding
+## were the biggest costs per pawn (pawn spec 12.1). Online it changes nothing.
 @export var keep_history_offline: bool = false:
 	set(value):
 		keep_history_offline = value
@@ -168,13 +168,19 @@ func _apply_role_to_state() -> void:
 ##   replays, and saving is the biggest cost per pawn (pawn spec 12.1).
 ## [br]- A client: every tick, for replays.
 ## [br]
-## An entity that NetworkSession never configured (made directly, as most tests do) keeps saving everything.
+## And whether its values are rounded every tick ([code]TickStateComponent.rounds_every_tick[/code]): only where some machine replays
+## it, so not offline and, on a server, not for an entity no client predicts (an AI pawn, the host's own pawn).
+## [br]
+## An entity that NetworkSession never configured (made directly, as most tests do) keeps saving and rounding everything.
 func refresh_input_saving() -> void:
 	if state == null:
 		return
 	var offline: bool = session != null and not session.is_server() and not session.is_client()
 	var on_server: bool = role == Role.AUTHORITY and session != null and session.is_server()
 	state.skip_input_capture = (on_server and not (is_predicted or session.default_predicted)) or (offline and not keep_history_offline)
+	# A client re-runs the entities it predicts: its own (owned by it, so not by this server or nobody) and any marked predicted.
+	var a_client_predicts: bool = session == null or is_predicted or session.default_predicted or (owner_peer != 0 and not is_local)
+	state.rounds_every_tick = not ((on_server and not a_client_predicts) or (offline and not keep_history_offline))
 	if on_server:
 		state.history_interval_ticks = session.get_snapshot_interval()
 	elif offline and not keep_history_offline:

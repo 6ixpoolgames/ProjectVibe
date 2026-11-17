@@ -79,6 +79,8 @@ var _left_pawn: Pawn = null # Claude 2026-11-16: the pawn U let go of, which U t
 var _released_connected := false # Claude 2026-11-16
 var _options: MatchOptionsPanel = null # Claude 2026-11-16: the start menu's match options
 var _defaults_before: PawnDefaultsRes = null # Claude 2026-11-16: the game's pawn defaults before this level put its own copy in
+var _dedicated := false # Claude 2026-11-17: hosting as a dedicated server (the menu's Dedicated server, or --dedicated)
+var _connected_players := 0 # Claude 2026-11-17: clients connected, for a dedicated server's status line
 
 
 func _ready() -> void:
@@ -94,6 +96,8 @@ func _ready() -> void:
 	NetworkSession.register_type("pawn", PAWN_SCENE)
 	NetworkSession.register_type("goblin", GOBLIN_SCENE)
 	NetworkSession.player_connected.connect(_on_player_connected)
+	NetworkSession.player_connected.connect(func(peer: int) -> void: _connected_players += 1 if peer != NetworkSession.get_local_peer() else 0) # Claude 2026-11-17
+	NetworkSession.player_left.connect(func(_peer: int) -> void: _connected_players = maxi(_connected_players - 1, 0))
 	NetworkSession.entity_spawned.connect(_on_entity_spawned)
 	NetworkSession.refused.connect(func(reason: String) -> void: _status.text = "Refused: %s" % reason)
 	NetworkSession.disconnected.connect(func() -> void: _menu.show())
@@ -110,6 +114,7 @@ func _ready() -> void:
 		InputMap.action_add_event(KILL_SELF_KEY_ACTION, key)
 	$Display/Menu/Box/Offline.pressed.connect(_start_offline)
 	$Display/Menu/Box/Host.pressed.connect(_host)
+	_add_dedicated_button() # Claude 2026-11-17
 	$Display/Menu/Box/Join.pressed.connect(func() -> void: _join(_address.text))
 	_build_match_options() # Claude 2026-11-16
 	NetworkSession.disconnected.connect(func() -> void: _options.refresh())
@@ -167,15 +172,52 @@ func _start_offline() -> void:
 	_start_spawners()
 
 
-func _host() -> void:
+## Claude 2026-11-17: dedicated: a server with no player of its own, as a game's dedicated server is; only clients' players get pawns
+## (--dedicated on the command line).
+func _host(dedicated: bool = false) -> void:
 	var error := NetworkSession.host(_port) # Claude 2026-11-09: was PORT; --port= can change it
 	if error != OK:
 		_status.text = "Couldn't host: error %d" % error
 		return
-	_menu.hide()
+	_dedicated = dedicated
+	if dedicated:
+		_show_server_screen() # Claude 2026-11-17: the menu stays, as a server's screen
+	else:
+		_menu.hide()
 	_start_recording("host") # Claude 2026-11-15
-	_on_player_connected(NetworkSession.get_local_peer())
+	if not dedicated:
+		_on_player_connected(NetworkSession.get_local_peer())
 	_start_spawners() # Claude 2026-11-10: was _spawn_wave()
+
+
+## Claude 2026-11-17: the menu's "Dedicated server" button, under Host. Made here rather than in the scenes, so every arena sample
+## gets it without editing each scene.
+func _add_dedicated_button() -> void:
+	var host_button: Button = $Display/Menu/Box/Host
+	var button := Button.new()
+	button.name = "Dedicated"
+	button.text = "Dedicated server"
+	button.tooltip_text = "Host with no player of your own, as a game's server would run. The world isn't drawn; status and keys still work."
+	host_button.add_sibling(button) # GDScript note: add_sibling puts it right after Host in the menu
+	button.pressed.connect(func() -> void: _host(true))
+
+
+## Claude 2026-11-17: what a dedicated server shows in a window. The menu stays up with its buttons swapped for a short note, and the
+## 3D world isn't drawn at all (Viewport.disable_3d): a server doesn't need to see it, and drawing would take time from the ticks.
+## The status lines, the diagnostics keys (F1 and the rest) and this sample's keys (and the mass battle's C and H) work as usual.
+func _show_server_screen() -> void:
+	get_viewport().disable_3d = true
+	var box: Container = $Display/Menu/Box
+	for child in box.get_children():
+		child.hide()
+	var note := Label.new()
+	note.name = "ServerNote"
+	note.text = "Dedicated server, port %d
+The world isn't drawn. The status is top left.
+F1: diagnostics keys. The sample's keys still work." % _port
+	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(note)
+	_menu.show()
 
 
 func _join(address: String) -> void:
@@ -508,7 +550,8 @@ func _step(ticks: int) -> void:
 func _status_text() -> String:
 	var mode := "offline"
 	if NetworkSession.is_server():
-		mode = "hosting"
+		# Claude 2026-11-17: and how many players are connected, which is what a dedicated server's screen is for
+		mode = "dedicated server, %d player%s" % [_connected_players, "" if _connected_players == 1 else "s"] if _dedicated else "hosting"
 	elif NetworkSession.is_client():
 		mode = "client, ping %d ms" % int(NetworkSession.get_rtt_ms())
 	var alive := 0
@@ -631,5 +674,7 @@ func _read_command_line() -> void:
 			_start_offline()
 		elif argument == "--host":
 			_host()
+		elif argument == "--dedicated": # Claude 2026-11-17: a server with no player of its own
+			_host(true)
 		elif argument.begins_with("--join="):
 			_join(argument.trim_prefix("--join="))

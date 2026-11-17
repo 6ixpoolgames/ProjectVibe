@@ -18,6 +18,8 @@
 ##   --spectate      Claude 2026-11-16: each client lets go of its pawn 3 s after joining (V), so it controls nothing and acknowledges
 ##                   snapshots with ACK packets of their own (it used to get every snapshot in full)
 ##   --host-window   Claude 2026-11-16: runs the host in a window, so its rows include drawing, as when playing (the clients stay headless)
+##   --dedicated     Claude 2026-11-17: a dedicated server instead of a host: a server with no player of its own (the sample's
+##                   --dedicated), as a game's server would run. Its section in the output is "server"
 ##   --spawn-distance=N  Claude 2026-11-16: passed on to the sample: the factions start N m from the middle (300). 40 is the quick
 ##                   peak-capacity test: they meet within seconds
 ## Anything else is passed on to every machine, so the sample's own settings work too: --near-middle, --tick-rate=30, --no-record.
@@ -43,7 +45,7 @@ const HOST_HEAD_START := 6.0
 ## Seconds the host keeps running after the clients' time, so they finish and leave before it stops.
 const HOST_EXTRA := 8.0
 
-var _role := "" # empty: the coordinator; "host" or "client": a machine
+var _role := "" # empty: the coordinator; "host", "server" (dedicated) or "client": a machine
 var _size := 50
 var _seconds := 120
 var _clients := 1
@@ -52,6 +54,7 @@ var _port := 0
 var _pass_on := PackedStringArray() # settings for the machines that the coordinator doesn't use itself
 var _ended := false # client: its connection has ended
 var _host_window := false # Claude 2026-11-16
+var _dedicated := false # Claude 2026-11-17: a dedicated server instead of a host (--dedicated)
 
 
 func _ready() -> void:
@@ -70,6 +73,8 @@ func _ready() -> void:
 			_port = int(argument.trim_prefix("--port="))
 		elif argument == "--host-window": # Claude 2026-11-16
 			_host_window = true
+		elif argument == "--dedicated": # Claude 2026-11-17
+			_dedicated = true
 		else:
 			_pass_on.append(argument)
 	if _role == "":
@@ -85,23 +90,24 @@ func _coordinate() -> void:
 	_port = NetRun.first_port() + 7
 	var folder := ProjectSettings.globalize_path("user://net_test/mass_battle/%d" % OS.get_process_id())
 	DirAccess.make_dir_recursive_absolute(folder)
-	print("--- Mass battle over the network: %d a faction, a host and %d client%s, %d s, on port %d ---" % [_size, _clients, "" if _clients == 1 else "s", _seconds, _port])
-	var names: Array[String] = ["host"]
+	print("--- Mass battle over the network: %d a faction, %s and %d client%s, %d s, on port %d ---" % [_size, "a dedicated server" if _dedicated else "a host", _clients, "" if _clients == 1 else "s", _seconds, _port])
+	var server_name := "server" if _dedicated else "host" # Claude 2026-11-17: a dedicated server, or a host with its own player
+	var names: Array[String] = [server_name]
 	for i in _clients:
 		names.append("client_%d" % (i + 1))
 	var pids := {}
 	for machine in names:
-		var role := "host" if machine == "host" else "client"
+		var role := machine if machine == server_name else "client"
 		var log_path := folder.path_join(machine + ".log")
 		DirAccess.remove_absolute(log_path)
-		var seconds := _seconds + HOST_HEAD_START + HOST_EXTRA if role == "host" else float(_seconds)
+		var seconds := _seconds + HOST_HEAD_START + HOST_EXTRA if role != "client" else float(_seconds)
 		var arguments := PackedStringArray(["--headless", "--log-file", log_path, "--path", ProjectSettings.globalize_path("res://"), SCENE, "--",
 			"--role=" + role, "--port=%d" % _port, "--size=%d" % _size, "--seconds=%d" % ceili(seconds), "--every=%d" % _every])
 		arguments.append_array(_pass_on)
-		if role == "host" and _host_window: # Claude 2026-11-16
+		if role != "client" and _host_window: # Claude 2026-11-16
 			arguments.remove_at(0) # "--headless"
 		pids[machine] = OS.create_process(OS.get_executable_path(), arguments, false)
-		if role == "host":
+		if role != "client":
 			await get_tree().create_timer(HOST_HEAD_START).timeout
 	# Wait for every machine, with room for loading; any still running after that is stopped and said to be.
 	var deadline := Time.get_ticks_msec() + int((_seconds + HOST_EXTRA + 60.0) * 1000.0)
@@ -154,6 +160,8 @@ func _play() -> void:
 	arena._port = _port # the sample's own setting, normally from its --port=; set here because its command line is read a frame later
 	if _role == "host":
 		arena._host()
+	elif _role == "server": # Claude 2026-11-17: a dedicated server
+		arena._host(true)
 	else:
 		arena._join("127.0.0.1")
 	# Claude 2026-11-16: and the spawn distance (the sample's --spawn-distance=)
@@ -197,7 +205,7 @@ func _print_totals() -> void:
 	var stats: Dictionary = NetworkSession.stats
 	# Claude 2026-11-16 (audit): the average as diagnostics works it out (DiagnosticsManager.average_snapshot_kb): a client's average
 	# snapshot, from what was sent to clients on the host and what arrived on a client.
-	var host := _role == "host"
+	var host := _role != "client" # Claude 2026-11-17: a host or a dedicated server
 	var average := DiagnosticsManager.average_snapshot_kb(stats.snapshot_bytes if host else stats.snapshot_bytes_received, stats.snapshots_sent if host else stats.snapshots_received)
 	_row("totals: %.1f MB sent, %.1f MB received, %d snapshots %s (%.1f KB on average), largest packet sent %.1f KB, received %.1f KB" % [
 		stats.bytes_sent / 1048576.0, stats.bytes_received / 1048576.0,

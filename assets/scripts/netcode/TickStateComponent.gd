@@ -130,12 +130,22 @@ var keep_input_history: bool = false
 var skip_input_capture: bool = false
 ## Which ticks' state goes into the history (pawn spec 12.1, open question 16).
 ## [br]
-## Values are still rounded every tick either way ([member quantize_each_tick]), so the simulation is the same; only the saved copy is
-## skipped. NetworkEntity sets it, like [member skip_input_capture]:
+## Whether the ticks that aren't saved are still rounded is [member rounds_every_tick]. NetworkEntity sets it, like
+## [member skip_input_capture]:
 ## [br]- 1: every tick (the default): a client's predicted entities, which replay, and anything not in a network session.
 ## [br]- N: only ticks that are a multiple of N: a server, which never replays and only reads the history to send snapshots.
 ## [br]- 0: never: offline, where nothing replays, unless [code]NetworkEntity.keep_history_offline[/code] is on.
 var history_interval_ticks: int = 1
+## Whether this entity's values are rounded every tick ([member quantize_each_tick]), or only on the ticks that are saved. Rounding
+## every tick is what lets a machine that replays this entity (a client predicting it) land on exactly the server's values; where no
+## machine ever replays it, it's work for nothing, and at 600 pawns it was most of the record phase (5 of 5.8 ms a tick). On by default.
+## NetworkEntity turns it off:
+## [br]- offline, where nothing replays (unless [code]NetworkEntity.keep_history_offline[/code] is on);
+## [br]- on a server, for an entity no client predicts: not owned by a client, not [code]is_predicted[/code], and not every entity
+##   predicted ([code]NetworkSession.default_predicted[/code]). AI pawns, and the host's own pawn.
+## [br]
+## Ticks that are saved are rounded either way, so snapshots carry the same values. A change of owner (possession) sets it again.
+var rounds_every_tick: bool = true
 ## Recording runs in C++ ([code]TickStateRecorder[/code], in native/) when the library is there, which gives exactly the same values.
 ## Off: GDScript for every component, for comparing the two. Tests take [code]-- --gdscript-record[/code].
 ## [br]
@@ -297,7 +307,7 @@ func _build_state_list() -> void:
 ## nothing: a still pawn stays exactly still. As is if there's no position entry, its encoding isn't settled yet, or this doesn't round
 ## each tick.
 func round_position(value: Vector3) -> Vector3:
-	if not quantize_each_tick or _position_index < 0:
+	if not quantize_each_tick or not rounds_every_tick or _position_index < 0:
 		return value
 	var encoding := _states[_position_index].encoding
 	if encoding == StateEncoding.AUTO:
@@ -325,9 +335,10 @@ func _tick_record(tick: int) -> void:
 	# Following uses the server's data, not its own, so it has nothing to save.
 	if rollback_mode == RollbackMode.FOLLOW_SERVER:
 		return
-	# A tick whose state nobody will read is only rounded, not saved (history_interval_ticks).
+	# A tick whose state nobody will read is only rounded, not saved (history_interval_ticks), and only where some machine replays this
+	# entity (rounds_every_tick).
 	if history_interval_ticks <= 0 or tick % history_interval_ticks != 0:
-		if quantize_each_tick and not _states.is_empty() and not _record_natively(null):
+		if quantize_each_tick and rounds_every_tick and not _states.is_empty() and not _record_natively(null):
 			_round_in_place(_states)
 		return
 	var slot := tick % history_size
