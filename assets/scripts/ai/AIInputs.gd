@@ -297,9 +297,11 @@ func _grow(count: int) -> void:
 ## rather than asking the tree for the whole group at every decision. Null if the group is empty. Go To Point walks to it. The group's
 ## list is asked of the tree once a tick and shared by every pawn looking that tick.
 func nearest_in_group(group: StringName, tick: int) -> Node3D:
-	var point: Node3D = _group_point.get(group)
+	# GDScript note: a freed node can't be put in a typed variable, so the kept one is checked while it's still a Variant.
+	var kept: Variant = _group_point.get(group)
+	var point: Node3D = kept if is_instance_valid(kept) else null
 	var looked: int = _group_looked_tick.get(group, -1)
-	if point == null or not is_instance_valid(point) or not point.is_inside_tree() or looked < 0 \
+	if point == null or not point.is_inside_tree() or looked < 0 \
 			or tick - looked >= TickDriver.ticks_at_rate(GROUP_LOOK_AGAIN_TICKS):
 		point = _find_nearest(group, tick)
 		_group_point[group] = point

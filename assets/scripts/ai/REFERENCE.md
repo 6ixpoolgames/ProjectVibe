@@ -340,6 +340,8 @@ Nothing watches every tick: where a pawn decides is settled when it first decide
 
 `check_against_gdscript` (shadow mode, for tests and finding faults): every pawn decides in GDScript, and each pawn that could decide in C++ also has C++ decide beside it, from C++'s own copy of its state; the answers are compared and counted (`get_counts()`), the first few disagreements logged, and C++'s copy put right after one.
 
+A tripwire in debug builds: every `FACT_CHECK_EVERY`th C++ decision also checks the pawn's written facts against the live ones, and warns (the F8 log) when one is out of date, so a write missed by new code shows up while playing, not only in tests.
+
 Keys (debug builds): F10 switches every pawn to GDScript and back, to tell whether a fault is in the C++ decider.
 
 What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)): `ai.decide.cpp`, one pawn's decision in C++ with its inputs gathered.
@@ -356,6 +358,7 @@ What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)):
 - `Decider.ALL_CPP = 1`: every pawn in C++ (special minds and a missing library still use GDScript)
 - `Decider.ALL_GDSCRIPT = 2`: every pawn in GDScript, the backup
 - `KNOWN_CONDITION_KINDS = ["always", "compare", "chance", "any"]`
+- `FACT_CHECK_EVERY = 100`: In debug builds, every this many C++ decisions one also checks its written facts (the tripwire, see the class description).
 
 ### Functions
 

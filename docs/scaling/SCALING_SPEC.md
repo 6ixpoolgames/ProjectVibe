@@ -421,7 +421,7 @@ the attacker's pawn number (it was the attacker's instance id, which differs bet
 | 5a | Timings per state, behaviour and sense; a recorder of decisions; `AIBatchDecider` choosing from given answers; shadow mode | The same choices as GDScript, at 150 and 600 pawns | **Built 2026-11-17**: 100% agreement, 0.2 to 0.4 µs a decision in C++ |
 | 5b | Inputs, conditions and score curves in GDScript and C++; the built-in behaviours as conditions; `action_ready` kept by events; event wake-ups | Shadow mode agrees with every decision; gathering a row costs less | **Built 2026-11-17**: every decision agreed (290 989 at 600 pawns, 72 461 at 150); a row 33 µs to gather (was 45); GDScript's own deciding about the same (50 µs a decision against 46); Go To Point's ticks a ninth as many |
 | 5c | Each pawn's decision state in C++; C++ makes the decisions (the main path), GDScript the backup: the pawn's `decides_in`, the game mode's override (`AIDecisionModule.decider`), special minds and a missing library to GDScript, F10 to switch | Shadow agreement from C++'s own state; C++ driving plays the same game as GDScript | **Built 2026-11-18**: every decision agreed (1 461 in a real fight); the same 1 164 changes of behaviour driving from C++ as from GDScript |
-| 5d | Inputs worked out in C++ from memory and the pawn table; target and state rules in C++ | The same targets and states as GDScript | **Part built 2026-11-18**: the memory-based inputs, and every fact written through when it changes (the owner's call), so a decision gathers nothing: choosing 1.15 ms a tick at 600 pawns (GDScript 2.67); target and state rules still to come |
+| 5d | Inputs worked out in C++ from memory and the pawn table; target and state rules in C++ | The same targets and states as GDScript | **Part built 2026-11-18**: the memory-based inputs, and every fact written through when it changes (the owner's call), so a decision gathers nothing: choosing 1.15 ms a tick at 600 pawns (GDScript 2.67); target and state rules parked (the owner's call 2026-11-18: about 0.85 ms a tick for another set of twin rules; ROADMAP.md) |
 | 5e | The decision job on the workers, chained after sensing; the batch's answers used (opt-in), applied the next tick | Identical results with 0 to N workers; main-thread AI time down | |
 | 5f | Deferral by count when the tick runs out of time (rule 5): decisions wait their turn in pawn-id order | Graceful overload in the 600-pawn battle | |
 
@@ -431,7 +431,9 @@ Today several systems each scale their own work: the AIActivationManager's tick 
 crowd mover's choices, the decision interval. The standard pattern is a **significance manager** (Unreal has one by that name): one
 place works out how much each pawn matters (distance to players, on screen, in a fight) and how much time the tick has to spare,
 and each system reads its level from it: tick step, decision interval, movement, visual detail, replay detail. A dynamic decision
-interval belongs there rather than in the AI. To design when the per-system rules have settled.
+interval belongs there rather than in the AI. To design when the per-system rules have settled. *(2026-11-18, the owner's
+question: with it, an event scheduler, a timer wheel pawns book their next jobs into, so a pawn with nothing due doesn't run its AI;
+see ROADMAP.md.)*
 
 ## 7. The tick rate, chosen per match *(v0.4)*
 

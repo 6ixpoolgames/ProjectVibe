@@ -4,6 +4,8 @@
 ## conditions and curves the same way: live shadow mode over made-up brains fed random inputs, which must agree on every decision.
 ## Claude 2026-11-18 (step 5c): and C++ driving (the main path) plays the same game as GDScript driving, persistence, a per-pawn
 ## persistence mask, jitter changes and behaviours finishing included; and where pawns decide (setting, override, special minds).
+## Claude 2026-11-18 (a review's finding): a group point that moves, or is freed, between the lookup's 2-second looks gives C++ and
+## GDScript the same answer.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_conditions_selftest.tscn"
 extends SelfTest
@@ -29,6 +31,7 @@ func _ready() -> void:
 	_test_any_and_curves()
 	_test_own_code()
 	await _test_cpp_agrees()
+	_test_moving_group_point()
 	_finish()
 
 
@@ -205,6 +208,42 @@ func _test_cpp_agrees() -> void:
 	_decide(special, 1)
 	_check(special.ai_context.behaviour_manager.cpp_row == -1, "a special mind (a behaviour with code of its own) decides in GDScript")
 	special.free()
+	if added:
+		GameMode.remove_module(module)
+
+
+# A pawn whose behaviour needs to be more than 5 m from the nearest node in a group, with the node moving near and far every tick and
+# then freed: shadow mode must agree at every decision.
+func _test_moving_group_point() -> void:
+	var module := GameMode.get_module(AIDecisionModule) as AIDecisionModule
+	var added := module == null
+	if added:
+		module = AIDecisionModule.new()
+		GameMode.add_module(module)
+	module.check_against_gdscript = true
+	module.reset_counts()
+	var point := Node3D.new()
+	add_child(point)
+	point.add_to_group(&"test_moving_point")
+	var away := _behaviour("Away", 0.6, 0.6)
+	away.conditions = [AICompareCondition.make(&"group_found/test_moving_point", Comparison.EQUAL, 1.0),
+		AICompareCondition.make(&"group_distance/test_moving_point", Comparison.MORE_THAN, 5.0)]
+	var stay := _behaviour("Stay", 0.3, 0.3)
+	var pawn := _make_pawn([away, stay])
+	var changes := [0] # GDScript note: a lambda captures plain locals by value, so the count lives in an array it can change
+	pawn.ai_context.behaviour_manager.behaviour_changed.connect(func(_o: AIBehaviourBase, _n: AIBehaviourBase, _r: String) -> void: changes[0] += 1)
+	for t in 60:
+		if point:
+			point.global_position = pawn.global_position + Vector3(2.0 if t % 2 == 0 else 20.0, 0.0, 0.0)
+		if t == 40:
+			point.free() # freed between looks
+			point = null
+		_decide(pawn, 7000 + t)
+	var counts := module.get_counts()
+	_check(counts["checked"] == 60 and counts["agreed"] == 60 and changes[0] > 20,
+			"a group point that moves every tick, then is freed: C++ agrees at every decision (%d of %d, %d changes)" % [counts["agreed"], counts["checked"], changes[0]])
+	pawn.free()
+	module.check_against_gdscript = false
 	if added:
 		GameMode.remove_module(module)
 

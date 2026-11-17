@@ -60,6 +60,7 @@ signal entity_forgotten(entity: Node3D)
 ## ticks.
 @export var uncertain_fade: FadeProfile:
 	set(value):
+		_listen_to(uncertain_fade, value)
 		uncertain_fade = value
 		_configure()
 ## The same delay for certain entries. Longer keeps a pawn searching longer after losing sight of an enemy.
@@ -71,6 +72,7 @@ signal entity_forgotten(entity: Node3D)
 ## ticks (20 s).
 @export var certain_fade: FadeProfile:
 	set(value):
+		_listen_to(certain_fade, value)
 		certain_fade = value
 		_configure()
 ## Two sightings with no unseen check between them, at most this many ticks apart, count as one continuous look, so awareness
@@ -96,6 +98,8 @@ var pawn: Pawn = null
 # AIMemoryStore (C++) or AIMemoryStoreGD: the same functions either way. Untyped, because the C++ class only exists when the library
 # loads.
 var _store: Object = null
+var _fades_dirty := true # a fade profile was edited, so the store's copy needs its settings again
+var _configured_rate := -1 # the tick rate the store's copy was made at
 var _native := false
 
 
@@ -194,9 +198,10 @@ func add_threat(entity: Object, amount: float) -> void:
 
 ## Forgets entries whose fade has ended or whose entity is gone. The sensing manager calls this on each full pass.
 func forget_old(tick: int) -> void:
-	# Settings again first, because the C++ store copies a FadeProfile's settings: edits made inside a profile while
-	# the game runs reach it here, on the next full pass.
-	_configure()
+	# The C++ store copies a FadeProfile's settings, so they go to it again when a profile announced an edit (changed) or the tick
+	# rate changed; otherwise the copy it has is right.
+	if _fades_dirty or TickDriver.get_tick_rate() != _configured_rate:
+		_configure()
 	var forgotten: PackedInt64Array = _store.forget_old(tick)
 	for id in forgotten:
 		var entity := instance_from_id(id) as Node3D if is_instance_id_valid(id) else null
@@ -239,12 +244,26 @@ func _announce(added: bool, became_certain: Array) -> void:
 func _configure() -> void:
 	if _store == null or uncertain_fade == null or certain_fade == null:
 		return
+	_fades_dirty = false
+	_configured_rate = TickDriver.get_tick_rate()
 	# The delays and continuous_sighting_ticks are written for 60 ticks a second, and go to the store at this match's rate (scaling
 	# spec step 6). The C++ store converts the profiles' own tick settings the same way as FadeProfile does.
 	if _store.has_method(&"set_tick_rate"):
 		_store.set_tick_rate(TickDriver.get_tick_rate())
 	_store.configure_fades(uncertain_fade, TickDriver.ticks_at_rate(uncertain_fade_delay_ticks), _is_custom(uncertain_fade),
 			certain_fade, TickDriver.ticks_at_rate(certain_fade_delay_ticks), _is_custom(certain_fade), TickDriver.ticks_at_rate(continuous_sighting_ticks))
+
+
+# Listens to the profile now in use for edits made while the game runs (FadeProfile sends changed), and stops listening to the old.
+func _listen_to(old: FadeProfile, new: FadeProfile) -> void:
+	if old and old.changed.is_connected(_on_fade_edited):
+		old.changed.disconnect(_on_fade_edited)
+	if new and not new.changed.is_connected(_on_fade_edited):
+		new.changed.connect(_on_fade_edited)
+
+
+func _on_fade_edited() -> void:
+	_fades_dirty = true
 
 
 # A profile whose script isn't FadeProfile itself may override value_at(), so the C++ store calls it rather than doing the maths.

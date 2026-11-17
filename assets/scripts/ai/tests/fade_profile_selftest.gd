@@ -24,6 +24,7 @@ func _ready() -> void:
 	_test_curve()
 	_test_odd_cases()
 	_test_extended()
+	_test_announces_edits()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -87,6 +88,20 @@ func _test_odd_cases() -> void:
 	no_curve.fade_ticks = 10
 	print("  (a warning about a missing curve is expected next)")
 	_check(is_equal_approx(no_curve.value_at(5), 0.5), "curve with nothing drawn: a straight line instead")
+
+
+# Claude 2026-11-18: a profile sends changed when a setting changes, so AIMemory copies it into its C++ store again only then
+# (rather than at every full pass).
+func _test_announces_edits() -> void:
+	var fade := FadeProfile.new()
+	var heard := [0]
+	fade.changed.connect(func() -> void: heard[0] += 1)
+	fade.hold_ticks = 5
+	fade.fade_ticks = 50
+	fade.mode = FadeProfile.Mode.HALF_LIFE
+	fade.half_life_ticks = 9
+	fade.curve = Curve.new()
+	_check(heard[0] == 5, "each setting changed sends changed (%d of 5)" % heard[0])
 
 
 func _test_extended() -> void:

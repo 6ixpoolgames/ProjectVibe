@@ -36,15 +36,30 @@ extends Resource
 enum Mode { LINEAR, HALF_LIFE, CURVE }
 
 ## Which curve the fade follows. See the class description.
-@export var mode := Mode.LINEAR
+@export var mode := Mode.LINEAR:
+	set(value):
+		mode = value
+		emit_changed() # so whatever copied its settings (AIMemory's C++ store) copies them again
 ## Ticks at full strength before the fade begins.
-@export_range(0, 36000, 1, "or_greater") var hold_ticks := 0
+@export_range(0, 36000, 1, "or_greater") var hold_ticks := 0:
+	set(value):
+		hold_ticks = value
+		emit_changed() # so whatever copied its settings (AIMemory's C++ store) copies them again
 ## LINEAR and CURVE: ticks from full to nothing, after the hold.
-@export_range(0, 36000, 1, "or_greater") var fade_ticks := 60
+@export_range(0, 36000, 1, "or_greater") var fade_ticks := 60:
+	set(value):
+		fade_ticks = value
+		emit_changed() # so whatever copied its settings (AIMemory's C++ store) copies them again
 ## HALF_LIFE: the value halves every this many ticks, after the hold.
-@export_range(0, 36000, 1, "or_greater") var half_life_ticks := 30
+@export_range(0, 36000, 1, "or_greater") var half_life_ticks := 30:
+	set(value):
+		half_life_ticks = value
+		emit_changed() # so whatever copied its settings (AIMemory's C++ store) copies them again
 ## CURVE: the shape of the fade. x runs from 0 (the end of the hold) to 1 (fade_ticks later); y is the value.
-@export var curve: Curve
+@export var curve: Curve:
+	set(value):
+		curve = value
+		emit_changed() # so whatever copied its settings (AIMemory's C++ store) copies them again
 
 # HALF_LIFE counts as over after this many halvings: 0.5^7 is about 0.8%, the first step below 1%.
 const HALVINGS_UNTIL_NOTHING := 7

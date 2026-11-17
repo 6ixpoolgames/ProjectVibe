@@ -29,9 +29,18 @@ class_name AISensingManager
 extends Node
 
 ## Ticks between full passes: 10 is six a second at 60 ticks a second.
-@export_range(1, 600, 1, "or_greater") var sense_interval_ticks := 10
+@export_range(1, 600, 1, "or_greater") var sense_interval_ticks := 10:
+	set(value):
+		sense_interval_ticks = value
+		_schedule_rate = -1 # worked out again at the next tick
+		for sense in _senses:
+			if sense is SightSense:
+				sense._settings_dirty = true # it hands the interval to memory's store
 ## Ticks between cheap refreshes of what's already in memory.
-@export_range(1, 600, 1, "or_greater") var refresh_interval_ticks := 5
+@export_range(1, 600, 1, "or_greater") var refresh_interval_ticks := 5:
+	set(value):
+		refresh_interval_ticks = value
+		_schedule_rate = -1
 ## Physics layers the shared query looks on. Pawns are on layer 2.
 @export_flags_3d_physics var candidate_mask := 2
 ## The most pawns one query returns.
@@ -57,6 +66,11 @@ var _use_job := false # decided once, when ready
 var _asked_for_tick := -1 # the tick at whose end this manager last asked the job, so it asks once
 var _sight: SightSense = null # the first sight sense, which the job serves
 var _candidates: Array[Pawn] = [] # reused every pass
+# The two intervals at the match's tick rate, worked out once (and again when the rate or a setting changes), so a tick's schedule
+# check is two sums rather than function calls.
+var _full_interval := 10
+var _refresh_interval := 5
+var _schedule_rate := -1
 # Reused for every query, so a pass makes no new query objects.
 var _query := PhysicsShapeQueryParameters3D.new()
 var _sphere := SphereShape3D.new()
@@ -100,13 +114,20 @@ func get_senses() -> Array[AISenseBase]:
 func tick_sensing(tick: int) -> void:
 	if pawn == null or pawn.ai_context == null or pawn.ai_context.memory == null or _senses.is_empty():
 		return
-	var offset := pawn.ai_context.pawn_number() if pawn.ai_context else 0
-	var interval := TickDriver.ticks_at_rate(sense_interval_ticks) # written for 60 a second
-	# fired_since_last_run, so a pawn running every Nth tick still gets the passes that fell between its runs (pawn spec 8.21). Sight's
-	# awareness already fills by the real ticks since its last check.
-	if pawn.fired_since_last_run(tick, offset, interval):
+	var rate := TickDriver.get_tick_rate()
+	if rate != _schedule_rate:
+		_schedule_rate = rate
+		_full_interval = TickDriver.ticks_at_rate(sense_interval_ticks) # written for 60 a second
+		_refresh_interval = TickDriver.ticks_at_rate(refresh_interval_ticks)
+	var offset := pawn.ai_context.pawn_number()
+	var interval := _full_interval
+	# Pawn.fires_in_run's rule, written out: a pass fires on this run if one fell due on this tick or the ticks since its last run, so a
+	# pawn running every Nth tick still gets the passes between its runs (pawn spec 8.21). Sight's awareness already fills by the real
+	# ticks since its last check.
+	var elapsed := pawn.ticks_elapsed
+	if interval <= 1 or posmod(tick + offset, interval) < elapsed:
 		full_pass(tick)
-	elif pawn.fired_since_last_run(tick, offset, TickDriver.ticks_at_rate(refresh_interval_ticks)):
+	elif _refresh_interval <= 1 or posmod(tick + offset, _refresh_interval) < elapsed:
 		for sense in _senses:
 			var started := PerfScopes.begin_detailed() # each sense timed on its own, in detail (PerfScopes)
 			sense.refresh(tick)
@@ -115,6 +136,13 @@ func tick_sensing(tick: int) -> void:
 	# the job's answer, which is always for the next tick, is for that run. That's this tick for a pawn running every tick. If a
 	# stepping pawn's step changes first, it runs on another tick, the answer goes unused, and that pass runs on the main thread.
 	if not _use_job:
+		return
+	# Ticks until the next pass falls due after this one. The next run is at most a whole step away, so a pass further off than the
+	# longest step can't be on it, and most ticks stop here without asking when the next run is.
+	var to_next := posmod(-(tick + offset), interval) if interval > 1 else 1
+	if to_next == 0:
+		to_next = interval
+	if to_next > Pawn.MAX_TICK_STEP:
 		return
 	var next_run := pawn.next_run_tick(tick)
 	if not Pawn.fires_in_run(next_run, next_run - tick, offset, interval):

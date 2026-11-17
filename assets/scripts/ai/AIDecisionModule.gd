@@ -9,8 +9,9 @@
 ## [br]
 ## [b]Facts are written through[/b] (the owner's call): whatever owns a fact writes it into the pawn's row when it changes, so a
 ## decision gathers nothing. The state manager's state_changed, the context's current_target setter, its notes of hits and swings, a
-## game's inputs (AIInputs.set_input), the nearest point of a group when the lookup finds another, and the actions that could start
-## when the AbilityManager's readiness_version has moved on. The pawn's position and memory are read in C++ (its body, its
+## game's inputs (AIInputs.set_input), and the actions that could start when the AbilityManager's readiness_version has moved on.
+## A group's nearest point is the one fact sent at every decision of a pawn whose conditions read it (Go To Point): the point can move
+## or be freed between the lookup's 2-second looks, and GDScript reads where it is at each decision, so C++ must too. The pawn's position and memory are read in C++ (its body, its
 ## AIMemoryStore). Shadow mode also checks that the written facts match the live ones ([code]stale_facts[/code] in [method get_counts]).
 ## [br]
 ## Where each pawn decides (the owner's call: C++ is main, GDScript a dormant backup):
@@ -27,6 +28,12 @@
 ## [member check_against_gdscript] (shadow mode, for tests and finding faults): every pawn decides in GDScript, and each pawn that
 ## could decide in C++ also has C++ decide beside it, from C++'s own copy of its state; the answers are compared and counted
 ## ([method get_counts]), the first few disagreements logged, and C++'s copy put right after one.
+## [br]
+## A tripwire in debug builds: every so many C++ decisions, one also checks the pawn's written facts against the live ones, and warns
+## (the F8 log) when one is out of date, so a write missed by new code shows up while playing, not only in tests. Its pace follows how
+## busy the tick is (TickDriver.load_average): every [constant FACT_CHECK_EVERY_IDLE]th with time to spare, every
+## [constant FACT_CHECK_EVERY]th normally, every [constant FACT_CHECK_EVERY_BUSY]th near the budget, so it checks most when it costs
+## least.
 ## [br]
 ## Keys (debug builds): F10 switches every pawn to GDScript and back, to tell whether a fault is in the C++ decider.
 ## [br]
@@ -55,6 +62,11 @@ enum Decider {
 @export_range(0, 100, 1, "or_greater") var warnings_kept := 5
 
 const KNOWN_CONDITION_KINDS := ["always", "compare", "chance", "any"] # the kinds AIBatchDecider reads
+## The tripwire's pace (see the class description), in C++ decisions between checks: under half the tick's budget, up to 90% of it,
+## and above that.
+const FACT_CHECK_EVERY_IDLE := 20
+const FACT_CHECK_EVERY := 100
+const FACT_CHECK_EVERY_BUSY := 1000
 
 var _decider: Object = null # the C++ AIBatchDecider, null without the library
 var _warned_no_library := false
@@ -66,7 +78,10 @@ var _warned_minds := {} # a special mind's reason -> true, so each is said once
 var _previous_decider := Decider.PAWN_SETTING # what F10 goes back to
 var _counts := {"cpp": 0, "checked": 0, "agreed": 0, "differs": 0, "special_minds": 0, "stale_facts": 0}
 var _kinds_sent := 0 # how many input slots' kinds C++ has
-var _rows := {} # manager instance id -> {ready_version, ready_slots, groups, sent_points, on_state}: what this module keeps per pawn
+var _tripwire := OS.is_debug_build() # the sampled fact check runs in debug builds only
+var _decisions_since_check := 0
+var _check_every := FACT_CHECK_EVERY # set again after each check, from how busy the tick is
+var _rows := {} # manager instance id -> {ready_version, ready_slots, groups, on_state, follows_body}: what this module keeps per pawn
 
 
 func _init() -> void:
@@ -172,8 +187,8 @@ func place(manager: AIBehaviourManager) -> void:
 	if context.state_manager:
 		context.state_manager.state_changed.connect(on_state)
 	var abilities := manager.pawn.ability_manager
-	_rows[id] = {"ready_version": -1, "ready_slots": ready_slots, "groups": groups, "sent_points": {}, "on_state": on_state,
-		"follows_body": abilities != null and _follows_body(manager, abilities), "next_group_look": -1}
+	_rows[id] = {"ready_version": -1, "ready_slots": ready_slots, "groups": groups, "on_state": on_state,
+		"follows_body": abilities != null and _follows_body(manager, abilities)}
 	state_changed(manager)
 	target_changed(manager)
 	facts_changed(manager)
@@ -241,12 +256,20 @@ func decide_in_cpp(manager: AIBehaviourManager, tick: int, event_priority: int, 
 	if abilities and (abilities.readiness_version != kept["ready_version"] or kept["follows_body"]):
 		kept["ready_version"] = abilities.readiness_version
 		_write_readiness(manager, kept)
-	# The lookup keeps a point for 2 seconds, so it's only asked when that's up (or the point it gave has gone).
-	if not kept["groups"].is_empty() and tick >= kept["next_group_look"]:
+	if not kept["groups"].is_empty():
 		_write_group_points(manager, kept, tick)
 	if check_against_gdscript:
 		_check_facts(manager)
+	elif _tripwire:
+		_decisions_since_check += 1
+		if _decisions_since_check >= _check_every:
+			_decisions_since_check = 0
+			_check_facts(manager)
+			var load := TickDriver.load_average
+			_check_every = FACT_CHECK_EVERY_IDLE if load < 0.5 else (FACT_CHECK_EVERY if load < 0.9 else FACT_CHECK_EVERY_BUSY)
 	var chosen: int = _decider.decide_pawn(row, tick, event_priority, event_normal)
+	if check_against_gdscript:
+		_check_inputs(manager)
 	_counts["cpp"] += 1
 	PerfScopes.end(&"ai.decide.cpp", started)
 	return chosen
@@ -322,19 +345,13 @@ func _write_readiness(manager: AIBehaviourManager, kept: Dictionary) -> void:
 		_decider.set_input(manager.cpp_row, slot, inputs.value(slot))
 
 
-# Each group's nearest point, written when it's another node than last time.
+# Each group's nearest point, where it is now. The lookup keeps the node for 2 seconds but checks it's still there at every call, as
+# GDScript's own reading does, and a point can move (one carried by a hero), so its position goes over at every decision.
 func _write_group_points(manager: AIBehaviourManager, kept: Dictionary, tick: int) -> void:
 	var inputs := manager.pawn.ai_context.inputs
-	var sent: Dictionary = kept["sent_points"]
-	var all_there := true
 	for group: Array in kept["groups"]:
 		var point := inputs.nearest_in_group(group[0], tick)
-		all_there = all_there and point != null
-		if sent.get(group[0]) != point or point == null:
-			sent[group[0]] = point
-			_decider.set_group_point(manager.cpp_row, group[1], group[2], point != null, point.global_position if point else Vector3.ZERO)
-	# A point found is kept 2 seconds (AIInputs.nearest_in_group); with none found, it looks again at the next decision.
-	kept["next_group_look"] = tick + TickDriver.ticks_at_rate(AIInputs.GROUP_LOOK_AGAIN_TICKS) if all_there else tick + 1
+		_decider.set_group_point(manager.cpp_row, group[1], group[2], point != null, point.global_position if point else Vector3.ZERO)
 
 
 # True if an action a behaviour presses has an ability whose readiness follows the body (Jump), so it's asked every time.
@@ -356,6 +373,23 @@ func _state_number(manager: AIBehaviourManager, state_name: StringName) -> int:
 		number = _decider.find_state(brain, state_name)
 		states[state_name] = number
 	return number
+
+
+# Shadow mode: every input C++ just worked out against GDScript's own, slot by slot (the hit and swing facts, a game's inputs, the
+# group points and the memory-based ones all show up here). Counted with the stale facts.
+func _check_inputs(manager: AIBehaviourManager) -> void:
+	var inputs := manager.pawn.ai_context.inputs
+	var slots := manager.worked_out_inputs()
+	inputs.fill(slots)
+	var used: PackedFloat64Array = _decider.get_last_inputs()
+	for slot in slots:
+		var mine := inputs.value(slot)
+		var theirs := used[slot] if slot < used.size() else 0.0
+		if mine != theirs:
+			_counts["stale_facts"] += 1
+			if _counts["stale_facts"] <= warnings_kept:
+				push_warning("AIDecisionModule: C++ worked out %s as %s for %s, GDScript as %s." % [AIInputs.name_of(slot), theirs, manager.pawn.name, mine])
+			return
 
 
 # Shadow mode: the facts written into the row against the live ones; a difference means a write was missed somewhere.

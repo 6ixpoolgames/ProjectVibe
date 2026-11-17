@@ -39,30 +39,65 @@ extends AISenseBase
 
 ## Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Per tick at 60 ticks a second, like
 ## every setting here counted in ticks; at another rate it's converted to fill at the same speed.
-@export_range(0.0, 1.0, 0.001, "or_greater") var fill_rate := 1.0 / 30.0
+@export_range(0.0, 1.0, 0.001, "or_greater") var fill_rate := 1.0 / 30.0:
+	set(value):
+		fill_rate = value
+		_settings_dirty = true
 ## Inside this distance, in metres, distance doesn't weaken sight at all.
-@export_range(0.0, 200.0, 0.5, "or_greater") var near_range := 8.0
+@export_range(0.0, 200.0, 0.5, "or_greater") var near_range := 8.0:
+	set(value):
+		near_range = value
+		_settings_dirty = true
 ## Beyond this distance, in metres, nothing is seen.
-@export_range(0.0, 500.0, 0.5, "or_greater") var sight_range := 25.0
+@export_range(0.0, 500.0, 0.5, "or_greater") var sight_range := 25.0:
+	set(value):
+		sight_range = value
+		_settings_dirty = true
 ## The width of the central cone, in degrees, where sight is at full strength.
-@export_range(0.0, 360.0, 1.0) var central_cone_degrees := 90.0
+@export_range(0.0, 360.0, 1.0) var central_cone_degrees := 90.0:
+	set(value):
+		central_cone_degrees = value
+		_settings_dirty = true
 ## The width of everything it can see, in degrees, the central cone included. The part outside the central cone is the periphery.
-@export_range(0.0, 360.0, 1.0) var periphery_degrees := 160.0
+@export_range(0.0, 360.0, 1.0) var periphery_degrees := 160.0:
+	set(value):
+		periphery_degrees = value
+		_settings_dirty = true
 ## How strongly the periphery sees, compared with the central cone.
-@export_range(0.0, 1.0, 0.01) var periphery_multiplier := 0.3
+@export_range(0.0, 1.0, 0.01) var periphery_multiplier := 0.3:
+	set(value):
+		periphery_multiplier = value
+		_settings_dirty = true
 ## The most ticks one check can count, so a long gap doesn't give a huge gain at once.
-@export_range(1, 600, 1, "or_greater") var max_gain_ticks := 30
+@export_range(1, 600, 1, "or_greater") var max_gain_ticks := 30:
+	set(value):
+		max_gain_ticks = value
+		_settings_dirty = true
 ## The height of the eyes above the pawn's feet, in metres.
-@export var eye_height := 1.6
+@export var eye_height := 1.6:
+	set(value):
+		eye_height = value
+		_settings_dirty = true
 ## The height on the target the ray aims at, in metres above its feet: about the chest.
-@export var target_height := 1.0
+@export var target_height := 1.0:
+	set(value):
+		target_height = value
+		_settings_dirty = true
 ## Physics layers that block sight. The world, layer 1, by default.
-@export_flags_3d_physics var sight_blocking_mask := 1
+@export_flags_3d_physics var sight_blocking_mask := 1:
+	set(value):
+		sight_blocking_mask = value
+		_settings_dirty = true
 
 # Reused for every ray, so checks create no new objects.
 var _ray := PhysicsRayQueryParameters3D.new()
-# The settings handed to memory's store each pass, in the order AIMemoryStore.set_sight_settings takes them.
+# The settings handed to memory's store and the sensing job, in the order AIMemoryStore.set_sight_settings takes them. Filled again
+# only when a setting changes (each setting's setter marks them) or the match's tick rate does, and sent to the store only then.
 var _settings := PackedFloat64Array()
+var _settings_dirty := true
+var _settings_rate := -1 # the tick rate they were filled at
+var _store_given: Object = null # the store that has these settings and the geometry below
+var _geometry_given: Object = null
 var _one_target: Array = [null] # reused for a refresh's single check
 
 
@@ -83,18 +118,13 @@ func full_pass_prepared(job: Object, tick: int) -> void:
 	if memory == null:
 		return
 	var store: Object = memory.get_store()
-	# The settings ask_job filled a tick ago, for this same pass.
-	if _settings.size() != 11:
-		_fill_settings()
-	store.set_sight_settings(_settings)
-	store.set_sight_geometry(SightGeometryFeeder.get_geometry())
+	_give_store(store) # the settings ask_job used a tick ago, for this same pass
 	memory.announce_sight_results(store.sight_check_prepared(job, pawn, tick))
 
 
 ## Asks the sensing job for next tick's full pass, with where the eyes face now and this sense's settings.
 func ask_job(job: Object, reach: float, max_candidates: int) -> void:
-	_fill_settings()
-	job.add_request(pawn, _eye_yaw(), reach, max_candidates, _settings)
+	job.add_request(pawn, _eye_yaw(), reach, max_candidates, _settings_now())
 
 
 ## Only the current target, one ray. Refreshing every remembered entity costs more than the full passes in a crowd (measured with
@@ -176,12 +206,33 @@ func _check_all(targets: Array, tick: int) -> void:
 	if memory == null:
 		return
 	var store: Object = memory.get_store()
-	_fill_settings()
-	store.set_sight_settings(_settings)
-	# Line of sight in C++ where the C++ store runs; the GDScript store casts physics rays.
-	if store.has_method(&"set_sight_geometry"):
-		store.set_sight_geometry(SightGeometryFeeder.get_geometry())
+	_give_store(store)
 	memory.announce_sight_results(store.sight_check(pawn, _eye_yaw(), targets, tick))
+
+
+# The settings, filled again only if one changed or the tick rate did (most passes reuse them as they are).
+func _settings_now() -> PackedFloat64Array:
+	var rate := TickDriver.get_tick_rate()
+	if _settings_dirty or rate != _settings_rate:
+		_fill_settings()
+		_settings_dirty = false
+		_settings_rate = rate
+		_store_given = null # the store needs the new ones
+	return _settings
+
+
+# Gives memory's store the settings and, for line of sight in C++ (the C++ store), the geometry, only when it doesn't have them yet.
+# The GDScript store casts physics rays and has no geometry.
+func _give_store(store: Object) -> void:
+	var settings := _settings_now()
+	var geometry: Object = SightGeometryFeeder.get_geometry()
+	if store == _store_given and geometry == _geometry_given:
+		return
+	store.set_sight_settings(settings)
+	if store.has_method(&"set_sight_geometry"):
+		store.set_sight_geometry(geometry)
+	_store_given = store
+	_geometry_given = geometry
 
 
 # The settings for memory's store and the sensing job, in AIMemoryStore.set_sight_settings' order.
@@ -197,7 +248,7 @@ func _fill_settings() -> void:
 	_settings[7] = eye_height
 	_settings[8] = target_height
 	_settings[9] = sight_blocking_mask
-	_settings[10] = TickDriver.ticks_at_rate(manager.sense_interval_ticks if manager else 10)
+	_settings[10] = TickDriver.ticks_at_rate(manager.sense_interval_ticks if manager else 10) # the manager marks a change
 
 
 # Which way the eyes face, as a yaw: see the class description.

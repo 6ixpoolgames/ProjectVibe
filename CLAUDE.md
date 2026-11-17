@@ -11,8 +11,7 @@ Godot 4.7 hobby project (GDScript). Meant as a reusable base for many kinds of r
    - Doc comments (`##`) use Godot's markup, so the editor's help and the generated `REFERENCE.md` show them properly: `[br]- ` before each list item, a `## [br]` line between paragraphs, `[codeblock]` for examples, `[method name]` and `[member name]` for links. `tools/docs/make_reference.py` explains it and builds each system's `REFERENCE.md`; `tools/docs/check_comments_only.py` proves a cleanup changed only comments.
    - Systems not yet cleaned up still have dated `Claude <date>:` notes. They go when that system's pass is done; until then, follow the new rule in the code you touch.
    - `.tscn` / `.tres` files can't hold comments reliably (the editor strips them), so list those changes in the commit message and in the chat summary instead.
-2. **The owner wants to understand the whole codebase.** Don't make changes they can't follow. After every change, explain what changed, how it fits into the rest of the system, and anything it affects elsewhere. Prefer clear and boring over clever.
-3. **Comment generously, in plain language.** The owner is getting back into reading and writing GDScript, so new GDScript explains what it does and why, and explains language features as they come up. `assets/scripts/terrain/TerrainGenerator.gd` shows the level of detail, with its `GDScript note:` comments. <!-- Claude 2026-11-05: asked for by the owner -->
+2. **Rapid prototyping of architecture** *(the owner's call, 2026-11-18, replacing the education rules)*. The project is a fast experiment in how the architecture should go; a ground-up rewrite may follow once it's clear which parts work. This framework is the game. Comments say what the code does and why, briefly and in plain language; no teaching notes (`GDScript note:`) are needed in new code. Summaries after a change stay short.
 
 
 ## Layout
