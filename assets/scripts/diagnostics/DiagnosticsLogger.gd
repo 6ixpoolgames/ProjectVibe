@@ -1,10 +1,12 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16: catches the engine's warnings and errors for DiagnosticsManager (diagnostics v0), so
-## they go into the session log, the log console (F8) and the replay, rate-limited. Godot calls a Logger for every push_warning,
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: diagnostics/CHANGELOG.md.
+## Catches the engine's warnings and errors for [DiagnosticsManager].
+##
+## So they go into the session log, the log panel (F8) and the replay, rate-limited. Godot calls a Logger for every push_warning,
 ## push_error and engine error.
-##
+## [br]
 ## Godot can call this from any thread (a worker that hits an error, say), so it only stores each message under a lock; the manager
-## takes them on the main thread once a frame (take_messages).
-##
+## takes them on the main thread once a frame ([method take_messages]).
+## [br]
 ## GDScript note: Logger is Godot's class for this (Godot 4.5 and later). OS.add_logger() starts calling it, OS.remove_logger() stops.
 class_name DiagnosticsLogger
 extends Logger

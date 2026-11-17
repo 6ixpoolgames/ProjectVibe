@@ -1,12 +1,11 @@
-// Written by Claude (claude-opus-5-5), 2026-11-17 (C++ bundle stage 2, from the code audit): the "wait for the readers" list that
-// shared data keeps (PawnTable, AIPawnGrid, SightGeometry), so worker jobs can read it while it never changes under them.
+// Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
+// ChangeGuard: the "wait for the readers" list that shared data keeps (PawnTable, AIPawnGrid, SightGeometry), so worker jobs can
+// read it while it never changes under them. Not seen by GDScript.
 //
 // A job that reads one of them adds itself here, with what to call to wait for it (in practice, its scheduler's finish_all). The
 // data calls before_change() just before it changes anything, which waits for every reader, so nothing is read half-changed.
-//
-// Before, each of them had one guard slot, set by the job that read it. A second job reading the same data replaced the first's
-// guard, so the data could change while the first was still reading. And the pawn grid had no guard at all: it relied on the
-// table's guard having run first, which held for its rebuilds but not for a change of cell size.
+// Every reader is on the list, so a second job reading the same data doesn't push out the first, and each piece of data has a
+// list of its own (the pawn grid doesn't count on the table's guard having run first).
 //
 // Only touched on the main thread, like the data it guards.
 #pragma once

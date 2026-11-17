@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: the live ground nav mesh: commit, unload, queries, debug (spec 8.3, 12).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// GroundDomain: the live ground nav mesh: commit, unload, queries, debug (nav spec 8.3, 12). Described in ground_domain.h.
 #include "ground_domain.h"
 
 #include <DetourAlloc.h>
@@ -25,7 +26,7 @@ GroundDomain::GroundDomain() {
 	m_link_filters = new dtQueryFilter[MAX_TIERS];
 	for (int t = 0; t < MAX_TIERS; ++t) {
 		m_filters[t].setIncludeFlags(tier_flag(t));
-		m_filters[t].setExcludeFlags(POLYFLAG_LINK); // Claude 2026-11-08: was 0; links didn't exist
+		m_filters[t].setExcludeFlags(POLYFLAG_LINK);
 		m_link_filters[t].setIncludeFlags(tier_flag(t));
 		m_link_filters[t].setExcludeFlags(0);
 	}
@@ -83,8 +84,8 @@ bool GroundDomain::commit_tile(TileBuildResult &r) {
 		return true;
 	}
 
-	// Claude 2026-11-05: the old tile has to go before the new one can take its place, and removing it frees its
-	// data, so keep a copy to put back if the new one is refused. Without this, a refused tile left a hole in the mesh.
+	// The old tile has to go before the new one can take its place, and removing it frees its data, so keep a copy to put
+	// back if the new one is refused. Otherwise a refused tile would leave a hole in the mesh.
 	unsigned char *backup = nullptr;
 	int backup_size = 0;
 	if (old) {
@@ -161,13 +162,13 @@ void GroundDomain::straighten(dtNavMeshQuery *q, const QueryState &state, int np
 	std::vector<float> corners(MAX_STRAIGHT * 3);
 	int ncorners = 0;
 	const int max_corners = m_debug_corner_limit > 0 ? std::min(m_debug_corner_limit, MAX_STRAIGHT) : MAX_STRAIGHT;
-	// Claude 2026-11-08: Detour marks the corner where a link starts, and gives its polygon, which holds the link's id.
+	// Detour marks the corner where a link starts, and gives its polygon, which holds the link's id.
 	std::vector<unsigned char> corner_flags(want_links ? MAX_STRAIGHT : 0);
 	std::vector<dtPolyRef> corner_refs(want_links ? MAX_STRAIGHT : 0);
 	const dtStatus s = q->findStraightPath(state.start_pos, end, state.polys.data(), npolys, corners.data(),
 			want_links ? corner_flags.data() : nullptr, want_links ? corner_refs.data() : nullptr, &ncorners, max_corners, 0);
-	// Claude 2026-11-05: Detour says when it ran out of room for corners. The path then stops short of the goal, so
-	// callers have to be told it isn't complete. This status used to be ignored.
+	// Detour says when it ran out of room for corners. The path then stops short of the goal, so callers are told it
+	// isn't complete.
 	if (dtStatusDetail(s, DT_BUFFER_TOO_SMALL)) {
 		partial = true;
 	}
@@ -218,7 +219,6 @@ bool GroundDomain::closest_point(const float *p, int tier, float *out) const {
 	return ref != 0;
 }
 
-// Claude 2026-11-17 (C++ bundle stage 3): see the header.
 dtNavMeshQuery *GroundDomain::new_query() const {
 	if (!m_mesh) {
 		return nullptr;
@@ -267,7 +267,7 @@ bool GroundDomain::begin_sliced(const float *from, const float *to, int tier, Pa
 		fail.reason = "nav not initialised";
 		return false;
 	}
-	m_sliced_links = use_links; // Claude 2026-11-17 (C++ bundle stage 3)
+	m_sliced_links = use_links;
 	if (!snap_endpoints(m_sliced_query, m_sliced_state, from, to, tier, fail, use_links)) {
 		return false;
 	}
@@ -297,7 +297,7 @@ void GroundDomain::finish_sliced(PathOutcome &out) {
 		out.reason = "search failed";
 		return;
 	}
-	straighten(m_sliced_query, m_sliced_state, npolys, (s & DT_PARTIAL_RESULT) != 0, out, m_sliced_links); // Claude 2026-11-17: links
+	straighten(m_sliced_query, m_sliced_state, npolys, (s & DT_PARTIAL_RESULT) != 0, out, m_sliced_links);
 }
 
 void GroundDomain::debug_triangles(const WorldRect &r, std::vector<float> &verts, std::vector<float> &colors) const {

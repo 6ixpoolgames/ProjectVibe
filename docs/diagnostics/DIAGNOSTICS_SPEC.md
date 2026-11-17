@@ -62,6 +62,7 @@ To time something new, wrap it: `var started := PerfScopes.begin()` … `PerfSco
 | F6 | Spikes, newest first, with their parts and top scopes | bottom left |
 | F7 | Pawn inspector: Ctrl + left click a pawn to see its flags, running abilities and cooldowns, effects, AI state, behaviour and target, and input | bottom left |
 | F8 | Warnings and errors, with how many times each came | bottom left |
+| F9 | *(Claude 2026-11-17, the owner's request)* Nav view (`NavDebugView`): the nav mesh coloured by room (tier), nav links as arcs (cyan both ways, orange one way), and nav markers, points of interest included (`NavMarkerDebugModule`), around where the camera looks. Drawn in the world, not a panel; made the first time it's shown, and costs nothing hidden | the world |
 | F12 | Capture: saves a folder (see 7) and says where | — |
 
 The samples' own keys (F3 readouts, P pause, and so on) are unchanged. The mass battle's old F4 performance overlay is gone; its team and switch lines moved to the status text.

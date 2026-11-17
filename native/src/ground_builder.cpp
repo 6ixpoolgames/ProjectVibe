@@ -1,6 +1,7 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: ground tile build pipeline, input spans -> Detour tile (spec 8.2).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// The ground tile build pipeline, input spans -> Detour tile (nav spec 8.2). Described in ground_builder.h.
 // Step numbers match the spec. Steps 3 (obstacle carving), 10 (portals) and 11 (cached spans) belong to later phases and are
-// marked as such below. Claude 2026-11-08: step 8 (links, placed and found automatically) is built, for phase 3.
+// marked as such below. Step 8 (links, placed and found automatically) is built, for phase 3.
 #include "ground_builder.h"
 
 #include "providers.h"
@@ -157,7 +158,7 @@ bool compute_clearance_tiers(rcContext &ctx, const NavConfig &cfg, rcCompactHeig
 	return true;
 }
 
-// Claude 2026-11-08: step 8, auto links. Finds where a pawn could drop off a ledge or jump a gap, from the compact heightfield
+// Step 8, auto links. Finds where a pawn could drop off a ledge or jump a gap, from the compact heightfield
 // this build already made, so it costs nothing extra to gather. The same idea as Unreal's and Unity's link generators.
 //
 // For each walkable span inside the tile (not the borrowed border, which belongs to the neighbour), in each of the 4 directions:
@@ -444,7 +445,7 @@ std::unique_ptr<TileBuildResult> build_ground_tile(const TileBuildInput &in) {
 		rs.pmesh->flags[i] = flags;
 	}
 
-	// ---- 8. Links. Claude 2026-11-08: placed links that start in this tile, plus the ones found at ledges and gaps (phase 3).
+	// ---- 8. Links: placed links that start in this tile, plus the ones found at ledges and gaps (phase 3).
 	std::vector<LinkDef> links = in.placed_links;
 	const size_t placed_count = links.size();
 	if (cfg.auto_links) {
@@ -493,7 +494,7 @@ std::unique_ptr<TileBuildResult> build_ground_tile(const TileBuildInput &in) {
 	params.cs = cfg.cell_size;
 	params.ch = cfg.cell_height;
 	params.buildBvTree = true;
-	// Claude 2026-11-08: the links from step 8. Detour keeps only those whose start lies inside this tile.
+	// The links from step 8. Detour keeps only those whose start lies inside this tile.
 	params.offMeshConCount = int(links.size());
 	if (!links.empty()) {
 		params.offMeshConVerts = link_verts.data();

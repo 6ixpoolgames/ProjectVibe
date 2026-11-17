@@ -1,10 +1,10 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: walking on the ground: accelerating, slowing, steering in the air and turning to
-## face where it's going. The default locomotion. Pawn spec section 8.5. It replaces GroundMovement's steering; the pawn adds gravity.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
+## Walking on the ground: accelerating, slowing, steering in the air and turning to face where it's going. The default locomotion.
 ##
-## Its numbers come from the pawn's stats, so a buff or a different pawn changes them without touching this:
-##   speed_stat (MoveSpeed), Acceleration, Deceleration, AirControl, TurnRate (degrees per second)
-## Each has a fallback, the same as GroundMovement used, for a pawn without that stat.
-##
+## Pawn spec section 8.5. The pawn adds gravity. Its numbers come from the pawn's stats, so a buff or a different pawn changes them
+## without touching this: [member speed_stat] (MoveSpeed), Acceleration, Deceleration, AirControl, TurnRate (degrees per second). Each
+## has a fallback for a pawn without that stat.
+## [br]
 ## While its category is locked out (an attack that roots the pawn), it stops steering and the pawn slows to a stop.
 class_name WalkAbility
 extends AbilityBase
@@ -14,8 +14,8 @@ extends AbilityBase
 ## Top speed when the pawn has no such stat.
 @export var fallback_speed := 5.0
 
-# Claude 2026-11-09: the five stats, kept here and read again only when the StatManager's version changes (pawn spec 15.2). Reading
-# all five every tick was about a third of this ability's cost.
+# The five stats, kept here and read again only when the StatManager's version changes (pawn spec 15.2). Reading all five every
+# tick was about a third of this ability's cost.
 var _stats_version := -1
 var _stats_speed_stat: StringName = &""
 var _speed := 0.0
@@ -28,17 +28,17 @@ var _turn_rate := 0.0
 func _init() -> void:
 	super()
 	kind = Kind.LOCOMOTION
-	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	# Tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
 	category = Tags.MOVEMENT_WALK
-	extra_categories = [Tags.MOVEMENT_BASIC] # Claude 2026-11-10: a group, so a rule can name all basic movement at once
-	# Claude 2026-11-09: moving cancels only actions with a threshold of 0, such as an emote. Locomotion never blocks an action:
-	# anything that conflicts with it stops it, as before.
+	extra_categories = [Tags.MOVEMENT_BASIC] # a group, so a rule can name all basic movement at once
+	# Moving cancels only actions with a threshold of 0, such as an emote. Locomotion never blocks an action: anything that
+	# conflicts with it stops it.
 	interrupt_priority = 0
 	interrupt_threshold = 0
 
 
 func tick(dt: float) -> void:
-	_refresh_stats() # Claude 2026-11-09: was five read_stat calls here
+	_refresh_stats()
 	var speed := _speed
 	var acceleration := _acceleration
 	var deceleration := _deceleration
@@ -46,7 +46,7 @@ func tick(dt: float) -> void:
 	var turn_rate := _turn_rate
 
 	# Accelerate the horizontal velocity toward what's wanted. Locked out, nothing is wanted.
-	var wanted := Vector3.ZERO if manager.is_locked(self) else move_input().limit_length(1.0) # Claude 2026-11-16 (pawn M4)
+	var wanted := Vector3.ZERO if manager.is_locked(self) else move_input().limit_length(1.0)
 	var target := wanted * speed
 	var horizontal := Vector3(pawn.velocity.x, 0.0, pawn.velocity.z)
 	var rate := acceleration if target.length_squared() > 0.0001 else deceleration
@@ -62,8 +62,7 @@ func tick(dt: float) -> void:
 		pawn.yaw = rotate_toward(pawn.yaw, target_yaw, turn_rate * dt)
 
 
-# Claude 2026-11-09: reads the five stats again if a stat changed (or there was no StatManager before and there is now), or if
-# speed_stat was changed. The same values and fallbacks as before.
+# Reads the five stats again if a stat changed (or there was no StatManager before and there is now), or if speed_stat was changed.
 func _refresh_stats() -> void:
 	var version: int = pawn.stat_manager.version if pawn and pawn.stat_manager else 0
 	if version == _stats_version and speed_stat == _stats_speed_stat:

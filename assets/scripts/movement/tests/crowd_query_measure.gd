@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-16: what each physics query the CrowdMover uses costs, and what move_and_slide costs, for
 ## a pawn alone and for one in the middle of a packed crowd, the owner's request ("test its cost in a worst case surrounded by other
 ## pawns, just so we have the profile"). Not pass/fail: it prints microseconds per call. Pawn spec 8.22.
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/movement/tests/crowd_query_measure.tscn"
+##   godot --headless --path . "res://assets/scripts/movement/tests/crowd_query_measure.tscn"
 ## The crowd: 12 pawns touching the middle one, and 24 more just outside them. "On a slope" puts all of it on a 25 degree ramp, where
 ## the lifted sweep passes close over the ground. The last rows time the CrowdMover's whole batch for every pawn walking inward.
 extends Node

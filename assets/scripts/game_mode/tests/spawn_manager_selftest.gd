@@ -6,7 +6,7 @@
 ##   - a PawnSpawner fills up, removes a body, replaces it after its delay with a fresh pawn, stops at total_limit, treats a pawn
 ##     removed some other way as a death, and refill_now skips the wait
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/game_mode/tests/spawn_manager_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/game_mode/tests/spawn_manager_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := preload("res://assets/scenes/pawn/pawn.tscn")

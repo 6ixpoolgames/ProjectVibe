@@ -10,7 +10,7 @@
 ## (Claude 2026-11-09: the physics frame column is a median and is noisier than the others; see _measure.)
 ##
 ## Run from the project folder (takes a few minutes):
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/pawn/tests/pawn_stress.tscn"
+##   godot --headless --path . "res://assets/scripts/pawn/tests/pawn_stress.tscn"
 ## Add "-- --sizes=100,200" to choose the crowd sizes.
 ## Claude 2026-11-09, for the rollback recording work (pawn spec 12.1):
 ##   --history=every|snapshots|never   which ticks each pawn saves: every (a client's own pawn, and the old default everywhere),

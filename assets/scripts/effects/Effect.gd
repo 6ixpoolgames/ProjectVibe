@@ -1,31 +1,35 @@
-## Written by Claude (claude-opus-5-5), 2026-11-10: one effect, such as a sword hit, a poison or a combo boost: what it does to the pawn
-## it's applied to. A Resource, so it's saved as a .tres file and tuned in one place, however many abilities use it. Pawn spec 8.11,
-## the owner's design, shaped like Unreal's gameplay effects.
+# Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
+## One effect, such as a sword hit, a poison or a combo boost: what it does to the pawn it's applied to.
 ##
-## Two kinds, by duration_seconds:
-##   INSTANT    (0, the default) does its parts once and is gone: damage, a heal, a knockback, lifesteal.
-##   OVER TIME  (above 0) stays on the pawn that long, in its EffectManager's active list, which rolls back. While it lasts, its held
-##              parts hold (a slow, a resistance, a combo boost). With a period, its do-once parts run again every period (a poison
-##              ticking, a heal over time).
-##
-## What it does is its parts, a list picked from a dropdown in the inspector (each an EffectPart):
-##   do once  StatChangePart (Health -20 is damage, +15 a heal), KnockbackPart, LifestealPart
-##   held     StatModifierPart (MoveSpeed x0.7), AbilityPriorityPart (a group of abilities' priority or interrupt numbers),
-##            ResistancePart
+## A Resource, so it's saved as a .tres file and tuned in one place, however many abilities use it. Pawn spec 8.11, the owner's
+## design, shaped like Unreal's gameplay effects.
+## [br]
+## Two kinds, by [member duration_seconds]:
+## [br]- [b]Instant[/b] (0, the default) does its parts once and is gone: damage, a heal, a knockback, lifesteal.
+## [br]- [b]Over time[/b] (above 0) stays on the pawn that long, in its EffectManager's active list, which rolls back. While it lasts,
+##   its held parts hold (a slow, a resistance, a combo boost). With a period, its do-once parts run again every period (a poison
+##   ticking, a heal over time).
+## [br]
+## What it does is its [member parts], a list picked from a dropdown in the inspector (each an [EffectPart]):
+## [br]- Do once: [StatChangePart] (Health -20 is damage, +15 a heal), [KnockbackPart], [LifestealPart].
+## [br]- Held: [StatModifierPart] (MoveSpeed x0.7), [AbilityPriorityPart] (a group of abilities' priority or interrupt numbers),
+##   [ResistancePart].
+## [br]
 ## They run in list order, so a LifestealPart after a StatChangePart heals from the damage just dealt.
-##
-## Where effects come from: an ability's EffectApplier child (on start, to itself; on hit, to the target or itself), or code
-## (pawn.effect_manager.apply_effect). The pawn they land on applies them to itself (EffectManager), with its own resistances, and an
-## effect that pushes or staggers it goes through its own abilities, so its own interrupt rules decide (KnockbackPart).
-##
+## [br]
+## Where effects come from: an ability's [EffectApplier] child (on start, to itself; on hit, to the target or itself), an
+## [ApplyEffectStep], a [HitInterceptor]'s response, or code ([code]pawn.effect_manager.apply_effect[/code]). The pawn they land on
+## applies them to itself ([EffectManager]), with its own resistances, and an effect that pushes or staggers it goes through its own
+## abilities, so its own interrupt rules decide (KnockbackPart).
+## [br]
 ## Who decides: do-once parts change things only on the authority (the server, or offline), as hits always have; clients get the
 ## results in snapshots. Held parts work on every machine, from the active list, so a client predicting its own pawn agrees.
-##
+## [br]
 ## Odd cases (checked in effects/tests/effect_selftest.gd):
-##   - No parts: it does nothing, and an over-time one still shows in the active list for its duration.
-##   - Held parts on an instant effect: nothing to hold them, so they do nothing; a warning says so once.
-##   - Saved over-time effects are recognised on every machine by their file path. One made in code needs an effect_name to be
-##     recognised on a client; without one it works offline only.
+## [br]- No parts: it does nothing, and an over-time one still shows in the active list for its duration.
+## [br]- Held parts on an instant effect: nothing to hold them, so they do nothing; a warning says so once.
+## [br]- Saved over-time effects are recognised on every machine by their file path. One made in code needs an
+##   [member effect_name] to be recognised on a client; without one it works offline only.
 class_name Effect
 extends Resource
 

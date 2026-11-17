@@ -1,22 +1,26 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: shared data and settings for one pawn's AI. A part on the pawn, added by
-## PawnInitializer. Pawn spec section 10.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Shared data and settings for one pawn's AI, and the step that runs the AI parts in order.
 ##
-## It makes no decisions. It holds what the other AI parts share, so they don't each look it up again:
-##   - references: the pawn, its AI controller (the hands), its state and behaviour managers
-##   - settings for the whole AI: while_possessed, decision_interval_ticks, random_seed
-##   - the decision waiting to happen this tick, if any, and how strong its reason is (the "event", pawn spec 10.7)
-##   - random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
-##   - Claude 2026-11-09, step 8b: the current target, and shared inputs behaviours read (current_target_index, most_aware_index)
-##
-## The pawn calls run_ai() from its own tick, which runs the AI parts in a fixed order. Nothing here ticks on its own.
-## Claude 2026-11-16 (pawn M1): run_ai was Pawn._tick_ai.
-##
+## A part on the pawn, added by PawnInitializer. Pawn spec section 10. It makes no decisions. It holds what the other AI parts share,
+## so they don't each look it up again:
+## [br]- references: the pawn, its AI controller (the hands), and the other AI parts ([member state_manager],
+##   [member behaviour_manager], [member sensing_manager], [member memory], [member target_selector])
+## [br]- settings for the whole AI: [member while_possessed], [member decision_interval_ticks], [member random_seed]
+## [br]- the decision waiting to happen this tick, if any, and how strong its reason is (the "event", pawn spec 10.7)
+## [br]- random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
+## [br]- the current target, and shared inputs behaviours read ([method current_target_index], [method most_aware_index])
+## [br]- the last hit the pawn took and the latest swing coming at it, for states and behaviours
+## [br]
+## The pawn calls [method run_ai] from its own tick, which runs the AI parts in a fixed order. Nothing here ticks on its own.
+## [br]
 ## How to use it (behaviours and states get it as their "context"):
-##   context.pawn, context.controller, context.state_manager, context.behaviour_manager
-##   context.current_tick                     # the tick the AI is running now
-##   context.current_state_name()             # &"Idle", or &"" before the first state is picked
-##   context.has_target()                     # false until step 8b adds target selection
-##   context.random_unit(salt)                # a number from 0 up to 1, the same on every run for this pawn and tick
+## [codeblock]
+## context.pawn, context.controller, context.memory, context.state_manager, context.behaviour_manager
+## context.current_tick            # the tick the AI is running now
+## context.current_state_name()    # &"Idle", or &"" before the first state is picked
+## context.has_target()            # true while the target selector has picked a target
+## context.random_unit(salt)       # a number from 0 up to 1, the same on every run for this pawn and tick
+## [/codeblock]
 class_name AIContextComponent
 extends Node
 
@@ -41,7 +45,7 @@ enum WhilePossessed {
 var pawn: Pawn = null
 ## The tick the AI is running now. Set by the pawn at the start of each AI step.
 var current_tick := 0
-## What the AI is focused on, picked by the target selector (Claude 2026-11-09). Null when there's none.
+## What the AI is focused on, picked by the target selector. Null when there's none.
 var current_target: Node3D = null:
 	set(value):
 		current_target = value
@@ -63,21 +67,20 @@ func _enter_tree() -> void:
 	if pawn == null:
 		push_warning("AIContextComponent: its parent isn't a Pawn, so this AI has nothing to drive.")
 		return
-	_parts_found = false # Claude 2026-11-17: see _find_parts_if_needed
+	_parts_found = false # see _find_parts_if_needed
 	if not pawn.child_entered_tree.is_connected(_on_pawn_parts_changed):
 		pawn.child_entered_tree.connect(_on_pawn_parts_changed)
 		pawn.child_exiting_tree.connect(_on_pawn_parts_changed)
 
 
-# Claude 2026-11-16 (pawn M3): the AI notes every hit that reaches the pawn, parried ones included: it listens for them now, where Pawn._take_hit
-# used to call note_hit.
-# Claude 2026-11-17: stops listening to the pawn it leaves.
+# Stops listening to the pawn it leaves.
 func _exit_tree() -> void:
 	if pawn and pawn.child_entered_tree.is_connected(_on_pawn_parts_changed):
 		pawn.child_entered_tree.disconnect(_on_pawn_parts_changed)
 		pawn.child_exiting_tree.disconnect(_on_pawn_parts_changed)
 
 
+# The AI notes every hit that reaches the pawn, parried ones included, by listening to the AbilityManager's hit_arrived.
 func _ready() -> void:
 	var abilities := _sibling_ability_manager()
 	if abilities:
@@ -94,8 +97,8 @@ var controller: AIController:
 			return pawn.controller_manager.ai_controller as AIController
 		return null
 
-# Claude 2026-11-17 (the owner's call): the context finds the pawn's other AI parts itself; the pawn used to hold a reference to
-# each. They're looked for the first time one is asked for, and again after a part is added to or removed from the pawn.
+# The context finds the pawn's other AI parts itself (pawn.ai_context.memory, say), so the pawn holds only ai_context. They're
+# looked for the first time one is asked for, and again after a part is added to or removed from the pawn.
 # GDScript note: "get:" under a variable runs whenever it's read, so pawn.ai_context.memory works like a plain variable.
 
 ## The pawn's state manager, or null.
@@ -110,19 +113,19 @@ var behaviour_manager: AIBehaviourManager:
 		_find_parts_if_needed()
 		return _behaviour_manager
 
-## Claude 2026-11-17: the pawn's sensing manager, or null.
+## The pawn's sensing manager, or null.
 var sensing_manager: AISensingManager:
 	get:
 		_find_parts_if_needed()
 		return _sensing_manager
 
-## Claude 2026-11-09: the pawn's memory, or null.
+## The pawn's memory, or null.
 var memory: AIMemory:
 	get:
 		_find_parts_if_needed()
 		return _memory
 
-## Claude 2026-11-09: the pawn's target selector, or null.
+## The pawn's target selector, or null.
 var target_selector: AITargetSelector:
 	get:
 		_find_parts_if_needed()
@@ -136,7 +139,7 @@ var _memory: AIMemory = null
 var _target_selector: AITargetSelector = null
 
 
-# Claude 2026-11-17: the first of each AI part among the pawn's children, as the pawn found them before.
+# The first of each AI part among the pawn's children.
 func _find_parts_if_needed() -> void:
 	if _parts_found or pawn == null:
 		return
@@ -159,12 +162,12 @@ func _find_parts_if_needed() -> void:
 			_target_selector = child
 
 
-# Claude 2026-11-17: a part added or removed: look again next time one is asked for.
+# A part added or removed: look again next time one is asked for.
 func _on_pawn_parts_changed(_node: Node) -> void:
 	_parts_found = false
 
 
-# --- Shared inputs (Claude 2026-11-09, pawn spec 10.8) ---
+# --- Shared inputs (pawn spec 10.8) ---
 # Values many states and behaviours read. Each is worked out the first time something asks in a tick, and kept for the rest of
 # that tick, so if nothing asks, it costs nothing. Memory indexes only change on a sensing pass, which comes before any reader.
 
@@ -217,14 +220,17 @@ func current_state_name() -> StringName:
 	return state.name if state else &""
 
 
-## Claude 2026-11-09, step 10: the last hit this pawn took, noted by Pawn.receive_hit on the server. State rules (AIAwarenessState)
-## and behaviours read it; the hit isn't turned into a memory entry, because there's no damage sense (the owner's call).
-var last_hit_tick := -1 # -1: never hit
+## The tick of the last hit this pawn took, noted from the AbilityManager's hit_arrived on the server; -1: never hit. State rules
+## (AIAwarenessState) and behaviours read it; the hit isn't turned into a memory entry, because there's no damage sense (the owner's
+## call).
+var last_hit_tick := -1
+## Who made the last hit.
 var last_attacker: Node3D = null
-var last_hit_from := Vector3.ZERO # where the attacker stood when it hit
+## Where the attacker stood when it hit.
+var last_hit_from := Vector3.ZERO
 
 
-## Claude 2026-11-09: called by Pawn.receive_hit. Notes the hit and asks for a decision at once, so the pawn reacts this tick.
+## Called for the AbilityManager's hit_arrived. Notes the hit and asks for a decision at once, so the pawn reacts this tick.
 func note_hit(hit: HitInfo) -> void:
 	last_hit_tick = hit.tick
 	last_attacker = hit.attacker
@@ -232,15 +238,16 @@ func note_hit(hit: HitInfo) -> void:
 	request_decision()
 
 
-## Claude 2026-11-15: the latest swing coming at this pawn (Pawn.notice_incoming_attack), for AIParryBehaviour: who swung, the tick
-## its swing started, and the tick its hit starts. incoming_hit_tick is -1 when nothing is coming.
+## Who swung the latest swing coming at this pawn ([method note_incoming_attack]), for AIParryBehaviour, or null.
 var incoming_attacker: Pawn = null
+## The tick that swing started.
 var incoming_start_tick := -1
+## The tick that swing's hit starts; -1 when nothing is coming.
 var incoming_hit_tick := -1
 
 
-## Claude 2026-11-15: called by Pawn.notice_incoming_attack, on the server, when an enemy starts a swing that may reach this pawn. Notes
-## it and asks for a decision at once, since a swing's windup is shorter than the time between ordinary decisions.
+## Called by an enemy's MeleeAttackAbility, on the server, when it starts a swing that may reach this pawn. Notes it and asks for a
+## decision at once, since a swing's windup is shorter than the time between ordinary decisions.
 func note_incoming_attack(attacker: Pawn, start_tick: int, hit_tick: int) -> void:
 	incoming_attacker = attacker
 	incoming_start_tick = start_tick
@@ -248,31 +255,30 @@ func note_incoming_attack(attacker: Pawn, start_tick: int, hit_tick: int) -> voi
 	request_decision()
 
 
-## Claude 2026-11-15: true while a noted swing hasn't hit yet and its attacker is still there and alive.
+## True while a noted swing hasn't hit yet and its attacker is still there and alive.
 func has_incoming_attack() -> bool:
 	return incoming_hit_tick >= current_tick and is_instance_valid(incoming_attacker) and not incoming_attacker.is_dead()
 
 
-## Claude 2026-11-15: forgets the noted swing, once it's been answered.
+## Forgets the noted swing, once it's been answered.
 func clear_incoming_attack() -> void:
 	incoming_attacker = null
 	incoming_start_tick = -1
 	incoming_hit_tick = -1
 
 
-## Claude 2026-11-09: true if the pawn was hit within this many ticks.
-## Claude 2026-11-09 (scaling spec step 6): ticks at the reference rate (60 a second), like every AI setting.
+## True if the pawn was hit within this many ticks, counted at 60 a second like every AI setting (converted to the match's rate).
 func was_hit_within(ticks: int) -> bool:
 	return last_hit_tick >= 0 and current_tick - last_hit_tick <= TickDriver.ticks_at_rate(ticks)
 
 
-## Claude 2026-11-09: true if the last attacker is in memory.
+## True if the last attacker is in memory.
 func last_attacker_is_known() -> bool:
 	var remembered := memory
 	return remembered != null and is_instance_valid(last_attacker) and remembered.find(last_attacker) >= 0
 
 
-## Claude 2026-11-09: where an unknown attacker hit from, if that was within this many ticks; null otherwise. Look Toward and
+## Where an unknown attacker hit from, if that was within this many ticks; null otherwise. Look Toward and
 ## Investigate head there when nothing else is half-noticed.
 func unknown_hit_point(within_ticks: int) -> Variant:
 	if was_hit_within(within_ticks) and not last_attacker_is_known():
@@ -280,7 +286,7 @@ func unknown_hit_point(within_ticks: int) -> Variant:
 	return null
 
 
-## True when there's a current target. Claude 2026-11-09: set by the target selector from step 8b.
+## True when there's a current target, picked by the target selector.
 func has_target() -> bool:
 	return is_instance_valid(current_target)
 
@@ -288,36 +294,36 @@ func has_target() -> bool:
 # --- Running the AI ---
 
 
-## Claude 2026-11-09: the AI's step, in a fixed order. Claude 2026-11-16 (pawn M1): moved here from Pawn._tick_ai, the owner's call (the AI's
-## core part runs the AI; the pawn only calls this). The pawn calls it in its input phase. In a fixed order (pawn spec sections 4 and 10.9). Runs only where the AI runs (offline or the
-## server), never while a rollback replays ticks, and, while a player has the pawn, only as far as the AI context's
-## while_possessed allows. Order:
-##   1. Sensing, which writes into memory (Claude 2026-11-09, step 8b).
-##   2. On a decision tick, or when something asked for a decision: the target is picked, the state is checked, then the
-##      behaviour manager decides.
-##   3. The running behaviour ticks, which calls the AI controller.
+## The AI's step, in a fixed order (pawn spec sections 4 and 10.9). The pawn calls it in its input phase; the AI's core part runs
+## the AI, and the pawn only calls this. Runs only where the AI runs (offline or the server), never while a rollback replays ticks,
+## and, while a player has the pawn, only as far as [member while_possessed] allows. Order:
+## [br]1. Forces and taunts asked for during the last tick are applied, in the order they were asked for, even while possessed.
+## [br]2. Sensing, which writes into memory. MEMORY_ONLY stops after this.
+## [br]3. On a decision tick, or when something asked for a decision: the target is picked, the state is checked, then the
+##   behaviour manager decides.
+## [br]4. The running behaviour ticks, which calls the AI controller.
 func run_ai(tick: int) -> void:
 	if pawn == null or not pawn.runs_ai_here():
 		return
 	if TickDriver.is_resimulating():
 		return # the AI is never rolled back, so a replay must not run it again
 	current_tick = tick
-	var has_player := pawn.controller_manager != null and pawn.controller_manager.has_player() # Claude 2026-11-16 (pawn M4)
+	var has_player := pawn.controller_manager != null and pawn.controller_manager.has_player()
 	var ai_state_manager := state_manager
 	var ai_target_selector := target_selector
 	var ai_behaviour_manager := behaviour_manager
-	var ai_sensing_manager := sensing_manager # Claude 2026-11-17: was pawn.ai_context.sensing_manager
-	# Claude 2026-11-09 (scaling spec step 3): forces asked for during the last tick (a taunt from another pawn, say), in the order
-	# they were asked for. Before anything else, and even while possessed, as a force between ticks would have been.
+	var ai_sensing_manager := sensing_manager
+	# Forces asked for during the last tick (a taunt from another pawn, say), in the order they were asked for (scaling spec step 3).
+	# Before anything else, and even while possessed, as a force between ticks would have been.
 	if ai_state_manager:
 		ai_state_manager.apply_queued(tick)
 	if ai_target_selector:
 		ai_target_selector.apply_queued(tick)
 	if has_player and while_possessed == WhilePossessed.OFF:
 		return
-	# Claude 2026-11-09: step 1, sensing writes into memory. MEMORY_ONLY stops after it.
+	# Sensing writes into memory. MEMORY_ONLY stops after it.
 	if ai_sensing_manager:
-		var sensing_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+		var sensing_started := PerfScopes.begin() # timed for diagnostics (PerfScopes)
 		ai_sensing_manager.tick_sensing(tick)
 		PerfScopes.end(&"ai.sensing", sensing_started)
 	if has_player and while_possessed == WhilePossessed.MEMORY_ONLY:
@@ -328,7 +334,7 @@ func run_ai(tick: int) -> void:
 		ai_target_selector.check_force_expiry(tick)
 	if is_decision_tick(tick):
 		request_decision()
-	var decide_started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	var decide_started := PerfScopes.begin()
 	if has_decision_waiting():
 		if ai_target_selector:
 			ai_target_selector.update_target(tick) # first, because states such as Combat look at the current target
@@ -348,10 +354,10 @@ func run_ai(tick: int) -> void:
 # --- Decisions ---
 
 
-## True on this pawn's regular decision ticks, every decision_interval_ticks, offset by its own number.
+## True on this pawn's regular decision ticks, every [member decision_interval_ticks], offset by its own number.
 func is_decision_tick(tick: int) -> bool:
-	# Claude 2026-11-16 (pawn spec 8.21): or one it skipped since its last run, for a pawn running every Nth tick.
-	return pawn.fired_since_last_run(tick, pawn_number(), TickDriver.ticks_at_rate(decision_interval_ticks)) # Claude 2026-11-09 (scaling spec step 6)
+	# Or one it skipped since its last run, for a pawn running every Nth tick (pawn spec 8.21).
+	return pawn.fired_since_last_run(tick, pawn_number(), TickDriver.ticks_at_rate(decision_interval_ticks))
 
 
 ## Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state
@@ -416,7 +422,7 @@ func random_signed(salt: int) -> float:
 	return random_unit(salt) * 2.0 - 1.0
 
 
-var _number_name: StringName = &"" # Claude 2026-11-16 (wider audit): the name _name_number was worked out from
+var _number_name: StringName = &"" # the name _name_number was worked out from
 var _name_number := 0
 
 ## This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on
@@ -427,14 +433,16 @@ func pawn_number() -> int:
 	var entity := pawn.get_network_entity()
 	if entity and entity.entity_id >= 0:
 		return entity.entity_id
-	# Claude 2026-11-16 (wider audit): the hash is kept until the name changes. Offline this hashed the name at least twice a tick
-	# for every pawn. GDScript note: comparing two StringNames is one pointer comparison, far cheaper than hashing the text.
+	# The hash is kept until the name changes, since it's asked for at least twice a tick for every pawn.
+	# GDScript note: comparing two StringNames is one pointer comparison, far cheaper than hashing the text.
 	if pawn.name != _number_name:
 		_number_name = pawn.name
 		_name_number = String(pawn.name).hash() & 0x7FFFFFFF
 	return _name_number
 
-# Claude 2026-11-16 (pawn M3): the pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
+# The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
+# REFACTOR: the same lookup is in AIBehaviourManager. One shared way to find a sibling part before the pawn's own _ready (on Pawn,
+# say) would be one place to change (reusable).
 func _sibling_ability_manager() -> AbilityManager:
 	if pawn == null:
 		return null

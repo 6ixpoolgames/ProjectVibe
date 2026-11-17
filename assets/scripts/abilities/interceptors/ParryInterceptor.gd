@@ -1,12 +1,14 @@
-## Written by Claude (claude-opus-5-5), 2026-11-17 (pawn spec 8.23): turns away hits from the front. A TURN_AWAY HitInterceptor (see
-## HitInterceptor.gd): the hit arrives, so the AI notices it, then none of its effects land if the attacker is within front_degrees
-## of where the pawn faces. Its ON_INTERCEPT EffectApplier children say what happens next (in the samples, parry_knockback.tres
-## pushes the attacker back). Replaces ParryAbility.try_parry, AbilityManager.parry_hit and the parry-only lists on every ability.
+# Written by Claude (claude-opus-5-5), 2026-11-17. History: abilities/CHANGELOG.md.
+## Turns away hits from the front: a parry.
 ##
+## A TURN_AWAY [HitInterceptor] (pawn spec 8.23): the hit arrives, so the AI notices it, then none of its effects land if the attacker
+## is within [member front_degrees] of where the pawn faces. Its ON_INTERCEPT EffectApplier children say what happens next (in the
+## samples, parry_knockback.tres pushes the attacker back). A ParryAbility with no interceptor of its own makes one.
+## [br]
 ## Odd cases:
-##   - A hit with no attacker (a trap, a poison's tick) isn't turned away: there's no "front" for it to come from.
-##   - A pawn's own hit on itself isn't turned away.
-##   - A reply to an interception can't be turned away (HitInterceptor's rule), so two pawns parrying each other don't bounce hits.
+## [br]- A hit with no attacker (a trap, a poison's tick) isn't turned away: there's no "front" for it to come from.
+## [br]- A pawn's own hit on itself isn't turned away.
+## [br]- A reply to an interception can't be turned away (HitInterceptor's rule), so two pawns parrying each other don't bounce hits.
 class_name ParryInterceptor
 extends HitInterceptor
 

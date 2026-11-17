@@ -1,14 +1,16 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: see ai_memory_store.h. Every rule here mirrors AIMemoryStoreGD.gd and
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// AIMemoryStore: one pawn's AI memory in C++. Described in ai_memory_store.h. Every rule here mirrors AIMemoryStoreGD.gd and
 // SightSense.gd; a change to one goes in the other, and ai_perception_selftest runs both.
+// REFACTOR: kept twice, here and in AIMemoryStoreGD.gd (reusable, extensible); see the row in native/CHANGELOG.md.
 #include "ai_memory_store.h"
-#include "ai_sensing_job.h" // Claude 2026-11-09 (scaling spec step 2)
+#include "ai_sensing_job.h"
 
 #include <godot_cpp/classes/collision_object3d.hpp>
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/physics_direct_space_state3d.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
-#include <godot_cpp/core/error_macros.hpp> // Claude 2026-11-17: ERR_FAIL_INDEX_V
+#include <godot_cpp/core/error_macros.hpp> // ERR_FAIL_INDEX_V
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -21,15 +23,14 @@
 using namespace godot;
 
 namespace {
-// Claude 2026-11-09, step 10: dead pawns aren't seen, and are forgotten. Claude 2026-11-09 (scaling spec step 4): reads Pawn.dead, which
-// the Death ability keeps equal to Pawn.is_dead(), instead of calling is_dead() through GDScript, which was about a third of sensing's
-// cost. Anything without a dead property (not a pawn) is alive.
+// Dead pawns aren't seen, and are forgotten. Reads Pawn.dead, which the Death ability keeps equal to Pawn.is_dead(), instead of
+// calling is_dead() through GDScript, which costs about a third of sensing. Anything without a dead property (not a pawn) is alive.
 bool is_dead(Object *entity) {
 	static const StringName dead_name("dead");
 	return entity != nullptr && bool(entity->get(dead_name));
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2): a node's collision layer, 0 if it isn't a collision object.
+// A node's collision layer, 0 if it isn't a collision object.
 uint32_t layer_of(Node3D *node) {
 	CollisionObject3D *body = Object::cast_to<CollisionObject3D>(node);
 	return body ? body->get_collision_layer() : 0;
@@ -50,7 +51,7 @@ AIMemoryStore::AIMemoryStore() {
 
 // --- Fades ---
 
-// Claude 2026-11-09 (scaling spec step 6): round(ticks × rate ÷ 60), at least 1 above 0, as TickDriver.ticks_at_rate.
+// round(ticks × rate ÷ 60), at least 1 above 0, as TickDriver.ticks_at_rate.
 int64_t AIMemoryStore::at_rate(int64_t reference_ticks) const {
 	if (reference_ticks <= 0 || _tick_rate == 60) {
 		return reference_ticks;
@@ -74,7 +75,7 @@ void AIMemoryStore::read_fade(Fade &into, const Ref<Resource> &profile, int64_t 
 		return;
 	}
 	into.mode = int(profile->get("mode"));
-	into.hold = at_rate(int64_t(profile->get("hold_ticks"))); // Claude 2026-11-09 (step 6): at the match's rate
+	into.hold = at_rate(int64_t(profile->get("hold_ticks"))); // at the match's rate
 	into.fade = at_rate(int64_t(profile->get("fade_ticks")));
 	into.half_life = at_rate(int64_t(profile->get("half_life_ticks")));
 	into.curve = profile->get("curve");
@@ -123,8 +124,8 @@ void AIMemoryStore::configure_fades(const Ref<Resource> &uncertain, int64_t unce
 // --- Entries ---
 
 double AIMemoryStore::awareness_of(size_t i, int64_t tick) const {
-	// Claude 2026-11-09: held while it's in view, the rule record_sighting already used: if the last check saw it, and that was at
-	// most continuous_sighting_ticks ago, it hasn't faded. Before, a target in plain view drifted down between checks.
+	// Held while it's in view, the rule record_sighting uses too: if the last check saw it, and that was at most
+	// continuous_sighting_ticks ago, it hasn't faded, so a target in plain view doesn't drift down between checks.
 	if (in_view(i, tick)) {
 		return _awareness_when_seen[i];
 	}
@@ -132,7 +133,7 @@ double AIMemoryStore::awareness_of(size_t i, int64_t tick) const {
 	return _awareness_when_seen[i] * value_at(fade, double(tick - _last_seen[i] - fade.delay));
 }
 
-// Claude 2026-11-09: the last check saw it, and not too long ago.
+// The last check saw it, and not too long ago.
 bool AIMemoryStore::in_view(size_t i, int64_t tick) const {
 	return _last_checked[i] == _last_seen[i] && tick - _last_seen[i] <= _continuous_ticks;
 }
@@ -145,18 +146,17 @@ int64_t AIMemoryStore::find(Object *entity) const {
 	if (entity == nullptr) {
 		return -1;
 	}
-	return find_id(entity->get_instance_id()); // Claude 2026-11-17: the lookup moved to find_id
+	return find_id(entity->get_instance_id());
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2): find by instance id.
+// Find by instance id.
 int64_t AIMemoryStore::find_id(uint64_t id) const {
 	auto found = _index_of.find(id);
 	return found == _index_of.end() ? -1 : int64_t(found->second);
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): every *_at function checks its index first. A wrong index from
-// GDScript (a stale one after forget(), say) read past the end of the lists, which could crash the game or return garbage; now
-// it prints an error naming the index and returns a harmless value. ERR_FAIL_INDEX_V(index, size, value) is Godot's own check:
+// Every *_at function checks its index first. A wrong index from GDScript (a stale one after forget(), say) would read past the
+// end of the lists, so it prints an error naming the index and returns a harmless value instead. ERR_FAIL_INDEX_V(index, size, value) is Godot's own check:
 // if index isn't in 0 .. size - 1, it reports it and returns value.
 Object *AIMemoryStore::entity_at(int64_t index) const {
 	ERR_FAIL_INDEX_V(index, entry_count(), nullptr);
@@ -194,7 +194,7 @@ int64_t AIMemoryStore::ticks_since_checked(Object *entity, int64_t tick, int64_t
 }
 
 int64_t AIMemoryStore::record_sighting(Object *entity, double gain, int64_t tick, const Vector3 &position) {
-	// Claude 2026-11-17 (C++ bundle stage 2): the work moved to record_sighting_id. A null entity is ignored (it used to crash).
+	// The work is record_sighting_id's. A null entity is ignored, with an error.
 	ERR_FAIL_NULL_V(entity, 0);
 	return record_sighting_id(entity->get_instance_id(), gain, tick, position);
 }
@@ -218,7 +218,7 @@ int64_t AIMemoryStore::record_sighting_id(uint64_t id, double gain, int64_t tick
 		i = size_t(found);
 	}
 	// Fading only counts while it isn't seen: sightings close together, with no unseen check between them, are one look.
-	const double before = awareness_of(i, tick); // Claude 2026-11-09: which now holds it while in view, as this line used to
+	const double before = awareness_of(i, tick); // which holds it while in view
 	const double now = _certain[i] ? 1.0 : std::min(1.0, before + gain);
 	_last_known[i] = position;
 	_last_seen[i] = tick;
@@ -264,7 +264,7 @@ PackedInt64Array AIMemoryStore::forget_old(int64_t tick) {
 	for (int64_t i = int64_t(_ids.size()) - 1; i >= 0; --i) { // backwards, so removing one doesn't move the ones still to check
 		const Fade &fade = _certain[size_t(i)] ? _certain_fade : _uncertain;
 		Object *entity = instance_of(_ids[size_t(i)]);
-		// Claude 2026-11-09: never while it's held in view, even with a fade shorter than continuous_sighting_ticks.
+		// Never while it's held in view, even with a fade shorter than continuous_sighting_ticks.
 		const bool faded = !in_view(size_t(i), tick) && tick - _last_seen[size_t(i)] >= fade.delay + ends_after(fade);
 		if (entity == nullptr || is_dead(entity) || faded) {
 			if (entity != nullptr) {
@@ -345,11 +345,11 @@ void AIMemoryStore::set_sight_geometry(const Ref<SightGeometry> &geometry) {
 }
 
 void AIMemoryStore::set_sight_settings(const PackedFloat64Array &s) {
-	_sight.read(s); // Claude 2026-11-09 (step 2): the shared struct; fewer than 11 numbers change nothing, as before
+	_sight.read(s); // the shared struct; fewer than 11 numbers change nothing
 }
 
-// Claude 2026-11-09 (scaling spec step 2): the visibility rule moved to ai_sight_rules.h and the ray and record to check_one, so that
-// sight_check_prepared does exactly the same with the job's numbers.
+// The visibility rule is in ai_sight_rules.h and the ray and record in check_one, so that sight_check_prepared does exactly the
+// same with the job's numbers.
 Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const Array &candidates, int64_t tick) {
 	Array became_certain;
 	bool added = false;
@@ -362,10 +362,10 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 	}
 	const Vector3 eye = observer->get_global_position() + Vector3(0.0, _sight.eye_height, 0.0);
 	const Vector2 facing = sight_rules::facing_from_yaw(eye_yaw);
-	const uint32_t observer_layer = layer_of(observer); // Claude 2026-11-17: once, not per candidate
+	const uint32_t observer_layer = layer_of(observer); // once, not per candidate
 	PhysicsDirectSpaceState3D *space = nullptr;
 	if (_geometry.is_valid()) {
-		_geometry->sync(tick); // Claude 2026-11-09 (step 4): what changed since the last tick; nothing to do most ticks
+		_geometry->sync(tick); // what changed since the last tick; nothing to do most ticks
 	}
 
 	const int64_t count = candidates.size();
@@ -402,7 +402,7 @@ Array AIMemoryStore::sight_check_prepared(Object *job_object, Object *observer_o
 		return result;
 	}
 	PhysicsDirectSpaceState3D *space = nullptr;
-	const uint32_t observer_layer = layer_of(observer); // Claude 2026-11-17: once, not per candidate
+	const uint32_t observer_layer = layer_of(observer); // once, not per candidate
 	for (int64_t c = 0; c < count; ++c) {
 		const AISensingJob::Candidate &candidate = candidates[c];
 		// The same checks sight_check makes before visibility: the job only knew the table, not whether a pawn has died or left.
@@ -418,9 +418,8 @@ Array AIMemoryStore::sight_check_prepared(Object *job_object, Object *observer_o
 	return result;
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): the observer's layer and the target's id come from the caller, read
-// once (see the header). The memory entry is looked up once, by id, and reused for the record; it was looked up twice, each time
-// asking the engine for the target's id.
+// The observer's layer and the target's id come from the caller, read once (see the header). The memory entry is looked up
+// once, by id, and reused for the record.
 void AIMemoryStore::check_one(Node3D *observer, uint32_t observer_layer, Node3D *target, uint64_t target_id, const Vector3 &eye,
 		const Vector3 &aim, const Vector3 &target_position, double visibility, int64_t tick, int ray, PhysicsDirectSpaceState3D *&space,
 		bool &added, Array &became_certain) {
@@ -434,7 +433,7 @@ void AIMemoryStore::check_one(Node3D *observer, uint32_t observer_layer, Node3D 
 		CollisionObject3D *target_body = Object::cast_to<CollisionObject3D>(target);
 		const uint32_t layers = observer_layer | layer_of(target);
 		if (_geometry.is_valid() && (_sight.blocking_mask & layers) == 0) {
-			// Claude 2026-11-09 (scaling spec step 4): line of sight in C++. The sensing job may already have the answer (ray 0 or 1).
+			// Line of sight in C++. The sensing job may already have the answer (ray 0 or 1).
 			seen = ray >= 0 ? ray == 0 : !_geometry->blocked(eye, aim, _sight.blocking_mask);
 		} else {
 			// A physics ray: without the geometry, or when the mask includes the pawns' own layers (pawns aren't in the geometry).
@@ -464,7 +463,7 @@ void AIMemoryStore::check_one(Node3D *observer, uint32_t observer_layer, Node3D 
 			became_certain.push_back(target);
 		}
 	} else if (entry >= 0) {
-		_last_checked[size_t(entry)] = tick; // record_check, with the entry already found (Claude 2026-11-17)
+		_last_checked[size_t(entry)] = tick; // record_check, with the entry already found
 	}
 }
 
@@ -494,7 +493,7 @@ void AIMemoryStore::_bind_methods() {
 			&AIMemoryStore::best_target);
 	ClassDB::bind_method(D_METHOD("set_sight_settings", "settings"), &AIMemoryStore::set_sight_settings);
 	ClassDB::bind_method(D_METHOD("sight_check", "observer", "eye_yaw", "candidates", "tick"), &AIMemoryStore::sight_check);
-	ClassDB::bind_method(D_METHOD("sight_check_prepared", "job", "observer", "tick"), &AIMemoryStore::sight_check_prepared); // Claude 2026-11-09
-	ClassDB::bind_method(D_METHOD("set_sight_geometry", "geometry"), &AIMemoryStore::set_sight_geometry); // Claude 2026-11-09, step 4
-	ClassDB::bind_method(D_METHOD("set_tick_rate", "rate"), &AIMemoryStore::set_tick_rate); // Claude 2026-11-09, step 6
+	ClassDB::bind_method(D_METHOD("sight_check_prepared", "job", "observer", "tick"), &AIMemoryStore::sight_check_prepared);
+	ClassDB::bind_method(D_METHOD("set_sight_geometry", "geometry"), &AIMemoryStore::set_sight_geometry);
+	ClassDB::bind_method(D_METHOD("set_tick_rate", "rate"), &AIMemoryStore::set_tick_rate);
 }

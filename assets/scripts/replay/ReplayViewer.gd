@@ -1,26 +1,28 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: replay v0's viewer (docs/replay/REPLAY_SPEC.md). Runs replay_viewer.tscn: opens a
-## recording and plays or scrubs it, showing each pawn as a ghost capsule, the chunks that were built as outlines on the ground, the
-## chunk sources with their load distances, and the events around the tick shown. Nothing is simulated: it only shows what was
-## recorded, which is what debugging needs (a pawn standing on a chunk that went away, say).
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## Replay v0's viewer: plays and scrubs a recording (docs/replay/REPLAY_SPEC.md).
 ##
-## Which file: file_path if set, else -- --file=<path> on the command line, else the newest recording in user://replays/host (or
-## user://replays/client with -- --client).
-##
+## Runs replay_viewer.tscn. It shows each pawn as a ghost capsule, the chunks that were built as outlines on the ground, the chunk
+## sources with their load distances, and the events around the tick shown. Nothing is simulated: it only shows what was recorded,
+## which is what debugging needs (a pawn standing on a chunk that went away, say).
+## [br]
+## Which file: [member file_path] if set, else [code]-- --file=<path>[/code] on the command line, else the newest recording in
+## user://replays/host (or user://replays/client with [code]-- --client[/code]).
+## [br]
 ## Keys:
-##   Space play and pause        ← → one tick back or forward (Shift: ten)        Home End the start or end
-##   + - playback speed          [ ] select the previous or next pawn              F follow the selected pawn
-##   L labels on every pawn (on to begin with when there are 40 or fewer)
-##   Right mouse drag to turn the camera, the mouse wheel to zoom, W A S D to move it (when not following)
-## The slider at the bottom scrubs.
-##
-## Claude 2026-11-16, diagnostics (docs/diagnostics/DIAGNOSTICS_SPEC.md): a recording with the diagnostics channel shows a strip above
-## the slider, each tick's slowest frame (blue up to 1/60 s, orange up to 1/30 s, red beyond, with lines at both), with the tick shown
-## marked; click it to jump there. The panel then also shows the frame at that tick: its parts and its most expensive scopes. The strip
-## is filled in the background, a few blocks a frame, so a long recording opens at once.
-##
+## [br]- Space: play and pause. ← →: one tick back or forward (Shift: ten). Home, End: the start or end.
+## [br]- + -: playback speed. [ ]: select the previous or next pawn. F: follow the selected pawn.
+## [br]- L: labels on every pawn (on to begin with when there are 40 or fewer).
+## [br]- Right mouse drag turns the camera, the mouse wheel zooms, W A S D move it (when not following).
+## [br]- The slider at the bottom scrubs.
+## [br]
+## Diagnostics (docs/diagnostics/DIAGNOSTICS_SPEC.md): a recording with the diagnostics channel shows a strip above the slider, the
+## slowest frame in each of its columns (blue up to about 1/60 s, orange up to about 1/30 s, red beyond, with lines at both), with the
+## tick shown marked; click it to jump there. The panel then also shows the frame at that tick: its parts and its most expensive
+## scopes. The strip is filled in the background, a few blocks a frame, so a long recording opens at once.
+## [br]
 ## What the ghosts show: the team's colour; grey and lying down when dead; pale blue when frozen (switched off by the AI switch-off,
-## not ticking at all); darker when sleeping (idle, skipping physics but still ticking). The labels list the flags as letters:
-##   G on the ground, D dead, F frozen, S sleeping, C keeps chunks loaded (a source of its own), P a player has it.
+## not ticking at all); darker when sleeping (idle, skipping physics but still ticking). The labels list the flags as letters: G on the
+## ground, D dead, F frozen, S sleeping, C keeps chunks loaded (a source of its own), P a player has it.
 class_name ReplayViewer
 extends Node3D
 
@@ -52,7 +54,7 @@ var _status: Label = null
 var _panel: Label = null
 var _slider: HSlider = null
 var _setting_slider := false
-var _strip: Control = null # Claude 2026-11-16: the diagnostics strip
+var _strip: Control = null # the diagnostics strip
 var _strip_values := PackedFloat32Array() # the slowest frame in each column of the strip, in ms; -1 where there's nothing yet
 var _strip_next_block := 0 # the next block to read for the strip
 
@@ -73,7 +75,7 @@ func _ready() -> void:
 	_tick = _reader.get_first_tick()
 	_slider.min_value = _reader.get_first_tick()
 	_slider.max_value = _reader.get_last_tick()
-	_strip_values.resize(512) # Claude 2026-11-16: columns of the diagnostics strip
+	_strip_values.resize(512) # columns of the diagnostics strip
 	_strip_values.fill(-1.0)
 	_strip_next_block = 0
 	var first := _reader.get_frame(_reader.get_first_tick())
@@ -109,7 +111,7 @@ func get_reader() -> ReplayReader:
 func _process(delta: float) -> void:
 	if _reader == null:
 		return
-	_fill_strip() # Claude 2026-11-16
+	_fill_strip()
 	if _playing:
 		_tick = minf(_tick + delta * float(_reader.get_header().get("tick_rate", 60)) * SPEEDS[_speed_index], _reader.get_last_tick())
 		if _tick >= _reader.get_last_tick():
@@ -335,7 +337,7 @@ func _panel_text(frame: Dictionary) -> String:
 		var input: Variant = info.get("input")
 		if input != null:
 			lines.append("  input: move %s, look %.0f°, held %d" % [_vector(input.move_input), rad_to_deg(input.look_yaw), input.held_actions])
-	# Claude 2026-11-16: the frame at this tick, from the diagnostics channel, if the recording has it.
+	# The slowest frame at this tick, from the diagnostics channel, if the recording has it.
 	if not frame.diagnostics.is_empty():
 		var record: Dictionary = frame.diagnostics.reduce(func(a: Dictionary, b: Dictionary) -> Dictionary: return a if a.frame_ms >= b.frame_ms else b)
 		var scope_names: Array = record.scopes.keys()
@@ -427,7 +429,7 @@ func _build_scene() -> void:
 	layer.add_child(_status)
 	_panel = _make_label(Control.PRESET_BOTTOM_LEFT)
 	_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	_panel.offset_bottom = -72.0 # Claude 2026-11-16: was -44, above the diagnostics strip now
+	_panel.offset_bottom = -72.0 # above the diagnostics strip
 	layer.add_child(_panel)
 	_slider = HSlider.new()
 	_slider.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
@@ -441,7 +443,7 @@ func _build_scene() -> void:
 			_playing = false
 			_tick = value)
 	layer.add_child(_slider)
-	# Claude 2026-11-16: the diagnostics strip, just above the slider
+	# The diagnostics strip, just above the slider
 	_strip = Control.new()
 	_strip.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	_strip.offset_left = 14.0
@@ -457,7 +459,9 @@ func _build_scene() -> void:
 	layer.add_child(_strip)
 
 
-# Claude 2026-11-16: reads a few blocks' diagnostics a frame into the strip's columns, until the whole recording is in.
+# Reads a few blocks' diagnostics a frame into the strip's columns, until the whole recording is in.
+# REFACTOR: reads the reader's private _blocks for each block's first and last tick. A public ReplayReader.get_block_ticks(index)
+# would keep the reader's insides its own. Extensible. See CHANGELOG.md.
 func _fill_strip() -> void:
 	if _strip == null:
 		return

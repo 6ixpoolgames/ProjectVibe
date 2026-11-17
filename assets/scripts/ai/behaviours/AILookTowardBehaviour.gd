@@ -1,20 +1,21 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: stops and looks toward something half-noticed. Pawn spec section 10.7. Allowed in
-## Alert by default.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Stops and looks toward something half-noticed: the first reaction to a glimpse.
 ##
-## The first reaction to a glimpse: "huh, what was that?". It scores high while the most aware entry in memory isn't certain
-## yet, stops the pawn, and looks at that entry's last known position for look_ticks. Looking turns the AI's eyes (SightSense
-## sees where the AI looks), so a target that stays in view keeps filling awareness. Then it finishes, and its cooldown lets
-## Investigate take over.
-##
-## It's only available while something uncertain is remembered, so it never runs for an enemy it's already certain of.
-## Claude 2026-11-09, step 10: or while an unknown attacker hit the pawn within hit_memory_ticks: then it looks where the hit came
-## from. There's no memory entry for that attacker (no damage sense, the owner's call), only the context's note of the hit.
+## Pawn spec section 10.7. Allowed in Alert by default. "Huh, what was that?": it scores high while the most aware entry in memory
+## isn't certain yet, stops the pawn, and looks at that entry's last known position for [member look_ticks]. Looking turns the AI's
+## eyes (SightSense sees where the AI looks), so a target that stays in view keeps filling awareness. Then it finishes, and its
+## cooldown lets Investigate take over.
+## [br]
+## It's only available while something uncertain is remembered, so it never runs for an enemy it's already certain of, or while an
+## unknown attacker hit the pawn within [member hit_memory_ticks]: then it looks where the hit came from. There's no memory entry for
+## that attacker (no damage sense, the owner's call), only the context's note of the hit.
+# REFACTOR: _point_of_interest() is the same function as AIInvestigateBehaviour's (reusable). See CHANGELOG.md.
 class_name AILookTowardBehaviour
 extends AIBehaviourBase
 
 ## How long it looks, in ticks.
 @export_range(1, 36000, 1, "or_greater") var look_ticks := 60
-## Claude 2026-11-09: how long after being hit by an unknown attacker it may still turn toward where the hit came from, in ticks.
+## How long after being hit by an unknown attacker it may still turn toward where the hit came from, in ticks.
 @export_range(0, 36000, 1, "or_greater") var hit_memory_ticks := 300
 
 
@@ -24,7 +25,7 @@ func _init() -> void:
 	max_score = 0.6
 	min_score = max_score # a fixed score, so it can help skip others
 	cooldown_ticks = 180
-	tick_interval_ticks = 5 # Claude 2026-11-09: re-aiming 12 times a second is plenty, and each tick searches memory
+	tick_interval_ticks = 5 # re-aiming 12 times a second is plenty, and each tick searches memory
 
 
 # Only for something half-noticed: an uncertain most aware entry, or a recent hit from an unknown attacker. Its score is always
@@ -40,7 +41,7 @@ func enter(context: AIContextComponent) -> void:
 
 func tick(context: AIContextComponent) -> Status:
 	_look(context) # follow it if it moves while still in view
-	# Claude 2026-11-09: time since it started, in ticks, so it lasts the same at any tick_interval_ticks.
+	# Time since it started, in ticks, so it lasts the same at any tick_interval_ticks.
 	return Status.SUCCEEDED if context.current_tick - started_tick >= TickDriver.ticks_at_rate(look_ticks) else Status.RUNNING
 
 

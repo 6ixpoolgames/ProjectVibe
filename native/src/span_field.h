@@ -1,4 +1,6 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: per-column solid span lists, the universal nav input (spec 5.2).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// SpanField: per-column solid span lists, the universal nav input (nav spec 5.2). Built on a worker for each tile build; not
+// seen by GDScript.
 #pragma once
 
 #include <cstdint>

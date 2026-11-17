@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-17: headless self-test for BodyNavFeeder: a wall fed to nav bends paths around it, and
 ## once the wall leaves the tree the path goes straight again. Also the odd cases at the top of BodyNavFeeder.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/world/tests/body_nav_feeder_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/world/tests/body_nav_feeder_selftest.tscn"
 extends SelfTest
 
 var _nav: Object = null

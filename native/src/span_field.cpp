@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: span list operations used by input layers (spec 5.2, 5.5).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// SpanField: the span list operations input layers use (nav spec 5.2, 5.5). Described in span_field.h.
 #include "span_field.h"
 
 #include <algorithm>
@@ -14,10 +15,9 @@ void SpanField::reset(int width, int depth, float origin_x, float origin_z, floa
 	m_columns.assign(size_t(width) * size_t(depth), {});
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): add_solid and carve edit the column in place. Both used to build a
-// new list for every call, one heap allocation per cell per input layer in every tile build. A column is always sorted from the
-// bottom up, and its spans never overlap or touch (touching ones are merged), so the spans an edit concerns are always one run of
-// neighbours: found, replaced by the result, and the rest left where they are. The results are the same as before.
+// add_solid and carve edit the column in place, so a tile build doesn't allocate a new list per cell per input layer. A column
+// is always sorted from the bottom up, and its spans never overlap or touch (touching ones are merged), so the spans an edit
+// concerns are always one run of neighbours: found, replaced by the result, and the rest left where they are.
 void SpanField::add_solid(int cx, int cz, float y0, float y1, uint8_t surface) {
 	if (y1 <= y0) {
 		return;

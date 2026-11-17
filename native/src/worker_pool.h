@@ -1,4 +1,8 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: background threads for tile builds (spec section 3).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// WorkerPool: NavServer's own background threads for tile builds (nav spec section 3). A plain job queue; not seen by GDScript.
+// It's separate from JobScheduler, the workers every other per-tick job shares.
+// REFACTOR: two thread pools in one library (efficient): nav's tile builds could run on JobScheduler's workers, so a 4-core
+// server doesn't run two sets of threads that compete.
 #pragma once
 
 #include <condition_variable>

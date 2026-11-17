@@ -1,7 +1,9 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: one pawn's AI memory in C++, plus the loops that read and write it: the sight
-// check, the most aware entry and target scoring. Pawn spec sections 10.4, 10.5 and 10.11.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// AIMemoryStore: one pawn's AI memory in C++, plus the loops that read and write it: the sight check, the most aware entry and
+// target scoring. Pawn spec sections 10.4, 10.5 and 10.11.
 //
-// AIMemory.gd owns one of these and keeps every setting: the fades, their delays, the sight settings and the target weights all stay
+// GDScript: AIMemory.gd owns one of these (when the library is loaded) and keeps every setting; SightSense calls the sight checks
+// and AITargetSelector calls best_target. The settings: the fades, their delays, the sight settings and the target weights all stay
 // exported on the GDScript nodes and are passed in here, so designers tune the same inspector values whichever version runs.
 // assets/scripts/ai/AIMemoryStoreGD.gd is the same thing in GDScript, used where this library isn't available, and the tests run
 // both and expect the same results.
@@ -13,12 +15,12 @@
 // here. A profile whose script overrides value_at() (a "custom" profile) is called instead, so a designer's own fade still works.
 #pragma once
 
-#include "ai_sight_rules.h"
-#include "sight_geometry.h" // Claude 2026-11-09 (scaling spec step 4): line of sight in C++ // Claude 2026-11-09 (scaling spec step 2): the visibility rule, shared with AISensingJob
+#include "ai_sight_rules.h" // the visibility rule, shared with AISensingJob
+#include "sight_geometry.h" // line of sight in C++
 
 #include <godot_cpp/classes/curve.hpp>
 #include <godot_cpp/classes/physics_ray_query_parameters3d.hpp>
-#include <godot_cpp/classes/ref.hpp> // Claude 2026-11-17 (godot-cpp 10): Ref<T> is no longer pulled in by ref_counted.hpp
+#include <godot_cpp/classes/ref.hpp> // godot-cpp 10: Ref<T> isn't pulled in by ref_counted.hpp
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/classes/resource.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -74,15 +76,15 @@ public:
 	// Checks each candidate (Pawns) from observer's eyes, facing eye_yaw, and records what's seen. Returns
 	// [a new entry was made (bool), entities that became certain (Array)].
 	Array sight_check(Object *observer, double eye_yaw, const Array &candidates, int64_t tick);
-	// Claude 2026-11-09 (scaling spec step 2): the same check, with the candidates and their visibility already found by an
-	// AISensingJob for this observer and tick (job is the AISensingJob). Casts the rays and records, exactly as sight_check does with
+	// The same check, with the candidates and their visibility already found by an
+	// AISensingJob for this observer and tick (job is the AISensingJob). Casts the rays the job didn't test and records, exactly as sight_check does with
 	// the same candidates. Returns the same as sight_check; nothing happens if the job has no result for this observer and tick.
 	Array sight_check_prepared(Object *job, Object *observer, int64_t tick);
-	// Claude 2026-11-09 (scaling spec step 4): where line of sight is tested instead of physics rays: the shared SightGeometry, or
+	// Where line of sight is tested instead of physics rays: the shared SightGeometry, or
 	// null for physics rays. Physics rays are still used for a check whose mask includes the observer's or the target's own layer,
 	// because pawns aren't in the geometry.
 	void set_sight_geometry(const Ref<SightGeometry> &geometry);
-	// Claude 2026-11-09 (scaling spec step 6): the match's tick rate. Fade profiles' hold, fade and half-life are written for 60 ticks a
+	// The match's tick rate (scaling spec step 6). Fade profiles' hold, fade and half-life are written for 60 ticks a
 	// second and converted to it, exactly as TickDriver.ticks_at_rate does for FadeProfile in GDScript. Call before configure_fades.
 	void set_tick_rate(int64_t rate);
 
@@ -102,19 +104,18 @@ private:
 	};
 
 	void read_fade(Fade &into, const Ref<Resource> &profile, int64_t delay, bool custom) const;
-	int64_t at_rate(int64_t reference_ticks) const; // Claude 2026-11-09 (step 6): as TickDriver.ticks_at_rate
+	int64_t at_rate(int64_t reference_ticks) const; // as TickDriver.ticks_at_rate
 	static double value_at(const Fade &fade, double ticks);
 	static int64_t ends_after(const Fade &fade);
 	double awareness_of(size_t i, int64_t tick) const;
-	bool in_view(size_t i, int64_t tick) const; // Claude 2026-11-09: held, not fading: the last check saw it, recently
-	// Claude 2026-11-09 (step 2): one candidate's check once its visibility is known: the ray if it could be seen, then the record.
-	// Both sight checks use it, so they record the same things in the same order.
-	// Claude 2026-11-09 (step 4): ray is what's already known about line of sight: -1 nothing (test it now), 0 clear, 1 blocked.
-	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): by instance id, which the sensing job already has, so the sight
-	// checks don't ask the engine for each candidate's id two or three times. The Object versions above call these.
+	bool in_view(size_t i, int64_t tick) const; // held, not fading: the last check saw it, recently
+	// By instance id, which the sensing job already has, so the sight checks don't ask the engine for each candidate's id two or
+	// three times. The Object versions above call these.
 	int64_t find_id(uint64_t id) const;
 	int64_t record_sighting_id(uint64_t id, double gain, int64_t tick, const Vector3 &position);
-	// Claude 2026-11-17: target_id is the target's instance id, and observer_layer the observer's collision layer, both read once by
+	// One candidate's check once its visibility is known: the ray if it could be seen, then the record. Both sight checks use it,
+	// so they record the same things in the same order. ray is what's already known about line of sight: -1 nothing (test it now),
+	// 0 clear, 1 blocked. target_id is the target's instance id, and observer_layer the observer's collision layer, both read once by
 	// the caller instead of for every candidate.
 	void check_one(Node3D *observer, uint32_t observer_layer, Node3D *target, uint64_t target_id, const Vector3 &eye, const Vector3 &aim,
 			const Vector3 &target_position,
@@ -134,10 +135,10 @@ private:
 	Fade _certain_fade;
 	int64_t _continuous_ticks = 30;
 
-	// Claude 2026-11-09 (scaling spec step 2): SightSense's settings, in the struct the sensing job shares (ai_sight_rules.h).
+	// SightSense's settings, in the struct the sensing job shares (ai_sight_rules.h).
 	sight_rules::Settings _sight;
-	Ref<SightGeometry> _geometry; // Claude 2026-11-09 (step 4)
-	int64_t _tick_rate = 60; // Claude 2026-11-09 (scaling spec step 6): the match's rate, for the profiles' tick settings
+	Ref<SightGeometry> _geometry;
+	int64_t _tick_rate = 60; // the match's rate, for the profiles' tick settings
 	Ref<PhysicsRayQueryParameters3D> _ray;
 };
 

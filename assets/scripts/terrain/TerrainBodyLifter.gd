@@ -1,13 +1,15 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: moves bodies up onto the ground when an edit raises it above them. An optional module:
-## add it as a child of a TerrainGenerator. The ground's surface is one-sided, so a body left underneath would fall forever. A game that never
-## raises the ground doesn't need this.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: terrain/CHANGELOG.md.
+## Moves bodies up onto the ground when an edit raises it above them.
 ##
-## How to use it: add this as a child of the TerrainGenerator, and put each body that needs it in the Godot group GROUP. Pawn joins by itself.
-## A body's position has to be at its feet. Digging moves nothing, because a body just falls into the hole.
-##
+## An optional module: add it as a child of a [TerrainGenerator]. The ground's surface is one-sided, so a body left underneath
+## would fall forever. A game that never raises the ground doesn't need this.
+## [br]
+## How to use it: add this as a child of the TerrainGenerator, and put each body that needs it in the Godot group [constant GROUP].
+## Pawn joins by itself. A body's position has to be at its feet. Digging moves nothing, because a body just falls into the hole.
+## [br]
 ## What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
-##   - The parent isn't a TerrainGenerator: it warns and does nothing.
-##   - A body over a chunk that isn't built: left alone, because there's no ground there to compare with.
+## [br]- The parent isn't a TerrainGenerator: it warns and does nothing.
+## [br]- A body over a chunk that isn't built: left alone, because there's no ground there to compare with.
 class_name TerrainBodyLifter
 extends Node
 
@@ -31,7 +33,7 @@ func _exit_tree() -> void:
 	_terrain = null
 
 
-## center is the middle of the raised patch in the world, seen from above, as X and Z.
+# center is the middle of the raised patch in the world, seen from above, as X and Z.
 func _on_ground_raised(center: Vector2, radius: float) -> void:
 	# A patch can move a grid point a little past its radius, so this reaches one square further.
 	var reach := radius + _terrain.chunk_size / _terrain.chunk_resolution

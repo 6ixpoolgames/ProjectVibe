@@ -1,8 +1,10 @@
-// Written by Claude (claude-opus-5-5), 2026-11-17 (C++ bundle stage 3, replay spec 3): the replay's motion channel's packing in C++.
-// ReplayMotionChannel.gd gathers each pawn's position, yaw, velocity and flags once a tick; this compares them with what was last
-// written for that pawn and writes the tick's bytes, in exactly the layout the GDScript version writes (ReplayMotionChannel.gd, version
-// 2): count (u16); ids (u32 each); position x, y, z changes (i32 each, whole millimetres); yaws (half); velocities x, y, z (half);
+// Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
+// ReplayMotionPacker: the replay's motion channel's packing in C++ (replay spec 3). replay/ReplayMotionChannel.gd makes one when
+// the library is loaded, else packs in GDScript. The channel gathers each pawn's position, yaw, velocity and flags once a tick;
+// this compares them with what was last written for that pawn and writes the tick's bytes, in exactly the layout the GDScript
+// version writes (ReplayMotionChannel.gd, version 2): count (u16); ids (u32 each); position x, y, z changes (i32 each, whole millimetres); yaws (half); velocities x, y, z (half);
 // flags (u8, bit 7 meaning "the position is whole, not a change"). replay_selftest compares the two byte for byte.
+// REFACTOR: kept twice, here and in ReplayMotionChannel.gd (reusable, extensible); see the row in native/CHANGELOG.md.
 //
 // It keeps each pawn's last record itself, as the GDScript version keeps _last, so forget() a pawn that leaves and clear() at the end.
 #pragma once

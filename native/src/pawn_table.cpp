@@ -1,7 +1,8 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: see pawn_table.h.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// PawnTable: the shared table of plain pawn data. Described in pawn_table.h.
 #include "pawn_table.h"
 
-#include <godot_cpp/classes/box_shape3d.hpp> // Claude 2026-11-17: these five for read_body
+#include <godot_cpp/classes/box_shape3d.hpp> // these five for read_body
 #include <godot_cpp/classes/capsule_shape3d.hpp>
 #include <godot_cpp/classes/collision_shape3d.hpp>
 #include <godot_cpp/classes/cylinder_shape3d.hpp>
@@ -20,7 +21,7 @@ using namespace godot;
 
 PawnTable::PawnTable() :
 		_team_name("team") {
-	// Claude 2026-11-09 (step 2): the built-in optional columns, off until something switches them on. Their defaults are what a
+	// The built-in optional columns, off until something switches them on. Their defaults are what a
 	// pawn without the property would mean: standing still, facing -Z, in the air, fully visible.
 	auto built_in = [this](const char *name, Variant::Type type, const Variant &default_value) {
 		Column column;
@@ -34,8 +35,8 @@ PawnTable::PawnTable() :
 	built_in("yaw", Variant::FLOAT, 0.0);
 	built_in("grounded", Variant::BOOL, false);
 	built_in("detectability", Variant::FLOAT, 1.0);
-	// Claude 2026-11-17 (C++ bundle stage 4): detectability is a stat now (Pawn.detectability, StatManager.DETECTABILITY), pushed here
-	// when it changes instead of read from every pawn at every refresh.
+	// Detectability is a stat (Pawn.detectability, StatManager.DETECTABILITY), pushed here when it changes instead of read from
+	// every pawn at every refresh.
 	_columns.back().pushed = true;
 }
 
@@ -43,7 +44,7 @@ bool PawnTable::add(Object *pawn, int64_t key) {
 	if (pawn == nullptr || _slot_of.count(pawn->get_instance_id()) > 0) {
 		return false;
 	}
-	before_change(); // Claude 2026-11-09 (step 2): no job may be reading while the arrays move
+	before_change(); // no job may be reading while the arrays move
 	// The first slot with a larger key: equal keys keep the order they were added in.
 	const size_t slot = size_t(std::upper_bound(_keys.begin(), _keys.end(), key) - _keys.begin());
 	_keys.insert(_keys.begin() + slot, key);
@@ -51,14 +52,14 @@ bool PawnTable::add(Object *pawn, int64_t key) {
 	_nodes.insert(_nodes.begin() + slot, nullptr);
 	_positions.insert(_positions.begin() + slot, Vector3());
 	_teams.insert(_teams.begin() + slot, 0);
-	_bodies.insert(_bodies.begin() + slot, read_body(pawn)); // Claude 2026-11-17 (C++ bundle stage 3)
-	// Claude 2026-11-09 (step 2): every column that's on gets a place too, with its default until the next refresh reads the pawn.
+	_bodies.insert(_bodies.begin() + slot, read_body(pawn));
+	// Every column that's on gets a place too, with its default until the next refresh reads the pawn.
 	for (Column &column : _columns) {
 		if (!column.on()) {
 			continue;
 		}
 		if (column.pushed) {
-			column.unread.insert(column.unread.begin() + slot, 1); // Claude 2026-11-17: read at the next refresh
+			column.unread.insert(column.unread.begin() + slot, 1); // read at the next refresh
 		}
 		if (column.type == Variant::FLOAT) {
 			column.numbers.insert(column.numbers.begin() + slot, double(column.default_value));
@@ -111,7 +112,7 @@ bool PawnTable::refresh(int64_t tick) {
 			if (!column.on()) {
 				continue;
 			}
-			// Claude 2026-11-17 (C++ bundle stage 4): a pushed column reads its property only the first time.
+			// A pushed column reads its property only the first time.
 			if (column.pushed) {
 				if (!column.unread[slot]) {
 					continue;
@@ -127,7 +128,7 @@ bool PawnTable::refresh(int64_t tick) {
 	} else {
 		++_version;
 	}
-	// Claude 2026-11-17 (C++ bundle stage 4): the pushes since the last refresh, oldest first, so the newest wins.
+	// The pushes since the last refresh, oldest first, so the newest wins.
 	for (const Push &push : _pushes) {
 		auto found = _slot_of.find(push.id);
 		Column &column = _columns[size_t(push.column)];
@@ -150,7 +151,7 @@ void PawnTable::mark_stale() {
 	_stale = true;
 }
 
-// --- Columns (Claude 2026-11-09, step 2) ---
+// --- Columns (scaling spec step 2) ---
 
 bool PawnTable::require_column(const StringName &name) {
 	Column *column = find_column(name, "require_column");
@@ -301,14 +302,14 @@ void PawnTable::switched(Column &column, bool was_on) {
 	if (column.on()) {
 		resize_column(column);
 		if (column.pushed) {
-			column.unread.assign(_keys.size(), 1); // Claude 2026-11-17: each pawn's property is read once, at the next refresh
+			column.unread.assign(_keys.size(), 1); // each pawn's property is read once, at the next refresh
 		}
 		_stale = true; // the next refresh reads its real values
 	} else {
 		column.numbers = std::vector<double>();
 		column.whole_numbers = std::vector<int64_t>();
 		column.vectors = std::vector<Vector3>();
-		column.unread = std::vector<uint8_t>(); // Claude 2026-11-17
+		column.unread = std::vector<uint8_t>();
 	}
 	++_version;
 }
@@ -329,7 +330,7 @@ void PawnTable::read_column(Column &column, size_t slot, Object *node) {
 	if (value.get_type() == Variant::NIL) {
 		value = column.default_value; // the pawn doesn't have this property
 	}
-	write_column(column, slot, value); // Claude 2026-11-17: split out, for set_value's pushes too
+	write_column(column, slot, value); // shared with set_value's pushes
 }
 
 void PawnTable::write_column(Column &column, size_t slot, const Variant &value) {
@@ -344,7 +345,6 @@ void PawnTable::write_column(Column &column, size_t slot, const Variant &value) 
 	}
 }
 
-// Claude 2026-11-17 (C++ bundle stage 4): see the header.
 bool PawnTable::add_pushed_column(const StringName &name, int64_t type, const StringName &property, const Variant &default_value) {
 	if (!add_column(name, type, property, default_value)) {
 		return false;
@@ -374,7 +374,7 @@ bool PawnTable::set_value(Object *pawn, const StringName &column_name, const Var
 }
 
 void PawnTable::before_change() {
-	_change_guard.before_change(); // Claude 2026-11-17: waits for every reader (change_guard.h)
+	_change_guard.before_change(); // waits for every reader (change_guard.h)
 }
 
 // --- For GDScript ---
@@ -405,7 +405,7 @@ Dictionary PawnTable::get_row(int64_t slot) const {
 	row["key"] = _keys[i];
 	row["team"] = _teams[i];
 	row["position"] = _positions[i];
-	// Claude 2026-11-09 (step 2): and every column that's on.
+	// And every column that's on.
 	for (const Column &column : _columns) {
 		if (!column.on()) {
 			continue;
@@ -431,9 +431,7 @@ void PawnTable::rebuild_slot_map() {
 	}
 }
 
-// Removes one slot from every array, keeping the rest in key order.
-// Claude 2026-11-17 (C++ bundle stage 3): see Body in the header. Read once, on joining: a pawn's collision shape is part of its scene
-// and doesn't change in play.
+// See Body in the header. Read once, on joining: a pawn's collision shape is part of its scene and doesn't change in play.
 PawnTable::Body PawnTable::read_body(Object *pawn) {
 	Body body;
 	Node *node = Object::cast_to<Node>(pawn);
@@ -477,19 +475,20 @@ PawnTable::Body PawnTable::read_body(Object *pawn) {
 	return body;
 }
 
+// Removes one slot from every array, keeping the rest in key order.
 void PawnTable::erase_slot(size_t slot) {
 	_keys.erase(_keys.begin() + slot);
 	_ids.erase(_ids.begin() + slot);
 	_nodes.erase(_nodes.begin() + slot);
 	_positions.erase(_positions.begin() + slot);
 	_teams.erase(_teams.begin() + slot);
-	_bodies.erase(_bodies.begin() + slot); // Claude 2026-11-17
+	_bodies.erase(_bodies.begin() + slot);
 	for (Column &column : _columns) {
 		if (!column.on()) {
 			continue;
 		}
 		if (column.pushed) {
-			column.unread.erase(column.unread.begin() + slot); // Claude 2026-11-17
+			column.unread.erase(column.unread.begin() + slot);
 		}
 		if (column.type == Variant::FLOAT) {
 			column.numbers.erase(column.numbers.begin() + slot);
@@ -502,7 +501,6 @@ void PawnTable::erase_slot(size_t slot) {
 }
 
 void PawnTable::_bind_methods() {
-	// Claude 2026-11-17 (C++ bundle stage 4)
 	ClassDB::bind_method(D_METHOD("add_pushed_column", "name", "type", "property", "default_value"), &PawnTable::add_pushed_column);
 	ClassDB::bind_method(D_METHOD("set_value", "pawn", "column", "value"), &PawnTable::set_value);
 	ClassDB::bind_method(D_METHOD("add", "pawn", "key"), &PawnTable::add);

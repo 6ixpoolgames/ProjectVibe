@@ -1,5 +1,6 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: input providers / adapters and the composite (spec 5.2, 5.4, 5.5).
-// Everything here runs on worker threads and only reads the InputSnapshot it is given.
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// Input providers (adapters) and the composite that turn a tile's input layers into spans (nav spec 5.2, 5.4, 5.5). Not seen by
+// GDScript. Everything here runs on worker threads and only reads the InputSnapshot it is given.
 #pragma once
 
 #include "input_store.h"

@@ -12,7 +12,7 @@
 ##   - A pawn with a source has ground on every tick, from its first one, and after being teleported somewhere new.
 ##
 ## Exits 0 on success, 1 on failure. About 2 minutes. Add -- --only=name to run one scenario. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/streaming/tests/net_streaming_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/streaming/tests/net_streaming_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const SECONDS := 20

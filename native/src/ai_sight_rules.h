@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: how strongly one pawn sees another, before line of sight and time: distance ×
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// How strongly one pawn sees another, before line of sight and time: distance ×
 // angle × detectability (SightSense.gd's visibility_of, pawn spec 10.4). One copy of the rule, used by AIMemoryStore's sight check on
 // the main thread and by AISensingJob on worker threads (scaling spec step 2), so the two can't drift apart and give exactly the same
 // numbers. Plain maths only: safe on any thread.

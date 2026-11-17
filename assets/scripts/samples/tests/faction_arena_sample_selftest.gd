@@ -3,7 +3,7 @@
 ## button; the bigger readouts; and the debug keys: pausing, stepping back through the recording (view only) and forward.
 ## Claude 2026-11-13: also teams of team_size (8), soldiers filling the players' team, and the usual Health.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/samples/tests/faction_arena_sample_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/samples/tests/faction_arena_sample_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const ARENA := "res://assets/scenes/samples/faction_arena_sample.tscn"

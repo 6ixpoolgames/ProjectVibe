@@ -1,30 +1,34 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: how precisely networked values are stored (netcode spec section 5.3).
-## Every networked property has an encoding. Values are rounded to it at the end of every tick, on server and client
-## alike, so both simulate from exactly what the network can carry and rounding alone never causes a misprediction.
+# Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
+## How precisely networked values are stored (netcode spec section 5.3).
 ##
+## Every networked property has an encoding. Values are rounded to it at the end of every tick, on server and client alike, so both
+## simulate from exactly what the network can carry and rounding alone never causes a misprediction. The C++ recorder
+## ([code]TickStateRecorder[/code]) and codec ([code]NetCodec[/code]) round the same way ([code]native/src/state_encoding.h[/code]),
+## so a change to [method quantize] goes in both.
+## [br]
 ## Encodings:
-##   auto        pick by the value's type: Vector3 -> vector3_mm, Vector2 -> vector2_mm, float -> float, anything else -> raw
-##   vector3_mm  1 mm per axis. The default for positions AND velocities
-##   vector2_mm  same, Vector2
-##   vector3_cm  1 cm per axis. Only for values that don't build up tick by tick (a target point, say)
-##   angle_u16   an angle in radians, 65536 steps per turn (about 0.005 degrees)
-##   angle_byte  an angle in radians, 256 steps per turn. Only for values that don't build up tick by tick
-##   float       32-bit float
-##   raw         left alone: ints, bools, bitmasks, StringNames
-##
-## Why rounding step matters: a value that changes by less than half a step per tick is rounded straight back and
-## never changes. At 60 ticks/s and 1 mm, that stalls anything moving slower than about 3 cm/s, and speeds in general
-## are off by up to 3 cm/s. At 1 cm it would be 30 cm/s, which is why positions aren't in cm.
-##
-## Physics bodies, two rules (see TickSamplePawn.gd):
-##   - safe_margin must not be a whole number of steps, and Godot's default of 1 mm is. A body rests one margin above the
-##     floor, so rounding would park it exactly on the edge of "touching". Float noise then flips the contact, and the
-##     engine snaps it up to 2.4 cm into the floor.
-##   - Don't turn the body by writing rotation every tick. That slowly changes its scale, and so its collision shape,
-##     differently in a replay. Keep facing as a plain number and turn only the model.
-##
-## Corner cases (checked in tests/tick_state_selftest.gd): an encoding that doesn't fit the value's type leaves the
-## value unchanged; an unknown encoding name is reported by is_known() and the component falls back to auto.
+## [br]- [code]auto[/code]: pick by the value's type: Vector3 is vector3_mm, Vector2 is vector2_mm, float is float, anything else raw.
+## [br]- [code]vector3_mm[/code]: 1 mm per axis. The default for positions and velocities.
+## [br]- [code]vector2_mm[/code]: the same, for a Vector2.
+## [br]- [code]vector3_cm[/code]: 1 cm per axis. Only for values that don't build up tick by tick (a target point, say).
+## [br]- [code]angle_u16[/code]: an angle in radians, 65536 steps per turn (about 0.005 degrees).
+## [br]- [code]angle_byte[/code]: an angle in radians, 256 steps per turn. Only for values that don't build up tick by tick.
+## [br]- [code]float[/code]: a 32-bit float.
+## [br]- [code]raw[/code]: left alone: ints, bools, bitmasks, StringNames.
+## [br]
+## Why the rounding step matters: a value that changes by less than half a step per tick is rounded straight back and never changes.
+## At 60 ticks/s and 1 mm, that stalls anything moving slower than about 3 cm/s, and speeds in general are off by up to 3 cm/s. At
+## 1 cm it would be 30 cm/s, which is why positions aren't in cm.
+## [br]
+## Physics bodies, two rules (see samples/TickSamplePawn.gd):
+## [br]- safe_margin must not be a whole number of steps, and Godot's default of 1 mm is. A body rests one margin above the floor, so
+##   rounding would park it exactly on the edge of "touching". Float noise then flips the contact, and the engine snaps it up to
+##   2.4 cm into the floor.
+## [br]- Don't turn the body by writing rotation every tick. That slowly changes its scale, and so its collision shape, differently in
+##   a replay. Keep facing as a plain number and turn only the model.
+## [br]
+## Corner cases (checked in tests/tick_state_selftest.gd): an encoding that doesn't fit the value's type leaves the value unchanged;
+## an unknown encoding name is reported by [method is_known] and the component falls back to auto.
 class_name StateEncoding
 extends RefCounted
 
@@ -44,6 +48,7 @@ const BYTE_STEP := TAU / 256.0
 const FLOAT_TOLERANCE := 0.0001
 
 
+## True if this is one of the encoding names above.
 static func is_known(encoding: StringName) -> bool:
 	return encoding in [AUTO, VECTOR3_MM, VECTOR2_MM, VECTOR3_CM, ANGLE_U16, ANGLE_BYTE, FLOAT, RAW]
 
@@ -87,14 +92,15 @@ static func quantize(value: Variant, encoding: StringName) -> Variant:
 
 
 ## GDScript floats are 64-bit, but engine properties like rotation store 32 bits. Rounded values go through this so a
-## value reads back from such a property exactly as it was written, and doesn't look changed on the next tick.
-# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (NetPackets calls it); it was _as_float32.
+## value reads back from such a property exactly as it was written, and doesn't look changed on the next tick. NetPackets uses it
+## too.
 static func as_float32(value: float) -> float:
 	return Vector2(value, 0.0).x
 
 
-## Claude 2026-11-04: a value part way between two others, for drawing between snapshots. Things that can't blend, like
-## bools, stay at the first value until the second arrives.
+## A value part way between two others, for drawing between snapshots.
+## [br]
+## Things that can't blend, like bools, stay at the first value until the second arrives.
 static func blend(a: Variant, b: Variant, weight: float, encoding: StringName) -> Variant:
 	if typeof(a) != typeof(b):
 		return a

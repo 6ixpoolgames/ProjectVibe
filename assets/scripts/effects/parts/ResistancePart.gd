@@ -1,9 +1,10 @@
-## Written by Claude (claude-opus-5-5), 2026-11-10: adds to the pawn's resistance to a kind of effect while its effect lasts, such as
-## +0.5 against damage.elemental.fire for a fire ward. A held part (EffectPart). Pawn spec 8.11.
+# Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
+## Adds to the pawn's resistance to a kind of effect while its effect lasts. A held part ([EffectPart]).
 ##
-## Added to the pawn's own resistances (EffectManager.resistances). How resistances count, there: every resistance whose tag is one
-## of an effect's tags, or a level above one, adds up, so 0.2 against damage.elemental and 0.3 against damage.elemental.fire make 0.5
-## against fire. Negative is a weakness. 1 or more and the pawn ignores those effects entirely.
+## Such as +0.5 against damage.elemental.fire for a fire ward. Pawn spec 8.11. Added to the pawn's own resistances
+## (EffectManager.resistances). How resistances count, there: every resistance whose tag is one of an effect's tags, or a level above
+## one, adds up, so 0.2 against damage.elemental and 0.3 against damage.elemental.fire make 0.5 against fire. Negative is a weakness.
+## 1 or more and the pawn ignores those effects entirely.
 class_name ResistancePart
 extends EffectPart
 
@@ -17,7 +18,7 @@ func is_held() -> bool:
 	return true
 
 
-# Claude 2026-11-16 (wider audit): its share of the pawn's totals (the EffectManager did this sum itself, by class).
+# Its share of the pawn's totals: [tag bit, amount] in the resistance list.
 func add_held(totals: EffectHeldTotals, stacks: int) -> void:
 	if tag != &"":
 		totals.resistance_bits.append([EffectTags.own_bit(tag), amount * stacks])

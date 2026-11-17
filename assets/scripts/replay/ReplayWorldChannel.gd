@@ -1,18 +1,20 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: replay channel 4, "world": the loaded ground and what keeps it loaded (replay spec
-## section 3). For seeing a pawn standing on a chunk that went away.
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## Replay channel 4, "world": the loaded ground and what keeps it loaded (replay spec section 3).
 ##
+## For seeing a pawn standing on a chunk that went away.
+## [br]
 ## Events (the pawn id is 0 for all of them):
-##   "chunk_built"     data: terrain (its id here), chunk (Vector2i)       a terrain finished building a chunk
-##   "chunk_collision" data: terrain, chunk                                its collision is in, so things can stand on it
-##   "chunk_removed"   data: terrain, chunk
-##   "source_added", "source_removed"
-##                     data: source (its id here), position, load, nav    a chunk source started or stopped keeping the world loaded
-##                     here. Claude 2026-11-16 (pawn M2): pawns are sources now, so only those that count on this machine are tracked
-##                     (counts_on_this_machine), and a source switched off is "source_removed". "source_on" and "source_off"
-##                     are still read in older recordings.
+## [br]- "chunk_built" (data: terrain, its id here; chunk, a Vector2i): a terrain finished building a chunk.
+## [br]- "chunk_collision" (data: terrain, chunk): its collision is in, so things can stand on it.
+## [br]- "chunk_removed" (data: terrain, chunk).
+## [br]- "source_added" (data: source, its id here; position, load, nav, active, counts): a chunk source started keeping the world
+##   loaded here. Pawns can be sources, so only sources that count on this machine are tracked (counts_on_this_machine).
+## [br]- "source_removed" (data: source): a source left, or stopped counting here (switched off).
+## [br]- "source_on" and "source_off" are no longer written, but are still read in older recordings.
+## [br]
 ## A keyframe's snapshot: every terrain (id, name, chunk size, origin, built chunks) and every source (id, position, load and nav
-## distances, on or off, and whether it counts on this machine).
-##
+## distances, active and counts, which are always true now, since only sources that count are tracked).
+## [br]
 ## Reading: state["terrains"] is terrain id -> {name, chunk_size, origin, chunks: {Vector2i: true}}, and state["sources"] is source
 ## id -> {position, load, nav, active, counts}. Source positions are updated only by keyframes and their own events, so a moving
 ## source (a player's pawn, say) is up to a second out of date; the pawn's own motion record has the exact place.
@@ -144,7 +146,8 @@ func _on_chunk_removed(key: Vector2i, terrain_id: int) -> void:
 	add_event("chunk_removed", 0, {"terrain": terrain_id, "chunk": key})
 
 
-# Sources have no signals, so each tick this compares them with last tick: new ones, gone ones, and ones switched on or off.
+# Sources have no signals, so each tick this compares them with last tick: new ones, and gone ones (a source that stopped counting on
+# this machine, switched off, counts as gone).
 func _check_sources() -> void:
 	if recorder == null or not recorder.is_inside_tree():
 		return

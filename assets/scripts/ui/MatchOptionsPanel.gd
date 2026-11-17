@@ -1,24 +1,27 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16: a start menu's match options, built from the settings themselves, the owner's request
-## ("add the distance and other options to the start game menu ... this should prove out modularity of gamemode").
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: ui/CHANGELOG.md.
+## A start menu's match options, built from the settings themselves.
 ##
 ## What it shows: a heading and one row per setting, for any object that names some of its own properties. Every GameMode module can
-## name its settings (GameModeModule.get_match_options), so add_from_game_mode() lists whichever modules this game has: take a module
-## out of the project setting project_base/game_mode/modules and its options leave the menu, with nothing here naming it. A level, an
-## autoload or anything else is added the same way with add_section().
-##
+## name its settings (GameModeModule.get_match_options), so [method add_from_game_mode] lists whichever modules this game has: take a
+## module out of the project setting project_base/game_mode/modules and its options leave the menu, with nothing here naming it. A
+## level, an autoload or anything else is added the same way with [method add_section].
+## [br]
 ## How a row is made: from the property's own description, as the inspector does (Object.get_property_list):
-##   - a bool: a check box
-##   - an int with an enum (@export_enum): a drop-down of its names
-##   - an int or float: a number box, with the range, step and "or_greater" of an @export_range when it has one
-## Changing a row sets the property at once, so a setter runs as it would from code. refresh() reads every value again (call it when
-## the menu is shown, since keys or code may have changed them).
-##
+## [br]- a bool: a check box
+## [br]- an int with an enum (@export_enum): a drop-down of its names
+## [br]- an int or float: a number box, with the range, step and "or_greater" of an @export_range when it has one
+## [br]
+## Changing a row sets the property at once, so a setter runs as it would from code. [method refresh] reads every value again (call
+## it when the menu is shown, since keys or code may have changed them).
+## [br]
 ## Use:
-##   var panel := MatchOptionsPanel.new()
-##   menu_box.add_child(panel)
-##   panel.add_section("This level", self, PackedStringArray(["team_size", "spawn_distance"]))
-##   panel.add_from_game_mode()
-##   panel.add_from_autoloads()   # Claude 2026-11-16: the tick driver's and network session's, which name their own
+## [codeblock]
+## var panel := MatchOptionsPanel.new()
+## menu_box.add_child(panel)
+## panel.add_section("This level", self, PackedStringArray(["team_size", "spawn_distance"]))
+## panel.add_from_game_mode()
+## panel.add_from_autoloads()   # the tick driver's and network session's, which name their own
+## [/codeblock]
 class_name MatchOptionsPanel
 extends VBoxContainer
 
@@ -54,7 +57,7 @@ func add_from_game_mode() -> void:
 		add_section(String(module.name).capitalize(), module, module.get_match_options())
 
 
-## Claude 2026-11-16: adds a section for every autoload that names match options (a get_match_options() function, as GameMode
+## Adds a section for every autoload that names match options (a get_match_options() function, as GameMode
 ## modules have), headed by its name, in the project's autoload order. The autoloads are the project setting's "autoload/" entries;
 ## one without the function (GameMode itself, the legacy ones) is skipped.
 func add_from_autoloads() -> void:
@@ -74,7 +77,7 @@ func refresh() -> void:
 		_refresh_row(row)
 
 
-# Claude 2026-11-16 (audit): one row's value read again (refresh() did every row each time one was added).
+# One row's value read again, as each row is added.
 func _refresh_row(row: Array) -> void:
 	var target: Object = row[0]
 	if not is_instance_valid(target):

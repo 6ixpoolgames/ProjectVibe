@@ -1,30 +1,36 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16: diagnostics v0 (docs/diagnostics/DIAGNOSTICS_SPEC.md), the owner's request after the
-## mass battle ran under 30 fps in play but not in Claude's runs. A GameMode module, listed by the project setting
-## project_base/game_mode/modules, so the base never names it (docs/TEST_AND_DEBUG_CODE.md). Claude 2026-11-16: it ships in release builds
-## too, the owner's call (bug reports: session logs, captures and replays from players' machines), so it moved from debug/ to diagnostics/
-## and the setting's .release override lists it as well. A game can still leave it out of either list.
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: diagnostics/CHANGELOG.md.
+## Diagnostics v0: measures every frame, keeps logs, feeds the replay and shows the panels (docs/diagnostics/DIAGNOSTICS_SPEC.md).
 ##
+## A GameMode module, listed by the project setting project_base/game_mode/modules, so the base never names it
+## (docs/TEST_AND_DEBUG_CODE.md). It ships in release builds too, the owner's call, for bug reports (session logs, captures and
+## replays from players' machines): the setting's .release override lists it as well. A game can leave it out of either list.
+## [br]
 ## What it does, every frame, wherever the game runs (the editor, a window, headless):
-##   - Measures the frame: the physics steps (all of this frame's ticks), every node's _process, and the rest (drawing the last frame,
-##     and waiting for the screen), with timestamps from a helper that runs first and this module running last. A frame is counted
-##     from the end of the last frame's scripts to the end of this one's, so a slow frame's time and its breakdown stay together
-##     (Godot's delta would put the time on the next frame). Plus TickDriver's phases, every
-##     PerfScopes timing, drawing on the CPU and GPU, draw calls, and memory, object, node and orphan-node counts (a leak shows as a
-##     count that only climbs).
-##   - Keeps the last history_seconds of frames in memory, and every frame over budget as a spike, with its full breakdown.
-##   - Hands each frame to the replay recording (ReplayDiagnosticsChannel), so one file holds the game and what it cost.
-##   - Writes a session log per instance (user://diagnostics/sessions/): a header saying how it was run, a summary every 5 s, every
-##     spike, and every warning and error, rate-limited.
-##   - Starts a replay recording when a game starts and none is running (hosting, joining, or a player taking a pawn offline), so
-##     recordings are always on, the owner's call.
-##   - Feeds the editor's Debugger > Monitors with its main numbers, for live graphs when running from the editor.
-##   - Shows panels, one key each (DiagnosticsPanels), and takes captures (F12).
-##
-## Reading it from code: GameMode.get_module(DiagnosticsManager) (not a named line on GameMode, since the base mustn't name debug code).
-##   get_summary(seconds)   averages over the last seconds: see _summary() for the keys
-##   get_frames()           the history, oldest first; get_spikes(), the spikes, newest last
-##   get_log_lines()        the warnings and errors so far, as [level, text, where, count]
-##   capture()              saves a capture folder now, and returns its path
+## [br]- Measures the frame: the physics steps (all of this frame's ticks), every node's _process, and the rest (drawing the last frame,
+##   and waiting for the screen), with timestamps from a helper that runs first and this module running last. A frame is counted from
+##   the end of the last frame's scripts to the end of this one's, so a slow frame's time and its breakdown stay together (Godot's
+##   delta would put the time on the next frame). Plus TickDriver's phases, every [PerfScopes] timing, drawing on the CPU and GPU, draw
+##   calls, and memory, object, node and orphan-node counts (a leak shows as a count that only climbs).
+## [br]- Keeps the last [member history_seconds] of frames in memory, and every frame over budget as a spike, with its full breakdown.
+## [br]- Hands each frame to the replay recording ([ReplayDiagnosticsChannel]), so one file holds the game and what it cost.
+## [br]- Writes a session log per instance (user://diagnostics/sessions/): a header saying how it was run, a summary every
+##   [member log_every_seconds], every spike, and every warning and error, rate-limited.
+## [br]- Starts a replay recording when a game starts and none is running (hosting, joining, or a player taking a pawn offline), so
+##   recordings are always on, the owner's call.
+## [br]- Feeds the editor's Debugger > Monitors with its main numbers, for live graphs when running from the editor.
+## [br]- Shows panels, one key each ([DiagnosticsPanels]), and takes captures (F12).
+## [br]
+## Reading it from code: [code]GameMode.get_module(DiagnosticsManager)[/code] (not a named line on GameMode, since the base never
+## names it).
+## [codeblock]
+## get_summary(seconds)  # averages over the last seconds; the keys are listed at get_summary
+## get_frames()          # the history, oldest first; get_spikes(), the spikes, newest last
+## get_log_lines()       # the warnings and errors so far, as [level, text, where, count]
+## capture()             # saves a capture folder now, and returns its path
+## [/codeblock]
+# REFACTOR: one class does several jobs: measuring frames, the session log, captures, the editor's monitors, starting recordings and
+# the window's title. Splitting out the session log and captures would make each easier to read and to swap. Extensible.
+# See CHANGELOG.md.
 class_name DiagnosticsManager
 extends GameModeModule
 
@@ -41,8 +47,7 @@ extends GameModeModule
 @export_range(1, 100, 1, "or_greater") var repeats_logged := 3
 ## Where session logs and captures go.
 @export var folder := "user://diagnostics"
-## Claude 2026-11-16 (the owner's call: test runs were deleting their playtest logs): on, a run with no display (a test, or a dedicated
-## server) writes its session logs and captures into folder/headless instead, with its own logs_kept, so the many headless runs
+## On, a run with no display (a test, or a dedicated server) writes its session logs and captures into folder/headless instead, with its own logs_kept, so the many headless runs
 ## never push out the logs of games played in a window.
 @export var headless_runs_apart := true
 ## How many session logs to keep. The oldest are deleted when a session starts.
@@ -72,13 +77,13 @@ var _message_order: Array = [] # texts, in the order they first came
 var _monitor_ids: Array[StringName] = []
 var _last_summary := {}
 var _role := "offline"
-# Claude 2026-11-16 (profiling the networked mass battle): the session's counters at the last frame, so each frame records what it added.
+# The session's counters at the last frame, so each frame records what it added.
 var _last_net := {} # counter index -> its value at the last frame
-# Claude 2026-11-16 (the server's tick rate): the server's tick at the last frame: this machine's own offline or hosting, the newest
-# snapshot's on a client. Each frame records how far it moved ("server_ticks").
+# The server's tick at the last frame: this machine's own offline or hosting, the newest snapshot's on a client. Each frame records
+# how far it moved ("server_ticks").
 var _last_server_tick := -1
-# Claude 2026-11-16 (audit, the owner's call: no hard-coded names): the session's counters come from NetworkSession.COUNTING_STATS, each
-# kept in a frame's record as "net_<name>"; the key names are made once here, not every frame.
+# The session's counters come from NetworkSession.COUNTING_STATS (no hard-coded names, the owner's call), each kept in a frame's
+# record as "net_<name>"; the key names are made once here, not every frame.
 var _net_counters: Array[String] = []
 var _net_keys: Array[String] = []
 
@@ -108,7 +113,7 @@ func _init() -> void:
 func _on_module_added(game_mode: GameModeSingleton) -> void:
 	_driver = get_node_or_null("/root/TickDriver")
 	_session = get_node_or_null("/root/NetworkSession")
-	if _session: # Claude 2026-11-16 (audit): the counters the session publishes, and their record keys
+	if _session: # the counters the session publishes, and their record keys
 		_net_counters.assign(NetworkSessionSingleton.COUNTING_STATS)
 		for counter in _net_counters:
 			_net_keys.append("net_" + counter)
@@ -138,7 +143,7 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 		_session.hosted.connect(func() -> void: _set_role("host"))
 		_session.joined.connect(func() -> void: _set_role("client"))
 		_session.disconnected.connect(func() -> void: _set_role("offline"))
-		_session.connection_ended.connect(_on_connection_ended) # Claude 2026-11-16 (profiling)
+		_session.connection_ended.connect(_on_connection_ended)
 	_update_title()
 
 
@@ -193,8 +198,8 @@ func _process(delta: float) -> void:
 	var scopes := PerfScopes.take_frame()
 	if _driver:
 		var profile: Dictionary = _driver.profile
-		# Claude 2026-11-16 (wider audit): only the times. The counts (rollbacks, rollback_ticks) were shown as times too. The number
-		# of rollbacks is the rollback time's call count, as for any scope.
+		# Only the times, not the counts (rollbacks, rollback_ticks). The number of rollbacks is the rollback time's call count, as for
+		# any scope.
 		for part: Variant in profile:
 			if TickDriverSingleton.PROFILE_COUNTS.has(String(part)) or int(profile[part]) <= 0:
 				continue
@@ -205,14 +210,14 @@ func _process(delta: float) -> void:
 		_last_tick = _driver.tick
 		record["dropped"] = _driver.dropped_ticks - _last_dropped
 		_last_dropped = _driver.dropped_ticks
-		record["load_step"] = _driver.load_step # Claude 2026-11-16 (pawn spec 8.21): the load ladder
-	# Claude 2026-11-16: how many AI pawns run every tick, every 2nd and every 4th (AIActivationManager).
+		record["load_step"] = _driver.load_step # the load ladder (pawn spec 8.21)
+	# How many AI pawns run every tick, every 2nd and every 4th (AIActivationManager).
 	var game_mode: Node = get_node_or_null(^"/root/GameMode")
 	var activation: AIActivationManager = game_mode.ai_activation_manager if game_mode else null
 	if activation:
 		record["step_counts"] = activation.get_step_counts()
-	_record_network(record) # Claude 2026-11-16 (profiling)
-	_record_server_ticks(record) # Claude 2026-11-16
+	_record_network(record)
+	_record_server_ticks(record)
 	record["scopes"] = scopes
 	_frames.append(record)
 	var oldest: float = record.time - history_seconds
@@ -267,22 +272,27 @@ func get_log_path() -> String:
 	return _log_path
 
 
-## Averages over the last seconds of history. Keys: seconds, frames, fps, frame_ms, physics_ms, scripts_ms, rest_ms, steps_per_frame,
-## frame_worst_ms, over_60_percent (frames over 20 ms), over_30_percent (over 34 ms), ticks_per_second, dropped_per_second, render_cpu_ms, render_gpu_ms, draw_calls,
-## objects, nodes, orphans, memory_mb, scopes (name -> [ms a frame, calls a frame], most expensive first), tick_ms (TickDriver's
-## phases a tick), tick_parts (each phase and network part -> ms a tick), pawns, dead, frozen, role, window, vsync.
-## Claude 2026-11-16 (the owner's request, for profiling different hardware): and server: tick_rate (what it's set to), ticks_per_second
-## (how fast its ticks really went: this machine's own offline or hosting, measured from snapshots on a client), load_percent and
-## load_step (the load ladder's; on a client, as the server's snapshots report them, -1 before any).
-## Claude 2026-11-16 (profiling): and net, while in a session: sent_kb_s, received_kb_s, snapshots_per_second, snapshot_kb (a client's
-## average snapshot: as sent on a server, as received on a client), largest_sent_kb and largest_received_kb (the biggest packets since
-## the start), corrections_per_second, resyncs, underruns_per_second, and the worst connection's rtt_ms, loss_percent and
-## seconds_since_heard. Claude 2026-11-16: and animation_ms, the animation category (every "animation." scope, ms a frame).
+## Averages over the last seconds of history, as a Dictionary.
+##
+## Its keys:
+## [br]- The frame: seconds, frames, fps, frame_ms, physics_ms, scripts_ms, rest_ms, steps_per_frame, frame_worst_ms, over_60_percent
+##   (frames over 20 ms), over_30_percent (over 34 ms), render_cpu_ms, render_gpu_ms, draw_calls, animation_ms (the animation
+##   category: every "animation." scope, ms a frame).
+## [br]- Ticks: ticks_per_second, dropped_per_second, load_step, step_counts (AI pawns running every tick, 2nd and 4th), tick_ms
+##   (TickDriver's phases a tick), tick_parts (each phase and network part -> ms a tick).
+## [br]- scopes: name -> [ms a frame, calls a frame], most expensive first.
+## [br]- Counts: objects, nodes, orphans, memory_mb, pawns, dead, frozen; and role, window, vsync.
+## [br]- server: tick_rate (what it's set to), ticks_per_second (how fast its ticks really went: this machine's own offline or hosting,
+##   measured from snapshots on a client), load_percent and load_step (the load ladder's; on a client, as the server's snapshots report
+##   them, -1 before any). For profiling on different hardware, the owner's request.
+## [br]- net, while in a session: sent_kb_s, received_kb_s, snapshots_per_second, snapshot_kb (the average snapshot: as sent on a
+##   server, as received on a client), largest_sent_kb and largest_received_kb (the biggest packets since the start),
+##   corrections_per_second, resyncs, underruns_per_second, and the worst connection's rtt_ms, loss_percent and seconds_since_heard.
 func get_summary(seconds := 1.0) -> Dictionary:
 	return _summary(seconds)
 
 
-## Claude 2026-11-16: "a/b/c" for how many AI pawns run every tick, every 2nd and every 4th, or "-" without the counts.
+## "a/b/c" for how many AI pawns run every tick, every 2nd and every 4th, or "-" without the counts.
 static func steps_text(counts: Variant) -> String:
 	if not (counts is Dictionary) or counts.is_empty():
 		return "-"
@@ -296,9 +306,9 @@ func _summary(seconds: float) -> Dictionary:
 	var count := 0
 	var sums := {"frame_ms": 0.0, "physics_ms": 0.0, "scripts_ms": 0.0, "rest_ms": 0.0, "steps": 0.0, "render_cpu_ms": 0.0,
 		"render_gpu_ms": 0.0, "ticks": 0.0, "dropped": 0.0}
-	for key in _net_keys: # Claude 2026-11-16 (profiling): each frame's network counts, summed like the rest
+	for key in _net_keys: # each frame's network counts, summed like the rest
 		sums[key] = 0.0
-	sums["server_ticks"] = 0.0 # Claude 2026-11-16
+	sums["server_ticks"] = 0.0
 	var worst := 0.0
 	var over_60 := 0
 	var over_30 := 0
@@ -315,6 +325,9 @@ func _summary(seconds: float) -> Dictionary:
 		for key: String in sums:
 			sums[key] += float(record.get(key, 0.0))
 		worst = maxf(worst, record.frame_ms)
+		# REFACTOR: "late" and "very late" are fixed at 20 and 34 ms (60 and 30 fps), while spikes follow the tick rate and
+		# spike_over_budget; the panels and the replay viewer's strip repeat the same numbers. Settings, or the frame budget, would let a
+		# game with another target set them. Designer friendly. See CHANGELOG.md.
 		if record.frame_ms > 20.0: # late: a missed 1/60 s, allowing for a millisecond of jitter either side
 			over_60 += 1
 		if record.frame_ms > 34.0:
@@ -339,7 +352,7 @@ func _summary(seconds: float) -> Dictionary:
 	var span := maxf(seconds, 0.001)
 	out["ticks_per_second"] = sums.ticks / span
 	out["dropped_per_second"] = sums.dropped / span
-	out["load_step"] = int(last.get("load_step", 1)) # Claude 2026-11-16 (pawn spec 8.21)
+	out["load_step"] = int(last.get("load_step", 1)) # the load ladder (pawn spec 8.21)
 	out["step_counts"] = last.get("step_counts", {})
 	for key: String in ["draw_calls", "objects", "nodes", "orphans"]:
 		out[key] = int(last.get(key, 0))
@@ -351,9 +364,9 @@ func _summary(seconds: float) -> Dictionary:
 	for scope: StringName in names:
 		scopes[scope] = [scope_sums[scope][0] / 1000.0 / frames, scope_sums[scope][1] / frames]
 	out["scopes"] = scopes
-	# Claude 2026-11-16 (the owner's request: a category for animations; worked out here in the audit, not every frame): every
-	# "animation." scope added up, ms a frame. Animation runs once a rendered frame, in the scripts part of it. A new animation system
-	# joins it by naming its scopes "animation.something".
+	# The animation category (the owner's request), worked out here rather than every frame: every "animation." scope added up, ms a
+	# frame. Animation runs once a rendered frame, in the scripts part of it. A new animation system joins it by naming its scopes
+	# "animation.something".
 	out["animation_ms"] = _animation_usec(scope_sums) / 1000.0 / frames
 	var ticks := maxf(sums.ticks, 1.0)
 	for part in ["input", "capture", "simulate", "record", "before_tick", "after_tick"]:
@@ -369,7 +382,7 @@ func _summary(seconds: float) -> Dictionary:
 	var pawns := 0
 	var dead := 0
 	var frozen := 0
-	for node in get_tree().get_nodes_in_group(Pawn.GROUP): # Claude 2026-11-16 (wider audit): the list of all pawns
+	for node in get_tree().get_nodes_in_group(Pawn.GROUP): # the list of all pawns
 		var pawn := node as Pawn
 		if pawn:
 			pawns += 1
@@ -380,14 +393,14 @@ func _summary(seconds: float) -> Dictionary:
 	out["pawns"] = pawns
 	out["dead"] = dead
 	out["frozen"] = frozen
-	if _role != "offline" and _session: # Claude 2026-11-16 (profiling)
+	if _role != "offline" and _session:
 		out["net"] = _net_summary(sums, span)
-	out["server"] = _server_summary(sums.server_ticks / span) # Claude 2026-11-16
+	out["server"] = _server_summary(sums.server_ticks / span)
 	return out
 
 
-## Claude 2026-11-16 (the owner's request: the server's tick rate in diagnostics): the server's tick rate, how fast it really ran, and
-## its load, for a summary. Also what get_server_ticks() gives, for a game's own readout.
+# The server's tick rate, how fast it really ran, and its load, for a summary (the owner's request). Also what get_server_ticks()
+# gives, for a game's own readout.
 func _server_summary(ticks_per_second: float) -> Dictionary:
 	var client: bool = _session != null and _session.is_client()
 	var out := {"tick_rate": _driver.get_tick_rate() if _driver else 0, "ticks_per_second": ticks_per_second, "load_percent": -1, "load_step": -1}
@@ -400,9 +413,10 @@ func _server_summary(ticks_per_second: float) -> Dictionary:
 	return out
 
 
-## Claude 2026-11-16: the server's tick rate over the last seconds, as in a summary's "server" (tick_rate, ticks_per_second,
-## load_percent, load_step). Cheap enough for every frame: it only adds up the newest frames' tick counts, unlike get_summary.
-## A game's HUD can show it; the arena samples' status line does (server_text).
+## The server's tick rate over the last seconds, as in a summary's "server" (tick_rate, ticks_per_second, load_percent, load_step).
+##
+## Cheap enough for every frame: it only adds up the newest frames' tick counts, unlike [method get_summary]. A game's HUD can show
+## it; the arena samples' status line does ([method server_text]).
 func get_server_ticks(seconds := 1.0) -> Dictionary:
 	var since: float = (_frames[-1].time if not _frames.is_empty() else 0.0) - seconds
 	var ticks := 0.0
@@ -414,7 +428,7 @@ func get_server_ticks(seconds := 1.0) -> Dictionary:
 	return _server_summary(ticks / maxf(seconds, 0.001))
 
 
-## Claude 2026-11-16: a summary's "server" as a short line: "server 60 ticks/s, running 59.8, load 63%, step 1".
+## A summary's "server" as a short line: "server 60 ticks/s, running 59.8, load 63%, step 1".
 static func server_text(server: Dictionary) -> String:
 	if server.is_empty():
 		return ""
@@ -424,9 +438,9 @@ static func server_text(server: Dictionary) -> String:
 	return text
 
 
-## Claude 2026-11-16: how far the server's tick moved this frame, into the frame's record. Offline and hosting that's this machine's own
-## ticks (the record's "ticks"); on a client, how far the newest snapshot's tick moved. A jump back (a new session, or a client's first
-## snapshot) counts as nothing.
+# How far the server's tick moved this frame, into the frame's record. Offline and hosting that's this machine's own ticks (the
+# record's "ticks"); on a client, how far the newest snapshot's tick moved. A jump back (a new session, or a client's first snapshot)
+# counts as nothing.
 func _record_server_ticks(record: Dictionary) -> void:
 	if not (_session and _session.is_client()):
 		record["server_ticks"] = record.get("ticks", 0)
@@ -437,7 +451,7 @@ func _record_server_ticks(record: Dictionary) -> void:
 	_last_server_tick = now
 
 
-# Claude 2026-11-16: the animation category's microseconds in a set of scopes (name -> [microseconds, calls]).
+# The animation category's microseconds in a set of scopes (name -> [microseconds, calls]).
 static func _animation_usec(scopes: Dictionary) -> float:
 	var total := 0.0
 	for scope: StringName in scopes:
@@ -446,9 +460,9 @@ static func _animation_usec(scopes: Dictionary) -> float:
 	return total
 
 
-## Claude 2026-11-16 (profiling): the network part of a summary, from the frames' counts (sums) over span seconds, and the connections'
-## latest numbers. Claude 2026-11-16 (audit): snapshots counted like with like: on a server the snapshots sent (one per client) and the
-## bytes they carried, on a client the snapshots received and their bytes. (It used to divide every client's bytes by one count.)
+# The network part of a summary, from the frames' counts (sums) over span seconds, and the connections' latest numbers. Snapshots a
+# second are those encoded on a server and those received on a client. Their average size counts like with like: on a server the
+# snapshots sent (one per client) and the bytes they carried, on a client the snapshots received and their bytes.
 func _net_summary(sums: Dictionary, span: float) -> Dictionary:
 	var server: bool = _session.is_server()
 	var snapshots: float = sums.net_snapshots_encoded if server else sums.net_snapshots_received
@@ -467,15 +481,15 @@ func _net_summary(sums: Dictionary, span: float) -> Dictionary:
 	return net
 
 
-## Claude 2026-11-16: an average snapshot's size in KB, from bytes and how many snapshots carried them (0 with none). Shared with the
+## An average snapshot's size in KB, from bytes and how many snapshots carried them (0 with none). Shared with the
 ## networked measure, so both work it out the same way.
 static func average_snapshot_kb(bytes: float, snapshots: float) -> float:
 	return bytes / 1024.0 / snapshots if snapshots > 0.0 else 0.0
 
 
-## Claude 2026-11-16 (profiling): what the session's counters added this frame, into the frame's record as "net_" keys. GDScript note:
-## the counters only ever grow during a session, so the difference is this frame's; a new session starts them where they are.
-## Claude 2026-11-16 (audit): nothing offline, where they don't change (the replay's diagnostics channel never reads these keys).
+# What the session's counters added this frame, into the frame's record as "net_" keys. The counters only ever grow during a
+# session, so the difference is this frame's; a new session starts them where they are. Nothing offline, where they don't change
+# (the replay's diagnostics channel never reads these keys).
 func _record_network(record: Dictionary) -> void:
 	if _session == null or _role == "offline":
 		_last_net.clear()
@@ -487,12 +501,12 @@ func _record_network(record: Dictionary) -> void:
 		_last_net[i] = now
 
 
-## Claude 2026-11-16 (profiling): a connection ended: why, and its last numbers, into the session log.
+# A connection ended: why, and its last numbers, into the session log.
 func _on_connection_ended(peer: int, reason: String, details: Dictionary) -> void:
 	_write_line("[network] " + connection_ended_text(peer, reason, details))
 
 
-## Claude 2026-11-16 (audit): a NetworkSession.connection_ended as one line of text, shared with the networked measure.
+## A NetworkSession.connection_ended as one line of text, shared with the networked measure.
 static func connection_ended_text(peer: int, reason: String, details: Dictionary) -> String:
 	if details.is_empty():
 		return "%s ended: %s" % ["the session" if peer == 0 else "peer %d" % peer, reason]
@@ -500,7 +514,7 @@ static func connection_ended_text(peer: int, reason: String, details: Dictionary
 		peer, reason, details.get("seconds_connected", 0.0), details.get("seconds_since_heard", 0.0), details.get("rtt_ms", -1), details.get("loss_percent", -1.0)]
 
 
-## The last summary written to the log (every log_every_seconds), for the editor's monitors.
+## The last summary written to the log (every [member log_every_seconds]), for a game's own readout. Nothing in the base reads it.
 func get_last_summary() -> Dictionary:
 	return _last_summary
 
@@ -521,6 +535,8 @@ func _hook_recorder(recorder: ReplayRecorder) -> void:
 
 
 # Always-on recordings (the owner's call): a game that starts without starting one gets one. The samples start theirs themselves.
+# REFACTOR: a replay rule living in diagnostics. A game without DiagnosticsManager gets no always-on recordings; an always-on setting
+# on ReplayRecorder would keep the rule with the recorder. Reusable. See CHANGELOG.md.
 func _on_possessed(peer: int, _pawn: Pawn) -> void:
 	if _session and _session.is_connected_to_session():
 		return # hosting and joining are handled by their own signals
@@ -540,6 +556,9 @@ func _set_role(role: String) -> void:
 		_recorder.start_recording(role)
 
 
+# The window's title says the role and the process, so several instances on one machine can be told apart.
+# REFACTOR: a debugging convenience that also renames a shipped game's window ("Name - offline, process 1234"), since diagnostics
+# ship in release builds. A setting, or debug builds only, would keep a game's own title. Designer friendly. See CHANGELOG.md.
 func _update_title() -> void:
 	if RunEnvironment.is_headless():
 		return
@@ -551,7 +570,7 @@ func _update_title() -> void:
 
 
 func _open_log() -> void:
-	var sessions := _run_folder().path_join("sessions") # Claude 2026-11-16: headless runs apart (headless_runs_apart)
+	var sessions := _run_folder().path_join("sessions") # headless runs apart (headless_runs_apart)
 	DirAccess.make_dir_recursive_absolute(sessions)
 	var names: Array = Array(DirAccess.get_files_at(sessions)).filter(func(file_name: String) -> bool: return file_name.ends_with(".log"))
 	names.sort()
@@ -572,7 +591,7 @@ func _open_log() -> void:
 		_driver.get_tick_rate() if _driver else 0, TickJobs.get_worker_count_setting()])
 
 
-# Claude 2026-11-16: this run's folder: folder, or folder/headless for a run with no display (headless_runs_apart).
+# This run's folder: folder, or folder/headless for a run with no display (headless_runs_apart).
 func _run_folder() -> String:
 	if headless_runs_apart and RunEnvironment.is_headless():
 		return folder.path_join("headless")
@@ -602,10 +621,10 @@ func summary_text(n: Dictionary) -> String:
 	return "[summary %.0fs] %s, %d fps, frame %.1f ms (worst %.0f, late >20 ms %.0f%%, very late >34 ms %.0f%%) = physics %.1f (%.2f steps) + scripts %.1f (animation %.1f) + rest %.1f | tick %.2f ms, %.0f ticks/s, dropped %.1f/s, load step %d, AI every tick/2nd/4th %s | draw CPU %.1f GPU %.1f, %d calls | memory %.0f MB, objects %d, nodes %d, orphans %d | pawns %d, dead %d, frozen %d | %s, vsync %s | top ms/frame: %s" % [
 		n.seconds, n.role, n.fps, n.frame_ms, n.frame_worst_ms, n.over_60_percent, n.over_30_percent, n.physics_ms, n.steps_per_frame,
 		n.scripts_ms, n.get("animation_ms", 0.0), n.rest_ms, n.tick_ms, n.ticks_per_second, n.dropped_per_second, n.load_step, DiagnosticsManager.steps_text(n.step_counts), n.render_cpu_ms, n.render_gpu_ms, n.draw_calls,
-		n.memory_mb, n.objects, n.nodes, n.orphans, n.pawns, n.dead, n.frozen, n.window, n.vsync, ", ".join(top)] + " | " + server_text(n.get("server", {})) + net_text(n) # Claude 2026-11-16: and the server's tick rate
+		n.memory_mb, n.objects, n.nodes, n.orphans, n.pawns, n.dead, n.frozen, n.window, n.vsync, ", ".join(top)] + " | " + server_text(n.get("server", {})) + net_text(n) # then the server's tick rate, and the network
 
 
-## Claude 2026-11-16 (profiling): the network part of a summary line, or empty offline.
+## The network part of a summary line, or empty offline.
 static func net_text(n: Dictionary) -> String:
 	if not n.has("net"):
 		return ""
@@ -661,7 +680,7 @@ func _write_repeat_counts() -> void:
 ## of its own. Returns the folder's path.
 func capture() -> String:
 	var stamp := Time.get_datetime_string_from_system(false, true).replace(":", "-").replace(" ", "_")
-	var path := _run_folder().path_join("captures").path_join("%s_%d" % [stamp, OS.get_process_id()]) # Claude 2026-11-16
+	var path := _run_folder().path_join("captures").path_join("%s_%d" % [stamp, OS.get_process_id()])
 	DirAccess.make_dir_recursive_absolute(path)
 	if not RunEnvironment.is_headless():
 		var image := get_viewport().get_texture().get_image()
@@ -707,12 +726,12 @@ func _add_monitors() -> void:
 		&"Diagnostics/Frame (ms)": func() -> float: return _last_frame(&"frame_ms"),
 		&"Diagnostics/Physics (ms)": func() -> float: return _last_frame(&"physics_ms"),
 		&"Diagnostics/Scripts (ms)": func() -> float: return _last_frame(&"scripts_ms"),
-		&"Diagnostics/Animation (ms)": func() -> float: return _animation_usec(_frames[-1].scopes) / 1000.0 if not _frames.is_empty() else 0.0, # Claude 2026-11-16
+		&"Diagnostics/Animation (ms)": func() -> float: return _animation_usec(_frames[-1].scopes) / 1000.0 if not _frames.is_empty() else 0.0,
 		&"Diagnostics/Physics steps": func() -> float: return _last_frame(&"steps"),
 		&"Diagnostics/Objects": func() -> float: return _last_frame(&"objects"),
 		&"Diagnostics/Nodes": func() -> float: return _last_frame(&"nodes"),
 		&"Diagnostics/Orphan nodes": func() -> float: return _last_frame(&"orphans"),
-		# Claude 2026-11-16: the server's real tick rate, over the last second
+		# the server's real tick rate, over the last second
 		&"Diagnostics/Server ticks per second": func() -> float: return float(get_server_ticks(1.0).ticks_per_second),
 	}
 	for id: StringName in monitors:

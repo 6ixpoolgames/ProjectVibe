@@ -40,3 +40,9 @@ Thumbs.db
 *.pdb
 *.ilk
 .sconsign*.dblite
+
+# The wiki build (tools/docs/build_wiki.py); not committed
+build/
+
+# This machine's details for Claude; never committed (the repository is public)
+CLAUDE.local.md

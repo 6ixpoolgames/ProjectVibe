@@ -1,23 +1,22 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: turns action names like &"jump" into bits, so an input command can carry every held
-## action in one int. Pawn spec section 5.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: controllers/CHANGELOG.md.
+## Turns action names like &"jump" into bits, so an input command carries every held action in one int.
 ##
-## Why bits: an input command goes over the network every tick, and one int is much smaller than a list of names. Checking "is jump
-## held?" is one AND.
-##
+## Pawn spec section 5. Why bits: an input command goes over the network every tick, and one int is much smaller than a list of
+## names. Checking "is jump held?" is one AND.
+## [br]
 ## Why a declared list: in multiplayer every machine must give the same action the same bit. So the game lists its actions in
-## resources/input_actions.tres (an InputActionsRes), and each one gets the bit of its place in that list, the same everywhere.
-##
+## resources/input_actions.tres (an InputActionsRes), and each one gets the bit of its place in that list, the same everywhere. The
+## file is the only place the list lives. The list is part of NetworkSession's content hash, so machines with different lists can't
+## connect.
+## [br]
 ## What happens in odd cases (all checked in tests/input_actions_selftest.gd):
-##   - No list file: a warning, and the list starts empty. Each action used is then added as it's first seen, with its own warning.
-##     Claude 2026-11-07: there used to be a copy of the list in code for this case. It's gone, so the file is the only place the
-##     list lives, and the two can't drift apart.
-##   - An action nobody listed, used at runtime: added at the end with a one-time warning. A typo such as &"Jump" shows up the same way.
-##     Claude 2026-11-07, from the audit of 6df1464: only offline. While a network session is running it gets no bit (it's never
-##     held), with a one-time warning, because two machines adding names in a different order would disagree on what a bit means.
-##     The list itself is part of NetworkSession's content hash, so machines with different lists can't connect.
-##   - Empty or blank name: no bit (0). Never an error.
-##   - More than 64 actions: the extra ones get no bit, with a warning.
-##
+## [br]- No list file: a warning, and the list starts empty. Each action used is then added as it's first seen, with its own warning.
+## [br]- An action nobody listed, used at runtime: offline, added at the end with a one-time warning. A typo such as &"Jump" shows up
+##   the same way. While a network session is running it gets no bit (it's never held), with a one-time warning, because two machines
+##   adding names in a different order would disagree on what a bit means.
+## [br]- Empty or blank name: no bit (0). Never an error.
+## [br]- More than 64 actions: the extra ones get no bit, with a warning.
+## [br]
 ## A static class, not an autoload, so it works in headless tests. TagRegistry works the same way.
 class_name InputActions
 extends RefCounted
@@ -34,7 +33,7 @@ static var _warned: Dictionary = {}
 ## The mask with this action's bit, or 0 for a blank name.
 static func mask_of(action: StringName) -> int:
 	_ensure_loaded()
-	# Claude 2026-11-07: the fast path. Pawns call this every tick, so a known name returns at once, without building a new string.
+	# The fast path. Pawns call this every tick, so a known name returns at once, without building a new string.
 	var index: Variant = _index_of.get(action)
 	if index != null:
 		return 1 << index
@@ -78,6 +77,8 @@ static func get_actions() -> Array[StringName]:
 	return _actions.duplicate()
 
 
+# REFACTOR: reset() and use_list() are test hooks in a shipping class; they could live in a tests/ helper (production code kept
+# apart from test code). See CHANGELOG.md.
 ## Forgets everything, so the next use reads the list again. For tests.
 static func reset() -> void:
 	_index_of.clear()
@@ -127,7 +128,7 @@ static func _add(action: StringName, late: bool) -> void:
 	_actions.append(action)
 
 
-## Claude 2026-11-07: true while this machine is a server or a client. A static class has no node of its own, so it asks the tree.
+## True while this machine is a server or a client. A static class has no node of its own, so it asks the tree.
 static func _is_online() -> bool:
 	var tree := Engine.get_main_loop() as SceneTree
 	var session: Node = tree.root.get_node_or_null("NetworkSession") if tree else null

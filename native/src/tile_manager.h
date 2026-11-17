@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: tile lifecycle, streaming, build scheduling, commits (spec section 9).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// TileManager: NavServer's tile lifecycle, streaming, build scheduling and commits (nav spec section 9). Not seen by GDScript.
 //
 // Every tile has a version. Anything that changes a tile's inputs gives it a new version.
 // A build remembers the version it started from; at commit, a build whose version is no
@@ -40,7 +41,7 @@ struct TileInfo {
 	bool provisional = false;
 	bool has_live = false;
 	int poly_count = 0;
-	int link_count = 0; // Claude 2026-11-08: links baked into the live tile, placed and found
+	int link_count = 0; // links baked into the live tile, placed and found
 	int auto_link_count = 0;
 	double build_ms = 0.0;
 	std::string error;
@@ -69,7 +70,7 @@ public:
 	// Tick phase 2: swap in finished builds until the time budget is used.
 	void commit_finished(GroundDomain &domain, double budget_ms, std::vector<TileKey> &changed);
 	// Tick phase 3: start builds for the most important tiles that need one.
-	// Claude 2026-11-08: links are the placed links; each build gets those starting in its tile.
+	// links are the placed links; each build gets those starting in its tile.
 	void schedule(const InputStore &store, const std::vector<Interest> &interests, const std::vector<LinkDef> &links, WorkerPool &pool);
 
 	void stats(TileStats &out) const;
@@ -85,7 +86,7 @@ private:
 		bool has_live = false;
 		bool provisional = false;
 		int poly_count = 0;
-		int link_count = 0; // Claude 2026-11-08
+		int link_count = 0;
 		int auto_link_count = 0;
 		double build_ms = 0.0;
 		std::string error;

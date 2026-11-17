@@ -1,30 +1,33 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: the base for one AI behaviour, such as Wander or Chase. A child of the pawn's
-## AIBehaviourManager. Pawn spec section 10.7.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## The base for one AI behaviour, such as Wander or Chase: one concrete thing to do.
 ##
-## A behaviour is one concrete thing to do. Each holds its own checks, score and actions; the behaviour manager only judges between
-## them (pawn spec 10.8). It acts only through the AI controller, the pawn's hands: context.controller.move_to(), press(), hold(),
-## look_at_point(). It never touches abilities or the body directly (pawn spec section 3, rule 4).
-##
+## A child of the pawn's AIBehaviourManager. Pawn spec section 10.7. Each behaviour holds its own checks, score and actions; the
+## behaviour manager only judges between them (pawn spec 10.8). It acts only through the AI controller, the pawn's hands:
+## [code]context.controller.move_to()[/code], [code]press()[/code], [code]hold()[/code], [code]look_at_point()[/code]. It never touches
+## abilities or the body directly (pawn spec section 3, rule 4).
+## [br]
 ## How to make one: extend this, set the settings below in the inspector or in _init(), and override any of:
-##   is_available(context) -> bool    its own yes or no, after the manager's cheap checks
-##   score(context) -> float          how much it wants to run now, from min_score to max_score
-##   enter(context)                   once, when it starts
-##   tick(context) -> Status          every tick while it runs. Return SUCCEEDED or FAILED to finish
-##   exit(context, reason)            once, when it stops, whatever the reason. Clean up here, such as context.controller.stop()
-##
+## [br]- [method is_available]: its own yes or no, after the manager's cheap checks
+## [br]- [method score]: how much it wants to run now, from [member min_score] to [member max_score]
+## [br]- [method enter]: once, when it starts
+## [br]- [method tick]: every tick while it runs. Return SUCCEEDED or FAILED to finish
+## [br]- [method exit]: once, when it stops, whatever the reason. Clean up here, such as [code]context.controller.stop()[/code]
+## [br]
 ## The behaviour's name is its node name, such as Wander. The fixed order and the random numbers read it, so give it a real name.
-##
-## Claude 2026-11-09 (scaling spec step 6): every setting here counted in ticks is written for 60 ticks a second, and converted to
-## the match's rate where it's read (TickDriver.ticks_at_rate), so it lasts the same time at any rate.
-##
+## [br]
+## Every setting here counted in ticks is written for 60 ticks a second, and converted to the match's rate where it's read
+## ([code]TickDriver.ticks_at_rate[/code]), so it lasts the same time at any rate.
+## [br]
 ## Settings worth knowing (pawn spec 10.7):
-##   - persistence, persistence_fade: from when it's chosen, its score gets persistence × the fade's value. + keeps it chosen, -
-##     makes the AI prefer something else for a while. Empty fade: no persistence.
-##   - interrupt_threshold, cannot_be_interrupted, min_run_ticks: what may replace it while it runs.
-##   - score_jitter: a random offset on its score at each decision, for variety. -1 uses the manager's default_score_jitter.
+## [br]- [member persistence], [member persistence_fade]: from when it's chosen, its score gets persistence × the fade's value. +
+##   keeps it chosen, - makes the AI prefer something else for a while. Empty fade: no persistence.
+## [br]- [member interrupt_threshold], [member cannot_be_interrupted], [member min_run_ticks]: what may replace it while it runs.
+## [br]- [member score_jitter]: a random offset on its score at each decision, for variety. -1 uses the manager's
+##   default_score_jitter.
 class_name AIBehaviourBase
 extends Node
 
+## What [method tick] returns: keep running, or finished well or badly.
 enum Status { RUNNING, SUCCEEDED, FAILED }
 
 ## States it may run in, by node name, such as &"Idle". Empty: any state.
@@ -48,7 +51,7 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 @export var cannot_be_interrupted := false
 ## ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
 @export var score_jitter := -1.0
-## Claude 2026-11-09: while it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after.
+## While it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after.
 ## The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now and then. 1: every tick.
 ## Pawns start behaviours on different ticks, so a crowd's ticks spread out by themselves. Count time in ticks with
 ## context.current_tick, not by counting tick() calls, so a behaviour behaves the same at any interval.
@@ -60,11 +63,13 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 
 ## Set by the AIBehaviourManager.
 var manager: AIBehaviourManager = null
+## The pawn this behaviour belongs to. Set by the AIBehaviourManager.
 var pawn: Pawn = null
 ## Worked out once by the manager: a hash of the name, for random numbers.
 var name_hash := 0
-## The tick it last started, and the tick it last ended (-1: never).
+## The tick it last started (-1: never).
 var started_tick := -1
+## The tick it last ended (-1: never).
 var ended_tick := -1
 
 # Scratch values for one decision, kept here so a decision creates no arrays or objects. Only the manager reads them.
@@ -124,10 +129,9 @@ func is_allowed_in(state_name: StringName) -> bool:
 
 
 ## True while its cooldown hasn't finished.
-# Claude 2026-11-12: these functions' tick parameters are named at_tick: "tick" clashed with tick() above, which the editor
-# warned about. The same values as before.
+# These functions' tick parameters are named at_tick: "tick" would clash with tick() above, which the editor warns about.
 func is_cooling_down(at_tick: int) -> bool:
-	return cooldown_ticks > 0 and ended_tick >= 0 and at_tick - ended_tick < TickDriver.ticks_at_rate(cooldown_ticks) # Claude 2026-11-09 (step 6)
+	return cooldown_ticks > 0 and ended_tick >= 0 and at_tick - ended_tick < TickDriver.ticks_at_rate(cooldown_ticks)
 
 
 ## This behaviour's jitter amount: its own, or the manager's default when it's -1.
@@ -167,5 +171,6 @@ func set_persistence_speed(speed: float, at_tick: int) -> void:
 	_persistence_speed = maxf(0.0, speed)
 
 
+# How far along its fade persistence is at this tick.
 func _persistence_ticks_along(at_tick: int) -> float:
 	return _persistence_along + (at_tick - _persistence_changed_tick) * _persistence_speed

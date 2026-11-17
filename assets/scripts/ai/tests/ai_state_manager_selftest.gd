@@ -2,7 +2,7 @@
 ## the fixed order, forced states with priorities, running out and releasing, the signal, and the odd cases at the top of
 ## AIStateManager.gd. Claude 2026-11-09 (scaling spec step 3): and forces asked for during a tick, which wait for the next AI step.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_state_manager_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/ai_state_manager_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

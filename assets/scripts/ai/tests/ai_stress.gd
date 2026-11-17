@@ -6,7 +6,7 @@
 ## TickDriver's input phase, where the AI runs; the difference is the AI's cost.
 ##
 ## Run from the project folder (takes about a minute):
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_stress.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/ai_stress.tscn"
 ## To see where the time goes, add one of these after "--":
 ##   --no-sensing      the AI parts, but senses never run
 ##   --no-behaviours   the AI parts and senses, but no behaviours

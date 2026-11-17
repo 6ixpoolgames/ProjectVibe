@@ -1,11 +1,12 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: hunts around where an enemy it became certain of was last seen. Pawn spec section 10.7. Allowed
-## in Alert by default.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Hunts around where an enemy it became certain of was last seen: "I know you were here".
 ##
-## It scores high while the most aware entry in memory became certain but isn't fresh enough for Combat: "I know you were here". It
-## runs (holding sprint, if sprint_to_last_known is on) to the last known position, then walks to search_points random points within
-## search_radius of it, standing pause_ticks at each, and succeeds. If the pawn is still Alert, the next decision usually picks it
-## again, so it keeps searching until the entry fades (Idle) or the enemy is seen again (Combat).
-##
+## Pawn spec section 10.7. Allowed in Alert by default. It scores high while the most aware entry in memory became certain but isn't
+## fresh enough for Combat. It runs (holding sprint, if [member sprint_to_last_known] is on) to the last known position, then walks to
+## [member search_points] random points within [member search_radius] of it, standing [member pause_ticks] at each, and succeeds. If
+## the pawn is still Alert, the next decision usually picks it again, so it keeps searching until the entry fades (Idle) or the enemy
+## is seen again (Combat).
+## [br]
 ## It's only available when the most aware entry became certain: Look Toward and Investigate handle half-noticed things.
 class_name AISearchBehaviour
 extends AIBehaviourBase
@@ -33,7 +34,7 @@ func _init() -> void:
 	allowed_states = [&"Alert"]
 	max_score = 0.7
 	min_score = max_score # a fixed score, so it can help skip others
-	tick_interval_ticks = 5 # Claude 2026-11-09: it only needs to notice when a walk or a pause ends
+	tick_interval_ticks = 5 # it only needs to notice when a walk or a pause ends
 
 
 # Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is always max_score.
@@ -54,7 +55,7 @@ func enter(context: AIContextComponent) -> void:
 
 func tick(context: AIContextComponent) -> Status:
 	var hands := context.controller
-	# Claude 2026-11-09: pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
+	# Pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
 	if _pause_until >= 0:
 		if context.current_tick < _pause_until:
 			return Status.RUNNING
@@ -73,7 +74,7 @@ func tick(context: AIContextComponent) -> Status:
 	if _going_to_centre:
 		_going_to_centre = false
 		hands.hold(&"sprint", false)
-	_pause_until = context.current_tick + maxi(TickDriver.ticks_at_rate(pause_ticks), 1) # Claude 2026-11-09 (step 6)
+	_pause_until = context.current_tick + maxi(TickDriver.ticks_at_rate(pause_ticks), 1) # pause_ticks are at 60 a second
 	return Status.RUNNING
 
 

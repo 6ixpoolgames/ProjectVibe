@@ -4,7 +4,7 @@
 ## a fight run with the job is the same, tick for tick, as one without it; and the scheduler's numbers say where the work ran.
 ## Needs the navcore C++ library; without it, it says so and passes.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_sensing_job_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/ai_sensing_job_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

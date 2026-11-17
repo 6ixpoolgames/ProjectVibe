@@ -1,33 +1,35 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: picks whose input a pawn follows. Pawn spec section 6.4. A part on the pawn, added
-## by PawnInitializer, with the pawn's AIController as its child.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: controllers/CHANGELOG.md.
+## Picks whose input a pawn follows, and holds that input and whether a player has the pawn.
 ##
-## The rule is fixed and simple:
-##   - A player's controller is attached here (this machine's player has the pawn): that controller is in charge.
-##   - A player elsewhere has the pawn: nobody here is in charge, because the input arrives over the network.
-##   - Nobody has it: the AI controller is in charge. That's how the AI takes over the moment a player lets go.
-##
-## The pawn asks take_input_command() once per tick, in its input phase. Controllers never write to the pawn themselves.
-##
+## A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child (pawn spec sections 6.4 and 8.17). The
+## rule is fixed and simple:
+## [br]- A player's controller is attached here (this machine's player has the pawn): that controller is in charge.
+## [br]- A player elsewhere has the pawn: nobody here is in charge, because the input arrives over the network.
+## [br]- Nobody has it: the AI controller is in charge. That's how the AI takes over the moment a player lets go.
+## [br]
+## The pawn calls [method tick_input] once per tick, in its input phase, which asks the controller in charge and writes its command
+## into the input. Controllers never write to the pawn themselves.
+## [br]
 ## How to use it:
-##   pawn.controller_manager.get_controller_in_charge()   # a ControllerBase, or null
-##   pawn.controller_manager.ai_controller                 # the AI's hands
-## PlayerController calls attach_player and detach_player when it takes or lets go of a pawn. Nothing else should.
-##
-## Claude 2026-11-16 (pawn M4): it also holds the pawn's input and whether a player has it, the owner's call (they were on Pawn):
-##   move_input, held_actions, look_yaw, look_pitch, view_ticks_behind   this tick's input, written from an InputCommand (apply_input)
-##   previous_held_actions                                               last tick's held_actions, so a press can be told from a hold
-##   is_action_held(action), was_action_pressed(action)                   held this tick; held this tick but not last tick
-##   has_player(), set_has_player(value), possession_changed              a player has the pawn (PossessionCoordinator sets it)
-##   sanitize_network_input, _network_input_missing                       the server's checks on a client's input (NetworkEntity
-##                                                                        calls them here: this registers as its input_owner)
-## The input rolls back: the pawn's TickStateComponent lists "ControllerManager:move_input" and the others. A pawn without a
+## [codeblock]
+## pawn.controller_manager.get_controller_in_charge()   # a ControllerBase, or null
+## pawn.controller_manager.ai_controller                 # the AI's hands
+## pawn.controller_manager.move_input                    # this tick's input; also held_actions, look_yaw, look_pitch
+## pawn.controller_manager.was_action_pressed(&"jump")   # held this tick but not last tick; is_action_held for a hold
+## pawn.controller_manager.has_player()                  # a player has the pawn (PossessionCoordinator sets it)
+## [/codeblock]
+## PlayerController calls [method attach_player] and [method detach_player] when it takes or lets go of a pawn. Nothing else should.
+## [br]
+## The input rolls back: the pawn's TickStateComponent lists "ControllerManager:move_input" and the others as input, and
+## [member previous_held_actions] as state. The server's checks on a client's input ([method sanitize_network_input],
+## [code]_network_input_missing[/code]) are here too: this registers as its NetworkEntity's input_owner. A pawn without a
 ## ControllerManager has no input and no player: it stands still, and can't be possessed.
-##
+## [br]
 ## What happens in odd cases (all checked in tests/controller_manager_selftest.gd):
-##   - Its parent isn't a Pawn: it warns, and nobody is ever in charge.
-##   - No AIController child: an unpossessed pawn has nobody in charge, and its input stays as it is.
-##   - A player's controller is freed while attached: it's ignored, as if it had let go.
-##   - Claude 2026-11-08: control changes hands while the pawn is following a path: the path is dropped.
+## [br]- Its parent isn't a Pawn: it warns, and nobody is ever in charge.
+## [br]- No AIController child: an unpossessed pawn has nobody in charge, and its input stays as it is.
+## [br]- A player's controller is freed while attached: it's ignored, as if it had let go.
+## [br]- Control changes hands while the pawn is following a path: the path is dropped.
 class_name ControllerManager
 extends Node
 
@@ -35,24 +37,24 @@ extends Node
 ## frame, once, with the final answer: possessing takes two steps (a player has it, then their controller attaches), and listeners
 ## shouldn't see "nobody" in between.
 signal controller_changed(controller: ControllerBase)
-## Sent when a player takes this pawn, or lets it go. Claude 2026-11-16 (pawn M4): moved here from Pawn.
+## Sent when a player takes this pawn, or lets it go.
 signal possession_changed(pawn: Pawn, has_player: bool)
 
 ## Whether a player may take control of this pawn. Turn it off on pawns players should never control.
-## Claude 2026-11-07: on by default, the owner's choice. Off, people would be left wondering why their pawn doesn't work. Something
-## still has to ask for a possession, so a wrong one is a clear bug that gets looked at.
-## Claude 2026-11-17 (the owner's call): moved here from Pawn, with the rest of possession. To turn it off in a pawn scene whose
-## ControllerManager comes from the game's defaults, add parts/ControllerManager.tscn to the scene yourself and untick it there:
-## PawnInitializer leaves a part the scene already has alone.
+## [br]
+## On by default: off, people would be left wondering why their pawn doesn't work. Something still has to ask for a possession, so
+## a wrong one is a clear bug that gets looked at. To turn it off in a pawn scene whose ControllerManager comes from the game's
+## defaults, add parts/ControllerManager.tscn to the scene yourself and untick it there: PawnInitializer leaves a part the scene
+## already has alone.
 @export var possessable := true
 
 ## On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's
-## setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own. Claude 2026-11-16 (pawn M4): moved from Pawn.
+## setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own.
 @export_range(-1, 60, 1, "or_greater") var missing_input_hold_ticks := -1
 ## Then its direction fades to nothing over this many ticks. -1 uses NetworkSession's setting.
 @export_range(-1, 60, 1, "or_greater") var missing_input_fade_ticks := -1
 
-# This tick's input, as plain data. Listed in the pawn's TickState, so it goes over the network and rolls back. Claude 2026-11-16 (pawn M4): moved from Pawn.
+# This tick's input, as plain data. Listed in the pawn's TickState, so it goes over the network and rolls back.
 var move_input := Vector3.ZERO ## the direction to go, in world space, up to length 1
 var held_actions := 0 ## which named actions are held this tick, as bits from InputActions
 var look_yaw := 0.0 ## where the player is looking, which is often not where the pawn is facing
@@ -72,13 +74,13 @@ var player_controller: ControllerBase = null
 
 var _last_in_charge: ControllerBase = null
 var _check_queued := false
-var _has_player := false # Claude 2026-11-16 (pawn M4): moved from Pawn
+var _has_player := false
 var _missing_input_ticks := 0 # on the server: how many ticks in a row a client's input has been missing
 var _input_missing_this_tick := false
 
 
 func _init() -> void:
-	# GDScript note: nothing here runs per frame. The pawn calls take_input_command() on its tick.
+	# GDScript note: nothing here runs per frame. The pawn calls tick_input() on its tick.
 	set_process(false)
 	set_physics_process(false)
 
@@ -90,7 +92,7 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
-	# Claude 2026-11-16 (pawn M3): the AI's hands let go when the pawn dies: this listens for it now, where Pawn._die used to do it.
+	# The AI's hands let go when the pawn dies.
 	var abilities := _sibling_ability_manager()
 	if abilities:
 		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void:
@@ -102,8 +104,8 @@ func _ready() -> void:
 			ai_controller = child
 			ai_controller.pawn = pawn
 			break
-	possession_changed.connect(_on_possession_changed) # Claude 2026-11-16 (pawn M4): the signal is this manager's own now
-	# Claude 2026-11-16 (pawn M4): the server's checks on a client's input come here, not to the pawn.
+	possession_changed.connect(_on_possession_changed)
+	# The server's checks on a client's input come here, not to the pawn.
 	if pawn:
 		for child in pawn.get_children():
 			if child is NetworkEntity:
@@ -111,7 +113,7 @@ func _ready() -> void:
 	_last_in_charge = get_controller_in_charge()
 
 
-## Who the pawn follows right now, or null. See the rule at the top.
+## Who the pawn follows right now, or null. See the rule in the class description.
 func get_controller_in_charge() -> ControllerBase:
 	if pawn == null:
 		return null
@@ -128,7 +130,7 @@ func take_input_command(tick: int) -> InputCommand:
 	return controller.take_input_command(tick) if controller else null
 
 
-# --- The input (Claude 2026-11-16 (pawn M4): moved here from Pawn) ---
+# --- The input ---
 
 
 ## The pawn calls this once per tick, in its input phase: where this pawn's input is decided here, asks the controller in charge and
@@ -184,7 +186,7 @@ func decides_own_input() -> bool:
 	return entity == null or entity.is_local or (entity.role == NetworkEntity.Role.AUTHORITY and entity.owner_peer == 0)
 
 
-# --- Who has the pawn (Claude 2026-11-16 (pawn M4): moved here from Pawn) ---
+# --- Who has the pawn ---
 
 
 ## True if a player controls this pawn. On a client, that's any player, not only this machine's.
@@ -197,7 +199,7 @@ func set_has_player(value: bool) -> void:
 	if _has_player == value:
 		return
 	_has_player = value
-	# Claude 2026-11-07: with nobody driving it, a pawn stands idle. The last tick's input would otherwise repeat forever. From the next
+	# With nobody driving it, a pawn stands idle. The last tick's input would otherwise repeat forever. From the next
 	# tick the AI controller is in charge, if there is one.
 	if not value and pawn and pawn.is_simulated_here():
 		clear_input()
@@ -236,6 +238,8 @@ func _network_input_missing() -> void:
 	_input_missing_this_tick = true
 	_missing_input_ticks += 1
 	# -1 means NetworkSession's rule. With no session at all, 3 and 6, the same as its defaults.
+	# REFACTOR: 3 and 6 copy NetworkSession's defaults by hand; shared constants would keep them from drifting apart (one place to
+	# change). See CHANGELOG.md.
 	var session: Node = get_node_or_null("/root/NetworkSession")
 	var hold: int = missing_input_hold_ticks if missing_input_hold_ticks >= 0 else (session.missing_input_hold_ticks if session else 3)
 	var fade: int = missing_input_fade_ticks if missing_input_fade_ticks >= 0 else (session.missing_input_fade_ticks if session else 6)
@@ -266,12 +270,12 @@ func detach_player(controller: ControllerBase) -> void:
 		_refresh()
 
 
-func _on_possession_changed(_pawn: Pawn, _player_has_it: bool) -> void: # Claude 2026-11-16 (pawn M4): renamed, _has_player is this class's own now
+func _on_possession_changed(_pawn: Pawn, _player_has_it: bool) -> void:
 	_stop_path()
 	_refresh()
 
 
-# Claude 2026-11-08: a path belongs to whoever asked for it. When someone else takes charge, it's dropped straight away, not at
+# A path belongs to whoever asked for it. When someone else takes charge, it's dropped straight away, not at
 # the end of the frame like controller_changed, so the AI never walks the rest of a player's click, or the other way round.
 func _stop_path() -> void:
 	if pawn and pawn.navigation_manager:
@@ -293,7 +297,7 @@ func _send_if_changed() -> void:
 		_last_in_charge = now
 		controller_changed.emit(now)
 
-# Claude 2026-11-16 (pawn M3): the pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
+# The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
 func _sibling_ability_manager() -> AbilityManager:
 	if pawn == null:
 		return null

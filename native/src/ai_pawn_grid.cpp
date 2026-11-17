@@ -1,7 +1,8 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: see ai_pawn_grid.h.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// AIPawnGrid: a shared grid of pawns for "who's near me" questions. Described in ai_pawn_grid.h.
 #include "ai_pawn_grid.h"
 
-#include <godot_cpp/classes/collision_object3d.hpp> // Claude 2026-11-17: find_touching
+#include <godot_cpp/classes/collision_object3d.hpp> // find_touching
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
 
@@ -28,9 +29,9 @@ double AIPawnGrid::get_cell_size() const {
 	return _cell_size;
 }
 
-// Claude 2026-11-09: from the table's rows, in slot order.
+// From the table's rows, in slot order.
 void AIPawnGrid::rebuild() {
-	_change_guard.before_change(); // Claude 2026-11-17 (C++ bundle stage 2): no job may be reading the cells while they change
+	_change_guard.before_change(); // no job may be reading the cells while they change
 	for (auto &cell : _cells) {
 		cell.second.clear(); // keep the vectors' memory for the next tick
 	}
@@ -44,7 +45,7 @@ void AIPawnGrid::rebuild() {
 	_built_version = _table->version();
 }
 
-// Claude 2026-11-09 (step 2): split into prepare() and find_slots(), which the worker jobs use; the answers are the same.
+// prepare() then find_slots(), the same two steps the worker jobs use, so the answers are the same.
 Array AIPawnGrid::query(const Vector3 &origin, double radius, int64_t own_team, Object *exclude, int64_t max_results, int64_t tick) {
 	Array result;
 	if (_table.is_null()) {
@@ -106,7 +107,7 @@ size_t AIPawnGrid::find_slots(const Vector3 &origin, double radius, int64_t own_
 }
 
 namespace {
-// Claude 2026-11-17: the squared distance from point p to segment a-b.
+// The squared distance from point p to segment a-b.
 double distance_squared_to_segment(const Vector3 &p, const Vector3 &a, const Vector3 &b) {
 	const Vector3 ab = b - a;
 	const double length_squared = ab.length_squared();
@@ -118,7 +119,7 @@ double distance_squared_to_segment(const Vector3 &p, const Vector3 &a, const Vec
 constexpr double MOVED_SINCE_READ = 2.0;
 } // namespace
 
-// Claude 2026-11-17 (C++ bundle stage 3): see the header. A sphere touches a capsule when the sphere's centre is within the two radii
+// See the header. A sphere touches a capsule when the sphere's centre is within the two radii
 // of the capsule's middle segment; that's the whole test, the same one physics makes.
 Array AIPawnGrid::find_touching(const PackedVector3Array &centres, double radius, Object *exclude, int64_t tick) {
 	Array result;
@@ -192,6 +193,5 @@ void AIPawnGrid::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_cell_size", "size"), &AIPawnGrid::set_cell_size);
 	ClassDB::bind_method(D_METHOD("get_cell_size"), &AIPawnGrid::get_cell_size);
 	ClassDB::bind_method(D_METHOD("query", "origin", "radius", "own_team", "exclude", "max_results", "tick"), &AIPawnGrid::query);
-	// Claude 2026-11-17 (C++ bundle stage 3)
 	ClassDB::bind_method(D_METHOD("find_touching", "centres", "radius", "exclude", "tick"), &AIPawnGrid::find_touching);
 }

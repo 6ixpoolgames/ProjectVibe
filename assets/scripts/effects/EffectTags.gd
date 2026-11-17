@@ -1,27 +1,31 @@
-## Written by Claude (claude-opus-5-5), 2026-11-10: effect type tags, such as damage.elemental.fire, turned into bits (pawn spec 8.11).
-## What KIND of effect something is: resistances, immunities and "remove every poison" go by these. The owner's design: a separate
-## tag set from the abilities' (TagRegistry), so each has its own 64 bits.
+# Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
+## Effect type tags, such as damage.elemental.fire, turned into bits (pawn spec 8.11).
 ##
-## The same rules as TagRegistry and NavTags, in a separate copy as NavTags is, so working code doesn't change:
-##   - A tag is a name with dot-separated levels. A dot means "inside": damage.elemental.fire is inside damage.elemental, which is
-##     inside damage.
-##   - Every level gets its own bit. damage, damage.elemental and damage.elemental.fire are three bits.
-##   - A tag's MASK holds its own bit plus its parents' bits. So a resistance to "damage.elemental" catches fire and frost with one
-##     AND, and never catches "damaged" (whole levels only).
-##   - The game lists its tags in a declarations file (resources/effect_tag_declarations.tres), and they're sorted and numbered at
-##     startup, the same on every machine.
-##
-## Code writes tags as the constants below (EffectTags.DAMAGE_PHYSICAL), never as text, so a misspelling is an error when the script
-## is checked. Designers pick them from dropdowns (addons/tag_picker). A constant here must be declared in the file:
+## What [i]kind[/i] of effect something is: resistances, immunities and "remove every poison" go by these. The owner's design: a
+## separate tag set from the abilities' (TagRegistry), so each has its own 64 bits.
+## [br]
+## The same rules as TagRegistry and NavTags:
+## [br]- A tag is a name with dot-separated levels. A dot means "inside": damage.elemental.fire is inside damage.elemental, which is
+##   inside damage.
+## [br]- Every level gets its own bit. damage, damage.elemental and damage.elemental.fire are three bits.
+## [br]- A tag's mask holds its own bit plus its parents' bits. So a resistance to "damage.elemental" catches fire and frost with one
+##   AND, and never catches "damaged" (whole levels only).
+## [br]- The game lists its tags in a declarations file (resources/effect_tag_declarations.tres), and they're sorted and numbered at
+##   startup, the same on every machine.
+## [br]
+## Code writes tags as the constants below ([code]EffectTags.DAMAGE_PHYSICAL[/code]), never as text, so a misspelling is an error
+## when the script is checked. Designers pick them from dropdowns (addons/tag_picker). A constant here must be declared in the file:
 ## effects/tests/effect_selftest checks it.
-##
+## [br]
 ## What happens in odd cases (checked in effects/tests/effect_selftest.gd):
-##   - Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
-##   - A tag nobody declared: added on the spot with a one-time warning. Fine offline; machines may disagree online, which is what
-##     the warning is for. Questions (has_tag) never add tags.
-##   - More than 64 levels: the extra ones get no bit, match nothing, and warn once.
-##   - No declarations file: everything still works, and every tag just counts as undeclared.
-##
+## [br]- Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
+## [br]- A tag nobody declared: added on the spot with a one-time warning. Fine offline; machines may disagree online, which is what
+##   the warning is for. Questions ([method has_tag]) never add tags.
+## [br]- More than 64 levels: the extra ones get no bit, match nothing, and warn once.
+## [br]- No declarations file: everything still works, and every tag just counts as undeclared.
+# REFACTOR: the third copy of the same tag rules (TagRegistry, NavTags, EffectTags), kept apart so working code didn't change. One
+# tag-set class used three times would cut the code and the tests to one; reusable. See CHANGELOG.md.
+#
 # GDScript note: everything here is static, so nobody makes an EffectTags object: call EffectTags.mask_of(...) on the class.
 class_name EffectTags
 extends RefCounted

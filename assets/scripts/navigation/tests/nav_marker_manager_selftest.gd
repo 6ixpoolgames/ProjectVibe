@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-06: headless self-test for the NavMarkerManager core. Checks the odd cases listed at the top of NavMarkerManager.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/navigation/tests/nav_marker_manager_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/navigation/tests/nav_marker_manager_selftest.tscn"
 ## It prints a few warnings on purpose, because some checks make requests that should be refused.
 ## Tests only use NavMarkerManager's public functions, so the same tests can check a C++ version later.
 extends Node

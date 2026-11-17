@@ -3,7 +3,7 @@
 ## waddles only while the pawn moves and falls over when it dies, the sword points through the spots the hit checks during a swing,
 ## and the heights move the hit area.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/visuals/tests/visuals_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/visuals/tests/visuals_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PLAYER_SCENE := "res://assets/scenes/samples/faction_player.tscn"

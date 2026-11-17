@@ -3,7 +3,7 @@
 ## game time, diagnostics v0's numbers averaged over those 10 s (Claude 2026-11-16: was the PerformanceOverlay's). One size per run, since the game mode and session carry over
 ## between arenas in one process. Headless, so nothing is drawn: a windowed game adds rendering on top (F4 in the sample shows it).
 ## Run from the project folder (add --tick-rate=30 to measure at 30 ticks a second):
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --fixed-fps 60 --path . "res://assets/scripts/samples/tests/mass_battle_measure.tscn" -- --size=50 --seconds=150
+##   godot --headless --fixed-fps 60 --path . "res://assets/scripts/samples/tests/mass_battle_measure.tscn" -- --size=50 --seconds=150
 ## --fixed-fps 60 runs it as fast as the computer can while every frame still counts as 1/60 s, so the game time is the same however
 ## slow the ticks are. Leave it out to measure in real time, where slow ticks get dropped (the dropped column).
 ## Claude 2026-11-16: --scopes adds a line per row with every timed part in ms a tick, to see what each phase spends its time on.

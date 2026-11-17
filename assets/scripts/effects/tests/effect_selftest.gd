@@ -3,7 +3,7 @@
 ## that tick and can kill, stacking, cleanses, dying clearing them), boosts to ability numbers, a rollback loading the active list,
 ## and the odd cases at the top of EffectManager.gd and Effect.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/effects/tests/effect_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/effects/tests/effect_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

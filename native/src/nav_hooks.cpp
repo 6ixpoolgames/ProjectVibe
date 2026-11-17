@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: NavHooks resource, the opt-in a terrain generator carries (spec 5.1).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// NavHooks's bindings: its properties and the LayerOp enum. The class is described in nav_hooks.h.
 #include "nav_hooks.h"
 
 #include <godot_cpp/core/class_db.hpp>

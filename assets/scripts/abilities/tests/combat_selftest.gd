@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless self-test for pawn spec step 9: Dash, MeleeAttack, Knockback, the
 ## interrupt rules (pawn spec 8.6), hits on the server only, rollback, the lag compensation input, and the AI's Attack behaviour.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/combat_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/abilities/tests/combat_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

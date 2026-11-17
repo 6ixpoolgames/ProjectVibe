@@ -1,9 +1,13 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: one tick's input for a pawn, as plain values. Players and AI make the same shape, and
-## it's what goes over the network. Pawn spec section 5. This replaces the old idea of "intent": nothing holds what a pawn wants
-## between ticks except the last input.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: controllers/CHANGELOG.md.
+## One tick's input for a pawn, as plain values: what players and AI both make, and what goes over the network.
 ##
-## How to use it: a controller makes one each tick and gives it to ControllerManager.apply_input() (Pawn's until pawn M4). In a script or test,
-## InputCommand.make(direction, [&"sprint"]) is the short way.
+## Pawn spec section 5. Nothing holds what a pawn wants between ticks except the last input: there's no "intent".
+## [br]
+## How to use it: a controller makes one each tick, and the pawn's ControllerManager copies it into the pawn's input
+## ([method ControllerManager.apply_input]). In a script or test, this is the short way:
+## [codeblock]
+## InputCommand.make(direction, [&"sprint"])
+## [/codeblock]
 class_name InputCommand
 extends RefCounted
 
@@ -13,14 +17,14 @@ var move := Vector3.ZERO
 var look_yaw := 0.0
 var look_pitch := 0.0
 ## Which named actions are held this tick, as bits from InputActions. A press is "held this tick, not held last tick", which the
-## pawn works out, so a press is never sent twice.
+## ControllerManager works out, so a press is never sent twice.
 var held_actions := 0
-## Claude 2026-11-09: how many ticks behind its own tick the sender was drawing other pawns, for lag compensation (step 9). The
-## player's controller fills it from NetworkSession; the AI's stays 0.
+## How many ticks behind its own tick the sender was drawing other pawns, for lag compensation. The player's controller fills it
+## from NetworkSession; the AI's stays 0.
 var view_ticks_behind := 0.0
 
 
-## A command in one line. held is a list of action names, such as [&"jump", &"sprint"].
+## A command in one line. held is a list of action names, such as [code][&"jump", &"sprint"][/code].
 static func make(move_direction := Vector3.ZERO, held: Array = [], yaw := 0.0, pitch := 0.0) -> InputCommand:
 	var command := InputCommand.new()
 	command.move = move_direction

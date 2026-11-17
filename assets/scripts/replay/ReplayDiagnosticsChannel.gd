@@ -1,23 +1,27 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16: replay channel 6, "diagnostics": how each frame went, recorded alongside the game
-## (the owner's call: diagnostics hook into replay v0, so one recording holds what happened and what it cost; docs/diagnostics/
-## DIAGNOSTICS_SPEC.md). It's a plain data channel in the base, like the others: something else fills it. In debug builds that's the
-## DiagnosticsManager (diagnostics/), which adds this channel to the recorder; without it, nothing is recorded here.
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: replay/CHANGELOG.md.
+## Replay channel 6, "diagnostics": how each frame went, recorded alongside the game.
 ##
+## Diagnostics hook into replay (the owner's call; docs/diagnostics/DIAGNOSTICS_SPEC.md), so one recording holds what happened and what
+## it cost. It's a plain data channel in the base, like the others: something else fills it. That's the [DiagnosticsManager]
+## (diagnostics/), which adds this channel to the recorder; in a game without it, nothing is recorded here.
+## [br]
 ## Frames and ticks aren't the same: a frame can run two ticks when it catches up, or none while paused. So each tick writes the frames
 ## that finished since the last tick, each with its own frame number.
-##
-## A tick's bytes:  on a keyframe, the snapshot (put_var: the scope names so far, so reading can start at any block); then the frame
-##   count (u16), and for each frame:
-##     frame number (u32); frame, physics, scripts and rest times (4 × f32, ms); physics steps (u8); drawing on the CPU and GPU (2 × f32,
-##     ms); draw calls, objects, nodes, orphan nodes, memory in KB (5 × u32); then its scopes: count (u16), and for each: the name's
-##     number (u16), microseconds (u32), calls (u16)
-##   then the events, as every event channel (ReplayEventChannel): "scope_name" (data: number, name) the first time a name is used;
+## [br]
+## A tick's bytes:
+## [br]- On a keyframe, the snapshot (put_var: the scope names so far, so reading can start at any block).
+## [br]- The frame count (u16), and for each frame: frame number (u32); frame, physics, scripts and rest times (4 × f32, ms); physics
+##   steps (u8); drawing on the CPU and GPU (2 × f32, ms); draw calls, objects, nodes, orphan nodes, memory in KB (5 × u32); then its
+##   scopes: count (u16), and for each: the name's number (u16), microseconds (u32), calls (u16).
+## [br]- The events, as every event channel ([ReplayEventChannel]): "scope_name" (data: number, name) the first time a name is used;
 ##   "log" (data: level, text, count) for warnings and errors; "capture" (data: folder) when a capture was taken (F12).
-##
+## [br]
 ## Recording, from whatever measures frames:
-##   channel.add_frame(record)     record: {frame, frame_ms, physics_ms, scripts_ms, rest_ms, steps, render_cpu_ms, render_gpu_ms,
-##                                         draw_calls, objects, nodes, orphans, memory_kb, scopes: {name: [microseconds, calls]}}
-##   channel.add_event("log", 0, {level, text, count})
+## [codeblock]
+## channel.add_frame(record)  # {frame, frame_ms, physics_ms, scripts_ms, rest_ms, steps, render_cpu_ms, render_gpu_ms,
+##                            #  draw_calls, objects, nodes, orphans, memory_kb, scopes: {name: [microseconds, calls]}}
+## channel.add_event("log", 0, {level, text, count})
+## [/codeblock]
 ## Reading: state["frames"] holds this tick's frames, as records like the above (scopes by name).
 class_name ReplayDiagnosticsChannel
 extends ReplayEventChannel

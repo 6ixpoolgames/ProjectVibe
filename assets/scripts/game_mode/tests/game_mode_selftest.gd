@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for the GameMode shell and AIActivationManager.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/game_mode/tests/game_mode_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/game_mode/tests/game_mode_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 

@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-05: see net_codec.h. Every rule here copies assets/scripts/netcode/NetPackets.gd,
+// Written by Claude (claude-opus-5-5), 2026-11-05. History: native/CHANGELOG.md.
+// NetCodec: snapshot encoding in C++. Described in net_codec.h. Every rule here copies assets/scripts/netcode/NetPackets.gd,
 // and tests/net_codec_selftest fails if the two ever give different bytes or values. Change them together.
 #include "net_codec.h"
 
@@ -28,16 +29,16 @@ enum Tag : uint8_t {
 	TAG_INT32,
 	TAG_INT64,
 	TAG_OTHER,
-	// Claude 2026-11-07: small ints in 1 or 2 bytes instead of 4. Added at the end so the numbers above don't move.
+	// Small ints in 1 or 2 bytes instead of 4. At the end so the numbers above don't move.
 	TAG_INT8,
 	TAG_INT16,
 };
 
-// Claude 2026-11-17 (C++ bundle stage 2): the encoding numbers and the rounding steps (MM, CM, PI_VALUE, TAU_VALUE, U16_STEP and
-// BYTE_STEP) come from state_encoding.h, shared with TickStateRecorder. They were copied here.
+// The encoding numbers and the rounding steps (MM, CM, PI_VALUE, TAU_VALUE, U16_STEP and BYTE_STEP) come from state_encoding.h,
+// shared with TickStateRecorder.
 using namespace state_encoding;
 
-const int64_t PROTOCOL_VERSION = 5; // the same as NetPackets.PROTOCOL_VERSION: bump both when the format changes. Claude 2026-11-07: 5 adds small ints
+const int64_t PROTOCOL_VERSION = 5; // the same as NetPackets.PROTOCOL_VERSION: bump both when the format changes
 const int64_t WORLD_ENTRY_SIZE = 8; // the same as NetPackets.WORLD_ENTRY_SIZE
 const int64_t MAX_LIST_SIZE = 255;
 const int64_t INT24_LIMIT = 8388607;
@@ -84,7 +85,7 @@ int64_t NetCodec::get_protocol_version() const {
 	return PROTOCOL_VERSION;
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2): through the shared names in state_encoding.h. A name that isn't an encoding is sent
+// Through the shared names in state_encoding.h. A name that isn't an encoding is sent
 // raw, as NetPackets does.
 int NetCodec::encoding_id(const Variant &name) const {
 	const Encoding id = m_encoding_names.id_of(StringName(name));
@@ -138,7 +139,7 @@ void NetCodec::put_angle_u16(double value) {
 }
 
 void NetCodec::put_int(int64_t value) {
-	// Claude 2026-11-07: the smallest size that holds it. Most networked ints (held actions, counters, small ids) fit in one byte.
+	// The smallest size that holds it. Most networked ints (held actions, counters, small ids) fit in one byte.
 	if (value >= -128 && value <= 127) {
 		put_u8(TAG_INT8);
 		put_u8((uint8_t)(int8_t)value);
@@ -378,7 +379,7 @@ bool NetCodec::read_value(Variant &out) {
 		case TAG_BOOL_TRUE:
 			out = true;
 			return true;
-		case TAG_INT8: { // Claude 2026-11-07
+		case TAG_INT8: {
 			if (get_available_bytes() < 1) {
 				return false;
 			}
@@ -386,7 +387,7 @@ bool NetCodec::read_value(Variant &out) {
 			m_read_at += 1;
 			return true;
 		}
-		case TAG_INT16: { // Claude 2026-11-07
+		case TAG_INT16: {
 			if (get_available_bytes() < 2) {
 				return false;
 			}
@@ -487,8 +488,8 @@ Variant NetCodec::read_world(const PackedByteArray &bytes, int64_t start, int64_
 	return out;
 }
 
-// Claude 2026-11-17 (C++ bundle stage 3): see the header. It was the GDScript loop in NetworkSession._delta_entity_bytes, which
-// raised the host's snapshot sending from 1.9 to 2.3 ms a tick at 154 pawns.
+// See the header. The same as NetworkSession.delta_state_lists in GDScript, which costs the host about 0.4 ms a tick more at
+// 154 pawns.
 Array NetCodec::delta_state(const Array &now, const Array &then, const Array &encodings, int64_t ticks_back, int64_t mask_bits) const {
 	Array result;
 	const int64_t count = now.size();
@@ -548,6 +549,5 @@ void NetCodec::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("read_u32"), &NetCodec::read_u32);
 	ClassDB::bind_method(D_METHOD("read_list"), &NetCodec::read_list);
 	ClassDB::bind_method(D_METHOD("read_world", "bytes", "start", "count"), &NetCodec::read_world);
-	// Claude 2026-11-17 (C++ bundle stage 3)
 	ClassDB::bind_method(D_METHOD("delta_state", "now", "then", "encodings", "ticks_back", "mask_bits"), &NetCodec::delta_state);
 }

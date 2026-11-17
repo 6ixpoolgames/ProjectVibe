@@ -1,76 +1,53 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: a melee swing. An action bound to &"primary". Pawn spec section 8.6, step 9.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: abilities/CHANGELOG.md.
+## A melee swing: an action bound to &"primary", built from steps.
 ##
-## Three phases, in ticks: windup_ticks (8), then hit_ticks (4) when it can hit, then recovery_ticks (12): about 0.4 s in all. It
-## turns to face the pawn's look direction when it starts (Claude 2026-11-12: no longer; it turns at a limited speed during the
-## windup, see below), then holds still: while it runs, all movement and other combat abilities
-## are locked out. Dash (priority 20) cancels it, which is the player's animation cancel; Sprint (10) and Jump (5) don't, because its
-## interrupt_threshold is 15. Knockback (30) staggers it.
-##
-## Hits, on the server only (or offline), during the hit ticks:
-##   - A sphere of hit_radius, at hit_height, placed in front so its far edge is attack_range from the pawn. attack_range is the
-##     attack's real reach; the AI's Attack behaviour steps in to attack_range minus its approach_margin before swinging.
-##   - Checked through LagCompensation.melee, so a player's swing is judged against where they saw other pawns: the pawn's input
-##     carries view_ticks_behind, and the server limits it to what's believable. The AI's swings use 0.
-##   - Each pawn is hit at most once per swing. Its own team is skipped unless hits_own_team is on.
-##   - Each hit calls the target's AbilityManager.receive_hit() (Pawn's until pawn M3) with a HitInfo, which starts the target's own knockback, and sends hit_landed
-##     here, for local effects such as sounds. Claude 2026-11-09: the target takes the hit after every pawn has simulated this tick
-##     (pawn spec 15.4), so hit_landed goes out first. Claude 2026-11-09: each hit also takes damage health points (step 10); dead pawns
-##     aren't hit.
-## A rollback replay never hits again: hits are decided once, on the authority, outside replays.
-##
-## Claude 2026-11-10, a game feel pass (the owner's request):
-##   - The hit area moves: during the hit ticks the sphere sweeps across sweep_degrees (100) in front of the pawn, from its right to
-##     its left (sweep_from_left turns it round), at the same reach. Each tick checks every spot the sphere passes through in that
-##     tick, no more than half its radius apart, so a fast sweep or a 30 Hz match leaves no gaps; they're checked in one lag
-##     compensation rewind (LagCompensation.melee_spheres). sweep_degrees 0 is the old sphere that holds still, straight ahead.
-##   - It turns during the windup: toward where the pawn looks, at up to windup_turn_degrees_per_second (720), so a swing started a
-##     little off still lands where the player (or the AI) is looking. From the first hit tick it holds still, as before. 0: it holds
-##     still from the start, as before.
-##   - Claude 2026-11-12, the owner's request: that is now its only turning. It used to snap to where the pawn looks when it
-##     started; now an attack turns at most windup_turn_degrees_per_second (about 96 degrees over an 8-tick windup at 720).
-##   - A hit can lift the target in a small hop: knockback_hop_speed, in metres per second upward (KnockbackAbility).
-##   - hit_area_moved goes out on every hit tick, for debug drawing the sweep.
-## Claude 2026-11-12 (pawn spec 8.12): the sweep can rise or fall too (height_at_sweep_start and _end), for slashes, backhands and
-## chops, and visuals/FloatingSword draws a sword through the same spots.
-## Claude 2026-11-10 (pawn spec 8.11), the owner's design: a swing no longer carries damage or knockback. damage, knockback_speed,
-## knockback_ticks and knockback_hop_speed are gone; its EffectApplier children say what a hit does (on hit, to the target: a
-## StatChangePart for damage, a KnockbackPart for the push and hop), and the target applies them. The default swing's are in
-## resources/effects/swing_hit.tres, with the same numbers as before (20 damage, 6 m/s for 10 ticks, a 2 m/s hop). A swing with no
-## on-hit effects hits and does nothing, and warns once.
-##
-## Claude 2026-11-16 (pawn spec 8.20, the owner's design): built from steps now (abilities/steps/). A swing is a WindupStep, which starts
-## a TurnToFaceStep, then a MeleeSweepStep, then a WaitStep for the recovery; the hit checks above moved into MeleeSweepStep. With no
-## AbilityStep children of its own, it makes those four from its settings below (windup_ticks, hit_ticks, recovery_ticks, attack_range,
-## hit_radius, hit_height, sweep_degrees, sweep_from_left, the two heights, windup_turn_degrees_per_second), so every swing in every
-## scene became a stepped one with the same numbers. A designer wanting another pattern places steps of their own instead, and these
-## settings then only matter for attack_range (the AI's reach) and warns_targets.
-## What changed in feel (the owner's calls):
-##   - The turn follows where the pawn looks only while the attack's action is held, and keeps turning through the hit while it is.
-##     Let go, and it swings where it faces. The AI holds its attack action through its swings for this.
-##   - The windup's timer only counts once the pawn is within 90 degrees of where it looks (or the turn has stopped), so a swing
-##     started facing away turns first and hits later. Within 90 degrees, it's as quick as before.
+## Pawn spec sections 8.6, 8.9 and 8.20. A swing is a WindupStep, which starts a TurnToFaceStep, then a MeleeSweepStep (the hit
+## window), then an OpenComboStep and a WaitStep for the recovery. With no AbilityStep children of its own, it makes those from its
+## settings below ([member windup_ticks], [member hit_ticks], [member recovery_ticks], [member attack_range], [member hit_radius],
+## [member hit_height], [member sweep_degrees], [member sweep_from_left], the two heights,
+## [member windup_turn_degrees_per_second], [member combo_window_ticks]): about 0.4 s in all with the defaults. A designer wanting
+## another pattern places steps of their own instead, and these settings then only matter for attack_range (the AI's reach) and
+## [member warns_targets].
+## [br]
+## While it runs, all movement and other combat abilities are locked out. Dash (priority 40) cancels it, which is the player's
+## animation cancel; Sprint (10) and Jump (5) don't, because its interrupt_threshold is 15. Knockback (30) staggers it.
+## [br]
+## Turning (the owner's calls): it never snaps to where the pawn looks. Its TurnToFace step turns toward the look, at the pawn's
+## TurnRate stat by default, only while the attack's action is held, and keeps turning through the hit while it is. Let go, and it
+## swings where it faces. The AI holds its attack action through its swings for this. The windup's timer only counts once the pawn is
+## within 90 degrees of where it looks (or the turn has stopped), so a swing started facing away turns first and hits later.
+## [br]
+## Hits, on the server only (or offline), during the sweep: MeleeSweepStep has the rules (lag compensation, each pawn once per swing,
+## its own team skipped). [member attack_range] is the attack's real reach: the AI's Attack behaviour steps in to attack_range minus
+## its approach_margin before swinging. A swing carries no damage or knockback of its own: its EffectApplier children say what a hit
+## does (on hit, to the target: a StatChangePart for damage, a KnockbackPart for the push and hop), and the target applies them. The
+## default swing's are in resources/effects/swing_hit.tres (20 damage, 6 m/s for 10 ticks, a 2 m/s hop). A swing with no on-hit
+## effects hits and does nothing, and warns once. A rollback replay never hits again.
+## [br]
+## The sweep can rise or fall (height_at_sweep_start and _end), for slashes, backhands and chops, and visuals/FloatingSword draws a
+## sword through the same spots ([method hit_offset_at]).
 class_name MeleeAttackAbility
 extends AbilityBase
 
-## Sent on the server for each pawn this swing hits, when the swing finds it. For effects, sounds and UI. Claude 2026-11-09: the
-## target takes the hit (its damage, knockback and hit_received) later in the same tick, after every pawn has simulated.
-@warning_ignore("unused_signal") # Claude 2026-11-16: sent by its MeleeSweepStep now
+## Sent on the server for each pawn this swing hits, when the swing finds it. For effects, sounds and UI. The target takes the hit
+## (its effects and hit_received) later in the same tick, after every pawn has simulated (pawn spec 15.4).
+@warning_ignore("unused_signal") # sent by its MeleeSweepStep
 signal hit_landed(hit: HitInfo)
-## Claude 2026-11-09: sent once per swing, on its first hit tick, with where the hit sphere is and its radius. Sent on every machine
-## that runs the swing (the server, offline, and a client predicting its own pawn), never during a rollback replay. For effects,
-## sounds and debug drawing (AbilityDebugDraw). It says where the swing can hit, not whether it hit anything: see hit_landed.
-@warning_ignore("unused_signal") # Claude 2026-11-16: sent by its MeleeSweepStep now
+## Sent once per sweep, on its first tick, with where the hit sphere is and its radius. Sent on every machine that runs the swing
+## (the server, offline, and a client predicting its own pawn), never during a rollback replay. For effects, sounds and debug drawing
+## (AbilityDebugDraw). It says where the swing can hit, not whether it hit anything: see hit_landed.
+@warning_ignore("unused_signal") # sent by its MeleeSweepStep
 signal hit_window_started(centre: Vector3, radius: float)
-## Claude 2026-11-10: sent on every hit tick, on the same machines as hit_window_started, with where the hit sphere was at the start and
-## the end of this tick's part of the sweep. For effects and debug drawing (AbilityDebugDraw draws the sweep with it).
-@warning_ignore("unused_signal") # Claude 2026-11-16: sent by its MeleeSweepStep now
+## Sent on every tick of a sweep, on the same machines as hit_window_started, with where the hit sphere was at the start and the end
+## of this tick's part of the sweep. For effects and debug drawing (AbilityDebugDraw draws the sweep with it).
+@warning_ignore("unused_signal") # sent by its MeleeSweepStep
 signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
 
-## Ticks from the start of the swing to when it can hit.
+## Ticks from the start of the swing to when it can hit (its Windup step's length).
 @export_range(0, 120, 1, "or_greater") var windup_ticks := 8
-## Ticks it can hit for.
+## Ticks it can hit for (its Sweep step's length).
 @export_range(1, 120, 1, "or_greater") var hit_ticks := 4
-## Ticks after hitting before it's over.
+## Ticks after hitting before it's over (its Recovery step's length).
 @export_range(0, 120, 1, "or_greater") var recovery_ticks := 12
 ## How far it reaches, in metres from the pawn: the far edge of the hit sphere.
 @export_range(0.1, 20.0, 0.05, "or_greater") var attack_range := 1.8
@@ -80,50 +57,48 @@ signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
 @export var hit_height := 1.0
 ## On: it can hit pawns on its own team.
 @export var hits_own_team := false
-## Claude 2026-11-10: how far round the hit sphere sweeps during the hit ticks, in degrees, centred straight ahead. 0: it holds still.
+## How far round the hit sphere sweeps during the hit ticks, in degrees, centred straight ahead. 0: it holds still.
 @export_range(0.0, 360.0, 1.0) var sweep_degrees := 100.0
-## Claude 2026-11-10: on: the sweep goes from the pawn's left to its right. Off (the default): right to left.
+## On: the sweep goes from the pawn's left to its right. Off (the default): right to left.
 @export var sweep_from_left := false
-## Claude 2026-11-12: how far above or below hit_height the hit sphere is at the start of the sweep, in metres, so a swing can slash
-## downward, rise, or chop straight down (a small sweep_degrees with a big drop). 0 (the default): level, as before. The owner's
-## request, so the floating sword (visuals/FloatingSword) can swing high and low and still show exactly where the hit is.
+## How far above or below hit_height the hit sphere is at the start of the sweep, in metres, so a swing can slash downward, rise, or
+## chop straight down (a small sweep_degrees with a big drop). 0 (the default): level. The owner's request, so the floating sword
+## (visuals/FloatingSword) can swing high and low and still show exactly where the hit is.
 @export_range(-3.0, 3.0, 0.05, "or_greater", "or_less") var height_at_sweep_start := 0.0
-## Claude 2026-11-12: the same at the end of the sweep. Between the two the sphere moves in a straight line up or down.
+## The same at the end of the sweep. Between the two the sphere moves in a straight line up or down.
 @export_range(-3.0, 3.0, 0.05, "or_greater", "or_less") var height_at_sweep_end := 0.0
-## Claude 2026-11-10: how fast it turns toward where the pawn looks during the windup, in degrees per second. 0: no turning.
-## Claude 2026-11-12: the attack's turn speed: it no longer snaps to the look when it starts, so this is all the turning it does.
-## Claude 2026-11-16 (pawn spec 8.20): its TurnToFace step's speed. -1 (now the default): the pawn's TurnRate stat (540 without one),
-## so a turn speed limits every attack the same way. 0: no turning. Above 0: this speed, for this attack only.
+## How fast it turns toward where the pawn looks, in degrees per second: its TurnToFace step's speed. -1 (the default): the pawn's
+## TurnRate stat (540 without one), so a turn speed limits every attack the same way. 0: no turning. Above 0: this speed, for this
+## attack only.
 @export_range(-1.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second := -1.0
-## Claude 2026-11-16 (pawn spec 8.20): how long the combo window stays open after its hit, in ticks at 60 a second (its default
-## OpenCombo step). Follow-ups are other abilities with combo_positions 2 or 3.
+## How long the combo window stays open after its hit, in ticks at 60 a second (its OpenCombo step). Follow-ups are other abilities
+## with combo_positions 2 or 3.
 @export_range(1, 600, 1, "or_greater") var combo_window_ticks := 30
-## Claude 2026-11-15: on: when a swing starts, on the server, enemies within its reach and in front of the pawn are told it's coming
-## (Pawn.notice_incoming_attack), so their AI can parry. One sphere query a swing.
+## On: when a swing starts, on the server, enemies within its reach and in front of the pawn are told it's coming (their
+## AIContextComponent.note_incoming_attack), so their AI can parry. One sphere query a swing.
 @export var warns_targets := true
 
-# Claude 2026-11-16: _hit_this_swing is AbilityBase.pawns_hit_this_run now, and _warned_no_effects is MeleeSweepStep's.
-var _made_default_steps := false # Claude 2026-11-16: true when it made its own steps from its settings
+var _made_default_steps := false # true when it made its own steps from its settings
 
 
 func _init() -> void:
 	super()
 	kind = Kind.ACTION
 	trigger_action = &"primary"
-	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	# Tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
 	category = Tags.COMBAT_MELEE
 	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
 	interrupt_priority = 15
 	interrupt_threshold = 15
 	buffer_window = 0.15 # a press near the end of a dash waits for it
-	combo_positions = [1] # Claude 2026-11-16 (pawn spec 8.20): an opener, unless a scene says it's a follow-up
+	combo_positions = [1] # an opener, unless a scene says it's a follow-up (pawn spec 8.20)
 
 
-# Claude 2026-11-16 (pawn spec 8.20): duration_ticks, get_rollback_properties and tick are gone: its steps time and run the swing, and
-# the base handles a stepped ability's timer and rollback.
+# Its steps time and run the swing, and the base handles a stepped ability's timer and rollback, so it has no duration_ticks,
+# get_rollback_properties or tick of its own.
 
 
-## Claude 2026-11-16: finds its steps, after making the default four from its settings if it has none of its own.
+## Finds its steps, after making the default ones from its settings if it has none of its own.
 func collect_steps() -> void:
 	var has_own := false
 	for child in get_children():
@@ -138,17 +113,16 @@ func collect_steps() -> void:
 
 
 func start() -> void:
-	# Claude 2026-11-12, the owner's request: no snap to where the pawn looks. It turns there during the windup at
-	# windup_turn_degrees_per_second, so a turn speed limits every attack.
-	# Claude 2026-11-16: its made steps take its settings again, in case they were changed while playing (a test, a tuning panel).
+	# No snap to where the pawn looks (the owner's request): its TurnToFace step turns it, so a turn speed limits every attack.
+	# Its made steps take its settings again, in case they were changed while playing (a test, a tuning panel).
 	if _made_default_steps:
 		_sync_default_steps()
-	if warns_targets and pawn.is_authority() and not _is_replaying(): # Claude 2026-11-15
+	if warns_targets and pawn.is_authority() and not _is_replaying():
 		_warn_targets()
 
 
-# Claude 2026-11-16: the steps of a swing, from its settings: Windup (starts TurnToFace; then Sweep), TurnToFace, Sweep (then OpenCombo
-# and Recovery), OpenCombo, Recovery. Named the same everywhere, so their rolled-back state has the same paths on every machine.
+# The steps of a swing, from its settings: Windup (starts TurnToFace; then Sweep), TurnToFace, Sweep (then OpenCombo and Recovery),
+# OpenCombo, Recovery. Named the same everywhere, so their rolled-back state has the same paths on every machine.
 func _make_default_steps() -> void:
 	var windup := WindupStep.new()
 	windup.name = "Windup"
@@ -172,7 +146,7 @@ func _make_default_steps() -> void:
 	_made_default_steps = true
 
 
-# Claude 2026-11-16: copies its settings onto the steps it made.
+# Copies its settings onto the steps it made.
 func _sync_default_steps() -> void:
 	var windup := get_node(^"Windup") as WindupStep
 	var turn := get_node(^"TurnToFace") as TurnToFaceStep
@@ -195,7 +169,7 @@ func _sync_default_steps() -> void:
 	(get_node(^"OpenCombo") as OpenComboStep).window_ticks = combo_window_ticks
 
 
-# Claude 2026-11-16: its first windup and first sweep, or null. The visuals and the target warning read the swing's shape through them.
+# Its first windup, or null. The visuals and the target warning read the swing's shape through its first windup and first sweep.
 func _first_windup() -> WindupStep:
 	for step in steps:
 		if step is WindupStep:
@@ -203,7 +177,7 @@ func _first_windup() -> WindupStep:
 	return null
 
 
-# Claude 2026-11-16: how fast its first TurnToFace step turns now, in degrees a second; 0 with none.
+# How fast its first TurnToFace step turns now, in degrees a second; 0 with none.
 func _turn_speed() -> float:
 	for step in steps:
 		if step is TurnToFaceStep:
@@ -218,8 +192,8 @@ func _first_sweep() -> MeleeSweepStep:
 	return null
 
 
-## Claude 2026-11-16: where the swing is, for visuals that follow its phases, such as the floating sword: "windup", "hit" or
-## "recovery" with how far through it is (0 to 1, smooth between ticks), or "none" when it isn't swinging. Read from its running steps.
+## Where the swing is, for visuals that follow its phases, such as the floating sword: "windup", "hit" or "recovery" with how far
+## through it is (0 to 1, smooth between ticks), or "none" when it isn't swinging. Read from its running steps.
 func swing_phase() -> Dictionary:
 	for step in steps:
 		if step.running and step is MeleeSweepStep:
@@ -233,9 +207,9 @@ func swing_phase() -> Dictionary:
 	return {"phase": "none", "progress": 0.0}
 
 
-# Claude 2026-11-15: tells enemies this swing may reach that it's coming, and when its hit starts. Within attack_range plus hit_radius,
-# and within the sweep's width (plus 30 degrees to spare) of where the pawn will face when the hit starts: its facing turned toward
-# where it looks, as far as the windup's turn speed allows (tick() does the turning).
+# Tells enemies this swing may reach that it's coming, and when its hit starts. Within attack_range plus hit_radius, and within the
+# sweep's width (plus 30 degrees to spare) of where the pawn will face when the hit starts: its facing turned toward where it looks,
+# as far as its TurnToFace step's speed allows over the windup.
 func _warn_targets() -> void:
 	var reach := attack_range + hit_radius
 	var sphere := SphereShape3D.new()
@@ -245,8 +219,8 @@ func _warn_targets() -> void:
 	query.transform = Transform3D(Basis.IDENTITY, pawn.global_position + Vector3(0.0, 0.9, 0.0))
 	query.collision_mask = pawn.collision_layer
 	query.exclude = [pawn.get_rid()]
-	var turn := deg_to_rad(_turn_speed()) * float(windup_length()) / TickDriver.get_tick_rate() # Claude 2026-11-16: was _windup(), and the setting's own speed
-	var hit_yaw := rotate_toward(pawn.yaw, look_yaw(), turn) # Claude 2026-11-16 (pawn M4)
+	var turn := deg_to_rad(_turn_speed()) * float(windup_length()) / TickDriver.get_tick_rate()
+	var hit_yaw := rotate_toward(pawn.yaw, look_yaw(), turn)
 	var facing := Vector3(-sin(hit_yaw), 0.0, -cos(hit_yaw))
 	var widest := deg_to_rad(sweep_degrees * 0.5 + 30.0)
 	var now: int = TickDriver.tick
@@ -258,9 +232,9 @@ func _warn_targets() -> void:
 		to.y = 0.0
 		if to.length_squared() > 0.0001 and facing.angle_to(to.normalized()) > widest:
 			continue
-		# Claude 2026-11-16 (pawn M3): straight to the target's AI (was Pawn.notice_incoming_attack), on the server, while it's alive.
+		# Straight to the target's AI, on the server, while it's alive.
 		if other.ai_context and other.is_authority() and not other.is_dead():
-			other.ai_context.note_incoming_attack(pawn, now, now + windup_length()) # Claude 2026-11-16: was _windup()
+			other.ai_context.note_incoming_attack(pawn, now, now + windup_length())
 
 
 func _is_replaying() -> bool:
@@ -268,20 +242,20 @@ func _is_replaying() -> bool:
 	return driver != null and driver.is_resimulating()
 
 
-## Where the hit sphere is straight ahead: the middle of the sweep. Claude 2026-11-10: with a sweep, see hit_centre_at.
+## Where the hit sphere is straight ahead: the middle of the sweep. With a sweep, see [method hit_centre_at].
 func hit_centre() -> Vector3:
 	return hit_centre_at(0.5)
 
 
-## Claude 2026-11-10: where the hit sphere is at this point of the sweep, from 0 (its start) to 1 (its end), for the pawn's facing now.
-## Claude 2026-11-16: answered by its first sweep step.
+## Where the hit sphere is at this point of the sweep, from 0 (its start) to 1 (its end), for the pawn's facing now. Answered by its
+## first sweep step.
 func hit_centre_at(progress: float) -> Vector3:
 	return pawn.global_position + hit_offset_at(progress, pawn.yaw)
 
 
-## Claude 2026-11-12: the same as hit_centre_at, from the pawn's feet, for a facing given in radians. The floating sword uses it with the
-## facing it draws, which is smoothed between ticks, so it swings through exactly the spots the hit checks. Claude 2026-11-16: from its
-## first sweep step (MeleeSweepStep.offset_at); straight ahead at chest height if it has none.
+## The same as [method hit_centre_at], from the pawn's feet, for a facing given in radians. The floating sword uses it with the facing
+## it draws, which is smoothed between ticks, so it swings through exactly the spots the hit checks. From its first sweep step
+## (MeleeSweepStep.offset_at); straight ahead at chest height if it has none.
 func hit_offset_at(progress: float, facing: float) -> Vector3:
 	var sweep := _first_sweep()
 	if sweep == null:
@@ -289,8 +263,8 @@ func hit_offset_at(progress: float, facing: float) -> Vector3:
 	return sweep.offset_at(progress, facing)
 
 
-## Claude 2026-11-16: how long a swing takes when it doesn't wait for its turn: its first windup, sweep and recovery, at this match's
-## tick rate. 0 with none of them. For tests and tools; a real swing can take longer while its windup waits.
+## How long a swing takes when it doesn't wait for its turn: its first windup, sweep and recovery, at this match's tick rate. 0 with
+## none of them. For tests and tools; a real swing can take longer while its windup waits.
 func planned_ticks() -> int:
 	var total := windup_length() + hit_length()
 	for step in steps:
@@ -300,20 +274,22 @@ func planned_ticks() -> int:
 	return total
 
 
-## Claude 2026-11-12: how many ticks the windup lasts, and then how many it can hit for, at this match's tick rate. For visuals that
-## follow the swing's phases, such as the floating sword. Claude 2026-11-16: its first windup's and first sweep's lengths; the windup can
-## take longer while it waits for the turn (swing_phase() says where it really is).
+## How many ticks the windup lasts, at this match's tick rate: its first windup's length. For visuals that follow the swing's phases,
+## such as the floating sword. The windup can take longer while it waits for the turn ([method swing_phase] says where it really is).
 func windup_length() -> int:
 	var windup := _first_windup()
 	return windup.length() if windup else 0
 
 
+## How many ticks it can hit for, at this match's tick rate: its first sweep's length.
 func hit_length() -> int:
 	var sweep := _first_sweep()
 	return sweep.length() if sweep else 0
 
 
-## Claude 2026-11-10: the spots the sphere passes through on this hit tick (0 for the first). Claude 2026-11-16: its first sweep's.
+# The spots the sphere passes through on this hit tick (0 for the first): its first sweep's.
+# REFACTOR: only visuals/tests/visuals_selftest calls this; the test could ask the sweep step (centres_for_tick) itself. Test
+# helpers stay out of production code.
 func _sweep_centres(hit_tick: int) -> Array[Vector3]:
 	var sweep := _first_sweep()
 	return sweep.centres_for_tick(hit_tick) if sweep else [hit_centre()] as Array[Vector3]

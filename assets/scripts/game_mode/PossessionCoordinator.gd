@@ -1,38 +1,41 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: who controls which pawn. A module of GameMode, reached as GameMode.possession_coordinator.
-## It creates this machine's PlayerController at the start, which then lasts for the whole game, with or without a pawn.
-## Claude 2026-11-07: renamed from PossessionModule, so that the name says what it does.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: game_mode/CHANGELOG.md.
+## Who controls which pawn: players possess and let go of pawns through here.
 ##
+## A module of GameMode, reached as GameMode.possession_coordinator. It creates this machine's PlayerController at the start, which
+## then lasts for the whole game, with or without a pawn.
+## [br]
 ## How to use it:
-##   GameMode.possession_coordinator.possess(pawn)              # offline, or a client asking the server for this pawn
-##   GameMode.possession_coordinator.possess_for(peer, pawn)    # server: gives this player this pawn
-##   GameMode.possession_coordinator.release()                  # lets go. Offline or a client's own, or release_for(peer) on the server
-##   GameMode.possession_coordinator.controller                 # this machine's PlayerController
-##   GameMode.possession_coordinator.spectate()                 # Claude 2026-11-16: lets go and flies the spectator (FreeFlyCamera)
-##   GameMode.possession_coordinator.stop_spectating()          # stops flying; possessing a pawn stops it too
-##   GameMode.possession_coordinator.is_spectating()
-##
-## Every request comes here, and the possessable flag on the pawn's ControllerManager is the check (Claude 2026-11-17: was on Pawn). Claude 2026-11-07: the simplest version, as the owner
-## asked. An AI controller will ask here too, when there is one. In multiplayer the server decides, and a client's call is only a
-## request. A possessed pawn's owner_peer is its player, so its inputs come from that player and it's predicted on their machine.
-## Letting go sets owner_peer to 0, so the server runs it, and it stands idle with nothing driving it.
-##
-## Claude 2026-11-07: what a pawn does once it's let go isn't decided here. That's the controller manager's job when it's built,
-## and it can hear about it through ControllerManager.possession_changed (Pawn's until pawn M4): its AI controller takes over at once if it has one, and otherwise
-## the pawn stays idle. Respawning or removing a pawn belongs to the game, which can listen to released here, and to
+## [codeblock]
+## GameMode.possession_coordinator.possess(pawn)            # offline, or a client asking the server for this pawn
+## GameMode.possession_coordinator.possess_for(peer, pawn)  # server: gives this player this pawn
+## GameMode.possession_coordinator.release()                # lets go. Offline or a client's own, or release_for(peer) on the server
+## GameMode.possession_coordinator.controller               # this machine's PlayerController
+## GameMode.possession_coordinator.spectate()               # lets go and flies the spectator (FreeFlyCamera)
+## GameMode.possession_coordinator.stop_spectating()        # stops flying; possessing a pawn stops it too
+## GameMode.possession_coordinator.is_spectating()
+## [/codeblock]
+## Every request comes here, and the possessable flag on the pawn's ControllerManager is the check: the simplest version, as the owner
+## asked. In multiplayer the server decides, and a client's call is only a request. A possessed pawn's owner_peer is its player, so its
+## inputs come from that player and it's predicted on their machine. Letting go sets owner_peer to 0, so the server runs it.
+## [br]
+## What a pawn does once it's let go isn't decided here. Its ControllerManager hears about it through possession_changed: its
+## AIController takes over at once if it has one, and otherwise the pawn stands idle. The AI never asks here; it only drives pawns no
+## player has. Respawning or removing a pawn belongs to the game, which can listen to [signal released] here, and to
 ## NetworkSession.player_left, which fires afterwards. Creating a controller never spawns a pawn.
-##
+## [br]
 ## What happens in odd cases (all checked in pawn/tests/possession_selftest.gd and net_pawn_selftest.gd):
-##   - A pawn with possessable off, or held by someone else, or freed: refused, with the refused signal.
-##   - A possessed pawn is removed: the player has no pawn, and the camera holds where it was.
-##   - A player leaves: they let go of their pawn, and it stays in the world. Anything else they own is removed by NetworkSession.
-##   - No module at all: the game runs with no controller, and a scene's own camera carries on working.
-##   - A client asking for something broken: the server ignores it.
-##
-## Claude 2026-11-16 (the owner's call): spectating. The spectator is a FreeFlyCamera, not a Pawn: nearly the whole game looks for Pawn
+## [br]- A pawn with possessable off, with no ControllerManager, held by someone else, or freed: refused, with the
+##   [signal refused] signal.
+## [br]- A possessed pawn is removed: the player has no pawn, and the camera holds where it was.
+## [br]- A player leaves: they let go of their pawn, and it stays in the world. Anything else they own is removed by NetworkSession.
+## [br]- No module at all: the game runs with no controller, and a scene's own camera carries on working.
+## [br]- A client asking for something broken: the server ignores it.
+## [br]
+## [b]Spectating[/b] (the owner's call). The spectator is a FreeFlyCamera, not a Pawn: nearly the whole game looks for Pawn
 ## (abilities, AI, teams, the kill floor, replays, spawning), and a spectator should be in none of it. So this recognises it as its own
-## kind of thing: spectate() lets go of the pawn and has this machine's PlayerController fly it, and possessing any pawn ends it. Like
-## Unreal's spectator, it's local: only this machine knows its player is spectating. Telling the server, for a respawn queue or a
-## scoreboard, waits until something needs it. A dedicated server has no player, so it never spectates.
+## kind of thing: [method spectate] lets go of the pawn and has this machine's PlayerController fly it, and possessing any pawn ends
+## it. Like Unreal's spectator, it's local: only this machine knows its player is spectating. Telling the server, for a respawn queue
+## or a scoreboard, waits until something needs it. A dedicated server has no player, so it never spectates.
 class_name PossessionCoordinator
 extends GameModeModule
 
@@ -42,16 +45,18 @@ signal possessed(peer: int, pawn: Pawn)
 signal released(peer: int, pawn: Pawn)
 ## A request was turned down, on the machine that decided.
 signal refused(peer: int, pawn: Pawn, reason: String)
-## Claude 2026-11-16: this machine's player started or stopped spectating.
+## This machine's player started or stopped spectating.
 signal spectating_changed(spectating: bool)
 
 ## A project setting: a scene to use as the PlayerController, so a game can have its own.
 const CONTROLLER_SCENE_SETTING := "project_base/game_mode/player_controller_scene"
 ## How offline play refers to its one player, since it has no network peer number.
 const OFFLINE_PEER := -1
+## The world channel the server tells clients who has which pawn on.
 const CHANNEL := "possession"
-const REQUEST_CHANNEL := "possession_request" # Claude 2026-11-07: a client asking the server
-# What's in a possession message.
+## The client channel a client asks the server for a pawn on.
+const REQUEST_CHANNEL := "possession_request"
+# What's in a possession message: one player's pawn, or everyone's (for a late joiner).
 const MESSAGE_ONE := 1
 const MESSAGE_ALL := 2
 
@@ -61,7 +66,7 @@ var controller: PlayerController = null
 var _by_peer := {} # peer -> Pawn
 var _session: Node = null
 var _waiting := {} # entity id -> peer, for a client told about a pawn it hasn't been told to spawn yet
-var _spectating := false # Claude 2026-11-16: this machine's player is flying the spectator
+var _spectating := false # this machine's player is flying the spectator
 
 
 func _init() -> void:
@@ -76,7 +81,7 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 		_session.register_world_channel(CHANNEL, _on_network_message, _catch_up_message)
 		_session.entity_spawned.connect(_on_entity_spawned)
 		_session.register_client_channel(REQUEST_CHANNEL, _on_request)
-		_session.player_leaving.connect(_on_player_leaving) # Claude 2026-11-07
+		_session.player_leaving.connect(_on_player_leaving)
 	if not OS.has_feature("dedicated_server"):
 		controller = _make_controller()
 		add_child(controller)
@@ -88,7 +93,7 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 		_session.unregister_world_channel(CHANNEL)
 		_session.entity_spawned.disconnect(_on_entity_spawned)
 		_session.unregister_client_channel(REQUEST_CHANNEL)
-		_session.player_leaving.disconnect(_on_player_leaving) # Claude 2026-11-07
+		_session.player_leaving.disconnect(_on_player_leaving)
 	for peer: int in _by_peer.keys():
 		_clear(peer)
 
@@ -117,8 +122,8 @@ func release() -> void:
 		release_for(_local_peer())
 
 
-## Claude 2026-11-16: lets go of this machine's pawn, if it has one (its AI controller takes over), and flies the spectator, starting
-## where the camera is. On a client, letting go is a request, but the flying starts at once. False with no PlayerController (a
+## Lets go of this machine's pawn, if it has one (its AI controller takes over), and flies the spectator, starting where the camera
+## is. On a client, letting go is a request, but the flying starts at once. False with no PlayerController (a
 ## dedicated server).
 func spectate() -> bool:
 	if controller == null:
@@ -133,7 +138,7 @@ func spectate() -> bool:
 	return true
 
 
-## Claude 2026-11-16: stops flying the spectator. The camera holds where it is until this machine's player has a pawn. Possessing one
+## Stops flying the spectator. The camera holds where it is until this machine's player has a pawn. Possessing one
 ## stops spectating by itself, so this is only needed to stop without one.
 func stop_spectating() -> void:
 	if not _spectating:
@@ -144,7 +149,7 @@ func stop_spectating() -> void:
 	spectating_changed.emit(false)
 
 
-## Claude 2026-11-16: true while this machine's player is flying the spectator.
+## True while this machine's player is flying the spectator.
 func is_spectating() -> bool:
 	return _spectating
 
@@ -182,7 +187,7 @@ func release_for(peer: int) -> void:
 	_tell_clients(peer, null)
 
 
-## Claude 2026-11-07: server or offline: whoever has this pawn lets go of it. This is the only way to evict someone. Turning possessable
+## Server or offline: whoever has this pawn lets go of it. This is the only way to evict someone. Turning possessable
 ## off doesn't: it only stops new possessions.
 func release_pawn(pawn: Pawn) -> void:
 	var peer := get_peer_of(pawn)
@@ -226,11 +231,10 @@ func _make_controller() -> PlayerController:
 func _why_not(peer: int, pawn: Pawn) -> String:
 	if not is_instance_valid(pawn):
 		return "there's no such pawn"
-	# Claude 2026-11-16 (wider audit): refused here, before anything changes. It used to get as far as changing the pawn's owner,
-	# then stop on an error.
+	# Refused here, before anything changes, rather than stopping on an error halfway.
 	if pawn.controller_manager == null:
 		return "this pawn has no ControllerManager, so a player's input couldn't reach it"
-	if not pawn.controller_manager.possessable: # Claude 2026-11-17: the flag is the ControllerManager's now
+	if not pawn.controller_manager.possessable:
 		return "this pawn can't be possessed"
 	var holder := get_peer_of(pawn)
 	if holder != 0 and holder != peer:
@@ -240,13 +244,13 @@ func _why_not(peer: int, pawn: Pawn) -> String:
 
 func _assign(peer: int, pawn: Pawn) -> void:
 	_by_peer[peer] = pawn
-	if pawn.controller_manager: # Claude 2026-11-16 (pawn M4); the check (wider audit): a pawn built without one, as _clear allows for
+	if pawn.controller_manager: # a pawn built without one, as _clear allows for
 		pawn.controller_manager.set_has_player(true)
 	if not pawn.tree_exiting.is_connected(_on_pawn_leaving):
 		pawn.tree_exiting.connect(_on_pawn_leaving.bind(pawn), CONNECT_ONE_SHOT)
 	if peer == _local_peer() and controller:
-		controller.take_pawn(pawn) # Claude 2026-11-16: this stops the controller's spectating too
-		if _spectating: # Claude 2026-11-16
+		controller.take_pawn(pawn) # this stops the controller's spectating too
+		if _spectating:
 			_spectating = false
 			spectating_changed.emit(false)
 	possessed.emit(peer, pawn)
@@ -258,7 +262,7 @@ func _clear(peer: int) -> void:
 	if peer == _local_peer() and controller:
 		controller.take_pawn(null)
 	if is_instance_valid(pawn):
-		if pawn.controller_manager: # Claude 2026-11-16 (pawn M4)
+		if pawn.controller_manager:
 			pawn.controller_manager.set_has_player(false)
 		if pawn.tree_exiting.is_connected(_on_pawn_leaving):
 			pawn.tree_exiting.disconnect(_on_pawn_leaving)
@@ -347,8 +351,8 @@ func _on_network_message(bytes: PackedByteArray) -> void:
 func _apply_from_server(peer: int, entity_id: int) -> void:
 	if _by_peer.has(peer):
 		_clear(peer)
-	# Claude 2026-11-16 (wider audit): whatever this peer was waiting to be given is out of date now. It stayed listed, so a pawn
-	# that spawned here later was handed to a peer that had since let go or taken another.
+	# Whatever this peer was waiting to be given is out of date now, so a pawn that spawns here later isn't handed to a peer that has
+	# since let go or taken another.
 	for waiting_id: int in _waiting.keys():
 		if _waiting[waiting_id] == peer:
 			_waiting.erase(waiting_id)
@@ -394,7 +398,7 @@ func _on_request(peer: int, bytes: PackedByteArray) -> void:
 	possess_for(peer, pawn)
 
 
-## Claude 2026-11-07: server: a player has gone. Letting go sets the pawn's owner to 0, so NetworkSession doesn't remove it with
+## Server: a player has gone. Letting go sets the pawn's owner to 0, so NetworkSession doesn't remove it with
 ## the rest of what they owned. AIActivationManager switches it off if its ground unloads, like any pawn with no player.
 func _on_player_leaving(peer: int) -> void:
 	release_for(peer)

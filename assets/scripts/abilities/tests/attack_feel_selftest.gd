@@ -4,7 +4,7 @@
 ## and invulnerability: a pawn whose running ability has an InvulnerabilityInterceptor isn't hit by a swing, and a dashing pawn takes no
 ## hit at all.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/attack_feel_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/abilities/tests/attack_feel_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

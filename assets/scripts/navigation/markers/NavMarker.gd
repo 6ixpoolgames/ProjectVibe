@@ -1,12 +1,12 @@
-## Written by Claude (claude-opus-5-5), 2026-11-06: the base data object for nav markers (nav spec section 21.2).
-## A marker says "this spot means something to nav or AI", such as a ladder, a cover spot or a seat.
-## It's plain data with no behaviour. Modules hold the code that acts on markers, so a marker nothing
-## handles is simply ignored.
+# Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
+## The base data object for nav markers: "this spot means something to nav or AI" (nav spec section 21.2).
 ##
-## A marker is INPUT. When it's registered, NavMarkerManager copies its position, tag and enabled state into its own
+## A ladder, a cover spot or a seat. It's plain data with no behaviour: modules (NavMarkerModule) hold the code that acts on markers,
+## so a marker nothing handles is simply ignored.
+## [br]
+## A marker is input. When it's registered, NavMarkerManager copies its position, tag and enabled state into its own
 ## rows, so changing those here afterwards does nothing. To switch a marker on or off during play, call
 ## NavMarkerManager.set_enabled(id, value).
-##
 # GDScript note: a Resource is a data object Godot can edit in the inspector and save to a file.
 # It's much lighter than a node, because it isn't in the scene tree and gets no per-frame calls.
 class_name NavMarker

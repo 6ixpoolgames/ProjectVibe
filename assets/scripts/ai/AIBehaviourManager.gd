@@ -1,43 +1,50 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: picks and runs the pawn's AI behaviour. A part on the pawn, added by
-## PawnInitializer, with its behaviours (AIBehaviourBase nodes) as children. Pawn spec sections 10.7 and 10.8.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Picks and runs the pawn's AI behaviour, judging between its behaviours by score.
 ##
-## It only judges between behaviours. Each behaviour holds its own checks, score and actions.
-##
+## A part on the pawn, added by PawnInitializer (or the game's AI brain, [code]PawnDefaultsRes.ai_brain[/code]), with its behaviours
+## ([AIBehaviourBase] nodes) as children. Pawn spec sections 10.7 and 10.8. It only judges between behaviours. Each behaviour holds its
+## own checks, score and actions.
+## [br]
 ## At each decision (pawn spec 10.8):
-##   0. Interrupts: if the running behaviour can't be replaced by this decision's reason, it keeps running and that's all.
-##   1. Valid: the behaviours the current state allows.
-##   2. Hard rules, with no behaviour code run: drop any on cooldown, needing a target when there's none, or whose action can't start.
-##   3. Ranges: each one's result can only land between floor = min_score + persistence - jitter and
-##      ceiling = max_score + persistence + jitter. One whose ceiling is below the highest floor can't win, so it's dropped.
-##      Claude 2026-11-09: a floor is only certain if its behaviour is available, so the highest floor is taken from the first
-##      available behaviour, checking from the highest floor down (usually one is_available() call).
-##   4. Scoring, highest ceiling first: is_available() and score() run, persistence and this decision's jitter are added. As soon as
-##      the next ceiling can't beat the best result, the rest are skipped.
-##   5. Jitter: each behaviour gets its own offset within ± its jitter, from the context's replayable random numbers.
-##   6. Ties: results within tie_margin are a tie. With randomize_ties one is picked at random, otherwise the fixed order decides.
-##   7. Switching: if the winner isn't the running one, the old one's exit() runs, then the new one's enter(), and its persistence
-##      starts.
-## Between decisions only the running behaviour's tick() runs, every tick_interval_ticks (Claude 2026-11-09). When it returns
-## SUCCEEDED or FAILED, the manager decides at once.
-##
+## [br]0. Interrupts: if the running behaviour can't be replaced by this decision's reason, it keeps running and that's all.
+## [br]1. Valid: the behaviours the current state allows.
+## [br]2. Hard rules, with no behaviour code run: drop any on cooldown, needing a target when there's none, or whose action can't
+##   start.
+## [br]3. Ranges: each one's result can only land between floor = min_score + persistence - jitter and ceiling = max_score +
+##   persistence + jitter. One whose ceiling is below the highest floor can't win, so it's dropped. A floor is only certain if its
+##   behaviour is available, so the highest floor is taken from the first available behaviour, checking from the highest floor down
+##   (usually one is_available() call).
+## [br]4. Scoring, highest ceiling first: is_available() and score() run, persistence and this decision's jitter are added. As soon
+##   as the next ceiling can't beat the best result, the rest are skipped.
+## [br]5. Jitter: each behaviour gets its own offset within ± its jitter, from the context's replayable random numbers.
+## [br]6. Ties: results within [member tie_margin] are a tie. With [member randomize_ties] one is picked at random, otherwise the
+##   fixed order decides.
+## [br]7. Switching: if the winner isn't the running one, the old one's exit() runs, then the new one's enter(), and its persistence
+##   starts.
+## [br]
+## Between decisions only the running behaviour's tick() runs, every tick_interval_ticks. When it returns SUCCEEDED or FAILED, the
+## manager decides at once. When the pawn dies, the running behaviour stops (reason "died").
+## [br]
 ## How to use it (outside code only talks to the manager):
-##   pawn.ai_context.behaviour_manager.get_running_behaviour()
-##   pawn.ai_context.behaviour_manager.add_persistence_ticks(&"Chase", 60)       # say after landing a hit
-##   pawn.ai_context.behaviour_manager.set_persistence_speed(&"Chase", 0.5)
-##   pawn.ai_context.behaviour_manager.set_interrupt_threshold(&"Chase", 25)     # say for a berserk effect
-##   pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)          # say for a confused effect
-##   behaviour_changed(old_behaviour, new_behaviour, reason)
-##
+## [codeblock]
+## pawn.ai_context.behaviour_manager.get_running_behaviour()
+## pawn.ai_context.behaviour_manager.add_persistence_ticks(&"Chase", 60)    # say after landing a hit
+## pawn.ai_context.behaviour_manager.set_persistence_speed(&"Chase", 0.5)
+## pawn.ai_context.behaviour_manager.set_interrupt_threshold(&"Chase", 25)  # say for a berserk effect
+## pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say for a confused effect
+## [/codeblock]
+## Listen to [signal behaviour_changed] to follow its choices.
+## [br]
 ## The fixed order: behaviours are sorted by name once, when the manager is ready. Never by the order they were added.
-##
+## [br]
 ## What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd):
-##   - Its parent isn't a Pawn: it warns and does nothing.
-##   - No behaviours at all: it does nothing, so a script can drive the AI controller directly. That's the default part.
-##   - A state that allows none of its behaviours: the pawn stands still, with a warning naming the state, once.
-##   - Every allowed behaviour is ruled out for now (cooldowns, no target): the pawn stands still until one can run. No warning.
-##   - A score() outside min_score to max_score: a warning naming the behaviour, once, in debug builds. It would break step 3 or 4.
-##   - A behaviour with an automatic name (starting with "@"): it warns, because names must be the same on every run.
-##   - A behaviour asked for by name that doesn't exist: it warns and does nothing.
+## [br]- Its parent isn't a Pawn: it warns and does nothing.
+## [br]- No behaviours at all: it does nothing, so a script can drive the AI controller directly. That's the default part.
+## [br]- A state that allows none of its behaviours: the pawn stands still, with a warning naming the state, once.
+## [br]- Every allowed behaviour is ruled out for now (cooldowns, no target): the pawn stands still until one can run. No warning.
+## [br]- A score() outside min_score to max_score: a warning naming the behaviour, once, in debug builds. It would break step 3 or 4.
+## [br]- A behaviour with an automatic name (starting with "@"): it warns, because names must be the same on every run.
+## [br]- A behaviour asked for by name that doesn't exist: it warns and does nothing.
 class_name AIBehaviourManager
 extends Node
 
@@ -51,6 +58,7 @@ signal behaviour_changed(old_behaviour: AIBehaviourBase, new_behaviour: AIBehavi
 ## Results closer than this count as a tie.
 @export var tie_margin := 0.0001
 
+## The pawn this is a part of, or null.
 var pawn: Pawn = null
 
 var _behaviours: Array[AIBehaviourBase] = [] # by name
@@ -82,7 +90,7 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	_collect_behaviours()
-	# Claude 2026-11-16 (pawn M3): the running behaviour stops when the pawn dies: this listens for it now, where Pawn._die used to call it.
+	# The running behaviour stops when the pawn dies (the AbilityManager's died).
 	var abilities := _sibling_ability_manager()
 	if abilities:
 		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: stop_running("died"))
@@ -103,7 +111,8 @@ func get_behaviours() -> Array[AIBehaviourBase]:
 	return _behaviours.duplicate()
 
 
-## The pawn calls this when a decision is waiting (see AIContextComponent.request_decision). Uses up the waiting decision.
+## [method AIContextComponent.run_ai] calls this when a decision is waiting (see [method AIContextComponent.request_decision]). Uses
+## up the waiting decision.
 func decide(tick: int) -> void:
 	if pawn == null or pawn.ai_context == null:
 		return
@@ -143,8 +152,8 @@ func decide(tick: int) -> void:
 		_warned_states[state_name] = true
 		push_warning("AIBehaviourManager: no behaviour on %s is allowed in the state %s, so it stands still there." % [pawn.name, state_name])
 	# 3, continued. A floor is only certain if its behaviour is available, so the highest floor comes from the first available
-	# behaviour, checking from the highest floor down. (Claude 2026-11-09: found in step 8b. A behaviour with a fixed score that
-	# didn't apply right now, such as Search with nothing certain, would otherwise shut out ones that did.)
+	# behaviour, checking from the highest floor down. Otherwise a behaviour with a fixed score that doesn't apply right now, such as
+	# Search with nothing certain, would shut out ones that do.
 	var highest_floor := -INF
 	_candidates.sort_custom(_by_floor)
 	for behaviour in _candidates:
@@ -191,14 +200,13 @@ func decide(tick: int) -> void:
 	_start(best, reason, tick)
 
 
-## The pawn calls this every tick the AI runs, after any decision. Ticks the running behaviour.
+## [method AIContextComponent.run_ai] calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 func tick_running(tick: int) -> void:
 	if _running == null or pawn == null:
 		return
-	# Claude 2026-11-09: only every tick_interval_ticks, counted from when it started (ai_stress: Chase ticking every tick was 1.8 ms
-	# of a 200-pawn crowd).
-	var interval := TickDriver.ticks_at_rate(_running.tick_interval_ticks) # Claude 2026-11-09 (scaling spec step 6)
-	# Claude 2026-11-16 (pawn spec 8.21): or one skipped since its pawn's last run, for a pawn running every Nth tick.
+	# Only every tick_interval_ticks, counted from when it started: ticking every tick costs a crowd far more (ai_stress).
+	var interval := TickDriver.ticks_at_rate(_running.tick_interval_ticks)
+	# Or one skipped since its pawn's last run, for a pawn running every Nth tick (pawn spec 8.21).
 	if interval > 1 and not pawn.fired_since_last_run(tick, -_running.started_tick, interval):
 		return
 	var context := pawn.ai_context
@@ -210,7 +218,7 @@ func tick_running(tick: int) -> void:
 	decide(tick)
 
 
-## Claude 2026-11-09: stops the running behaviour, if any; its exit() gets this reason. The pawn calls it when it dies.
+## Stops the running behaviour, if any; its exit() gets this reason. Called with "died" when the pawn dies.
 func stop_running(reason: String) -> void:
 	_stop_running(reason, _now())
 
@@ -254,7 +262,7 @@ func _can_replace_running(event_priority: int, event_is_normal: bool, tick: int)
 	if event_priority < _running.interrupt_threshold:
 		return false
 	# min_run_ticks 0 means no minimum at all, whatever the ticks say.
-	if event_is_normal and _running.min_run_ticks > 0 and tick - _running.started_tick < TickDriver.ticks_at_rate(_running.min_run_ticks): # Claude 2026-11-09 (step 6)
+	if event_is_normal and _running.min_run_ticks > 0 and tick - _running.started_tick < TickDriver.ticks_at_rate(_running.min_run_ticks):
 		return false
 	return true
 
@@ -305,12 +313,11 @@ func _find(behaviour_name: StringName) -> AIBehaviourBase:
 	for behaviour in _behaviours:
 		if behaviour.name == behaviour_name:
 			return behaviour
-	push_warning("AIBehaviourManager: %s has no behaviour called %s." % [String(pawn.name) if pawn else "this pawn", behaviour_name]) # Claude 2026-11-12: String(), so both sides are text
+	push_warning("AIBehaviourManager: %s has no behaviour called %s." % [String(pawn.name) if pawn else "this pawn", behaviour_name]) # String(), so both sides are text
 	return null
 
 
-# Claude 2026-11-16 (wider audit): the TickDriver autoload, as the rest of this file uses it; this looked it up by path each time,
-# with a fallback that could never run.
+# The tick now, from the TickDriver autoload.
 func _now() -> int:
 	return TickDriver.tick
 
@@ -330,7 +337,8 @@ func _collect_behaviours() -> void:
 	for i in _behaviours.size():
 		_behaviours[i].decision_index = i
 
-# Claude 2026-11-16 (pawn M3): the pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
+# The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
+# REFACTOR: the same lookup as AIContextComponent's (reusable). See CHANGELOG.md.
 func _sibling_ability_manager() -> AbilityManager:
 	if pawn == null:
 		return null

@@ -1,27 +1,27 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16 (the owner's request): a camera that flies freely, for a player with no pawn: the
-## spectator view between matches, while waiting to respawn, or after letting go of a pawn. PossessionCoordinator.spectate() starts it:
-## the PlayerController makes one the first time and flies it with the player's keys and mouse.
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: camera/CHANGELOG.md.
+## A camera that flies freely, for a player with no pawn: the spectator.
 ##
-## It isn't a Pawn. A Pawn is a whole character: it's simulated on ticks, rolled back, networked, recorded in replays, counted on a team,
-## seen by the AI and killed by the kill floor. A spectator needs none of that. Unreal does the same: its PlayerController spawns its
-## spectator on its own machine only, and nothing else in the game knows it's there.
-##
-## So it's local and per rendered frame, like the camera arm: never ticked, never sent over the network, never rolled back.
-##
+## For the spectator view between matches, while waiting to respawn, or after letting go of a pawn. PossessionCoordinator.spectate()
+## starts it: the PlayerController makes one the first time and flies it with the player's keys and mouse.
+## [br]
+## It isn't a Pawn. A Pawn is a whole character: it's simulated on ticks, rolled back, networked, recorded in replays, counted on a
+## team, seen by the AI and killed by the kill floor. A spectator needs none of that. Unreal does the same: its PlayerController spawns
+## its spectator on its own machine only, and nothing else in the game knows it's there. So it's local and per rendered frame, like
+## the camera arm: never ticked, never sent over the network, never rolled back.
+## [br]
 ## What it carries:
-##   View              a VirtualCamera, which the PlayerController's real camera follows while spectating
-##   StreamingSource   keeps the world loaded around it while it's flying (keeps_world_loaded), so flying away from every pawn still
-##                     shows ground. On a client it loads only that client's world, as any camera's source does.
-##
-## How to use it: nothing to set up for the default. A game wanting different settings or a model for its spectator makes a scene whose
-## root is a FreeFlyCamera and sets it as the PlayerController's spectator_scene.
-##
-## Controls (read by the PlayerController): WASD flies where the view looks, Space and Ctrl go straight up and down (Claude
-## 2026-11-16, the owner's call: the jump and crouch keys, the PlayerController's fly_up_key and fly_down_key; it was Q and E), and the mouse looks. Claude 2026-11-16 (the owner's numbers): 10 m/s, 25 with
-## the sprint key held, and with it held the wheel ramps that fast speed up or down, up to 75. Claude 2026-11-16 (the owner's request):
-## the wheel on its own zooms, by narrowing the field of view as a lens does, so it stays where it is; the mouse turns slower to match.
-## The middle mouse button (middleMouse_button) resets the zoom.
-##
+## [br]- View: a VirtualCamera, which the PlayerController's real camera follows while spectating.
+## [br]- StreamingSource: keeps the world loaded around it while it's flying ([member keeps_world_loaded]), so flying away from every
+##   pawn still shows ground. On a client it loads only that client's world, as any camera's source does.
+## [br]
+## How to use it: nothing to set up for the default. A game wanting different settings or a model for its spectator makes a scene
+## whose root is a FreeFlyCamera and sets it as the PlayerController's spectator_scene.
+## [br]
+## Controls (read by the PlayerController): WASD flies where the view looks, Space and Ctrl go straight up and down (the jump and
+## crouch keys, the PlayerController's fly_up_key and fly_down_key), and the mouse looks. 10 m/s, 25 with the sprint key held, and
+## with it held the wheel ramps that fast speed up or down, up to 75. The wheel on its own zooms, by narrowing the field of view as a
+## lens does, so it stays where it is; the mouse turns slower to match. The middle mouse button (middleMouse_button) resets the zoom.
+## [br]
 ## It goes through ground and walls: there's no collision.
 class_name FreeFlyCamera
 extends Node3D
@@ -34,15 +34,15 @@ extends Node3D
 @export var max_fast_speed := 75.0
 ## How much one notch of the wheel changes the fast speed, in metres per second.
 @export var fast_speed_step := 5.0
-## Claude 2026-11-16: how much one notch of the wheel zooms in or out, as a multiple: 1.25 makes things look 1.25 times bigger.
+## How much one notch of the wheel zooms in or out, as a multiple: 1.25 makes things look 1.25 times bigger.
 @export var zoom_per_notch := 1.25
-## Claude 2026-11-16: the most it zooms in, as a multiple of how big things look at fov.
+## The most it zooms in, as a multiple of how big things look at fov.
 @export var max_zoom := 8.0
 ## How long it takes to reach full speed from standing, or to stop, in seconds. 0 is at once.
 @export var seconds_to_full_speed := 0.15
 ## The field of view while it's the view, in degrees.
 @export_range(1.0, 179.0, 0.1) var fov := 75.0
-## On: it keeps the world loaded around it while it's flying, through its StreamingSource. Claude 2026-11-16: can be changed while
+## On: it keeps the world loaded around it while it's flying, through its StreamingSource. It can be changed while
 ## flying (the mass battle turns it off, so its own sources decide what's loaded).
 ## GDScript note: set(value) runs whenever the value is assigned, so the source follows at once.
 @export var keeps_world_loaded := true:
@@ -59,15 +59,15 @@ var streaming_source: StreamingSource = null
 var _velocity := Vector3.ZERO
 var _flying := false
 var _fast_speed := -1.0 # the fast speed now, after the wheel; -1 until first used, then fast_speed
-var _zoom := 1.0 # Claude 2026-11-16: 1 is no zoom
+var _zoom := 1.0 # 1 is no zoom
 
 
-## Claude 2026-11-16: how zoomed in it is: 1 is none, 2 makes things look twice as big.
+## How zoomed in it is: 1 is none, 2 makes things look twice as big.
 func get_zoom() -> float:
 	return _zoom
 
 
-## Claude 2026-11-16: zooms by this many notches of the wheel (in is positive), between none and max_zoom.
+## Zooms by this many notches of the wheel (in is positive), between none and max_zoom.
 func change_zoom(notches: float) -> void:
 	_zoom = clampf(_zoom * pow(zoom_per_notch, notches), 1.0, max_zoom)
 	_apply_zoom()
@@ -96,7 +96,7 @@ func _ready() -> void:
 		view = VirtualCamera.new()
 		view.name = "View"
 		add_child(view)
-	_apply_zoom() # Claude 2026-11-16: was view.fov = fov
+	_apply_zoom() # sets view.fov for the zoom
 	streaming_source = get_node_or_null(^"StreamingSource") as StreamingSource
 	if streaming_source == null:
 		streaming_source = StreamingSource.new()
@@ -110,7 +110,7 @@ func begin(at: Vector3) -> void:
 	global_position = at
 	_velocity = Vector3.ZERO
 	_flying = true
-	_zoom = 1.0 # Claude 2026-11-16: each time it starts, unzoomed
+	_zoom = 1.0 # each time it starts, unzoomed
 	_apply_zoom()
 	if streaming_source:
 		streaming_source.active = keeps_world_loaded
@@ -129,20 +129,20 @@ func is_flying() -> bool:
 	return _flying
 
 
-## Claude 2026-11-16: jumps to this place and stops there, as for an overview point. Which way it faces is the player's look, which
+## Jumps to this place and stops there, as for an overview point. Which way it faces is the player's look, which
 ## the PlayerController sets (PlayerController.place_spectator()).
 func teleport(to: Vector3) -> void:
 	global_position = to
 	_velocity = Vector3.ZERO
 
 
-## Claude 2026-11-16: back to no zoom (the middle mouse button).
+## Back to no zoom (the middle mouse button).
 func reset_zoom() -> void:
 	_zoom = 1.0
 	_apply_zoom()
 
 
-# Claude 2026-11-16: the view's field of view for the zoom. Zooming by 2 halves the width of what's seen, so the angle's tangent halves.
+# The view's field of view for the zoom. Zooming by 2 halves the width of what's seen, so the angle's tangent halves.
 func _apply_zoom() -> void:
 	if view:
 		view.fov = rad_to_deg(2.0 * atan(tan(deg_to_rad(fov) / 2.0) / _zoom))

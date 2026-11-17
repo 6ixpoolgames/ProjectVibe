@@ -1,25 +1,31 @@
-## Written by Claude (claude-opus-5-5), 2026-11-10: keeps a number of pawns of one type alive, replacing each that dies after a delay.
-## Put one in a level and set it in the inspector. Works on the server or offline; on a client it does nothing, since the server's
-## pawns reach clients by themselves. It spawns through GameMode.spawn_manager, which it needs.
+# Written by Claude (claude-opus-5-5), 2026-11-10. History: spawning/CHANGELOG.md.
+## Keeps a number of pawns of one type alive, replacing each that dies after a delay.
 ##
-## Where its pawns appear: with spawn_group empty, within scatter_radius of the spawner itself, facing the spawner's way; with a
-## group, at SpawnPoints in that group that accept the pawn's team (see SpawnManager, "Choosing a point").
-##
+## Put one in a level and set it in the inspector (pawn spec 8.9). Works on the server or offline; on a client it does nothing, since
+## the server's pawns reach clients by themselves. It spawns through GameMode.spawn_manager, which it needs.
+## [br]
+## Where its pawns appear: with [member spawn_group] empty, within [member scatter_radius] of the spawner itself, facing the
+## spawner's way; with a group, at SpawnPoints in that group that accept the pawn's team (see SpawnManager, "Choosing a point").
+## [br]
 ## What it does, checked between ticks:
-##   - Fills up to keep_alive at once when it's switched on, and after that whenever it has fewer than keep_alive living pawns and
-##     no replacement is still waiting.
-##   - A pawn of its own that dies: its body is removed after body_seconds, and a replacement is due respawn_seconds after the death.
-##     The replacement is a fresh pawn, not the dead one revived, so its AI starts clean (no memory of the fight it died in).
-##   - A pawn of its own that's removed some other way (the game despawned it) counts as a death, without a body to remove.
-##   - total_limit above 0 stops it after that many, in all. 0: no limit.
-##   - only_where_loaded on: it waits while the ground around it isn't loaded, the rule AIActivationManager uses, so a spawner no
-##     player is near doesn't run AI nobody sees. With no terrain, the ground always counts as loaded.
+## [br]- Fills up to [member keep_alive] at once when it's switched on, and after that whenever it has fewer than keep_alive living
+##   pawns and no replacement is still waiting.
+## [br]- A pawn of its own that dies: its body is removed after [member body_seconds], and a replacement is due
+##   [member respawn_seconds] after the death. The replacement is a fresh pawn, not the dead one revived, so its AI starts clean (no
+##   memory of the fight it died in).
+## [br]- A pawn of its own that's removed some other way (the game despawned it) counts as a death, without a body to remove.
+## [br]- [member total_limit] above 0 stops it after that many, in all. 0: no limit.
+## [br]- [member only_where_loaded] on: it waits while the ground around it isn't loaded, the rule AIActivationManager uses, so a
+##   spawner no player is near doesn't run AI nobody sees. With no terrain, the ground always counts as loaded.
+## [br]
 ## All its delays count ticks (SpawnManager.after_seconds), so pausing the tick driver pauses them.
-##
+## [br]
 ## How to use it from code:
-##   spawner.active = true          # starts filling; false stops spawning, and leaves its pawns where they are
-##   spawner.refill_now()           # fills up at once, skipping the replacements' wait
-##   spawner.get_alive()            # its living pawns
+## [codeblock]
+## spawner.active = true          # starts filling; false stops spawning, and leaves its pawns where they are
+## spawner.refill_now()           # fills up at once, skipping the replacements' wait
+## spawner.get_alive()            # its living pawns
+## [/codeblock]
 class_name PawnSpawner
 extends Node3D
 
@@ -34,8 +40,7 @@ signal pawn_died(pawn: Pawn)
 		active = value
 		if active and is_inside_tree():
 			_update.call_deferred() # GDScript note: deferred, so setting it from _ready or a signal doesn't spawn halfway through
-## The NetworkSession type name to spawn (NetworkSession.register_type).
-## Claude 2026-11-16 (wider audit): empty by default; it was "goblin", a type only the samples register. Empty, it spawns nothing.
+## The NetworkSession type name to spawn (NetworkSession.register_type). Empty, the default: it spawns nothing, and warns once.
 @export var pawn_type := ""
 ## How many living pawns it keeps.
 @export_range(0, 1000, 1, "or_greater") var keep_alive := 3
@@ -89,9 +94,9 @@ func get_spawned_total() -> int:
 	return _spawned_total
 
 
-# Between ticks, and when switched on: drop pawns that are gone, then spawn what's missing and not waiting.
-var _warned_no_type := false # Claude 2026-11-16 (wider audit)
+var _warned_no_type := false
 
+# Between ticks, and when switched on: drop pawns that are gone, then spawn what's missing and not waiting.
 func _update() -> void:
 	if not active or not is_inside_tree():
 		return
@@ -113,7 +118,7 @@ func _update() -> void:
 		return
 	if only_where_loaded and not _ground_loaded():
 		return
-	if pawn_type == "": # Claude 2026-11-16 (wider audit): nothing chosen to spawn; said once, where it used to try "goblin"
+	if pawn_type == "": # nothing chosen to spawn; said once
 		if not _warned_no_type:
 			_warned_no_type = true
 			push_warning("PawnSpawner '%s' has no pawn_type, so it spawns nothing. Set it to a type registered with NetworkSession.register_type." % name)
@@ -126,7 +131,7 @@ func _update() -> void:
 			return # no point, or the type isn't registered: SpawnManager has warned
 		_spawned_total += 1
 		_alive.append(pawn.get_instance_id())
-		if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): died moved to the AbilityManager
+		if pawn.ability_manager: # died is the AbilityManager's signal
 			pawn.ability_manager.died.connect(_on_died.bind(pawn.get_instance_id()))
 		spawned.emit(pawn)
 
@@ -162,6 +167,8 @@ func _manager() -> SpawnManager:
 
 
 # The rule AIActivationManager uses: every chunk within the margin is built. No terrain: always loaded.
+# REFACTOR: a copy of AIActivationManager's rule; one shared "is the ground loaded here" check would keep them alike (duplicated
+# logic). See CHANGELOG.md.
 func _ground_loaded() -> bool:
 	var terrains := get_tree().get_nodes_in_group(TerrainGenerator.GROUP)
 	if terrains.is_empty():

@@ -1,0 +1,100 @@
+/* Written by Claude (claude-opus-5-5), 2026-11-17: the wiki's look, on top of MkDocs Material. Copied into the site by
+   tools/docs/build_wiki.py. Colours are set per scheme (light "default", dark "slate") so both read well. */
+
+:root {
+  --pb-ink: #1f2a3d;
+  --pb-amber: #e39b2d;
+  --pb-teal: #2a9d8f;
+  --pb-rose: #d1495b;
+  --pb-slate: #7b8597;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #24324a;
+  --md-primary-fg-color--light: #34476a;
+  --md-primary-fg-color--dark: #18223a;
+  --md-accent-fg-color: var(--pb-amber);
+  --md-typeset-a-color: #2563a8;
+  --pb-card-bg: #ffffff;
+  --pb-card-border: #e3e7ee;
+  --pb-hero-from: #24324a;
+  --pb-hero-to: #3b5280;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #1a2233;
+  --md-primary-fg-color--light: #283450;
+  --md-primary-fg-color--dark: #121826;
+  --md-accent-fg-color: #f0b75a;
+  --md-default-bg-color: #12161f;
+  --md-typeset-a-color: #7fb3ea;
+  --pb-card-bg: #1a202c;
+  --pb-card-border: #2a3244;
+  --pb-hero-from: #1d2740;
+  --pb-hero-to: #2c3d63;
+}
+
+/* Reading width and rhythm */
+.md-grid { max-width: 76rem; }
+.md-typeset { font-size: 0.78rem; line-height: 1.7; }
+.md-typeset h1 { font-weight: 700; letter-spacing: -0.01em; }
+.md-typeset h2 { font-weight: 650; margin-top: 2em; padding-bottom: 0.3em; border-bottom: 1px solid var(--pb-card-border); }
+.md-typeset h3 { font-weight: 600; }
+
+/* The landing page's banner */
+.pb-hero {
+  margin: 0 0 2rem;
+  padding: 2.4rem 2rem;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--pb-hero-from), var(--pb-hero-to));
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+}
+.pb-hero h1 { color: #fff; margin: 0 0 0.4rem; font-size: 2.1rem; }
+.pb-hero p { margin: 0.3rem 0; font-size: 0.95rem; opacity: 0.92; max-width: 46rem; }
+.pb-hero .md-button { margin: 1rem 0.5rem 0 0; color: #fff; border-color: rgba(255, 255, 255, 0.6); }
+.pb-hero .md-button--primary { background: var(--md-accent-fg-color); border-color: var(--md-accent-fg-color); color: #1b1b1b; }
+
+/* Cards (Material's "grid cards") */
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid > .card {
+  background: var(--pb-card-bg);
+  border: 1px solid var(--pb-card-border);
+  border-radius: 12px;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-2px);
+  border-color: var(--md-accent-fg-color);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12);
+}
+.md-typeset .grid.cards .twemoji.lg { color: var(--md-accent-fg-color); }
+
+/* Status badges on the systems page */
+.pb-status {
+  display: inline-block;
+  padding: 0.1em 0.65em;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  color: #fff;
+  background: var(--pb-slate);
+}
+.pb-status.built { background: var(--pb-teal); }
+.pb-status.partly { background: var(--pb-amber); color: #1b1b1b; }
+.pb-status.planned { background: var(--pb-rose); }
+.pb-status-note { display: block; margin-top: 0.4rem; font-size: 0.7rem; opacity: 0.8; }
+
+/* Tables: lighter rules, a tinted header, rows that are easy to follow */
+.md-typeset table:not([class]) { border-radius: 8px; font-size: 0.72rem; border: 1px solid var(--pb-card-border); }
+.md-typeset table:not([class]) th { background: var(--md-primary-fg-color); color: #fff; font-weight: 600; }
+.md-typeset table:not([class]) tr:hover { background: rgba(227, 155, 45, 0.07); }
+
+/* Code */
+.md-typeset code { border-radius: 4px; }
+.md-typeset pre > code { border-radius: 8px; }
+
+/* Reference pages: function and setting lists breathe a little */
+.md-typeset ul li { margin-bottom: 0.35em; }

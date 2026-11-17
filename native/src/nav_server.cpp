@@ -1,4 +1,6 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: NavServer, the one public entry point (spec section 6).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// NavServer: settings, the tick's phases, input layers, interests, path searches, links, debug and bindings. The class is
+// described in nav_server.h.
 #include "nav_server.h"
 
 #include "nav_hooks.h"
@@ -74,7 +76,7 @@ void NavServer::configure(const Dictionary &config) {
 	getf("edge_max_error", c.edge_max_error);
 	getf("detail_sample_dist", c.detail_sample_dist);
 	getf("detail_sample_max_error", c.detail_sample_max_error);
-	// Claude 2026-11-08: links the tile build finds by itself.
+	// Links the tile build finds by itself.
 	if (config.has("auto_links")) {
 		c.auto_links = bool(config["auto_links"]);
 	}
@@ -86,8 +88,7 @@ void NavServer::configure(const Dictionary &config) {
 	if (config.has("auto_link_jump_action")) {
 		m_auto_jump_action = StringName(config["auto_link_jump_action"]);
 	}
-	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): an empty tier_radii list is ignored, keeping the default tiers.
-	// Before, tier_count became 1 and the loop read radii[0] from an empty list, past its end.
+	// An empty tier_radii list is ignored, keeping the default tiers.
 	if (config.has("tier_radii") && PackedFloat32Array(config["tier_radii"]).size() > 0) {
 		PackedFloat32Array radii = config["tier_radii"];
 		c.tier_count = std::clamp(int(radii.size()), 1, navcore::MAX_TIERS);
@@ -102,7 +103,7 @@ void NavServer::configure(const Dictionary &config) {
 	c.cell_height = std::max(c.cell_height, 0.01f);
 	c.tile_size_cells = std::clamp(c.tile_size_cells, 16, 256);
 	c.max_builds_in_flight = std::max(c.max_builds_in_flight, 1);
-	c.link_jump_distance = std::clamp(c.link_jump_distance, 0.0f, 10.0f); // Claude 2026-11-08: the border grows with it
+	c.link_jump_distance = std::clamp(c.link_jump_distance, 0.0f, 10.0f); // the tile border grows with it
 	c.link_drop_reach = std::clamp(c.link_drop_reach, 0.0f, 10.0f);
 	c.link_spacing = std::max(c.link_spacing, c.cell_size);
 	c.tier_radii[0] = c.agent_radius; // tier 0 is by definition the smallest pawn
@@ -119,7 +120,7 @@ void NavServer::configure(const Dictionary &config) {
 	m_tiles.reset(m_cfg);
 	m_tiles.resync_after_pool_stop();
 	m_paths.clear();
-	m_path_results.clear(); // Claude 2026-11-17: answers to searches that no longer apply
+	m_path_results.clear(); // answers to searches that no longer apply
 	if (!m_ground.init(m_cfg)) {
 		UtilityFunctions::push_error("NavServer: could not initialise the Detour nav mesh");
 	}
@@ -148,7 +149,7 @@ Dictionary NavServer::get_config() const {
 	d["max_builds_in_flight"] = m_cfg.max_builds_in_flight;
 	d["worker_threads"] = m_cfg.worker_threads;
 	d["query_iterations_per_tick"] = m_cfg.query_iterations_per_tick;
-	d["auto_links"] = m_cfg.auto_links; // Claude 2026-11-08
+	d["auto_links"] = m_cfg.auto_links;
 	d["link_jump_distance"] = m_cfg.link_jump_distance;
 	d["link_jump_height"] = m_cfg.link_jump_height;
 	d["link_drop_height"] = m_cfg.link_drop_height;
@@ -181,13 +182,14 @@ void NavServer::tick(double delta) {
 	std::vector<navcore::PathOutcome> outcomes;
 	m_paths.process(m_ground, m_cfg.query_iterations_per_tick, outcomes);
 
-	// Phase 5 (crowd) arrives with agents in phase 3 of the build plan.
+	// Phase 5 (crowd) isn't here: CrowdBatch moves crowds when CrowdMover asks, on JobScheduler's workers, reading the nav mesh
+	// through ground().
 
 	m_last_tick_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
 	m_max_tick_ms = std::max(m_max_tick_ms, m_last_tick_ms);
 	++m_ticks;
 
-	// Claude 2026-11-17 (C++ bundle stage 3): every answer is kept for take_path_result too, and old ones nobody took are dropped.
+	// Every answer is kept for take_path_result too, and old ones nobody took are dropped.
 	for (auto it = m_path_results.begin(); it != m_path_results.end();) {
 		it = m_ticks - it->second.tick > RESULT_KEEP_TICKS ? m_path_results.erase(it) : std::next(it);
 	}
@@ -315,8 +317,8 @@ bool NavServer::submit_mesh(int layer, int64_t mesh_id, const PackedVector3Array
 		UtilityFunctions::push_error("NavServer.submit_mesh: ", String(err.c_str()));
 		return false;
 	}
-	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): dirty_bounds, as submit_heightmap has, for a mesh that changed
-	// only in part (a terrain edit, TerrainNavFeeder): only the tiles under it rebuild. Empty, the whole mesh's area does, as before.
+	// dirty_bounds, as submit_heightmap has, for a mesh that changed only in part (a terrain edit, TerrainNavFeeder): only the
+	// tiles under it rebuild. Empty, the whole mesh's area does.
 	const bool has_bounds = dirty_bounds.size.x > 0.0 || dirty_bounds.size.z > 0.0;
 	dirty(has_bounds ? rect_from_aabb(dirty_bounds) : changed);
 	return true;
@@ -388,15 +390,14 @@ void NavServer::remove_interest(int id) {
 int NavServer::find_path(const Vector3 &from, const Vector3 &to, int tier, bool use_links) {
 	const float a[3] = { float(from.x), float(from.y), float(from.z) };
 	const float b[3] = { float(to.x), float(to.y), float(to.z) };
-	return m_paths.push(a, b, tier, use_links); // Claude 2026-11-17: use_links
+	return m_paths.push(a, b, tier, use_links);
 }
 
 void NavServer::cancel_path(int request_id) {
 	m_paths.cancel(request_id);
-	m_path_results.erase(request_id); // Claude 2026-11-17
+	m_path_results.erase(request_id);
 }
 
-// Claude 2026-11-17 (C++ bundle stage 3): see the header.
 Dictionary NavServer::take_path_result(int request_id) {
 	auto found = m_path_results.find(request_id);
 	if (found == m_path_results.end()) {
@@ -422,10 +423,9 @@ PackedVector3Array NavServer::find_path_now(const Vector3 &from, const Vector3 &
 }
 
 Dictionary NavServer::find_path_now_with_links(const Vector3 &from, const Vector3 &to, int tier) {
-	return find_path_now_result(from, to, tier, true); // Claude 2026-11-17: the body moved into find_path_now_result
+	return find_path_now_result(from, to, tier, true);
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2): was find_path_now_with_links's body, with use_links passed on instead of always true.
 // Without links, every link id is 0 (the search fills none in).
 Dictionary NavServer::find_path_now_result(const Vector3 &from, const Vector3 &to, int tier, bool use_links) {
 	ensure_started();
@@ -558,7 +558,7 @@ Array NavServer::get_tile_states() const {
 		d["provisional"] = t.provisional;
 		d["has_live"] = t.has_live;
 		d["polys"] = t.poly_count;
-		d["links"] = t.link_count; // Claude 2026-11-08
+		d["links"] = t.link_count;
 		d["auto_links"] = t.auto_link_count;
 		d["build_ms"] = t.build_ms;
 		if (!t.error.empty()) {
@@ -616,7 +616,6 @@ void NavServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("submit_heightmap", "layer", "chunk", "heights", "samples", "spacing", "materials", "dirty_bounds"),
 			&NavServer::submit_heightmap, DEFVAL(PackedByteArray()), DEFVAL(AABB()));
 	ClassDB::bind_method(D_METHOD("release_chunk", "layer", "chunk"), &NavServer::release_chunk);
-	// Claude 2026-11-17 (C++ bundle stage 2): dirty_bounds added, empty by default.
 	ClassDB::bind_method(D_METHOD("submit_mesh", "layer", "mesh_id", "faces", "xform", "surface", "dirty_bounds"), &NavServer::submit_mesh,
 			DEFVAL(String("default")), DEFVAL(AABB()));
 	ClassDB::bind_method(D_METHOD("remove_mesh", "layer", "mesh_id"), &NavServer::remove_mesh);
@@ -627,14 +626,13 @@ void NavServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("move_interest", "id", "position"), &NavServer::move_interest);
 	ClassDB::bind_method(D_METHOD("remove_interest", "id"), &NavServer::remove_interest);
 
-	ClassDB::bind_method(D_METHOD("find_path", "from", "to", "tier", "use_links"), &NavServer::find_path, DEFVAL(0), DEFVAL(false)); // Claude 2026-11-17: use_links
+	ClassDB::bind_method(D_METHOD("find_path", "from", "to", "tier", "use_links"), &NavServer::find_path, DEFVAL(0), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("cancel_path", "request_id"), &NavServer::cancel_path);
-	ClassDB::bind_method(D_METHOD("take_path_result", "request_id"), &NavServer::take_path_result); // Claude 2026-11-17
+	ClassDB::bind_method(D_METHOD("take_path_result", "request_id"), &NavServer::take_path_result);
 	ClassDB::bind_method(D_METHOD("find_path_now", "from", "to", "tier"), &NavServer::find_path_now, DEFVAL(0));
 	ClassDB::bind_method(D_METHOD("closest_point", "point", "tier"), &NavServer::closest_point, DEFVAL(0));
-	// Claude 2026-11-08: links.
+	// Links.
 	ClassDB::bind_method(D_METHOD("find_path_now_with_links", "from", "to", "tier"), &NavServer::find_path_now_with_links, DEFVAL(0));
-	// Claude 2026-11-17 (C++ bundle stage 2)
 	ClassDB::bind_method(D_METHOD("find_path_now_result", "from", "to", "tier", "use_links"), &NavServer::find_path_now_result,
 			DEFVAL(0), DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("add_link", "start", "end", "two_way", "action"), &NavServer::add_link, DEFVAL(true), DEFVAL(StringName()));

@@ -1,12 +1,13 @@
-## Written by Claude (claude-opus-5-5), 2026-11-10: changes a stat's value while its effect lasts, such as MoveSpeed x0.7 for a slow. A
-## held part (EffectPart). Pawn spec 8.11.
+# Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
+## Changes a stat's value while its effect lasts, such as MoveSpeed x0.7 for a slow. A held part ([EffectPart]).
 ##
-## The stat's value becomes (base_value + every add) x every multiply, from all the held parts on the pawn for that stat, and goes
-## back to its base_value when they've all ended. With stacks, add counts once per stack and multiply is applied once per stack
-## (x0.7 twice is x0.49). The pawn's EffectManager works it out whenever its active list changes, on every machine, so movement a
-## client predicts agrees with the server.
+## Pawn spec 8.11. The stat's value becomes (base_value + every add) x every multiply, from all the held parts on the pawn for that
+## stat, and goes back to its base_value when they've all ended. With stacks, add counts once per stack and multiply is applied once
+## per stack (x0.7 twice is x0.49). The pawn's EffectManager works it out whenever its active list changes, on every machine, so
+## movement a client predicts agrees with the server.
+## [br]
 ## For a stat that changes during play (Health), this changes its most; if that falls below what it has now, what it has falls too.
-## While effects change a stat, set its base_value rather than its value: its value is worked out again whenever the list changes.
+## The stat keeps these changes through a new base_value (Stat.set_modifiers), so setting base_value while an effect holds is safe.
 class_name StatModifierPart
 extends EffectPart
 
@@ -22,6 +23,6 @@ func is_held() -> bool:
 	return true
 
 
-# Claude 2026-11-16 (wider audit): its share of the pawn's totals (the EffectManager did this sum itself, by class).
+# Its share of the pawn's totals: an add and a multiply for its stat.
 func add_held(totals: EffectHeldTotals, stacks: int) -> void:
 	totals.change_stat(stat, add, multiply, stacks)

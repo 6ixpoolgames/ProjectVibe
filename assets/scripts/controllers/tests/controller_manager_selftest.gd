@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for ControllerManager and AIController. Checks the rule for who's
 ## in charge, the odd cases at the top of ControllerManager.gd, and that the AI takes over when a player lets go.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/controllers/tests/controller_manager_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/controllers/tests/controller_manager_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

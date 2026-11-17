@@ -3,7 +3,7 @@
 ## marching to the middle; H switching the heroes' sources; C freezing and unfreezing an AI pawn in the middle; and a pawn sprinting and
 ## dashing out into unloaded land at a player's speeds never running off the ground its own source builds.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/samples/tests/mass_battle_sample_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/samples/tests/mass_battle_sample_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const ARENA := "res://assets/scenes/samples/mass_battle_sample.tscn"

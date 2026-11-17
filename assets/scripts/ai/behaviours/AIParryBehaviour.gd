@@ -1,16 +1,18 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: parries a swing coming at the pawn, some of the time. The owner's request: AI pawns
-## parry too, about 30% of swings, so a mass fight has some variety and parry gets tested under load.
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: ai/CHANGELOG.md.
+## Parries a swing coming at the pawn, some of the time ([member parry_chance]).
 ##
-## How it hears about a swing: an enemy's MeleeAttackAbility, when it starts on the server, tells the pawns it may reach
-## (Pawn.notice_incoming_attack), and their AIContextComponent notes it and asks for a decision at once. Ordinary decisions come every
+## The owner's request: AI pawns parry too, about 30% of swings, so a mass fight has some variety and parry gets tested under load.
+## [br]
+## How it hears about a swing: an enemy's MeleeAttackAbility, when it starts on the server, tells the AI of each pawn it may reach
+## ([method AIContextComponent.note_incoming_attack]), which notes it and asks for a decision at once. Ordinary decisions come every
 ## 15 ticks, longer than a swing's windup, so without that the parry would usually come too late.
-##
-## When it's available: a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up (parry_chance). The roll is
-## made from the swing's start tick and the attacker, so each swing is rolled once, however many decisions happen during its windup,
-## and a replay rolls the same.
-##
+## [br]
+## When it's available: a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up. The roll is made from the
+## swing's start tick and the attacker, so each swing is rolled once, however many decisions happen during its windup, and a replay
+## rolls the same.
+## [br]
 ## What it does: looks at the attacker and presses parry (presses_action, so it's skipped while the parry is cooling down or locked
-## out, for example mid-swing). It finishes on its next tick, and forgets the swing. ParryAbility does the rest.
+## out, for example mid-swing). It finishes two ticks later, and forgets the swing. ParryAbility does the rest.
 class_name AIParryBehaviour
 extends AIBehaviourBase
 
@@ -22,7 +24,7 @@ const ROLL_SALT := 0x9A44
 
 func _init() -> void:
 	super()
-	# GDScript note: above every other behaviour in the samples (the heavy attack is 0.95), because a parry has to happen now or never.
+	# Above every other behaviour in the samples (the heavy attack is 0.95), because a parry has to happen now or never.
 	max_score = 0.97
 	min_score = 0.97
 	presses_action = &"parry"
@@ -47,7 +49,7 @@ func enter(context: AIContextComponent) -> void:
 		return
 	hands.stop()
 	hands.look_at_point(context.incoming_attacker.global_position)
-	hands.press(presses_action) # Claude 2026-11-16 (wider audit): the setting, where "parry" was written in here whatever it said
+	hands.press(presses_action) # the setting, so a parry on another action works too
 
 
 func tick(context: AIContextComponent) -> Status:

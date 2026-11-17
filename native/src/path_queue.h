@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: budgeted, resumable path requests (spec 12.2, RequestQueue).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// PathQueue: budgeted, resumable path requests (nav spec 12.2, RequestQueue), behind NavServer.find_path. Not seen by GDScript.
 // v1 runs the searches on the main thread inside tick(), with an iteration budget per tick.
 // The spec moves them to worker threads in phase 5; the queue API stays the same.
 #pragma once
@@ -12,7 +13,7 @@ namespace navcore {
 
 class PathQueue {
 public:
-	// Claude 2026-11-17 (C++ bundle stage 3): use_links lets the search cross links, as find_path_now_result's does.
+	// use_links lets the search cross links, as find_path_now_result's does.
 	int push(const float *from, const float *to, int tier, bool use_links = false);
 	void cancel(int id);
 	void clear();
@@ -27,7 +28,7 @@ private:
 		float from[3] = {};
 		float to[3] = {};
 		int tier = 0;
-		bool use_links = false; // Claude 2026-11-17
+		bool use_links = false;
 		int retries = 0;
 	};
 

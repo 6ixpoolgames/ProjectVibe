@@ -1,5 +1,7 @@
-## Written by Claude (claude-opus-5-5), 2026-11-06: something that doesn't navigate but affects paths (nav spec sections 11 and 21.3).
-## The usual term is a dynamic obstacle, such as a crate, a parked vehicle or a fallen tree.
+# Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
+## Something that doesn't navigate but affects paths: a dynamic obstacle (nav spec sections 11 and 21.3).
+##
+## A crate, a parked vehicle or a fallen tree.
 ## NavObstacleModule will hand these to nav's ObstacleSystem. Until that exists they're registered and do nothing.
 class_name NavObstacle
 extends NavMarker

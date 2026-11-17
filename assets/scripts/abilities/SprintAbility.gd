@@ -1,10 +1,10 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: running faster for a while. A locomotion ability bound to &"sprint". Pawn spec
-## section 8.5.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
+## Running faster for a while: a locomotion ability bound to &"sprint".
 ##
-## It walks the same way Walk does, at SprintSpeed. For now it has a maximum duration and a cooldown instead of stamina, the owner's
-## choice for testing: while &"sprint" is held and Sprint is ready, it runs instead of Walk. When its time runs out, or the key is let
-## go, it stops, its cooldown starts, and Walk takes over even if the key is still held. So it wins over Walk when it's ready, but has
-## downtime. An AI uses it the same way, by holding &"sprint".
+## Pawn spec section 8.5. It walks the same way Walk does, at SprintSpeed. For now it has a maximum duration and a cooldown instead
+## of stamina, the owner's choice for testing: while &"sprint" is held and Sprint is ready, it runs instead of Walk. When its time
+## runs out, or the key is let go, it stops, its cooldown starts, and Walk takes over even if the key is still held. So it wins over
+## Walk when it's ready, but has downtime. An AI uses it the same way, by holding &"sprint".
 class_name SprintAbility
 extends WalkAbility
 
@@ -12,11 +12,11 @@ extends WalkAbility
 func _init() -> void:
 	super()
 	trigger_action = &"sprint"
-	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	# Tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
 	category = Tags.MOVEMENT_SPRINT
-	extra_categories = [Tags.MOVEMENT_BASIC] # Claude 2026-11-10
+	extra_categories = [Tags.MOVEMENT_BASIC]
 	speed_stat = &"SprintSpeed"
 	fallback_speed = 9.0
 	duration = 3.0
 	cooldown = 4.0
-	interrupt_priority = 10 # Claude 2026-11-09: above Walk, so sprinting cancels actions with a threshold of 10 or less
+	interrupt_priority = 10 # above Walk, so sprinting cancels actions with a threshold of 10 or less

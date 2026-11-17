@@ -1,23 +1,26 @@
-## Written by Claude (claude-opus-5-5), 2026-11-12: makes a pawn's model move like a toy being played with, the owner's request: it
-## rocks from side to side and hops a little with each step instead of walking with legs, leans into a dash, tips back when knocked
-## back, and falls over when it dies. Put it under the pawn's Visual/Model, with nothing else needed: it makes the model itself from
-## toy_scene, and stands it on a coloured base like a figurine's, so teams can be told apart.
+# Written by Claude (claude-opus-5-5), 2026-11-12. History: visuals/CHANGELOG.md.
+## Makes a pawn's model move like a toy being played with: rocking, hopping, leaning into a dash and falling over when it dies.
 ##
+## The owner's toy look (pawn spec 8.12): it rocks from side to side and hops a little with each step instead of walking with legs,
+## leans into a dash, tips back when knocked back, and falls over when it dies. Put it under the pawn's Visual/Model, with nothing
+## else needed: it makes the model itself from [member toy_scene], and stands it on a coloured base like a figurine's, so teams can
+## be told apart.
+## [br]
 ## What it is and isn't:
-##   - Visual only. It runs once per rendered frame (_process), only reads the pawn, and changes nothing the game simulates, so it
-##     needs no rollback and works the same on the server, on a client predicting its own pawn, and on a client drawing other pawns.
-##   - It moves only itself (this node). The pawn turns Visual/Model to face the way the pawn faces, and this sits inside that, so
-##     "forward" here is always the pawn's forward (-Z) and "side to side" is its left and right.
-##   - Its origin is at the pawn's feet, so rocking and tipping over pivot on the ground, as a toy standing on a table does.
-##
-## How fast it waddles comes from how fast the drawn model moves (Visual, smoothed between ticks), not from the pawn's velocity, so
-## a pawn drawn from snapshots on a client waddles too. The step rate grows with speed: steps_per_metre steps for every metre.
-##
-## The model: toy_scene is instanced as a child at toy_scale (turned round if turn_model_round is on). If it has an AnimationPlayer,
-## the first frame of pose_animation holds the model in a still pose for the waddle to move.
-## Claude 2026-11-16 (with the owner's call not to track the sword on a server): with no display (a headless server or test), the figure
-## isn't built and its per-frame waddle never runs, since nothing can see it (RunEnvironment.runs_visuals). A host playing in a window
-## still draws it.
+## [br]- Visual only. It runs once per rendered frame, only reads the pawn, and changes nothing the game simulates, so it needs no
+##   rollback and works the same on the server, on a client predicting its own pawn, and on a client drawing other pawns.
+## [br]- It moves only itself (this node). The pawn turns Visual/Model to face the way the pawn faces, and this sits inside that, so
+##   "forward" here is always the pawn's forward (-Z) and "side to side" is its left and right.
+## [br]- Its origin is at the pawn's feet, so rocking and tipping over pivot on the ground, as a toy standing on a table does.
+## [br]
+## How fast it waddles comes from how fast the drawn model moves (Visual, smoothed between ticks), not from the pawn's velocity, so a
+## pawn drawn from snapshots on a client waddles too. The step rate grows with speed: [member steps_per_metre] steps for every metre.
+## [br]
+## The model: toy_scene is instanced as a child at [member toy_scale] (turned round if [member turn_model_round] is on). If it has an
+## AnimationPlayer, the first frame of [member pose_animation] holds the model in a still pose for the waddle to move.
+## [br]
+## With no display (a headless server or test), the figure isn't built and its per-frame waddle never runs, since nothing can see it
+## (RunEnvironment.runs_visuals). A host playing in a window still draws it.
 class_name ToyWaddle
 extends Node3D
 
@@ -76,12 +79,12 @@ var _last_position := Vector3.ZERO
 var _speed := 0.0 # metres per second the drawn model moves, smoothed
 var _step_phase := 0.0 # in radians: one step is half a turn
 var _breath_phase := 0.0
-var _lean := 0.0 # radians, forward is negative (see _process)
+var _lean := 0.0 # radians, forward is negative (see _animate)
 var _fall := 0.0 # radians, toward the pawn's right side
 
 
 func _ready() -> void:
-	# Claude 2026-11-16: nothing to draw on, so nothing to build or move (see the top of the file).
+	# Nothing to draw on, so nothing to build or move (see the class description).
 	if not RunEnvironment.runs_visuals():
 		set_process(false)
 		return
@@ -114,12 +117,12 @@ func _bind() -> void:
 
 
 func _process(delta: float) -> void:
-	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	var started := PerfScopes.begin() # timed for diagnostics, in its animation category
 	_animate(delta)
-	PerfScopes.end(&"animation.waddle", started) # Claude 2026-11-16: was visuals.waddle, now in diagnostics' animation category
+	PerfScopes.end(&"animation.waddle", started)
 
 
-# Claude 2026-11-16: the work itself, timed by _process.
+# The work itself, timed by _process.
 func _animate(delta: float) -> void:
 	if _pawn == null or delta <= 0.0:
 		return
@@ -130,7 +133,7 @@ func _animate(delta: float) -> void:
 	var moved := at - _last_position
 	moved.y = 0.0
 	_last_position = at
-	# Claude 2026-11-12: named blend, not ease, which is one of Godot's own functions (the editor warned about the clash).
+	# Named blend, not ease, which is one of Godot's own functions.
 	var blend := 1.0 - exp(-ease_rate * delta) # GDScript note: exp() gives the same easing at any frame rate
 	_speed = lerpf(_speed, moved.length() / delta, blend)
 	var dead := _pawn.is_dead()
@@ -163,6 +166,8 @@ func _animate(delta: float) -> void:
 
 
 # The pawn this belongs to: the nearest Pawn above it.
+# REFACTOR: the same search, and the same find-the-parts-on-the-first-frame pattern, is in FloatingSword; a small shared base for
+# per-frame pawn visuals would hold it once (duplicated logic). See CHANGELOG.md.
 func _find_pawn() -> Pawn:
 	var at := get_parent()
 	while at and not at is Pawn:

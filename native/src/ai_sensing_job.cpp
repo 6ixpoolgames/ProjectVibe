@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: see ai_sensing_job.h.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// AISensingJob: AI sensing's search on worker threads. Described in ai_sensing_job.h.
 #include "ai_sensing_job.h"
 
 #include <godot_cpp/classes/collision_object3d.hpp>
@@ -15,13 +16,11 @@ AISensingJob::~AISensingJob() {
 	if (_handle != 0 && _scheduler.is_valid()) {
 		_scheduler->finish(_handle);
 	}
-	remove_guards(); // Claude 2026-11-17
+	remove_guards();
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): the table, the grid and the geometry never change while this job
-// reads them: each keeps a list of its readers (change_guard.h), and anything that would change one first waits for them, by
-// finishing every job the scheduler is running. Before, the job set a single guard on the table and geometry, which a second
-// job would have replaced, and the grid had none.
+// The table, the grid and the geometry never change while this job reads them: each keeps a list of its readers
+// (change_guard.h), and anything that would change one first waits for them, by finishing every job the scheduler is running.
 void AISensingJob::add_guards() {
 	if (_scheduler.is_null()) {
 		return;
@@ -57,7 +56,7 @@ void AISensingJob::setup(const Ref<JobScheduler> &scheduler, const Ref<AIPawnGri
 	if (_handle != 0 && _scheduler.is_valid()) {
 		_scheduler->finish(_handle);
 	}
-	remove_guards(); // Claude 2026-11-17: off the old grid, table and geometry
+	remove_guards(); // off the old grid, table and geometry
 	_scheduler = scheduler;
 	_grid = grid;
 	_handle = 0;
@@ -74,14 +73,14 @@ void AISensingJob::setup(const Ref<JobScheduler> &scheduler, const Ref<AIPawnGri
 	table->require_column("detectability"); // the automatic switch: this job reads it
 	_detectability = table->column_index("detectability");
 	// The table never changes while a job reads it: anything that would change it finishes the running jobs first.
-	add_guards(); // Claude 2026-11-17: the table, the grid and the geometry, see add_guards
+	add_guards(); // the table, the grid and the geometry, see add_guards
 }
 
 void AISensingJob::set_geometry(const Ref<SightGeometry> &geometry) {
 	if (_handle != 0 && _scheduler.is_valid()) {
 		_scheduler->finish(_handle);
 	}
-	// Claude 2026-11-17 (C++ bundle stage 2): this job is a reader of the new geometry, and no longer of the old (change_guard.h).
+	// This job is a reader of the new geometry, and no longer of the old (change_guard.h).
 	if (_geometry.is_valid()) {
 		_geometry->change_guard().remove(this);
 	}
@@ -108,7 +107,7 @@ bool AISensingJob::add_request(Object *observer_object, double eye_yaw, double r
 	r.eye_yaw = eye_yaw;
 	r.reach = reach;
 	r.max_candidates = std::max<int64_t>(max_candidates, 0);
-	// Claude 2026-11-09 (step 4): as AIMemoryStore.check_one decides it, for the observer's side; the target's side is checked when
+	// As AIMemoryStore.check_one decides it, for the observer's side; the target's side is checked when
 	// the result is used.
 	CollisionObject3D *body = Object::cast_to<CollisionObject3D>(observer);
 	r.use_geometry = _geometry.is_valid() && (r.sight.blocking_mask & (body ? body->get_collision_layer() : 0)) == 0;
@@ -139,7 +138,7 @@ void AISensingJob::start(int64_t tick) {
 	_grid->prepare(tick);
 	_table = table.ptr(); // for the workers, which mustn't touch Godot's reference counts
 	if (_geometry.is_valid()) {
-		_geometry->sync(tick); // Claude 2026-11-09 (step 4): on the main thread, before the workers read it
+		_geometry->sync(tick); // on the main thread, before the workers read it
 	}
 	size_t places = 0;
 	for (size_t i = 0; i < _requests.size(); ++i) {
@@ -175,7 +174,7 @@ void AISensingJob::run_requests(int32_t begin, int32_t end) {
 			out.aim = out.position + Vector3(0.0, r.sight.target_height, 0.0);
 			const double detectability = _detectability >= 0 ? table->numbers(_detectability)[slot] : 1.0;
 			out.visibility = sight_rules::visibility(r.sight, r.eye, facing, out.aim, detectability);
-			// Claude 2026-11-09 (step 4): the ray too, when it could matter.
+			// The ray too, when it could matter.
 			out.ray = (r.use_geometry && out.visibility > 0.0) ? (_geometry->blocked(r.eye, out.aim, r.sight.blocking_mask) ? 1 : 0) : -1;
 		}
 		r.found = int64_t(keep);
@@ -244,7 +243,7 @@ void AISensingJob::reset_stats() {
 
 void AISensingJob::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("setup", "scheduler", "grid"), &AISensingJob::setup);
-	ClassDB::bind_method(D_METHOD("set_geometry", "geometry"), &AISensingJob::set_geometry); // Claude 2026-11-09, step 4
+	ClassDB::bind_method(D_METHOD("set_geometry", "geometry"), &AISensingJob::set_geometry);
 	ClassDB::bind_method(D_METHOD("add_request", "observer", "eye_yaw", "reach", "max_candidates", "sight_settings"), &AISensingJob::add_request);
 	ClassDB::bind_method(D_METHOD("start", "tick"), &AISensingJob::start);
 	ClassDB::bind_method(D_METHOD("has_result", "observer", "tick"), &AISensingJob::has_result);

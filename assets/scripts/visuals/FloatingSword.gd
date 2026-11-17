@@ -1,28 +1,31 @@
-## Written by Claude (claude-opus-5-5), 2026-11-12: a sword that floats beside the pawn and swings through each attack, the owner's request:
-## the pawn doesn't hold it, it hovers at its right side like a toy waved next to a figure, and swoops through the swing. Put it under
-## the pawn's Visual (not Model, which rocks with the waddle). It makes the sword itself from sword_scene.
+# Written by Claude (claude-opus-5-5), 2026-11-12. History: visuals/CHANGELOG.md.
+## A sword that floats beside the pawn and swings through each attack, exactly where the hit is checked.
 ##
+## The owner's toy look (pawn spec 8.12): the pawn doesn't hold it; it hovers at its right side like a toy waved next to a figure,
+## and swoops through the swing. Put it under the pawn's Visual (not Model, which rocks with the waddle). It makes the sword itself
+## from [member sword_scene].
+## [br]
 ## What it shows, frame by frame:
-##   - Hovering: at the pawn's right, about chest high, blade up, bobbing and swaying gently.
-##   - A swing (any MeleeAttackAbility on the pawn that's running), through its three phases:
-##       windup    it swings back to just behind where the hit starts
-##       hit       it sweeps through the hit, blade pointing out from the pawn's chest through each spot the hit checks
-##                 (MeleeAttackAbility.hit_offset_at, the same path the hits use), edge first. So what you see is what hits,
-##                 including swings that rise, fall or chop straight down (height_at_sweep_start and _end).
-##       recovery  it drifts back to hovering
-##   - Dead: it drops to the ground beside the pawn, lying flat.
-##   - Claude 2026-11-15: a parry (ParryAbility running): it guards in front of the pawn's chest, blade held flat across, edge out,
-##     for as long as the parry runs (guard_forward and guard_height).
-## Claude 2026-11-12, the owner's request (the combo's swings should alternate): after a swing it rests on the side where the swing
-## ended, so the next swing starts from there. A swing ending on the left leaves it hovering at the pawn's left, the second swing
-## then sweeps from left to right, and so on. A swing ending in the middle (a chop) leaves it where it was. After return_seconds with
-## no swing it goes back to the right, round the front of the pawn rather than through it.
-##
+## [br]- Hovering: at the pawn's side, about chest high, blade up, bobbing and swaying gently.
+## [br]- A swing (any MeleeAttackAbility on the pawn that's running), through its phases (MeleeAttackAbility.swing_phase, from its
+##   steps): windup, it swings back to just behind where the hit starts; hit, it sweeps through the hit, blade pointing out from the
+##   pawn's chest through each spot the hit checks (MeleeAttackAbility.hit_offset_at, the same path the hits use), edge first, so what
+##   you see is what hits, including swings that rise, fall or chop straight down; recovery, it drifts back to hovering.
+## [br]- A parry (ParryAbility running): it guards in front of the pawn's chest, blade held flat across, edge out, for as long as the
+##   parry runs ([member guard_forward], [member guard_height]).
+## [br]- Dead: it drops to the ground beside the pawn, lying flat.
+## [br]
+## Combo swings alternate: after a swing it rests on the side where the swing ended, so the next swing starts from there. A swing
+## ending on the left leaves it hovering at the pawn's left, the second swing then sweeps from left to right, and so on. A swing
+## ending in the middle (a chop) leaves it where it was. After [member return_seconds] with no swing it goes back to the right, round
+## the front of the pawn rather than through it.
+## [br]
 ## Visual only: it runs once per rendered frame, only reads the pawn, and changes nothing the game simulates. The swing's progress
-## comes from the ability's timer, which rolls back and reaches clients in snapshots, so a client sees other pawns' swings too, and
-## the tick driver's interpolation fraction makes it smooth between ticks.
-## Claude 2026-11-16 (the owner's call: don't track the sword on a server): with no display (a headless server or test), it builds
+## comes from the ability's state, which rolls back and reaches clients in snapshots, so a client sees other pawns' swings too, and
+## the tick driver's interpolation fraction makes it smooth between ticks. With no display (a headless server or test), it builds
 ## nothing and never runs, since nothing can see it (RunEnvironment.runs_visuals). A host playing in a window still draws it.
+# REFACTOR: it finds MeleeAttackAbility and ParryAbility by class, so a new kind of attack or guard needs code here (extensible). The
+# modular animation work could give abilities a pose to report instead. See CHANGELOG.md.
 class_name FloatingSword
 extends Node3D
 
@@ -53,13 +56,13 @@ extends Node3D
 ## before the last one settled, or the pawn dying. The rest of the time it follows the swing exactly, with no lag, so even a fast
 ## chop is drawn where the hit is.
 @export_range(0.0, 1.0, 0.01, "or_greater") var settle_seconds := 0.12
-## Claude 2026-11-12: seconds with no swing before it goes back to the pawn's right from the side the last swing ended on.
+## Seconds with no swing before it goes back to the pawn's right from the side the last swing ended on.
 @export_range(0.0, 10.0, 0.05, "or_greater") var return_seconds := 0.8
-## Claude 2026-11-12: how long that trip round the front takes, in seconds.
+## How long that trip round the front takes, in seconds.
 @export_range(0.01, 3.0, 0.01, "or_greater") var side_change_seconds := 0.35
 
 @export_group("Parrying")
-## Claude 2026-11-15: while a parry runs, how far in front of the pawn the guarding sword is, and how high, in metres.
+## While a parry runs, how far in front of the pawn the guarding sword is, and how high, in metres.
 @export var guard_forward := 0.6
 @export var guard_height := 1.15
 
@@ -67,14 +70,14 @@ var _pawn: Pawn = null
 var _visual: Node3D = null
 var _model: Node3D = null
 var _swings: Array[MeleeAttackAbility] = []
-var _parries: Array[ParryAbility] = [] # Claude 2026-11-15
+var _parries: Array[ParryAbility] = []
 var _bound := false
 var _sword: Node3D = null
 var _bob_phase := 0.0
-var _shown_key := -1 # what it showed last frame: the running swing's instance id, 0 hovering, 1 dead
+var _shown_key := -1 # what it showed last frame: the running parry's or swing's instance id, 0 hovering, 1 dead
 var _settle_from := Transform3D.IDENTITY # where it was drawn when that changed
 var _settled := 1.0 # 0 just after a change, 1 once it has glided to its new pose
-# Claude 2026-11-12: where it rests, as an angle round the pawn from its right: 0 right, PI/2 in front, PI left. Where it's heading,
+# Where it rests, as an angle round the pawn from its right: 0 right, PI/2 in front, PI left. Where it's heading,
 # and how long since the last swing.
 var _rest_angle := 0.0
 var _rest_target := 0.0
@@ -82,7 +85,7 @@ var _idle_seconds := 0.0
 
 
 func _ready() -> void:
-	# Claude 2026-11-16: nothing to draw on, so nothing to build or move (see the top of the file).
+	# Nothing to draw on, so nothing to build or move (see the class description).
 	if not RunEnvironment.runs_visuals():
 		set_process(false)
 		return
@@ -105,7 +108,7 @@ func _bind() -> void:
 		for ability in _pawn.ability_manager.get_abilities():
 			if ability is MeleeAttackAbility:
 				_swings.append(ability)
-			elif ability is ParryAbility: # Claude 2026-11-15
+			elif ability is ParryAbility:
 				_parries.append(ability)
 	_read_pawn()
 	global_transform = _target(_facing())
@@ -113,12 +116,12 @@ func _bind() -> void:
 
 
 func _process(delta: float) -> void:
-	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	var started := PerfScopes.begin() # timed for diagnostics, in its animation category
 	_animate(delta)
-	PerfScopes.end(&"animation.sword", started) # Claude 2026-11-16: was visuals.sword, now in diagnostics' animation category
+	PerfScopes.end(&"animation.sword", started)
 
 
-# Claude 2026-11-16: the work itself, timed by _process.
+# The work itself, timed by _process.
 func _animate(delta: float) -> void:
 	if _pawn == null:
 		return
@@ -138,11 +141,11 @@ func _animate(delta: float) -> void:
 	global_transform = target if _settled >= 1.0 else _settle_from.interpolate_with(target, _ease_in_out(_settled))
 
 
-# What it's showing: 1 dead, the running swing's instance id, or 0 hovering. A change starts a short glide (settle_seconds).
+# What it's showing: 1 dead, the running parry's or swing's instance id, or 0 hovering. A change starts a short glide (settle_seconds).
 func _shown() -> int:
 	if _dead_now:
 		return 1
-	if _parry_now: # Claude 2026-11-15
+	if _parry_now:
 		return _parry_now.get_instance_id()
 	return _swing_now.get_instance_id() if _swing_now else 0
 
@@ -156,15 +159,15 @@ func _target(facing: float) -> Transform3D:
 		var forward := Vector3(-sin(facing), 0.0, -cos(facing))
 		return Transform3D(_blade_basis(forward, Vector3.UP), feet + right * hover_side + Vector3(0.0, 0.05, 0.0))
 	var hover := _hover(feet, right)
-	# Claude 2026-11-15: guarding during a parry: in front of the chest, blade flat across the pawn, edge facing out.
+	# Guarding during a parry: in front of the chest, blade flat across the pawn, edge facing out.
 	if _parry_now:
 		var ahead := Vector3(-sin(facing), 0.0, -cos(facing))
 		return Transform3D(_blade_basis(right, ahead), feet + ahead * guard_forward + Vector3(0.0, guard_height, 0.0) - right * 0.5)
 	var swing := _swing_now
 	if swing == null:
 		return hover
-	# Claude 2026-11-16 (pawn spec 8.20): where the swing is comes from its steps (swing_phase), not from counting ticks since it started,
-	# since a windup can wait for its turn. The progress is smooth between ticks.
+	# Where the swing is comes from its steps (swing_phase, pawn spec 8.20), since a windup can wait for its turn. The progress is
+	# smooth between ticks.
 	var phase := _phase_now
 	match phase.phase:
 		"windup":
@@ -176,8 +179,8 @@ func _target(facing: float) -> Transform3D:
 	return hover
 
 
-# Hovering beside the pawn, bobbing, the blade leaning out a little and swaying with the bob. Claude 2026-11-12: on the side it rests
-# on (_rest_angle): right, left, or partway round the front while it changes sides.
+# Hovering beside the pawn, bobbing, the blade leaning out a little and swaying with the bob, on the side it rests on (_rest_angle):
+# right, left, or partway round the front while it changes sides.
 func _hover(feet: Vector3, right: Vector3) -> Transform3D:
 	var forward := Vector3(right.z, 0.0, -right.x) # a quarter turn left of right is forward
 	var out := right * cos(_rest_angle) + forward * sin(_rest_angle)
@@ -187,13 +190,13 @@ func _hover(feet: Vector3, right: Vector3) -> Transform3D:
 	return Transform3D(_blade_basis(blade, out.cross(Vector3.UP)), place)
 
 
-# Claude 2026-11-12: which side it rests on. Once a swing's hit is over, the side its sweep ended on; with no swing for
+# Which side it rests on. Once a swing's hit is over, the side its sweep ended on; with no swing for
 # return_seconds, the right again, moving round the front over side_change_seconds.
 func _update_rest_side(delta: float, facing: float) -> void:
 	var swing := _swing_now
 	if swing:
 		_idle_seconds = 0.0
-		if _phase_now.phase == "recovery": # Claude 2026-11-16: was counting ticks since it started
+		if _phase_now.phase == "recovery":
 			var right := Vector3(cos(facing), 0.0, -sin(facing))
 			var end := swing.hit_offset_at(1.0, facing)
 			end.y = 0.0
@@ -232,8 +235,8 @@ func _blade_basis(blade: Vector3, edge_toward: Vector3) -> Basis:
 	return Basis(x, y, z)
 
 
-# Claude 2026-11-16 (wider audit): what the pawn is doing this frame, read once at the top of _animate and used by everything below.
-# Each of these was asked for two or three times a frame, and swing_phase() makes a new Dictionary each time.
+# What the pawn is doing this frame, read once at the top of _animate and used by everything below, since swing_phase() makes a new
+# Dictionary each time.
 var _dead_now := false
 var _parry_now: ParryAbility = null
 var _swing_now: MeleeAttackAbility = null
@@ -254,7 +257,7 @@ func _running_swing() -> MeleeAttackAbility:
 	return null
 
 
-# Claude 2026-11-15: the running parry, or null.
+# The running parry, or null.
 func _running_parry() -> ParryAbility:
 	for parry in _parries:
 		if parry.is_running_timed():

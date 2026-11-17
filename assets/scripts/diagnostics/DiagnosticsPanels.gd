@@ -1,13 +1,19 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16: diagnostics v0's on-screen panels (docs/diagnostics/DIAGNOSTICS_SPEC.md), one key each
-## (the owner's call, for readability), in a small fixed-width font, in two columns so they never overlap each other: F1, F2 and F4
-## down the top right, F6, F7 and F8 up from the bottom left:
-##   F1   help: these keys
-##   F2   frame graph: the last few seconds, one bar per frame, split into physics, scripts and the rest, with lines at 1/60 and 1/30 s
-##   F4   timings: the last second's averages, the frame's parts, the tick, and every timing scope, most expensive first
-##   F6   spikes: the slowest recent frames, each with what took the time
-##   F7   pawn inspector: Ctrl + left click a pawn to see its flags, abilities, effects, AI and input
-##   F8   log: warnings and errors, with how often each came
-##   F12  capture: saves a capture folder (DiagnosticsManager.capture) and says where
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: diagnostics/CHANGELOG.md.
+## Diagnostics' on-screen panels, one key each (docs/diagnostics/DIAGNOSTICS_SPEC.md).
+##
+## One key each is the owner's call, for readability. They use a small fixed-width font, in two columns so they never overlap each
+## other: F1, F2 and F4 down the top right, F6, F7 and F8 up from the bottom left.
+## [br]- F1 help: these keys, and the session log's name.
+## [br]- F2 frame graph: the last few seconds, one bar per frame, split into physics, scripts and the rest, with lines at 1/60 and
+##   1/30 s.
+## [br]- F4 timings: the last second's averages, the frame's parts, the tick, and the most expensive timing scopes (up to
+##   [constant SCOPES_LISTED]).
+## [br]- F6 spikes: the newest frames over budget, each with what took the time.
+## [br]- F7 pawn inspector: Ctrl + left click a pawn to see its flags, abilities, effects, AI and input.
+## [br]- F8 log: warnings and errors, with how often each came.
+## [br]- F9 nav view: the nav mesh, nav links and nav markers in the world around the camera ([NavDebugView], debug builds only).
+## [br]- F12 capture: saves a capture folder ([method DiagnosticsManager.capture]) and says where.
+## [br]
 ## A proper look comes with UI v0 (the roadmap); this is for reading numbers.
 class_name DiagnosticsPanels
 extends CanvasLayer
@@ -28,6 +34,7 @@ var _inspected: Pawn = null
 var _refresh_left := 0.0
 var _font: Font
 var _note := "" # a line shown in the help panel, such as where the last capture went
+var _nav_view: NavDebugView = null # F9, made the first time it's shown
 
 
 # The frame graph: one thin bar per frame, newest on the right.
@@ -124,6 +131,8 @@ func _make_label() -> Label:
 
 ## True while a panel is shown.
 func is_shown(key: Key) -> bool:
+	if key == KEY_F9:
+		return _nav_view != null and _nav_view.shown # the nav view isn't a panel
 	return _panels.has(key) and _panels[key][0].visible
 
 
@@ -133,6 +142,15 @@ func toggle(key: Key) -> void:
 		_note = "Captured to %s" % manager.capture()
 		_panels[KEY_F1][0].visible = true
 		_refresh_left = 0.0
+		return
+	# F9 is the nav view, drawn in the world rather than a panel. It's made the first time, under the manager (a
+	# Node3D under this CanvasLayer would draw the same, but the manager is the module's root).
+	if key == KEY_F9:
+		if _nav_view == null:
+			_nav_view = NavDebugView.new()
+			_nav_view.name = "NavDebugView"
+			manager.add_child(_nav_view)
+		_nav_view.set_shown(not _nav_view.shown)
 		return
 	if _panels.has(key):
 		_panels[key][0].visible = not _panels[key][0].visible
@@ -154,7 +172,7 @@ func get_text(key: Key) -> String:
 
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key and key.pressed and not key.echo and key.physical_keycode in [KEY_F1, KEY_F2, KEY_F4, KEY_F6, KEY_F7, KEY_F8, KEY_F12]:
+	if key and key.pressed and not key.echo and key.physical_keycode in [KEY_F1, KEY_F2, KEY_F4, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F12]:
 		toggle(key.physical_keycode)
 		get_viewport().set_input_as_handled()
 		return
@@ -207,11 +225,14 @@ func _set_text(key: Key, text: String) -> void:
 	label.text = text
 
 
+# The first line's "(debug builds only)" is out of date: the panels ship in release builds too (only F9's nav view is debug only).
+# Comments only in the docs pass, so the text stays until the next code change.
 func _help_text() -> String:
 	var lines := PackedStringArray(["F1 diagnostics keys (debug builds only)",
 		"  F2 frame graph   F4 timings   F6 spikes",
 		"  F7 pawn inspector (Ctrl + click a pawn)   F8 log",
 		"  F12 capture (screenshot, history, spikes, log, replay tick)",
+		"  F9 nav view: nav mesh, links, markers",
 		"log: %s" % manager.get_log_path().get_file()])
 	if _note != "":
 		lines.append(_note)
@@ -224,12 +245,12 @@ func _timings_text(n: Dictionary) -> String:
 	lines.append("frame %6.1f ms %4.0f fps  worst %4.0f  late %3.0f%%  very late %3.0f%%" % [n.frame_ms, n.fps, n.frame_worst_ms, n.over_60_percent, n.over_30_percent])
 	lines.append("  (late: over 20 ms, a missed 1/60 s; very late: over 34 ms)")
 	lines.append("  physics %6.1f ms (%.2f steps)   scripts %5.1f   rest %5.1f" % [n.physics_ms, n.steps_per_frame, n.scripts_ms, n.rest_ms])
-	# Claude 2026-11-16 (the owner's request): the animation category, the part of the scripts spent animating (every animation.* scope)
+	# The animation category (the owner's request), the part of the scripts spent animating (every animation.* scope)
 	lines.append("    of which animation %5.2f ms" % n.get("animation_ms", 0.0))
 	lines.append("  tick    %6.2f ms   %3.0f ticks/s   dropped %.1f/s" % [n.tick_ms, n.ticks_per_second, n.dropped_per_second])
-	# Claude 2026-11-16 (pawn spec 8.21): the load ladder, and how many AI pawns run every tick, every 2nd and every 4th.
+	# The load ladder (pawn spec 8.21), and how many AI pawns run every tick, every 2nd and every 4th.
 	lines.append("  load step %d   AI every tick/2nd/4th %s" % [n.get("load_step", 1), DiagnosticsManager.steps_text(n.get("step_counts", {}))])
-	lines.append("  " + DiagnosticsManager.server_text(n.get("server", {}))) # Claude 2026-11-16: the server's tick rate (a client's from snapshots)
+	lines.append("  " + DiagnosticsManager.server_text(n.get("server", {}))) # the server's tick rate (a client's from snapshots)
 	lines.append("  drawing CPU %.1f  GPU %.1f ms   %d draw calls" % [n.render_cpu_ms, n.render_gpu_ms, n.draw_calls])
 	lines.append("  memory %.0f MB   objects %d   nodes %d   orphan nodes %d" % [n.memory_mb, n.objects, n.nodes, n.orphans])
 	lines.append("  pawns %d   dead %d   frozen %d" % [n.pawns, n.dead, n.frozen])
@@ -270,8 +291,8 @@ func _inspector_text() -> String:
 	lines.append("  at (%.1f, %.1f, %.1f)   moving %.1f m/s   facing %.0f°" % [at.x, at.y, at.z, pawn.velocity.length(), rad_to_deg(pawn.yaw)])
 	lines.append("  flags: %s%s%s%s%s%s   Health %.0f" % ["grounded " if pawn.grounded else "", "DEAD " if pawn.is_dead() else "",
 		"FROZEN " if pawn.is_frozen() else "", "sleeping " if pawn.is_sleeping else "", "source " if pawn.is_keeping_world_loaded() else "",
-		"player" if pawn.controller_manager and pawn.controller_manager.has_player() else "", pawn.stat_manager.get_health() if pawn.stat_manager else 0.0]) # Claude 2026-11-17: was pawn.stat_manager.get_health()
-	var controllers := pawn.controller_manager # Claude 2026-11-16 (pawn M4)
+		"player" if pawn.controller_manager and pawn.controller_manager.has_player() else "", pawn.stat_manager.get_health() if pawn.stat_manager else 0.0])
+	var controllers := pawn.controller_manager # the pawn's input is its ControllerManager's
 	if controllers:
 		lines.append("  input: move (%.2f, %.2f), look %.0f°, held %d" % [controllers.move_input.x, controllers.move_input.z, rad_to_deg(controllers.look_yaw), controllers.held_actions])
 	if pawn.ability_manager:
@@ -279,7 +300,7 @@ func _inspector_text() -> String:
 		var cooling := PackedStringArray()
 		for ability in pawn.ability_manager.get_abilities():
 			if ability.is_running_timed():
-				# Claude 2026-11-16 (pawn spec 8.20): a stepped ability shows its running steps.
+				# A stepped ability shows its running steps (pawn spec 8.20).
 				var steps_now := ability.get_running_step_names()
 				# A stepped ability's ticks_left is only its safety limit, so its steps' ticks show instead.
 				if ability.is_stepped():

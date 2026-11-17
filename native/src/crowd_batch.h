@@ -1,14 +1,17 @@
-// Written by Claude (claude-opus-5-5), 2026-11-17 (C++ bundle stage 3, pawn spec 8.22): the crowd mover's batch in C++. CrowdMover.gd
-// gathers the AI pawns walking on the ground each tick and hands their moves here as plain lists; this works out where each one
-// ends up, spread over the job scheduler's worker threads, and says which ones it couldn't move so CrowdMover moves those by
-// physics. CrowdMover._move_batch is the GDScript version, used where this library isn't available.
+// Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
+// CrowdBatch: the crowd mover's batch in C++ (pawn spec 8.22). movement/CrowdMover.gd makes one (use_cpp_batch, with TickJobs'
+// scheduler, the shared SightGeometry and NavServer), gathers the AI pawns walking on the ground each tick and hands their moves
+// here as plain lists; this works out where each one ends up, spread over the job scheduler's worker threads, and says which ones
+// it couldn't move so CrowdMover moves those by physics. CrowdMover._move_batch is the GDScript version, used where this library
+// isn't available.
+// REFACTOR: kept twice, here and in CrowdMover._move_batch (reusable, extensible); see the row in native/CHANGELOG.md.
 //
 // For each pawn, in three steps, as the GDScript version:
 //   1. Where it would go: its move for the tick, flat.
 //   2. Separation: pushed apart from every pawn it overlaps (the other movers where they'd go, the rest where they stand), half the
 //      push each between two movers, all of it against a pawn that isn't moving with the crowd. Every push is worked out from the
 //      same positions, so the order of the pawns changes nothing.
-//   3. Walls and the ground. The owner's call in the code audit: walls belong in navigation. So a pawn on the nav mesh walks along it
+//   3. Walls and the ground. Walls belong in navigation (the owner's call). So a pawn on the nav mesh walks along it
 //      (Detour's moveAlongSurface for its nav tier, what Unreal calls NavWalking): it slides along the nav mesh's edge, which is the
 //      walls less the tier's radius, instead of crossing it. Then the ground under where it ends up, from SightGeometry's copy of the
 //      level (the same triangles and shapes physics has), within the step it may climb.
@@ -16,10 +19,10 @@
 // What each pawn's status says (get_statuses):
 //   MOVED (1): done; the position returned is where it stands.
 //   BY_PHYSICS (0): no ground within its step there, or too steep: CrowdMover moves it by physics, which handles the edge or the fall.
-//   CHECK_WALLS (2): not walked along the nav mesh, so CrowdMover checks walls and ground with physics, as before this class: no nav
+//   CHECK_WALLS (2): not walked along the nav mesh, so CrowdMover checks walls and ground with physics, as its GDScript batch does: no nav
 //     mesh under it (none built there, or it's off the edge), no NavServer, or a body wider than its nav tier's radius (the nav mesh
 //     would let it stand partly inside a wall; set the tiers' radii, NavServer.configure's tier_radii, to the pawns' sizes), or a tier of -1
-//     (Claude 2026-11-17: a pawn crossing a nav link, a jump or a drop off a ledge, which leaves the nav mesh on purpose). The
+//     (a pawn crossing a nav link, a jump or a drop off a ledge, which leaves the nav mesh on purpose). The
 //     position returned is where separation pushed it.
 //   CHECK_GROUND (3): walked along the nav mesh, but the ground under it needs physics: there's no SightGeometry, or a capsule or
 //     cylinder is in the way, which it doesn't work out exactly. The position returned is where the walk ended, at its old height.

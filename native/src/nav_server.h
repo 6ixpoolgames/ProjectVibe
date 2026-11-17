@@ -1,11 +1,19 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: NavServer, the one public entry point (spec section 6).
-// Registered as an engine singleton, so GDScript just writes NavServer.find_path(...).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// NavServer: the nav library's one public entry point (nav spec section 6). It takes the level as input layers, builds a
+// Recast/Detour nav mesh in tiles on worker threads around the places streaming asks for (interests), and answers path searches,
+// with links (jumps, drops, placed links).
+//
+// Registered as an engine singleton, so GDScript writes NavServer.find_path(...); it exists only while the navcore library is
+// loaded, so GDScript checks Engine.has_singleton("NavServer") first. Users: world/TerrainNavFeeder and world/BodyNavFeeder feed
+// it, NavigationManager finds paths, NavLinkModule places links, CrowdMover hands it to CrowdBatch, diagnostics/NavDebugView draws
+// it. Something must call tick() once per physics tick (TerrainNavFeeder does); that's the only place the nav mesh changes and
+// queued paths are searched.
 // Everything below it lives in namespace navcore and knows nothing about Godot.
 #pragma once
 
 #include "ground_domain.h"
 
-#include <algorithm> // Claude 2026-11-17: std::clamp in tier_radius
+#include <algorithm> // std::clamp in tier_radius
 #include "input_store.h"
 #include "path_queue.h"
 #include "tile_manager.h"
@@ -58,7 +66,7 @@ public:
 	bool submit_heightmap(int layer, Vector2i chunk, const PackedFloat32Array &heights, Vector2i samples,
 			float spacing, const PackedByteArray &materials, const AABB &dirty_bounds);
 	void release_chunk(int layer, Vector2i chunk);
-	// Claude 2026-11-17: dirty_bounds, as submit_heightmap (empty: the whole mesh's area)
+	// dirty_bounds, as submit_heightmap: only the tiles under it rebuild (empty: the whole mesh's area)
 	bool submit_mesh(int layer, int64_t mesh_id, const PackedVector3Array &faces, const Transform3D &xform,
 			const String &surface, const AABB &dirty_bounds);
 	void remove_mesh(int layer, int64_t mesh_id);
@@ -70,31 +78,31 @@ public:
 	void remove_interest(int id);
 
 	// ---- queries ---------------------------------------------------------------------------
-	int find_path(const Vector3 &from, const Vector3 &to, int tier, bool use_links); // async: path_ready / path_failed
+	// Queues a search, which tick() runs within query_iterations_per_tick. The answer comes as the path_ready or path_failed
+	// signal and is also kept for take_path_result. use_links off (the default) never crosses links.
+	int find_path(const Vector3 &from, const Vector3 &to, int tier, bool use_links);
 	void cancel_path(int request_id);
-	// Claude 2026-11-17 (C++ bundle stage 3): a queued search's answer, for code that asks rather than listening to path_ready (each
-	// NavigationManager would otherwise hear every pawn's paths). Empty while it's still searching (or for an id it doesn't know);
-	// then once {ok, points, link_ids, partial, reason}, as find_path_now_result, and it's forgotten. An answer nobody takes is
-	// dropped after RESULT_KEEP_TICKS of NavServer's ticks. find_path's use_links works as find_path_now_result's.
+	// A queued search's answer, for code that asks rather than listening to path_ready (each NavigationManager would otherwise
+	// hear every pawn's paths). Empty while it's still searching (or for an id it doesn't know); then once {ok, points, link_ids,
+	// partial, reason}, as find_path_now_result, and it's forgotten. An answer nobody takes is dropped after RESULT_KEEP_TICKS of
+	// NavServer's ticks.
 	Dictionary take_path_result(int request_id);
-	PackedVector3Array find_path_now(const Vector3 &from, const Vector3 &to, int tier); // sync, for tests/tools
+	PackedVector3Array find_path_now(const Vector3 &from, const Vector3 &to, int tier); // sync, points only, never crosses links
 	Variant closest_point(const Vector3 &p, int tier); // Vector3, or null if no nav nearby
-	// Claude 2026-11-08: like find_path_now, but the path may cross links. Returns {points, link_ids, partial}: link_ids has one
-	// entry per point, not 0 where that point starts a link, which ends at the next point. points is empty if there's no way.
-	// find_path_now and find_path never cross links, so code written before links existed gets the same paths as before.
+	// find_path_now_result with use_links on.
 	Dictionary find_path_now_with_links(const Vector3 &from, const Vector3 &to, int tier);
-	// Claude 2026-11-17 (C++ bundle stage 2): the one sync search that says everything, with or without links: {points, link_ids,
-	// partial}, as above. find_path_now gives only points, so a path found without links couldn't say it was partial (it ends at
-	// the closest place it can reach). find_path_now_with_links is this with use_links on.
+	// The one sync search that says everything, with or without links: {points, link_ids, partial}. link_ids has one entry per
+	// point, not 0 where that point starts a link, which ends at the next point (all 0 without links). partial says the path ends
+	// at the closest place it can reach, not at the point. points is empty if there's no way.
 	Dictionary find_path_now_result(const Vector3 &from, const Vector3 &to, int tier, bool use_links);
 
-	// Claude 2026-11-17 (C++ bundle stage 3): for other C++ classes (CrowdBatch): the live ground nav mesh, read-only, and a tier's
+	// For other C++ classes (CrowdBatch): the live ground nav mesh, read-only, and a tier's
 	// radius (how far its nav mesh keeps from walls). Not for GDScript.
 	const navcore::GroundDomain &ground() const { return m_ground; }
 	float tier_radius(int tier) const { return m_cfg.tier_radii[std::clamp(tier, 0, m_cfg.tier_count - 1)]; }
 
 	// ---- links (spec section 10, phase 3) ---------------------------------------------------
-	// Claude 2026-11-08: placed links, such as a door, a ladder or a jump a designer marked. The tile holding the start rebuilds
+	// Placed links, such as a door, a ladder or a jump a designer marked. The tile holding the start rebuilds
 	// to include it, on the next ticks. action is the named action a pawn presses at the start, or empty to just walk across.
 	int add_link(const Vector3 &start, const Vector3 &end, bool two_way, const StringName &action);
 	bool remove_link(int link_id);
@@ -105,9 +113,10 @@ public:
 
 	// ---- debug / stats ---------------------------------------------------------------------
 	Dictionary get_debug_triangles(const AABB &area);
-	// Claude 2026-11-08: the live links in an area, for drawing and tests: {starts, ends, link_ids, two_way}.
+	// The live links in an area, for drawing and tests: {starts, ends, link_ids, two_way}.
 	Dictionary get_debug_links(const AABB &area) const;
-	// Claude 2026-11-05: for tests only: see GroundDomain.
+	// For tests only: see GroundDomain.
+	// REFACTOR: test hooks bound into the shipping class (test code out of shipping code); a test-only subclass or build flag.
 	void debug_fail_tile_commits(int count) { m_ground.debug_fail_commits(count); }
 	void debug_limit_path_corners(int limit) { m_ground.debug_limit_corners(limit); }
 	Array get_tile_states() const;
@@ -126,20 +135,20 @@ private:
 	navcore::TileManager m_tiles;
 	navcore::GroundDomain m_ground;
 	navcore::PathQueue m_paths;
-	// Claude 2026-11-17: answers waiting to be taken (take_path_result), with the tick each came in on.
+	// Answers waiting to be taken (take_path_result), with the tick each came in on.
 	struct PathResult {
 		Dictionary result;
 		uint64_t tick = 0;
 	};
 	std::unordered_map<int, PathResult> m_path_results;
 	static constexpr uint64_t RESULT_KEEP_TICKS = 600;
-	navcore::WorkerPool m_pool; // declared last: destroyed first, so no job outlives what it uses
+	navcore::WorkerPool m_pool; // declared after everything a build job uses, so it's destroyed (its workers joined) before them
 
 	std::vector<navcore::Interest> m_interests;
 	int m_next_interest = 1;
 	std::vector<std::string> m_surface_names; // index = surface id
 	std::vector<navcore::WorldRect> m_pending_dirty;
-	// Claude 2026-11-08: placed links, and the action each one presses.
+	// Placed links, and the action each one presses.
 	std::vector<navcore::LinkDef> m_links;
 	std::unordered_map<uint32_t, StringName> m_link_actions;
 	uint32_t m_next_link = 1;

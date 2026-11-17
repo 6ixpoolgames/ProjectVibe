@@ -1,7 +1,8 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: the state for when nothing else fits. Pawn spec section 10.6.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## The state for when nothing else fits: its prerequisites always hold.
 ##
-## Its prerequisites always hold, so with the lowest priority it catches every case the other states don't. Every state manager
-## should have one, or there are moments when no state fits.
+## Pawn spec section 10.6. With the lowest priority it catches every case the other states don't. Every state manager should have
+## one, or there are moments when no state fits.
 class_name AIIdleState
 extends AIStateBase
 

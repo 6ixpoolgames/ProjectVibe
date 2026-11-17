@@ -1,6 +1,8 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: the settings for a CameraArm, as a resource a designer can make and share.
-## A pawn type with its own feel gets its own preset. With none, a pawn uses these defaults, a third-person orbit.
-## An arm length of 0 is first person.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: camera/CHANGELOG.md.
+## The settings for a CameraArm, as a resource a designer can make and share.
+##
+## A pawn type with its own feel gets its own preset (on its CameraMount). With none, a pawn uses these defaults, a third-person
+## orbit. An arm length of 0 is first person.
 class_name CameraPreset
 extends Resource
 

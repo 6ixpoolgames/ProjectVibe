@@ -4,7 +4,7 @@
 ## down, and the special request gives the heavy attack. Claude 2026-11-10: the follow-up is now a combo made of boosts (_test_combo).
 ## Claude 2026-11-16 (pawn spec 8.20): and now a combo counted by position, light and heavy mixed (_test_combo).
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/attack_request_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/abilities/tests/attack_request_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-17 (C++ bundle stage 3): see replay_motion_packer.h.
+// Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
+// ReplayMotionPacker: the replay's motion packing in C++. Described in replay_motion_packer.h.
 #include "replay_motion_packer.h"
 
 #include "state_encoding.h"

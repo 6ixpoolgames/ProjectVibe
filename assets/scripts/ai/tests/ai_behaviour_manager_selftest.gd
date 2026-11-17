@@ -3,7 +3,7 @@
 ## jitter, ties, the fixed order), persistence, interrupts, finishing, Wander, what runs while a player has the pawn, that a client
 ## never runs the AI, that a rollback doesn't run it again, and the odd cases at the top of AIBehaviourManager.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_behaviour_manager_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/ai_behaviour_manager_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

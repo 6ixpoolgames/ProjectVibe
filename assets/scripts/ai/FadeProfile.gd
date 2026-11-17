@@ -1,31 +1,41 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: how a value fades over ticks, as a Resource designers tune in the inspector.
-## Pawn spec section 10.2. Used by AI behaviour persistence (10.7) now, and by AI memory and target selection (10.5) from step 8b.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## How a value fades over ticks, from full to nothing, as a Resource designers tune in the inspector.
 ##
+## Pawn spec section 10.2. Used by AI behaviour persistence (10.7), memory's awareness and the target selector's current target
+## bonus (10.5).
+## [br]
 ## A fade starts at full (1.0) and ends at nothing (0.0). One profile has exactly one curve, so a designer never has to combine two
 ## kinds of fade in their head:
-##   LINEAR      full for hold_ticks, then a straight line down to nothing over fade_ticks
-##   HALF_LIFE   full for hold_ticks, then halves every half_life_ticks. Counts as nothing below 1%, which is after 7 halvings
-##   CURVE       full for hold_ticks, then follows the drawn curve over fade_ticks (the curve's x runs 0 to 1, its y is the value)
-##
+## [br]- LINEAR: full for [member hold_ticks], then a straight line down to nothing over [member fade_ticks]
+## [br]- HALF_LIFE: full for hold_ticks, then halves every [member half_life_ticks]. Counts as nothing below 1%, which is after 7
+##   halvings
+## [br]- CURVE: full for hold_ticks, then follows the drawn [member curve] over fade_ticks (the curve's x runs 0 to 1, its y is the
+##   value)
+## [br]
+## hold_ticks, fade_ticks and half_life_ticks are written for 60 ticks a second, and used at the match's rate
+## ([code]TickDriver.ticks_at_rate[/code]), so a fade lasts the same time at any rate.
+## [br]
 ## How to use it:
-##   var fade := FadeProfile.new()          # or a .tres file made in the inspector, shared by everything that uses it
-##   fade.value_at(30)                       # 1.0 at the start, falling to 0.0
-##   fade.ends_after()                       # ticks until it's nothing; from then on value_at() gives exactly 0.0
-##
-## A fade no mode covers: write a script that extends FadeProfile and overrides value_at() and ends_after(). Everything that uses a
-## profile picks it up with no other change.
-##
-## What happens in odd cases:
-##   - A tick count below 0 (before the fade starts): full.
-##   - LINEAR or CURVE with fade_ticks 0, or HALF_LIFE with half_life_ticks 0: full for the hold, then nothing at once.
-##   - CURVE with no curve drawn: it behaves as LINEAR, and warns once.
-##   - A drawn curve that dips below 0 or rises above 1: the value is kept between 0 and 1.
+## [codeblock]
+## var fade := FadeProfile.new()  # or a .tres file made in the inspector, shared by everything that uses it
+## fade.value_at(30)              # 1.0 at the start, falling to 0.0
+## fade.ends_after()              # ticks until it's nothing; from then on value_at() gives exactly 0.0
+## [/codeblock]
+## A fade no mode covers: write a script that extends FadeProfile and overrides [method value_at] and [method ends_after]. Everything
+## that uses a profile picks it up with no other change.
+## [br]
+## What happens in odd cases (checked in ai/tests/fade_profile_selftest.gd):
+## [br]- A tick count below 0 (before the fade starts): full.
+## [br]- LINEAR or CURVE with fade_ticks 0, or HALF_LIFE with half_life_ticks 0: full for the hold, then nothing at once.
+## [br]- CURVE with no curve drawn: it behaves as LINEAR, and warns once.
+## [br]- A drawn curve that dips below 0 or rises above 1: the value is kept between 0 and 1.
 class_name FadeProfile
 extends Resource
 
+## The kinds of fade: a straight line, halving, or a drawn curve.
 enum Mode { LINEAR, HALF_LIFE, CURVE }
 
-## Which curve the fade follows. See the top of the file.
+## Which curve the fade follows. See the class description.
 @export var mode := Mode.LINEAR
 ## Ticks at full strength before the fade begins.
 @export_range(0, 36000, 1, "or_greater") var hold_ticks := 0
@@ -43,9 +53,7 @@ var _warned_no_curve := false
 
 
 ## The value this many ticks after the fade started: 1.0 at the start, falling to 0.0. ticks can be fractional, so a fade can run
-## slower or faster than one step per tick.
-## Claude 2026-11-09 (scaling spec step 6): hold_ticks, fade_ticks and half_life_ticks are written for 60 ticks a second, and used at
-## the match's rate (TickDriver.ticks_at_rate); ticks here are real ticks at that rate.
+## slower or faster than one step per tick. ticks here are real ticks at the match's rate.
 func value_at(ticks: float) -> float:
 	var hold := TickDriver.ticks_at_rate(hold_ticks)
 	if ticks < hold:

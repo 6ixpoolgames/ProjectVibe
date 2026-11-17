@@ -59,7 +59,7 @@
 ##   --ai=2              server: adds this many AI pawns nobody owns
 ##   --follow            client: remote pawns stand on server data during a rollback, to compare
 ##   --bind=0.0.0.0      server: listen on this address instead of this machine only. Claude 2026-11-05, for testing across operating systems
-##   --address=172.18.0.1  client: the server's address, when it isn't on this machine. Claude 2026-11-05
+##   --address=192.0.2.10  client: the server's address, when it isn't on this machine. Claude 2026-11-05
 ##   --build-id=test     everyone: names the build, so the handshake compares that instead of the game's files. Claude 2026-11-05
 extends Node
 

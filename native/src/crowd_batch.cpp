@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-17 (C++ bundle stage 3): see crowd_batch.h.
+// Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
+// CrowdBatch: the crowd mover's batch in C++. Described in crowd_batch.h.
 #include "crowd_batch.h"
 
 #include "nav_server.h"
@@ -86,7 +87,7 @@ PackedVector3Array CrowdBatch::move(const PackedVector3Array &positions, const P
 		_tiers[i] = tiers[int64_t(i)];
 		_widest = std::max(_widest, _radii[i]);
 		if (nav_ready) {
-			// Claude 2026-11-17: a tier of -1 is a pawn crossing a nav link (CrowdMover): a jump or a walk off a ledge leaves the nav
+			// A tier of -1 is a pawn crossing a nav link (CrowdMover): a jump or a walk off a ledge leaves the nav
 			// mesh on purpose, which walking along it would stop at the edge. It's checked by physics until it's across.
 			const bool on_link = _tiers[i] < 0;
 			const bool covered = !on_link && _radii[i] <= _nav->tier_radius(_tiers[i]) + TIER_RADIUS_SLACK;

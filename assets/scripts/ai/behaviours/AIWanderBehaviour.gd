@@ -1,13 +1,14 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: walks to random nearby points, pausing between them. Pawn spec section 10.7.
-## Allowed in Idle by default. Step 8a's behaviour, to prove deciding and acting with no senses.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Walks to random nearby points, pausing between them: what a pawn does when nothing more interesting can run.
 ##
-## What it does, over and over: picks a random point within wander_radius of its home (where the pawn was when it first started
-## wandering), walks there with the AI controller's move_to, so it follows nav paths and crosses links, then stands for a random
-## time between min_pause_ticks and max_pause_ticks.
-##
+## Pawn spec section 10.7. Allowed in Idle by default. What it does, over and over: picks a random point within
+## [member wander_radius] of its home (where the pawn was when it first started wandering), walks there with the AI controller's
+## move_to, so it follows nav paths and crosses links, then stands for a random time between [member min_pause_ticks] and
+## [member max_pause_ticks].
+## [br]
 ## The random points and pauses come from the context's replayable random numbers, so the same seed, pawn and ticks give the same
-## walk. A point with no way there is skipped, and another is tried on the next tick.
-##
+## walk. A point with no way there is skipped, and another is tried on its next tick.
+## [br]
 ## It never finishes on its own (it returns RUNNING), so it runs until something better comes along.
 class_name AIWanderBehaviour
 extends AIBehaviourBase
@@ -32,10 +33,10 @@ var _pause_until := -1 # the tick its current pause ends; -1: not pausing
 func _init() -> void:
 	super()
 	allowed_states = [&"Idle"]
-	# GDScript note: a low, fixed score: Wander is what a pawn does when nothing more interesting can run.
+	# A low, fixed score: Wander is what a pawn does when nothing more interesting can run.
 	max_score = 0.1
 	min_score = 0.1
-	tick_interval_ticks = 5 # Claude 2026-11-09: it only needs to notice when a walk or a pause ends
+	tick_interval_ticks = 5 # it only needs to notice when a walk or a pause ends
 
 
 func enter(_context: AIContextComponent) -> void:
@@ -50,7 +51,7 @@ func tick(context: AIContextComponent) -> Status:
 	var hands := context.controller
 	if hands == null or pawn == null:
 		return Status.FAILED
-	# Claude 2026-11-09: pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
+	# Pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
 	if _pause_until >= 0:
 		if context.current_tick < _pause_until:
 			return Status.RUNNING
@@ -60,7 +61,7 @@ func tick(context: AIContextComponent) -> Status:
 	if _walking:
 		# The walk ended: it arrived, or nav gave up on it. Stand for a while either way.
 		_walking = false
-		# Claude 2026-11-09 (scaling spec step 6): both written for 60 ticks a second.
+		# Both written for 60 ticks a second.
 		var shortest := TickDriver.ticks_at_rate(min_pause_ticks)
 		var longest := TickDriver.ticks_at_rate(max_pause_ticks)
 		_pause_until = context.current_tick + shortest + int(context.random_unit(PAUSE_SALT) * (maxi(longest - shortest, 0) + 1))

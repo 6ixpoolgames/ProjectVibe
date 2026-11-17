@@ -1,24 +1,29 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: one tunable state for every "how aware am I of an enemy" situation. Pawn spec
-## section 10.6. The default Alert and Combat are two nodes running this script with different settings, so a designer makes a new
-## awareness state, say a jumpy "Startled", by adding a node and filling in the settings, with no code.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## One tunable state for every "how aware am I of an enemy" situation, such as Alert and Combat.
 ##
+## Pawn spec section 10.6. The default Alert and Combat are two nodes running this script with different settings, so a designer
+## makes a new awareness state, say a jumpy "Startled", by adding a node and filling in the settings, with no code.
+## [br]
 ## Its prerequisites hold when the entry it looks at (the current target, or any entry in memory) meets every setting:
-##   min_awareness          awareness now is at least this
-##   requires_certain       the entry became certain (reached full awareness) at some point
-##   max_ticks_since_seen   it was seen within this many ticks (-1: any time)
-## Claude 2026-11-09, step 10: or, separately, the pawn was hit recently:
-##   hit_within_ticks       hit within this many ticks (-1: off)
-##   attacker               KNOWN: the attacker is in memory; UNKNOWN: it isn't; ANY: either
+## [br]- [member min_awareness]: awareness now is at least this
+## [br]- [member requires_certain]: the entry became certain (reached full awareness) at some point
+## [br]- [member max_ticks_since_seen]: it was seen within this many ticks (-1: any time)
+## [br]
+## Or, separately, the pawn was hit recently:
+## [br]- [member hit_within_ticks]: hit within this many ticks (-1: off)
+## [br]- [member attacker]: KNOWN, the attacker is in memory; UNKNOWN, it isn't; ANY, either
+## [br]
 ## So Combat holds when a known attacker hits, and Alert when an unknown one does: the owner's rule, with no damage sense.
 class_name AIAwarenessState
 extends AIStateBase
 
+## Which memory entries the state looks at.
 enum LooksAt {
 	CURRENT_TARGET, ## the target the target selector picked
 	ANY_ENTRY, ## any entry in memory
 }
 
-## Claude 2026-11-09: which attackers count for the hit rule.
+## Which attackers count for the hit rule.
 enum Attacker {
 	ANY, ## any attacker
 	KNOWN, ## one the pawn has in memory
@@ -31,11 +36,11 @@ enum Attacker {
 @export_range(0.0, 1.0, 0.01) var min_awareness := 0.3
 ## On: only entries that became certain count.
 @export var requires_certain := false
-## Only entries seen within this many ticks count. -1: any time.
+## Only entries seen within this many ticks (at 60 a second) count. -1: any time.
 @export_range(-1, 36000, 1, "or_greater") var max_ticks_since_seen := -1
-## Claude 2026-11-09: or the pawn was hit within this many ticks, by an attacker of the kind below. -1: off.
+## Or the pawn was hit within this many ticks (at 60 a second), by an attacker of the kind below. -1: off.
 @export_range(-1, 36000, 1, "or_greater") var hit_within_ticks := -1
-## Claude 2026-11-09: which attackers count for hit_within_ticks.
+## Which attackers count for hit_within_ticks.
 @export var attacker := Attacker.ANY
 
 
@@ -57,14 +62,13 @@ func prerequisites_met(context: AIContextComponent) -> bool:
 func _entry_fits(memory: AIMemory, index: int, tick: int) -> bool:
 	if requires_certain and not memory.is_certain_at(index):
 		return false
-	# Claude 2026-11-16 (wider audit): counted at 60 a second like hit_within_ticks, so converted for this match's rate (it wasn't,
-	# so 120 ticks was 2 s at 60 and 4 s at 30).
+	# Counted at 60 a second like hit_within_ticks, so converted for this match's rate.
 	if max_ticks_since_seen >= 0 and memory.ticks_since_seen_at(index, tick) > TickDriver.ticks_at_rate(max_ticks_since_seen):
 		return false
 	return memory.awareness_at(index, tick) >= min_awareness
 
 
-# Claude 2026-11-09: the hit rule.
+# The hit rule.
 func _hit_fits(context: AIContextComponent) -> bool:
 	if hit_within_ticks < 0 or not context.was_hit_within(hit_within_ticks):
 		return false

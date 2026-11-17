@@ -1,56 +1,70 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: what goes on the wire (netcode spec section 11).
-## Packet types, and how one value is turned into bytes and back. Every value starts with a one-byte tag saying how it's
-## stored, so a reader never has to guess, and a bad packet can be spotted and dropped.
+# Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
+## What goes on the wire (netcode spec section 11): packet types, and how one value is turned into bytes and back.
 ##
-## Values follow their encoding from StateEncoding: a position at 1 mm takes 3 bytes per axis, an angle_u16 takes 2.
-## Reading a rounded value back gives exactly the same number the sender rounded to, which is why a client's prediction
-## can compare equal to what the server sent.
-##
-## Never trust these bytes: read_value returns BAD for anything truncated or unknown, and objects are never decoded.
-## Positions are limited to about +/- 8.3 km at 1 mm; anything further is clamped.
+## Every value starts with a one-byte tag saying how it's stored, so a reader never has to guess, and a bad packet can be spotted
+## and dropped.
+## [br]
+## Values follow their encoding from StateEncoding: a position at 1 mm takes 3 bytes per axis, an angle_u16 takes 2. Reading a
+## rounded value back gives exactly the same number the sender rounded to, which is why a client's prediction can compare equal to
+## what the server sent.
+## [br]
+## Never trust these bytes: [method read_value] returns [constant BAD] for anything truncated or unknown, and objects are never
+## decoded. Positions are limited to about +/- 8.3 km at 1 mm; anything further is clamped.
+## [br]
+## NetCodec in C++ ([code]native/src/net_codec.cpp[/code]) writes and reads inputs and snapshots with the same bytes, faster; this
+## class is the fallback where that library isn't loaded, and handles every other packet. A change to the format goes in both
+## (tests/net_codec_selftest compares them).
 class_name NetPackets
 extends RefCounted
 
 ## Bump this when the wire format changes. It's part of the handshake's content hash.
-## Claude 2026-11-05: native/src/net_codec.cpp holds its own copy of this format and this number, so bump and change both.
-const PROTOCOL_VERSION := 5 # Claude 2026-11-05: 4 adds custom state to snapshots. Claude 2026-11-07: 5 adds small ints (INT8, INT16)
+## [br]
+## native/src/net_codec.cpp holds its own copy of this format and this number, so bump and change both.
+const PROTOCOL_VERSION := 5
 
-# Claude 2026-11-07: WORLD_MESSAGE, OWNER_CHANGED and CLIENT_MESSAGE added. NetCodec only handles inputs and snapshots, so it doesn't need to know.
-# Claude 2026-11-16: ACK added at the end, so the numbers before it don't move: a client says which parts of which snapshots it read
-# (Claude 2026-11-17: per part, not whole snapshots as this said first). NetCodec doesn't need to know.
+## Packet types, the first byte of every packet. New types go at the end, so the numbers before them don't move.
+## [br]
+## NetCodec only handles inputs and snapshots, so it doesn't need to know about the others. With ACK, a client says which parts of
+## which snapshots it read.
 enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, WORLD_MESSAGE, OWNER_CHANGED, CLIENT_MESSAGE, ACK }
-## Claude 2026-11-16 (audit): the types sent unreliably, in one place, so a new type is added here once (NetDebugModule reads it; it
-## had to be patched by hand for ACK). Everything else goes reliably.
+## The types sent unreliably, in one place, so a new type is added here once (NetDebugModule reads it too). Everything else goes
+## reliably.
 const UNRELIABLE_TYPES: Array[int] = [Type.INPUT, Type.SNAPSHOT, Type.PING, Type.PONG, Type.ACK]
 
 
-## Claude 2026-11-16 (audit): true if packets of this type go unreliably (UNRELIABLE_TYPES).
+## True if packets of this type go unreliably ([constant UNRELIABLE_TYPES]).
 static func is_unreliable(type: int) -> bool:
 	return UNRELIABLE_TYPES.has(type)
 
 ## What read_value returns for a broken packet. Stop reading when you see it.
 const BAD := &"__net_bad_packet__"
+## The most values one list can hold: its count is one byte.
 const MAX_LIST_SIZE := 255
+## The largest number 3 bytes hold, signed: about 8.3 km at 1 mm.
 const INT24_LIMIT := 8388607
-## Claude 2026-11-05: items per entity in write_world's list: id, state values, state encodings, sync values, sync encodings,
-## input values, input encodings, custom values.
+## Items per entity in [method write_world]'s list: id, state values, state encodings, sync values, sync encodings, input values,
+## input encodings, custom values.
 const WORLD_ENTRY_SIZE := 8
 
-# Claude 2026-11-07: INT8 and INT16 added at the end, so the numbers before them don't move. An int takes the smallest that holds it.
+## The one-byte tag before every value, saying how it's stored. New tags go at the end, so the numbers before them don't move. An
+## int takes the smallest tag that holds it (INT8, INT16, INT32, INT64).
 enum Tag { MISSING = 0, VECTOR3_MM, VECTOR3_CM, VECTOR2_MM, ANGLE_U16, ANGLE_BYTE, FLOAT32, BOOL_FALSE, BOOL_TRUE, INT32, INT64, OTHER, INT8, INT16 }
 
 
+## An empty buffer to write a packet into.
 static func new_buffer() -> StreamPeerBuffer:
 	var buffer := StreamPeerBuffer.new()
 	return buffer
 
 
+## A buffer that reads these bytes from the start.
 static func reader(bytes: PackedByteArray) -> StreamPeerBuffer:
 	var buffer := StreamPeerBuffer.new()
 	buffer.data_array = bytes
 	return buffer
 
 
+## True if at least this many bytes are left to read.
 static func has_bytes(buffer: StreamPeerBuffer, count: int) -> bool:
 	return buffer.get_available_bytes() >= count
 
@@ -130,11 +144,11 @@ static func read_value(buffer: StreamPeerBuffer) -> Variant:
 			return false
 		Tag.BOOL_TRUE:
 			return true
-		Tag.INT8: # Claude 2026-11-07
+		Tag.INT8:
 			if not has_bytes(buffer, 1):
 				return BAD
 			return buffer.get_8()
-		Tag.INT16: # Claude 2026-11-07
+		Tag.INT16:
 			if not has_bytes(buffer, 2):
 				return BAD
 			return buffer.get_16()
@@ -188,8 +202,9 @@ static func read_list(buffer: StreamPeerBuffer) -> Variant:
 
 # --- A snapshot's entities -------------------------------------------------------------------------
 
-## Claude 2026-11-05: moved here from NetworkSession. NetCodec in C++ does the same job, faster, with the same bytes: this version is
-## what runs where that library isn't available.
+## A snapshot's entities as bytes, from a flat list of [constant WORLD_ENTRY_SIZE] items per entity.
+## [br]
+## NetCodec in C++ does the same job, faster, with the same bytes: this version is what runs where that library isn't available.
 static func write_world(entries: Array) -> PackedByteArray:
 	var world := new_buffer()
 	for at in range(0, entries.size() - WORLD_ENTRY_SIZE + 1, WORLD_ENTRY_SIZE):
@@ -201,7 +216,8 @@ static func write_world(entries: Array) -> PackedByteArray:
 	return world.data_array
 
 
-## Claude 2026-11-05: an Array of [id, state, sync, input, custom] for each entity. Null if the packet is broken.
+## Reads count entities written by [method write_world]: an Array of [id, state, sync, input, custom] for each. Null if the packet
+## is broken.
 static func read_world(buffer: StreamPeerBuffer, count: int) -> Variant:
 	var parsed: Array = []
 	for i in count:
@@ -225,7 +241,7 @@ static func _write_plain(buffer: StreamPeerBuffer, value: Variant) -> void:
 		TYPE_BOOL:
 			buffer.put_u8(Tag.BOOL_TRUE if value else Tag.BOOL_FALSE)
 		TYPE_INT:
-			# Claude 2026-11-07: 1 or 2 bytes for small ints. Most networked ints (held actions, counters, small ids) fit in one.
+			# 1 or 2 bytes for small ints. Most networked ints (held actions, counters, small ids) fit in one.
 			if value >= -128 and value <= 127:
 				buffer.put_u8(Tag.INT8)
 				buffer.put_8(value)

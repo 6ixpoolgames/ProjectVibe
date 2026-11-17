@@ -1,7 +1,7 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16 (pawn spec 8.20): a timed pause, such as an attack's recovery. It does nothing but
-## take its length_ticks.
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
+## A timed pause, such as an attack's recovery: it does nothing but take its length_ticks.
 ##
-## For visuals, the weapon stays at the end of the sweep that started this step, if one did.
+## Pawn spec 8.20. For visuals, the weapon stays at the end of the sweep that started this step, if one did.
 class_name WaitStep
 extends AbilityStep
 

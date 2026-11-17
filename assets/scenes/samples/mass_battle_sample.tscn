@@ -1,10 +1,16 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=14 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_arena_sample.tscn" id="1_arena"]
 [ext_resource type="Script" path="res://assets/scripts/samples/MassBattleSample.gd" id="2_sample"]
 [ext_resource type="Script" path="res://assets/scripts/streaming/StreamingSource.gd" id="3_source"]
 [ext_resource type="Script" path="res://assets/scripts/spawning/PawnSpawner.gd" id="4_spawner"]
 [ext_resource type="Script" path="res://assets/scripts/world/BodyNavFeeder.gd" id="5_nav_feeder"]
+[ext_resource type="Script" path="res://assets/scripts/navigation/NavMarkerNode.gd" id="6_marker_node"]
+[ext_resource type="Script" path="res://assets/scripts/navigation/markers/NavPoint.gd" id="7_nav_point"]
+
+[sub_resource type="Resource" id="Point_cover"]
+script = ExtResource("7_nav_point")
+tag = &"point.cover"
 
 [sub_resource type="StandardMaterial3D" id="Wall_mat"]
 albedo_color = Color(0.55, 0.52, 0.48, 1)
@@ -132,3 +138,30 @@ mesh = SubResource("WallB_mesh")
 
 [node name="BodyNavFeeder" type="Node" parent="CentreWalls/WallB"]
 script = ExtResource("5_nav_feeder")
+
+[node name="CoverPoints" type="Node3D" parent="CentreWalls"]
+
+[node name="CoverA1" type="Node3D" parent="CentreWalls/CoverPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0, -3)
+script = ExtResource("6_marker_node")
+marker = SubResource("Point_cover")
+
+[node name="CoverA2" type="Node3D" parent="CentreWalls/CoverPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0.3, 3)
+script = ExtResource("6_marker_node")
+marker = SubResource("Point_cover")
+
+[node name="CoverA3" type="Node3D" parent="CentreWalls/CoverPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0, 0)
+script = ExtResource("6_marker_node")
+marker = SubResource("Point_cover")
+
+[node name="CoverB1" type="Node3D" parent="CentreWalls/CoverPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, -1.2, -5)
+script = ExtResource("6_marker_node")
+marker = SubResource("Point_cover")
+
+[node name="CoverB2" type="Node3D" parent="CentreWalls/CoverPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1, -1.2, -5)
+script = ExtResource("6_marker_node")
+marker = SubResource("Point_cover")

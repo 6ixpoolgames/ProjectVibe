@@ -1,21 +1,25 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: replay channel 5, "gameplay": what happened, as events (replay spec section 3).
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## Replay channel 5, "gameplay": what happened, as events (replay spec section 3).
+##
 ## The same events the AI debug timeline lists, for every pawn, plus freezes, possession and falls. Each event's id is the pawn it
 ## happened to.
-##
+## [br]
 ## Events, and their data:
-##   "hit"                attacker (replay id, 0 if none), ability (name), damage (Health taken)
-##   "died"               killer (replay id, 0 if none)
-##   "ability_started"    ability
-##   "ability_cancelled"  ability, by (the ability that cancelled it, "" if none)
-##   "step_started"       ability, step (Claude 2026-11-16, pawn spec 8.20: a step of a stepped ability, ability.step)
-##   "step_finished"      ability, step, reason ("done", "failed" or "cancelled")
-##   "ai_state"           from, to (state names), reason
-##   "ai_behaviour"       from, to (behaviour names), reason
-##   "ai_target"          from, to (replay ids, 0 for none), reason
-##   "frozen", "unfrozen" (none): the AI switch-off stopped or restarted it (AIActivationManager)
-##   "possessed", "released"  peer: a player took it or let it go (PossessionCoordinator)
-##   "fell"               report: the kill floor's report of how it got there (KillFloor.pawn_fell)
-##
+## [br]- "hit": attacker (replay id, 0 if none), ability (name), damage (Health taken).
+## [br]- "hit_intercepted": by (the attacker's replay id, 0 if none), interceptor (the HitInterceptor that stopped it, such as a parry's;
+##   pawn spec 8.23).
+## [br]- "died": killer (replay id, 0 if none).
+## [br]- "ability_started": ability.
+## [br]- "ability_cancelled": ability, by (the ability that cancelled it, "" if none).
+## [br]- "step_started": ability, step (a step of a stepped ability, pawn spec 8.20).
+## [br]- "step_finished": ability, step, reason ("done", "failed" or "cancelled").
+## [br]- "ai_state": from, to (state names), reason.
+## [br]- "ai_behaviour": from, to (behaviour names), reason.
+## [br]- "ai_target": from, to (replay ids, 0 for none), reason.
+## [br]- "frozen", "unfrozen" (no data): the AI switch-off stopped or restarted it (AIActivationManager).
+## [br]- "possessed", "released": peer, a player took it or let it go (PossessionCoordinator).
+## [br]- "fell": report, the kill floor's report of how it got there (KillFloor.pawn_fell).
+## [br]
 ## Reading: only state["events"], this tick's events. Nothing lasts.
 class_name ReplayGameplayChannel
 extends ReplayEventChannel
@@ -67,11 +71,11 @@ func write_tick(tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
 func pawn_added(pawn: Pawn, id: int) -> void:
 	var connections: Array = []
 	# GDScript note: each lambda below captures id, so the event names the right pawn even after others come and go.
-	if pawn.ability_manager: # Claude 2026-11-16 (pawn M3): hit_received and died moved to the AbilityManager
+	if pawn.ability_manager: # hits, death, abilities and their steps
 		_connect(connections, pawn.ability_manager.hit_received, func(hit: HitInfo) -> void:
 			add_event("hit", id, {"attacker": recorder.get_replay_id(hit.attacker) if recorder else 0, "ability": _name_of(hit.ability),
 				"damage": hit.damage_dealt}))
-		# Claude 2026-11-17 (pawn spec 8.23): a hit a HitInterceptor stopped (a parry), with who sent it and what stopped it
+		# A hit a HitInterceptor stopped (a parry, say), with who sent it and what stopped it.
 		_connect(connections, pawn.ability_manager.hit_intercepted, func(hit: HitInfo, interceptor: HitInterceptor) -> void:
 			add_event("hit_intercepted", id, {"by": recorder.get_replay_id(hit.attacker) if recorder and is_instance_valid(hit.attacker) else 0,
 				"interceptor": _name_of(interceptor)}))
@@ -81,19 +85,19 @@ func pawn_added(pawn: Pawn, id: int) -> void:
 			add_event("ability_started", id, {"ability": _name_of(ability)}))
 		_connect(connections, pawn.ability_manager.ability_cancelled, func(ability: AbilityBase, by: AbilityBase) -> void:
 			add_event("ability_cancelled", id, {"ability": _name_of(ability), "by": _name_of(by)}))
-		# Claude 2026-11-16 (pawn spec 8.20): steps, the owner's ability.step level of detail.
+		# Steps, the owner's ability.step level of detail (pawn spec 8.20).
 		_connect(connections, pawn.ability_manager.step_started, func(ability: AbilityBase, step: AbilityStep) -> void:
 			add_event("step_started", id, {"ability": _name_of(ability), "step": _name_of(step)}))
 		_connect(connections, pawn.ability_manager.step_finished, func(ability: AbilityBase, step: AbilityStep, reason: String) -> void:
 			add_event("step_finished", id, {"ability": _name_of(ability), "step": _name_of(step), "reason": reason}))
-	if pawn.ai_context and pawn.ai_context.state_manager: # Claude 2026-11-17: through the AI's core
+	if pawn.ai_context and pawn.ai_context.state_manager: # the AI's parts are reached through its context
 		_connect(connections, pawn.ai_context.state_manager.state_changed, func(old: AIStateBase, new: AIStateBase, reason: String) -> void:
 			add_event("ai_state", id, {"from": _name_of(old), "to": _name_of(new), "reason": reason}))
-	if pawn.ai_context and pawn.ai_context.behaviour_manager: # Claude 2026-11-17: through the AI's core
+	if pawn.ai_context and pawn.ai_context.behaviour_manager:
 		_connect(connections, pawn.ai_context.behaviour_manager.behaviour_changed,
 			func(old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
 				add_event("ai_behaviour", id, {"from": _name_of(old), "to": _name_of(new), "reason": reason}))
-	if pawn.ai_context and pawn.ai_context.target_selector: # Claude 2026-11-17: through the AI's core
+	if pawn.ai_context and pawn.ai_context.target_selector:
 		_connect(connections, pawn.ai_context.target_selector.target_changed, func(old: Node3D, new: Node3D, reason: String) -> void:
 			add_event("ai_target", id, {"from": recorder.get_replay_id(old) if recorder else 0,
 				"to": recorder.get_replay_id(new) if recorder else 0, "reason": reason}))

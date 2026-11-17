@@ -1,16 +1,18 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: GDExtension entry point; registers NavHooks and the NavServer singleton.
-#include "ai_memory_store.h" // Claude 2026-11-09: AI memory and sight in C++, pawn spec 10.11
-#include "ai_pawn_grid.h" // Claude 2026-11-09
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// The navcore library's GDExtension entry point (bin/navcore.gdextension names navcore_library_init). It registers every class
+// GDScript can make, and the NavServer engine singleton. native/README.md lists the classes and which scripts use them.
+#include "ai_memory_store.h" // AI memory and sight in C++, pawn spec 10.11
+#include "ai_pawn_grid.h" // who's near whom, for sensing and swing hits
 #include "nav_hooks.h"
 #include "nav_server.h"
-#include "net_codec.h" // Claude 2026-11-05: packet encoding in C++, a measured test the game doesn't use yet
-#include "tick_state_recorder.h" // Claude 2026-11-09: rollback recording in C++, pawn spec 12.1
-#include "pawn_table.h" // Claude 2026-11-09: the shared table of plain pawn data, scaling spec step 1
-#include "job_scheduler.h" // Claude 2026-11-09: worker threads for plain-data jobs, scaling spec step 2
-#include "ai_sensing_job.h" // Claude 2026-11-09: the first job kind, sensing, step 2
-#include "sight_geometry.h" // Claude 2026-11-09: line of sight in C++, step 4
-#include "replay_motion_packer.h" // Claude 2026-11-17: the replay's motion packing in C++, C++ bundle stage 3
-#include "crowd_batch.h" // Claude 2026-11-17: the crowd mover's batch in C++, C++ bundle stage 3
+#include "net_codec.h" // snapshot encoding in C++, NetworkSession's fast path
+#include "tick_state_recorder.h" // rollback recording in C++, pawn spec 12.1
+#include "pawn_table.h" // the shared table of plain pawn data, scaling spec step 1
+#include "job_scheduler.h" // worker threads for plain-data jobs, scaling spec step 2
+#include "ai_sensing_job.h" // sensing's search on the workers, step 2
+#include "sight_geometry.h" // line of sight in C++, step 4
+#include "replay_motion_packer.h" // the replay's motion packing in C++
+#include "crowd_batch.h" // the crowd mover's batch in C++
 
 #include <gdextension_interface.h>
 #include <godot_cpp/classes/engine.hpp>
@@ -28,16 +30,16 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	}
 	GDREGISTER_CLASS(NavHooks);
 	GDREGISTER_CLASS(NavServer);
-	GDREGISTER_CLASS(NetCodec); // Claude 2026-11-05
-	GDREGISTER_CLASS(AIMemoryStore); // Claude 2026-11-09
-	GDREGISTER_CLASS(PawnTable); // Claude 2026-11-09: before AIPawnGrid, which uses it
-	GDREGISTER_CLASS(AIPawnGrid); // Claude 2026-11-09
-	GDREGISTER_CLASS(SightGeometry); // Claude 2026-11-09, step 4: before the job and the store, which use it
-	GDREGISTER_CLASS(JobScheduler); // Claude 2026-11-09, step 2
-	GDREGISTER_CLASS(AISensingJob); // Claude 2026-11-09, step 2: after the grid and the scheduler it uses
-	GDREGISTER_CLASS(TickStateRecorder); // Claude 2026-11-09
-	GDREGISTER_CLASS(ReplayMotionPacker); // Claude 2026-11-17
-	GDREGISTER_CLASS(CrowdBatch); // Claude 2026-11-17: after the scheduler and the geometry it uses
+	GDREGISTER_CLASS(NetCodec);
+	GDREGISTER_CLASS(AIMemoryStore);
+	GDREGISTER_CLASS(PawnTable); // before AIPawnGrid, which uses it
+	GDREGISTER_CLASS(AIPawnGrid);
+	GDREGISTER_CLASS(SightGeometry); // before the job and the store, which use it
+	GDREGISTER_CLASS(JobScheduler);
+	GDREGISTER_CLASS(AISensingJob); // after the grid and the scheduler it uses
+	GDREGISTER_CLASS(TickStateRecorder);
+	GDREGISTER_CLASS(ReplayMotionPacker);
+	GDREGISTER_CLASS(CrowdBatch); // after the scheduler and the geometry it uses
 	g_nav_server = memnew(NavServer);
 	Engine::get_singleton()->register_singleton("NavServer", g_nav_server);
 }

@@ -1,32 +1,34 @@
-## Written by Claude (claude-opus-5-5), 2026-11-05: one terrain generator with the features of procgen_tile.gd and
-## nav_test_terrain.gd, built alongside them. Both originals stay as they are.
-## Claude 2026-11-07: renamed from Terrain, so that the name says what it does. Scene nodes may still be called "Terrain".
+# Written by Claude (claude-opus-5-5), 2026-11-05. History: terrain/CHANGELOG.md.
+## Generates ground in square chunks, with a low-poly look and no visible square grid.
 ##
-## The look it goes for is low poly without a visible square grid. The four settings that shape that are noise_scale,
-## grid_jitter, chunk_resolution (how fine the grid is) and chunk_size (how big a chunk is in metres), plus smooth_shading.
-##
-## From procgen_tile.gd: the noise settings, UVs, a Generate button in the editor, and a signal when collision is ready.
-## From nav_test_terrain.gd: seamless chunks, height_at(), raycast(), live edit(), and feeding the nav system.
-##
-## How it holds together: _chunk_triangles() makes one list of triangles for each chunk. The flat-shaded mesh, the
-## collision and the nav system all use that list, so what you see, what you stand on and what nav walks on are the same.
-##
-## Claude 2026-11-07: renamed from HeightmapTerrain, because this is becoming the coordinator for a terrain's chunks and
-## modules, and other ways of making ground could join later. tile_size became chunk_size and grid_size chunk_resolution,
-## because "tile" means nav's 12.8 m tiles everywhere else.
-##
-## How to use it: add a Node3D to a scene, attach this script, and press Play or the Generate button in the inspector.
-## To see it working, open terrain_sample.tscn. The test is tests/terrain_selftest.tscn.
-## For a world that loads around the player instead of one fixed block, see ChunkStreamer and streaming_sample.tscn.
-##
-## Claude 2026-11-07: it knows nothing about nav, networks or streaming. It says when a chunk is built or removed, and a TerrainNavFeeder, if
-## there is one, feeds nav from that. So it stands alone, and works with or without a WorldCoordinator. See docs/world/WORLD_SPEC.md.
-##
-## How to read this file, if you're getting back into GDScript: "GDScript note:" comments explain a language feature
-## the first time it comes up. The other comments explain what this terrain does and why.
-##
-## GDScript note: a comment starting with ## is a documentation comment. Above a class, function or variable, it shows
-## up in the editor's help, and above an @export it becomes the tooltip in the inspector. A # comment is just a note.
+## The settings that shape the look are [member noise_scale], [member grid_jitter], [member chunk_resolution] (how fine the grid is)
+## and [member chunk_size] (how big a chunk is in metres), plus [member smooth_shading]. It's called a chunk, not a tile, because
+## "tile" means nav's 12.8 m tiles everywhere else.
+## [br]
+## What it has: the noise settings, UVs, a Generate button in the editor, a signal when collision is ready, seamless chunks,
+## [method height_at], [method raycast] and live [method edit]. It brings together the features of the first generator
+## (procgen_tile.gd, now in assets/legacy/terrain/) and the nav demo's terrain (samples/nav_demo/nav_test_terrain.gd), which both stay
+## as they are.
+## [br]
+## How it holds together: _chunk_triangles() makes one list of triangles for each chunk. The flat-shaded mesh, the collision and
+## whatever listens to [signal chunk_built] (nav, through a TerrainNavFeeder) all use that list, so what you see, what you stand on
+## and what nav walks on are the same.
+## [br]
+## How to use it: add a Node3D to a scene, attach this script, and press Play or the Generate button in the inspector. To see it
+## working, open terrain_sample.tscn. The test is tests/terrain_selftest.tscn. For a world that loads around the player instead of
+## one fixed block, see [ChunkStreamer] and streaming_sample.tscn.
+## [br]
+## It knows nothing about building nav, networks or streaming. It says when a chunk is built or removed, and a TerrainNavFeeder, if
+## there is one, feeds nav from that. So it stands alone, and works with or without a [WorldCoordinator]. See docs/world/WORLD_SPEC.md.
+## Optional modules add to it as children: [TerrainEditLog] (edits outlast their chunks, reach other machines and go into save
+## files) and [TerrainBodyLifter] (bodies move up when an edit raises the ground over them).
+## [br]
+## How to read this file, if you're getting back into GDScript: "GDScript note:" comments explain a language feature the first time
+## it comes up. The other comments explain what this terrain does and why.
+## [br]
+## GDScript note: a comment starting with ## is a documentation comment. Above a class, function or variable, it shows up in the
+## editor's help, and above an @export it becomes the tooltip in the inspector. A # comment is just a note. Godot joins a doc
+## comment's lines into one paragraph, so this project marks each new paragraph and list item with a line-break tag.
 
 # GDScript note: @tool makes this script run inside the editor as well as in the game. That's what lets the terrain
 # appear in the 3D view and the Generate button work. Engine.is_editor_hint() tells the two cases apart.
@@ -42,18 +44,18 @@ extends Node3D
 # terrain.collision_built.connect(my_function), and emit() below calls every connected function.
 # The parameters are the chunk's grid position and the node holding its collision shape.
 signal collision_built(chunk: Vector2i, collision_node: CollisionShape3D)
-## Sent when a chunk has just been removed. Claude 2026-11-07: AI on it needs to know before its next tick.
+## Sent when a chunk has just been removed, straight away, so anything on it knows before its next tick.
 signal chunk_removed(chunk: Vector2i)
 ## Sent when an edit has just raised the ground. center is the middle of the patch in the world, seen from above, as X and Z.
-## Claude 2026-11-07: TerrainBodyLifter uses it, so moving bodies isn't this script's job.
+## TerrainBodyLifter uses it, so moving bodies isn't this script's job.
 signal ground_raised(center: Vector2, radius: float)
-## Sent when a chunk has been built or rebuilt, with its triangles, measured from this node. Claude 2026-11-07: TerrainNavFeeder uses it.
-## Claude 2026-11-17: while it goes out for an edit, edit_area says which part changed.
+## Sent when a chunk has been built or rebuilt, with its triangles, measured from this node. TerrainNavFeeder uses it. While it goes
+## out for an edit, [member edit_area] says which part changed.
 signal chunk_built(chunk: Vector2i, triangles: PackedVector3Array)
 ## Sent when generate() or start_empty() begins, with the settings it's about to use already in place.
 signal generation_started
 
-## Claude 2026-11-17 (C++ bundle stage 2, from the code audit): while chunk_built goes out for an edit, the part of the ground the
+## While [signal chunk_built] goes out for an edit, the part of the ground the
 ## edit changed, measured from this node like the triangles: X and Z only (its Y and height are 0). Outside it, the chunk's
 ## triangles are the same as before. Empty (size zero) when a chunk is built whole. TerrainNavFeeder passes it on, so nav rebuilds
 ## only the tiles the edit touched instead of every tile under the chunk. Not an export: it's only set during an edit.
@@ -77,11 +79,10 @@ const NO_GROUND := INF
 ## Chunks with different numbers line up exactly, because heights come from positions in the world.
 @export var center_chunk := Vector2i.ZERO
 ## How wide one chunk is, in metres.
-# Claude 2026-11-05: in procgen_tile.gd, tile_size was the size of one square, so a finer grid also made a bigger tile.
-# Here it's the whole chunk, so chunk_resolution can change without changing how big the terrain is.
+# It's the whole chunk, not one square, so chunk_resolution can change without changing how big the terrain is.
 # GDScript note: @export_range gives the inspector a slider. "or_greater" still lets you type a larger value by hand.
-# Claude 2026-11-06: defaults raised from 72 and 12, keeping squares of about 6 m as before. First 256 m, then lowered to
-# 128 m by the owner after the stress test: its worst single step is about a third of 256 m's, which suits slower machines.
+# The defaults make squares of about 6 m. 128 m is the owner's choice after the stress test: its worst single step is about a third
+# of a 256 m chunk's, which suits slower machines.
 @export_range(1.0, 1000.0, 0.5, "or_greater") var chunk_size := 128.0
 ## How fine the grid is: the number of squares along each side of a chunk. Fewer squares look more low poly.
 @export_range(1, 256, 1, "or_greater") var chunk_resolution := 21
@@ -95,7 +96,7 @@ const NO_GROUND := INF
 ## Off: every triangle is one flat colour, which is the low-poly look. On: lighting blends smoothly across triangles.
 @export var smooth_shading := false
 
-## Claude 2026-11-16 (the navigation and terrain assessment): raise this whenever the ground this generator makes changes in a way the
+## Raise this whenever the ground this generator makes changes in a way the
 ## settings don't show, such as a script extending this one changing _shape_height. It's part of ground_settings_hash, so saved terrain
 ## edits and other machines made for the old ground are refused rather than applied to different ground.
 @export var generator_version := 1
@@ -106,9 +107,9 @@ const NO_GROUND := INF
 ## spreads them out. Different values for X and Z stretch hills in one direction. It doesn't move any grid points.
 @export var noise_scale := Vector2.ONE
 ## The kind of noise.
-# Claude 2026-11-05: procgen_tile.gd used its own list of names, and they didn't match Godot's numbers, so "Simplex"
-# really gave Cellular. Using Godot's own enum as the type means the names always match. fractal_type below does the
-# same, which matters there too: the first entry in Godot's list means no fractal at all, not FBM.
+# Using Godot's own enum as the type means the names always match its numbers (a list of names of its own could say "Simplex"
+# and give Cellular). fractal_type below does the same, which matters there too: the first entry in Godot's list means no
+# fractal at all, not FBM.
 # GDScript note: an enum is a list of named numbers. When an @export has an enum as its type, the inspector shows a menu.
 @export var noise_type: FastNoiseLite.NoiseType = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 ## How big the hills are. Lower values give wide, gentle hills, and higher values give small, frequent bumps.
@@ -135,11 +136,11 @@ const NO_GROUND := INF
 @export_group("Streaming")
 ## On: the terrain builds its chunk_radius block when it starts. Off: it starts empty, and something else asks for
 ## chunks, which is normally a ChunkStreamer. The editor preview always builds the block, so you can see the ground.
-# Claude 2026-11-06: added for ChunkStreamer. On is the default, so every existing scene behaves as before.
+# ChunkStreamer needs it off; the WorldCoordinator turns it off when there's a streamer.
 @export var build_on_start := true
 ## Off: no meshes are built, only collision, which saves time and memory on a machine nobody looks at.
 ## A build exported with Godot's dedicated_server feature never builds meshes, whatever this says.
-# Claude 2026-11-07: added for multiplayer streaming. A mesh was about 1.9 ms of the 6.5 ms a 256 m chunk cost.
+# For servers, which build ground nobody looks at. A mesh was about 1.9 ms of the 6.5 ms a 256 m chunk cost.
 @export var build_meshes := true
 
 @export_group("")
@@ -158,17 +159,17 @@ var _mesh_nodes := {} # Vector2i -> MeshInstance3D
 var _collision_nodes := {} # Vector2i -> CollisionShape3D, each one inside its own StaticBody3D
 var _plain_material := StandardMaterial3D.new() # used when the material setting is empty
 var _has_generated := false
-# Claude 2026-11-06: the next three are for building and unloading one chunk at a time.
+# The next three are for building and unloading one chunk at a time.
 var _building := {} # Vector2i -> _ChunkBuild, the chunks that are partly built
 var _edited_chunks := {} # Vector2i -> true, used only to warn when an unload is about to lose an edit
 var _warned_about_lost_edits := false
-# Claude 2026-11-07: the two below are for TerrainEditLog, an optional module.
+# The two below are for TerrainEditLog, an optional module.
 var _edit_log: TerrainEditLog = null
 var _rebuild_queue: Array[Vector2i] = [] # chunks to rebuild, one per frame, because the log changed
 
 
 ## Everything a half-built chunk needs to remember between steps.
-# Claude 2026-11-06: added so a chunk can be built over several frames, for slower machines.
+# So a chunk can be built over several frames, for slower machines.
 # GDScript note: a class inside a script is a small helper type that only this script normally uses.
 class _ChunkBuild:
 	var stage := Stage.POINTS
@@ -176,7 +177,7 @@ class _ChunkBuild:
 	var points := PackedVector3Array()
 	var mesh := _MeshData.new()
 	var triangles := PackedVector3Array()
-	var next_edit := 0 # Claude 2026-11-07: how far through this chunk's edits it has got
+	var next_edit := 0 # how far through this chunk's edits it has got
 
 
 ## The lists a mesh is made from. Each index of the first three describes one vertex.
@@ -200,12 +201,12 @@ class _MeshData:
 
 # The order a chunk's build goes through, one stage at a time.
 enum Stage { POINTS, EDITS, MESH_ROWS, MESH_NODE, COLLISION, ANNOUNCE }
-# How much one build step does. Measured 2026-11-06 at about 0.4 ms on a fast desktop, so slower machines stay near
+# How much one build step does. Measured at about 0.4 ms on a fast desktop, so slower machines stay near
 # their budget too. Collision can't be split, so it's the largest single step.
 const POINTS_PER_STEP := 350
 const SQUARES_PER_STEP := 700
 const SMOOTH_POINTS_PER_STEP := 120
-# Claude 2026-11-07: measured at about 24 microseconds an edit on a 128 m chunk.
+# Measured at about 24 microseconds an edit on a 128 m chunk.
 const EDITS_PER_STEP := 20
 
 
@@ -219,8 +220,8 @@ const GROUP := &"terrains"
 
 
 func _ready() -> void:
-	set_process(false) # Claude 2026-11-07: only runs while chunks are waiting to be rebuilt
-	# Claude 2026-11-06: a streamed terrain starts empty. The editor still builds the block, as a preview.
+	set_process(false) # only runs while chunks are waiting to be rebuilt
+	# A streamed terrain starts empty. The editor still builds the block, as a preview.
 	if build_on_start or Engine.is_editor_hint():
 		_build_block()
 	else:
@@ -229,14 +230,14 @@ func _ready() -> void:
 
 # If this node is taken out of the scene and put back, _ready won't run again.
 func _enter_tree() -> void:
-	add_to_group(GROUP) # Claude 2026-11-07: see GROUP
+	add_to_group(GROUP) # see GROUP
 	if _has_generated:
 		# GDScript note: looping over a Dictionary gives you its keys.
 		for key in _points:
 			_rebuild_solid(key)
 
 
-# Claude 2026-11-07: a change to the edit log rebuilds chunks a few at a time, so it doesn't stall a frame.
+# A change to the edit log rebuilds chunks one a frame, so it doesn't stall a frame.
 func _process(_delta: float) -> void:
 	if _rebuild_queue.is_empty():
 		set_process(false)
@@ -251,7 +252,7 @@ func _process(_delta: float) -> void:
 ## settings from code. It runs by itself once when the node enters the scene.
 func generate() -> void:
 	if _edit_log != null:
-		_edit_log.clear() # Claude 2026-11-07: as this function's description says
+		_edit_log.clear() # as this function's description says
 	_build_block()
 
 
@@ -271,7 +272,7 @@ func _build_block() -> void:
 
 ## Clears everything and applies the current settings, leaving no chunks built. A terrain with build_on_start off does
 ## this by itself. After this, build_chunk_step and load_chunk add chunks.
-# Claude 2026-11-06: added for ChunkStreamer.
+# ChunkStreamer relies on it.
 func start_empty() -> void:
 	_prepare()
 	_has_generated = true
@@ -285,13 +286,13 @@ func chunk_of(world_position: Vector3) -> Vector2i:
 
 ## True once a chunk is completely built, including its collision. A chunk that's partly built doesn't count.
 func has_chunk(key: Vector2i) -> bool:
-	# Claude 2026-11-07: reads the points, because a chunk with build_meshes off has no mesh node.
+	# Reads the points, because a chunk with build_meshes off has no mesh node.
 	return _points.has(key) and not _building.has(key)
 
 
 ## True if every chunk within margin metres of this position is completely built. Quick, because AI checks it often:
 ## a position in the middle of a chunk only needs that one chunk.
-# Claude 2026-11-07: added for AIActivationManager.
+# AIActivationManager uses it.
 func has_ground_around(world_position: Vector3, margin: float) -> bool:
 	var origin := _terrain_origin()
 	var x := (world_position.x - origin.x) / chunk_size
@@ -326,7 +327,7 @@ func get_loaded_chunks() -> Array[Vector2i]:
 ## Does one small piece of building a chunk, and returns true once the chunk is finished. Call it again with the same
 ## chunk to continue. ChunkStreamer uses this to spread a chunk over several frames. Several chunks can be partly built
 ## at once. The result is exactly the same as generate() would make, because both use the same functions.
-# Claude 2026-11-06: added so slower machines don't stall while a chunk loads. See POINTS_PER_STEP above.
+# So slower machines don't stall while a chunk loads. See POINTS_PER_STEP above.
 func build_chunk_step(key: Vector2i) -> bool:
 	if has_chunk(key):
 		return true
@@ -341,7 +342,7 @@ func build_chunk_step(key: Vector2i) -> bool:
 	# GDScript note: match compares a value against each option below, like a list of "if" checks.
 	match build.stage:
 		Stage.POINTS:
-			@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
+			@warning_ignore("integer_division") # whole numbers on purpose
 			var rows := maxi(1, POINTS_PER_STEP / _points_per_edge())
 			var end_row := mini(build.next_row + rows, _points_per_edge())
 			_fill_point_rows(build.points, key, build.next_row, end_row)
@@ -350,7 +351,7 @@ func build_chunk_step(key: Vector2i) -> bool:
 				build.next_row = 0
 				build.stage = Stage.EDITS
 		Stage.EDITS:
-			# Claude 2026-11-07: a much-dug chunk can have a long list, so this is split up too.
+			# A much-dug chunk can have a long list, so this is split up too.
 			if _edit_log != null and build.next_edit < _edit_log.get_chunk_edit_count(key):
 				build.next_edit = _edit_log.apply_some_to_chunk(key, build.points, build.next_edit, EDITS_PER_STEP)
 				return false
@@ -389,7 +390,8 @@ func load_chunk(key: Vector2i) -> void:
 		pass
 
 
-## Removes a chunk: its mesh, collision, nav data and markers, or whatever part of them has been built.
+## Removes a chunk: its mesh and collision, or whatever part of them has been built. [signal chunk_removed] goes out, so its nav
+## data and markers go too.
 ## With no TerrainEditLog, any edits on this chunk are lost, and it warns the first time that happens.
 func unload_chunk(key: Vector2i) -> void:
 	if _edit_log == null and _edited_chunks.has(key) and not _warned_about_lost_edits:
@@ -398,12 +400,12 @@ func unload_chunk(key: Vector2i) -> void:
 	_forget_chunk(key)
 
 
-## A built chunk's triangles, measured from this node. Claude 2026-11-07: for something that arrives after the chunk was built.
+## A built chunk's triangles, measured from this node, for something that arrives after the chunk was built.
 func get_chunk_triangles(key: Vector2i) -> PackedVector3Array:
 	return _chunk_triangles(key) if _points.has(key) else PackedVector3Array()
 
 
-## A chunk's markers, placed in the world. See _make_chunk_markers. Claude 2026-11-07: TerrainNavFeeder announces them.
+## A chunk's markers, placed in the world. See _make_chunk_markers. TerrainNavFeeder announces them.
 func get_chunk_markers(key: Vector2i) -> Array[NavMarker]:
 	var markers := _make_chunk_markers(key)
 	var origin := _terrain_origin()
@@ -454,15 +456,15 @@ func raycast(origin: Vector3, direction: Vector3, max_distance := 600.0) -> Vari
 ## With a TerrainEditLog child, the edit outlasts its chunk. Without one, it's gone when the chunk unloads.
 ## In multiplayer, add a TerrainEditLog: it tells the clients, and keeps them from editing on their own. Without one, an edit stays on
 ## the machine that made it, and machines end up on different ground.
-# Claude 2026-11-07: the network rule moved to TerrainEditLog, so this script doesn't need to know about networks.
+# The network rule is in TerrainEditLog, so this script doesn't need to know about networks.
 func edit(center: Vector3, radius: float, amount: float) -> void:
 	if radius <= 0.0 or (_edit_log != null and _edit_log.refuses_edit()):
 		return
-	# Claude 2026-11-06: a half-built chunk would finish with a mesh made from the heights before this edit, so finish
+	# A half-built chunk would finish with a mesh made from the heights before this edit, so finish
 	# them first. It costs a stutter only if an edit lands while a chunk is loading.
-	finish_building_chunks() # Claude 2026-11-07: moved into a helper, which the client's path uses too
+	finish_building_chunks() # a helper, which the client's path uses too
 	var local_center := center - _terrain_origin()
-	# Claude 2026-11-07: rounded to 32 bits first, the same as what the log stores, so that every machine gets identical ground.
+	# Rounded to 32 bits first, the same as what the log stores, so that every machine gets identical ground.
 	var rounded := PackedFloat32Array([local_center.x, local_center.z, radius, amount])
 	if _edit_log != null:
 		_edit_log.record(rounded[0], rounded[1], rounded[2], rounded[3])
@@ -470,18 +472,17 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 
 
 ## An edit from the server has reached this client, and the log has it already.
-# Claude 2026-11-07, from the audit of 6df1464: the caller now finishes half-built chunks with finish_building_chunks() BEFORE it
-# records the edit. Finishing them here, after recording, made them read the new edit from the log and then get it again below:
-# the ground ended up raised twice.
-# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _apply_edit_from_log.
+# The caller (TerrainEditLog) finishes half-built chunks with finish_building_chunks() BEFORE it records the edit. Finishing them
+# here, after recording, would make them read the new edit from the log and then get it again below: the ground would rise twice.
+# No underscore, because another class (TerrainEditLog) calls it.
 func apply_edit_from_log(x: float, z: float, radius: float, amount: float) -> void:
 	_apply_edit_to_loaded_chunks(x, z, radius, amount)
 
 
-## Claude 2026-11-07: finishes every half-built chunk right now. Called before an edit goes into the log, so that no chunk is
+## Finishes every half-built chunk right now. Called before an edit goes into the log, so that no chunk is
 ## caught halfway: it either finished before the edit was recorded, and gets the edit from the loaded-chunk pass, or it starts
 ## later and reads the edit from the log. Never both.
-# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _finish_building_chunks.
+# No underscore, because another class (TerrainEditLog) calls it.
 func finish_building_chunks() -> void:
 	for key: Vector2i in _building.keys():
 		load_chunk(key)
@@ -489,7 +490,7 @@ func finish_building_chunks() -> void:
 
 ## Changes the heights of the chunks that are built, and rebuilds them. The log isn't touched here.
 func _apply_edit_to_loaded_chunks(x: float, z: float, radius: float, amount: float) -> void:
-	# Claude 2026-11-17 (C++ bundle stage 2): see edit_area. Points move within radius; the triangles using them reach one square further.
+	# See edit_area. Points move within radius; the triangles using them reach one square further.
 	var reach := radius + _square_size()
 	edit_area = AABB(Vector3(x - reach, 0.0, z - reach), Vector3(reach * 2.0, 0.0, reach * 2.0))
 	var flat_center := Vector2(x, z)
@@ -514,7 +515,7 @@ func _apply_edit_to_loaded_chunks(x: float, z: float, radius: float, amount: flo
 		if touched:
 			_points[key] = points # store it back, so there's no doubt the Dictionary has the changed points
 			changed_chunks.append(key)
-			_edited_chunks[key] = true # Claude 2026-11-06: so unloading it can warn that the edit is lost
+			_edited_chunks[key] = true # so unloading it can warn that the edit is lost
 
 	# Then rebuild. A chunk next to the patch can need new smooth lighting even when none of its own points moved.
 	# Collision and nav only care about its own points.
@@ -522,7 +523,7 @@ func _apply_edit_to_loaded_chunks(x: float, z: float, radius: float, amount: flo
 		_rebuild_mesh(key)
 	for key in changed_chunks:
 		_rebuild_solid(key)
-	edit_area = AABB() # Claude 2026-11-17: the edit's chunk_built signals have gone out
+	edit_area = AABB() # the edit's chunk_built signals have gone out
 	if amount > 0.0:
 		var origin := _terrain_origin()
 		ground_raised.emit(Vector2(flat_center.x + origin.x, flat_center.y + origin.z), radius)
@@ -554,7 +555,7 @@ func chunks_touched_by_edit(x: float, z: float, radius: float) -> Array[Vector2i
 
 ## A number that changes if the settings that decide the ground change. TerrainEditLog uses it to refuse edits made for
 ## different ground.
-## Claude 2026-11-16: generator_version is part of it, since a script's own _shape_height changes the ground without changing any setting.
+## [member generator_version] is part of it, since a script's own _shape_height changes the ground without changing any setting.
 func ground_settings_hash() -> int:
 	return hash([chunk_size, chunk_resolution, height_scale, grid_jitter, noise_seed, noise_scale, int(noise_type), frequency, int(fractal_type), fractal_octaves, fractal_gain, fractal_lacunarity, generator_version])
 
@@ -564,7 +565,7 @@ func ground_settings_hash() -> int:
 
 ## Change this to shape the ground beyond the noise, such as a flat plaza or a wall. Copy tests/terrain_test_course.gd
 ## to see how. noise_height is the height so far, and the position is measured from this node.
-# GDScript note: another script can say "extends Terrain" and write its own _shape_height. GDScript then uses
+# GDScript note: another script can say "extends TerrainGenerator" and write its own _shape_height. GDScript then uses
 # that version everywhere, including in the calls made from this file. That script also needs @tool to show its shapes
 # in the editor preview.
 func _shape_height(_x: float, _z: float, noise_height: float) -> float:
@@ -575,28 +576,28 @@ func _shape_height(_x: float, _z: float, noise_height: float) -> float:
 ## Change this to give a chunk its links and points of interest. Copy tests/terrain_marker_example.gd to see how.
 ## A TerrainNavFeeder announces them to NavMarkerManager when the chunk is built and after an edit, so they can't float or get buried, and
 ## releases them when it's gone. By default a chunk has none and pays nothing. Rules for what you return:
-##   - Make new markers every time, because get_chunk_markers moves them into place.
-##   - Set each marker's position measured from this node, as _shape_height does. _point_at gives grid points.
-##   - Build the list from the chunk's numbers, not random numbers, so every machine gets the same list. A marker's
-##     id comes from its place in the list. That's also why an edit shouldn't change the list, only the heights,
-##     or a change remembered for one marker could land on another.
-##   - Declare the markers' tags in nav_tag_declarations.tres, or they're refused.
-# Claude 2026-11-06: the nav spec's section 21.6. The generator knows its own terrain, so it says what's there.
+## [br]- Make new markers every time, because get_chunk_markers moves them into place.
+## [br]- Set each marker's position measured from this node, as _shape_height does. _point_at gives grid points.
+## [br]- Build the list from the chunk's numbers, not random numbers, so every machine gets the same list. A marker's id comes from
+##   its place in the list. That's also why an edit shouldn't change the list, only the heights, or a change remembered for one
+##   marker could land on another.
+## [br]- Declare the markers' tags in nav_tag_declarations.tres, or they're refused.
+# The nav spec's section 21.6. The generator knows its own terrain, so it says what's there.
 func _make_chunk_markers(_key: Vector2i) -> Array[NavMarker]:
 	return []
 
 
 # --- The edit log module ---
-# Claude 2026-11-07: everything the terrain does about edits outlasting their chunks goes through here, and stops if the
+# Everything the terrain does about edits outlasting their chunks goes through here, and stops if the
 # module isn't there.
 
 
-# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _edit_log_arrived.
+# No underscore, because another class (TerrainEditLog) calls it.
 func edit_log_arrived(log_module: TerrainEditLog) -> void:
 	_edit_log = log_module
 
 
-# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _edit_log_left.
+# No underscore, because another class (TerrainEditLog) calls it.
 func edit_log_left(log_module: TerrainEditLog) -> void:
 	if _edit_log == log_module:
 		_edit_log = null
@@ -613,7 +614,7 @@ func _return_to_default_ground() -> void:
 
 
 ## Queues the built ones among these chunks to be rebuilt from scratch, with whatever the log now says.
-# Claude 2026-11-16 (wider audit): no underscore now, because another class uses it (TerrainEditLog calls it); it was _rebuild_chunks_for_log.
+# No underscore, because another class (TerrainEditLog) calls it.
 func rebuild_chunks_for_log(chunks: Array) -> void:
 	for key: Vector2i in _building.keys():
 		load_chunk(key) # so a half-built chunk can't finish with what it read before
@@ -655,7 +656,7 @@ func _generate_points(key: Vector2i) -> void:
 	_points[key] = points
 
 
-## Works out some rows of a chunk's grid points. Claude 2026-11-06: split out so a build can stop between rows.
+## Works out some rows of a chunk's grid points, so a build can stop between rows.
 func _fill_point_rows(points: PackedVector3Array, key: Vector2i, from_row: int, to_row: int) -> void:
 	var n := _points_per_edge()
 	for z in range(from_row, to_row):
@@ -663,7 +664,7 @@ func _fill_point_rows(points: PackedVector3Array, key: Vector2i, from_row: int, 
 			# Points are numbered across the whole world, not within the chunk, and everything about a point comes from
 			# that number. The last point of one chunk has the same number as the first point of the next, so both
 			# chunks get exactly the same position and height. That's what makes the terrain seamless.
-			# Claude 2026-11-05: procgen_tile.gd used positions within the tile, so every tile came out the same.
+			# Positions within the chunk instead would make every chunk come out the same.
 			points[x + z * n] = _make_point(key.x * chunk_resolution + x, key.y * chunk_resolution + z)
 
 
@@ -767,12 +768,10 @@ func _set_chunk_mesh(key: Vector2i, arrays: Array) -> void:
 ## The one idea behind normals: a vertex has one normal, so how you share vertices decides the look. A flat look needs
 ## each triangle to have its own three vertices, with one normal between them. A smooth look needs triangles to share
 ## one vertex at each corner, with a normal blended from every triangle touching that corner.
-# Claude 2026-11-05: both normals are worked out here, not with SurfaceTool.generate_normals(). That only sees one
-# chunk's triangles, so the two sides of a chunk border got different lighting and showed a faint line. Its smooth
-# groups are also the reason slope_smoothing did nothing in procgen_tile.gd: SurfaceTool reads the group when a vertex
-# is added, and that code set it later, while adding indices.
-# Claude 2026-11-06: this fills arrays directly instead of using SurfaceTool. SurfaceTool took 5.6 ms of the 10.7 ms a
-# 256 m chunk cost, because it needs several script calls per vertex. The vertices, normals, UVs and indices are unchanged.
+# Both normals are worked out here, not with SurfaceTool.generate_normals(). That only sees one chunk's triangles, so the two
+# sides of a chunk border would get different lighting and show a faint line.
+# This fills arrays directly instead of using SurfaceTool, which took 5.6 ms of the 10.7 ms a 256 m chunk cost, because it needs
+# several script calls per vertex.
 func _make_mesh_arrays(key: Vector2i) -> Array:
 	var data := _MeshData.new()
 	_start_mesh_data(data)
@@ -797,9 +796,9 @@ func _mesh_row_count() -> int:
 
 func _mesh_rows_per_step() -> int:
 	if smooth_shading:
-		@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
+		@warning_ignore("integer_division") # whole numbers on purpose
 		return maxi(1, SMOOTH_POINTS_PER_STEP / _points_per_edge())
-	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
+	@warning_ignore("integer_division") # whole numbers on purpose
 	return maxi(1, SQUARES_PER_STEP / chunk_resolution)
 
 
@@ -1024,7 +1023,7 @@ func _clear() -> void:
 
 
 ## Removes whatever exists of one chunk.
-# Claude 2026-11-06: split out of _clear, so one chunk can go on its own.
+# Shared by _clear and unload_chunk, so one chunk can go on its own.
 func _forget_chunk(key: Vector2i) -> void:
 	_building.erase(key)
 	if _mesh_nodes.has(key):
@@ -1073,7 +1072,7 @@ func _point_at(world_x_number: int, world_z_number: int) -> Vector3:
 	var key := Vector2i(floori(float(world_x_number) / chunk_resolution), floori(float(world_z_number) / chunk_resolution))
 	if not _points.has(key):
 		var point := _make_point(world_x_number, world_z_number)
-		# Claude 2026-11-07: a neighbour that isn't built still has its edits, so lighting at the border matches.
+		# A neighbour that isn't built still has its edits, so lighting at the border matches.
 		return _edit_log.apply_to_point(key, point) if _edit_log != null else point
 	var index := posmod(world_x_number, chunk_resolution) + posmod(world_z_number, chunk_resolution) * _points_per_edge()
 	return _points[key][index]

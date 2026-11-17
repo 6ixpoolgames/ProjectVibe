@@ -1,29 +1,31 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: the base for one kind of data in a replay file (replay spec section 3). A channel
-## has an id, a name and a version, which go in the file's header, and the same class both writes its data (for ReplayRecorder) and
-## reads it back (for ReplayReader), so the layout of its bytes lives in one place.
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## The base for one kind of data in a replay file (replay spec section 3).
 ##
+## A channel has an id, a name and a version, which go in the file's header, and the same class both writes its data (for
+## [ReplayRecorder]) and reads it back (for [ReplayReader]), so the layout of its bytes lives in one place.
+## [br]
 ## How a recording uses a channel:
-##   begin(recorder)                        once, when recording starts. Connect to signals here.
-##   write_tick(tick, out, keyframe)        once a tick: write this tick's data into out. keyframe is true on the first tick of every
-##                                          block, when the channel writes everything as it is, not just what changed.
-##   pawn_added(pawn, id) / pawn_removed    as pawns enter and leave the tree while recording
-##   end()                                  once, when recording stops. Disconnect here.
-##
-## How a reader uses it:
-##   read_tick(tick, data, keyframe, state)  one tick's bytes, applied to state (a Dictionary the channel owns the layout of).
-##                                           On a keyframe, state starts empty.
-##
-## To add a kind of data later: extend this (or ReplayEntityChannel or ReplayEventChannel), give it an unused id, and add it with
-## ReplayRecorder.add_channel before recording starts. A reader without it skips its bytes (replay spec section 2).
-##
+## [br]- [method begin] once, when recording starts. Connect to signals here.
+## [br]- [method write_tick] once a tick: write this tick's data into out. keyframe is true on the first tick of every block, when the
+##   channel writes everything as it is, not just what changed.
+## [br]- [method pawn_added] and [method pawn_removed] as pawns enter and leave the tree while recording.
+## [br]- [method end] once, when recording stops. Disconnect here.
+## [br]
+## How a reader uses it: [method read_tick] applies one tick's bytes to state, a Dictionary the channel owns the layout of. On a
+## keyframe, state starts empty.
+## [br]
+## To add a kind of data: extend this (or [ReplayEntityChannel] or [ReplayEventChannel]), give it an unused id, and add it with
+## [method ReplayRecorder.add_channel] before recording starts, and with [method ReplayReader.add_channel] to read it. A reader
+## without it skips its bytes (replay spec section 2).
+## [br]
 ## GDScript note: RefCounted, not Node: a channel isn't in the scene tree, and is freed by itself once nothing holds it.
 class_name ReplayChannel
 extends RefCounted
 
 ## The id in the file. 1 to 99 are the base's (replay spec section 3); a game's own channels use 100 and up.
 var channel_id := 0
-## Reading: the version the file was written with, from its header (Claude 2026-11-15). read_tick checks it when a channel reads
-## older layouts too, such as the motion channel's version 1.
+## Reading: the version the file was written with, from its header. read_tick checks it when a channel reads older layouts too, such
+## as the motion channel's version 1.
 var file_version := 1
 ## A name for people: shown by the viewer and kept in the header.
 var channel_name := ""

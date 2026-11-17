@@ -1,0 +1,63 @@
+<!-- Written by Claude (claude-opus-5-5), 2026-11-17: the navcore C++ library's running changelog (the owner's call: history leaves the
+code comments and lives here, next to the code). Newest first. Add an entry with every change; code comments say what the code does
+now, this says how it got here and why. -->
+
+# navcore changelog
+
+navcore is the C++ GDExtension in `native/src/`: the Recast/Detour nav library (`NavServer`) and the C++ hot paths for AI, the pawn table, worker jobs, netcode, replay and the crowd mover. Overview and build steps: [README.md](README.md). Designs: [NAV_SPEC.md](../docs/navigation/NAV_SPEC.md), [SCALING_SPEC.md](../docs/scaling/SCALING_SPEC.md). The GDScript side of nav has its own changelog: [navigation/CHANGELOG.md](../assets/scripts/navigation/CHANGELOG.md).
+
+## Refactor candidates
+
+Code that works but doesn't yet fit the project's goals (reusable, extensible, efficient, designer friendly). Each is marked `REFACTOR:` in the code. Sizes are rough: S an hour or two, M a day, L more.
+
+| What | Where | Why | Size |
+|---|---|---|---|
+| C++ classes with a GDScript twin | `ai_memory_store.cpp` / `AIMemoryStoreGD.gd`, `net_codec.h` / `NetPackets.gd`, `tick_state_recorder.h` / `TickStateComponent.gd`, `replay_motion_packer.h` / `ReplayMotionChannel.gd`, `crowd_batch.h` / `CrowdMover._move_batch` | The same rules written twice, so every change is made and tested twice, and a third game system wanting the same speed-up adds a third copy. Kept on purpose while the library might be missing on a platform; once it ships everywhere, the GDScript copies could go. The owner's call | L |
+| One thread pool | `worker_pool.h` (nav's `WorkerPool`) and `JobScheduler` | Two sets of worker threads in one library compete on a 4-core server. Nav's tile builds could be a job kind on `JobScheduler` | M |
+| Rename `SightGeometry` | `sight_geometry.h`, with `ai/senses/SightGeometryFeeder.gd` | It's the library's thread-safe copy of the level's collision, and the crowd mover uses it for the ground; the name says sight. `WorldGeometry`, with its feeder outside `ai/`, says what it does | S |
+| Test hooks in `NavServer` | `debug_fail_tile_commits`, `debug_limit_path_corners` in `nav_server.h` (and `GroundDomain`) | Test code bound into the shipping class. A test-only build flag or subclass would keep them out | S |
+| `NavHooks` settings that do nothing | `send_estimates`, `send_link_hints` in `nav_hooks.h` | A designer sees two switches in the inspector that change nothing. Hide them until the coarse planner (estimates) or link hints exist | S |
+
+## 2026-11-17
+
+- **godot-cpp 10, Godot 4.7's API.** godot-cpp moved to 10.0.0-stable (versioned apart from Godot, built for any API from 4.3 up), with `api_version = "4.7"` in `SConstruct`; it was the 4.4 bindings. `bin/navcore.gdextension` says `compatibility_minimum = "4.7"`, since a library built for 4.7 won't load in an older Godot. Three source fixes: an explicit `#include` for `Ref<T>` (no longer pulled in by `ref_counted.hpp`), and `Math_PI`/`Math_TAU`, which godot-cpp 10 renamed, replaced by `state_encoding.h`'s constants.
+- **Nav fixes** (from the code audit). A stale tile build landing no longer clears the "building" mark of a remade tile's newer build, so the tile isn't built twice (regression test in `nav_selftest`). An empty `tier_radii` list is ignored; before, `tier_count` became 1 and read past the end of the empty list. Huge or endless dirty rectangles no longer loop over billions of tile numbers, and a NaN one dirties every tile. `submit_mesh` takes `dirty_bounds`, as `submit_heightmap` does, so a terrain edit rebuilds only the tiles under it. `SpanField` edits columns in place instead of a new list per cell per layer.
+- **Nav default `agent_radius` 0.4 m** (was 0.3), the default pawn's, and tier 0 with it, so `CrowdBatch` can walk the default pawn along the nav mesh and paths keep it a full body's width from walls.
+- **Paths: queue with links, and answers to take.** `find_path` takes `use_links` (the queue's searches could only avoid links before). `take_path_result` gives a queued search's answer to code that asks rather than listens to `path_ready`, kept `RESULT_KEEP_TICKS` (600) of NavServer's ticks. `find_path_now_result` gives points, link ids and a partial flag with links on or off; it's `find_path_now_with_links`'s old body, which is now a call to it, since a path found without links couldn't say it was partial.
+- **`ChangeGuard`** (`change_guard.h`): `PawnTable`, `AIPawnGrid` and `SightGeometry` each keep a list of the jobs reading them, and wait for all of them before a change. Before, each had one guard slot set by the last job to read it, so a second job replaced the first's; and the grid had none, relying on the table's guard, which didn't cover `set_cell_size`.
+- **`state_encoding.h`**: the rounding steps, encoding names and one list of encoding numbers that `NetCodec` and `TickStateRecorder` share. Each kept its own copy, with the numbers in different orders.
+- **`SightGeometry`**: a shape's `changed` signal is connected once and marks every body using it; before, a second body sharing a shape failed to connect (Godot counts a function as connected whatever is bound to it) and wasn't re-read when the shape changed. Static bodies are checked for moves every 16 ticks, spread out by slot, instead of every tick. `ground_at` and `find_ground`: the ground under a point, for the crowd mover.
+- **`AIMemoryStore`**: every `*_at` function checks its index (a stale index from GDScript read past the end of the lists), a null entity is ignored, and the sight checks look each candidate up once by instance id, with the observer's layer read once, instead of asking the engine for ids two or three times.
+- **Into C++** (C++ bundle stage 3). `CrowdBatch`: the crowd mover's batch on `JobScheduler`'s workers, walking pawns along the nav mesh (Detour's `moveAlongSurface`, `GroundDomain::move_along_surface`, what Unreal calls NavWalking) with the ground from `SightGeometry.ground_at`; a pawn crossing a nav link (tier -1) is left to physics until it's across, since walking along the mesh stopped it at the ledge. `AIPawnGrid.find_touching`: swing hits against each pawn's capsule (`PawnTable::Body`, read when it joins), instead of a physics query per spot. `NetCodec.delta_state`: delta snapshots' change check, which in GDScript took the host's snapshot sending from 1.9 to 2.3 ms a tick at 154 pawns. `ReplayMotionPacker`: the replay motion channel's packing, byte for byte as GDScript.
+- **Pushed pawn-table columns** (pawn M6): `add_pushed_column` and `set_value`. A pushed column's property is read once, when a pawn joins or the column is switched on, then changed only by `set_value`, applied at the next refresh. `Stat.table_column` mirrors a stat into one; the built-in `detectability` column is pushed, from the Detectability stat.
+- **Comments cleaned up** for the documentation pass: dated notes moved here, every file's header points here, and each class's header says how GDScript uses it. Stale comments fixed: `NavServer`'s note that `find_path` never crosses links (it takes `use_links`), the pool's "declared last" (it's declared after what builds use, not last), "phase 5 (crowd) arrives with agents" (it's `CrowdBatch`), `NavHooks`'s link hints "arriving with links" (links came another way), `AISensingJob`'s "step 4 moves line of sight into C++" (done), `PawnTable`'s "for now `AIPawnGrid` builds itself from it" (jobs read it too), `PawnTable::Body`'s "a warning once" (one as each such pawn joins), and the `erase_slot` comment that had drifted above `read_body`.
+
+## 2026-11-10
+
+- **Tick rate per match** (scaling spec step 6): `AIMemoryStore.set_tick_rate`; fade profiles' hold, fade and half-life are written for 60 ticks a second and converted as `TickDriver.ticks_at_rate` does.
+
+## 2026-11-09
+
+- **Line of sight in C++** (scaling spec step 4): `SightGeometry`, a copy of the level's collision shapes (triangle meshes exactly, boxes, spheres, capsules, cylinders, world boundaries; anything else as its bounding box) in a grid of cells that keep their height range, so most rays skip cells above the ground. `AIMemoryStore` and `AISensingJob` test sight against it, falling back to physics rays where a mask includes pawns' own layers. Dead pawns are read from `Pawn.dead` instead of calling `is_dead()` through GDScript, about a third of sensing's cost.
+- **Forces and taunts queued; awareness holds while in view** (step 3): an entry the last check saw, within `continuous_sighting_ticks`, doesn't fade; before, a target in plain view drifted down between checks.
+- **Job scheduler and table columns** (step 2): `JobScheduler`, worker threads that learn what each kind of job costs; `AISensingJob`, sensing's search and visibility on the workers, with the visibility rule in `ai_sight_rules.h` so the main-thread and job checks can't drift apart; `PawnTable` columns, off until required or enabled, plus `add_column`. `AIPawnGrid` split into `prepare` and `find_slots` for the jobs.
+- **Shared pawn table** (step 1): `PawnTable`, one array per field, a slot per pawn in entity id order, read once a tick. `AIPawnGrid` builds from it instead of tracking pawns (`track`/`untrack` gone), so ties come back in the same order on every machine.
+- **Rollback recording in C++**: `TickStateRecorder`, the steady state of `TickStateComponent`'s recording, rounding with the engine's own functions so it matches GDScript exactly.
+- **AI perception in C++**: `AIMemoryStore` (memory, sight checks, target scoring, fades) and `AIPawnGrid` (who's near whom), about 5.6 ms a tick in GDScript in `ai_stress`. Dead pawns aren't seen and are forgotten (pawn step 10).
+
+## 2026-11-08
+
+- **Links** (nav phase 3): placed links (`add_link`, `remove_link`, an action per link) and links the tile build finds at ledges and gaps (auto links: drops and jumps, `auto_links` and the `link_*` settings); `find_path_now_with_links`, `get_link_action`, `is_auto_link`, `get_debug_links`. Every link carries `POLYFLAG_LINK`, so searches that don't allow links leave them out and paths found before links existed are unchanged. With auto links on, a tile's border widens to see a landing a full jump away.
+
+## 2026-11-07
+
+- **Small ints in snapshots**: `NetCodec` writes whole numbers in 1 or 2 bytes when they fit (most held actions, counters and small ids), protocol version 5. New tags go at the end so the old numbers don't move.
+
+## 2026-11-05
+
+- **Snapshot encoding in C++**: `NetCodec`, the same format as `NetPackets.gd`, about 0.5 µs a pawn against 9 to 11 in GDScript.
+- **Four nav defects from the audit, fixed.** A refused tile is put back instead of leaving a hole (`GroundDomain::commit_tile` keeps a copy). A path too long for Detour's corner buffer is flagged partial (the status was ignored). An immediate search no longer changes where a slow sliced one ends (each has its own query state). Starting a queued request costs search steps, so a batch of requests that fail early can't all run in one tick. `debug_fail_tile_commits` and `debug_limit_path_corners` reach the first two in tests.
+
+## 2026-11-03
+
+- **navcore** (nav spec phases 1 and 2): a C++ GDExtension building a Recast/Detour nav mesh in tiles on worker threads, from streamed input layers (heightmaps and meshes, added, carved or recoloured through `SpanField`), around streaming interests, with clearance tiers in the area ids, versioned tiles so a stale build is never committed, and budgeted path searches. `NavServer` as an engine singleton, `NavHooks` as the opt-in a level piece carries.

@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless self-test for FadeProfile. Checks each mode's shape, the hold, when each
 ## ends, the odd cases at the top of FadeProfile.gd, and that a script extending it is picked up.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/fade_profile_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/fade_profile_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 

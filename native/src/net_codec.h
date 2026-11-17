@@ -1,12 +1,15 @@
-// Written by Claude (claude-opus-5-5), 2026-11-05: writes and reads the entities in a snapshot, as NetworkSession's fast path.
+// Written by Claude (claude-opus-5-5), 2026-11-05. History: native/CHANGELOG.md.
+// NetCodec: writes and reads the entities in a snapshot, and works out delta snapshots' changes, as NetworkSession's fast path.
+// NetworkSession and NetPackets.gd make one when the library is loaded, and use it if its get_protocol_version() matches.
 // NetPackets.gd holds the same format in GDScript, and runs where this library isn't available. The two give exactly the same
 // bytes and values, which tests/net_codec_selftest checks, so machines using either can play together.
 //
 // Why this exists: writing and reading took about 9 and 11 microseconds per pawn in GDScript, and about 0.5 here (netcode spec,
 // section 14.1). It's plain data: nothing here touches the scene or the game.
+// REFACTOR: kept twice, here and in NetPackets.gd (reusable, extensible); see the row in native/CHANGELOG.md.
 #pragma once
 
-#include "state_encoding.h" // Claude 2026-11-17 (C++ bundle stage 2)
+#include "state_encoding.h"
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -44,7 +47,7 @@ public:
 	int64_t read_u32(); // 0 if there aren't 4 bytes left: check get_available_bytes first
 	Variant read_list(); // an Array, or null if the packet is broken
 
-	// Claude 2026-11-17 (C++ bundle stage 2/3, netcode spec 11.4.1): the delta snapshots' change check, as
+	// The delta snapshots' change check (netcode spec 11.4.1), as
 	// NetworkSession.delta_state_lists in GDScript, which tests/net_codec_selftest compares it with. now and then are an entity's
 	// state values at this tick and at its baseline, encodings its state encodings. Returns [values, encodings]: the state list
 	// and encodings to send, [ticks_back, mask, mask, ..., each changed value], with one bit per entry in each mask (mask_bits
@@ -82,7 +85,7 @@ private:
 
 	// Godot's interned names, made once here because they can't exist before the engine has started.
 	StringName m_missing;
-	// Claude 2026-11-17 (C++ bundle stage 2): the encoding names, shared with TickStateRecorder (state_encoding.h).
+	// The encoding names, shared with TickStateRecorder (state_encoding.h).
 	state_encoding::EncodingNames m_encoding_names;
 };
 

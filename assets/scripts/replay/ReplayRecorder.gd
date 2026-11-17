@@ -1,32 +1,37 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: records the game to a replay file, replay v0 (docs/replay/REPLAY_SPEC.md). A
-## GameMode module, reached as GameMode.replay_recorder. It records nothing until start_recording() is called, which the game does
-## when play starts: on the host when the player picks Offline or Host, and on a client once Join has connected (the samples do this).
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## Records the game to a replay file (replay v0, docs/replay/REPLAY_SPEC.md).
 ##
-## What it records: every pawn, AI ones included, every tick, through its channels (replay spec section 3):
-##   motion (where each pawn is and its flags), input (its input command), spawns (who exists), world (chunks and chunk sources) and
-##   gameplay (hits, deaths, abilities, AI changes, freezes, possession, falls).
-## A game can add its own channels with add_channel() before recording starts.
-##
+## A GameMode module, reached as [code]GameMode.replay_recorder[/code]. It records nothing until [method start_recording] is called,
+## which the game does when play starts: on the host when the player picks Offline or Host, and on a client once Join has connected
+## (the samples do this). [DiagnosticsManager] also starts one when play starts and none is running.
+## [br]
+## What it records: every pawn, AI ones included, every tick, through its channels (replay spec section 3): motion (where each pawn is
+## and its flags), input (its input command), spawns (who exists), world (chunks and chunk sources) and gameplay (hits, deaths,
+## abilities, AI changes, freezes, possession, falls). A game can add its own channels with [method add_channel] before recording
+## starts; DiagnosticsManager adds the diagnostics channel this way.
+## [br]
 ## How it works, once a tick (TickDriver's after_tick, which never fires while a rollback replays ticks, so nothing is recorded twice):
-##   1. Pawns that entered the tree since last tick are given a replay id and handed to every channel.
-##   2. Each channel writes this tick's bytes into its part of the current block. A block's first tick is a keyframe: every channel
-##      writes everything as it is, so a reader can start there.
-##   3. After block_seconds of ticks, the block is finished and handed to the ReplayWriter, which compresses and writes it on its own
-##      thread.
-##
-## Files: <folder>/<role>/<date>_<time>.pbreplay, with role "host" (host and offline) or "client". Only the newest keep_recordings in
-## each folder are kept; older ones are deleted when a new recording starts.
-##
-## Claude 2026-11-16, safeguards (the owner asked that the writer can never run away, write more recordings than the cap, or grow one
-## recording without limit). Each stops the recording with a warning saying why (get_stopped_reason), and the file stays readable:
-##   - max_recording_seconds (3 hours): a recording stops when it's this long.
-##   - max_file_megabytes (2 GB): a recording stops when its file is this big, whatever its length.
-##   - min_free_megabytes (1 GB): a recording doesn't start, or stops, when the disk has less room than this. Checked every minute.
-##   - max_folder_megabytes (4 GB): old recordings in a role's folder are deleted, oldest first, until the folder is under this, as
-##     well as down to keep_recordings. The file being recorded is never deleted, and one another instance still has open can't be
-##     (Windows refuses), so it's skipped.
-##   - The writer's queue: if the disk falls so far behind that max_queued_blocks blocks are waiting, the recording stops rather than
-##     filling memory. And if writing fails (a full disk, a lost drive), the writer stops writing and the recording stops.
+## [br]- Pawns that entered the tree since last tick are given a replay id and handed to every channel.
+## [br]- Each channel writes this tick's bytes into its part of the current block. A block's first tick is a keyframe: every channel
+##   writes everything as it is, so a reader can start there.
+## [br]- After [member block_seconds] of ticks, the block is finished and handed to the [ReplayWriter], which compresses and writes it
+##   on its own thread.
+## [br]
+## Files: <folder>/<role>/<date>_<time>.pbreplay, with role "host" (host and offline) or "client"; a run with no display uses
+## <folder>/headless/<role> ([member headless_runs_apart]). Only the newest [member keep_recordings] in each folder are kept; older
+## ones are deleted when a new recording starts.
+## [br]
+## Safeguards (replay spec section 3.1): a recording can never run away, outnumber the cap, or grow without limit. Each stops the
+## recording with a warning saying why ([method get_stopped_reason]), and the file stays readable:
+## [br]- [member max_recording_seconds] (3 hours): a recording stops when it's this long.
+## [br]- [member max_file_megabytes] (2 GB): a recording stops when its file is this big, whatever its length.
+## [br]- [member min_free_megabytes] (1 GB): a recording doesn't start, or stops, when the disk has less room than this. Checked every
+##   minute.
+## [br]- [member max_folder_megabytes] (4 GB): old recordings in a role's folder are deleted, oldest first, until the folder is under
+##   this, as well as down to keep_recordings. The file being recorded is never deleted, and one another instance still has open can't
+##   be (Windows refuses), so it's skipped.
+## [br]- The writer's queue: if the disk falls so far behind that [member max_queued_blocks] blocks are waiting, the recording stops
+##   rather than filling memory. And if writing fails (a full disk, a lost drive), the writer stops writing and the recording stops.
 class_name ReplayRecorder
 extends GameModeModule
 
@@ -47,19 +52,20 @@ const LOCAL_IDS_START := 1 << 30
 @export var enabled := true
 ## Where recordings go. Each role gets a folder of its own inside it.
 @export var folder := "user://replays"
-## Claude 2026-11-16 (the owner's call: test runs were deleting their playtest recordings): on, a run with no display (a test, or a
-## dedicated server) records into folder/headless/<role> instead, with its own keep_recordings, so the many headless runs never push
-## out recordings of games played in a window. The replay viewer's default (the newest in folder/host) is then always a played game.
+## On, a run with no display (a test, or a dedicated server) records into folder/headless/<role> instead, with its own
+## keep_recordings, so the many headless runs never push out recordings of games played in a window. The replay viewer's default (the
+## newest in folder/host) is then always a played game.
 @export var headless_runs_apart := true
-## How many recordings to keep in each role's folder. Older ones are deleted when a new one starts. 0 keeps them all.
+## How many recordings to keep in each role's folder. Older ones are deleted when a new one starts. 0 keeps them all, and then
+## max_folder_megabytes isn't applied either.
 @export_range(0, 1000, 1, "or_greater") var keep_recordings := 10
 ## How long each block is, in seconds. Seeking starts from a block's keyframe, so shorter blocks seek faster but make bigger files.
 @export_range(0.1, 10.0, 0.1) var block_seconds := 1.0
-## Off: blocks are written on the main thread, at once (ReplayWriter.use_thread). For tests, which set it in code.
-## Claude 2026-11-16 (wider audit): no longer shown in the inspector, since it's no setting for a game.
+## Off: blocks are written on the main thread, at once (ReplayWriter.use_thread). For tests, which set it in code; not in the
+## inspector, since it's no setting for a game.
 var write_on_thread := true
-## Claude 2026-11-16, safeguards (see the top of the file). 0 switches each one off.
-## The longest a recording may be, in seconds: 3 hours by default (the owner's call).
+## The longest a recording may be, in seconds: 3 hours by default (the owner's call). This and the safeguards below are switched off
+## by 0 (see the top of the file).
 @export_range(0.0, 86400.0, 60.0, "or_greater") var max_recording_seconds := 10800.0
 ## The biggest a recording's file may get, in megabytes.
 @export_range(0, 100000, 1, "or_greater") var max_file_megabytes := 2048
@@ -68,7 +74,7 @@ var write_on_thread := true
 ## The most a role's folder may hold, in megabytes. Older recordings are deleted to stay under it.
 @export_range(0, 1000000, 1, "or_greater") var max_folder_megabytes := 4096
 ## How many finished blocks may wait for the writer before the recording gives up: with 1 s blocks, how many seconds the disk may
-## fall behind. Claude 2026-11-16: 60 (about a minute), the owner's call, was 30; at mass-battle sizes a full queue is a few MB.
+## fall behind. 60 (about a minute) is the owner's call; at mass-battle sizes a full queue is a few MB.
 @export_range(1, 3600, 1, "or_greater") var max_queued_blocks := 60
 
 var _channels: Array[ReplayChannel] = []
@@ -84,13 +90,13 @@ var _block: Array[StreamPeerBuffer] = [] # one buffer per channel, in the order 
 var _block_first_tick := -1
 var _block_ticks := 0
 var _ticks_recorded := 0
-var _last_tick_recorded := -1 # Claude 2026-11-16 (wider audit): see _record_tick
-var _stopped_reason := "" # Claude 2026-11-16: why the last recording stopped, if a safeguard stopped it
+var _last_tick_recorded := -1 # see _record_tick
+var _stopped_reason := "" # why the last recording stopped, if a safeguard stopped it
 var _next_space_check_msec := 0
 
 
 
-## Claude 2026-11-16: the settings a start menu may offer (GameModeModule.get_match_options): whether this match is recorded.
+## The settings a start menu may offer (GameModeModule.get_match_options): whether this match is recorded.
 func get_match_options() -> PackedStringArray:
 	return PackedStringArray(["enabled"])
 
@@ -99,6 +105,9 @@ func _init() -> void:
 	# GDScript note: this module does nothing per frame; it works from TickDriver's after_tick signal.
 	set_process(false)
 	set_physics_process(false)
+	# The base's channels; diagnostics (6) is added by DiagnosticsManager when the game has it.
+	# REFACTOR: the same list of base channels as ReplayReader._init, written out twice. One list on ReplayChannel is one place to add
+	# a channel. Extensible. See CHANGELOG.md.
 	for channel: ReplayChannel in [ReplayMotionChannel.new(), ReplayInputChannel.new(), ReplaySpawnChannel.new(),
 			ReplayWorldChannel.new(), ReplayGameplayChannel.new()]:
 		_channels.append(channel)
@@ -118,7 +127,8 @@ func _exit_tree() -> void:
 	stop_recording() # the game is closing: finish the file and stop the writer's thread
 
 
-## Adds a game's own channel, before recording starts. Its id must be unused; the base's are 1 to 5, so a game uses 100 and up.
+## Adds a channel, before recording starts. Its id must be unused; 1 to 99 are the base's (6 is diagnostics), so a game's own use 100
+## and up.
 func add_channel(channel: ReplayChannel) -> void:
 	if _recording:
 		push_warning("ReplayRecorder: add_channel() while recording does nothing; add it before start_recording().")
@@ -141,12 +151,12 @@ func start_recording(role: String) -> Error:
 	stop_recording()
 	if not enabled or _driver == null:
 		return ERR_UNAVAILABLE
-	var role_folder := _role_folder(role) # Claude 2026-11-16: headless runs apart (headless_runs_apart)
+	var role_folder := _role_folder(role) # headless runs apart (headless_runs_apart)
 	var made := DirAccess.make_dir_recursive_absolute(role_folder)
 	if made != OK:
 		push_warning("ReplayRecorder: couldn't make %s (error %d), so nothing is recorded." % [role_folder, made])
 		return made
-	# Claude 2026-11-16: refuses to start without room on the disk.
+	# Refuses to start without room on the disk.
 	var space := _free_megabytes(role_folder)
 	if min_free_megabytes > 0 and space >= 0 and space < min_free_megabytes:
 		push_warning("ReplayRecorder: only %d MB free, under min_free_megabytes (%d), so nothing is recorded." % [space, min_free_megabytes])
@@ -162,7 +172,7 @@ func start_recording(role: String) -> Error:
 		suffix += 1
 	_writer = ReplayWriter.new()
 	_writer.use_thread = write_on_thread
-	_writer.max_queued_blocks = max_queued_blocks # Claude 2026-11-16
+	_writer.max_queued_blocks = max_queued_blocks
 	var error := _writer.open(_path, _header(role))
 	if error != OK:
 		push_warning("ReplayRecorder: couldn't create %s (error %d), so nothing is recorded." % [_path, error])
@@ -181,7 +191,7 @@ func start_recording(role: String) -> Error:
 	for channel in _channels:
 		channel.begin(self)
 	# Pawns already here are handed over at the first tick, like any that arrive later.
-	for node in get_tree().get_nodes_in_group(Pawn.GROUP): # Claude 2026-11-16 (wider audit): the list of all pawns, already here when the recording starts
+	for node in get_tree().get_nodes_in_group(Pawn.GROUP): # every pawn already here when the recording starts
 		if node is Pawn:
 			_arrived.append(node)
 	get_tree().node_added.connect(_on_node_added)
@@ -220,7 +230,7 @@ func is_recording() -> bool:
 	return _recording
 
 
-## Claude 2026-11-16: why the last recording stopped on its own (a safeguard), or "" if it was stopped by stop_recording() or is
+## Why the last recording stopped on its own (a safeguard), or "" if it was stopped by stop_recording() or is
 ## still running.
 func get_stopped_reason() -> String:
 	return _stopped_reason
@@ -254,16 +264,16 @@ func get_replay_id(node: Node) -> int:
 
 
 func _on_after_tick(_dt: float, tick: int) -> void:
-	var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+	var started := PerfScopes.begin() # timed for diagnostics, as "replay.record"
 	_record_tick(tick)
 	PerfScopes.end(&"replay.record", started)
 
 
-# Claude 2026-11-16: the work itself, timed by _on_after_tick.
+# The work itself, timed by _on_after_tick.
 func _record_tick(tick: int) -> void:
-	# Claude 2026-11-16 (wider audit): a tick that isn't after the last one recorded is left out. A client's clock can jump back (a
-	# resync), and the reader finds frames by their tick, counting on ticks only going up; a file with the same ticks twice gave
-	# it the wrong frames around the jump. The recording carries on when the clock passes where it was.
+	# A tick that isn't after the last one recorded is left out. A client's clock can jump back (a resync), and the reader finds frames
+	# by their tick, counting on ticks only going up; the same ticks twice in a file would give it the wrong frames around the jump.
+	# The recording carries on when the clock passes where it was.
 	if tick <= _last_tick_recorded:
 		return
 	_last_tick_recorded = tick
@@ -360,14 +370,14 @@ func _finish_block() -> void:
 		out.put_u16(_channels[i].channel_id)
 		out.put_u32(bytes.size())
 		out.put_data(bytes)
-	# Claude 2026-11-16: the writer refuses a block when too many are already waiting, or after a write failed.
+	# The writer refuses a block when too many are already waiting, or after a write failed.
 	if not _writer.push_block(out.data_array):
 		_safeguard_stop.call_deferred("the writer fell %d blocks behind or failed to write (error %d)" % [max_queued_blocks, _writer.get_error()])
 	_block_ticks = 0
 	_check_limits()
 
 
-# Claude 2026-11-16: the safeguards checked once a block (see the top of the file). Stopping is deferred to the end of the frame,
+# The safeguards checked once a block (see the top of the file). Stopping is deferred to the end of the frame,
 # because this runs inside the tick's after_tick signal.
 func _check_limits() -> void:
 	if not _recording or _writer == null:
@@ -420,7 +430,7 @@ func _header(role: String) -> PackedByteArray:
 	return out.data_array
 
 
-# Claude 2026-11-16: the folder a role's recordings go in: folder/<role>, or folder/headless/<role> for a run with no display.
+# The folder a role's recordings go in: folder/<role>, or folder/headless/<role> for a run with no display.
 func _role_folder(role: String) -> String:
 	if headless_runs_apart and RunEnvironment.is_headless():
 		return folder.path_join("headless").path_join(role)
@@ -431,13 +441,13 @@ func _role_folder(role: String) -> String:
 # by name sorts them by age.
 func _prune(role_folder: String, keep: int) -> void:
 	if keep_recordings <= 0:
-		return
+		return # keeping them all, which skips the folder size limit too
 	var names: Array[String] = []
 	for file_name in DirAccess.get_files_at(role_folder):
 		if file_name.get_extension() == FILE_EXTENSION:
 			names.append(file_name)
 	names.sort()
-	# Claude 2026-11-16: also down to max_folder_megabytes, oldest first, and never the file being recorded; a file another instance
+	# Also down to max_folder_megabytes, oldest first, and never the file being recorded; a file another instance
 	# still has open can't be deleted, and is left.
 	var sizes := {}
 	var total := 0

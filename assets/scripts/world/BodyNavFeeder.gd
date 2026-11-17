@@ -1,15 +1,17 @@
-## Written by Claude (claude-opus-5-5), 2026-11-17: puts a static body (a wall, a rock, a building) into the nav mesh, the way
-## TerrainNavFeeder puts the terrain in. Pawns then plan paths around it, and a pawn walking along the nav mesh (CrowdMover's C++ batch,
+# Written by Claude (claude-opus-5-5), 2026-11-17. History: navigation/CHANGELOG.md.
+## Puts a static body (a wall, a rock, a building) into the nav mesh.
+##
+## The way TerrainNavFeeder puts the terrain in. Pawns then plan paths around it, and a pawn walking along the nav mesh (CrowdMover's C++ batch,
 ## NavWalking) slides along it instead of being handed to physics. Without it, nav doesn't know the body is there: paths go straight
 ## through it and only physics stops the pawn.
-##
+## [br]
 ## How to use it: add this as a child of a StaticBody3D. Its box collision shapes (BoxShape3D) go into nav when it enters the tree and
 ## come out when it leaves. Other shapes are skipped with a warning; boxes cover walls and blocks, which is what t0 needs.
-##
+## [br]
 ## What happens in odd cases:
-##   - The parent isn't a StaticBody3D: it warns and does nothing (a body that moves would need its nav tiles rebuilt as it goes).
-##   - No C++ library: it does nothing, quietly. The body still blocks pawns through physics.
-##   - The body is moved by code after it's placed: call refresh() so nav sees the new place.
+## [br]- The parent isn't a StaticBody3D: it warns and does nothing (a body that moves would need its nav tiles rebuilt as it goes).
+## [br]- No C++ library: it does nothing, quietly. The body still blocks pawns through physics.
+## [br]- The body is moved by code after it's placed: call refresh() so nav sees the new place.
 class_name BodyNavFeeder
 extends Node
 

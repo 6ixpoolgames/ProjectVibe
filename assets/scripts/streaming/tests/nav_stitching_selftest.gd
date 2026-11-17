@@ -16,7 +16,7 @@
 ##   - A pawn following nav paths across several chunks while the streamer loads them.
 ##
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/streaming/tests/nav_stitching_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/streaming/tests/nav_stitching_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const TIER_SMALLEST := 0

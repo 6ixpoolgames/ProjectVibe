@@ -1,6 +1,6 @@
-// Written by Claude (claude-opus-5-5), 2026-11-17 (C++ bundle stage 2, from the code audit): the encoding rules the packet codec
-// (net_codec.cpp) and the rollback recorder (tick_state_recorder.cpp) share, written once. Each kept its own copy before: the
-// same steps, the same encoding names, and two lists of encoding numbers in different orders.
+// Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
+// The encoding rules the packet codec (net_codec.cpp) and the rollback recorder (tick_state_recorder.cpp) share, written once:
+// the rounding steps, the encoding names and one list of encoding numbers. Not seen by GDScript.
 //
 // These copy the GDScript side, and must stay the same as it:
 //   - MM, CM, U16_STEP and BYTE_STEP are StateEncoding.gd's (and NetPackets.gd's) constants. GDScript numbers are 64-bit doubles.

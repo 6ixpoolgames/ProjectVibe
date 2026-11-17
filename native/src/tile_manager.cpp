@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: tile lifecycle, streaming, build scheduling, commits (spec section 9).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// TileManager: tile lifecycle, streaming, build scheduling, commits (nav spec section 9). Described in tile_manager.h.
 #include "tile_manager.h"
 
 #include <algorithm>
@@ -36,10 +37,10 @@ void TileManager::mark_dirty(const WorldRect &world_rect) {
 	// A tile's border reads this far into its neighbours, so changes that close also concern them.
 	const WorldRect r = world_rect.expanded(m_cfg.border_cells() * m_cfg.cell_size + m_cfg.cell_size);
 	const float tw = m_cfg.tile_world();
-	// Claude 2026-11-17 (C++ bundle stage 2, from the code audit): the tile range is worked out in doubles, and a range with more
-	// tiles in it than there are tiles at all goes through the tiles instead. A huge or endless rectangle (a mesh with no bounds,
-	// say) used to loop over every tile number in it, billions of steps, and int(floor(...)) of an endless value is undefined.
-	// A rectangle with a NaN in it (a broken transform) dirties every tile, since there's no telling where it is.
+	// The tile range is worked out in doubles, and a range with more tiles in it than there are tiles at all goes through the
+	// tiles instead, so a huge or endless rectangle (a mesh with no bounds, say) doesn't loop over billions of tile numbers, and
+	// int(floor(...)) never sees an endless value. A rectangle with a NaN in it (a broken transform) dirties every tile, since
+	// there's no telling where it is.
 	const double x0 = std::floor(double(r.min_x) / tw), x1 = std::floor(double(r.max_x) / tw);
 	const double z0 = std::floor(double(r.min_z) / tw), z1 = std::floor(double(r.max_z) / tw);
 	const bool unknown = std::isnan(x0) || std::isnan(x1) || std::isnan(z0) || std::isnan(z1);
@@ -140,9 +141,9 @@ void TileManager::commit_finished(GroundDomain &domain, double budget_ms, std::v
 			continue; // tile was unloaded while building
 		}
 		TileRecord &t = it->second;
-		// Claude 2026-11-17 (C++ bundle stage 2): clear the "building" mark only if this is the build it marks. A tile dropped
-		// mid-build and made again has a new build under way; an old build landing used to clear that build's mark, so
-		// schedule() started a third and the tile was built twice. Versions never repeat, so an old build can't match.
+		// Clear the "building" mark only if this is the build it marks. A tile dropped mid-build and made again has a new build
+		// under way, and an old build landing mustn't clear that build's mark, or schedule() starts another and the tile is built
+		// twice. Versions never repeat, so an old build can't match.
 		if (r->version == t.in_flight_version) {
 			t.in_flight_version = 0;
 		}
@@ -165,7 +166,7 @@ void TileManager::commit_finished(GroundDomain &domain, double budget_ms, std::v
 		t.has_live = !r->empty;
 		t.provisional = r->provisional;
 		t.poly_count = r->poly_count;
-		t.link_count = r->link_count; // Claude 2026-11-08
+		t.link_count = r->link_count;
 		t.auto_link_count = r->auto_link_count;
 		t.build_ms = r->build_ms;
 		++m_builds_committed;
@@ -217,7 +218,7 @@ void TileManager::schedule(const InputStore &store, const std::vector<Interest> 
 		input->generation = m_generation;
 		input->cfg = m_cfg;
 		store.snapshot(tile_build_rect(m_cfg, t.key), input->snapshot); // references, not copies
-		// Claude 2026-11-08: placed links starting in this tile. Copied, so a link removed mid-build can't change it.
+		// Placed links starting in this tile. Copied, so a link removed mid-build can't change it.
 		const WorldRect own = tile_world_rect(m_cfg, t.key);
 		for (const LinkDef &link : links) {
 			if (link.start[0] >= own.min_x && link.start[0] < own.max_x && link.start[2] >= own.min_z && link.start[2] < own.max_z) {
@@ -287,7 +288,7 @@ void TileManager::tile_infos(std::vector<TileInfo> &out) const {
 		info.provisional = t.provisional;
 		info.has_live = t.has_live;
 		info.poly_count = t.poly_count;
-		info.link_count = t.link_count; // Claude 2026-11-08
+		info.link_count = t.link_count;
 		info.auto_link_count = t.auto_link_count;
 		info.build_ms = t.build_ms;
 		info.error = t.error;

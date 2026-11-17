@@ -2,7 +2,7 @@
 ## the Death ability, revive, being hit as a state rule, threat from damage, dead pawns ignored by sensing and memory, and a goblin
 ## fighting an intruder to the death.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/fight_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/abilities/tests/fight_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

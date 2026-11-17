@@ -3,7 +3,7 @@
 ## parry is turned away and its swing cancelled; and a parry's own push can't be parried back. Also the AI's parry (AIParryBehaviour):
 ## told a swing is coming, it parries as often as its parry_chance says.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/abilities/tests/parry_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/abilities/tests/parry_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 # The faction samples' pawn: its abilities (faction_abilities.tscn) include Parry, with parry_knockback.tres on its ParryInterceptor's ON_INTERCEPT applier (Claude 2026-11-17, pawn spec 8.23).

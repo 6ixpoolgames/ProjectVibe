@@ -1,26 +1,28 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: runs a pawn's AI senses on their turn. A part on the pawn, added by
-## PawnInitializer, with its senses (AISenseBase nodes) as children: SightSense by default. Pawn spec section 10.4.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Runs a pawn's AI senses on their turn, and finds the other-team pawns they may notice.
 ##
-## Each tick the pawn's AI runs (AIContextComponent.run_ai, which was Pawn._tick_ai until pawn M1), in this order:
-##   - Every sense_interval_ticks: a full pass. One shared query finds the pawns of other teams within the longest sense's range,
-##     and each sense gets that list. Then memory forgets entries whose fade has ended.
-##   - Every refresh_interval_ticks in between: each sense refreshes the current target, which for sight is one ray.
-## Both are offset by the pawn's own number, so a crowd doesn't all sense on the same tick.
-##
-## Teams: only pawns on another team are candidates. When no pawn of another team is in the tree at all, the query is skipped,
-## so a crowd that's all on one team, like the stress tests, costs almost nothing here.
-##
-## Claude 2026-11-09: the query uses AIPawnGrid from the navcore C++ library when it's available: one grid of every pawn, rebuilt at
-## most once a tick and shared by every pawn, which returns the nearest max_candidates first. Claude 2026-11-09 (scaling spec step 1):
-## the grid reads the shared PawnTable (Pawn.get_table()), which pawns join themselves, so ties come back in entity-id order.
-## Claude 2026-11-09 (scaling spec step 2): with the library, the full pass's search and visibility run on worker threads, as the
-## sensing job (AISensingJob, shared by every pawn). At the end of each tick, every pawn whose full pass is next tick asks the job,
-## and the job reads the shared table and works while the next tick waits to start. On the pass's tick, the sight sense takes the
-## result and casts only the rays (Claude 2026-11-09, step 4: now the job tests line of sight too, against SightGeometry, so a pass on
-## the main thread only records). The answers are the same as the old way; only something that moves
-## a pawn between ticks isn't seen by that pass. A pass with no result (a pawn that wasn't due, a test calling full_pass) runs the
-## old way. TickJobs.enabled off turns the job off.
-## Without the library, or with AIMemory.use_native off, it's a physics shape query on the layers in candidate_mask
+## A part on the pawn, added by PawnInitializer, with its senses ([AISenseBase] nodes) as children: SightSense by default. Pawn spec
+## section 10.4. Each tick the pawn's AI runs ([method AIContextComponent.run_ai]):
+## [br]- Every [member sense_interval_ticks]: a full pass. One shared query finds the pawns of other teams within the longest sense's
+##   range, and each sense gets that list. Then memory forgets entries whose fade has ended.
+## [br]- Every [member refresh_interval_ticks] in between: each sense refreshes the current target, which for sight is one ray.
+## [br]
+## Both are offset by the pawn's own number, so a crowd doesn't all sense on the same tick. A pawn running every 2nd or 4th tick still
+## gets the passes that fell between its runs (pawn spec 8.21).
+## [br]
+## Teams: only pawns on another team are candidates. When no pawn of another team is in the game at all (the TeamRegistry module
+## says so), the query is skipped, so a crowd that's all on one team, like the stress tests, costs almost nothing here.
+## [br]
+## [b]With the navcore C++ library[/b], the query uses AIPawnGrid: one grid of every pawn, rebuilt at most once a tick and shared by
+## every pawn, which returns the nearest [member max_candidates] first. The grid reads the shared PawnTable (Pawn.get_table()), which
+## pawns join themselves, so ties come back in entity-id order (scaling spec step 1). The full pass's search, visibility and line of
+## sight run on worker threads as the sensing job (AISensingJob, shared by every pawn; line of sight against SightGeometry), scaling
+## spec steps 2 and 4. At the end of each tick, every pawn whose full pass is on its next run asks the job, and the job reads the
+## shared table and works while the next tick waits to start. On the pass's tick, the sight sense only records the result. The
+## answers are the same as on the main thread; only something that moves a pawn between ticks isn't seen by that pass. A pass with
+## no result (a pawn that wasn't due, a test calling full_pass) runs on the main thread. TickJobs.enabled off turns the job off.
+## [br]
+## [b]Without the library[/b], or with AIMemory.use_native off, it's a physics shape query on the layers in [member candidate_mask]
 ## (pawns are on layer 2), which returns at most max_candidates, nearest not guaranteed. The sight checks themselves run in the
 ## pawn's memory store (pawn spec 10.11).
 class_name AISensingManager
@@ -35,24 +37,25 @@ extends Node
 ## The most pawns one query returns.
 @export_range(1, 256, 1, "or_greater") var max_candidates := 32
 
+## The pawn this is a part of, or null.
 var pawn: Pawn = null
 
-# Claude 2026-11-09: the grid every pawn shares, built from Pawn's shared table, or null without the C++ library. See _shared_grid.
+# The grid every pawn shares, built from Pawn's shared table, or null without the C++ library. See _shared_grid.
 static var _grid: Object = null
-# Claude 2026-11-09 (scaling spec step 2): the sensing job every pawn shares, or null without it (see _shared_job); the managers
-# whose full pass is next tick, collected during this tick; and the tick driver whose after_tick starts the job.
+# The sensing job every pawn shares, or null without it (see _shared_job); the managers whose full pass is next tick, collected
+# during this tick; and the tick driver whose after_tick starts the job.
 static var _job: Object = null
 static var _due_next: Array[AISensingManager] = []
-# Claude 2026-11-16 (profiling the networked mass battle): managers of stepping pawns, by the tick at whose end they ask the job (the
-# tick before their next run), since they don't run in between to ask then. tick -> Array of managers.
+# Managers of stepping pawns, by the tick at whose end they ask the job (the tick before their next run), since they don't run in
+# between to ask then. tick -> Array of managers.
 static var _due_later: Dictionary = {}
 static var _job_driver: Node = null
 
 var _senses: Array[AISenseBase] = []
 var _use_grid := false # decided once, when ready
-var _use_job := false # Claude 2026-11-09 (step 2): decided once, when ready
-var _asked_for_tick := -1 # Claude 2026-11-16 (audit): the tick at whose end this manager last asked the job, so it asks once
-var _sight: SightSense = null # Claude 2026-11-09 (step 2): the first sight sense, which the job serves
+var _use_job := false # decided once, when ready
+var _asked_for_tick := -1 # the tick at whose end this manager last asked the job, so it asks once
+var _sight: SightSense = null # the first sight sense, which the job serves
 var _candidates: Array[Pawn] = [] # reused every pass
 # Reused for every query, so a pass makes no new query objects.
 var _query := PhysicsShapeQueryParameters3D.new()
@@ -81,8 +84,8 @@ func _ready() -> void:
 			if _sight == null and child is SightSense:
 				_sight = child
 	_query.shape = _sphere
-	_use_grid = _shared_grid() != null and AIMemory.use_native # Claude 2026-11-09: was _grid, made by track_pawn
-	# Claude 2026-11-09 (step 2): get_scheduler() is null with TickJobs.enabled off, even once the shared job exists.
+	_use_grid = _shared_grid() != null and AIMemory.use_native
+	# get_scheduler() is null with TickJobs.enabled off, even once the shared job exists.
 	_use_job = _use_grid and _sight != null and TickJobs.get_scheduler() != null and _shared_job() != null
 
 
@@ -91,31 +94,28 @@ func get_senses() -> Array[AISenseBase]:
 	return _senses.duplicate()
 
 
-## The pawn calls this each tick its AI runs.
+## [method AIContextComponent.run_ai] calls this each tick the pawn's AI runs.
 func tick_sensing(tick: int) -> void:
 	if pawn == null or pawn.ai_context == null or pawn.ai_context.memory == null or _senses.is_empty():
 		return
 	var offset := pawn.ai_context.pawn_number() if pawn.ai_context else 0
-	var interval := TickDriver.ticks_at_rate(sense_interval_ticks) # Claude 2026-11-09 (scaling spec step 6): written for 60 a second
-	# Claude 2026-11-16 (pawn spec 8.21): fired_since_last_run, so a pawn running every Nth tick still gets the passes that fell between its
-	# runs. Sight's awareness already fills by the real ticks since its last check.
+	var interval := TickDriver.ticks_at_rate(sense_interval_ticks) # written for 60 a second
+	# fired_since_last_run, so a pawn running every Nth tick still gets the passes that fell between its runs (pawn spec 8.21). Sight's
+	# awareness already fills by the real ticks since its last check.
 	if pawn.fired_since_last_run(tick, offset, interval):
 		full_pass(tick)
 	elif pawn.fired_since_last_run(tick, offset, TickDriver.ticks_at_rate(refresh_interval_ticks)):
 		for sense in _senses:
 			sense.refresh(tick)
-	# Claude 2026-11-09 (scaling spec step 2): if next tick is a full pass, ask the sensing job for it at the end of this tick.
-	# Claude 2026-11-16 (profiling the networked mass battle): a stepping pawn too, which used to sense on the main thread: when its
-	# next run (Pawn.next_run_tick) will do a full pass, it asks at the end of the tick before that run, so the job's answer, which is
-	# always for the next tick, is for that run. If its step changes first, it runs on another tick, the answer goes unused, and that
-	# pass is done the old way, as before.
+	# If its next run (Pawn.next_run_tick) will do a full pass, ask the sensing job for it at the end of the tick before that run, so
+	# the job's answer, which is always for the next tick, is for that run. That's this tick for a pawn running every tick. If a
+	# stepping pawn's step changes first, it runs on another tick, the answer goes unused, and that pass runs on the main thread.
 	if not _use_job:
 		return
 	var next_run := pawn.next_run_tick(tick)
 	if not Pawn.fires_in_run(next_run, next_run - tick, offset, interval):
 		return # no full pass on its next run
-	# Claude 2026-11-16 (audit, the owner's call): a repeat ask for the same tick is dropped (its step can shrink between runs, which
-	# would otherwise ask twice).
+	# A repeat ask for the same tick is dropped (its step can shrink between runs, which would otherwise ask twice).
 	if _asked_for_tick == next_run - 1:
 		return
 	_asked_for_tick = next_run - 1
@@ -125,14 +125,14 @@ func tick_sensing(tick: int) -> void:
 		if not _due_later.has(next_run - 1):
 			_due_later[next_run - 1] = []
 		_due_later[next_run - 1].append(self)
-	if _job_driver == null: # Claude 2026-11-16 (wider audit): the autoload; this read the pawn's private _driver
+	if _job_driver == null: # the TickDriver autoload, connected once for every manager
 		_job_driver = TickDriver
 		_job_driver.after_tick.connect(AISensingManager._start_job)
 
 
-## One full pass now. The pawn's tick calls it on schedule; tests may call it directly.
+## One full pass now. [method tick_sensing] calls it on schedule; tests may call it directly.
 func full_pass(tick: int) -> void:
-	# Claude 2026-11-09 (scaling spec step 2): the job's result for this tick, if it has one. The sight sense uses the job's numbers;
+	# The job's result for this tick, if it has one. The sight sense uses the job's numbers;
 	# any other sense gets the same candidates the search below would have found.
 	if _use_job and _job.has_result(pawn, tick):
 		if _senses.size() > 1:
@@ -158,31 +158,28 @@ func get_range() -> float:
 	return longest
 
 
-## Claude 2026-11-09 (scaling spec step 1): the shared grid, made on first use from Pawn's shared table, or null without the C++
-## library. It replaces track_pawn and untrack_pawn: pawns join the table themselves.
+# The shared grid, from Pawn (which the swing hit checks share), or null without the C++ library. Pawns join its table themselves.
 static func _shared_grid() -> Object:
 	if _grid == null:
-		_grid = Pawn.get_grid() # Claude 2026-11-17 (C++ bundle stage 3): made by Pawn now, which the swing hit checks share
+		_grid = Pawn.get_grid()
 	return _grid
 
 
-## Claude 2026-11-09 (scaling spec step 2): the shared sensing job, made on first use, or null without the C++ library or with
-## TickJobs.enabled off.
+# The shared sensing job, made on first use, or null without the C++ library or with TickJobs.enabled off.
 static func _shared_job() -> Object:
 	if _job == null and ClassDB.class_exists(&"AISensingJob") and _shared_grid() != null and TickJobs.get_scheduler() != null:
 		_job = ClassDB.instantiate(&"AISensingJob")
 		_job.setup(TickJobs.get_scheduler(), _grid)
-		_job.set_geometry(SightGeometryFeeder.get_geometry()) # Claude 2026-11-09 (step 4): rays on the workers too
+		_job.set_geometry(SightGeometryFeeder.get_geometry()) # line of sight on the workers too
 	return _job
 
 
-## Claude 2026-11-09 (scaling spec step 2): at the end of every tick (TickDriver.after_tick), asks the job for every pawn whose full
-## pass is next tick, then starts it. Called every tick, even with nobody due, so last tick's results are dropped.
+# At the end of every tick (TickDriver.after_tick), asks the job for every pawn whose full pass is next tick, then starts it. Called
+# every tick, even with nobody due, so last tick's results are dropped.
 static func _start_job(_dt: float, tick: int) -> void:
 	var due := _due_next
 	_due_next = []
-	# Claude 2026-11-16 (profiling): plus the stepping pawns that asked ahead for this tick. Older entries (a rollback, a skipped tick)
-	# are dropped.
+	# Plus the stepping pawns that asked ahead for this tick. Older entries (a rollback, a skipped tick) are dropped.
 	if not _due_later.is_empty():
 		for at: int in _due_later.keys():
 			if at == tick:
@@ -195,8 +192,8 @@ static func _start_job(_dt: float, tick: int) -> void:
 	_job.start(tick)
 
 
-# Claude 2026-11-09 (step 2): this pawn's request, skipped in the same cases _find_candidates finds nothing, so that pass runs the
-# old way and gives the same answer.
+# This pawn's request, skipped in the same cases _find_candidates finds nothing, so that pass runs on the main thread and gives the
+# same answer.
 func _ask_job() -> void:
 	if pawn == null or pawn.ai_context == null or pawn.ai_context.memory == null or not pawn.is_inside_tree():
 		return
@@ -232,8 +229,7 @@ func _find_candidates(tick: int) -> void:
 			_candidates.append(other)
 
 
-# Claude 2026-11-16 (pawn M1): true when no pawn anywhere is on another team, from the TeamRegistry module (was a counter on Pawn). Without the
-# module, sensing looks every time.
+# True when no pawn anywhere is on another team, from the TeamRegistry module. Without the module, sensing looks every time.
 func _nobody_to_find() -> bool:
 	var game_mode: Node = get_node_or_null("/root/GameMode")
 	var registry: TeamRegistry = game_mode.team_registry if game_mode else null

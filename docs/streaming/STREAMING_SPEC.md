@@ -2,7 +2,7 @@
 
 # Chunk Streaming
 
-**Status:** built for one terrain, offline and in multiplayer, with edits that outlast their chunks and reach every machine. Edits aren't saved to a file yet. `ChunkStreamer` is now part of a `WorldCoordinator`, and only streams chunks: `TerrainNavFeeder` ticks nav and manages its interests. See `docs/world/WORLD_SPEC.md`.
+**Status:** built for one terrain, offline and in multiplayer, with edits that outlast their chunks and reach every machine, and are saved to a file (`TerrainEditLog.save_to_file`). *(Claude 2026-11-17, the documentation pass: this said edits weren't saved yet.)* `ChunkStreamer` is now part of a `WorldCoordinator`, and only streams chunks: `TerrainNavFeeder` ticks nav and manages its interests. See `docs/world/WORLD_SPEC.md`.
 
 ## 1. How it works
 
@@ -146,7 +146,7 @@ These match within the noise between runs. The largest errors come from pawn con
 
 | Item | Notes |
 |---|---|
-| **Saving edits to a file** | `TerrainEditLog.to_bytes` and `from_bytes` are there, and nothing writes them yet |
+| **Saving edits to a file** | Built: `TerrainEditLog.save_to_file` and `load_from_file`, a "PBTE" header and `to_bytes()`, written to a temporary file and renamed over the old one *(Claude 2026-11-17: corrected in the documentation pass)* |
 | **Merging long edit lists** | A chunk with 1,000 edits takes about 30 ms to build, spread across steps. Merging them into stored heights isn't built |
 | **Relevancy** | Clients still receive every pawn, wherever it is (netcode spec, section 16) |
 | **The real pawn** | Waits on the owner's pawn design |

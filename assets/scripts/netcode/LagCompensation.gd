@@ -1,18 +1,22 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: the server checking a late attack against what the shooter saw
-## (netcode spec section 9). A client draws other players in the past, so when its attack reaches the server, the target has
-## moved on. The server moves everyone else back to where the shooter saw them, checks the hit, and puts them back.
+# Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
+## The server checking a late attack against what the shooter saw (netcode spec section 9).
 ##
-## How far back: the client says how many ticks behind its own tick it was drawing others (view_ticks_behind). The server
-## never trusts that blindly: it's limited to between 0 and NetworkSession.rewind_cap_seconds, and to what that client's
-## snapshot acknowledgements make believable (NetworkSession.limit_view_ticks_behind).
-##
+## A client draws other players in the past, so when its attack reaches the server, the target has moved on. The server moves
+## everyone else back to where the shooter saw them, checks the hit, and puts them back.
+## [br]
+## How far back: the client says how many ticks behind its own tick it was drawing others ([code]view_ticks_behind[/code]). The
+## server never trusts that blindly: it's limited to between 0 and [code]NetworkSession.rewind_cap_seconds[/code], and to what that
+## client's snapshot acknowledgements make believable ([code]NetworkSession.limit_view_ticks_behind[/code]). With no time to go back
+## (every AI swing, all offline play, or lag compensation switched off), nothing is rewound at all.
+## [br]
 ## Rules, checked in tests/net_selftest.gd:
-##   - Past the cap, a high-ping shooter has to lead the target.
-##   - An entity with no record of that tick stays where it is for the check.
-##   - Everyone goes back to their real position before this returns, including in the collision world.
-##   - Only for attacks. Movement is never rewound on the server.
-##   - Only runs on the authority, inside a tick.
-##   - Tier 0 rewinds once per attack, not once per tick for all attacks, which costs more if many fire on the same tick.
+## [br]- Past the cap, a high-ping shooter has to lead the target.
+## [br]- An entity with no record of that tick stays where it is for the check.
+## [br]- Everyone goes back to their real position before this returns, including in the collision world.
+## [br]- Only for attacks. Movement is never rewound on the server.
+## [br]- Only runs on the authority, inside a tick.
+## [br]- Tier 0 rewinds once per check, not once per tick for all checks, which costs more if many fire on the same tick.
+##   [method melee_spheres] checks several spheres in one rewind.
 class_name LagCompensation
 extends RefCounted
 
@@ -36,14 +40,15 @@ static func hitscan(shooter: NetworkEntity, origin: Vector3, direction: Vector3,
 
 ## A sphere around centre, such as a melee swing. Returns every entity it touched, as an Array of NetworkEntity.
 static func melee(shooter: NetworkEntity, centre: Vector3, radius: float, view_ticks_behind: float) -> Array[NetworkEntity]:
-	# Claude 2026-11-10: one sphere is a list of one; the checking moved to melee_spheres.
+	# One sphere is a list of one, checked by melee_spheres.
 	var one: Array[Vector3] = [centre]
 	return melee_spheres(shooter, one, radius, view_ticks_behind)
 
 
-## Claude 2026-11-10: several spheres of one radius, checked in one rewind, such as the spots a sweeping swing passes through in one
-## tick (MeleeAttackAbility). Rewinding moves every other entity, which costs far more than a sphere check, so it's done once for the
-## lot. Returns every entity any of them touched, each once, as an Array of NetworkEntity.
+## Several spheres of one radius, checked in one rewind, such as the spots a sweeping swing passes through in one tick.
+## [br]
+## Rewinding moves every other entity, which costs far more than a sphere check, so it's done once for the lot. Returns every entity
+## any of them touched, each once, as an Array of NetworkEntity.
 static func melee_spheres(shooter: NetworkEntity, centres: Array[Vector3], radius: float, view_ticks_behind: float) -> Array[NetworkEntity]:
 	var found: Array[NetworkEntity] = []
 	var body := shooter.get_parent() as Node3D
@@ -67,13 +72,15 @@ static func melee_spheres(shooter: NetworkEntity, centres: Array[Vector3], radiu
 	return found
 
 
-## Claude 2026-11-17 (C++ bundle stage 3): true if a check for this shooter would move other entities back in time first. When it
-## wouldn't (every AI swing, and all offline play), a check can ask where pawns are now, as MeleeSweepStep does through the pawn grid.
+## True if a check for this shooter would move other entities back in time first.
+## [br]
+## When it wouldn't (every AI swing, and all offline play), a check can ask where pawns are now, as MeleeSweepStep does through the
+## pawn grid.
 static func would_rewind(shooter: NetworkEntity, view_ticks_behind: float) -> bool:
 	return _ticks_to_rewind(shooter, view_ticks_behind) > 0.0
 
 
-# Claude 2026-11-17: how many ticks back the shooter's view is, as far as it's believed and allowed; 0 for none. Was in _rewind_others.
+# How many ticks back the shooter's view is, as far as it's believed and allowed; 0 for none.
 static func _ticks_to_rewind(shooter: NetworkEntity, view_ticks_behind: float) -> float:
 	var session: Node = shooter.session
 	if session == null or not session.lag_compensation_enabled:
@@ -88,9 +95,9 @@ static func _ticks_to_rewind(shooter: NetworkEntity, view_ticks_behind: float) -
 
 static func _rewind_others(shooter: NetworkEntity, view_ticks_behind: float) -> Array[NetworkEntity]:
 	var rewound: Array[NetworkEntity] = []
-	# Claude 2026-11-16 (wider audit): with no time to go back (every AI swing, and all offline play), nothing is rewound. It used
-	# to ask every entity to rewind to the present, which each refused after a lookup: pawns x swings at the clash.
-	var back := _ticks_to_rewind(shooter, view_ticks_behind) # Claude 2026-11-17: worked out there now
+	# With no time to go back (every AI swing, and all offline play), nothing is rewound, rather than asking every entity to
+	# rewind to the present.
+	var back := _ticks_to_rewind(shooter, view_ticks_behind)
 	if back <= 0.0:
 		return rewound
 	var driver: Node = shooter.get_node_or_null("/root/TickDriver")

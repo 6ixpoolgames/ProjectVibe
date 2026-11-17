@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-06: headless self-test for a terrain's chunks announcing their markers to NavMarkerManager.
 ## Also times generating and editing at the 128 m defaults, which the nav spec's section 21.6 asks for.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/terrain/tests/terrain_markers_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/terrain/tests/terrain_markers_selftest.tscn"
 extends Node
 
 

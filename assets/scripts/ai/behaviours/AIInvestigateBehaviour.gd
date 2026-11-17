@@ -1,13 +1,16 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: walks over to see what something half-noticed was. Pawn spec section 10.7. Allowed
-## in Alert by default.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Walks over to see what something half-noticed was.
 ##
-## It scores high while the most aware entry in memory isn't certain yet, and walks, without sprinting, to that entry's last
-## known position. If the position moves more than repath_distance (the target was seen again somewhere else), it heads for the new
-## one. It succeeds on arriving, and fails if there's no way there. Its cooldown stops it walking to the same spot over and over.
-##
-## It's only available while something uncertain is remembered: Search handles enemies it became certain of.
-## Claude 2026-11-09, step 10: or while an unknown attacker hit the pawn within hit_memory_ticks: then it walks to where the hit
-## came from, with no memory entry (no damage sense, the owner's call).
+## Pawn spec section 10.7. Allowed in Alert by default. It scores high while the most aware entry in memory isn't certain yet, and
+## walks, without sprinting, to that entry's last known position. If the position moves more than [member repath_distance] (the
+## target was seen again somewhere else), it heads for the new one. It succeeds on arriving, and fails if there's no way there. Its
+## cooldown stops it walking to the same spot over and over.
+## [br]
+## It's only available while something uncertain is remembered (Search handles enemies it became certain of), or while an unknown
+## attacker hit the pawn within [member hit_memory_ticks]: then it walks to where the hit came from, with no memory entry (no damage
+## sense, the owner's call).
+# REFACTOR: _point_of_interest() is the same function as AILookTowardBehaviour's. One copy, on the context say, keeps the two
+# reacting to the same things (reusable). See CHANGELOG.md.
 class_name AIInvestigateBehaviour
 extends AIBehaviourBase
 
@@ -15,7 +18,7 @@ extends AIBehaviourBase
 @export_range(0.1, 50.0, 0.1, "or_greater") var repath_distance := 2.0
 ## How close, in metres, counts as arrived.
 @export_range(0.1, 10.0, 0.1, "or_greater") var arrive_distance := 1.0
-## Claude 2026-11-09: how long after being hit by an unknown attacker it may still go to where the hit came from, in ticks.
+## How long after being hit by an unknown attacker it may still go to where the hit came from, in ticks.
 @export_range(0, 36000, 1, "or_greater") var hit_memory_ticks := 300
 
 var _goal := Vector3.ZERO
@@ -27,7 +30,7 @@ func _init() -> void:
 	max_score = 0.5
 	min_score = max_score # a fixed score, so it can help skip others
 	cooldown_ticks = 120
-	tick_interval_ticks = 5 # Claude 2026-11-09: it only needs to notice arriving, or the position moving
+	tick_interval_ticks = 5 # it only needs to notice arriving, or the position moving
 
 
 # Only for something half-noticed: an uncertain most aware entry, or a recent hit from an unknown attacker. Its score is always

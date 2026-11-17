@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: background threads for tile builds (spec section 3).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// WorkerPool: background threads for tile builds. Described in worker_pool.h.
 #include "worker_pool.h"
 
 namespace navcore {

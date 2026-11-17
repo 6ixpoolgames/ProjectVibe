@@ -1,6 +1,8 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16 (pawn spec 8.20, the owner's design): opens the combo window when it starts, so a
-## follow-up (an ability whose combo_positions include the next position) can start for window_ticks. Put after a hit, not at the start,
-## so an attack cancelled in its windup opens nothing. Done on its next tick.
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
+## Opens the combo window when it starts, so a follow-up can start for [member window_ticks].
+##
+## Pawn spec 8.20, the owner's design. A follow-up is an ability whose combo_positions include the next position. Put this after a
+## hit, not at the start, so an attack cancelled in its windup opens nothing. Done on its next tick.
 class_name OpenComboStep
 extends AbilityStep
 

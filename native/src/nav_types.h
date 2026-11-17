@@ -1,5 +1,6 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: shared basic types for the nav core (spec section 4).
-// Nothing in here depends on Godot, so worker threads can use all of it safely.
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// The nav library's shared basic types (nav spec section 4): tile keys, area ids and polygon flags, link ids, and NavConfig, the
+// settings NavServer.configure fills in. Nothing in here depends on Godot, so worker threads can use all of it safely.
 #pragma once
 
 #include <algorithm>
@@ -64,12 +65,12 @@ inline uint8_t area_surface(uint8_t area) { return area & 0x0F; }
 // A filter for tier N then includes just the bit for tier N.
 constexpr uint16_t POLYFLAG_WALK = 1 << 0;
 inline uint16_t tier_flag(int tier) { return tier <= 0 ? POLYFLAG_WALK : uint16_t(1u << tier); }
-// Claude 2026-11-08: every link (Detour's off-mesh connection) also has this bit, so a search can leave links out by excluding it.
+// Every link (Detour's off-mesh connection) also has this bit, so a search can leave links out by excluding it.
 // Bits 1..3 are the tiers above.
 constexpr uint16_t POLYFLAG_LINK = 1 << 4;
 
 // ---- links (spec section 10, phase 3) --------------------------------------------------------
-// Claude 2026-11-08: a link joins two points nav can't walk between, such as either side of a gap. Detour stores each one in the
+// A link joins two points nav can't walk between, such as either side of a gap. Detour stores each one in the
 // tile holding its start, so a link only works while that tile is built, and only reaches its end while the end's tile is too.
 //
 // Each link has a 32-bit id that comes back with a path. Placed links get ids counting up from 1. Links the tile build finds by
@@ -98,15 +99,15 @@ struct NavConfig {
 
 	// Smallest pawn.
 	float agent_height = 1.8f;
-	// Claude 2026-11-17: 0.4 (was 0.3), the default pawn's radius (pawn.tscn), so its walls come from the nav mesh
-	// (CrowdBatch needs the tier's radius to cover the body) and paths keep it a full body's width from walls.
+	// 0.4, the default pawn's radius (pawn.tscn), so its walls come from the nav mesh (CrowdBatch needs the tier's radius to
+	// cover the body) and paths keep it a full body's width from walls.
 	float agent_radius = 0.4f;
 	float agent_max_climb = 0.4f;
 	float max_slope_deg = 45.0f;
 
 	// Clearance tiers: tier t = "at least tier_radii[t] of space around this spot".
 	// tier_radii[0] is always the smallest pawn's radius.
-	float tier_radii[MAX_TIERS] = { 0.4f, 0.6f, 1.0f, 1.5f }; // Claude 2026-11-17: tier 0 is agent_radius, 0.4
+	float tier_radii[MAX_TIERS] = { 0.4f, 0.6f, 1.0f, 1.5f }; // tier 0 is agent_radius
 	int tier_count = 4;
 
 	// Vertical range of the world. (ceiling - floor) / cell_height must stay under 8191 (Recast limit).
@@ -127,7 +128,7 @@ struct NavConfig {
 	float detail_sample_dist = 6.0f;
 	float detail_sample_max_error = 1.0f;
 
-	// Claude 2026-11-08: links the tile build finds by itself at ledges and gaps (spec section 8.2, step 8). The defaults suit the
+	// Links the tile build finds by itself at ledges and gaps (spec section 8.2, step 8). The defaults suit the
 	// t0 pawn: Jump's 5 m/s gives a jump about 1.27 m high, and walking at 5 m/s covers about 5 m in the air, so these leave room.
 	bool auto_links = true;
 	float link_jump_distance = 2.0f; // widest gap to jump, edge to edge. Each extra metre widens every tile's border by 1 m
@@ -147,14 +148,14 @@ struct NavConfig {
 	//  - Recast's erosion and region building see across the seam (radius + 3, as in the Recast demo)
 	//  - the clearance distance field can "see" the biggest tier radius past the tile edge.
 	//    Otherwise tiers would be capped at tile seams and big pawns couldn't cross them.
-	//  - Claude 2026-11-08: with auto links on, a ledge at the tile's edge can see a landing a full jump away, past the edge.
+	//  - with auto links on, a ledge at the tile's edge can see a landing a full jump away, past the edge.
 	int border_cells() const {
 		int a = walkable_radius_cells() + 3;
 		int b = int(std::ceil(max_tier_radius() / cell_size)) + 3;
 		int c = auto_links ? link_reach_cells() + link_rim_cells() : 0;
 		return std::max(a, std::max(b, c));
 	}
-	// Claude 2026-11-08: how far past a ledge, in cells, the build looks for somewhere to land. The gap itself, plus the strip
+	// How far past a ledge, in cells, the build looks for somewhere to land. The gap itself, plus the strip
 	// on each side that isn't walkable: the ledge's own cell and the erosion by the pawn's radius.
 	int link_reach_cells() const {
 		return int(std::ceil(std::fmax(link_jump_distance, link_drop_reach) / cell_size)) + link_rim_cells();

@@ -1,17 +1,21 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16: facts about where this run of the game is, asked in one place. So far: whether it has a
-## display. The code audit found the same check, DisplayServer.get_name() == "headless", written out in about seven places
-## (diagnostics, replays, visuals), and two visual parts each with their own switch for tests.
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: platform/README.md.
+## Facts about where this run of the game is, asked in one place. So far: whether it has a display.
 ##
 ## Use:
-##   if RunEnvironment.is_headless(): ...        # nothing is drawn: a test, or a dedicated server (Godot started with --headless)
-##   if not RunEnvironment.runs_visuals(): ...   # a visual-only part (a toy figure, a floating sword) has nothing to do
-## A test that checks visual parts while running headless turns visuals_without_display on.
+## [codeblock]
+## if RunEnvironment.is_headless(): ...        # nothing is drawn: a test, or a dedicated server (Godot started with --headless)
+## if not RunEnvironment.runs_visuals(): ...   # a visual-only part (a toy figure, a floating sword) has nothing to do
+## [/codeblock]
+## A test that checks visual parts while running headless turns [member visuals_without_display] on.
 class_name RunEnvironment
 extends RefCounted
 
 ## On: visual-only parts run even with no display. Off (the default): with no display they build nothing and never run, since nothing
-## can see them (the floating swords cost 1.4 ms a tick on a headless mass battle server). GDScript note: a static var belongs to the
-## class, so every part sees the same one.
+## can see them (the floating swords cost 1.4 ms a tick on a headless mass battle server).
+## [br]
+## GDScript note: a static var belongs to the class, so every part sees the same one.
+# REFACTOR: a switch only tests turn on, kept in shipping code. Test code belongs in tests/ (keep test code out of shipping code);
+# the owner may prefer to keep this one small static as the agreed hook.
 static var visuals_without_display := false
 
 

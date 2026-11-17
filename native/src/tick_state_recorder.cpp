@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: see tick_state_recorder.h.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// TickStateRecorder: the fast path of rollback recording. Described in tick_state_recorder.h.
 #include "tick_state_recorder.h"
 
 #include <godot_cpp/core/class_db.hpp>
@@ -10,8 +11,7 @@
 
 using namespace godot;
 
-// Claude 2026-11-17 (C++ bundle stage 2): MM, CM, U16_STEP, BYTE_STEP, PI_VALUE and the encoding numbers come from
-// state_encoding.h, shared with NetCodec. They were copied here (and Math_PI, which godot-cpp 10 renamed, was used for pi).
+// MM, CM, U16_STEP, BYTE_STEP, PI_VALUE and the encoding numbers come from state_encoding.h, shared with NetCodec.
 using namespace state_encoding;
 
 namespace {
@@ -146,8 +146,7 @@ Variant TickStateRecorder::quantize_by_id(const Variant &value, int encoding) co
 	return value;
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2): through the shared names in state_encoding.h. "auto" counts as unknown here, as before:
-// an entry's encoding is settled before it gets here.
+// Through the shared names in state_encoding.h. "auto" counts as unknown here: an entry's encoding is settled before it gets here.
 int TickStateRecorder::encoding_id(const StringName &name) const {
 	const Encoding id = m_encoding_names.id_of(name);
 	return id == ENC_AUTO ? int(ENC_UNKNOWN) : int(id);

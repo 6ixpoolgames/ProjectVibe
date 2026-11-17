@@ -1,21 +1,26 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16: timing scopes, the one piece of diagnostics v0 that lives in the base (the owner's
-## call; docs/diagnostics/DIAGNOSTICS_SPEC.md). Systems mark the work they do, and a diagnostics tool reads how long each took, frame by
-## frame. When nothing is listening (enabled off, as in a release build, where the debug tools aren't there), a scope costs one check
-## of a true-or-false, so the marks can stay in shipping code, as TickDriver's profile does (docs/TEST_AND_DEBUG_CODE.md).
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: diagnostics/CHANGELOG.md.
+## Timing scopes: systems mark the work they do, and a diagnostics tool reads how long each took, frame by frame.
 ##
+## The piece of diagnostics the rest of the base calls (the owner's call; docs/diagnostics/DIAGNOSTICS_SPEC.md). When nothing is
+## listening ([member enabled] off, as in a game without [DiagnosticsManager]), a scope costs one check of a true-or-false, so the
+## marks can stay in shipping code, as TickDriver's profile does (docs/TEST_AND_DEBUG_CODE.md).
+## [br]
 ## How to mark work:
-##   var started := PerfScopes.begin()          # 0 when nothing is listening, else the time now
-##   ... the work ...
-##   PerfScopes.end(&"ai.sensing", started)     # adds the time since begin() to "ai.sensing" for this frame
+## [codeblock]
+## var started := PerfScopes.begin()       # 0 when nothing is listening, else the time now
+## # ... the work ...
+## PerfScopes.end(&"ai.sensing", started)  # adds the time since begin() to "ai.sensing" for this frame
+## [/codeblock]
 ## Names are dotted, from the general to the particular ("ai.sensing", "net.snapshots.send"), so a tool can add up a group ("ai").
 ## The same name can be used many times a frame, such as once per pawn: the times add up, and the count says how many.
-##
+## [br]
 ## How a tool reads them (DiagnosticsManager does, once a frame):
-##   PerfScopes.enabled = true
-##   var frame := PerfScopes.take_frame()       # name -> [microseconds, count] since the last take_frame(), and starts afresh
-##
+## [codeblock]
+## PerfScopes.enabled = true
+## var frame := PerfScopes.take_frame()  # name -> [microseconds, count] since the last take_frame(), and starts afresh
+## [/codeblock]
 ## Main thread only: the totals aren't guarded for threads. Work on worker threads is timed by whoever waits for it.
-##
+## [br]
 ## GDScript note: everything here is static, so it's used as PerfScopes.begin() with no object made, like TickJobs.
 class_name PerfScopes
 extends RefCounted

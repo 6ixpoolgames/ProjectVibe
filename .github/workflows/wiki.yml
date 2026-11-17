@@ -1,0 +1,51 @@
+# Written by Claude (claude-opus-5-5), 2026-11-17: builds the wiki (tools/docs/build_wiki.py) and publishes it on GitHub Pages, on every
+# push to master that changes the docs, and when started by hand from the Actions tab. The repository and the wiki are public, so the
+# build runs tools/docs/check_privacy.py on the repository and on the finished site, and stops without publishing on any find.
+# References (REFERENCE.md) are committed, so no Godot is needed here.
+name: Wiki
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "assets/scripts/**/*.md"
+      - "native/*.md"
+      - "docs/**"
+      - "tools/docs/**"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One publish at a time; a newer push replaces one still waiting.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The versions the wiki was built and checked with locally.
+      - run: python -m pip install "mkdocs==1.6.1" "mkdocs-material==9.8.1"
+      - run: python tools/docs/build_wiki.py
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/wiki/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,9 +1,9 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: jumping. An action bound to &"jump", which happens at once. Pawn spec section 8.5.
-## It replaces GroundMovement's jump.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
+## Jumping: an action bound to &"jump", which happens at once.
 ##
-## It starts from the ground, or within coyote_time of walking off an edge, which forgives a press a moment too late. A press a
-## moment too early, in the air, waits buffer_window seconds and jumps on landing. Holding the key doesn't bounce, because only a
-## press starts it. The height comes from the pawn's JumpVelocity stat, in metres per second upward.
+## Pawn spec section 8.5. It starts from the ground, or within [member coyote_time] of walking off an edge, which forgives a press a
+## moment too late. A press a moment too early, in the air, waits buffer_window seconds and jumps on landing. Holding the key doesn't
+## bounce, because only a press starts it. The height comes from the pawn's JumpVelocity stat, in metres per second upward.
 class_name JumpAbility
 extends AbilityBase
 
@@ -21,11 +21,11 @@ func _init() -> void:
 	super()
 	kind = Kind.ACTION
 	trigger_action = &"jump"
-	# Claude 2026-11-10: tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	# Tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
 	category = Tags.MOVEMENT_JUMP
-	extra_categories = [Tags.MOVEMENT_BASIC] # Claude 2026-11-10
+	extra_categories = [Tags.MOVEMENT_BASIC]
 	buffer_window = 0.15
-	interrupt_priority = 5 # Claude 2026-11-09: between Walk and Sprint
+	interrupt_priority = 5 # between Walk (0) and Sprint (10)
 
 
 func get_rollback_properties() -> Array[String]:
@@ -35,10 +35,10 @@ func get_rollback_properties() -> Array[String]:
 
 
 func every_tick(_dt: float) -> void:
-	ticks_off_ground = 0 if pawn.grounded else mini(ticks_off_ground + pawn.ticks_elapsed, COUNT_CAP) # Claude 2026-11-16 (pawn spec 8.21): was + 1
+	ticks_off_ground = 0 if pawn.grounded else mini(ticks_off_ground + pawn.ticks_elapsed, COUNT_CAP) # every tick this run covers
 
 
-## Claude 2026-11-09: a sleeping pawn is grounded, so every_tick() would only keep this at 0 (pawn spec 15.3).
+## A sleeping pawn is grounded, so every_tick() would only keep this at 0 (pawn spec 15.3).
 func can_sleep() -> bool:
 	return ticks_off_ground == 0
 

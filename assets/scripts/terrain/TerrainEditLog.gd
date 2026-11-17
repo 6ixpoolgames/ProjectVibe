@@ -1,32 +1,35 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: remembers every edit to a TerrainGenerator, so that a chunk built later still has them.
-## An optional module: add it as a child of the TerrainGenerator, and edits survive unloading.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: terrain/CHANGELOG.md.
+## Remembers every edit to a TerrainGenerator, so that a chunk built later still has them.
 ##
-## Without it, the ground goes back to how it was generated whenever a chunk unloads. If this node is deleted while the game
-## runs, or its saved data won't load, the world simply goes back to its default state. Nothing else depends on it.
-##
-## How it works: it stores the edits themselves, not the heights they produce. Each one is a center, radius, amount and tick,
-## about 24 bytes. When a chunk is built, its edits are applied in the order they happened. Each edit is listed under every
-## chunk it touches, including unloaded ones, so two chunks that share a border always agree on it.
-##
-## In multiplayer, the server's log is the one that counts. Clients get each edit as soon as it reaches them, which is after
-## the server has applied it, by about half their ping. Prediction can differ for that moment, and normal corrections fix it.
-## A late joiner gets the whole log. Both use the same bytes as to_bytes, which will suit save files too.
-##
-## Claude 2026-11-09, saving (pawn spec step 11): save_to_file() and load_from_file() keep the log in a file, as a 4-byte "PBTE"
-## header and then to_bytes(). Saving writes a temporary file and renames it over the old one, so a crash mid-save never leaves a
-## broken save: at worst the temporary file is left, and loading falls back to it. For designers, three settings do it with no code:
-## save_path (empty: no file), load_on_start, and save_every_seconds (0: only when the log leaves the tree, such as on quit). Only
-## the server or an offline game saves and loads: in multiplayer the server's log is the one that counts, and clients get it over
+## An optional module: add it as a child of the [TerrainGenerator], and edits survive unloading. Without it, the ground goes back to
+## how it was generated whenever a chunk unloads. If this node is deleted while the game runs, or its saved data won't load, the world
+## simply goes back to its default state. Nothing else depends on it.
+## [br]
+## How it works: it stores the edits themselves, not the heights they produce. Each one is a center, radius, amount and tick, 20 bytes
+## ([constant BYTES_PER_EDIT]). When a chunk is built, its edits are applied in the order they happened. Each edit is listed under
+## every chunk it touches, including unloaded ones, so two chunks that share a border always agree on it.
+## [br]
+## [b]Multiplayer.[/b] The server's log is the one that counts, and only the server edits ([method refuses_edit]). Clients get each
+## edit as soon as it reaches them, which is after the server has applied it, by about half their ping. Prediction can differ for that
+## moment, and normal corrections fix it. A late joiner gets the whole log, even an empty one, so a client that loaded edits of its own
+## doesn't keep ground the server doesn't have. The whole log goes as [method to_bytes], the same bytes a save file holds.
+## [br]
+## [b]Saving.[/b] [method save_to_file] and [method load_from_file] keep the log in a file, as a 4-byte "PBTE" header and then
+## to_bytes(). Saving writes a temporary file and renames it over the old one, so a crash mid-save never leaves a broken save: at worst
+## the temporary file is left, and loading falls back to it. For designers, three settings do it with no code: [member save_path]
+## (empty: no file), [member load_on_start], and [member save_every_seconds] (0: only when the log leaves the tree, such as on quit).
+## Only the server or an offline game saves and loads: in multiplayer the server's log is the one that counts, and clients get it over
 ## the network.
-##
+## [br]
 ## What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
-##   - from_bytes given broken data: it's refused, and the log stays as it was.
-##   - from_bytes given data from a terrain with different settings: it's refused, because those edits were meant for other
-##     ground. The world stays as it is.
-##   - The parent isn't a TerrainGenerator: it warns and does nothing.
-##   - A chunk with a very long list costs more to build. Nothing merges old edits yet.
-##   - Claude 2026-11-09: a save file that's missing, broken, or made for a terrain with different settings is refused, and the log
-##     and the ground stay as they were. Loading or saving on a client does nothing.
+## [br]- from_bytes given broken data: it's refused, and the log stays as it was. Every record is checked before anything changes.
+## [br]- from_bytes given data from a terrain with different settings: it's refused, because those edits were meant for other
+##   ground. The world stays as it is.
+## [br]- The parent isn't a TerrainGenerator: it warns and does nothing.
+## [br]- A chunk with a very long list costs more to build. Nothing merges old edits yet.
+## [br]- A save file that's missing, broken, or made for a terrain with different settings is refused, and the log and the ground stay
+##   as they were. The log then won't save itself over that file, so one run with a different seed doesn't delete the saved edits.
+## [br]- Loading or saving on a client does nothing.
 class_name TerrainEditLog
 extends Node
 
@@ -37,14 +40,14 @@ const BYTES_PER_EDIT := 20
 # The first byte of what goes over the network.
 const MESSAGE_ONE_EDIT := 1
 const MESSAGE_WHOLE_LOG := 2
-# Claude 2026-11-09: the first four bytes of a save file, so a wrong file is refused before anything else is read.
+# The first four bytes of a save file, so a wrong file is refused before anything else is read.
 const FILE_HEADER := "PBTE"
 
-## Claude 2026-11-09: where edits are saved, such as "user://world_edits.tedits". Empty: no file.
+## Where edits are saved, such as "user://world_edits.tedits". Empty: no file.
 @export var save_path := ""
-## Claude 2026-11-09: on, the edits in save_path are loaded when this log enters the tree (on the server or offline).
+## On, the edits in [member save_path] are loaded when this log enters the tree (on the server or offline).
 @export var load_on_start := true
-## Claude 2026-11-09: also save every this many seconds while running. 0: only when the log leaves the tree, such as on quit.
+## Also save every this many seconds while running. 0: only when the log leaves the tree, such as on quit.
 @export_range(0.0, 3600.0, 1.0, "or_greater") var save_every_seconds := 0.0
 
 var _x := PackedFloat32Array()
@@ -57,8 +60,8 @@ var _terrain: TerrainGenerator = null
 var _session: Node = null
 var _channel := ""
 var _warned_about_client_edit := false
-var _since_save := 0.0 # Claude 2026-11-09: seconds since the last timed save
-# Claude 2026-11-16 (wider audit): on once the file at save_path was there but refused (broken, or made for ground with other settings).
+var _since_save := 0.0 # seconds since the last timed save
+# On once the file at save_path was there but refused (broken, or made for ground with other settings).
 # The log then stops saving itself over it, so one run with a different seed doesn't delete the saved edits. Saving by code
 # (save_to_file) still works, and turns it off.
 var _load_refused := false
@@ -75,14 +78,14 @@ func _enter_tree() -> void:
 		# The path is the same on every machine, so this names the same terrain everywhere.
 		_channel = "terrain_edits:%s" % _terrain.get_path()
 		_session.register_world_channel(_channel, _on_network_message, _catch_up_message)
-	# Claude 2026-11-09: saving. Only timed saves need a per-frame check; saving isn't game state, so it runs on frames, not ticks.
+	# Saving. Only timed saves need a per-frame check; saving isn't game state, so it runs on frames, not ticks.
 	set_process(save_every_seconds > 0.0)
 	if save_path != "" and load_on_start and _may_use_files() and _save_exists(save_path):
 		load_from_file(save_path)
 
 
 func _exit_tree() -> void:
-	# Claude 2026-11-09: save on the way out, while the terrain is still here.
+	# Save on the way out, while the terrain is still here.
 	if save_path != "" and _terrain != null and _may_use_files():
 		_save_itself()
 	if _session and _channel != "":
@@ -92,8 +95,8 @@ func _exit_tree() -> void:
 		_terrain.edit_log_left(self)
 
 
-## Claude 2026-11-09: saves the log to a file: a temporary file first, then renamed over the old one. OK, or why not. Does nothing
-## on a client.
+## Saves the log to a file: a temporary file first, then renamed over the old one. Returns OK, or why not. Does nothing on a client.
+## Saving to [member save_path] on purpose lets the log save itself there again after a refused load.
 func save_to_file(path: String = save_path) -> Error:
 	if path == "" or not _may_use_files():
 		return ERR_UNAVAILABLE
@@ -113,7 +116,7 @@ func save_to_file(path: String = save_path) -> Error:
 	return DirAccess.rename_absolute(ProjectSettings.globalize_path(temporary), final_path)
 
 
-## Claude 2026-11-09: replaces the log with the one saved in a file, and rebuilds whatever changes. If the file is missing, its
+## Replaces the log with the one saved in a file, and rebuilds whatever changes. If the file is missing, its
 ## temporary file from an interrupted save is used. False, with the log and the ground as they were, when there's no file, it's
 ## broken, it was made for a terrain with different settings, or this is a client.
 func load_from_file(path: String = save_path) -> bool:
@@ -129,11 +132,11 @@ func load_from_file(path: String = save_path) -> bool:
 	else:
 		loaded = from_bytes(bytes.slice(4))
 	if path == save_path:
-		_load_refused = not loaded # Claude 2026-11-16 (wider audit): a refused file is left alone by the log's own saves
+		_load_refused = not loaded # a refused file is left alone by the log's own saves
 	return loaded
 
 
-# Claude 2026-11-16 (wider audit): the log's own saves (leaving the tree, the timer). Skipped, with a warning the first time, while
+# The log's own saves (leaving the tree, the timer). Skipped, with a warning the first time, while
 # the file there is one this log refused to load.
 var _refusal_warned := false
 func _save_itself() -> void:
@@ -145,7 +148,7 @@ func _save_itself() -> void:
 
 
 func _process(delta: float) -> void:
-	# Claude 2026-11-09: timed saves. Only runs when save_every_seconds is above 0.
+	# Timed saves. Only runs when save_every_seconds is above 0.
 	_since_save += delta
 	if save_every_seconds > 0.0 and _since_save >= save_every_seconds:
 		_since_save = 0.0
@@ -173,7 +176,7 @@ func clear() -> void:
 	_by_chunk.clear()
 
 
-# Claude 2026-11-09: saving and loading belong to the server, or an offline game.
+# Saving and loading belong to the server, or an offline game.
 func _may_use_files() -> bool:
 	return _session == null or not _session.is_client()
 
@@ -182,8 +185,8 @@ static func _save_exists(path: String) -> bool:
 	return FileAccess.file_exists(path) or FileAccess.file_exists(path + ".tmp")
 
 
-## Claude 2026-11-07: true if this machine mustn't edit the ground. Every machine has to end up with the same ground, so in multiplayer
-## only the server edits, and this tells everyone.
+## True if this machine mustn't edit the ground. Every machine has to end up with the same ground, so in multiplayer only the server
+## edits. On a client it warns once.
 func refuses_edit() -> bool:
 	if _session == null or not _session.is_client():
 		return false
@@ -208,7 +211,7 @@ func apply_to_chunk(key: Vector2i, points: PackedVector3Array) -> void:
 	apply_some_to_chunk(key, points, 0, get_chunk_edit_count(key))
 
 
-## Adds up to count of this chunk's edits, starting at from, and returns where to carry on from.
+## Adds up to [param count] of this chunk's edits, starting at [param from], and returns where to carry on from.
 func apply_some_to_chunk(key: Vector2i, points: PackedVector3Array, from: int, count: int) -> int:
 	var list: PackedInt32Array = _by_chunk.get(key, PackedInt32Array())
 	var end := mini(from + count, list.size())
@@ -236,7 +239,7 @@ func edit_as_bytes(index: int) -> PackedByteArray:
 	return buffer.data_array
 
 
-## Adds an edit that came from edit_as_bytes on another machine. Returns its position in the log, or -1 if it's broken.
+## Adds an edit that came from [method edit_as_bytes] on another machine. Returns its position in the log, or -1 if it's broken.
 func record_from_bytes(bytes: PackedByteArray) -> int:
 	if bytes.size() != BYTES_PER_EDIT:
 		return -1
@@ -256,7 +259,7 @@ func to_bytes() -> PackedByteArray:
 	return buffer.data_array
 
 
-## Replaces the log with one from to_bytes, and has the terrain rebuild whatever changes. False means it was refused, and the
+## Replaces the log with one from [method to_bytes], and has the terrain rebuild whatever changes. False means it was refused, and the
 ## log and the ground are as they were.
 func from_bytes(bytes: PackedByteArray) -> bool:
 	if bytes.size() < 9:
@@ -271,8 +274,8 @@ func from_bytes(bytes: PackedByteArray) -> bool:
 	var count := buffer.get_u32()
 	if bytes.size() != 9 + count * BYTES_PER_EDIT:
 		return false
-	# Claude 2026-11-07, from the audit of 6df1464: every record is checked before anything changes. This used to clear the log first,
-	# so one bad record left it empty while the built ground still had the old edits.
+	# Every record is checked before anything changes, so one bad record can't leave the log empty while the built ground still has
+	# the old edits.
 	var incoming: Array[PackedFloat32Array] = []
 	var ticks := PackedInt32Array()
 	for i in count:
@@ -300,21 +303,21 @@ func from_bytes(bytes: PackedByteArray) -> bool:
 # --- Multiplayer ---
 
 
-## Client: something arrived from the server's log.
+# Client: something arrived from the server's log.
 func _on_network_message(bytes: PackedByteArray) -> void:
 	if bytes.is_empty() or _terrain == null or _session == null or not _session.is_client():
 		return
 	var body := bytes.slice(1)
 	if bytes[0] == MESSAGE_ONE_EDIT:
-		_receive_edit(body) # Claude 2026-11-07: split out, so a test can call it without a network
+		_receive_edit(body) # its own function, so a test can call it without a network
 	elif bytes[0] == MESSAGE_WHOLE_LOG and from_bytes(body):
 		# A joining pawn may be about to take its first tick here, so this can't wait for later frames.
 		_terrain.finish_rebuilds()
 
 
-## Claude 2026-11-07, from the audit of 6df1464: one edit from the server, applied exactly once. Half-built chunks are finished
-## before the edit is recorded, the same order edit() uses on the server. Recording first made a half-built chunk read the edit
-## from the log while finishing, then get it again from the loaded-chunk pass. Returns its position in the log, or -1 if broken.
+# One edit from the server, applied exactly once. Half-built chunks are finished before the edit is recorded, the same order edit()
+# uses on the server; recording first would make a half-built chunk read the edit from the log while finishing, then get it again from
+# the loaded-chunk pass. Returns its position in the log, or -1 if broken.
 func _receive_edit(bytes: PackedByteArray) -> int:
 	if _terrain == null or bytes.size() != BYTES_PER_EDIT:
 		return -1
@@ -325,8 +328,8 @@ func _receive_edit(bytes: PackedByteArray) -> int:
 	return index
 
 
-## Server: what a late joiner needs: the whole log. Claude 2026-11-16 (wider audit): an empty one too. It used to send nothing then,
-## so a client that had loaded edits from its own file before joining kept ground the server doesn't have.
+# Server: what a late joiner needs: the whole log, an empty one too, so a client that loaded edits from its own file before joining
+# doesn't keep ground the server doesn't have.
 func _catch_up_message() -> PackedByteArray:
 	var bytes := to_bytes()
 	bytes.insert(0, MESSAGE_WHOLE_LOG)
@@ -352,7 +355,7 @@ func _read_edit(buffer: StreamPeerBuffer) -> int:
 	return _add(x, z, radius, amount, tick)
 
 
-## Claude 2026-11-07: the one check every edit from outside has to pass. Shared by single edits and whole logs.
+# The one check every edit from outside has to pass. Shared by single edits and whole logs.
 func _is_valid_edit(x: float, z: float, radius: float, amount: float) -> bool:
 	return is_finite(x) and is_finite(z) and is_finite(radius) and is_finite(amount) and radius > 0.0
 
@@ -373,13 +376,13 @@ func _add(x: float, z: float, radius: float, amount: float, tick: int) -> int:
 	return index
 
 
-## The current tick, for the records. It's only informative, so 0 is fine with no tick driver.
+# The current tick, for the records. It's only informative, so 0 is fine with no tick driver.
 func _current_tick() -> int:
 	var driver: Node = get_node_or_null("/root/TickDriver") if is_inside_tree() else null
 	return driver.tick if driver else 0
 
 
-## A number that changes if the settings that decide the ground change.
+# A number that changes if the settings that decide the ground change.
 func _settings_check() -> int:
 	if _terrain == null:
 		return 0

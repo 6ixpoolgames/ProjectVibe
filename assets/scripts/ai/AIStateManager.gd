@@ -1,42 +1,50 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: picks the pawn's current AI state. A part on the pawn, added by PawnInitializer,
-## with its states (AIStateBase nodes) as children. Pawn spec section 10.6.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Picks the pawn's current AI state: the highest-priority state whose prerequisites hold.
 ##
-## How a state is picked: at each decision, the states are checked from the highest priority down, and the pawn moves to the first
-## whose prerequisites hold. That's all. Smoothness comes from memory, which rises and fades steadily; a pawn flickering between
-## states is fixed in that state's prerequisites, not with a new mechanism. It works the way AbilityManager picks a locomotion.
-##
-## When the state changes, it asks the context for a decision with the new state's priority as the reason, so the behaviour
-## manager decides at once and the running behaviour may be interrupted (pawn spec 10.7).
-##
+## A part on the pawn, added by PawnInitializer, with its states ([AIStateBase] nodes) as children. Pawn spec section 10.6. At each
+## decision, the states are checked from the highest priority down, and the pawn moves to the first whose prerequisites hold. That's
+## all. Smoothness comes from memory, which rises and fades steadily; a pawn flickering between states is fixed in that state's
+## prerequisites, not with a new mechanism. It works the way AbilityManager picks a locomotion.
+## [br]
+## When the state changes, it asks the context for a decision with the new state's priority as the reason, so the behaviour manager
+## decides at once and the running behaviour may be interrupted (pawn spec 10.7).
+## [br]
 ## How to use it (outside code only talks to the manager):
-##   pawn.ai_context.state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
-##   pawn.ai_context.state_manager.force_state(&"Combat", 120, 50, "scripted")   # skip the normal check for 120 ticks
-##   pawn.ai_context.state_manager.release_forced_state()
-##   state_changed(old_state, new_state, reason)                       # for debug readouts and, later, animation
-##
+## [codeblock]
+## pawn.ai_context.state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
+## pawn.ai_context.state_manager.force_state(&"Combat", 120, 50, "scripted") # skip the normal check for 120 ticks
+## pawn.ai_context.state_manager.release_forced_state()
+## [/codeblock]
+## [signal state_changed] is for debug readouts and, later, animation.
+## [br]
 ## Forcing a state (pawn spec 10.6):
-##   - The normal check is skipped for hold_ticks (or until release_forced_state() when hold_ticks is -1), then it takes over again.
-##   - A new force replaces the current one only if its priority is equal or higher. A weaker one is refused and logged.
-##   - It takes effect at once. The behaviour manager decides at the pawn's next AI step, which is this tick if that hasn't run yet.
-##   - Server only: on a client it does nothing and warns.
-##   - Claude 2026-11-09 (scaling spec step 3): called during a tick (by another pawn's ability or behaviour, say), it's queued and
-##     applied at the start of this pawn's next AI step, in the order the calls were made, so the result never depends on which pawn
-##     went first. It returns true for "queued"; a missing state is still refused at once, and a weaker force is refused (and logged)
-##     when it's applied. Called between ticks (game code, a UI, a test), it applies at once, as before. Releases work the same way.
-##
+## [br]- The normal check is skipped for hold_ticks (or until [method release_forced_state] when hold_ticks is -1), then it takes
+##   over again.
+## [br]- A new force replaces the current one only if its priority is equal or higher. A weaker one is refused and logged.
+## [br]- It takes effect at once. The behaviour manager decides at the pawn's next AI step, which is this tick if that hasn't run
+##   yet.
+## [br]- Server only: on a client it does nothing and warns.
+## [br]- Called during a tick (by another pawn's ability or behaviour, say), it's queued and applied at the start of this pawn's next
+##   AI step, in the order the calls were made, so the result never depends on which pawn went first (scaling spec step 3). It
+##   returns true for "queued"; a missing state is still refused at once, and a weaker force is refused (and logged) when it's
+##   applied. Called between ticks (game code, a UI, a test), it applies at once. Releases work the same way.
+## [br]
 ## The fixed order: states are sorted by priority, then name, once, when the manager is ready. Never by the order they were added.
-##
+## [br]
 ## What happens in odd cases (checked in ai/tests/ai_state_manager_selftest.gd):
-##   - Its parent isn't a Pawn: it warns and never picks a state.
-##   - No state fits: it keeps the current one and warns once. An AIIdleState, which always fits, prevents this.
-##   - A state with an automatic name (starting with "@"): it warns, because names must be the same on every run.
-##   - force_state with a name it doesn't have: it warns and returns false.
+## [br]- Its parent isn't a Pawn: it warns and never picks a state.
+## [br]- No state fits: it keeps the current one and warns once. An AIIdleState, which always fits, prevents this.
+## [br]- A state with an automatic name (starting with "@"): it warns, because names must be the same on every run.
+## [br]- force_state with a name it doesn't have: it warns and returns false.
+# REFACTOR: forcing with a priority and a hold, and queueing requests made during a tick, is the same code as AITargetSelector's
+# force_target. One small shared helper would keep the two rules from drifting apart (reusable). See CHANGELOG.md.
 class_name AIStateManager
 extends Node
 
 ## Sent once each time the state changes. old_state is null for the first pick.
 signal state_changed(old_state: AIStateBase, new_state: AIStateBase, reason: String)
 
+## The pawn this is a part of, or null.
 var pawn: Pawn = null
 
 var _states: Array[AIStateBase] = [] # highest priority first, then by name
@@ -45,8 +53,8 @@ var _forced: AIStateBase = null
 var _force_priority := 0
 var _force_until_tick := -1 # -1: until released
 var _warned_none_fits := false
-# Claude 2026-11-09 (scaling spec step 3): forces and releases asked for during a tick, applied at the pawn's next AI step. Each is
-# [state_name, hold_ticks, priority, reason], or [] for a release.
+# Forces and releases asked for during a tick, applied at the pawn's next AI step. Each is [state_name, hold_ticks, priority,
+# reason], or [] for a release.
 var _queued: Array = []
 
 
@@ -80,7 +88,8 @@ func is_state_forced() -> bool:
 	return _forced != null
 
 
-## The pawn calls this at each decision. Checks the states in order and moves to the first that fits, unless a force holds.
+## [method AIContextComponent.run_ai] calls this at each decision. Checks the states in order and moves to the first that fits,
+## unless a force holds.
 func update_state(tick: int) -> void:
 	if pawn == null:
 		return
@@ -97,17 +106,18 @@ func update_state(tick: int) -> void:
 			return
 	if not _warned_none_fits:
 		_warned_none_fits = true
-		push_warning("AIStateManager: no state fits on %s, so it stays in %s. An AIIdleState, which always fits, prevents this." % [pawn.name, String(_current.name) if _current else "no state"]) # Claude 2026-11-12: String(), so both sides are text
+		push_warning("AIStateManager: no state fits on %s, so it stays in %s. An AIIdleState, which always fits, prevents this." % [pawn.name, String(_current.name) if _current else "no state"]) # String(), so both sides are text
 
 
-## The pawn calls this every tick, so a force that runs out hands back to the normal check on time, not at the next decision.
+## [method AIContextComponent.run_ai] calls this every tick, so a force that runs out hands back to the normal check on time, not at the next decision.
 func check_force_expiry(tick: int) -> void:
 	if _forced and _force_until_tick >= 0 and tick >= _force_until_tick:
 		_end_force()
 
 
-## Moves to this state at once, and holds it for hold_ticks (-1: until release_forced_state()). Returns false, and changes nothing,
-## if a stronger force is holding, the state doesn't exist, or this isn't where the AI runs.
+## Moves to this state at once, and holds it for hold_ticks (-1: until [method release_forced_state]). Returns false, and changes
+## nothing, if a stronger force is holding, the state doesn't exist, or this isn't where the AI runs. During a tick it's queued
+## instead and returns true; the priority check happens when it's applied.
 func force_state(state_name: StringName, hold_ticks: int, priority: int, reason: String) -> bool:
 	if pawn == null:
 		return false
@@ -118,14 +128,14 @@ func force_state(state_name: StringName, hold_ticks: int, priority: int, reason:
 	if state == null:
 		push_warning("AIStateManager: %s has no state called %s, so force_state did nothing." % [pawn.name, state_name])
 		return false
-	if _during_tick(): # Claude 2026-11-09 (step 3)
+	if _during_tick():
 		_queued.append([state_name, hold_ticks, priority, reason])
 		return true
 	return _apply_force(state, hold_ticks, priority, reason)
 
 
-## Claude 2026-11-09 (scaling spec step 3): the pawn calls this at the start of its AI step: applies the forces and releases queued
-## during the last tick, in the order they were asked for.
+## [method AIContextComponent.run_ai] calls this at the start of the AI step: applies the forces and releases queued during the
+## last tick, in the order they were asked for.
 func apply_queued(_tick: int) -> void:
 	if _queued.is_empty():
 		return
@@ -141,7 +151,7 @@ func apply_queued(_tick: int) -> void:
 				_apply_force(state, request[1], request[2], request[3])
 
 
-# Claude 2026-11-09 (step 3): what force_state did after finding the state, shared by the queued way and the immediate one.
+# What force_state does after finding the state, shared by the queued way and the immediate one.
 func _apply_force(state: AIStateBase, hold_ticks: int, priority: int, reason: String) -> bool:
 	var state_name := state.name
 	if _forced and priority < _force_priority:
@@ -152,13 +162,13 @@ func _apply_force(state: AIStateBase, hold_ticks: int, priority: int, reason: St
 		print("AIStateManager: %s: a force to %s (priority %d, \"%s\") replaces the force to %s (priority %d)." % [pawn.name, state_name, priority, reason, _forced.name, _force_priority])
 	_forced = state
 	_force_priority = priority
-	_force_until_tick = -1 if hold_ticks < 0 else _now() + TickDriver.ticks_at_rate(hold_ticks) # Claude 2026-11-09 (step 6): at 60 a second
+	_force_until_tick = -1 if hold_ticks < 0 else _now() + TickDriver.ticks_at_rate(hold_ticks) # hold_ticks are at 60 a second
 	if state != _current:
 		_change_to(state, reason, priority)
 	return true
 
 
-## Ends a forced state. The normal check picks the state again at once. Claude 2026-11-09 (step 3): queued during a tick.
+## Ends a forced state. The normal check picks the state again at once. During a tick it's queued, as forces are.
 func release_forced_state() -> void:
 	if _during_tick():
 		_queued.append([])
@@ -167,9 +177,9 @@ func release_forced_state() -> void:
 		_end_force()
 
 
-# Claude 2026-11-09 (step 3): true while a tick runs, when a request must wait for the pawn's next AI step.
+# True while a tick runs, when a request must wait for the pawn's next AI step.
 func _during_tick() -> bool:
-	return TickDriver.is_in_tick() # Claude 2026-11-16 (wider audit): the autoload, not a lookup by path
+	return TickDriver.is_in_tick()
 
 
 # --- Internals ---
@@ -204,8 +214,7 @@ func _find(state_name: StringName) -> AIStateBase:
 	return null
 
 
-# Claude 2026-11-16 (wider audit): the TickDriver autoload, as the rest of this file uses it; this looked it up by path each time,
-# with a fallback that could never run.
+# The tick now, from the TickDriver autoload.
 func _now() -> int:
 	return TickDriver.tick
 

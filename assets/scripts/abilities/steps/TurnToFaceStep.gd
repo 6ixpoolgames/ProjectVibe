@@ -1,12 +1,14 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16 (pawn spec 8.20, the owner's design): turns the pawn toward where it looks, following
-## the look as it moves (the crosshair for a player, look_at_point() for the AI), at the pawn's TurnRate stat.
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
+## Turns the pawn toward where it looks, following the look as it moves, at the pawn's TurnRate stat.
 ##
+## Pawn spec 8.20, the owner's design. The look is the crosshair for a player, look_at_point() for the AI.
+## [br]
 ## It runs only while its ability's action is held (the owner's call), through the base's ends_when_released, which it turns on: let
-## go, and it stops with "released"; held, it keeps turning through the swing. Claude 2026-11-16 (the owner's call): but it always turns
-## at least min_turn_degrees first, however short the press, unless it faces the look sooner. It doesn't keep its ability running
-## (keeps_ability_running is off), so when the swing's other steps are done, the ability ends and this stops with it. A WindupStep
-## usually starts it.
-##
+## go, and it stops with "released"; held, it keeps turning through the swing. But it always turns at least
+## [member min_turn_degrees] first, however short the press, unless it faces the look sooner (the owner's call). It doesn't keep its
+## ability running (keeps_ability_running is off), so when the swing's other steps are done, the ability ends and this stops with it.
+## A WindupStep usually starts it.
+## [br]
 ## The pawn's yaw rolls back and its look and held actions are input, so a rollback replay turns the same way. The minimum is counted
 ## from step_ticks, which rolls back, so it needs no state of its own.
 class_name TurnToFaceStep

@@ -4,7 +4,7 @@
 ## Claude 2026-11-09: also the debug shapes (a dash trail and a swing sphere, and that both fade), goblins sprinting, dashing and
 ## swinging while they chase, and the readout's last ability.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/samples/tests/arena_sample_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/samples/tests/arena_sample_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const ARENA := "res://assets/scenes/samples/arena_sample.tscn"

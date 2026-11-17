@@ -1,10 +1,10 @@
-## Written by Claude (claude-opus-5-5), 2026-11-10: pushes the pawn, once, through its own KnockbackAbility. A do-once part (EffectPart).
-## Pawn spec 8.11; it replaces MeleeAttackAbility's knockback settings.
+# Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
+## Pushes the pawn, once, through its own KnockbackAbility. A do-once part ([EffectPart]).
 ##
-## The owner's design: the pawn being hit starts its own Knockback ability, so its own interrupt rules decide what happens. A swing it
-## was doing is cancelled (Knockback's interrupt priority 30 beats a swing's threshold 15), and a running Dash isn't (its threshold is
-## 40). A pawn with no KnockbackAbility isn't pushed.
-##
+## Pawn spec 8.11, the owner's design: the pawn being hit starts its own Knockback ability, so its own interrupt rules decide what
+## happens. A swing it was doing is cancelled (Knockback's interrupt priority 30 beats a swing's threshold 15), and so is a Dash past
+## its invulnerable start (its threshold is 25). A pawn with no KnockbackAbility isn't pushed.
+## [br]
 ## The push goes along the hit's direction, from the attacker toward the target. With no hit (an effect from code, or one an ability
 ## put on its own pawn), it goes straight back from the way the pawn faces.
 class_name KnockbackPart
@@ -28,6 +28,6 @@ func apply_once(application: EffectApplication) -> void:
 		direction = application.hit.direction
 	else:
 		direction = Vector3(sin(target.yaw), 0.0, cos(target.yaw)) # back: a pawn faces -Z at yaw 0
-	var knockback := target.ability_manager.get_knockback() # Claude 2026-11-16 (wider audit): found once by the manager
+	var knockback := target.ability_manager.get_knockback() # found once by the manager, when it collects its abilities
 	if knockback:
 		knockback.push(direction * speed, TickDriver.ticks_at_rate(ticks), hop_speed)

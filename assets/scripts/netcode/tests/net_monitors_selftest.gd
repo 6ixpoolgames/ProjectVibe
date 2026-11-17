@@ -2,7 +2,7 @@
 ## Debugger > Monitors: it isn't there unless asked for (no editor debugger in a test), every monitor is added and readable, the rates
 ## follow rollbacks, corrections and bytes, and the monitors go away with it.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/netcode/tests/net_monitors_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/netcode/tests/net_monitors_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 

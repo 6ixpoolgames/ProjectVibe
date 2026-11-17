@@ -1,13 +1,18 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: the first job kind on worker threads (scaling spec step 2): for each pawn whose
-// full sensing pass is next tick, find the pawns of other teams near it (AIPawnGrid) and work out how visible each one is
-// (ai_sight_rules.h). The main thread then casts only the rays and records what's seen (AIMemoryStore.sight_check_prepared), because
-// physics rays can't run off the main thread; step 4 moves line of sight into C++ too.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// AISensingJob: AI sensing's search on worker threads (scaling spec step 2): for each pawn whose full sensing pass is next tick,
+// find the pawns of other teams near it (AIPawnGrid), work out how visible each one is (ai_sight_rules.h), and, with a
+// SightGeometry set (step 4), test line of sight too. The main thread then records what's seen
+// (AIMemoryStore.sight_check_prepared), casting a physics ray only where the geometry couldn't answer, since physics rays can't run
+// off the main thread.
+//
+// GDScript: AISensingManager makes one (with TickJobs' scheduler and the pawn grid), asks for each pawn due next tick and starts it;
+// SightSense hands its results to AIMemoryStore.
 //
 // When it runs: AISensingManager collects the pawns due next tick, and at the end of tick T (TickDriver.after_tick) asks for each
 // one (add_request) and calls start(T). The table is read then, so the job sees every pawn where tick T left it, which is exactly
 // what the pass on tick T+1 would have seen; workers do the work in the time between the two ticks. On tick T+1 each pawn's pass
 // takes its result, waiting for it (or doing it on the main thread) only if it isn't done. So the answers are the same as the
-// main-thread pass gives, with any number of workers or none, and the AI tests didn't need to change.
+// main-thread pass gives, with any number of workers or none.
 //
 // The one difference: something that moves a pawn between ticks (a teleport, a test placing a pawn) isn't seen by the next tick's
 // pass. A pass that has no result for its tick (a pawn that wasn't due, or one just spawned) runs on the main thread as before.
@@ -17,9 +22,9 @@
 #include "ai_sight_rules.h"
 #include "job_scheduler.h"
 #include "pawn_table.h"
-#include "sight_geometry.h" // Claude 2026-11-09 (scaling spec step 4)
+#include "sight_geometry.h"
 
-#include <godot_cpp/classes/ref.hpp> // Claude 2026-11-17 (godot-cpp 10): Ref<T> is no longer pulled in by ref_counted.hpp
+#include <godot_cpp/classes/ref.hpp> // godot-cpp 10: Ref<T> isn't pulled in by ref_counted.hpp
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -43,16 +48,16 @@ public:
 		Vector3 position;
 		Vector3 aim;
 		double visibility = 0.0;
-		// Claude 2026-11-09 (step 4): line of sight, tested here when it could be seen and the geometry can answer: -1 not tested
+		// Line of sight, tested here when it could be seen and the geometry can answer: -1 not tested
 		// (the main thread casts a physics ray), 0 clear, 1 blocked.
 		int8_t ray = -1;
 	};
 
-	// The scheduler that runs it, and the grid it searches (which reads the pawn table). Sets the table's change guard, so the table
-	// never changes while the job reads it.
+	// The scheduler that runs it, and the grid it searches (which reads the pawn table). Adds the job to the table's and the grid's
+	// change guards, so neither changes while the job reads it.
 	void setup(const Ref<JobScheduler> &scheduler, const Ref<AIPawnGrid> &grid);
-	// Claude 2026-11-09 (scaling spec step 4): line of sight on the workers too, from this geometry (null: physics rays on the main
-	// thread, as in step 2). Sets the geometry's change guard as well.
+	// Line of sight on the workers too, from this geometry (null: physics rays on the main thread). Adds the job to the geometry's
+	// change guard as well.
 	void set_geometry(const Ref<SightGeometry> &geometry);
 	~AISensingJob(); // finishes a run still going, which writes into this object
 	// Asks for observer's pass on the tick after the next start(): eyes facing eye_yaw, looking reach metres for at most
@@ -86,7 +91,7 @@ private:
 		double reach = 0.0;
 		int64_t max_candidates = 0;
 		sight_rules::Settings sight;
-		bool use_geometry = false; // Claude 2026-11-09 (step 4): its mask doesn't include its own layer, so pawns can't block it
+		bool use_geometry = false; // its mask doesn't include its own layer, so pawns can't block it
 		size_t first = 0; // where its candidates start in _candidates
 		int64_t found = 0; // how many it found
 	};
@@ -96,12 +101,12 @@ private:
 
 	Ref<JobScheduler> _scheduler;
 	Ref<AIPawnGrid> _grid;
-	// Claude 2026-11-17 (C++ bundle stage 2): the table this job added itself to as a reader (change_guard.h), kept so it can take
+	// The table this job added itself to as a reader (change_guard.h), kept so it can take
 	// itself off again even if the grid is given another table.
 	Ref<PawnTable> _guarded_table;
 	void add_guards(); // adds this job as a reader of the table, grid and geometry
 	void remove_guards(); // takes it off them again
-	Ref<SightGeometry> _geometry; // Claude 2026-11-09 (step 4)
+	Ref<SightGeometry> _geometry;
 	const PawnTable *_table = nullptr; // the grid's table, set by start(); the grid holds the reference
 	int _kind = -1;
 	int _detectability = -1; // the table's detectability column

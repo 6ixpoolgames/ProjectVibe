@@ -1,12 +1,14 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: the shared table of plain pawn data on a server (scaling spec section 3, tier 1
-// step 1). One array per field, one slot per pawn, so slot 7 in every array is the same pawn, and slots in a fixed order: by each
-// pawn's key, its entity id, which is the same on every machine.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// PawnTable: the shared table of plain pawn data on a server (scaling spec section 3, tier 1 step 1). One array per field, one
+// slot per pawn, so slot 7 in every array is the same pawn, and slots in a fixed order: by each pawn's key, its entity id, which
+// is the same on every machine.
 //
-// Pawns join when they enter the tree and leave when they leave it (Pawn.gd). The rows are read from the pawns' nodes once a tick,
-// at the first refresh(tick) of that tick, so everything that reads the table during a tick sees the same frozen copy. Tier 1's
-// worker jobs will read it instead of nodes; for now AIPawnGrid builds itself from it.
+// GDScript: Pawn.get_table() makes the one table (when the library is loaded). Pawns join when they enter the tree and leave when
+// they leave it (Pawn.gd); AISensingManager requires the columns sensing reads; Stat.gd pushes a stat's value into its column
+// (set_value). The rows are read from the pawns' nodes once a tick, at the first refresh(tick) of that tick, so everything that
+// reads the table during a tick sees the same frozen copy. Worker jobs (AISensingJob) and AIPawnGrid read it instead of nodes.
 //
-// Claude 2026-11-09 (scaling spec step 2, 3.2): columns. Four are always there: the key, the node, the position and the team, which
+// Columns (scaling spec step 2, 3.2). Four are always there: the key, the node, the position and the team, which
 // the table's order and the grid need. Every other field is a column that's off, holding nothing and costing nothing, until it's
 // switched on:
 //   - automatically, by a system that reads it: require_column("detectability") from the sensing job, say;
@@ -16,13 +18,13 @@
 // property, default): a number, a whole number or a Vector3, read from a property of the pawn. Columns can be switched on at any time;
 // the next refresh fills them.
 //
-// Claude 2026-11-09 (step 2): the table never changes under a job. Before anything changes it (a pawn joining or leaving, a refresh
-// that reads, a column switched), it calls the change guard, which the job scheduler sets to finish every job still reading it.
+// The table never changes under a job. Before anything changes it (a pawn joining or leaving, a refresh that reads, a column
+// switched), it calls its change guard (change_guard.h), which finishes every job still reading it.
 //
 // Plain data only: nothing here changes a pawn.
 #pragma once
 
-#include "change_guard.h" // Claude 2026-11-17
+#include "change_guard.h"
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -30,7 +32,7 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/variant.hpp>
-#include <godot_cpp/variant/transform3d.hpp> // Claude 2026-11-17
+#include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <cstdint>
@@ -62,7 +64,7 @@ public:
 	// Makes the next refresh read again, whatever the tick (pawns added or moved by code between ticks are seen anyway).
 	void mark_stale();
 
-	// Claude 2026-11-09 (step 2): columns, see the top of this file. Names are the built-ins (velocity, yaw, grounded, detectability)
+	// Columns, see the top of this file. Names are the built-ins (velocity, yaw, grounded, detectability)
 	// or ones added with add_column. Each returns false, with an error, for a name it doesn't know.
 	bool require_column(const StringName &name); // automatic: a system that reads the column
 	bool enable_column(const StringName &name); // by hand
@@ -70,7 +72,7 @@ public:
 	// A game's own column: type is TYPE_FLOAT, TYPE_INT, TYPE_BOOL (kept as 0 or 1) or TYPE_VECTOR3, read from property on each pawn,
 	// or default_value where a pawn doesn't have it. Switched on by hand. False if the name is taken or the type isn't one of those.
 	bool add_column(const StringName &name, int64_t type, const StringName &property, const Variant &default_value);
-	// Claude 2026-11-17 (C++ bundle stage 4, pawn M6): stat columns. A pushed column isn't read from every pawn at every refresh:
+	// Stat columns (pawn M6). A pushed column isn't read from every pawn at every refresh:
 	// its property is read once, when a pawn joins or the column is switched on, and after that only set_value() changes it. That's
 	// for values that rarely change and cost a GDScript call to read, such as a Stat (Stat.table_column mirrors one here whenever
 	// it changes) or Pawn.detectability. add_pushed_column is add_column for one; the built-in detectability column is one.
@@ -104,11 +106,11 @@ public:
 	const std::vector<double> &numbers(int column) const { return _columns[size_t(column)].numbers; }
 	const std::vector<int64_t> &whole_numbers(int column) const { return _columns[size_t(column)].whole_numbers; }
 	const std::vector<Vector3> &vectors(int column) const { return _columns[size_t(column)].vectors; }
-	// Claude 2026-11-17 (C++ bundle stage 3): each pawn's body, for swing hit checks (AIPawnGrid.find_touching), read once when it
+	// Each pawn's body, for swing hit checks (AIPawnGrid.find_touching), read once when it
 	// joins from its first enabled CollisionShape3D child: a capsule standing along the shape's own Y, as in physics. radius is the
 	// capsule's; half_segment half the length of its straight middle; local where the shape sits on the pawn. A sphere is a capsule
-	// with no middle; a box or cylinder is stood in for by the capsule around it, with a warning once. radius < 0: no shape, never
-	// touched (physics wouldn't find it either).
+	// with no middle; a box or cylinder is stood in for by the capsule around it, and any other shape by a 0.5 m capsule, each with
+	// a warning as the pawn joins. radius < 0: no shape, never touched (physics wouldn't find it either).
 	struct Body {
 		float radius = -1.0f;
 		float half_segment = 0.0f;
@@ -117,8 +119,8 @@ public:
 	const Body &body_at(int64_t slot) const { return _bodies[size_t(slot)]; }
 	// The farthest any pawn's body reaches from its origin, so a search knows how far around a point to look.
 	float max_body_reach() const { return _max_body_reach; }
-	// Called before anything changes the table, to wait for the jobs reading it.
-	// Claude 2026-11-17 (C++ bundle stage 2): every job reading it adds itself here (change_guard.h); was one guard, set by the last job.
+	// Called before anything changes the table, to wait for the jobs reading it. Every job reading it adds itself here
+	// (change_guard.h).
 	navcore::ChangeGuard &change_guard() { return _change_guard; }
 
 protected:
@@ -132,8 +134,8 @@ private:
 		Variant default_value;
 		bool required = false; // switched on by a system that reads it
 		bool enabled = false; // switched on by hand
-		bool pushed = false; // Claude 2026-11-17: read once per pawn, then changed by set_value (see add_pushed_column)
-		std::vector<uint8_t> unread; // Claude 2026-11-17: pushed columns: 1 for a slot whose property hasn't been read yet
+		bool pushed = false; // read once per pawn, then changed by set_value (see add_pushed_column)
+		std::vector<uint8_t> unread; // pushed columns: 1 for a slot whose property hasn't been read yet
 		std::vector<double> numbers; // TYPE_FLOAT
 		std::vector<int64_t> whole_numbers; // TYPE_INT and TYPE_BOOL
 		std::vector<Vector3> vectors; // TYPE_VECTOR3
@@ -145,8 +147,8 @@ private:
 	void before_change();
 	void resize_column(Column &column);
 	void read_column(Column &column, size_t slot, Object *node);
-	void write_column(Column &column, size_t slot, const Variant &value); // Claude 2026-11-17: what read_column does with a value
-	// Claude 2026-11-17: pushes waiting for the next refresh.
+	void write_column(Column &column, size_t slot, const Variant &value); // what read_column does with a value
+	// Pushes waiting for the next refresh.
 	struct Push {
 		uint64_t id = 0;
 		int column = 0;
@@ -162,9 +164,9 @@ private:
 	std::vector<Object *> _nodes; // set by refresh; null until then
 	std::vector<Vector3> _positions; // global position
 	std::vector<int64_t> _teams;
-	std::vector<Body> _bodies; // Claude 2026-11-17: read on add, see Body
-	float _max_body_reach = 0.0f; // Claude 2026-11-17: only grows
-	Body read_body(Object *pawn); // Claude 2026-11-17
+	std::vector<Body> _bodies; // read on add, see Body
+	float _max_body_reach = 0.0f; // only grows
+	Body read_body(Object *pawn);
 	// Every other column, built-in or added, on or off. Found by name with a short search: there are only a handful.
 	std::vector<Column> _columns;
 

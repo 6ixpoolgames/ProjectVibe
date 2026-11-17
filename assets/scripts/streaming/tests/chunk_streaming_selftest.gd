@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-06: headless self-test for chunk streaming: TerrainGenerator's one-chunk
 ## functions, ChunkStreamer, StreamingSource, and StreamingSamplePawn walking around. Nav is in nav_stitching_selftest.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/streaming/tests/chunk_streaming_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/streaming/tests/chunk_streaming_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 

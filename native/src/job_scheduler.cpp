@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: see job_scheduler.h.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// JobScheduler: worker threads for plain-data jobs. Described in job_scheduler.h.
 #include "job_scheduler.h"
 
 #include <godot_cpp/classes/display_server.hpp>

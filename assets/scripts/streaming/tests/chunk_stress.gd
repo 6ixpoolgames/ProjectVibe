@@ -10,7 +10,7 @@
 ## Only a real low-end machine can answer those.
 ##
 ## Every row runs with collision, nav and a real frame rate cap. Run from the project folder, about 6 minutes:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/streaming/tests/chunk_stress.tscn"
+##   godot --headless --path . "res://assets/scripts/streaming/tests/chunk_stress.tscn"
 extends Node
 
 const SLOWER_CPU := 3.0

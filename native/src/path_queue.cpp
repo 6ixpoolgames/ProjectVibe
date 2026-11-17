@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: budgeted, resumable path requests (spec 12.2, RequestQueue).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// PathQueue: budgeted, resumable path requests. Described in path_queue.h.
 #include "path_queue.h"
 
 #include <algorithm>
@@ -7,8 +8,8 @@ namespace navcore {
 
 namespace {
 constexpr int MAX_RETRIES = 3; // a tile committed mid-search invalidates it; just start over
-// Claude 2026-11-05: what starting a request costs, in search steps. Finding the nearest polygons to its start and goal
-// is real work, and requests that fail there used to cost nothing, so a big batch of them all ran in one tick.
+// What starting a request costs, in search steps. Finding the nearest polygons to its start and goal is real work, so even
+// requests that fail there count against the budget, and a big batch of them can't all run in one tick.
 constexpr int REQUEST_START_COST = 16;
 }
 
@@ -18,7 +19,7 @@ int PathQueue::push(const float *from, const float *to, int tier, bool use_links
 	std::copy(from, from + 3, r.from);
 	std::copy(to, to + 3, r.to);
 	r.tier = tier;
-	r.use_links = use_links; // Claude 2026-11-17
+	r.use_links = use_links;
 	m_queue.push_back(r);
 	return r.id;
 }
@@ -47,7 +48,7 @@ void PathQueue::process(GroundDomain &domain, int iteration_budget, std::vector<
 			PathOutcome fail;
 			fail.id = m_current.id;
 			budget -= REQUEST_START_COST;
-			if (!domain.begin_sliced(m_current.from, m_current.to, m_current.tier, fail, m_current.use_links)) { // Claude 2026-11-17: use_links
+			if (!domain.begin_sliced(m_current.from, m_current.to, m_current.tier, fail, m_current.use_links)) {
 				out.push_back(std::move(fail));
 				continue;
 			}

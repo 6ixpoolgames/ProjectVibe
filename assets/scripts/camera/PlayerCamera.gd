@@ -1,9 +1,10 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: the one real camera, which follows a VirtualCamera. PlayerController owns it.
-## This does what the old PlayerCamera3D's name suggests and nothing else. Possession and the 3D cursor live elsewhere now.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: camera/CHANGELOG.md.
+## The one real camera, which follows a VirtualCamera. PlayerController owns it.
 ##
-## It copies the view's position every rendered frame instead of being reparented onto it. So a pawn being freed can't take the
-## camera with it, and if the view disappears, the camera just holds where it was.
-##
+## It only follows a view; possession and the 3D cursor live elsewhere. It copies the view's position every rendered frame instead
+## of being reparented onto it. So a pawn being freed can't take the camera with it, and if the view disappears, the camera just
+## holds where it was.
+## [br]
 ## It leaves the scene's own camera alone until it's given a view.
 class_name PlayerCamera
 extends Camera3D

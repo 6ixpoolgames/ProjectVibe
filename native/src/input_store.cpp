@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: input layers and their submitted data (spec 5.3, 5.7).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// InputStore: input layers and their submitted data. Described in input_store.h.
 #include "input_store.h"
 
 #include <algorithm>

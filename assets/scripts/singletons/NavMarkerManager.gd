@@ -1,43 +1,43 @@
-## Written by Claude (claude-opus-5-5), 2026-11-06: the nav singleton's GDScript layer (nav spec section 21.5).
-## Claude 2026-11-07: renamed from NavWorld, so that the name says what it does. It manages markers and doesn't find paths.
-## Autoload "NavMarkerManager". It stores every nav marker, gives each a stable id, and answers searches like
-## "the nearest point.cover within 20 m". It needs no C++ library, so it works even where nav itself doesn't.
+# Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
+## Holds every nav marker and answers searches for them. Autoload "NavMarkerManager".
 ##
-## It also keeps the list of modules, tells them when markers change, and reports types nothing handles.
-## It doesn't find paths (NavServer does) or decide what a pawn does (AI does).
-##
+## It stores every nav marker, gives each a stable id, and answers searches like "the nearest point.cover within 20 m" (nav spec
+## section 21.5). It needs no C++ library, so it works even where nav itself doesn't. It also keeps the list of marker modules, tells
+## them when markers change, and reports types nothing handles. It doesn't find paths (NavServer does) or decide what a pawn does
+## (AI does).
+## [br]
 ## Written so its insides can move to C++ later without changing anything that calls it:
-##   - Callers use only the public functions below, which take and return plain values.
-##   - Searches return ids, not objects. get_marker(id) fetches the full data only when it's needed.
-##   - What searches read sits in flat arrays ("rows"), not in one object per marker.
-##   - A chunk registers its whole list in one call.
-##   - Searches call no script code in their loops.
-##   - Requests apply on the next tick, so nothing can rely on them being instant.
-##   - Ids come from a hash written out here, because Godot's hash() could differ from a C++ version.
-##
-## How it stores things: every marker is one row, meaning the same index in each array below.
-## So _positions[7], _masks[7] and _ids[7] all describe one marker. A removed marker's row is reused later.
-##
-## How search stays fast: the world is split into square cells, and a search only looks at nearby cells.
-## Each cell keeps a linked list running through the rows. _cell_heads gives a cell's first row, and
-## _next_in_cell gives the row after each one. That makes adding and removing a marker instant, and
-## it keeps everything in flat arrays.
-##
-## What happens in odd cases (all checked in tests/nav_marker_manager_selftest.gd):
-##   - A duplicate id, an undeclared tag or a null marker: refused, with one warning for the whole list.
-##   - An unknown id: harmless. get_marker gives null, and set_enabled warns and does nothing.
-##   - Releasing a chunk that isn't registered: nothing happens.
-##   - A search in an empty world, or with an infinite distance: finds what's there and always finishes.
-##   - A search with an undeclared or empty tag: finds nothing, and doesn't add the tag.
-##
-## Module rules are at the top of NavMarkerModule.gd, and checked in tests/nav_markers_selftest.gd.
-##
-## The debug report: if markers exist of a type no module announced, it warns once per type, after registrations
-## have gone quiet for a couple of seconds. It warns again only if a new unclaimed type appears, or a type loses
-## its last module. Debug builds only. A level with no AI will report NavPoint, which is fine: it's one true line.
-## Turn it off with the project setting below, for a game that leaves a type unhandled on purpose.
+## [br]- Callers use only the public functions below, which take and return plain values.
+## [br]- Searches return ids, not objects. [method get_marker] fetches the full data only when it's needed.
+## [br]- What searches read sits in flat arrays ("rows"), not in one object per marker.
+## [br]- A chunk registers its whole list in one call.
+## [br]- Searches call no script code in their loops.
+## [br]- Requests apply on the next tick, so nothing can rely on them being instant.
+## [br]- Ids come from a hash written out here, because Godot's hash() could differ from a C++ version.
+## [br]
+## How it stores things: every marker is one row, meaning the same index in each array below. So _positions[7], _masks[7] and _ids[7]
+## all describe one marker. A removed marker's row is reused later.
+## [br]
+## How search stays fast: the world is split into square cells, and a search only looks at nearby cells. Each cell keeps a linked list
+## running through the rows. _cell_heads gives a cell's first row, and _next_in_cell gives the row after each one. That makes adding
+## and removing a marker instant, and it keeps everything in flat arrays.
+## [br]
+## What happens in odd cases (all checked in navigation/tests/nav_marker_manager_selftest.gd):
+## [br]- A duplicate id, an undeclared tag or a null marker: refused, with one warning for the whole list.
+## [br]- An unknown id: harmless. get_marker gives null, and set_enabled warns and does nothing.
+## [br]- Releasing a chunk that isn't registered: nothing happens.
+## [br]- A search in an empty world, or with an infinite distance: finds what's there and always finishes.
+## [br]- A search with an undeclared or empty tag: finds nothing, and doesn't add the tag.
+## [br]
+## Module rules are at the top of NavMarkerModule.gd, and checked in navigation/tests/nav_markers_selftest.gd.
+## [br]
+## The debug report: if markers exist of a type no module announced, it warns once per type, after registrations have gone quiet for
+## [member report_quiet_seconds]. It warns again only if a new unclaimed type appears, or a type loses its last module. Debug builds
+## only. A level with no AI reports NavPoint, which is fine: it's one true line. Turn it off with the project setting
+## [constant REPORT_SETTING], for a game that leaves a type unhandled on purpose.
 extends Node
 
+## The project setting that switches the debug report on or off (on by default).
 const REPORT_SETTING := "project_base/nav/report_unhandled_markers"
 
 ## How wide each search cell is, in metres. Too small makes wide searches visit many cells, and too large
@@ -172,7 +172,7 @@ func request_markers(terrain: int, chunk: Vector2i, markers: Array[NavMarker]) -
 
 
 ## A hand-placed marker asks to be registered. Returns its id, or 0 if it was refused.
-## NavMarkerNode will call this with its scene path, so moving or renaming that node changes the id.
+## NavMarkerNode calls this with its scene path, so moving or renaming that node changes the id.
 func request_scene_marker(scene_path: String, marker: NavMarker) -> int:
 	var id := scene_marker_id(scene_path)
 	var reason := _why_refused(marker, id)
@@ -471,11 +471,13 @@ func get_marker_position(id: int) -> Vector3:
 	return Vector3.ZERO if row == NO_ROW else _positions[row]
 
 
+## True if this marker is on. False for an unknown id.
 func is_marker_enabled(id: int) -> bool:
 	var row: int = _row_of_id.get(id, NO_ROW)
 	return row != NO_ROW and _enabled[row] == 1
 
 
+## How many markers are registered, applied or waiting for the next tick.
 func get_marker_count() -> int:
 	return _row_of_id.size()
 
@@ -503,6 +505,7 @@ func chunk_marker_id(terrain: int, chunk: Vector2i, index: int) -> int:
 	return _never_zero(value)
 
 
+## A hand-placed marker's id, from its scene path: the same on every machine, and after every reload.
 func scene_marker_id(scene_path: String) -> int:
 	return _never_zero(fnv_hash(scene_path.to_utf8_buffer()))
 

@@ -2,7 +2,7 @@
 ## PerfScopes, the DiagnosticsManager's history, spikes, warnings, session log, summaries, the editor's monitors, its replay channel,
 ## captures, the panels, and always-on recordings.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/diagnostics/tests/diagnostics_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/diagnostics/tests/diagnostics_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
@@ -160,6 +160,11 @@ func _test_panels(manager: DiagnosticsManager, pawn: Pawn) -> void:
 	_check(panels.get_text(KEY_F6).contains("spikes") and panels.get_text(KEY_F8).contains("x10"), "F6 shows spikes, and F8 the warnings with counts")
 	panels.toggle(KEY_F4)
 	_check(not panels.is_shown(KEY_F4), "a key hides its panel again")
+	# Claude 2026-11-17: F9, the nav view (its drawing is checked in nav_debug_view_selftest).
+	panels.toggle(KEY_F9)
+	_check(panels.is_shown(KEY_F9) and manager.get_node_or_null(^"NavDebugView") is NavDebugView, "F9 shows the nav view")
+	panels.toggle(KEY_F9)
+	_check(not panels.is_shown(KEY_F9), "and hides it again")
 
 
 func _process(_delta: float) -> void:

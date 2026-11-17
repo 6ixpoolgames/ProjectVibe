@@ -1,16 +1,19 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: writes a replay file on a thread of its own (replay spec sections 1 and 2). The
-## recorder hands it each finished block; this thread compresses the block with zstd and appends it to the file. So the game's ticks
-## never wait for the disk.
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## Writes a replay file on a thread of its own (replay spec sections 1 and 2).
 ##
+## The recorder hands it each finished block; this thread compresses the block with zstd and appends it to the file. So the game's
+## ticks never wait for the disk.
+## [br]
 ## Why its own thread and not the job scheduler's: the scheduler's workers run work a tick is waiting for, such as AI sensing. A slow
 ## disk on one of them would hold a tick up. This thread sleeps until a block arrives, so it costs almost nothing.
-##
-## How to use it (ReplayRecorder does):
-##   var writer := ReplayWriter.new()
-##   writer.open(path, header_bytes)    # writes the header at once, then starts the thread
-##   writer.push_block(raw_bytes)       # any number of times, from the main thread
-##   writer.close()                     # writes what's left, then waits for the thread to finish
-##
+## [br]
+## How to use it ([ReplayRecorder] does):
+## [codeblock]
+## var writer := ReplayWriter.new()
+## writer.open(path, header_bytes)  # writes the header at once, then starts the thread
+## writer.push_block(raw_bytes)     # any number of times, from the main thread; false if refused
+## writer.close()                   # writes what's left, then waits for the thread to finish
+## [/codeblock]
 ## GDScript note: Mutex and Semaphore are how threads take turns safely. The mutex guards the queue, so the two threads never change
 ## it at the same moment; the semaphore counts blocks waiting, and the writing thread sleeps on it until there's one.
 class_name ReplayWriter
@@ -19,9 +22,9 @@ extends RefCounted
 ## Off: blocks are compressed and written on the calling thread instead, at once. For tests that compare the two, and for platforms
 ## without threads.
 var use_thread := true
-## Claude 2026-11-16: the most blocks that may wait to be written. push_block refuses more, so a disk that can't keep up never fills
-## memory; the recorder then stops recording.
-var max_queued_blocks := 60 # Claude 2026-11-16: the recorder sets it; 60 by default, was 30
+## The most blocks that may wait to be written. push_block refuses more, so a disk that can't keep up never fills memory; the
+## recorder then stops recording.
+var max_queued_blocks := 60 # the recorder sets it from its own max_queued_blocks
 
 var _file: FileAccess = null
 var _thread: Thread = null
@@ -51,8 +54,8 @@ func open(path: String, header: PackedByteArray) -> Error:
 	return OK
 
 
-## Queues a finished block. Returns at once; the block is written on the thread. Claude 2026-11-16: false if it was refused: the
-## file isn't open, writing has already failed (get_error), or max_queued_blocks are already waiting.
+## Queues a finished block. Returns at once; the block is written on the thread. False if it was refused: the file isn't open,
+## writing has already failed ([method get_error]), or [member max_queued_blocks] are already waiting.
 func push_block(raw: PackedByteArray) -> bool:
 	if _file == null or _error != OK:
 		return false
@@ -124,7 +127,7 @@ func _run() -> void:
 # block before the one being written.
 func _write_block(raw: PackedByteArray) -> void:
 	if _error != OK:
-		return # Claude 2026-11-16: after a failed write nothing more is written, so a broken file isn't made worse
+		return # after a failed write nothing more is written, so a broken file isn't made worse
 	var packed := raw.compress(FileAccess.COMPRESSION_ZSTD)
 	_file.store_32(raw.size())
 	_file.store_32(packed.size())

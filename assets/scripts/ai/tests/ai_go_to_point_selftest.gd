@@ -2,7 +2,7 @@
 ## an idle AI pawn walks to the nearest node in the rally_point group, in legs, and once it's within arrive_radius Wander takes over;
 ## with no point in the level it isn't available, so the pawn just wanders.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_go_to_point_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/ai_go_to_point_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const GOBLIN_SCENE := "res://assets/scenes/samples/faction_goblin.tscn" # has GoToPoint and Wander, among others

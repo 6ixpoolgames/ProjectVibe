@@ -4,7 +4,7 @@
 ## possessed, and target selection with its bonus, threat and forced targets.
 ## Claude 2026-11-09: add "-- --gdscript-store" to check the GDScript memory store where the C++ one is available.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/ai_perception_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/ai_perception_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

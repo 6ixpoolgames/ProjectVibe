@@ -1,31 +1,31 @@
-## Written by Claude (claude-opus-5-5), 2026-11-06: navigation's own tag names and bits (nav spec section 21.3).
-## Turns names like "link.jump" into bits, so nav and AI can check tags with one AND instead of comparing text.
+# Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
+## Navigation's own tag names and bits (nav spec section 21.3).
 ##
-## Why nav doesn't share TagRegistry: abilities and navigation are separate jobs, and each gets its own 64 bits.
-## NavTags follows the same rules as TagRegistry, and it's a separate copy on purpose, so that working code
-## doesn't change. To connect the two systems, a NavLink names an ability tag to play (see the nav spec).
-##
+## Turns names like "link.jump" into bits, so nav and AI can check tags with one AND instead of comparing text. Abilities have their
+## own tags (TagRegistry); each system gets its own 64 bits. A NavLink connects the two by naming the action a pawn presses.
+## [br]
 ## How tags work:
-##   - A tag is a name with dot-separated levels. A dot means "inside": link.jump is inside link.
-##   - Every level gets its own bit. link and link.jump are two bits.
-##   - A tag's MASK holds its own bit plus its parents' bits. So a search for "link" finds link.jump
-##     with one AND, and never finds "linkage", because only whole levels count.
-##
-## Why tags are declared in a file: in multiplayer, every machine must give the same tag the same bit.
-## Handing out bits on first use would depend on what happened to run first. So the game lists its tags in
-## a declarations file, and NavTags sorts and numbers them at startup, identically everywhere.
-##
+## [br]- A tag is a name with dot-separated levels. A dot means "inside": link.jump is inside link.
+## [br]- Every level gets its own bit. link and link.jump are two bits.
+## [br]- A tag's mask holds its own bit plus its parents' bits. So a search for "link" finds link.jump with one AND, and never finds
+##   "linkage", because only whole levels count.
+## [br]
+## Why tags are declared in a file: in multiplayer, every machine must give the same tag the same bit. Handing out bits on first use
+## would depend on what happened to run first. So the game lists its tags in a declarations file, and NavTags sorts and numbers them
+## at startup, identically everywhere.
+## [br]
 ## What happens in odd cases (all checked in tests/nav_tags_selftest.gd):
-##   - Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
-##   - Messy names ("link..jump", " link.jump ") are cleaned up.
-##   - A tag nobody declared: added on the spot with a one-time warning. Fine offline, but machines may
-##     disagree online, which is what the warning is for. Searches never add tags.
-##   - Declaring after NavTags is in use: treated the same as undeclared. Sorting again would change bits
-##     that are already stored in masks.
-##   - More than 64 levels: the extra ones get no bit, match nothing, and warn once.
-##   - No declarations file: everything still works, and every tag just counts as undeclared.
-##
-# Claude 2026-11-06: @tool lets this run inside the editor, so NavMarkerNode can warn about an undeclared tag there.
+## [br]- Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
+## [br]- Messy names ("link..jump", " link.jump ") are cleaned up.
+## [br]- A tag nobody declared: added on the spot with a one-time warning. Fine offline, but machines may disagree online, which is
+##   what the warning is for. Searches never add tags.
+## [br]- Declaring after NavTags is in use: treated the same as undeclared. Sorting again would change bits already stored in masks.
+## [br]- More than 64 levels: the extra ones get no bit, match nothing, and warn once.
+## [br]- No declarations file: everything still works, and every tag just counts as undeclared.
+# REFACTOR: the same rules as TagRegistry, copied on purpose when it was written. One tag-set class used twice (abilities, nav)
+# would halve the code and the tests. See CHANGELOG.md.
+#
+# @tool lets this run inside the editor, so NavMarkerNode can warn about an undeclared tag there.
 @tool
 # GDScript note: class_name makes "NavTags" usable from any script without loading it first.
 # Everything below is "static", meaning it belongs to the class itself. Nobody creates a NavTags object;

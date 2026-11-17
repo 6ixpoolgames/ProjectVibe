@@ -1,24 +1,27 @@
-## Written by Claude (claude-opus-5-5), 2026-11-06: the base for code that acts on nav markers (nav spec section 21.4).
-## Markers are plain data. All the code for a kind of marker lives in a module, a node you add to a level that
-## wants that behaviour and leave out of one that doesn't. A marker with no module simply does nothing.
+# Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
+## The base for code that acts on nav markers (nav spec section 21.4).
 ##
-## To make a module, extend this class, list your types in handled_types(), and fill in the calls you need:
-##   class_name MyLadderModule extends NavMarkerModule
-##   func handled_types() -> Array[Script]:
-##       return [NavLink]
-##   func _markers_added(ids: PackedInt64Array) -> void:
-##       for id in ids:
-##           var link: NavLink = NavMarkerManager.get_marker(id)
-##           ...
-##
+## Markers are plain data. All the code for a kind of marker lives in a module, a node you add to a level that wants that behaviour
+## and leave out of one that doesn't. A marker with no module simply does nothing.
+## [br]
+## To make a module, extend this class, list your types in [method handled_types], and fill in the calls you need:
+## [codeblock]
+## class_name MyLadderModule extends NavMarkerModule
+## func handled_types() -> Array[Script]:
+##     return [NavLink]
+## func _markers_added(ids: PackedInt64Array) -> void:
+##     for id in ids:
+##         var link: NavLink = NavMarkerManager.get_marker(id)
+##         ...
+## [/codeblock]
 ## Rules, all checked in tests/nav_markers_selftest.gd:
-##   - Calls arrive during the tick, once per batch, with a list of ids rather than one call per marker.
-##   - Load order doesn't matter. A module joining late gets every matching marker already there, on the next tick.
-##   - A module handles subclasses of its types too, so a modder's subclass of NavLink just works.
-##   - Several modules can handle one type.
-##   - When a module leaves, it gets a final _markers_removed straight away, so it can undo exactly what it did.
-##     Markers belong to NavMarkerManager and stay registered, so other modules aren't affected.
-##   - Requests made during a call wait for the next tick.
+## [br]- Calls arrive during the tick, once per batch, with a list of ids rather than one call per marker.
+## [br]- Load order doesn't matter. A module joining late gets every matching marker already there, on the next tick.
+## [br]- A module handles subclasses of its types too, so a modder's subclass of NavLink just works.
+## [br]- Several modules can handle one type.
+## [br]- When a module leaves, it gets a final _markers_removed straight away, so it can undo exactly what it did. Markers belong to
+##   NavMarkerManager and stay registered, so other modules aren't affected.
+## [br]- Requests made during a call wait for the next tick.
 class_name NavMarkerModule
 extends Node
 

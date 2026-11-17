@@ -2,7 +2,7 @@
 ## counted in ticks are written for 60 a second and last the same time at 30, physics steps at the tick rate, both AI memory stores
 ## agree at 30, and a goblin notices someone about as fast at 30 as at 60.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/singletons/tests/tick_rate_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/singletons/tests/tick_rate_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"

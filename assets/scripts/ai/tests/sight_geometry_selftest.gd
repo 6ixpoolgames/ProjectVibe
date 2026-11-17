@@ -3,7 +3,7 @@
 ## keeps up as bodies come, go, move, change shape or layer, and as the terrain is edited, and it says how much faster it is.
 ## Needs the navcore C++ library; without it, it says so and passes.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/ai/tests/sight_geometry_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/sight_geometry_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const RAYS := 20000

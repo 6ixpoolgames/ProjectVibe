@@ -1,16 +1,20 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: walks to a meeting point, the owner's request: in the mass battle, every faction
-## marches to the middle and fights there, instead of wandering near its spawner. Like Unreal's target points: the point is a node
-## in a Godot group (point_group, "rally_point" by default), placed in the level, so pawns spawned at any time find it.
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: ai/CHANGELOG.md.
+## Walks to a meeting point: the nearest node in a Godot group, "rally_point" by default.
 ##
-## When it's available: there's a node in point_group, and the pawn is further than arrive_radius from it. Allowed in Idle, the same
-## as Wander, with a score just above Wander's (0.15 against 0.1), so an idle pawn marches, anything it notices on the way (Alert,
-## Combat) takes over, and once it's there, Wander takes over and it mills about.
-##
-## How it walks: in legs of at most leg_metres toward the point, each one a move_to, so each path stays short. Nav is only built near
-## streaming sources (StreamingSource.nav_distance), so one path all the way across a big level might not exist yet, while a short
-## leg does. Each pawn walks a little to one side of the straight line (up to spread_metres, its own offset from its random numbers),
-## so a crowd marches as a band, not in single file. A leg that can't be walked is tried again a few metres shorter on the next tick.
-##
+## The owner's request: in the mass battle, every faction marches to the middle and fights there, instead of wandering near its
+## spawner. Like Unreal's target points: the point is a node in a Godot group ([member point_group]), placed in the level, so pawns
+## spawned at any time find it.
+## [br]
+## When it's available: there's a node in point_group, and the pawn is further than [member arrive_radius] from it. Allowed in Idle,
+## the same as Wander, with a score just above Wander's (0.15 against 0.1), so an idle pawn marches, anything it notices on the way
+## (Alert, Combat) takes over, and once it's there, Wander takes over and it mills about.
+## [br]
+## How it walks: in legs of at most [member leg_metres] toward the point, each one a move_to, so each path stays short. Nav is only
+## built near streaming sources (StreamingSource.nav_distance), so one path all the way across a big level might not exist yet, while
+## a short leg does. Each pawn walks a little to one side of the straight line (up to [member spread_metres], its own offset from its
+## random numbers), so a crowd marches as a band, not in single file. A leg that can't be walked is tried again a few metres shorter
+## on its next tick.
+## [br]
 ## It never finishes on its own: it returns RUNNING, and stops being available once the pawn has arrived.
 class_name AIGoToPointBehaviour
 extends AIBehaviourBase
@@ -38,13 +42,13 @@ func _init() -> void:
 	tick_interval_ticks = 5 # it only needs to notice when a leg ends
 
 
-# Claude 2026-11-16 (wider audit): how long a point found is kept before looking for the nearest again, in ticks at 60 a second.
+## How long a point found is kept before looking for the nearest again, in ticks at 60 a second.
 const LOOK_AGAIN_TICKS := 120
 var _looked_tick := -1000000
 
 func is_available(context: AIContextComponent) -> bool:
-	# Claude 2026-11-16 (wider audit): the point is kept while it's still there, and looked for again every 2 seconds in case a
-	# nearer one has appeared. This asked the tree for the whole group on every decision of every marching pawn.
+	# The point is kept while it's still there, and looked for again every 2 seconds in case a nearer one has appeared, rather than
+	# asking the tree for the whole group on every decision of every marching pawn.
 	if not is_instance_valid(_point) or not _point.is_inside_tree() or context.current_tick - _looked_tick >= TickDriver.ticks_at_rate(LOOK_AGAIN_TICKS):
 		_point = _nearest_point()
 		_looked_tick = context.current_tick

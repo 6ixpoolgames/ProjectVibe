@@ -1131,7 +1131,7 @@ Built for pawn spec step 7b. The owner chose both kinds of link for t0: placed o
 
 **Placed links:** `NavServer.add_link(start, end, two_way, action)` and `remove_link(id)`. A build gets a copy of the placed links that start in its tile. `NavLinkModule` (section 21.4) does this for `NavLink` markers.
 
-**Paths:** `find_path_now_with_links(from, to, tier)` returns `{points, link_ids, partial}`, with a link's id at the corner where it starts. `get_link_action(id)` gives the action to press. **`find_path_now` and `find_path` never cross links,** so code from before links, such as the stress test's walkers, gets the same paths as before. Links carry `POLYFLAG_LINK`, which those searches exclude.
+**Paths:** `find_path_now_with_links(from, to, tier)` returns `{points, link_ids, partial}`, with a link's id at the corner where it starts. `get_link_action(id)` gives the action to press. **`find_path_now` never crosses links,** so code from before links, such as the stress test's walkers, gets the same paths as before. *(Claude 2026-11-17: `find_path`, the queued search, takes `use_links` since the C++ bundle; `find_path_now_result` gives a partial flag with or without links.)* Links carry `POLYFLAG_LINK`, which those searches exclude.
 
 **Debug:** `get_debug_links(area)` lists live links, and `get_tile_states()` counts them per tile. Not drawn by `nav_debug_draw.gd` yet.
 

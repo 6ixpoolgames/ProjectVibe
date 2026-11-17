@@ -1,6 +1,11 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: worker threads for plain-data jobs on a server (scaling spec section 4, tier 1
-// step 2). The owner's design, as agreed: the main thread runs ticks, and work that only reads plain data overflows to worker
-// threads, with the scheduler learning what each kind of job costs.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// JobScheduler: worker threads for plain-data jobs (scaling spec section 4, tier 1 step 2). The owner's design, as agreed: the
+// main thread runs ticks, and work that only reads plain data overflows to worker threads, with the scheduler learning what each
+// kind of job costs.
+//
+// GDScript: jobs/TickJobs.gd makes the one scheduler (TickJobs.get_scheduler(), when the library is loaded and TickJobs.enabled)
+// and passes it to the job kinds, AISensingJob and CrowdBatch. GDScript only sets the worker count and reads the stats; the jobs
+// themselves are started from C++.
 //
 // How a job runs:
 //   - A job kind (AISensingJob, say) starts a run: some number of items (one per pawn, usually) and a function that does items

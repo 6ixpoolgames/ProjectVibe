@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: input providers / adapters and the composite (spec 5.2, 5.4, 5.5).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// Input providers (adapters) and the composite. Described in providers.h.
 #include "providers.h"
 
 #include <Recast.h>

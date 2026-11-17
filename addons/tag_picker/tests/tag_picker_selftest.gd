@@ -3,7 +3,7 @@
 ## scripts load, abilities are recognised, and a dropdown lists the declared tags with the right one selected, an undeclared value
 ## kept and marked, and "(none)" for no tag.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://addons/tag_picker/tests/tag_picker_selftest.tscn"
+##   godot --headless --path . "res://addons/tag_picker/tests/tag_picker_selftest.tscn"
 extends Node
 
 const ABILITY_BASE_PATH := "res://assets/scripts/abilities/AbilityBase.gd"

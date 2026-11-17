@@ -1,26 +1,29 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: reads a replay file (docs/replay/REPLAY_SPEC.md) and gives the state at any tick.
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## Reads a replay file (docs/replay/REPLAY_SPEC.md) and gives the state at any tick.
+##
 ## The viewer uses it, and so can a test or a tool.
-##
-## How to use it:
-##   var reader := ReplayReader.new()
-##   if reader.open("user://replays/host/....pbreplay") == OK:
-##       reader.get_header()          # tick_rate, role, started, game, channels...
-##       reader.get_first_tick(), reader.get_last_tick()
-##       var frame := reader.get_frame(tick)
-##       # frame.tick                  the tick shown (the nearest recorded one at or before the asked-for tick)
-##       # frame.pawns                 replay id -> {name, scene, team, motion: {...} or null, input: {...} or null}
-##       # frame.terrains, frame.sources   from the world channel (ReplayWorldChannel)
-##       # frame.events                this tick's events from every event channel: {tick, channel, kind, id, data}
-##       reader.get_events(from_tick, to_tick)   every event in that range, oldest first
-##       # Claude 2026-11-16: frame.diagnostics   the frames that finished this tick, when the recording has the diagnostics channel
-##       reader.get_diagnostics(from_tick, to_tick)   [tick, frame record] for every frame in that range (ReplayDiagnosticsChannel)
-##
+## [codeblock]
+## var reader := ReplayReader.new()
+## if reader.open("user://replays/host/....pbreplay") == OK:
+##     reader.get_header()        # tick_rate, role, started, game, channels...
+##     reader.get_first_tick()    # and get_last_tick()
+##     var frame := reader.get_frame(tick)
+##     # frame.tick         the tick shown (the nearest recorded one at or before the asked-for tick)
+##     # frame.pawns        replay id -> {name, scene, team, motion: {...} or null, input: {...} or null}
+##     # frame.terrains, frame.sources   from the world channel (ReplayWorldChannel)
+##     # frame.events       this tick's events from every event channel: {tick, channel, kind, id, data}
+##     # frame.diagnostics  the frames that finished this tick, when the recording has the diagnostics channel
+##     reader.get_events(from_tick, to_tick)       # every event in that range, oldest first
+##     reader.get_diagnostics(from_tick, to_tick)  # [tick, frame record] for every frame in that range
+## [/codeblock]
 ## How it finds a tick: the file is a list of blocks, each opening with a keyframe (replay spec section 2). It finds the tick's block,
 ## decodes it from its keyframe (keeping the last few decoded blocks), and reads the state at that tick. Nothing before that block is
 ## needed.
-##
+## [br]
 ## Damaged files: reading stops at the first block that's cut short or won't decompress, so a recording from a game that crashed opens
-## with everything up to its last whole block (is_cut_short() says so). Channels it has no class for are skipped.
+## with everything up to its last whole block ([method is_cut_short] says so). Channels it has no class for are skipped.
+# REFACTOR: open() reads the whole file into memory and decompresses every block once just to learn its ticks. A long recording
+# (hundreds of MB an hour at mass-battle sizes) would open faster and use less memory with an index of blocks. Efficient. See CHANGELOG.md.
 class_name ReplayReader
 extends RefCounted
 
@@ -36,9 +39,12 @@ var _cache := {} # block index -> decoded block
 var _cache_order: Array[int] = []
 
 
+# The base's channels, diagnostics included, so any recording made by the base reads in full.
+# REFACTOR: the same list of base channels as ReplayRecorder._init, written out twice (the recorder's leaves out diagnostics). One list
+# on ReplayChannel is one place to add a channel. Extensible. See CHANGELOG.md.
 func _init() -> void:
 	for channel: ReplayChannel in [ReplayMotionChannel.new(), ReplayInputChannel.new(), ReplaySpawnChannel.new(),
-			ReplayWorldChannel.new(), ReplayGameplayChannel.new(), ReplayDiagnosticsChannel.new()]: # Claude 2026-11-16: diagnostics
+			ReplayWorldChannel.new(), ReplayGameplayChannel.new(), ReplayDiagnosticsChannel.new()]:
 		_channels[channel.channel_id] = channel
 
 
@@ -68,7 +74,7 @@ func open(path: String) -> Error:
 		return ERR_FILE_CORRUPT
 	_header = fields
 	_header["format"] = format
-	# Claude 2026-11-15: each channel class learns which of its versions the file holds, so it can read older layouts.
+	# Each channel class learns which of its versions the file holds, so it can read older layouts.
 	for info: Variant in _header.get("channels", []):
 		if info is Dictionary and _channels.has(info.get("id")):
 			_channels[info.id].file_version = int(info.get("version", 1))
@@ -153,7 +159,7 @@ func get_frame(tick: int) -> Dictionary:
 		info["input"] = input.get(id)
 		pawns[id] = info
 	return {"tick": ticks[at], "pawns": pawns, "terrains": world.get("terrains", {}), "sources": world.get("sources", {}),
-		"events": block.events[at], "diagnostics": states.get(ReplayDiagnosticsChannel.ID, {}).get("frames", [])} # Claude 2026-11-16
+		"events": block.events[at], "diagnostics": states.get(ReplayDiagnosticsChannel.ID, {}).get("frames", [])}
 
 
 ## Every event from from_tick to to_tick, both included, oldest first. Each is {tick, channel, kind, id, data}.
@@ -172,7 +178,7 @@ func get_events(from_tick: int, to_tick: int) -> Array:
 	return out
 
 
-## Claude 2026-11-16: every diagnostics frame from from_tick to to_tick, both included, as [tick, frame record], oldest first. Empty
+## Every diagnostics frame from from_tick to to_tick, both included, as [tick, frame record], oldest first. Empty
 ## for a recording without the diagnostics channel.
 func get_diagnostics(from_tick: int, to_tick: int) -> Array:
 	var out: Array = []

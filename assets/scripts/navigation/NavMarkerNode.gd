@@ -1,18 +1,19 @@
-## Written by Claude (claude-opus-5-5), 2026-11-06: places a nav marker by hand in a scene (nav spec section 21.5).
-## Add this node, choose a marker type in the inspector, and fill in its values. The node's position and rotation
-## say where the marker is. Generators skip this node and register their markers directly.
+# Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
+## Places a nav marker by hand in a scene (nav spec section 21.5).
 ##
+## Add this node, choose a marker type in the inspector, and fill in its values. The node's position and rotation say where the marker
+## is. Generators skip this node and register their markers directly.
+## [br]
 ## What it does:
-##   - On entering the scene, it makes its own copy of the marker and registers that. Without the copy, every
-##     instance of a scene would share one marker, so opening one door would open them all.
-##   - On leaving the scene, it removes the marker.
-##
+## [br]- On entering the scene, it makes its own copy of the marker and registers that. Without the copy, every instance of a scene
+##   would share one marker, so opening one door would open them all.
+## [br]- On leaving the scene, it removes the marker.
+## [br]
 ## What happens in odd cases (all checked in tests/nav_marker_node_selftest.gd):
-##   - No marker set, or an undeclared tag: an inspector warning. At runtime it registers nothing, and the game runs.
-##   - A marker's id comes from this node's scene path, so moving or renaming the node changes the id.
-##     A node with an automatic name, which starts with @, may get a different id on each machine, so it warns.
-##   - Moving the node after it has registered doesn't move the marker.
-##
+## [br]- No marker set, or an undeclared tag: an inspector warning. At runtime it registers nothing, and the game runs.
+## [br]- A marker's id comes from this node's scene path, so moving or renaming the node changes the id. A node with an automatic
+##   name, which starts with @, may get a different id on each machine, so it warns.
+## [br]- Moving the node after it has registered doesn't move the marker.
 # GDScript note: @tool makes a script run inside the editor as well as in the game. It's needed here for the
 # inspector warnings, so the code below is careful to do its game work only when the game is running.
 @tool

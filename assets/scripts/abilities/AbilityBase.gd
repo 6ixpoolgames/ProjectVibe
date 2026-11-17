@@ -1,32 +1,38 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: the base for one thing a pawn can do, such as walk, jump or sprint. A child of the
-## pawn's AbilityManager. Pawn spec section 8.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
+## The base for one thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's AbilityManager.
 ##
-## An ability is pressed like a skill in an MMO or MOBA: its trigger_action (a named action from InputActions, such as &"jump") starts
-## it. The player's keys and an AI behaviour press the same actions, so both reach the same ability through the same rules.
-##
+## Pawn spec section 8. An ability is pressed like a skill in an MMO or MOBA: its [member trigger_action] (a named action from
+## InputActions, such as &"jump") starts it. The player's keys and an AI behaviour press the same actions, so both reach the same
+## ability through the same rules.
+## [br]
 ## Two kinds:
-##   LOCOMOTION   moves the pawn, every tick it's chosen. Exactly one runs each tick. The one with no trigger_action (Walk) is the
-##                default; one whose trigger_action is held (Sprint) runs instead while it can.
-##   ACTION       starts on a press. With no duration it happens at once (Jump); with a duration it runs for that long.
-##
+## [br]- [b]LOCOMOTION[/b] moves the pawn, every tick it's chosen. Exactly one runs each tick. The one with no trigger_action (Walk) is
+##   the default; one whose trigger_action is held (Sprint) runs instead while it can.
+## [br]- [b]ACTION[/b] starts on a press. With no duration it happens at once (Jump); with a duration it runs for that long.
+## [br]
 ## How to make one: extend this, set what's needed in _init(), and override any of:
-##   can_start() -> bool    extra conditions, such as being on the ground. Cooldowns and lockouts are already checked
-##   start()                once, when it starts. An action with no duration does its whole job here
-##   tick(dt)               every tick it runs. A locomotion ability writes the pawn's velocity here
-##   stop()                 once, when it stops
-##   every_tick(dt)         every tick, running or not, for counters such as time off the ground. Claude 2026-11-09: only called on
-##                          abilities that override it; such an ability also overrides can_sleep() (pawn spec 15.3)
+## [br]- [method can_start] -> bool: extra conditions, such as being on the ground. Cooldowns and lockouts are already checked.
+## [br]- [method start]: once, when it starts. An action with no duration does its whole job here.
+## [br]- [method tick] (dt): every tick it runs. A locomotion ability writes the pawn's velocity here.
+## [br]- [method stop]: once, when it stops.
+## [br]- [method every_tick] (dt): every tick, running or not, for counters such as time off the ground. Only called on abilities
+##   that override it; such an ability also overrides [method can_sleep] (pawn spec 15.3).
+## [br]
 ## Times are set in seconds and kept in ticks, so they line up exactly between server and client.
-##
-## Rollback: what an ability keeps between ticks has to roll back. get_rollback_properties() names those properties, and the
+## [br]
+## Rollback: what an ability keeps between ticks has to roll back. [method get_rollback_properties] names those properties, and the
 ## AbilityManager registers them with the pawn's TickStateComponent. The base already handles its own: ticks_left (only with a
-## duration), cooldown_ticks_left (only with a cooldown) and buffer_ticks_left (only with a buffer window). They count down to 0, so
-## they're small numbers on the network. An ability with more state adds it to the list.
-##
-## Claude 2026-11-16 (pawn spec 8.20, the owner's design): an ability can be built from steps, AbilityStep children such as a windup, a
-## turn and a swing (abilities/steps/AbilityStep.gd says how they run). The ability still owns the rules: starting, priority, cooldown,
-## the interrupt table, tags and effects. A stepped ability runs while any of its steps does, timed by ticks_left like any timed
-## ability, with max_steps_ticks as its longest run. The AbilityManager runs the steps right after tick().
+## duration, or steps), cooldown_ticks_left (only with a cooldown), buffer_ticks_left (only with a buffer window) and step_state
+## (only with steps). The timers count down to 0, so they're small numbers on the network. An ability with more state adds it to the
+## list.
+## [br]
+## Steps (pawn spec 8.20, the owner's design): an ability can be built from [AbilityStep] children such as a windup, a turn and a
+## swing (AbilityStep says how they run). The ability still owns the rules: starting, priority, cooldown, the interrupt table, tags
+## and effects. A stepped ability runs while any of its steps does, timed by ticks_left like any timed ability, with
+## [member max_steps_ticks] as its longest run. The AbilityManager runs the steps right after [method tick].
+## [br]
+## Hit interceptors (pawn spec 8.23): a [HitInterceptor] child, or one under a step, can stop hits while it runs (a parry,
+## invulnerability frames).
 class_name AbilityBase
 extends Node
 
@@ -37,23 +43,24 @@ enum Kind { LOCOMOTION, ACTION }
 @export var trigger_action: StringName = &""
 ## What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
 @export var category: StringName = &""
-## Claude 2026-11-10: more groups this ability belongs to, besides category, such as &"movement.advanced" for a dash, or a school and a
+## More groups this ability belongs to, besides category, such as &"movement.advanced" for a dash, or a school and a
 ## range for an attack (&"school.magic", &"range.ranged"). It answers to all of them, for lockouts, cancels and the AI's searches
 ## (AbilityManager.action_for_tag): each is a group, so one rule covers every ability in it. All of them share one 64-bit mask, with
 ## every other ability tag; how strong it is stays in the interrupt numbers, not in tags.
 @export var extra_categories: Array[StringName] = []
-## When several abilities share a trigger_action, the highest priority that can start wins; then the first in the tree. Claude
-## 2026-11-09: was lowest-wins; now it's higher-wins like interrupt_priority and behaviour scores (the owner's call). Among locomotion
-## abilities whose action is held, the same. Claude 2026-11-10: effects on the pawn can add to it while they last
-## (AbilityPriorityPart, pawn spec 8.11), which is how combos work; and to interrupt_priority and interrupt_threshold.
+## When several abilities share a trigger_action, the highest priority that can start wins; then the first in the tree. Higher wins,
+## as with interrupt_priority and behaviour scores (the owner's call). Among locomotion abilities whose action is held, the same.
+## Effects on the pawn can add to it while they last (AbilityPriorityPart, pawn spec 8.11), and to interrupt_priority and
+## interrupt_threshold.
 @export var priority := 0
-## Claude 2026-11-16 (pawn spec 8.20, the owner's design): which positions of a combo this ability can fill: [1] for an opener, [2] for
+## Which positions of a combo this ability can fill: [1] for an opener, [2] for
 ## a second hit, [2, 3] for one that fits second or third. Positions are shared by every attack, light and heavy, so attacks mix and
 ## match. A follow-up (no 1 in its list) can start only while a combo window is open and the next position is in its list; give it a
 ## higher priority than the opener on its key, so it wins inside the window. Empty (the default): not part of combos (walking,
-## dashing). The AbilityManager keeps the count (combo_position) and the window, which an OpenComboStep opens.
+## dashing). The AbilityManager keeps the count (combo_position) and the window, which an OpenComboStep opens. Pawn spec 8.20, the
+## owner's design.
 @export var combo_positions: Array[int] = []
-## Claude 2026-11-09: a random offset, up to ± this much, added to priority each time a press picks between abilities on one action,
+## A random offset, up to ± this much, added to priority each time a press picks between abilities on one action,
 ## like a behaviour's score_jitter. 0 (the default): none, so the order is always the same. The offset comes from the tick's own
 ## random numbers (TickDriver.tick_rng), so a rollback replay picks the same ability. Locomotion ignores it, because it's chosen every
 ## tick and would flicker.
@@ -66,35 +73,34 @@ enum Kind { LOCOMOTION, ACTION }
 @export var locks_out: Array[StringName] = []
 ## Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
 @export_range(0.0, 2.0, 0.01, "or_greater") var buffer_window := 0.0
-## Claude 2026-11-09: how strong this ability is at cancelling a running ability it conflicts with (pawn spec 8.6). Two abilities
-## conflict when either one's locks_out covers the other's category. Walk 0, Sprint 10, Jump 5, Dash 20, knockback 30. Claude
-## 2026-11-10: Dash 40 now, the one thing that cancels a knockback (threshold 35).
+## How strong this ability is at cancelling a running ability it conflicts with (pawn spec 8.6). Two abilities conflict when either
+## one's locks_out covers the other's category. Walk 0, Jump 5, Sprint 10, Parry 10, MeleeAttack 15, Knockback 30, Dash 40 (the one
+## thing that cancels a knockback, threshold 35), Death 1000.
 @export var interrupt_priority := 0
-## Claude 2026-11-09: while this runs, a conflicting ability whose interrupt_priority is at least this cancels it and starts; a
-## weaker one is locked out, as before. 100: nothing in t0 can cancel it. MeleeAttack uses 15, so Dash cancels a swing and Sprint
-## doesn't. An action meant to be cancelled by sprinting (a reload, say) uses 10 or less; by just moving, 0.
+## While this runs, a conflicting ability whose interrupt_priority is at least this cancels it and starts; a weaker one is locked
+## out. 100 (the default): only Death cancels it. MeleeAttack uses 15, so Dash cancels a swing and Sprint doesn't. An action meant to
+## be cancelled by sprinting (a reload, say) uses 10 or less; by just moving, 0.
 @export var interrupt_threshold := 100
-# Claude 2026-11-17 (pawn spec 8.23): invulnerable_while_running and invulnerable_seconds are gone: an InvulnerabilityInterceptor child
-# does that now (HitInterceptor), and Dash makes one by default.
-## Claude 2026-11-10: categories that can always cancel this while it runs, whatever the interrupt numbers say, such as
+# For invulnerability while it runs, give it an InvulnerabilityInterceptor child (HitInterceptor); Dash makes one by default.
+## Categories that can always cancel this while it runs, whatever the interrupt numbers say, such as
 ## &"movement.jump" for an ability a jump should cut short. Empty (the default): only the numbers decide. For the exceptions a single
 ## ladder of numbers can't express. A category covers its children, as in locks_out.
 @export var cancelled_by: Array[StringName] = []
-## Claude 2026-11-10: on: while this runs, the pawn's locomotion (Walk, Sprint) doesn't run at all, so it neither steers nor slows the
+## On: while this runs, the pawn's locomotion (Walk, Sprint) doesn't run at all, so it neither steers nor slows the
 ## pawn and this ability's own movement isn't fought. Dash has it. Off (the default): a locked-out locomotion still slows the pawn to
 ## a stop, which is what an attack that roots the pawn wants.
 @export var pauses_locomotion := false
-## Claude 2026-11-16 (pawn spec 8.22): on: while it runs, its pawn moves by physics (move_and_slide), not with the CrowdMover, so its
+## On: while it runs, its pawn moves by physics (move_and_slide), not with the CrowdMover, so its
 ## movement collides properly: fast or forced moves such as Dash and Knockback. Off (the default): walking speeds, which the crowd
-## mover handles.
+## mover handles. Pawn spec 8.22.
 @export var needs_full_movement := false
-## Claude 2026-11-16 (pawn spec 8.20): for an ability with steps, the longest it can run, in ticks at 60 a second, as a safety: it ends
+## For an ability with steps, the longest it can run, in ticks at 60 a second, as a safety: it ends
 ## once no step runs, and at this at the latest. Ignored without steps.
 @export_range(1, 6000, 1, "or_greater") var max_steps_ticks := 600
 
-# State that rolls back. See the top of the file.
-# Claude 2026-11-09: each timer tells the manager when it starts or reaches 0, so the manager only counts down the timers that are
-# running (pawn spec 15.2). That includes a rollback loading new values, which writes them through these setters.
+# State that rolls back. See the class description.
+# Each timer tells the manager when it starts or reaches 0, so the manager only counts down the timers that are running (pawn spec
+# 15.2). That includes a rollback loading new values, which writes them through these setters.
 # GDScript note: inside its own setter, a variable's name means the stored value, so "ticks_left" there is the old value.
 ## ticks left of a timed run. 0: not running a timed run
 var ticks_left := 0:
@@ -104,7 +110,7 @@ var ticks_left := 0:
 			manager.timers_changed()
 		ticks_left = value
 		if flips:
-			_running_changed(value > 0) # Claude 2026-11-09 (scaling spec step 4)
+			_running_changed(value > 0)
 ## ticks until it can start again
 var cooldown_ticks_left := 0:
 	set(value):
@@ -120,40 +126,38 @@ var buffer_ticks_left := 0:
 
 ## Set by the AbilityManager.
 var manager: AbilityManager = null
-## Claude 2026-11-09: set by the AbilityManager: a number from this ability's name, for its priority_jitter's random offset.
+## Set by the AbilityManager: a number from this ability's name, for its priority_jitter's random offset.
 var jitter_salt := 0
 var pawn: Pawn = null
-## This ability's category as bits, with its parents' bits too. Worked out once by the manager. Claude 2026-11-10: and its
-## extra_categories', with theirs.
+## This ability's category as bits, with its parents' bits too, and its extra_categories' with theirs. Worked out once by the
+## manager.
 var category_mask := 0
 ## locks_out as bits. Worked out once by the manager.
 var locks_out_mask := 0
-## Claude 2026-11-10: cancelled_by as bits. Worked out once by the manager, so the check while playing is one bit test.
+## cancelled_by as bits. Worked out once by the manager, so the check while playing is one bit test.
 var cancelled_by_mask := 0
-## Claude 2026-11-09: trigger_action's input bit (InputActions), or 0 with none. Worked out once by the manager, so a tick tests a bit
-## instead of looking the name up (pawn spec 15.2).
+## trigger_action's input bit (InputActions), or 0 with none. Worked out once by the manager, so a tick tests a bit instead of
+## looking the name up (pawn spec 15.2).
 var trigger_bit := 0
-## Claude 2026-11-10 (pawn spec 8.11): what this ability applies, from its EffectApplier children, collected once by the manager.
-## on_start_effects go on its own pawn when it starts. on_hit_effects go on a pawn it hits, and on_hit_self_effects on its own pawn
-## when it hits; an ability that hits (MeleeAttack) hands both to the HitInfo.
+## What this ability applies, from its EffectApplier children, collected once by the manager (pawn spec 8.11). on_start_effects go
+## on its own pawn when it starts. on_hit_effects go on a pawn it hits, and on_hit_self_effects on its own pawn when it hits; a
+## MeleeSweepStep hands both to the HitInfo. A HitInterceptor keeps its own ON_INTERCEPT effects.
 var on_start_effects: Array[Effect] = []
 var on_hit_effects: Array[Effect] = []
 var on_hit_self_effects: Array[Effect] = []
-# Claude 2026-11-17 (pawn spec 8.23): on_parry_effects and on_parry_self_effects are gone: a HitInterceptor keeps its own
-# (on_intercept_effects), from its ON_INTERCEPT EffectApplier children.
-## Claude 2026-11-17 (pawn spec 8.23): its HitInterceptors, under it or under its steps, found by the AbilityManager. Empty: none.
+## Its HitInterceptors, under it or under its steps, found by the AbilityManager (pawn spec 8.23). Empty: none.
 var interceptors: Array[HitInterceptor] = []
-## Claude 2026-11-16 (pawn spec 8.20): its AbilityStep children, in tree order, found by collect_steps(). Empty: no steps.
+## Its AbilityStep children, in tree order, found by [method collect_steps]. Empty: no steps.
 var steps: Array[AbilityStep] = []
-## Claude 2026-11-16: its steps' state, one number per step: 0 while it isn't running, its step_ticks + 1 while it is. Rolled back as
-## one value (steps read and write it through their running and step_ticks), because a value per step cost 2.4 ms a tick at 150 pawns.
+## Its steps' state, one number per step: 0 while it isn't running, its step_ticks + 1 while it is. Rolled back as one value (steps
+## read and write it through their running and step_ticks), because a value per step cost 2.4 ms a tick at 150 pawns.
 var step_state := PackedInt32Array()
-## Claude 2026-11-16, a safeguard (the owner asked): the most steps one ability may start in one tick. Each step runs at most once at a
+## A safeguard (the owner asked): the most steps one ability may start in one tick. Each step runs at most once at a
 ## time, and one started during a tick waits for the next, so ordinary setups never get near this. It stops steps whose own code starts
 ## and stops each other in a loop within one tick: past it, starts are refused, the ability ends, and it warns once.
 const MAX_STEP_STARTS_PER_TICK := 32
 var _starts_tick := -1 # the tick _starts_this_tick counts for
-## Claude 2026-11-16: the pawns its steps have hit this run (instance ids), so each is hit once across all its sweeps. On the server
+## The pawns its steps have hit this run (instance ids), so each is hit once across all its sweeps. On the server
 ## only, and never in a replay: hits are decided once, on the authority. Cleared when it starts.
 var pawns_hit_this_run: Array[int] = []
 var _starts_this_tick := 0
@@ -168,10 +172,10 @@ func _init() -> void:
 ## The properties on this node that roll back. Add to it with super() in an ability that keeps more.
 func get_rollback_properties() -> Array[String]:
 	var out: Array[String] = []
-	if duration > 0.0 or is_stepped(): # Claude 2026-11-16: a stepped ability is timed too
+	if duration > 0.0 or is_stepped(): # a stepped ability is timed too
 		out.append("ticks_left")
 	if is_stepped():
-		out.append("step_state") # Claude 2026-11-16: every step's state, as one value
+		out.append("step_state") # every step's state, as one value
 	if cooldown > 0.0:
 		out.append("cooldown_ticks_left")
 	if buffer_window > 0.0 and trigger_action != &"":
@@ -179,10 +183,10 @@ func get_rollback_properties() -> Array[String]:
 	return out
 
 
-## Claude 2026-11-09: how many ticks a timed run lasts. The default turns duration's seconds into ticks; an ability that thinks in
-## ticks, such as MeleeAttack with its phases, overrides this.
+## How many ticks a timed run lasts. The default turns duration's seconds into ticks, or gives max_steps_ticks for a stepped
+## ability. An ability with its own timing overrides this, such as Dash (its two phases) and Knockback (its push).
 func duration_ticks() -> int:
-	if is_stepped(): # Claude 2026-11-16 (pawn spec 8.20): its steps decide when it ends; this is only the most it can run
+	if is_stepped(): # its steps decide when it ends; this is only the most it can run
 		return TickDriver.ticks_at_rate(max_steps_ticks)
 	return manager.ticks_for(duration) if manager else 0
 
@@ -192,23 +196,23 @@ func is_running_timed() -> bool:
 	return ticks_left > 0
 
 
-## Claude 2026-11-10: how many ticks of the current run have been ticked: 0 on the tick it starts, before its first tick. 0 when not
+## How many ticks of the current run have been ticked: 0 on the tick it starts, before its first tick. 0 when not
 ## running. Read from ticks_left, which rolls back, so it needs no state of its own.
 func ticks_running() -> int:
 	return duration_ticks() - ticks_left if ticks_left > 0 else 0
 
 
-## Claude 2026-11-09 (scaling spec step 4): called whenever a timed run starts or ends, through the ticks_left setter, so also when a
+## Called whenever a timed run starts or ends, through the ticks_left setter, so also when a
 ## rollback loads new values. Nothing by default; DeathAbility uses it to keep Pawn.dead current.
 func _running_changed(_running: bool) -> void:
 	pass
 
 
-# --- Steps (Claude 2026-11-16, pawn spec 8.20) ---
+# --- Steps (pawn spec 8.20) ---
 
 
-## Claude 2026-11-16 (pawn spec 8.21): the ticks this run of its pawn covers: 1 normally, more for a pawn running every Nth tick.
-## Timers and step counts advance by it.
+## The ticks this run of its pawn covers: 1 normally, more for a pawn running every Nth tick (pawn spec 8.21). Timers and step counts
+## advance by it.
 func ticks_elapsed() -> int:
 	return pawn.ticks_elapsed if pawn else 1
 
@@ -276,9 +280,8 @@ func current_interrupt_threshold() -> int:
 	return strictest if strictest >= 0 else interrupt_threshold
 
 
-## Claude 2026-11-17 (pawn spec 8.23): the AbilityManager calls this when the ability has no HitInterceptor of its own, so it can make
-## the ones it should have by default (Dash its invulnerability, Parry its front guard), as MeleeAttack makes its default steps.
-## Nothing by default. has_invulnerable_step() went with the step's invulnerable flag.
+## The AbilityManager calls this when the ability has no HitInterceptor of its own, so it can make the ones it should have by default
+## (Dash its invulnerability, Parry its front guard), as MeleeAttack makes its default steps. Nothing by default.
 func make_default_interceptors() -> void:
 	pass
 
@@ -290,13 +293,13 @@ func collect_steps() -> void:
 		if child is AbilityStep:
 			child.ability = self
 			child.pawn = pawn
-			child.index = steps.size() # Claude 2026-11-16: its slot in step_state
+			child.index = steps.size() # its slot in step_state
 			steps.append(child)
 	step_state = PackedInt32Array()
 	step_state.resize(steps.size()) # GDScript note: resize fills new entries with 0, so no step is running
 	for step in steps:
-		step.setup_hold() # Claude 2026-11-16: which action it watches, before its own setup
-		step.setup() # Claude 2026-11-16
+		step.setup_hold() # which action it watches, before its own setup
+		step.setup()
 		step.next_steps.clear()
 		for path in step.starts_when_finished:
 			var next := step.get_node_or_null(path) as AbilityStep
@@ -317,13 +320,12 @@ func begin_steps() -> void:
 		start_step(steps[0])
 
 
-var _steps_this_tick: Array[AbilityStep] = [] # Claude 2026-11-16 (wider audit): run_steps' working list, kept between ticks
+var _steps_this_tick: Array[AbilityStep] = [] # run_steps' working list, kept between ticks so it isn't made anew every tick
 
 ## The AbilityManager calls this every tick the ability runs, after tick(): each running step's tick, in tree order. A step done starts
 ## its next steps; a step that fails ends them all. With no step left running, the ability ends (ticks_left goes to 0).
 func run_steps(dt: float) -> void:
 	# The steps running as this tick began. Those started during it get their first tick on the next one.
-	# Claude 2026-11-16 (wider audit): one list kept and reused; a new one was made for every running ability every tick.
 	_steps_this_tick.clear()
 	for step in steps:
 		if step.running:
@@ -331,7 +333,7 @@ func run_steps(dt: float) -> void:
 	for step in _steps_this_tick:
 		if not step.running:
 			continue # an earlier step stopped it this tick
-		# Claude 2026-11-16: let go, it ends before its tick, with "released", and its next steps start as if it were done.
+		# Let go, it ends before its tick, with "released", and its next steps start as if it were done.
 		if step.ends_when_released and step.hold_bit != 0 and not step.is_held() and step.can_end_on_release():
 			stop_step(step, "released")
 			for next in step.next_steps:
@@ -339,7 +341,7 @@ func run_steps(dt: float) -> void:
 			continue
 		var status := step.tick(dt)
 		if step.counts_this_tick():
-			step.step_ticks += ticks_elapsed() # Claude 2026-11-16 (pawn spec 8.21): was 1
+			step.step_ticks += ticks_elapsed() # every tick this run covers (pawn spec 8.21)
 		var length := step.length() # asked once: it converts for the tick rate each time
 		if status == AbilityStep.Status.RUNNING and length > 0 and step.step_ticks >= length:
 			status = AbilityStep.Status.DONE
@@ -351,7 +353,7 @@ func run_steps(dt: float) -> void:
 			stop_step(step, "failed")
 			end_steps("failed")
 			break
-	# Claude 2026-11-16: running while a step that keeps it running is; steps that only go along (keeps_ability_running off) stop then.
+	# Running while a step that keeps it running is; steps that only go along (keeps_ability_running off) stop then.
 	for step in steps:
 		if step.running and step.keeps_ability_running:
 			return
@@ -359,7 +361,7 @@ func run_steps(dt: float) -> void:
 	ticks_left = 0 # no step left: the ability is over, and the manager finishes it
 
 
-## Claude 2026-11-16: where its weapon is now, from its running steps (the first that says), as an offset from the pawn's feet for this
+## Where its weapon is now, from its running steps (the first that says), as an offset from the pawn's feet for this
 ## facing in radians; null if none says. For visuals and the animation module: they draw what the ability does.
 func weapon_point(facing: float) -> Variant:
 	for step in steps:
@@ -377,8 +379,8 @@ func end_steps(reason := "cancelled") -> void:
 			stop_step(step, reason)
 
 
-# --- The pawn's input (Claude 2026-11-16 (pawn M4): it lives on the ControllerManager now; these read it, and give "nothing pressed" for a pawn
-# without one, so no ability has to check) ---
+# --- The pawn's input. It lives on the ControllerManager (pawn spec 8.17); these read it, and give "nothing pressed" for a pawn
+# without one, so no ability has to check ---
 
 
 ## The direction the pawn is told to go, in world space, up to length 1.
@@ -416,34 +418,39 @@ func read_stat(stat_name: StringName, fallback: float) -> float:
 # --- Override these ---
 
 
+## Extra conditions for starting, such as being on the ground. Cooldowns, lockouts and combos are already checked.
 func can_start() -> bool:
 	return true
 
 
+## Once, when it starts.
 func start() -> void:
 	pass
 
 
+## Every tick it runs.
 func tick(_dt: float) -> void:
 	pass
 
 
+## Once, when it stops, finished or cancelled.
 func stop() -> void:
 	pass
 
 
+## Every tick, running or not. Only called on abilities whose script overrides it.
 func every_tick(_dt: float) -> void:
 	pass
 
 
-## Claude 2026-11-09: true if this ability is fine with the pawn sleeping (pawn spec 15.3): standing still, it skips its abilities,
+## True if this ability is fine with the pawn sleeping (pawn spec 15.3): standing still, it skips its abilities,
 ## gravity and move_and_slide. Only an ability that overrides every_tick() needs to think about it: answer false while every_tick()
 ## would still change something with the pawn standing still. Jump answers false until its time off the ground is back to 0.
 func can_sleep() -> bool:
 	return true
 
 
-## Claude 2026-11-16 (wider audit): true if the pawn may sleep while this ability runs (pawn spec 15.3). Its timer and tick() then
+## True if the pawn may sleep while this ability runs (pawn spec 15.3). Its timer and tick() then
 ## wait with the pawn, so only an ability that does nothing while it waits answers true: Death, while Health is 0. Asked every
 ## tick the pawn could otherwise sleep, so keep it cheap.
 func can_sleep_while_running() -> bool:

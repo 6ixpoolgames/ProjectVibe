@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: input layers and their submitted data (spec 5.3, 5.7).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// InputStore: NavServer's input layers and the data submitted to them (nav spec 5.3, 5.7). Not seen by GDScript.
 // Generators submit data on the main thread. The store keeps immutable, ref-counted copies, and a
 // build takes an InputSnapshot (references only, no copying) to read on a worker thread.
 #pragma once

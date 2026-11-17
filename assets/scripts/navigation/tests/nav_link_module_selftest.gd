@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-08: headless self-test for NavLinkModule, which hands placed NavLink markers to nav.
 ## Uses the course from nav_links_selftest, where nothing leads from the low platform C back up to B, so a placed link is the only
 ## way up. Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/navigation/tests/nav_link_module_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/navigation/tests/nav_link_module_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const Course := preload("res://assets/scripts/navigation/tests/nav_links_selftest.gd")

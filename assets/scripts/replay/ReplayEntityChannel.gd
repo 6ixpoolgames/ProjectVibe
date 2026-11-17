@@ -1,17 +1,20 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: a replay channel with one record per pawn (replay spec section 3). Each tick it
-## writes the pawns whose record changed since they were last written, and on a keyframe every pawn. Motion and input extend it.
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## A replay channel with one record per pawn (replay spec section 3).
 ##
-## A tick's bytes:  count (u16), then for each pawn: its replay id (u32) and its record (what write_record writes)
-##
-## An extending channel overrides three things:
-##   same_as_last(pawn, last) -> bool     true if nothing in the record changed. last is what remember() returned last time,
-##                                        or null for a pawn not written yet. Cheap checks only: this runs for every pawn every tick.
-##   remember(pawn) -> Variant            what same_as_last compares against next time
-##   write_record(pawn, out)              the record's bytes
-##   read_record(data) -> Variant         the record back from its bytes, as the reader keeps it (state[id] = this)
-##
-## The reader's state for this channel: replay id -> record. A pawn stays in it until the spawns channel says it went (the reader
-## drops it then), because a pawn that didn't change writes nothing.
+## Each tick it writes the pawns whose record changed since they were last written, and on a keyframe every pawn. Input extends it;
+## motion extends it too, but writes its ticks its own way (field by field, see [ReplayMotionChannel]).
+## [br]
+## A tick's bytes: count (u16), then for each pawn: its replay id (u32) and its record (what [method write_record] writes).
+## [br]
+## An extending channel overrides four things:
+## [br]- [method same_as_last]: true if nothing in the record changed. last is what [method remember] returned last time, or null for a
+##   pawn not written yet. Cheap checks only: this runs for every pawn every tick.
+## [br]- [method remember]: what same_as_last compares against next time.
+## [br]- [method write_record]: the record's bytes.
+## [br]- [method read_record]: the record back from its bytes, as the reader keeps it (state[id] = this).
+## [br]
+## The reader's state for this channel: replay id -> record. A pawn's last record stays in it, because a pawn that didn't change writes
+## nothing; the reader shows it only while the spawns channel lists the pawn as alive.
 class_name ReplayEntityChannel
 extends ReplayChannel
 

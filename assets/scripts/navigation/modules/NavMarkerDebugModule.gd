@@ -1,17 +1,20 @@
-## Written by Claude (claude-opus-5-5), 2026-11-06: draws every nav marker while the game runs (nav spec section 21.4).
-## Add this node to a level to see its markers, through walls and terrain. It does nothing in a release build.
+# Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
+## Draws every nav marker while the game runs (nav spec section 21.4).
 ##
+## Add this node to a level to see its markers, through walls and terrain, or press F9 (diagnostics' NavDebugView makes one). It does
+## nothing in a release build.
+## [br]
 ## How markers look:
-##   - Every marker is a small cross at its position, with a line showing which way it faces.
-##   - A link also has a line from its start to its end.
-##   - Areas and obstacles also have a box showing their size.
-##   - Colours follow the type. A disabled marker is grey.
-##
-## It only looks at markers, so it doesn't count as handling them in the debug report. Otherwise, adding it
-## would hide that nothing actually acts on them.
-##
-## The drawing is rebuilt from scratch when markers change, at most a few times a second. That's cheap at
+## [br]- Every marker is a small cross at its position, with a line showing which way it faces.
+## [br]- A link also has a line from its start to its end.
+## [br]- Areas and obstacles also have a box showing their size.
+## [br]- Colours follow the type. A disabled marker is grey.
+## [br]
+## It only looks at markers, so it doesn't count as handling them in the debug report. Otherwise, adding it would hide that nothing
+## actually acts on them. The drawing is rebuilt from scratch when markers change, at most a few times a second, which is cheap at
 ## hundreds of markers. Past max_drawn it stops drawing the rest and warns once.
+# REFACTOR: a debug tool in a production folder. It belongs in diagnostics/ beside NavDebugView, which uses it (keep test and debug
+# code apart from production code). The two sample scenes that place it would follow. See CHANGELOG.md.
 class_name NavMarkerDebugModule
 extends NavMarkerModule
 
@@ -126,7 +129,7 @@ func get_drawn_count() -> int:
 
 ## How many lines the current drawing holds.
 func get_line_count() -> int:
-	@warning_ignore("integer_division") # Claude 2026-11-12: whole numbers on purpose
+	@warning_ignore("integer_division") # whole numbers on purpose
 	return _points.size() / 2
 
 

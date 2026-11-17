@@ -1,16 +1,20 @@
-## Claude 2026-11-07: renamed from WorldNavLink, so that the name says what it does: it feeds nav from a terrain generator.
-## Written by Claude (claude-opus-5-5), 2026-11-07: connects a TerrainGenerator to nav, so that neither has to know the other exists. Spec:
-## docs/world/WORLD_SPEC.md. TerrainGenerator says when a chunk is built or removed. This hands its triangles to NavServer and announces its markers
-## to NavMarkerManager. It also keeps nav built around every StreamingSource, and can tick NavServer.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: world/CHANGELOG.md.
+## Feeds nav from a terrain generator, so that neither has to know the other exists.
 ##
-## How to use it: normally it's a child of a WorldCoordinator, which tells it which terrain to use. It also works as a child of a TerrainGenerator
-## with no coordinator at all. Give it a NavHooks to feed nav. With none, it only announces markers, which need no C++ library.
-##
+## Spec: docs/world/WORLD_SPEC.md. [TerrainGenerator] says when a chunk is built or removed. This hands its triangles to NavServer and
+## announces its markers to NavMarkerManager. It also keeps nav built around every streaming source (within each one's
+## [code]nav_distance[/code]), and can tick NavServer ([member tick_nav]).
+## [br]
+## How to use it: normally it's a child of a [WorldCoordinator], which tells it which terrain to use. It also works as a child of a
+## TerrainGenerator with no coordinator at all. Give it a NavHooks to feed nav. With none, it only announces markers, which need no C++
+## library.
+## [br]
 ## What happens in odd cases (all checked in world/tests/world_coordinator_selftest.gd):
-##   - No terrain: it warns and does nothing.
-##   - It arrives after chunks are built: it catches up on them.
-##   - The nav library isn't loaded: it warns, and markers still work.
-##   - It leaves the scene: nav and NavMarkerManager forget everything it told them, and it tells them again if it comes back.
+## [br]- No terrain: it warns and does nothing.
+## [br]- It arrives after chunks are built: it catches up on them.
+## [br]- The nav library isn't loaded: it warns, and markers still work.
+## [br]- It leaves the scene: nav and NavMarkerManager forget everything it told them, and it tells them again if it comes back.
+## [br]- A source's distances change while running: its nav area is remade at the new size.
 class_name TerrainNavFeeder
 extends Node
 
@@ -22,6 +26,8 @@ extends Node
 # GDScript note: @export_custom sets the inspector hint by hand. This one offers only NavHooks in the picker.
 @export_custom(PROPERTY_HINT_RESOURCE_TYPE, "NavHooks") var nav_hooks: Resource
 ## The nav system needs one tick per physics frame from somewhere. Turn this on if nothing else in the scene does it.
+# REFACTOR: ticking the whole nav library is a job for something universal, not the terrain's feeder. Every level has to remember to
+# turn it on, and a level with nav but no terrain (only BodyNavFeeders) has nothing to tick it (designer friendly). See CHANGELOG.md.
 @export var tick_nav := false
 ## How often to check where the sources are, in seconds.
 @export_range(0.0, 2.0, 0.01, "or_greater") var refresh_seconds := 0.2
@@ -33,7 +39,7 @@ var _nav_layer := -1 # our layer's number in the NavServer, or -1 for none
 var _terrain_id := 0 # our id in NavMarkerManager, or 0 when not registered
 var _fed := {} # Vector2i -> true, the chunks nav and NavMarkerManager have been told about
 var _nav_interests := {} # a source's instance id -> its interest id in NavServer
-var _nav_interest_radius := {} # Claude 2026-11-07: a source's instance id -> the radius its interest was made with
+var _nav_interest_radius := {} # a source's instance id -> the radius its interest was made with
 var _refresh_timer := 0.0
 var _listening_to: TerrainGenerator = null
 
@@ -91,7 +97,7 @@ func refresh_now() -> void:
 
 func _physics_process(delta: float) -> void:
 	if tick_nav and Engine.has_singleton("NavServer"):
-		var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+		var started := PerfScopes.begin() # timed for diagnostics (PerfScopes)
 		Engine.get_singleton("NavServer").tick(delta)
 		PerfScopes.end(&"nav.tick", started)
 
@@ -99,7 +105,7 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0:
-		var started := PerfScopes.begin() # Claude 2026-11-16: timed for diagnostics (PerfScopes)
+		var started := PerfScopes.begin() # timed for diagnostics (PerfScopes)
 		refresh_now()
 		PerfScopes.end(&"nav.refresh", started)
 
@@ -112,8 +118,8 @@ func _on_chunk_built(key: Vector2i, triangles: PackedVector3Array) -> void:
 	if uses_nav():
 		# Nav works in world positions, so it's told where the terrain is. If the terrain moves later, nav won't know until the next
 		# generate() or edit().
-		# Claude 2026-11-17 (C++ bundle stage 2): for an edit, only the part it changed is rebuilt (TerrainGenerator.edit_area).
-		# An empty area rebuilds every tile under the chunk. GDScript note: Transform3D * AABB moves a box into world space.
+		# For an edit, only the part it changed is rebuilt (TerrainGenerator.edit_area). An empty area rebuilds every tile under the
+		# chunk. GDScript note: Transform3D * AABB moves a box into world space.
 		var dirty_bounds := AABB()
 		if terrain.edit_area.size != Vector3.ZERO:
 			dirty_bounds = terrain.global_transform * terrain.edit_area
@@ -131,8 +137,8 @@ func _on_chunk_removed(key: Vector2i) -> void:
 		NavMarkerManager.release_markers(_terrain_id, key)
 
 
-## Nav knows each mesh by one number, so this packs the chunk's two grid numbers into one. Adding 2^20 keeps negative chunk numbers
-## positive, and "<<" slides the first number along so the two don't overlap.
+# Nav knows each mesh by one number, so this packs the chunk's two grid numbers into one. Adding 2^20 keeps negative chunk numbers
+# positive, and "<<" slides the first number along so the two don't overlap.
 func _nav_mesh_id(key: Vector2i) -> int:
 	return ((key.x + (1 << 20)) << 21) | (key.y + (1 << 20))
 
@@ -145,9 +151,9 @@ func _connect_to_nav() -> void:
 		return
 	_nav = Engine.get_singleton("NavServer")
 	# Mesh input, not heightmap input: nav's heightmap input needs a regular grid, and jitter moves the points off it. It also fills each
-	# column solid from the world floor, which would wipe out anything built underneath. Measured 2026-11-05 on 25 chunks of 1 m squares:
-	# the first build takes about the same as heightmap input (about 95 ms against 90 ms), and rebuilding after an edit takes about twice
-	# as long (17 ms against 8 ms).
+	# column solid from the world floor, which would wipe out anything built underneath. Measured on 25 chunks of 1 m squares: the first
+	# build takes about the same as heightmap input (about 95 ms against 90 ms), and rebuilding after an edit takes about twice as long
+	# (17 ms against 8 ms).
 	var adapter := ClassDB.class_get_integer_constant("NavServer", "ADAPTER_MESH")
 	_nav_layer = _nav.add_input_layer(terrain, nav_hooks, adapter)
 
@@ -156,8 +162,8 @@ func _connect_to_nav() -> void:
 # NavMarkerManager is plain GDScript, so all of this works without the nav library.
 
 
-## Gives NavMarkerManager a copy of where the terrain is and how big its chunks are, and gets the id its chunks' markers use. The id comes from
-## the terrain's path, so it matches on every machine.
+# Gives NavMarkerManager a copy of where the terrain is and how big its chunks are, and gets the id its chunks' markers use. The id comes
+# from the terrain's path, so it matches on every machine.
 func _register_terrain() -> void:
 	if not terrain.is_inside_tree():
 		return # it does this again when its generation starts
@@ -167,7 +173,7 @@ func _register_terrain() -> void:
 	_terrain_id = NavMarkerManager.register_terrain(str(terrain.get_path()), settings)
 
 
-## Replaces whatever this chunk has announced with a fresh list. Takes effect on NavMarkerManager's next tick.
+# Replaces whatever this chunk has announced with a fresh list. Takes effect on NavMarkerManager's next tick.
 func _announce_markers(key: Vector2i) -> void:
 	if _terrain_id == 0:
 		return
@@ -190,15 +196,14 @@ func _update_nav_interests() -> void:
 		return
 	var still_active := {}
 	for node in get_tree().get_nodes_in_group(StreamingSource.GROUP):
-		var source := node as Node3D # Claude 2026-11-16 (pawn M2): a StreamingSource or a Pawn, through the source contract
+		var source := node as Node3D # a StreamingSource or a Pawn, through the source contract (StreamingSource.gd)
 		if source == null or not source.counts_on_this_machine() or source.nav_distance <= 0.0:
 			continue
 		var id := source.get_instance_id()
 		still_active[id] = true
 		# There's no ground to build nav on past load_distance, so it can't ask for more than that.
 		var load_radius := minf(source.nav_distance, source.load_distance)
-		# Claude 2026-11-07, from the audit of 6df1464: a source whose distances changed gets a new interest of the new size. Moving
-		# the old one kept its old size, so changing nav_distance or load_distance while running did nothing.
+		# A source whose distances changed gets a new interest of the new size, since moving an interest keeps its old size.
 		if _nav_interests.has(id) and _nav_interest_radius.get(id, -1.0) != load_radius:
 			_nav.remove_interest(_nav_interests[id])
 			_nav_interests.erase(id)
@@ -221,4 +226,4 @@ func _remove_all_nav_interests() -> void:
 	for id: int in _nav_interests:
 		nav.remove_interest(_nav_interests[id])
 	_nav_interests.clear()
-	_nav_interest_radius.clear() # Claude 2026-11-07
+	_nav_interest_radius.clear()

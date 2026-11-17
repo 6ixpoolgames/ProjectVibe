@@ -1,31 +1,37 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: shared tag registry (pawn spec section 7.1, netcode spec section 13).
-## Turns tag names like "combat.melee.sword" into bits, so runtime checks are one AND instead of string compares.
+# Written by Claude (claude-opus-5-5), 2026-11-04. History: tags/CHANGELOG.md.
+## The ability tags: turns tag names like "combat.melee.sword" into bits, so checks are one AND instead of comparing text.
 ##
+## The shared tag registry of pawn spec section 7.1 and netcode spec section 13. Abilities carry these tags (a category and extra
+## categories), and lockouts, interrupts and the AI's [code]action_for_tag[/code] ask by them. Code writes them as [Tags] constants.
+## [br]
 ## How tags work:
-##   - A tag is a StringName with dot-separated levels. A dot means "sub-category": combat.melee is inside combat.
-##     Tags are names only, not class hierarchy or scene-tree position.
-##   - Every level gets its own bit. combat, combat.melee and combat.melee.sword are three bits.
-##   - A tag's MASK holds its own bit plus all its parents' bits. So a query or lockout for "combat"
-##     catches combat.melee.sword with one AND, and never catches "combatant" (whole levels only).
-##
-## Why declarations: in multiplayer every machine must give the same tag the same bit. Bits handed out on
-## first use would depend on what happened to run first. So the game lists its tags in a TagDeclarationsRes,
-## and the registry sorts and numbers them all at startup, identically everywhere.
-##
+## [br]- A tag is a StringName with dot-separated levels. A dot means "sub-category": combat.melee is inside combat. Tags are names
+##   only, not class hierarchy or scene-tree position.
+## [br]- Every level gets its own bit. combat, combat.melee and combat.melee.sword are three bits.
+## [br]- A tag's mask holds its own bit plus all its parents' bits. So a query or lockout for "combat" catches combat.melee.sword with
+##   one AND, and never catches "combatant" (whole levels only).
+## [br]- Matching is from the root only: "combat.melee" matches combat.melee.sword, "sword" doesn't.
+## [br]
+## Why declarations: in multiplayer every machine must give the same tag the same bit. Bits handed out on first use would depend on
+## what happened to run first. So the game lists its tags in a TagDeclarationsRes (resources/tag_declarations.tres), and the registry
+## sorts and numbers them all at startup, identically everywhere. The netcode handshake compares [method content_hash].
+## [br]
 ## Corner cases (all checked in tests/tag_registry_selftest.gd):
-##   - Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
-##   - Messy names ("combat..melee", " combat.melee ") are cleaned up (empty levels and spaces dropped).
-##   - A tag nobody declared, used at runtime: added on the spot with a one-time warning. Fine offline;
-##     a desync risk online, which is what the warning is for.
-##     Only setting things up adds tags (declare, bit_of, own_bit, mask_of and the list versions);
-##     queries (matches, has_tag) never do: an unknown tag just matches nothing.
-##   - Declaring after the registry is in use: same as undeclared (appended, warned). Sorting again would
-##     change bits that are already stored in masks.
-##   - More than 64 levels in total: the extra ones get no bit (mask 0, match nothing) and a warning.
-##     The mask could later become an array of ints without changing how designers use tags.
-##   - No declarations file: the registry still works, every tag is just "undeclared".
-##
-## Static class (not an autoload) so it works in headless tests and in --script mode.
+## [br]- Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
+## [br]- Messy names ("combat..melee", " combat.melee ") are cleaned up (empty levels and spaces dropped).
+## [br]- A tag nobody declared, used at runtime: added on the spot with a one-time warning. Fine offline; a desync risk online, which
+##   is what the warning is for. Only setting things up adds tags ([method declare], [method bit_of], [method own_bit],
+##   [method mask_of] and the list versions); queries ([method matches], [method has_tag]) never do: an unknown tag just matches
+##   nothing.
+## [br]- Declaring after the registry is in use: same as undeclared (appended, warned). Sorting again would change bits that are
+##   already stored in masks.
+## [br]- More than 64 levels in total: the extra ones get no bit (mask 0, match nothing) and a warning. The mask could later become an
+##   array of ints without changing how designers use tags.
+## [br]- No declarations file: the registry still works, every tag is just "undeclared".
+## [br]
+## A static class (not an autoload), so it works in headless tests and in --script mode.
+# REFACTOR: NavTags (navigation/) and EffectTags (effects/) are copies of these rules, made on purpose so working code didn't change.
+# One tag-set class, used once per tag set, would be one place to fix and test, and a game's own tag set would come free (reusable).
 class_name TagRegistry
 extends RefCounted
 
@@ -134,11 +140,6 @@ static func has_tag(tag) -> bool:
 	return _bit_of.has(normalize(tag))
 
 
-# Claude 2026-11-04: removed the any-level search (level_mask / matches_level, e.g. "sword" finding
-# combat.melee.sword and crafting.sword). The owner wants it made more robust before it's offered;
-# tier 0 matches from the root only.
-
-
 ## Tag names for the bits in a mask, in bit order. For debug text.
 static func names_of(mask: int) -> Array[StringName]:
 	_ensure_ready()
@@ -149,6 +150,7 @@ static func names_of(mask: int) -> Array[StringName]:
 	return out
 
 
+## How many tags have a bit.
 static func get_tag_count() -> int:
 	_ensure_ready()
 	return _tags.size()
@@ -167,7 +169,7 @@ static func content_hash() -> int:
 	return ",".join(PackedStringArray(_tags)).hash()
 
 
-## Claude 2026-11-10: every tag the declarations file declares, with each one's parent levels, sorted: the list a tag dropdown offers
+## Every tag the declarations file declares, with each one's parent levels, sorted: the list a tag dropdown offers
 ## (addons/tag_picker). It only reads the file, so it changes nothing here: safe in the editor, and before or after the registry is
 ## in use. Tags declared from code (declare()) aren't in it.
 static func read_declared_tags() -> Array[StringName]:
@@ -205,7 +207,7 @@ static func normalize(tag) -> StringName:
 
 # --- Internals ---------------------------------------------------------------------------------
 
-## First real use: read the declarations file (once), then number every declared level in sorted order.
+# First real use: read the declarations file (once), then number every declared level in sorted order.
 static func _ensure_ready() -> void:
 	if _frozen:
 		return
@@ -239,7 +241,7 @@ static func _read_declarations_file() -> void:
 		push_warning("[TagRegistry] %s is not a TagDeclarationsRes; no tags declared" % path)
 
 
-## Adds a tag (and any missing parent levels) after startup numbering.
+# Adds a tag (and any missing parent levels) after startup numbering.
 static func _add_late(tag: StringName, why: String) -> void:
 	_ensure_ready()
 	var path := ""

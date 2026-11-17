@@ -1,17 +1,19 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: the one job scheduler every job kind shares (scaling spec section 4, tier 1 step
-## 2). The scheduler itself is C++ (JobScheduler in navcore): worker threads that take batches of plain-data work, such as the sensing
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: jobs/README.md.
+## Finds the one job scheduler every job kind shares (scaling spec section 4).
+##
+## The scheduler itself is C++ (JobScheduler in navcore): worker threads that take batches of plain-data work, such as the sensing
 ## job (AISensingJob), from one shared queue. This class only holds it, so any script can find it, and keeps the two settings a game
 ## or a test might change.
-##
-## Not an autoload and never instanced: everything here is static (minimize autoloads). GDScript note: a static var belongs to the
-## class, not to an object, so there's one of each for the whole game, like Pawn's shared table.
-##
-## Without the C++ library, get_scheduler() returns null and every job kind runs the old way, on the main thread.
+## [br]
+## Not an autoload and never instanced: everything here is static (few autoloads). GDScript note: a static var belongs to the class,
+## not to an object, so there's one of each for the whole game, like Pawn's shared table.
+## [br]
+## Without the C++ library, [method get_scheduler] returns null and every job kind runs on the main thread instead.
 class_name TickJobs
 extends RefCounted
 
-## Off: no jobs. Everything runs on the main thread exactly as before tier 1 step 2. On by default; read when each part is ready, so
-## set it before pawns are made.
+## Off: no jobs, and every job kind runs on the main thread. On by default; read when each part is ready, so set it before pawns are
+## made.
 static var enabled := true
 
 # The scheduler, made on first use. Untyped, because the C++ class only exists when the library loads.
@@ -39,5 +41,6 @@ static func set_worker_count(count: int) -> void:
 		_scheduler.set_worker_count(count)
 
 
+## The worker count last set with [method set_worker_count]: -1 means sized to the machine.
 static func get_worker_count_setting() -> int:
 	return _worker_count

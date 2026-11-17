@@ -1,7 +1,8 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: see sight_geometry.h.
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// SightGeometry: line of sight (and the ground) in C++. Described in sight_geometry.h.
 #include "sight_geometry.h"
 
-#include <godot_cpp/classes/animatable_body3d.hpp> // Claude 2026-11-17
+#include <godot_cpp/classes/animatable_body3d.hpp>
 #include <godot_cpp/classes/area3d.hpp>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/box_shape3d.hpp>
@@ -11,7 +12,7 @@
 #include <godot_cpp/classes/cylinder_shape3d.hpp>
 #include <godot_cpp/classes/shape3d.hpp>
 #include <godot_cpp/classes/sphere_shape3d.hpp>
-#include <godot_cpp/classes/static_body3d.hpp> // Claude 2026-11-17
+#include <godot_cpp/classes/static_body3d.hpp>
 #include <godot_cpp/classes/world_boundary_shape3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/core/object.hpp>
@@ -120,7 +121,7 @@ void SightGeometry::mark_dirty(Object *object) {
 	}
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2): a shape changed; every body using it is read again at the next sync.
+// A shape changed; every body using it is read again at the next sync.
 void SightGeometry::on_shape_changed(uint64_t shape_id) {
 	auto found = _shape_watchers.find(shape_id);
 	if (found != _shape_watchers.end()) {
@@ -128,7 +129,7 @@ void SightGeometry::on_shape_changed(uint64_t shape_id) {
 	}
 }
 
-// Claude 2026-11-17 (C++ bundle stage 2): a body leaving stops being marked by its shapes. The connection itself stays (it's one
+// A body leaving stops being marked by its shapes. The connection itself stays (it's one
 // per shape, and a shape nobody watches just marks nothing); it's dropped with the shape or this geometry.
 void SightGeometry::unwatch_shapes(const Body &body) {
 	for (uint64_t shape_id : body.watched_shapes) {
@@ -167,7 +168,7 @@ int64_t SightGeometry::sync(int64_t tick) {
 		change();
 		const uint32_t slot = found->second;
 		unplace(slot);
-		unwatch_shapes(_bodies[slot]); // Claude 2026-11-17
+		unwatch_shapes(_bodies[slot]);
 		_bodies[slot] = Body();
 		_free_slots.push_back(slot);
 		_slot_of.erase(found);
@@ -208,14 +209,14 @@ int64_t SightGeometry::sync(int64_t tick) {
 		if (node == nullptr || !node->is_inside_tree()) {
 			change(); // freed, or left the tree without telling us
 			unplace(slot);
-			unwatch_shapes(body); // Claude 2026-11-17
+			unwatch_shapes(body);
 			_slot_of.erase(body.id);
 			body = Body();
 			_free_slots.push_back(slot);
 			continue;
 		}
 		// A new tick checks every body for a move or a new layer; within the same tick, only the ones marked.
-		// Claude 2026-11-17 (C++ bundle stage 2): a static body only every FIXED_CHECK_TICKS ticks, each on its own tick of them
+		// A static body only every FIXED_CHECK_TICKS ticks, each on its own tick of them
 		// (by its slot), so the checks are spread out instead of all landing on one tick (% is the remainder).
 		const bool due = new_tick && (!body.fixed || (uint64_t(tick) + slot) % FIXED_CHECK_TICKS == 0);
 		const bool moved = due && (node->get_global_transform() != body.transform || node->get_collision_layer() != body.layer);
@@ -284,14 +285,14 @@ void SightGeometry::clear() {
 	_pending_add.clear();
 	_pending_remove.clear();
 	_pending_dirty.clear();
-	_shape_watchers.clear(); // Claude 2026-11-17
+	_shape_watchers.clear();
 	_synced_tick = -1;
 }
 
 // --- Building ---
 
 void SightGeometry::before_change() {
-	_change_guard.before_change(); // Claude 2026-11-17: waits for every reader (change_guard.h)
+	_change_guard.before_change(); // waits for every reader (change_guard.h)
 }
 
 void SightGeometry::rebuild(uint32_t slot, CollisionObject3D *node) {
@@ -302,7 +303,7 @@ void SightGeometry::rebuild(uint32_t slot, CollisionObject3D *node) {
 	body.dirty = false;
 	body.transform = node->get_global_transform();
 	body.layer = node->get_collision_layer();
-	// Claude 2026-11-17: AnimatableBody3D extends StaticBody3D, but it's made to move, so it's checked every tick.
+	// AnimatableBody3D extends StaticBody3D, but it's made to move, so it's checked every tick.
 	body.fixed = Object::cast_to<StaticBody3D>(node) != nullptr && Object::cast_to<AnimatableBody3D>(node) == nullptr;
 	const PackedInt32Array owners = node->get_shape_owners();
 	for (int64_t o = 0; o < owners.size(); ++o) {
@@ -318,7 +319,7 @@ void SightGeometry::rebuild(uint32_t slot, CollisionObject3D *node) {
 				continue;
 			}
 			// A shape whose resource changes (a terrain chunk's triangles after an edit, a box resized) marks this body.
-			// Claude 2026-11-17 (C++ bundle stage 2): through _shape_watchers, with one connection per shape (see the header).
+			// Through _shape_watchers, with one connection per shape (see the header).
 			const uint64_t shape_id = shape->get_instance_id();
 			if (std::find(body.watched_shapes.begin(), body.watched_shapes.end(), shape_id) == body.watched_shapes.end()) {
 				body.watched_shapes.push_back(shape_id);
@@ -494,7 +495,7 @@ bool SightGeometry::blocked(const Vector3 &from, const Vector3 &to, uint32_t mas
 		const double t_out = std::min(std::min(next_x, next_z), 1.0);
 		auto cell = _cells.find(cell_key(cx, cz));
 		if (cell != _cells.end() && (cell->second.layers & mask) != 0) {
-			// Claude 2026-11-09: skip the cell if the ray is above or below everything in it while it crosses.
+			// Skip the cell if the ray is above or below everything in it while it crosses.
 			const double y_in = from.y + dy * t_in;
 			const double y_out = from.y + dy * t_out;
 			if (std::min(y_in, y_out) <= cell->second.top && std::max(y_in, y_out) >= cell->second.bottom) {
@@ -529,7 +530,7 @@ bool SightGeometry::hits(const CellEntry &ref, const Vector3 &from, const Vector
 	return (piece.layer & mask) != 0 && segment_hits_piece(piece, from, to);
 }
 
-// --- The ground (Claude 2026-11-17, C++ bundle stage 3) ---
+// --- The ground (for CrowdBatch) ---
 
 int SightGeometry::ground_at(double x, double z, double top, double bottom, uint32_t mask, double &height, Vector3 &normal) const {
 	// Braces, not brackets: "Vector3 from(real_t(x), ...)" reads to C++ as a function declaration.
@@ -831,7 +832,6 @@ bool SightGeometry::segment_hits_piece(const Piece &piece, const Vector3 &from, 
 }
 
 void SightGeometry::_bind_methods() {
-	// Claude 2026-11-17 (C++ bundle stage 3)
 	ClassDB::bind_method(D_METHOD("find_ground", "point", "top", "bottom", "mask"), &SightGeometry::find_ground);
 	ClassDB::bind_method(D_METHOD("add_body", "body"), &SightGeometry::add_body);
 	ClassDB::bind_method(D_METHOD("remove_body", "body"), &SightGeometry::remove_body);

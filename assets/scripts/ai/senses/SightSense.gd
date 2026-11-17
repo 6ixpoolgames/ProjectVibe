@@ -1,38 +1,44 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: sight, for basic stealth. A child of the pawn's AISensingManager. Pawn spec
-## section 10.4.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## Sight, for basic stealth: fills awareness of other-team pawns it can see, faster when they're close and in front.
 ##
-## For each other-team pawn it checks, on a full pass or a refresh:
-##     if there's no line of sight: no gain
-##     gain = fill_rate × ticks_since_last_check × distance_factor × angle_factor × target.detectability
-##   - ticks_since_last_check makes the checking rate not matter: a target checked every 10 ticks gets 10 ticks' worth. It's capped
-##     at max_gain_ticks, so a pawn that wasn't sensing for a while (say while possessed with while_possessed OFF) doesn't jump.
-##   - distance_factor: 1 inside near_range, falling in a straight line to 0 at sight_range.
-##   - angle_factor: 1 inside the central cone, periphery_multiplier in the periphery, nothing outside it. Angles are measured flat,
-##     from the direction the pawn's eyes face (below).
-##   - target.detectability: the target pawn's own number, 1 normally. Games set it from their stealth rules.
-## With the defaults, someone close and in front fills awareness in half a second, which is basically instant; someone 20 m away
-## at the edge of the periphery takes several seconds.
-##
-## Line of sight is one ray, from eye_height above this pawn's feet to target_height above the target's feet. Only layers in
-## sight_blocking_mask block it: the world (layer 1) by default, so other pawns don't hide each other.
-## Claude 2026-11-09 (scaling spec step 4): with the C++ library, the ray is tested in C++ against SightGeometry (SightGeometryFeeder
-## keeps it fed), on worker threads when the sensing job runs, instead of a physics ray. A mask that includes the pawns' own layer
-## keeps physics rays, because pawns aren't in the geometry.
-##
-## Which way the eyes face: where the AI is looking when it has a look target (AIController.look_at_point), or else the way the
-## body faces. While a player has the pawn, where the player looks. So a goblin looking toward a noise sees that way, and a walking
-## goblin sees where it's going.
-##
+## A child of the pawn's AISensingManager. Pawn spec section 10.4. For each other-team pawn it checks, on a full pass or a refresh:
+## [codeblock]
+## if there's no line of sight: no gain
+## gain = fill_rate × ticks_since_last_check × distance_factor × angle_factor × target.detectability
+## [/codeblock]
+## [br]- ticks_since_last_check makes the checking rate not matter: a target checked every 10 ticks gets 10 ticks' worth. It's capped
+##   at [member max_gain_ticks], so a pawn that wasn't sensing for a while (say while possessed with while_possessed OFF) doesn't jump.
+## [br]- distance_factor: 1 inside [member near_range], falling in a straight line to 0 at [member sight_range].
+## [br]- angle_factor: 1 inside the central cone, [member periphery_multiplier] in the periphery, nothing outside it. Angles are
+##   measured flat, from the direction the pawn's eyes face (below).
+## [br]- target.detectability: the target pawn's own number, 1 normally (its Detectability stat). Games set it from their stealth
+##   rules.
+## [br]
+## With the defaults, someone close and in front fills awareness in half a second, which is basically instant; someone 20 m away at
+## the edge of the periphery takes several seconds.
+## [br]
+## Line of sight is one ray, from [member eye_height] above this pawn's feet to [member target_height] above the target's feet. Only
+## layers in [member sight_blocking_mask] block it: the world (layer 1) by default, so other pawns don't hide each other. With the C++
+## library, the ray is tested in C++ against SightGeometry ([SightGeometryFeeder] keeps it fed), on worker threads when the sensing
+## job runs, instead of a physics ray (scaling spec step 4). A mask that includes the pawns' own layer keeps physics rays, because
+## pawns aren't in the geometry.
+## [br]
+## Which way the eyes face: where the AI is looking when it has a look target (AIController.look_at_point), or else the way the body
+## faces. While a player has the pawn, where the player looks. So a goblin looking toward a noise sees that way, and a walking goblin
+## sees where it's going.
+## [br]
 ## Refreshes check only the current target, the same way, so a tracked target stays fresh between full passes for one ray.
-##
-## Claude 2026-11-09: the checks themselves run in the pawn's memory store, AIMemoryStore in C++ when available (AIMemoryStoreGD
-## otherwise), with these settings handed over each pass. visibility_of() and has_line_of_sight() below are the same rules in
-## GDScript, for tests and debug readouts.
+## [br]
+## The checks themselves run in the pawn's memory store, AIMemoryStore in C++ when available ([AIMemoryStoreGD] otherwise), with
+## these settings handed over each pass. [method visibility_of] and [method has_line_of_sight] are the same rules in GDScript, for
+## tests and debug readouts.
+# REFACTOR: visibility_of() and has_line_of_sight() are a third copy of the sight rule (beside AIMemoryStoreGD and C++'s
+# ai_sight_rules.h). Asking the pawn's memory store would leave one GDScript copy to keep in step (reusable). See CHANGELOG.md.
 class_name SightSense
 extends AISenseBase
 
-## Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Claude 2026-11-09 (scaling spec step 6):
-## per tick at 60 ticks a second, like every setting here counted in ticks; at another rate it's converted to fill at the same speed.
+## Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Per tick at 60 ticks a second, like
+## every setting here counted in ticks; at another rate it's converted to fill at the same speed.
 @export_range(0.0, 1.0, 0.001, "or_greater") var fill_rate := 1.0 / 30.0
 ## Inside this distance, in metres, distance doesn't weaken sight at all.
 @export_range(0.0, 200.0, 0.5, "or_greater") var near_range := 8.0
@@ -55,47 +61,48 @@ extends AISenseBase
 
 # Reused for every ray, so checks create no new objects.
 var _ray := PhysicsRayQueryParameters3D.new()
-# Claude 2026-11-09: the settings handed to memory's store each pass, in the order AIMemoryStore.set_sight_settings takes them.
+# The settings handed to memory's store each pass, in the order AIMemoryStore.set_sight_settings takes them.
 var _settings := PackedFloat64Array()
 var _one_target: Array = [null] # reused for a refresh's single check
 
 
+## Its [member sight_range].
 func get_range() -> float:
 	return sight_range
 
 
-## Claude 2026-11-09: the whole pass runs in memory's store (C++ when available, else GDScript), with this sense's settings.
+## The whole pass runs in memory's store (C++ when available, else GDScript), with this sense's settings.
 func full_pass(candidates: Array[Pawn], tick: int) -> void:
 	_check_all(candidates, tick)
 
 
-## Claude 2026-11-09 (scaling spec step 2): the full pass with the sensing job's result: the job found the candidates and how visible
-## each is, on a worker thread; this casts the rays and records, the same as full_pass would. AISensingManager calls it.
+## The full pass with the sensing job's result: the job found the candidates, how visible each is and (against SightGeometry) the
+## line of sight, on a worker thread; this records them, the same as full_pass would. AISensingManager calls it.
 func full_pass_prepared(job: Object, tick: int) -> void:
 	var memory := pawn.ai_context.memory if pawn and pawn.ai_context else null
 	if memory == null:
 		return
 	var store: Object = memory.get_store()
-	# Claude 2026-11-16 (wider audit): the settings ask_job filled a tick ago, for this same pass; they were worked out again here.
+	# The settings ask_job filled a tick ago, for this same pass.
 	if _settings.size() != 11:
 		_fill_settings()
 	store.set_sight_settings(_settings)
-	store.set_sight_geometry(SightGeometryFeeder.get_geometry()) # Claude 2026-11-09 (step 4)
+	store.set_sight_geometry(SightGeometryFeeder.get_geometry())
 	memory.announce_sight_results(store.sight_check_prepared(job, pawn, tick))
 
 
-## Claude 2026-11-09 (step 2): asks the sensing job for next tick's full pass, with where the eyes face now and this sense's settings.
+## Asks the sensing job for next tick's full pass, with where the eyes face now and this sense's settings.
 func ask_job(job: Object, reach: float, max_candidates: int) -> void:
 	_fill_settings()
 	job.add_request(pawn, _eye_yaw(), reach, max_candidates, _settings)
 
 
-## Claude 2026-11-09: only the current target, one ray. Refreshing every remembered entity cost more than the full passes in a crowd
-## (measured with ai_stress), and keeping a tracked target fresh is what the refresh is for.
+## Only the current target, one ray. Refreshing every remembered entity costs more than the full passes in a crowd (measured with
+## ai_stress), and keeping a tracked target fresh is what the refresh is for.
 func refresh(tick: int) -> void:
 	var context := pawn.ai_context if pawn else null
-	# Claude 2026-11-12: has_target() first. The target can be freed between AI steps (a spawner removing a body), and casting a
-	# freed object is a script error, which stopped the faction arena.
+	# has_target() first. The target can be freed between AI steps (a spawner removing a body), and casting a freed object is a
+	# script error.
 	var target := context.current_target as Pawn if context and context.has_target() else null
 	if target and target.is_inside_tree():
 		_one_target[0] = target
@@ -163,24 +170,24 @@ func _visibility(target: Pawn) -> float:
 	return distance_factor * angle_factor * target.detectability
 
 
-# Claude 2026-11-09: hands the checks to memory's store, then lets memory wake a decision and send its signals.
+# Hands the checks to memory's store, then lets memory wake a decision and send its signals.
 func _check_all(targets: Array, tick: int) -> void:
 	var memory := pawn.ai_context.memory if pawn and pawn.ai_context else null
 	if memory == null:
 		return
 	var store: Object = memory.get_store()
-	_fill_settings() # Claude 2026-11-09 (step 2): moved into a function, which the job's request uses too
+	_fill_settings()
 	store.set_sight_settings(_settings)
-	# Claude 2026-11-09 (scaling spec step 4): line of sight in C++ where the C++ store runs; the GDScript store casts physics rays.
+	# Line of sight in C++ where the C++ store runs; the GDScript store casts physics rays.
 	if store.has_method(&"set_sight_geometry"):
 		store.set_sight_geometry(SightGeometryFeeder.get_geometry())
 	memory.announce_sight_results(store.sight_check(pawn, _eye_yaw(), targets, tick))
 
 
-# Claude 2026-11-09 (step 2): the settings for memory's store and the sensing job, in AIMemoryStore.set_sight_settings' order.
+# The settings for memory's store and the sensing job, in AIMemoryStore.set_sight_settings' order.
 func _fill_settings() -> void:
 	_settings.resize(11)
-	_settings[0] = TickDriver.per_tick_at_rate(fill_rate) # Claude 2026-11-09 (scaling spec step 6): per tick at 60, so the same per second
+	_settings[0] = TickDriver.per_tick_at_rate(fill_rate) # per tick at 60, so the same per second at any rate
 	_settings[1] = near_range
 	_settings[2] = sight_range
 	_settings[3] = cos(deg_to_rad(central_cone_degrees * 0.5))
@@ -193,8 +200,9 @@ func _fill_settings() -> void:
 	_settings[10] = TickDriver.ticks_at_rate(manager.sense_interval_ticks if manager else 10)
 
 
+# Which way the eyes face, as a yaw: see the class description.
 func _eye_yaw() -> float:
-	var controllers := pawn.controller_manager # Claude 2026-11-16 (pawn M4)
+	var controllers := pawn.controller_manager
 	if controllers and controllers.has_player():
 		return controllers.look_yaw # where the player looks
 	var hands := pawn.controller_manager.ai_controller as AIController if pawn.controller_manager else null

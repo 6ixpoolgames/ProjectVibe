@@ -1,29 +1,32 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: one player's controls. It's a placeholder for now: enough to drive a pawn and aim a
-## camera. It survives with no pawn, as Unreal's does, and PossessionCoordinator creates it and tells it which pawn it has.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: player/CHANGELOG.md.
+## One player's controls: reads their devices, aims their camera, and gives their pawn input.
 ##
+## A first version: enough to drive a pawn and aim a camera. It survives with no pawn, as Unreal's does, and PossessionCoordinator
+## creates it and tells it which pawn it has (pawn spec sections 5 and 6.2).
+## [br]
 ## What it does:
-##   - reads the player's devices, on this machine only
-##   - holds the look direction, and tells the current arm where to look
-##   - gives its pawn this tick's input, as plain data. Claude 2026-11-07: the pawn's ControllerManager asks for it, with
-##     take_input_command(), so this no longer ticks on its own.
-##
-## What it doesn't do: move anything. The pawn's movement module does that, so an RTS or a flying pawn needs no special controller.
-##
+## [br]- reads the player's devices, on this machine only
+## [br]- holds the look direction, and tells the current camera arm where to look
+## [br]- gives its pawn this tick's input as an InputCommand, when the pawn's ControllerManager asks ([method take_input_command]).
+##   Named actions (jump, sprint, ...) come from keys through [member action_keys].
+## [br]- owns the player's one camera arm, which moves to each pawn they take (CameraMount, pawn spec 8.18)
+## [br]
+## What it doesn't do: move anything. The pawn's abilities do that, so an RTS or a flying pawn needs no special controller.
+## [br]
 ## To drive it from a script, as a test or a replay viewer would, extend it and override the _read functions.
-##
-## Claude 2026-11-07: now extends ControllerBase, which holds pawn and pawn_changed. Each tick it builds an InputCommand, with named
-## actions (jump, sprint, ...) mapped from keys by action_keys. Pawn spec sections 5 and 6.2.
-##
-## Claude 2026-11-16 (the owner's request): spectating. PossessionCoordinator.spectate() lets go of the pawn and calls start_spectating(),
-## and the player flies a FreeFlyCamera (spectator_scene) with the same keys and mouse, the view starting where the camera was. Taking a
-## pawn stops it. Nothing starts it by itself: the game decides when a player spectates (between matches, waiting to respawn, after
-## letting go of a pawn). The controls are at the top of FreeFlyCamera.gd.
-##
+## [br]
+## [b]Spectating.[/b] PossessionCoordinator.spectate() lets go of the pawn and calls [method start_spectating], and the player flies a
+## FreeFlyCamera ([member spectator_scene]) with the same keys and mouse, the view starting where the camera was. Taking a pawn stops
+## it. Nothing starts it by itself: the game decides when a player spectates (between matches, waiting to respawn, after letting go
+## of a pawn). The controls are in FreeFlyCamera's description.
+## [br]
 ## What happens in odd cases (all checked in pawn/tests/possession_selftest.gd):
-##   - No pawn: it keeps reading look input, and nothing moves.
-##   - Claude 2026-11-16: spectating with a pawn still attached, as on a client between asking to let go and the server's answer: the
-##     keys fly the spectator and the pawn gets no movement or actions from them. The answer then lets go without stopping the spectating.
-##   - An action missing from the project's input map: treated as not pressed.
+## [br]- No pawn: it keeps reading look input, and nothing moves.
+## [br]- Spectating with a pawn still attached, as on a client between asking to let go and the server's answer: the keys fly the
+##   spectator and the pawn gets no movement or actions from them. The answer then lets go without stopping the spectating.
+## [br]- An action missing from the project's input map: treated as not pressed.
+# REFACTOR: the InputMap names for moving, the wheel and the mouse buttons (move_left, scrollWheel_up, left_click, middleMouse_button)
+# are written in the code, unlike action_keys; settings would let a designer remap them without code. See CHANGELOG.md.
 class_name PlayerController
 extends ControllerBase
 
@@ -41,35 +44,34 @@ enum LookMode {
 @export_range(0.01, 0.5, 0.01) var edge_zone := 0.125
 ## How fast the view turns at the very edge, in degrees per second, in SCREEN_EDGE mode.
 @export var edge_turn_speed := 150.0
-## On: clicking the ground walks there, along a nav path. Claude 2026-11-08: the pawn's NavigationManager finds and follows it.
+## On: clicking the ground walks there, along a nav path. The pawn's NavigationManager finds and follows it.
 @export var click_to_move := false
 ## Which key in the project's input map presses which named action. The left side is an action from InputActions, and the right is an
 ## action in Project Settings > Input Map. An action with no key here is never pressed by the player.
-# Claude 2026-11-07: new, replacing the fixed reads of move_jump and move_sprint.
 # GDScript note: Dictionary[StringName, StringName] is a typed dictionary, so the inspector only accepts names on both sides.
-# Claude 2026-11-09: dash (Left Alt) and primary (the left mouse button, a melee swing) added, step 9.
+# dash is Left Alt and primary the left mouse button (a melee swing).
 @export var action_keys: Dictionary[StringName, StringName] = {&"jump": &"move_jump", &"sprint": &"move_sprint", &"dash": &"move_dash", &"primary": &"attack_primary"}
-## Claude 2026-11-16: the free-flying camera used while spectating (start_spectating()). Its root must be a FreeFlyCamera. Empty: a
+## The free-flying camera used while spectating (start_spectating()). Its root must be a FreeFlyCamera. Empty: a
 ## FreeFlyCamera with its default settings.
 @export var spectator_scene: PackedScene
-## Claude 2026-11-16 (the owner's call: match jump and crouch): the keys (InputMap actions) that fly the spectator straight up and down.
+## The keys (InputMap actions) that fly the spectator straight up and down: jump and crouch by default, so flying matches walking.
 @export var fly_up_key: StringName = &"move_jump"
 @export var fly_down_key: StringName = &"move_crouch"
 
 ## The real camera. It holds where it is while there's no view to follow.
 var camera: PlayerCamera = null
 ## What the mouse or crosshair points at. It's off until something asks it.
-var world_cursor: WorldCursor = null # Claude 2026-11-07: renamed from cursor, to match its class
+var world_cursor: WorldCursor = null
 ## Where the player is looking, in radians.
 var look_yaw := 0.0
 var look_pitch := 0.0
 
-# Claude 2026-11-07: replaces _jump_latched. Actions pressed since the last tick, as bits, so a tap shorter than a tick still counts.
+# Actions pressed since the last tick, as bits, so a tap shorter than a tick still counts.
 var _latched_actions := 0
 var _zoom_steps := 0.0
 var _arm: CameraArm = null
-var _own_arm: CameraArm = null # Claude 2026-11-16 (pawn M5): the player's one arm, moved to each pawn they take; made when first needed
-var _spectator: FreeFlyCamera = null # Claude 2026-11-16: made the first time it spectates, and kept
+var _own_arm: CameraArm = null # the player's one arm, moved to each pawn they take; made when first needed
+var _spectator: FreeFlyCamera = null # made the first time it spectates, and kept
 var _spectating := false
 
 
@@ -84,7 +86,7 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
-	# Claude 2026-11-07: no longer registered with the tick driver. It lets go of its pawn's ControllerManager instead.
+	# It lets go of its pawn's ControllerManager.
 	if is_instance_valid(pawn) and pawn.controller_manager:
 		pawn.controller_manager.detach_player(self)
 	if is_instance_valid(camera) and not camera.is_inside_tree():
@@ -98,12 +100,11 @@ func _exit_tree() -> void:
 func take_pawn(new_pawn: Pawn) -> void:
 	if pawn == new_pawn:
 		return
-	# Claude 2026-11-16: a pawn has the keys now, so spectating stops. The pawn's view is set below.
+	# A pawn has the keys now, so spectating stops. The pawn's view is set below.
 	if new_pawn != null and _spectating:
 		stop_spectating()
 	_let_go_of_arm()
-	# Claude 2026-11-07: the pawn's ControllerManager asks this controller for input while it's attached, instead of this controller
-	# registering with the tick driver and pushing input.
+	# The pawn's ControllerManager asks this controller for input while it's attached.
 	if is_instance_valid(pawn) and pawn.controller_manager:
 		pawn.controller_manager.detach_player(self)
 	pawn = new_pawn
@@ -112,13 +113,13 @@ func take_pawn(new_pawn: Pawn) -> void:
 	elif pawn:
 		push_warning("PlayerController: %s has no ControllerManager, so this controller can't drive it. Check its skip_default_parts." % pawn.name)
 	if pawn == null:
-		# Claude 2026-11-16: unless spectating, which keeps its own view and the mouse (a client's release arrives after it starts).
+		# Unless spectating, which keeps its own view and the mouse (a client's release arrives after it starts).
 		if not _spectating:
 			camera.set_view(null)
 			_show_mouse()
-		_latched_actions = 0 # Claude 2026-11-07: a press before letting go doesn't belong to the next pawn
+		_latched_actions = 0 # a press before letting go doesn't belong to the next pawn
 	else:
-		# Claude 2026-11-16 (pawn M5): a pawn's own placed arm or view is used as it is; otherwise the player's one arm moves to the pawn's mount.
+		# A pawn's own placed arm or view is used as it is; otherwise the player's one arm moves to the pawn's mount.
 		_arm = CameraMount.arm_of(pawn)
 		if _arm == null and CameraMount.view_of(pawn) == null:
 			_arm = _attach_own_arm(pawn)
@@ -137,7 +138,7 @@ func take_pawn(new_pawn: Pawn) -> void:
 # --- Spectating ---
 
 
-## Claude 2026-11-16: flies a FreeFlyCamera with the player's keys and mouse, starting where the camera is now. Taking a pawn stops it.
+## Flies a FreeFlyCamera with the player's keys and mouse, starting where the camera is now. Taking a pawn stops it.
 ## Games ask PossessionCoordinator.spectate(), which lets go of the pawn first and keeps track; calling this directly is for tests.
 func start_spectating() -> void:
 	if _spectating:
@@ -156,7 +157,7 @@ func start_spectating() -> void:
 	_capture_mouse()
 
 
-## Claude 2026-11-16: stops flying. The camera holds where it is until there's a pawn. Games ask PossessionCoordinator.stop_spectating().
+## Stops flying. The camera holds where it is until there's a pawn. Games ask PossessionCoordinator.stop_spectating().
 func stop_spectating() -> void:
 	if not _spectating:
 		return
@@ -167,7 +168,7 @@ func stop_spectating() -> void:
 		_show_mouse()
 
 
-## Claude 2026-11-16: while spectating, moves the spectator to this place and faces it the same way, as for an overview point. False
+## While spectating, moves the spectator to this place and faces it the same way, as for an overview point. False
 ## when not spectating, and nothing moves.
 func place_spectator(at: Transform3D) -> bool:
 	if not _spectating or not is_instance_valid(_spectator):
@@ -177,12 +178,12 @@ func place_spectator(at: Transform3D) -> bool:
 	return true
 
 
-## Claude 2026-11-16: true while flying a FreeFlyCamera.
+## True while flying a FreeFlyCamera.
 func is_spectating() -> bool:
 	return _spectating
 
 
-## Claude 2026-11-16: the FreeFlyCamera, or null before the first time it spectates. For tests and debug tools.
+## The FreeFlyCamera, or null before the first time it spectates. For tests and debug tools.
 func get_spectator() -> FreeFlyCamera:
 	return _spectator
 
@@ -190,28 +191,29 @@ func get_spectator() -> FreeFlyCamera:
 # --- Input for the pawn ---
 
 
-## Claude 2026-11-07: this tick's input, from the devices. It uses up the presses saved since the last tick, so call it once per tick.
+## This tick's input, from the devices. It uses up the presses saved since the last tick, so call it once per tick.
 func take_input_command(_tick: int) -> InputCommand:
 	var command := InputCommand.new()
 	var wanted := _read_move()
 	# Godot's forward is -Z, and move input's Y is backward, the way Input.get_vector gives it.
 	command.move = Basis(Vector3.UP, look_yaw) * Vector3(wanted.x, 0.0, wanted.y)
-	# Keys take over from a click. A path left unfinished is dropped.
-	# Claude 2026-11-08: the path lives on the pawn's NavigationManager now, not here.
+	# Keys take over from a click. A path left unfinished is dropped. The path lives on the pawn's NavigationManager.
+	# REFACTOR: following a path and pressing a link's action is written out here and in AIController.take_input_command; one shared
+	# helper would keep them alike (duplicated logic). See CHANGELOG.md.
 	var navigation := _navigation()
 	var link_press := 0
 	if navigation:
 		if wanted.length_squared() > 0.01:
 			navigation.stop()
-		elif navigation.is_under_way(): # Claude 2026-11-16: was is_following_path; a click waiting for nav (PENDING) counts too
+		elif navigation.is_under_way(): # a click waiting for nav (PENDING) counts too
 			command.move = navigation.get_move_direction()
-			# Claude 2026-11-08: a link the path just reached may need an action, such as jump, pressed for this tick.
+			# A link the path just reached may need an action, such as jump, pressed for this tick.
 			var action := navigation.take_link_action()
 			if action != &"":
 				link_press = InputActions.mask_of(action)
 	command.look_yaw = look_yaw
 	command.look_pitch = look_pitch
-	# Claude 2026-11-09: how far behind this client draws others, so the server judges its swings against what it saw (step 9).
+	# How far behind this client draws others, so the server judges its swings against what it saw (lag compensation).
 	var session: Node = get_node_or_null("/root/NetworkSession")
 	command.view_ticks_behind = session.get_view_ticks_behind() if session else 0.0
 	# Held now, or pressed and let go again since the last tick.
@@ -220,16 +222,15 @@ func take_input_command(_tick: int) -> InputCommand:
 	for action: StringName in action_keys:
 		if _read_action_held(action):
 			command.held_actions |= InputActions.mask_of(action)
-	# Claude 2026-11-16: spectating, the keys fly the spectator, so a pawn still attached (a client waiting for its release) gets none.
+	# Spectating, the keys fly the spectator, so a pawn still attached (a client waiting for its release) gets none.
 	if _spectating:
 		command.move = Vector3.ZERO
 		command.held_actions = 0
 	return command
 
 
-## Walks the pawn to this place along a nav path, and in a straight line if there's no nav here. Keys take over from it.
-## Claude 2026-11-08: passes on to the pawn's NavigationManager. False if there's no pawn, it has no NavigationManager, or there's
-## no way there.
+## Walks the pawn to this place along a nav path, and in a straight line if there's no nav here. Keys take over from it. Passes on
+## to the pawn's NavigationManager. False if there's no pawn, it has no NavigationManager, or there's no way there.
 func move_to(world_point: Vector3) -> bool:
 	var navigation := _navigation()
 	if navigation == null:
@@ -243,7 +244,7 @@ func is_following_path() -> bool:
 	return navigation != null and navigation.is_following_path()
 
 
-# Claude 2026-11-08: the pawn's NavigationManager, or null. Replaces this controller's own path following.
+# The pawn's NavigationManager, or null.
 func _navigation() -> NavigationManager:
 	return pawn.navigation_manager if is_instance_valid(pawn) else null
 
@@ -252,8 +253,7 @@ func _navigation() -> NavigationManager:
 
 
 func _process(delta: float) -> void:
-	# Claude 2026-11-07: only with a pawn. A press with nothing to jump used to wait here, and jump the next pawn it got.
-	# Claude 2026-11-07: now for every action in action_keys, not only jump.
+	# Presses are kept only with a pawn, so a press with nothing to drive never carries over to the next pawn it gets.
 	# Every key is read every frame, pawn or not, so a press with no pawn is used up rather than left waiting.
 	var has_pawn := is_instance_valid(pawn)
 	for action: StringName in action_keys:
@@ -264,13 +264,13 @@ func _process(delta: float) -> void:
 	var extra := _read_look_extra()
 	look_yaw = wrapf(look_yaw + extra.x, -PI, PI)
 	look_pitch += extra.y
-	var wheel := _zoom_steps # Claude 2026-11-16: kept for spectating, below
+	var wheel := _zoom_steps # kept for spectating, below
 	if is_instance_valid(_arm):
 		look_pitch = _arm.set_look(look_yaw, look_pitch)
 		if _zoom_steps != 0.0:
 			_arm.zoom(_zoom_steps)
 	_zoom_steps = 0.0
-	# Claude 2026-11-16: spectating. Up and down is as far as straight up and down, a little short so the view never flips.
+	# Spectating. Up and down is as far as straight up and down, a little short so the view never flips.
 	if _spectating and is_instance_valid(_spectator):
 		look_pitch = clampf(look_pitch, -1.55, 1.55)
 		var wanted := _read_move()
@@ -287,7 +287,7 @@ func _process(delta: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and look_mode == LookMode.CAPTURED and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		# Claude 2026-11-16: zoomed in while spectating, the mouse turns slower by as much, so aiming feels the same.
+		# Zoomed in while spectating, the mouse turns slower by as much, so aiming feels the same.
 		var sensitivity := mouse_sensitivity / (_spectator.get_zoom() if _spectating and is_instance_valid(_spectator) else 1.0)
 		look_yaw = wrapf(look_yaw - event.relative.x * sensitivity, -PI, PI)
 		look_pitch -= event.relative.y * sensitivity
@@ -301,11 +301,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif click_to_move and is_instance_valid(pawn) and InputMap.has_action(&"left_click") and event.is_action_pressed(&"left_click"):
 		var hit := world_cursor.query_now()
 		if not hit.is_empty():
-			move_to(hit["position"]) # Claude 2026-11-08: a click with no way there now does nothing, rather than walking straight at it
+			move_to(hit["position"]) # a click with no way there does nothing, rather than walking straight at it
 	elif _spectating and is_instance_valid(_spectator) and InputMap.has_action(&"middleMouse_button") and event.is_action_pressed(&"middleMouse_button"):
-		_spectator.reset_zoom() # Claude 2026-11-16: spectating, the middle mouse button resets the zoom
+		_spectator.reset_zoom() # spectating, the middle mouse button resets the zoom
 		_capture_mouse()
-	elif event is InputEventMouseButton and event.pressed and (is_instance_valid(pawn) or _spectating): # Claude 2026-11-16: or spectating
+	elif event is InputEventMouseButton and event.pressed and (is_instance_valid(pawn) or _spectating):
 		_capture_mouse()
 
 
@@ -319,7 +319,6 @@ func _read_move() -> Vector2:
 	return Input.get_vector(&"move_left", &"move_right", &"move_forward", &"move_backward")
 
 
-# Claude 2026-11-07: these two replace _read_sprint and _read_jump_pressed, and work for any named action.
 ## True while the key for this named action is down.
 func _read_action_held(action: StringName) -> bool:
 	var key: StringName = action_keys.get(action, &"")
@@ -332,8 +331,7 @@ func _read_action_pressed(action: StringName) -> bool:
 	return key != &"" and InputMap.has_action(key) and Input.is_action_just_pressed(key)
 
 
-## Claude 2026-11-16: spectating: up (1) or down (-1). Claude 2026-11-16 (the owner's call): from the jump key (Space) and the crouch
-## key (Ctrl), fly_up_key and fly_down_key, instead of Q and E, so flying matches walking.
+## Spectating: up (1) or down (-1), from fly_up_key and fly_down_key (Space and Ctrl by default), so flying matches walking.
 func _read_fly_up_down() -> float:
 	if not _has_actions([fly_up_key, fly_down_key]):
 		return 0.0
@@ -376,13 +374,13 @@ func _edge_turn(delta: float) -> float:
 func _let_go_of_arm() -> void:
 	if is_instance_valid(_arm):
 		_arm.set_active(false)
-		# Claude 2026-11-16 (pawn M5): the player's own arm comes back here, idle, for the next pawn. A placed arm stays on its pawn.
+		# The player's own arm comes back here, idle, for the next pawn. A placed arm stays on its pawn.
 		if _arm == _own_arm and _arm.get_parent() != self:
 			_arm.reparent(self, false)
 	_arm = null
 
 
-# Claude 2026-11-16 (pawn M5): moves the player's arm to a pawn's mount (its CameraMount, or Visual), with the pawn's preset, ignoring the pawn's own body.
+# Moves the player's arm to a pawn's mount (its CameraMount, or Visual), with the pawn's preset, ignoring the pawn's own body.
 func _attach_own_arm(target: Pawn) -> CameraArm:
 	if not is_instance_valid(_own_arm):
 		_own_arm = CameraArm.new()
@@ -395,13 +393,13 @@ func _attach_own_arm(target: Pawn) -> CameraArm:
 	return _own_arm
 
 
-# Claude 2026-11-16: sets the look to face along this direction. Yaw 0 faces -Z, Godot's forward.
+# Sets the look to face along this direction. Yaw 0 faces -Z, Godot's forward.
 func _look_along(forward: Vector3) -> void:
 	look_yaw = atan2(-forward.x, -forward.z)
 	look_pitch = asin(clampf(forward.normalized().y, -1.0, 1.0))
 
 
-# Claude 2026-11-16: the spectator, from spectator_scene, or a default FreeFlyCamera. A child of this controller, so it lasts as long as it.
+# The spectator, from spectator_scene, or a default FreeFlyCamera. A child of this controller, so it lasts as long as it.
 func _make_spectator() -> FreeFlyCamera:
 	var made: FreeFlyCamera = null
 	if spectator_scene:

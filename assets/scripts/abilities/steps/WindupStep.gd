@@ -1,10 +1,12 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16 (pawn spec 8.20, the owner's design): the wait before an attack's hit.
+# Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
+## The wait before an attack's hit, turning toward the look first if it needs to.
 ##
-## When it starts, it starts its turn_step (a TurnToFaceStep), which turns the pawn toward where it looks while the action is held. Its
-## timer (length_ticks) only counts while the pawn is within start_within_degrees of where it looks, or once the turn has stopped (the
-## action let go, so the attack goes where the pawn faces). So a swing started facing roughly the right way is as quick as ever, and one
-## started facing away turns first. When its timer is done, it starts the steps in starts_when_finished: the sweep.
-##
+## Pawn spec 8.20, the owner's design. When it starts, it starts its [member turn_step] (a TurnToFaceStep), which turns the pawn toward
+## where it looks while the action is held. Its timer (length_ticks) only counts while the pawn is within
+## [member start_within_degrees] of where it looks, or once the turn has stopped (the action let go, so the attack goes where the pawn
+## faces). So a swing started facing roughly the right way is as quick as a plain timer, and one started facing away turns first. When
+## its timer is done, it starts the steps in starts_when_finished: the sweep.
+## [br]
 ## For visuals, the weapon waits at the start of the sweep it leads to.
 class_name WindupStep
 extends AbilityStep

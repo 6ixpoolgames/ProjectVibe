@@ -1,11 +1,13 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: one pawn's AI memory in GDScript, plus the loops that read and write it (the sight
-## check, the most aware entry, target scoring). Pawn spec sections 10.4, 10.5 and 10.11.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## One pawn's AI memory in GDScript, plus the loops that read and write it: the sight check, the most aware entry, target scoring.
 ##
-## The same thing as AIMemoryStore in the navcore C++ library, with the same functions and the same rules, used where that library
-## isn't available or AIMemory.use_native is off. The code moved here from AIMemory.gd and SightSense.gd when the C++ version was
-## added. A change to one goes in the other, and ai_perception_selftest runs both and expects the same results.
-##
-## AIMemory owns one of these and keeps every setting; the fades, delays, sight settings and target weights are passed in.
+## Pawn spec sections 10.4, 10.5 and 10.11. The same thing as AIMemoryStore in the navcore C++ library, with the same functions and
+## the same rules, used where that library isn't available or [member AIMemory.use_native] is off. A change to one goes in the other,
+## and ai_perception_selftest expects the same results from each: it runs on the C++ store where it loads, and on this one with
+## [code]-- --gdscript-store[/code].
+## [br]
+## [AIMemory] owns one of these and keeps every setting; the fades, delays, sight settings and target weights are passed in. Other
+## code goes through AIMemory, not this.
 class_name AIMemoryStoreGD
 extends RefCounted
 
@@ -66,8 +68,8 @@ func entity_at(index: int) -> Object:
 
 
 func awareness_at(index: int, tick: int) -> float:
-	# Claude 2026-11-09: held while it's in view, the rule record_sighting already used: if the last check saw it, and that was at
-	# most continuous_sighting_ticks ago, it hasn't faded. Before, a target in plain view drifted down between checks.
+	# Held while it's in view, the same rule record_sighting uses: if the last check saw it, and that was at most
+	# continuous_sighting_ticks ago, it hasn't faded, so a target in plain view doesn't drift down between checks.
 	if _in_view(index, tick):
 		return _awareness_when_seen[index]
 	# GDScript note: value_at of a negative tick count is full, so the delay needs no special case.
@@ -76,7 +78,7 @@ func awareness_at(index: int, tick: int) -> float:
 	return _awareness_when_seen[index] * _uncertain_fade.value_at(tick - _last_seen[index] - _uncertain_delay)
 
 
-# Claude 2026-11-09: held, not fading: the last check saw it, and not too long ago.
+# Held, not fading: the last check saw it, and not too long ago.
 func _in_view(index: int, tick: int) -> bool:
 	return _last_checked[index] == _last_seen[index] and tick - _last_seen[index] <= _continuous_ticks
 
@@ -118,7 +120,7 @@ func record_sighting(entity: Object, gain: float, tick: int, position: Vector3) 
 		_index_of[_ids[i]] = i
 		result |= 1
 	# Fading only counts while it isn't seen: sightings close together, with no unseen check between them, are one look.
-	var before := awareness_at(i, tick) # Claude 2026-11-09: which now holds it while in view, as this line used to
+	var before := awareness_at(i, tick) # which holds it while in view
 	var now := 1.0 if _certain[i] else minf(1.0, before + gain)
 	_last_known[i] = position
 	_last_seen[i] = tick
@@ -142,14 +144,14 @@ func add_threat(entity: Object, amount: float) -> void:
 		_threat[i] = maxf(0.0, _threat[i] + amount)
 
 
-## Forgets entries whose fade has ended or whose entity is gone. Returns the ids of forgotten entities that still exist.
+## Forgets entries whose fade has ended or whose entity is gone or dead. Returns the ids of forgotten entities that still exist.
 func forget_old(tick: int) -> PackedInt64Array:
 	var forgotten := PackedInt64Array()
 	var i := _ids.size() - 1
 	while i >= 0: # backwards, so removing one doesn't move the ones still to check
 		var lasts := _certain_delay + _certain_fade.ends_after() if _certain[i] else _uncertain_delay + _uncertain_fade.ends_after()
 		var entity := entity_at(i)
-		# Claude 2026-11-09: never while it's held in view, even with a fade shorter than continuous_sighting_ticks.
+		# Never while it's held in view, even with a fade shorter than continuous_sighting_ticks.
 		var faded := not _in_view(i, tick) and tick - _last_seen[i] >= lasts
 		if entity == null or _is_dead(entity) or faded:
 			if entity:
@@ -259,7 +261,7 @@ func sight_check(observer: Node3D, eye_yaw: float, candidates: Array, tick: int)
 # --- Internals ---
 
 
-# Claude 2026-11-09, step 10: dead pawns aren't seen, and are forgotten.
+# Dead pawns aren't seen, and are forgotten.
 static func _is_dead(entity: Object) -> bool:
 	return entity.has_method(&"is_dead") and entity.is_dead()
 

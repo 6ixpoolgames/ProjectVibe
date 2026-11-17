@@ -1,4 +1,5 @@
-// Written by Claude (claude-opus-5-5), 2026-11-03: ground tile build pipeline, input spans -> Detour tile (spec 8.2).
+// Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
+// The ground tile build pipeline, input spans -> Detour tile (nav spec 8.2), auto links included. Not seen by GDScript.
 // build_ground_tile is a pure function: it reads only its input and allocates its own result,
 // so any number of them can run on worker threads at the same time.
 #pragma once
@@ -17,7 +18,7 @@ struct TileBuildInput {
 	uint64_t generation = 0; // TileManager reset counter; results from before a reset are thrown away
 	NavConfig cfg;
 	InputSnapshot snapshot;
-	std::vector<LinkDef> placed_links; // Claude 2026-11-08: placed links that start inside this tile, copied when the build starts
+	std::vector<LinkDef> placed_links; // placed links that start inside this tile, copied when the build starts
 };
 
 struct TileBuildResult {
@@ -29,8 +30,8 @@ struct TileBuildResult {
 	bool empty = false; // nothing walkable: commit just removes the old tile
 	bool provisional = false; // some neighbour data was missing; rebuilt automatically when it arrives
 	int poly_count = 0;
-	int link_count = 0; // Claude 2026-11-08: placed and found links baked into this tile
-	int auto_link_count = 0; // Claude 2026-11-08: of those, how many the build found by itself
+	int link_count = 0; // placed and found links baked into this tile
+	int auto_link_count = 0; // of those, how many the build found by itself
 	double build_ms = 0.0;
 	std::string error;
 

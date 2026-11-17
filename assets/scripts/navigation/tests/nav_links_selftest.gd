@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-08: headless self-test for nav links (nav spec sections 10 and 19, phase 3): the
 ## links a tile build finds by itself at ledges and gaps, placed links from NavServer.add_link, and paths that cross them.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/navigation/tests/nav_links_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/navigation/tests/nav_links_selftest.tscn"
 ##
 ## The test world is boxes fed in as meshes, along X, each 6 m wide in Z (see build_course(), which the navigation manager's
 ## test borrows):

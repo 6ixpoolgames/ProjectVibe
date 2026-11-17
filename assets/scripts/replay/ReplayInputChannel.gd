@@ -1,7 +1,10 @@
-## Written by Claude (claude-opus-5-5), 2026-11-15: replay channel 2, "input": each pawn's input command, the owner's call for v0
-## (replay spec section 1). Not used by the v0 viewer beyond showing it; it's here so a later replay can re-simulate from a keyframe,
-## and so a recording shows what a player or the AI was pressing when something went wrong.
+# Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
+## Replay channel 2, "input": each pawn's input command (replay spec section 1).
 ##
+## Recorded at the owner's call for v0. The v0 viewer only shows it; it's here so a later replay can re-simulate from a keyframe, and
+## so a recording shows what a player or the AI was pressing when something went wrong. The input is the pawn's ControllerManager's;
+## a pawn without one records nothing pressed.
+## [br]
 ## A record, 20 bytes: move input (3 × half), look yaw (half), look pitch (half), held actions (u64, bits from InputActions), view
 ## ticks behind (half). Read back as a Dictionary:
 ## {move_input: Vector3, look_yaw: float, look_pitch: float, held_actions: int, view_ticks_behind: float}.
@@ -17,9 +20,7 @@ func _init() -> void:
 	version = 1
 
 
-# Claude 2026-11-16 (pawn M4): the input is the ControllerManager's now; a pawn without one records nothing pressed.
-# Claude 2026-11-16 (wider audit): compared value by value. It built the five-value list to compare, again to keep, and a third time to
-# write, for every pawn every tick.
+# Compared value by value against the controller manager, without building a list: this runs for every pawn every tick.
 func same_as_last(pawn: Pawn, last: Variant) -> bool:
 	if last == null:
 		return false
@@ -37,7 +38,7 @@ func remember(pawn: Pawn) -> Variant:
 
 
 func write_record(pawn: Pawn, out: StreamPeerBuffer) -> void:
-	# Claude 2026-11-16 (wider audit): written straight from the controller manager, without building remember()'s list again.
+	# Written straight from the controller manager, without building remember()'s list again.
 	var c := pawn.controller_manager
 	var move: Vector3 = c.move_input if c else Vector3.ZERO
 	out.put_half(move.x)

@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for StatManager and Stat. Checks the odd cases at the top of
 ## StatManager.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/stats/tests/stat_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/stats/tests/stat_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 

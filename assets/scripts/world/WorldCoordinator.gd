@@ -1,21 +1,23 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: combines terrain, streaming and nav in a level. Spec: docs/world/WORLD_SPEC.md.
-## It wires its parts together and builds nothing itself, so that the terrain generator generates terrain and nav builds from what it's
-## fed, with neither knowing the other exists. Tier 0 works with one TerrainGenerator. The owner's end goal, of interchangeable and eventually
-## blended level generators, is in the spec, and isn't built.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: world/CHANGELOG.md.
+## Puts a level together from its parts: terrain, streaming and the nav feeder.
 ##
-## How to use it: add one to a level, and give it these as children. It finds them by itself:
-##   TerrainGenerator   required. It generates the ground
-##   ChunkStreamer      optional: loads chunks around sources. Without it, the terrain builds its fixed block
-##   TerrainNavFeeder   optional: feeds nav. Without it, there's no nav
-## Code reaches them as world.terrain_generator, world.chunk_streamer and world.nav_feeder.
-##
+## Spec: docs/world/WORLD_SPEC.md. It wires its parts together and builds nothing itself, so that the terrain generator generates
+## terrain and nav builds from what it's fed, with neither knowing the other exists. Tier 0 works with one TerrainGenerator. The
+## owner's end goal, interchangeable and eventually blended level generators, is in the spec and isn't built.
+## [br]
+## How to use it: add one to a level and give it these as children. It finds them by itself:
+## [br]- [TerrainGenerator]: required. It generates the ground.
+## [br]- [ChunkStreamer]: optional. It loads chunks around streaming sources. Without it, the terrain builds its fixed block.
+## [br]- [TerrainNavFeeder]: optional. It feeds nav. Without it, there's no nav.
+## [br]
+## Code reaches them as [code]world.terrain_generator[/code], [code]world.chunk_streamer[/code] and [code]world.nav_feeder[/code].
+## [br]
 ## What happens in odd cases (all checked in tests/world_coordinator_selftest.gd):
-##   - No terrain generator: it warns and does nothing.
+## [br]- No terrain generator: it warns and does nothing.
 class_name WorldCoordinator
 extends Node3D
 
 ## The parts. Left empty, each is found among this node's children.
-# Claude 2026-11-07: renamed from terrain, streamer and nav_link, so that each name says what the part does.
 @export var terrain_generator: TerrainGenerator
 @export var chunk_streamer: ChunkStreamer
 @export var nav_feeder: TerrainNavFeeder

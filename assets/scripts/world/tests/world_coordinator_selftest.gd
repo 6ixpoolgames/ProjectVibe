@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for WorldCoordinator and TerrainNavFeeder: terrain and nav working together
 ## while neither knows the other exists. Exits 0 on success, 1 on failure. Run from the project folder:
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/world/tests/world_coordinator_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/world/tests/world_coordinator_selftest.tscn"
 extends Node
 
 const CHUNK_SIZE := 64.0

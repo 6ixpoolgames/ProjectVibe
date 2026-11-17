@@ -9,7 +9,7 @@
 ## headless means nothing is drawn, so a windowed game adds drawing on top.
 ##
 ## Run from the project folder (about 2.5 minutes with the defaults):
-##   "C:\Git\Test 2\Godot_v4.7.2-stable_win64_console.exe" --headless --path . "res://assets/scripts/samples/tests/mass_battle_net_measure.tscn" -- --size=50 --seconds=120
+##   godot --headless --path . "res://assets/scripts/samples/tests/mass_battle_net_measure.tscn" -- --size=50 --seconds=120
 ## Settings, after "--":
 ##   --size=N        pawns a faction (50)
 ##   --seconds=N     how long each client plays, in real seconds (120); the host runs a little longer

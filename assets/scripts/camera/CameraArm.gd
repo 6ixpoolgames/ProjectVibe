@@ -1,19 +1,19 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: holds a VirtualCamera out from a pawn, following a look direction, and pulls it in
-## so walls don't come between the camera and the pawn. It's Unreal's spring arm, as a plain node.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: camera/CHANGELOG.md.
+## Holds a VirtualCamera out from a pawn, following a look direction, and pulls it in so walls don't come between camera and pawn.
 ##
-## It's idle unless it's active, which is when a player is looking through it. An idle arm does no work and reads nothing, and
-## it never reads input itself: PlayerController tells it where to look. So AI or a cutscene could drive it just the same.
-##
-## Its one collision check each frame is a physics query outside the physics step. That's safe with Godot's default setting,
-## where physics doesn't run on its own thread. A project that turns that on would have to move this.
+## It's Unreal's spring arm, as a plain node. The PlayerController owns one arm per player and moves it to each pawn it takes (see
+## CameraMount); a pawn's scene may also place its own.
+## [br]
+## It's idle unless it's active, which is when a player is looking through it. An idle arm does no work and reads nothing, and it
+## never reads input itself: PlayerController tells it where to look. So AI or a cutscene could drive it just the same.
+## [br]
+## Its one collision check each frame is a physics query outside the physics step. That's safe with Godot's default setting, where
+## physics doesn't run on its own thread. A project that turns that on would have to move this.
 class_name CameraArm
 extends Node3D
 
 ## The settings. Empty means the defaults.
 @export var preset: CameraPreset
-
-# Claude 2026-11-16 (pawn M5): spawned_by_possession is gone: the PlayerController owns one arm and moves it between pawns, rather than a pawn
-# making one on possession.
 
 var _view: VirtualCamera = null
 var _length := 6.0
@@ -28,8 +28,8 @@ func _ready() -> void:
 	apply_preset(preset)
 
 
-## Claude 2026-11-16 (pawn M5): takes these settings (or the defaults, for null) now: the arm's place, length, pitch, field of view and
-## collision radius. For an arm moving to another pawn, whose preset may differ. Was the body of _ready.
+## Takes these settings (or the defaults, for null) now: the arm's place, length, pitch, field of view and collision radius. For an
+## arm moving to another pawn, whose preset may differ.
 func apply_preset(new_preset: CameraPreset) -> void:
 	preset = new_preset if new_preset else CameraPreset.new()
 	position = Vector3(preset.shoulder_offset, preset.mount_height, 0.0)
@@ -57,7 +57,7 @@ func ignore_body(body: CollisionObject3D) -> void:
 	_exclude.append(body.get_rid())
 
 
-## Claude 2026-11-16 (pawn M5): forgets every ignored body, for an arm moving to another pawn.
+## Forgets every ignored body, for an arm moving to another pawn.
 func clear_ignored() -> void:
 	_exclude.clear()
 

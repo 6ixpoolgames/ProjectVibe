@@ -1,59 +1,70 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: the shell of the game's rules. Autoload "GameMode".
-## "Game mode" is Unreal's name for this job. Here it holds optional modules and does almost nothing itself, so an empty one
-## costs nothing, and each piece of a game's rules can be swapped or left out on its own.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: game_mode/CHANGELOG.md.
+## The shell of the game's rules: holds the game's modules. Autoload "GameMode".
 ##
-## Modules so far:
-##   PawnInitializer         gives each pawn its default parts, from one list per game (Claude 2026-11-07)
-##   PossessionCoordinator   creates the PlayerController, and tracks who controls which pawn
-##   AIActivationManager     switches AI pawns off when no source keeps the ground under them loaded
-##   SpawnManager            puts pawns in at SpawnPoints, and brings players back after they die (Claude 2026-11-10)
-##   ReplayRecorder          records the game to a replay file once the game calls start_recording (Claude 2026-11-15, replay spec)
-##   TeamRegistry            how many pawns are on each team (Claude 2026-11-16, pawn M1: was a counter on Pawn)
-##
+## "Game mode" is Unreal's name for this job. Here it holds optional modules and does almost nothing itself, so an empty one costs
+## nothing, and each piece of a game's rules can be swapped or left out on its own.
+## [br]
+## The base's modules:
+## [br]- [PawnInitializer]: gives each pawn its default parts, from one list per game.
+## [br]- [PossessionCoordinator]: creates the PlayerController, and tracks who controls which pawn.
+## [br]- [AIActivationManager]: switches AI pawns off when no source keeps the ground under them loaded, and sets how often the rest run.
+## [br]- [SpawnManager]: puts pawns in at SpawnPoints, and brings players back after they die.
+## [br]- [ReplayRecorder]: records the game to a replay file once the game calls start_recording (replay spec).
+## [br]- [TeamRegistry]: how many pawns are on each team.
+## [br]- [CrowdMover]: moves AI pawns walking on the ground as one crowd.
+## [br]
 ## How to use it:
-##   GameMode.pawn_initializer         # a module, or null if this game doesn't have it, so check first
-##   GameMode.possession_coordinator   # the same
-##   GameMode.ai_activation_manager    # the same
-##   GameMode.get_module(SomeScript)   # any module by its script
-##   GameMode.add_module(node)         # a game's own modules, which extend GameModeModule
-##
-## Which modules start with the game comes from the project setting "project_base/game_mode/modules", a list of script paths.
-## With no setting, it starts the ones in DEFAULT_MODULES. An empty list starts none, and the game still runs.
-##
+## [codeblock]
+## GameMode.pawn_initializer         # a module, or null if this game doesn't have it, so check first
+## GameMode.possession_coordinator   # the same, and so on for each module above
+## GameMode.get_module(SomeScript)   # any module by its script
+## GameMode.add_module(node)         # a game's own modules, which extend GameModeModule
+## [/codeblock]
+## Which modules start with the game comes from the project setting "project_base/game_mode/modules", a list of script paths
+## (with a ".release" override for release builds). With no setting, it starts the ones in [constant DEFAULT_MODULES]. An empty list
+## starts none, and the game still runs.
+## [br]
 ## What happens in odd cases (all checked in game_mode/tests/game_mode_selftest.gd):
-##   - A path in the setting that doesn't load, or isn't a GameModeModule: it warns and carries on without that module.
-##   - Adding a second module of the same type: it warns and keeps the first.
+## [br]- A path in the setting that doesn't load, or isn't a GameModeModule: it warns and carries on without that module.
+## [br]- Adding a second module of the same type: it warns and keeps the first.
+# REFACTOR: the autoload has a named line for every base module (from game_mode/, replay/ and movement/), so adding a module to the
+# base means editing the autoload. Modules naming themselves, with get_module for the rest, would keep it universal (extensible).
 extends Node
 class_name GameModeSingleton
 
+## Sent when a module has started.
 signal module_added(module: GameModeModule)
+## Sent when a module has stopped, just before it's freed.
 signal module_removed(module: GameModeModule)
 
+## The project setting that lists the modules to start, as script paths.
 const MODULES_SETTING := "project_base/game_mode/modules"
+# REFACTOR: DEFAULT_MODULES is a second copy of the project setting's list, and it has drifted (the setting also starts
+# DiagnosticsManager). One list, in one place, is easier for a designer to keep right.
+## The modules started when the project setting isn't there, in this order.
 const DEFAULT_MODULES: Array[String] = [
-	"res://assets/scripts/game_mode/PawnInitializer.gd", # Claude 2026-11-07: first, so it's ready before any pawn arrives
+	"res://assets/scripts/game_mode/PawnInitializer.gd", # first, so it's ready before any pawn arrives
 	"res://assets/scripts/game_mode/PossessionCoordinator.gd",
 	"res://assets/scripts/game_mode/AIActivationManager.gd",
-	"res://assets/scripts/game_mode/SpawnManager.gd", # Claude 2026-11-10: does nothing with no spawn points placed
-	"res://assets/scripts/replay/ReplayRecorder.gd", # Claude 2026-11-15: records nothing until the game starts a recording
-	"res://assets/scripts/game_mode/TeamRegistry.gd", # Claude 2026-11-16 (pawn M1)
-	"res://assets/scripts/movement/CrowdMover.gd", # Claude 2026-11-16 (pawn spec 8.22): does nothing until an AI pawn walks
+	"res://assets/scripts/game_mode/SpawnManager.gd", # does nothing with no spawn points placed
+	"res://assets/scripts/replay/ReplayRecorder.gd", # records nothing until the game starts a recording
+	"res://assets/scripts/game_mode/TeamRegistry.gd",
+	"res://assets/scripts/movement/CrowdMover.gd", # does nothing until an AI pawn walks
 ]
 
 ## The module that switches AI pawns off, or null without one. Each module fills in its own line when it starts.
-# Claude 2026-11-07: renamed from ai_activity and possession, so that each name says what the module does.
 var ai_activation_manager: AIActivationManager = null
 ## Who controls which pawn, or null without one.
 var possession_coordinator: PossessionCoordinator = null
-## Claude 2026-11-07: gives pawns their default parts, or null without one.
+## Gives pawns their default parts, or null without one.
 var pawn_initializer: PawnInitializer = null
-## Claude 2026-11-10: spawns pawns at spawn points and brings players back, or null without one.
+## Spawns pawns at spawn points and brings players back, or null without one.
 var spawn_manager: SpawnManager = null
-## Claude 2026-11-15: records the game to replay files, or null without one (docs/replay/REPLAY_SPEC.md).
+## Records the game to replay files, or null without one (docs/replay/REPLAY_SPEC.md).
 var replay_recorder: ReplayRecorder = null
-## Claude 2026-11-16 (pawn M1): how many pawns are on each team, or null without one.
+## How many pawns are on each team, or null without one.
 var team_registry: TeamRegistry = null
-## Claude 2026-11-16 (pawn spec 8.22): moves AI pawns walking on the ground as one crowd, or null.
+## Moves AI pawns walking on the ground as one crowd (pawn spec 8.22), or null without one.
 var crowd_mover: CrowdMover = null
 
 var _modules: Array[GameModeModule] = []
@@ -75,7 +86,7 @@ func _ready() -> void:
 				module.free()
 
 
-## Starts a module. It stays until remove_module or until the game ends.
+## Starts a module. It stays until [method remove_module] or until the game ends.
 func add_module(module: GameModeModule) -> void:
 	if module == null:
 		return

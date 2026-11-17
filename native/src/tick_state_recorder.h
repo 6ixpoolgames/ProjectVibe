@@ -1,4 +1,6 @@
-// Written by Claude (claude-opus-5-5), 2026-11-09: the fast path of TickStateComponent's recording, the biggest cost per pawn per
+// Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
+// TickStateRecorder: the fast path of netcode/TickStateComponent.gd's rollback recording, which makes one when the library is
+// loaded. It's the fast path of the recording, the biggest cost per pawn per
 // tick in pawn_stress (pawn spec 12.1). Every tick, for each listed property, it reads the value, rounds it to its encoding, writes
 // it back if rounding changed it, and copies it into a history slot. TickStateComponent.gd does the same in GDScript, which is used
 // where this library isn't available and for everything unusual: matching entries to nodes, picking encodings by type, and warnings.
@@ -6,9 +8,10 @@
 //
 // Rounding calls the engine's own snapped, snappedf and wrapf, the functions GDScript's StateEncoding.quantize calls, so both give
 // exactly the same values, and machines using either can play together. tests/tick_state_selftest compares them.
+// REFACTOR: kept twice, here and in TickStateComponent.gd (reusable, extensible); see the row in native/CHANGELOG.md.
 #pragma once
 
-#include "state_encoding.h" // Claude 2026-11-17 (C++ bundle stage 2)
+#include "state_encoding.h"
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -47,7 +50,7 @@ protected:
 	static void _bind_methods();
 
 private:
-	// Claude 2026-11-17 (C++ bundle stage 2): the encoding numbers are state_encoding.h's, shared with NetCodec.
+	// The encoding numbers are state_encoding.h's, shared with NetCodec.
 	struct Entry {
 		uint64_t node_id = 0;
 		NodePath path; // used when the property has parts (":rotation:y")
@@ -62,7 +65,7 @@ private:
 	std::vector<Entry> m_entries;
 	std::vector<Object *> m_nodes; // looked up at the start of each capture
 
-	// Claude 2026-11-17 (C++ bundle stage 2): the encoding names, shared with NetCodec (state_encoding.h).
+	// The encoding names, shared with NetCodec (state_encoding.h).
 	state_encoding::EncodingNames m_encoding_names;
 	// The snapping steps, built the way StateEncoding builds them: Vector3(MM, MM, MM) stores 32-bit floats.
 	Variant m_step_mm3;
