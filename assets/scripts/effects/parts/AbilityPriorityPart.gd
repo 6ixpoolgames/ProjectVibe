@@ -1,30 +1,22 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## Changes one of a group of abilities' priority numbers while its effect lasts. A held part ([EffectPart]).
 ##
-## Pawn spec 8.11, the owner's design: a swing can put an over-time effect on its own pawn with one of these, boosting the abilities
-## tagged combo.second, so the next press of the attack picks the second swing. Combo positions (AbilityBase.combo_positions) are the
-## other way to build combos.
-## [br]
-## Which number (the owner's call: three kept apart):
-## [br]- PRESS_PRIORITY: which ability a press picks among those on one action (AbilityBase.priority). Locomotion ignores it.
-## [br]- INTERRUPT_PRIORITY: how hard the ability cancels running ones when it starts (interrupt_priority).
-## [br]- INTERRUPT_THRESHOLD: how hard the ability is to cancel while it runs (interrupt_threshold); below 0 makes it easier, such as
-##   a mage who's easy to interrupt.
-## [br]
-## The group is an ability tag (TagRegistry), such as &"combo.second": every ability on the pawn whose category or extra_categories
-## is that tag, or inside it. With stacks, the amount counts once per stack. The AbilityManager adds these when it compares numbers,
-## on every machine, so a client's prediction agrees. The interrupt table (AbilityManager.get_interrupt_table) shows the numbers with
-## them added.
+## Such as boosting abilities tagged combo.second so the next press picks the second swing. [member ability_tag] picks the group (every
+## ability whose category or extra_categories is that tag or inside it); [member number] picks which of three numbers changes.
+## The AbilityManager adds the totals when it compares numbers, on every machine, so a client's prediction agrees.
+## Design: pawn spec 8.11.
 class_name AbilityPriorityPart
 extends EffectPart
 
+## PRESS_PRIORITY: which ability a press picks among those on one action. INTERRUPT_PRIORITY: how hard it cancels running abilities
+## when it starts. INTERRUPT_THRESHOLD: how hard it is to cancel while running (below 0: easier to interrupt).
 enum Number { PRESS_PRIORITY, INTERRUPT_PRIORITY, INTERRUPT_THRESHOLD }
 
-## Which abilities, by ability tag.
+## Which abilities, by ability tag ([TagRegistry]).
 @export var ability_tag: StringName = &""
-## Which of their numbers.
+## Which of their numbers changes.
 @export var number := Number.PRESS_PRIORITY
-## How much is added to it. Negative takes away.
+## How much is added to it, once per stack. Negative takes away.
 @export var amount := 20
 
 

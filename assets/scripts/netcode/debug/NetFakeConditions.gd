@@ -1,23 +1,11 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: pretends the network is bad, for testing (netcode spec section 16).
-## Packets wait here before really being sent or handled. NetDebugModule has two of these: `fake` for what it sends and
-## `fake_in` for what it receives, so one window can set its whole ping. Off unless a value is set. Every setting can
-## change while running, and a fixed seed makes a run repeatable.
+# Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
+## Pretends the network is bad, for testing (netcode spec section 16; debug code).
 ##
-## What it can do (netcode spec section 16 lists the presets):
-##   latency_ms         a fixed delay on every packet
-##   jitter_ms          a random extra delay on each packet, from 0 up to this
-##   jitter_variation   0 to 1: how much jitter itself wanders over time, so a connection goes from calm to rough and back
-##   loss               chance that an unreliable packet disappears
-##   burst_*            short periods where every unreliable packet is lost and reliable ones wait, as on a real bad link
-##   spike_*            short periods of much higher latency
-##   reorder_chance     chance a packet gets held back, so it arrives after later ones
-##   duplicate_chance   chance an unreliable packet arrives twice
-##   timeline           latency that changes over time, as [[seconds, milliseconds], ...], for repeatable ramps
-##
-## Rules:
-##   - Reliable packets are never lost, duplicated or reordered, because that's what ENet promises. They still get delayed.
-##   - Packets are released on the next check after their time, so a real delay is rounded up to a frame or so.
-##   - start_burst and start_spike trigger one by hand, whatever the chance settings.
+## Packets wait here before really being sent or handled. NetDebugModule has two: [code]fake[/code] for what it sends and
+## [code]fake_in[/code] for what it receives, so one window can set its whole ping. Off until a value is set; every setting can change
+## while running, and [method set_seed] makes a run repeatable. Reliable packets are only delayed, never lost, duplicated or reordered
+## (what ENet promises). Packets are released on the next check after their time, so a delay rounds up to a frame or so.
+## Design: netcode spec 16 (it lists the presets).
 class_name NetFakeConditions
 extends RefCounted
 
@@ -30,23 +18,38 @@ const PRESETS := {
 	"worst": {"latency": 250.0, "jitter": 80.0, "variation": 1.0, "loss": 0.08, "spike_rate": 0.25, "spike_ms": 500.0, "spike_seconds": 1.5, "burst_rate": 0.15, "burst_seconds": 1.0, "reorder": 0.05, "duplicate": 0.02},
 }
 
+## A fixed delay on every packet, in milliseconds.
 var latency_ms: float = 0.0
+## A random extra delay on each packet, from 0 up to this (milliseconds).
 var jitter_ms: float = 0.0
+## 0 to 1: how much jitter itself wanders over time, so a connection goes from calm to rough and back.
 var jitter_variation: float = 0.0
+## Chance (0 to 1) that an unreliable packet disappears.
 var loss: float = 0.0
+## Bursts started a second on average: short periods where every unreliable packet is lost and reliable ones wait.
 var burst_rate_per_second: float = 0.0
+## How long each burst lasts, in seconds.
 var burst_seconds: float = 0.5
+## Spikes started a second on average: short periods of much higher latency.
 var spike_rate_per_second: float = 0.0
+## The extra latency of a spike, in milliseconds.
 var spike_ms: float = 200.0
+## How long each spike lasts, in seconds.
 var spike_seconds: float = 0.5
+## Chance an unreliable packet is held back (by [member reorder_ms]), so it arrives after later ones.
 var reorder_chance: float = 0.0
+## How long a held-back packet waits, in milliseconds.
 var reorder_ms: float = 80.0
+## Chance an unreliable packet arrives twice.
 var duplicate_chance: float = 0.0
 ## Latency over time, as [[seconds, milliseconds], ...] in order. Overrides latency_ms while set.
 var timeline: Array = []
 
+## Unreliable packets dropped so far.
 var packets_lost := 0
+## Bursts started so far, by chance or by hand.
 var bursts_started := 0
+## Spikes started so far, by chance or by hand.
 var spikes_started := 0
 
 var _waiting: Array[Dictionary] = []
@@ -61,18 +64,20 @@ var _jitter_level := 1.0
 var _next_wander_usec := 0
 
 
+## True if anything is set or still waiting, so packets must pass through here.
 func is_active() -> bool:
 	return latency_ms > 0.0 or jitter_ms > 0.0 or loss > 0.0 or burst_rate_per_second > 0.0 or spike_rate_per_second > 0.0 \
 			or reorder_chance > 0.0 or duplicate_chance > 0.0 or not timeline.is_empty() or not _waiting.is_empty() \
 			or _burst_until_usec > 0 or _spike_until_usec > 0
 
 
+## Seeds the random choices, to repeat a run.
 func set_seed(new_seed: int) -> void:
 	_rng.seed = new_seed
 
 
-## Sets everything to a named preset, taking this share of its round-trip figures. Each direction normally takes 0.5.
-## A spike's size isn't shared: each direction spikes on its own, so it has to be the full size to add that much to the ping.
+## Sets everything to a named preset, taking this share of its round-trip figures (0.5 per direction).
+## [br]A spike's size isn't shared: each direction spikes on its own, so it takes the full size.
 func apply_preset(preset_name: String, share: float = 0.5) -> void:
 	var preset: Dictionary = PRESETS.get(preset_name, {})
 	latency_ms = float(preset.get("latency", 0.0)) * share
@@ -102,10 +107,12 @@ func start_spike(now_usec: int, seconds: float, extra_ms: float) -> void:
 	_spike_until_usec = maxi(_spike_until_usec, now_usec + roundi(seconds * 1000000.0))
 
 
+## True while a burst is on.
 func is_in_burst(now_usec: int) -> bool:
 	return now_usec < _burst_until_usec
 
 
+## True while a spike is on.
 func is_in_spike(now_usec: int) -> bool:
 	return now_usec < _spike_until_usec
 
@@ -115,7 +122,7 @@ func get_current_jitter_ms() -> float:
 	return jitter_ms * _jitter_level
 
 
-## Moves random events and the timeline along. Runs on its own from release_due.
+## Moves random events and the timeline along. [method release_due] calls it.
 func update(now_usec: int) -> void:
 	var elapsed := 0.0 if _last_update_usec < 0 else (now_usec - _last_update_usec) / 1000000.0
 	_last_update_usec = now_usec
@@ -181,6 +188,7 @@ func release_due(now_usec: int, send: Callable) -> void:
 		send.call(packet["peer"], packet["bytes"], packet["reliable"])
 
 
+## Forgets every waiting packet and any burst or spike.
 func clear() -> void:
 	_waiting.clear()
 	_last_reliable_release = 0

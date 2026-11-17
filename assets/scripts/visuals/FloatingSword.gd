@@ -1,29 +1,14 @@
 # Written by Claude (claude-opus-5-5), 2026-11-12. History: visuals/CHANGELOG.md.
 ## A sword that floats beside the pawn and swings through each attack, exactly where the hit is checked.
 ##
-## The owner's toy look (pawn spec 8.12): the pawn doesn't hold it; it hovers at its right side like a toy waved next to a figure,
-## and swoops through the swing. Put it under the pawn's Visual (not Model, which rocks with the waddle). It makes the sword itself
-## from [member sword_scene].
+## Part of the toy look (pawn spec 8.12): the pawn doesn't hold it; it hovers at its right side, about chest high, blade up. Put it
+## under the pawn's Visual (not Model, which rocks with the waddle); it makes the sword from [member sword_scene]. A running
+## MeleeAttackAbility drives it through windup, hit (the blade sweeps the path the hits check, [code]hit_offset_at[/code]) and
+## recovery; a running ParryAbility makes it guard in front of the chest; death drops it flat.
 ## [br]
-## What it shows, frame by frame:
-## [br]- Hovering: at the pawn's side, about chest high, blade up, bobbing and swaying gently.
-## [br]- A swing (any MeleeAttackAbility on the pawn that's running), through its phases (MeleeAttackAbility.swing_phase, from its
-##   steps): windup, it swings back to just behind where the hit starts; hit, it sweeps through the hit, blade pointing out from the
-##   pawn's chest through each spot the hit checks (MeleeAttackAbility.hit_offset_at, the same path the hits use), edge first, so what
-##   you see is what hits, including swings that rise, fall or chop straight down; recovery, it drifts back to hovering.
-## [br]- A parry (ParryAbility running): it guards in front of the pawn's chest, blade held flat across, edge out, for as long as the
-##   parry runs ([member guard_forward], [member guard_height]).
-## [br]- Dead: it drops to the ground beside the pawn, lying flat.
-## [br]
-## Combo swings alternate: after a swing it rests on the side where the swing ended, so the next swing starts from there. A swing
-## ending on the left leaves it hovering at the pawn's left, the second swing then sweeps from left to right, and so on. A swing
-## ending in the middle (a chop) leaves it where it was. After [member return_seconds] with no swing it goes back to the right, round
-## the front of the pawn rather than through it.
-## [br]
-## Visual only: it runs once per rendered frame, only reads the pawn, and changes nothing the game simulates. The swing's progress
-## comes from the ability's state, which rolls back and reaches clients in snapshots, so a client sees other pawns' swings too, and
-## the tick driver's interpolation fraction makes it smooth between ticks. With no display (a headless server or test), it builds
-## nothing and never runs, since nothing can see it (RunEnvironment.runs_visuals). A host playing in a window still draws it.
+## Visual only: it runs once per rendered frame and only reads the pawn (swing progress is ability state, which rolls back and
+## reaches clients in snapshots), so it changes nothing simulated. With no display it builds nothing and never runs
+## (RunEnvironment.runs_visuals).
 # REFACTOR: it finds MeleeAttackAbility and ParryAbility by class, so a new kind of attack or guard needs code here (extensible). The
 # modular animation work could give abilities a pose to report instead. See CHANGELOG.md.
 class_name FloatingSword
@@ -137,7 +122,7 @@ func _animate(delta: float) -> void:
 		_settle_from = global_transform
 		_settled = 0.0 if settle_seconds > 0.0 else 1.0
 	_settled = minf(_settled + delta / maxf(settle_seconds, 0.001), 1.0)
-	# GDScript note: interpolate_with blends both the place and the turn between two transforms.
+	# interpolate_with blends both the place and the turn.
 	global_transform = target if _settled >= 1.0 else _settle_from.interpolate_with(target, _ease_in_out(_settled))
 
 

@@ -1,35 +1,18 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: controllers/CHANGELOG.md.
 ## Picks whose input a pawn follows, and holds that input and whether a player has the pawn.
 ##
-## A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child (pawn spec sections 6.4 and 8.17). The
-## rule is fixed and simple:
-## [br]- A player's controller is attached here (this machine's player has the pawn): that controller is in charge.
-## [br]- A player elsewhere has the pawn: nobody here is in charge, because the input arrives over the network.
-## [br]- Nobody has it: the AI controller is in charge. That's how the AI takes over the moment a player lets go.
+## A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child. This machine's player controller is in
+## charge when it has the pawn; nobody is when a player elsewhere has it (the input arrives over the network); otherwise the AI is, so
+## it takes over the moment a player lets go. The pawn calls [method tick_input] once per tick, which asks the controller in charge
+## and writes its command into the input. Controllers never write to the pawn themselves.
 ## [br]
-## The pawn calls [method tick_input] once per tick, in its input phase, which asks the controller in charge and writes its command
-## into the input. Controllers never write to the pawn themselves.
-## [br]
-## How to use it:
+## The input rolls back (the pawn's TickStateComponent lists it, with [member previous_held_actions] as state). The server's checks on
+## a client's input are here too ([method sanitize_network_input]), as the NetworkEntity's input_owner.
 ## [codeblock]
 ## pawn.controller_manager.get_controller_in_charge()   # a ControllerBase, or null
-## pawn.controller_manager.ai_controller                 # the AI's hands
-## pawn.controller_manager.move_input                    # this tick's input; also held_actions, look_yaw, look_pitch
-## pawn.controller_manager.was_action_pressed(&"jump")   # held this tick but not last tick; is_action_held for a hold
-## pawn.controller_manager.has_player()                  # a player has the pawn (PossessionCoordinator sets it)
+## pawn.controller_manager.was_action_pressed(&"jump")  # held this tick, not last tick
 ## [/codeblock]
-## PlayerController calls [method attach_player] and [method detach_player] when it takes or lets go of a pawn. Nothing else should.
-## [br]
-## The input rolls back: the pawn's TickStateComponent lists "ControllerManager:move_input" and the others as input, and
-## [member previous_held_actions] as state. The server's checks on a client's input ([method sanitize_network_input],
-## [code]_network_input_missing[/code]) are here too: this registers as its NetworkEntity's input_owner. A pawn without a
-## ControllerManager has no input and no player: it stands still, and can't be possessed.
-## [br]
-## What happens in odd cases (all checked in tests/controller_manager_selftest.gd):
-## [br]- Its parent isn't a Pawn: it warns, and nobody is ever in charge.
-## [br]- No AIController child: an unpossessed pawn has nobody in charge, and its input stays as it is.
-## [br]- A player's controller is freed while attached: it's ignored, as if it had let go.
-## [br]- Control changes hands while the pawn is following a path: the path is dropped.
+## Only PlayerController calls [method attach_player] and [method detach_player]. Design: pawn spec 6.4, 8.17.
 class_name ControllerManager
 extends Node
 
@@ -40,12 +23,8 @@ signal controller_changed(controller: ControllerBase)
 ## Sent when a player takes this pawn, or lets it go.
 signal possession_changed(pawn: Pawn, has_player: bool)
 
-## Whether a player may take control of this pawn. Turn it off on pawns players should never control.
-## [br]
-## On by default: off, people would be left wondering why their pawn doesn't work. Something still has to ask for a possession, so
-## a wrong one is a clear bug that gets looked at. To turn it off in a pawn scene whose ControllerManager comes from the game's
-## defaults, add parts/ControllerManager.tscn to the scene yourself and untick it there: PawnInitializer leaves a part the scene
-## already has alone.
+## Whether a player may take control of this pawn. Turn it off on pawns players should never control. To change it where the
+## ControllerManager comes from the game's defaults, add parts/ControllerManager.tscn to the pawn scene first.
 @export var possessable := true
 
 ## On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's
@@ -80,13 +59,13 @@ var _input_missing_this_tick := false
 
 
 func _init() -> void:
-	# GDScript note: nothing here runs per frame. The pawn calls tick_input() on its tick.
+	# Nothing here runs per frame: the pawn calls tick_input() on its tick.
 	set_process(false)
 	set_physics_process(false)
 
 
 func _enter_tree() -> void:
-	pawn = get_parent() as Pawn # GDScript note: "as" gives null when the parent isn't a Pawn, rather than an error
+	pawn = get_parent() as Pawn # null when the parent isn't a Pawn
 	if pawn == null:
 		push_warning("ControllerManager: its parent isn't a Pawn, so it never puts anyone in charge.")
 
@@ -133,9 +112,8 @@ func take_input_command(tick: int) -> InputCommand:
 # --- The input ---
 
 
-## The pawn calls this once per tick, in its input phase: where this pawn's input is decided here, asks the controller in charge and
-## writes its command into the input. A script that writes input itself, such as a test brain, can still do so later in the same phase
-## and win.
+## The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input.
+## A script that writes input later in the same phase wins.
 func tick_input(tick: int) -> void:
 	if not decides_own_input():
 		return
@@ -209,9 +187,8 @@ func set_has_player(value: bool) -> void:
 # --- The server's checks on a client's input (NetworkEntity calls these, as this pawn's input_owner) ---
 
 
-## On the server: a client's input is never trusted. Wrong types are replaced, and direction is limited to full speed. The values are
-## keyed as the pawn's TickState lists them ("ControllerManager:move_input"); plain names ("move_input") work too, for scripts and
-## tests.
+## On the server: a client's input is never trusted. Wrong types are replaced and direction is limited to full speed. Keys are as the
+## pawn's TickState lists them ("ControllerManager:move_input"); plain names work too.
 func sanitize_network_input(values: Dictionary) -> Dictionary:
 	var clean := values.duplicate()
 	var key := func(field: String) -> String:
@@ -231,9 +208,8 @@ func sanitize_network_input(values: Dictionary) -> Dictionary:
 	return clean
 
 
-## On the server: this tick's input never arrived, so the last one repeats. A held direction repeats fine, and a press doesn't, since a
-## repeated hold isn't "newly held". After missing_input_hold_ticks, the direction fades out over missing_input_fade_ticks. Held actions
-## are left alone, so a key still held when input comes back doesn't count as a new press.
+## On the server: this tick's input never arrived, so the last one repeats (a held direction repeats; a press doesn't). After
+## missing_input_hold_ticks the direction fades out over missing_input_fade_ticks. Held actions are left alone.
 func _network_input_missing() -> void:
 	_input_missing_this_tick = true
 	_missing_input_ticks += 1
@@ -286,7 +262,7 @@ func _stop_path() -> void:
 func _refresh() -> void:
 	if not _check_queued:
 		_check_queued = true
-		# GDScript note: call_deferred runs the function once the current frame's work is done.
+		# Deferred, so several changes in one frame give one check.
 		_send_if_changed.call_deferred()
 
 

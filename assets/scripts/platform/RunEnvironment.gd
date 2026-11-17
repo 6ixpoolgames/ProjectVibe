@@ -12,10 +12,7 @@ extends RefCounted
 
 ## On: visual-only parts run even with no display. Off (the default): with no display they build nothing and never run, since nothing
 ## can see them (the floating swords cost 1.4 ms a tick on a headless mass battle server).
-## [br]
-## GDScript note: a static var belongs to the class, so every part sees the same one.
-# REFACTOR: a switch only tests turn on, kept in shipping code. Test code belongs in tests/ (keep test code out of shipping code);
-# the owner may prefer to keep this one small static as the agreed hook.
+# REFACTOR: a switch only tests turn on, kept in shipping code; test code belongs in tests/. It could stay as the agreed small hook.
 static var visuals_without_display := false
 
 

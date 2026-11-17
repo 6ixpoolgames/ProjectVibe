@@ -13,39 +13,14 @@ Every class in `assets/scripts/streaming/`, from its doc comments. The overview 
 
 Loads terrain chunks around every streaming source, and unloads the ones nothing needs any more, without stalling the game.
 
-How to use it:
-
-1. Add this node to the scene and set its `terrain`. Under a [`WorldCoordinator`](../world/REFERENCE.md#worldcoordinator) that's done for you.
-
-2. On the TerrainGenerator, turn `build_on_start` off (the WorldCoordinator does this too).
-
-3. Add a [`StreamingSource`](#streamingsource) to whatever should keep the world loaded. A pawn that keeps the world loaded is a source itself.
-
-To see it working, open streaming_sample.tscn. The tests and stress test are in tests/.
-
-**The ground is always there.** The chunks directly under a source are built immediately, right before each tick, and ignore the budget. That costs a few milliseconds at most, and only when something has appeared or teleported somewhere new. Everything further out comes through the budget below. So a pawn with a source has ground on its very first tick.
-
-**It stays smooth.** Building a chunk is split into small steps (`TerrainGenerator.build_chunk_step()`), and each frame this runs steps until `max_ms_per_frame` is used up. A slower machine finishes chunks later, but its frames stay short.
-
-**Multiplayer.** Each machine runs its own streamer and loads what it needs: the server around every player, and a client around its own pawn. They don't send terrain to each other, because the same settings build the same ground on every machine. See StreamingSource and tests/net_streaming_selftest.gd.
-
-**No reloading the same chunk over and over.** A chunk loads within a source's load_distance, but only unloads past load_distance + `unload_margin`. So walking back and forth along that line doesn't keep rebuilding it.
-
-What happens in odd cases (all checked in tests/chunk_streaming_selftest.gd):
-- No terrain set: it warns once and does nothing.
-- No active sources: everything stays loaded, unless `hold_when_no_sources` is off. A player respawning or changing pawns shouldn't make the world vanish.
-- More chunks wanted than the limit: the nearest ones win, and it warns once.
-- A slow chunk: at least one step runs every frame, however small the budget.
-- No TickDriver: the ground check runs once per physics frame instead of before each tick.
-
-Not yet: it serves one terrain. Props or other things that load by chunk, or the blended level generators the world spec aims for, would need it to serve more.
+Add it to the scene and set its `terrain` (a [`WorldCoordinator`](../world/REFERENCE.md#worldcoordinator) does this, and turns off the terrain's `build_on_start`), then add a [`StreamingSource`](#streamingsource) to whatever should keep the world loaded; a pawn that does is a source itself. Building a chunk is split into steps (`TerrainGenerator.build_chunk_step()`) and each frame runs steps until `max_ms_per_frame` is used up, so a slower machine finishes chunks later but its frames stay short. The chunks directly under a source are built at once, right before each tick, outside the budget, so a pawn has ground on its first tick. A chunk loads within a source's load_distance and only unloads past load_distance + `unload_margin`. Each machine runs its own streamer; terrain isn't sent, since the same settings build the same ground. Design: streaming spec (docs/streaming/STREAMING_SPEC.md).
 
 ### Settings and properties
 
 - `terrain: TerrainGenerator`: The terrain to load chunks for. If it's empty and this node's parent is a terrain, it uses the parent.
 - `max_ms_per_frame: float` = `2.0`: How long this may spend per frame, in milliseconds. At least one step always runs, so one step can go over.
 - `unload_margin: float` = `64.0`: How far past a source's load_distance a chunk stays loaded, in metres, so that hovering around the edge doesn't rebuild it.
-- `max_chunks_per_source: int` = `256`: The most chunks that may be loaded per active source. A safety limit against running out of memory. It's per source, not one total, because a server needs chunks around every player. At the defaults a source wants about 37 chunks.
+- `max_chunks_per_source: int` = `256`: The most chunks loaded per active source, a safety limit against running out of memory. Per source because a server needs chunks around every player. At the defaults a source wants about 37 chunks.
 - `refresh_seconds: float` = `0.2`: How often to check where the sources are, in seconds. Shorter reacts faster and costs more.
 - `hold_when_no_sources: bool` = `true`: With no active sources, keeps every chunk loaded. Off: they all unload.
 
@@ -70,25 +45,13 @@ Not yet: it serves one terrain. Props or other things that load by chunk, or the
 
 Marks something as keeping the world loaded around it.
 
-"Streaming source" is the usual name for this in game engines. It does nothing by itself: a [`ChunkStreamer`](#chunkstreamer) finds every source and loads chunks around the active ones.
+A [`ChunkStreamer`](#chunkstreamer) finds every source and loads chunks around the active ones. Add this as a child of whatever should keep the world loaded (an RTS camera, a spawner); it follows its parent, so it needs no code. Turn `active` off when it shouldn't count. A Pawn needs none: it's a source itself, and is in the group only while it might keep the world loaded.
 
-How to use it: add this node as a child of whatever should keep the world loaded, such as an RTS camera or a spawner. It follows its parent because it's a Node3D, so it needs no code. Turn `active` off when that thing shouldn't count. It's a node of its own, not a setting on a controller, so that things without a pawn controller can use it too. A Pawn needs none: it's a source itself (its `keeps_world_loaded` flag, or a player has it), and is in the group only while it might keep the world loaded, so the group holds the few sources, not every pawn.
+**The source contract.** Anything in `GROUP` with these counts as a source; the chunk streamer, [`TerrainNavFeeder`](../world/REFERENCE.md#terrainnavfeeder), AIActivationManager and the replay read sources only through them:
+- `global_position`, `load_distance`, `nav_distance` (metres).
+- `counts_on_this_machine() -> bool` and `distance_moved_since_last_check() -> float`.
 
-**The source contract.** Anything in `GROUP` with these counts as a source, a StreamingSource node or a Pawn. The chunk streamer, the nav feeder (TerrainNavFeeder), the AI switch-off (AIActivationManager) and the replay read sources only through these:
-- `global_position`: where it is.
-- `load_distance`, `nav_distance`: how far it loads ground and builds nav, in metres.
-- `counts_on_this_machine() -> bool`: whether it loads anything on this machine right now.
-- `distance_moved_since_last_check() -> float`: how far it moved since the streamer last asked.
-
-In multiplayer, a source on a networked entity counts only where it should, with no setup needed:
-- On the server, or offline: it counts, so the world stays loaded around every player, wherever they are.
-- On a client: only on that client's own pawn. Another player's pawn doesn't make this machine load the world around it.
-
-Anything that isn't a networked entity, such as a camera, always counts on the machine it's on.
-
-What happens in odd cases (all checked in tests/chunk_streaming_selftest.gd):
-- No ChunkStreamer in the scene: nothing happens, and nothing breaks.
-- Removed from the scene or freed: it stops counting by itself, at the streamer's next refresh.
+In multiplayer a source counts on the server or offline, and on a client only for that client's own pawn.
 
 ### Settings and properties
 

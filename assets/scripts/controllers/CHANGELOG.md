@@ -14,6 +14,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move the test hooks out of `InputActions` | `reset()`, `use_list()` in `InputActions.gd` | Test hooks in a shipping class; the owner's rule keeps test code in `tests/` | S |
 | Share the missing-input defaults | `_network_input_missing()` in `ControllerManager.gd` | 3 and 6 copy `NetworkSession`'s defaults by hand, so the two can drift apart | S |
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): the class comments of `ControllerManager`, `AIController` and `InputActions` shortened (the AI-not-in-charge rule, the rollback note and the odd cases moved to the README's "How it works"). Stale comment fixed: the `look_at_node` doc sat on `stop_looking`, and `stop_looking` had none. `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
+
 ## 2026-11-17
 
 - **`AIController.look_at_node(node, offset)`** (scaling spec 6.2's wake-ups): keeps looking at a node, worked out again at every input until `stop_looking()` or another look, so a behaviour sleeping through a swing (Attack) still aims every tick. A freed node ends it and keeps the last aim.

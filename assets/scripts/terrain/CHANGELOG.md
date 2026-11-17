@@ -15,6 +15,10 @@ None in this folder yet. Related: `TerrainSettings`, which describes a terrain, 
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): moved to the README's new "How edits work" section: the edit log's byte format, multiplayer and saving rules, the body lifter's rules and what `_make_chunk_markers` must return. `TerrainGenerator`'s teaching comments (`GDScript note:`, the "how to read this file" block, the history of the first generator) are gone. No stale comments found.
+
 ## 2026-11-17
 
 - **Edits rebuild only the nav they touch.** `TerrainGenerator.edit_area`: while `chunk_built` goes out for an edit, the part of the ground it changed. `world/TerrainNavFeeder` passes it on, so nav rebuilds only the tiles under the edit instead of every tile under the chunk (the C++ bundle, stage 2, from the code audit).

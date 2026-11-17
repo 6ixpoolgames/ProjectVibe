@@ -1,14 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: camera/CHANGELOG.md.
 ## Holds a VirtualCamera out from a pawn, following a look direction, and pulls it in so walls don't come between camera and pawn.
 ##
-## It's Unreal's spring arm, as a plain node. The PlayerController owns one arm per player and moves it to each pawn it takes (see
-## CameraMount); a pawn's scene may also place its own.
-## [br]
-## It's idle unless it's active, which is when a player is looking through it. An idle arm does no work and reads nothing, and it
-## never reads input itself: PlayerController tells it where to look. So AI or a cutscene could drive it just the same.
-## [br]
-## Its one collision check each frame is a physics query outside the physics step. That's safe with Godot's default setting, where
-## physics doesn't run on its own thread. A project that turns that on would have to move this.
+## Like Unreal's spring arm, as a plain node. The PlayerController owns one arm per player and moves it to each pawn it takes (see
+## [CameraMount]); a pawn's scene may also place its own. It's idle unless active (a player is looking through it), and never reads
+## input itself: PlayerController tells it where to look. Its one collision check a frame is a physics query outside the physics
+## step, which is safe while physics doesn't run on its own thread (Godot's default).
 class_name CameraArm
 extends Node3D
 

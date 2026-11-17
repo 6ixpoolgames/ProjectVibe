@@ -1,20 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: camera/CHANGELOG.md.
 ## Where a player's camera arm attaches to a pawn, and with what settings.
 ##
-## One camera per player, owned by the PlayerController (pawn spec 8.18). A CameraMount is a plain marker a pawn's scene places under
-## its Visual node. It does nothing itself: the PlayerController moves its one arm here when it takes the pawn, and applies this
-## preset.
-## [br]
-## A pawn without one gets the arm on its Visual node, with the default settings (CameraPreset's). A pawn whose scene places its own
-## CameraArm, or a VirtualCamera of its own (at the eyes, say), uses that instead, and no mount is needed.
-## [br]
-## How to use it: add a CameraMount under the pawn scene's Visual node, and give it a CameraPreset (arm length, height, field of
-## view). Its position is ignored: the preset's mount_height and shoulder_offset place the arm. The static functions find a pawn's
-## camera pieces:
+## A plain marker a pawn's scene places under its Visual node, with a [CameraPreset] (arm length, height, field of view). It does
+## nothing itself: the PlayerController moves its one camera arm here when it takes the pawn, and applies the preset. Its position is
+## ignored; the preset's mount_height and shoulder_offset place the arm. A pawn without one gets the arm on its Visual with default
+## settings; a pawn with its own CameraArm or VirtualCamera uses that.
 ## [codeblock]
 ## CameraMount.arm_of(pawn)      # its arm, or null
 ## CameraMount.view_of(pawn)     # the view a camera attaches to
 ## [/codeblock]
+## Design: pawn spec 8.18.
 class_name CameraMount
 extends Node3D
 
@@ -23,8 +18,6 @@ extends Node3D
 
 
 # --- Finding a pawn's camera pieces ---
-# GDScript note: static functions belong to the class, so they're called as CameraMount.arm_of(pawn), with no CameraMount node
-# needed.
 
 
 ## Where a player's arm attaches on this pawn: the CameraMount under its Visual if the scene has one, else its Visual itself.

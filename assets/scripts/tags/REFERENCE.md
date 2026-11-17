@@ -13,25 +13,15 @@ Every class in `assets/scripts/tags/`, from its doc comments. The overview is in
 
 The ability tags: turns tag names like "combat.melee.sword" into bits, so checks are one AND instead of comparing text.
 
-The shared tag registry of pawn spec section 7.1 and netcode spec section 13. Abilities carry these tags (a category and extra categories), and lockouts, interrupts and the AI's `action_for_tag` ask by them. Code writes them as [`Tags`](#tags) constants.
+The shared tag registry (pawn spec 7.1, netcode spec 13). Abilities carry tags, and lockouts, interrupts and the AI's `action_for_tag` ask by them. Code writes them as [`Tags`](#tags) constants.
 
-How tags work:
-- A tag is a StringName with dot-separated levels. A dot means "sub-category": combat.melee is inside combat. Tags are names only, not class hierarchy or scene-tree position.
-- Every level gets its own bit. combat, combat.melee and combat.melee.sword are three bits.
-- A tag's mask holds its own bit plus all its parents' bits. So a query or lockout for "combat" catches combat.melee.sword with one AND, and never catches "combatant" (whole levels only).
-- Matching is from the root only: "combat.melee" matches combat.melee.sword, "sword" doesn't.
+Tag bit rules:
+- A tag is a StringName with dot-separated levels; a dot means sub-category (combat.melee is inside combat). Names only.
+- Every level gets its own bit: combat, combat.melee and combat.melee.sword are three bits.
+- A tag's mask is its own bit plus its parents' bits, so a query for "combat" catches combat.melee.sword with one AND, and never "combatant". Matching is from the root only: "combat.melee" matches combat.melee.sword, "sword" doesn't.
+- At most 64 levels; extras get no bit (mask 0, match nothing) with a warning.
 
-Why declarations: in multiplayer every machine must give the same tag the same bit. Bits handed out on first use would depend on what happened to run first. So the game lists its tags in a TagDeclarationsRes (resources/tag_declarations.tres), and the registry sorts and numbers them all at startup, identically everywhere. The netcode handshake compares `content_hash()`.
-
-Corner cases (all checked in tests/tag_registry_selftest.gd):
-- Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
-- Messy names ("combat..melee", " combat.melee ") are cleaned up (empty levels and spaces dropped).
-- A tag nobody declared, used at runtime: added on the spot with a one-time warning. Fine offline; a desync risk online, which is what the warning is for. Only setting things up adds tags (`declare()`, `bit_of()`, `own_bit()`, `mask_of()` and the list versions); queries (`matches()`, `has_tag()`) never do: an unknown tag just matches nothing.
-- Declaring after the registry is in use: same as undeclared (appended, warned). Sorting again would change bits that are already stored in masks.
-- More than 64 levels in total: the extra ones get no bit (mask 0, match nothing) and a warning. The mask could later become an array of ints without changing how designers use tags.
-- No declarations file: the registry still works, every tag is just "undeclared".
-
-A static class (not an autoload), so it works in headless tests and in --script mode.
+Every machine must give a tag the same bit, so the game declares its tags in a TagDeclarationsRes (resources/tag_declarations.tres) and the registry sorts and numbers them at startup; the netcode handshake compares `content_hash()`. A tag nobody declared is added on the spot with a warning (a desync risk online). Queries never add tags. A static class, so it works in headless tests.
 
 ### Constants
 
@@ -67,9 +57,7 @@ Write `Tags.MOVEMENT_DASH` instead of `&"movement.dash"`: a misspelt constant is
 
 The names follow the tags: dots become underscores, letters go upper case. Each tag's parent levels have constants too, because a lockout often names a whole branch (`Tags.MOVEMENT` locks every movement tag).
 
-This is for code only. Designers pick tags in the inspector from a dropdown (addons/tag_picker), and add new ones to the declarations file (resources/tag_declarations.tres) without touching this. A constant here must be declared there: tags/tests/tag_registry_selftest checks it. A tag declared there needs a constant here only if code uses it.
-
-GDScript note: a script with only constants is never instantiated; `Tags.MOVEMENT` is read straight from the class.
+For code only: designers pick tags from a dropdown (addons/tag_picker) and add new ones to resources/tag_declarations.tres. A constant here must be declared there (tags/tests/tag_registry_selftest checks); a declared tag needs a constant only if code uses it.
 
 ### Constants
 

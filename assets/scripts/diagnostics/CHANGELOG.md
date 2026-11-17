@@ -19,6 +19,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-18
 
+- **Comments rewritten to the reference style** (the documentation pass): class and member comments shortened, `GDScript note:` and "the owner's call" wording removed (the measuring method, PerfScopes' cost note and release-build behaviour kept). The frame-measuring explanation, the panels' contents and the `get_summary` keys moved to a new "How it works" section of the README. No stale comments found.
 - **F1 lists F10** (the AI decision module's key: every pawn's decisions in GDScript and back), and no longer says the panels are debug-only (they ship in release builds; F9 and F10 are debug-only).
 
 ## 2026-11-17

@@ -55,6 +55,27 @@ var hurt := Effect.make_damage(20)                        # a quick instant dama
 
 **Write a new kind of part.** Extend `EffectPart`, give it `@export` settings, and either override `apply_once(application)` (a do-once part) or return true from `is_held()` and override `add_held(totals, stacks)` (a held part). Keep no state on the part: one part is shared by every pawn the effect lands on.
 
+## How it works
+
+**Applying.** `EffectManager.apply_effect` refuses a dead pawn, and a harmful effect while the pawn is invulnerable (a dash) or has 1 or more resistance. An instant effect runs its do-once parts now. An over-time one goes in the active list (or, if it's there, its `stacking` rule decides); the first time its do-once parts run too, and its held parts hold from then on, on every machine. Do-once parts run in order on the authority only; once Health reaches 0 the pawn dies (`AbilityManager.health_ran_out`) and the rest are skipped. Health taken from a source adds threat in this pawn's AI memory for it.
+
+**Each tick** (`tick_effects`, called by the pawn before its abilities): every active effect counts down and ends at 0, and one with a period runs its do-once parts again when it comes round (3 s with a 1 s period runs at 0, 1 and 2 s). A pawn with effects on it doesn't rest.
+
+**Rollback.** The active list is one `PackedInt64Array`, `active_effects`, five numbers per effect: its id (`Effect.get_id`, from its file path or `effect_name`), ticks left, ticks to its next period, stacks, and its source (an entity id online, else an instance id). The pawn's `TickStateComponent` rolls it back and sends it in snapshots. What the held parts add up to (stat values, ability numbers, resistances) is worked out from the list whenever it changes, including when a rollback loads it, so it needn't roll back itself.
+
+**Resistances.** The inspector's `resistances` plus every held `ResistancePart`, as effect tag -> amount. An effect's resistance is every one whose tag is one of its tags or a level above one, added up: 0.2 against `damage.elemental` and 0.3 against `damage.elemental.fire` make 0.5 against fire. They apply only to harmful effects.
+
+**Tags.** Effect tags follow the same rules as `TagRegistry` and `NavTags`: a dot means "inside", every level gets its own bit, and a tag's mask holds its own bit plus its parents', so a resistance to `damage.elemental` catches fire and frost with one AND and never `damaged`. They're declared in `resources/effect_tag_declarations.tres`, sorted and numbered at startup so every machine agrees. A constant in `EffectTags` must be declared there (`effect_selftest` checks it).
+
+**Odd cases** (all checked in `effect_selftest`):
+- An effect with no parts does nothing, and an over-time one still shows in the active list for its duration.
+- Held parts on an instant effect do nothing; a warning says so once.
+- A saved over-time effect is recognised on every machine by its file path; one made in code needs an `effect_name` to be recognised on a client, or it works offline only.
+- The list is full (`max_active_effects`): a new over-time effect is refused, with a warning once.
+- An id in the list this machine doesn't know: it counts down, its held parts do nothing here, with a warning once.
+- The pawn dies: everything in the list is removed.
+- An empty or blank tag has no bit and matches nothing. An undeclared tag is added on the spot with a one-time warning (machines may disagree online, which the warning is for); asking with `has_tag` never adds one. More than 64 levels: the extras get no bit and warn once. With no declarations file everything works and every tag counts as undeclared.
+
 ## Settings worth knowing
 
 | Setting | Where | Default | What it does |

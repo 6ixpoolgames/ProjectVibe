@@ -9,6 +9,10 @@ Movement is this folder: `CrowdMover`, a GameMode module, and its C++ batch `Cro
 
 None found in the documentation pass. The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as the fallback where the C++ library isn't loaded.
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): moved to the README's new "How it works" section: the batch's steps, separation, the C++ and physics wall and ground checks and who `CrowdMover` moves. "The owner's call" wording removed; `_move_batch` now says it is a twin of the C++ `CrowdBatch`. No stale comments found.
+
 ## 2026-11-17
 
 - **The batch in C++** (the C++ bundle stage 3): `CrowdBatch` on the job scheduler's worker threads (`use_cpp_batch`). Walls come from the nav mesh (the owner's call, "walls belong in navigation"): a pawn on it walks along it with Detour's moveAlongSurface (NavWalking) and slides along its edge, with the ground from `SightGeometry`. Pawns it can't walk that way are handed back for the physics checks, now in `_walls_and_ground`, shared by both batches.

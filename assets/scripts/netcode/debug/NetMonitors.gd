@@ -1,28 +1,17 @@
-## Written by Claude (claude-opus-5-5), 2026-11-10: the netcode's numbers as graphs in Godot's own debugger, the owner's request. Run the
-## game from the editor, then open Debugger > Monitors: they're under "Net", beside FPS and memory, and draw live while host and
-## clients run. Nothing is drawn in the game itself.
+# Written by Claude (claude-opus-5-5), 2026-11-10. History: netcode/CHANGELOG.md.
+## The netcode's numbers as graphs in Godot's debugger (debug code).
 ##
-## An optional child of the session, as NetDebugModule is. NetworkSession adds it when the editor's debugger is attached
-## (EngineDebugger.is_active()), so an exported game or a headless test never has it unless it asks:
-##   NetMonitors.on(NetworkSession)
-##
-## The monitors (rates are per second, worked out once a second; a client-only number is 0 on the server and offline):
-##   Net/Ping (ms)                   client: the measured round trip
-##   Net/Lead (ticks)                client: how far ahead of the server it runs (prediction)
-##   Net/View behind (ticks)         client: how far behind its own tick others are drawn (interpolation)
-##   Net/Tick speed                  client: time dilation, 1 is normal
-##   Net/Rollbacks per second        replays started
-##   Net/Ticks replayed per second   ticks simulated again by those replays
-##   Net/Corrections per second      client: predictions the server's state put right
-##   Net/Average correction (m)      client: how far, on average, over the last second
-##   Net/Sent (KB per second), Net/Received (KB per second)
-##   Net/Input margin (ticks)        client: how early its inputs reach the server; negative is late
-##   Net/Missed inputs               client: inputs the server had to do without, in all
-##   Net/Entities                    networked entities on this machine
-## It only reads: it listens to TickDriver.after_rollback and reads the session's getters and stats, so it changes nothing.
+## Run the game from the editor and open Debugger > Monitors: they are under "Net", live while host and clients run. Nothing is drawn
+## in the game. An optional child of the session, added when the editor's debugger is attached; elsewhere: [code]NetMonitors.on(NetworkSession)[/code].
+## It only reads (TickDriver.after_rollback, the session's getters and stats). Rates are per second, worked out once a second; a
+## client-only number is 0 on the server and offline.
+## [br]Monitors: Ping (ms), Lead (ticks), View behind (ticks), Tick speed (time dilation, 1 is normal), Rollbacks per second, Ticks
+## replayed per second, Corrections per second, Average correction (m), Sent and Received (KB per second), Input margin (ticks, negative
+## is late), Missed inputs, Entities.
 class_name NetMonitors
 extends Node
 
+## Put before every monitor's name.
 const PREFIX := "Net/"
 ## Seconds between working out the rates.
 const RATE_SECONDS := 1.0

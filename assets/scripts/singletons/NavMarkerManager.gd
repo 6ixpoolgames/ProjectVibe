@@ -1,40 +1,14 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
 ## Holds every nav marker and answers searches for them. Autoload "NavMarkerManager".
 ##
-## It stores every nav marker, gives each a stable id, and answers searches like "the nearest point.cover within 20 m" (nav spec
-## section 21.5). It needs no C++ library, so it works even where nav itself doesn't. It also keeps the list of marker modules, tells
-## them when markers change, and reports types nothing handles. It doesn't find paths (NavServer does) or decide what a pawn does
-## (AI does).
-## [br]
-## Written so its insides can move to C++ later without changing anything that calls it:
-## [br]- Callers use only the public functions below, which take and return plain values.
-## [br]- Searches return ids, not objects. [method get_marker] fetches the full data only when it's needed.
-## [br]- What searches read sits in flat arrays ("rows"), not in one object per marker.
-## [br]- A chunk registers its whole list in one call.
-## [br]- Searches call no script code in their loops.
-## [br]- Requests apply on the next tick, so nothing can rely on them being instant.
-## [br]- Ids come from a hash written out here, because Godot's hash() could differ from a C++ version.
-## [br]
-## How it stores things: every marker is one row, meaning the same index in each array below. So _positions[7], _masks[7] and _ids[7]
-## all describe one marker. A removed marker's row is reused later.
-## [br]
-## How search stays fast: the world is split into square cells, and a search only looks at nearby cells. Each cell keeps a linked list
-## running through the rows. _cell_heads gives a cell's first row, and _next_in_cell gives the row after each one. That makes adding
-## and removing a marker instant, and it keeps everything in flat arrays.
-## [br]
-## What happens in odd cases (all checked in navigation/tests/nav_marker_manager_selftest.gd):
-## [br]- A duplicate id, an undeclared tag or a null marker: refused, with one warning for the whole list.
-## [br]- An unknown id: harmless. get_marker gives null, and set_enabled warns and does nothing.
-## [br]- Releasing a chunk that isn't registered: nothing happens.
-## [br]- A search in an empty world, or with an infinite distance: finds what's there and always finishes.
-## [br]- A search with an undeclared or empty tag: finds nothing, and doesn't add the tag.
-## [br]
-## Module rules are at the top of NavMarkerModule.gd, and checked in navigation/tests/nav_markers_selftest.gd.
-## [br]
-## The debug report: if markers exist of a type no module announced, it warns once per type, after registrations have gone quiet for
-## [member report_quiet_seconds]. It warns again only if a new unclaimed type appears, or a type loses its last module. Debug builds
-## only. A level with no AI reports NavPoint, which is fine: it's one true line. Turn it off with the project setting
-## [constant REPORT_SETTING], for a game that leaves a type unhandled on purpose.
+## It stores every nav marker, gives each a stable id, and answers searches such as "the nearest point.cover within 20 m". It needs no C++
+## library, keeps the list of marker modules and tells them when markers change. It doesn't find paths (NavServer) or decide what a pawn
+## does (AI). Requests apply on the next tick; searches return ids and read the state as of the last tick.
+## [codeblock]
+## var id := NavMarkerManager.find_nearest(&"point.cover", pawn.global_position, 20.0)   # 0: none
+## var marker := NavMarkerManager.get_marker(id)                                          # the full data, only when needed
+## [/codeblock]
+## Design: nav spec 21.5. How it stores markers and searches fast: the README.
 extends Node
 
 ## The project setting that switches the debug report on or off (on by default).
@@ -46,20 +20,19 @@ const CELL_SIZE := 32.0
 ## Means "no row", at the end of a linked list.
 const NO_ROW := -1
 
-# The FNV-1a hash's two standard numbers. The first is written as negative because it's too big for a signed
-# 64-bit int, and this is the same pattern of bits. Tests check the result against the published values.
+# The FNV-1a hash's two standard numbers. The first is written negative because it's too big for a signed 64-bit int (same bits).
 const FNV_OFFSET := -3750763034362895579
 const FNV_PRIME := 1099511628211
 
-# GDScript note: an enum gives names to numbers, so the queue below says Op.ADD instead of a bare 0.
+# What a queued request does.
 enum Op { ADD, REMOVE, SET_ENABLED, ADD_MODULE }
 
-## Whether the automatic report runs. Starts from the project setting.
+## Whether the debug report runs (debug builds only): it warns once per marker type no module handles. Starts from [constant REPORT_SETTING].
 var report_unhandled: bool = ProjectSettings.get_setting(REPORT_SETTING, true)
 ## How long registrations must stay quiet before the report runs, since a module may just not have arrived yet.
 var report_quiet_seconds := 2.0
 
-# --- The rows. One index = one marker. ---
+# --- The rows: one index is one marker, the same index in every array. A removed marker's row is reused. ---
 var _ids := PackedInt64Array()             # the marker's id; 0 means this row is free
 var _positions := PackedVector3Array()
 var _masks := PackedInt64Array()           # NavTags.mask_of(tag), so a search is one AND
@@ -69,12 +42,11 @@ var _linked := PackedByteArray()           # 1 = applied and searchable; modules
 var _types := PackedInt32Array()           # index into _type_scripts
 var _next_in_cell := PackedInt32Array()    # linked list: the next row in the same cell
 var _previous_in_cell := PackedInt32Array() # linked list: the row before this one
-# GDScript note: Array[NavMarker] is a typed array, so only NavMarkers (or null) can go in it.
 var _markers: Array[NavMarker] = []        # the full data, for what searches don't read
 
 var _free_rows := PackedInt32Array()       # rows ready to be reused
 var _row_of_id := {}                       # marker id -> row
-var _cell_heads := {}                      # cell (Vector2i) -> the first row in that cell
+var _cell_heads := {}                      # cell (Vector2i) -> the first row in that cell; rows in a cell are a linked list
 var _chunk_ids := {}                       # _chunk_key(terrain, chunk) -> PackedInt64Array of its ids
 var _terrains := {}                        # terrain id -> TerrainSettings
 var _kept_changes := {}                    # marker id -> enabled value, for chunk markers changed from how they started
@@ -97,11 +69,9 @@ var _automatic_report_count := 0
 
 
 func _ready() -> void:
-	# GDScript note: signal.connect(function) means "call this function whenever the signal fires".
 	TickDriver.before_tick.connect(_on_before_tick)
 
 
-# GDScript note: the leading underscore marks an argument this function has to accept but doesn't use.
 func _on_before_tick(dt: float, _tick: int) -> void:
 	flush()
 	_update_report(dt)
@@ -109,9 +79,8 @@ func _on_before_tick(dt: float, _tick: int) -> void:
 
 # --- Terrains ----------------------------------------------------------------------------------
 
-## A generator registers a copy of its settings, and gets the terrain id it uses for its chunks' markers.
-## The id comes from the generator's scene path, so it matches on every machine, and across reloads, with nobody
-## having to choose a number. Moving or renaming the node changes it. Registering again replaces the settings.
+## A generator registers a copy of its settings and gets the terrain id for its chunks' markers. The id comes from the generator's
+## scene path, so it matches on every machine and across reloads; moving or renaming the node changes it. Registering again replaces the settings.
 func register_terrain(scene_path: String, settings: TerrainSettings) -> int:
 	var id := scene_marker_id(scene_path)
 	_terrains[id] = settings
@@ -139,8 +108,8 @@ func chunk_of(terrain: int, position: Vector3) -> Vector2i:
 
 # --- Requests. These are checked straight away and take effect on the next tick. ---------------
 
-## A chunk announces its markers. Returns how many were accepted; refused ones get one warning between them.
-## A marker's id comes from its place in this list, so a generator must build the list the same way every time.
+## A chunk announces its markers. Returns how many were accepted; refused ones get one warning between them. A marker's id comes from
+## its place in this list, so a generator must build the list the same way every time.
 func request_markers(terrain: int, chunk: Vector2i, markers: Array[NavMarker]) -> int:
 	var new_rows := PackedInt32Array()
 	var new_ids := PackedInt64Array()
@@ -171,8 +140,8 @@ func request_markers(terrain: int, chunk: Vector2i, markers: Array[NavMarker]) -
 	return new_rows.size()
 
 
-## A hand-placed marker asks to be registered. Returns its id, or 0 if it was refused.
-## NavMarkerNode calls this with its scene path, so moving or renaming that node changes the id.
+## A hand-placed marker asks to be registered. Returns its id, or 0 if refused. NavMarkerNode calls this with its scene path, so moving
+## or renaming that node changes the id.
 func request_scene_marker(scene_path: String, marker: NavMarker) -> int:
 	var id := scene_marker_id(scene_path)
 	var reason := _why_refused(marker, id)
@@ -214,8 +183,8 @@ func remove_scene_marker(id: int) -> void:
 	_queue.append([Op.REMOVE, rows])
 
 
-## Switches a marker on or off. For a chunk's marker, the change is remembered through unloads, and only
-## while it differs from how the marker started, so memory doesn't grow with the size of the world.
+## Switches a marker on or off. A chunk marker's change is remembered through unloads, only while it differs from how the marker
+## started, so memory doesn't grow with the world.
 func set_enabled(id: int, enabled: bool) -> void:
 	var row: int = _row_of_id.get(id, NO_ROW)
 	if row == NO_ROW:
@@ -229,8 +198,7 @@ func set_enabled(id: int, enabled: bool) -> void:
 	_queue.append([Op.SET_ENABLED, row, enabled])
 
 
-## Applies every waiting request now, and tells modules. The tick does this by itself; tests and tools can
-## call it directly.
+## Applies every waiting request now, and tells modules. The tick does this by itself; tests and tools can call it directly.
 func flush() -> void:
 	if _queue.is_empty():
 		return
@@ -242,7 +210,7 @@ func flush() -> void:
 		if request[0] != Op.SET_ENABLED and not changed_rows.is_empty():
 			_tell_modules(changed_rows, Op.SET_ENABLED)
 			changed_rows = PackedInt32Array()
-		match request[0]: # GDScript note: match is GDScript's version of "switch": it runs the branch that fits
+		match request[0]:
 			Op.ADD:
 				for row in request[1]:
 					_link_row(row)
@@ -260,8 +228,7 @@ func flush() -> void:
 					if _linked[request[1]] == 1:
 						changed_rows.append(request[1])
 			Op.ADD_MODULE:
-				# It may have left, and even been freed, before this tick came. This is checked here because
-				# a freed object can't be passed to a function that expects a NavMarkerModule.
+				# It may have left, even been freed, before this tick. Checked here because a freed object can't be passed to a typed function.
 				if is_instance_valid(request[1]) and _modules_waiting.has(request[1]):
 					_join_waiting_module(request[1])
 	if not changed_rows.is_empty():
@@ -277,8 +244,8 @@ func add_module(module: NavMarkerModule) -> void:
 	_note_change()
 
 
-## A module is leaving the tree. This happens straight away, not on the next tick, because the module may not
-## exist by then. It gets a final _markers_removed so it can undo its work. The markers stay registered.
+## A module is leaving the tree. This happens at once, not next tick, as the module may not exist by then. It gets a final
+## _markers_removed so it can undo its work. The markers stay registered.
 func remove_module(module: NavMarkerModule) -> void:
 	_modules_waiting.erase(module)
 	if not _modules.has(module):
@@ -292,8 +259,8 @@ func remove_module(module: NavMarkerModule) -> void:
 		module._markers_removed(ids)
 
 
-## Forgets every marker and every kept change. For tests, and for leaving a level. Modules stay, and are told
-## their markers have gone. Modules waiting to join still join on the next tick.
+## Forgets every marker and kept change. For tests and leaving a level. Modules stay and are told their markers are gone; modules
+## waiting to join still join next tick.
 func reset() -> void:
 	for module in _modules.duplicate():
 		var ids := _ids_handled_by(module)
@@ -329,7 +296,7 @@ func reset() -> void:
 
 # --- The debug report -------------------------------------------------------------------------
 
-## Types with markers that no module announced, as type name -> how many markers.
+## Types with markers that no module announced, as type name -> how many markers. This is what the debug report warns about.
 func get_unhandled_types() -> Dictionary:
 	var unhandled := {}
 	for type_index in _type_scripts.size():
@@ -343,7 +310,7 @@ func get_automatic_report_count() -> int:
 	return _automatic_report_count
 
 
-## Prints the same list on demand, in any build.
+## Prints the unhandled types on demand, in any build.
 func print_report() -> void:
 	var unhandled := get_unhandled_types()
 	print("[NavMarkerManager] every marker type has a module" if unhandled.is_empty() else "[NavMarkerManager] no module handles: " + _describe_types(unhandled))
@@ -498,8 +465,7 @@ func get_kept_change_count() -> int:
 func chunk_marker_id(terrain: int, chunk: Vector2i, index: int) -> int:
 	var value := FNV_OFFSET
 	for number: int in [terrain, chunk.x, chunk.y, index]:
-		# GDScript note: >> shifts a number's bits right, and & 0xFF keeps only the lowest eight of them.
-		# Together they take the number apart one byte at a time.
+		# Takes each number apart one byte at a time.
 		for byte_number in 8:
 			value = (value ^ ((number >> (byte_number * 8)) & 0xFF)) * FNV_PRIME
 	return _never_zero(value)
@@ -510,8 +476,8 @@ func scene_marker_id(scene_path: String) -> int:
 	return _never_zero(fnv_hash(scene_path.to_utf8_buffer()))
 
 
-## The FNV-1a hash of some bytes: for each byte, XOR it in and multiply by the prime.
-## GDScript note: ints are 64 bits and wrap around when they overflow, which this relies on.
+## The FNV-1a hash of some bytes: for each byte, XOR it in and multiply by the prime. Relies on 64-bit ints wrapping. Written out here
+## because Godot's hash() could differ from a C++ version.
 func fnv_hash(bytes: PackedByteArray) -> int:
 	var value := FNV_OFFSET
 	for byte in bytes:
@@ -582,7 +548,7 @@ func _find_modules_for(script: Script) -> Array:
 			if announced.has(checking):
 				found.append(module)
 				break
-			# GDScript note: a script's base script is the one it extends, so this climbs NavLink -> NavMarker.
+			# Climbs to the script it extends, such as NavLink -> NavMarker.
 			checking = checking.get_base_script()
 	return found
 
@@ -692,8 +658,7 @@ func _unlink_row(row: int) -> void:
 		_previous_in_cell[next] = previous
 
 
-## Which cell a position is in. Height doesn't matter, because the world is a flat plane with layers on it.
-## GDScript note: floori rounds down, even for negatives, so -0.5 goes to cell -1 and not cell 0.
+## Which cell a position is in. Height doesn't matter: the world is a flat plane with layers on it.
 func _cell_of(position: Vector3) -> Vector2i:
 	return Vector2i(floori(position.x / CELL_SIZE), floori(position.z / CELL_SIZE))
 

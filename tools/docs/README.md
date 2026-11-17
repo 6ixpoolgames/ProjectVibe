@@ -51,38 +51,71 @@ Entries come from the dated notes taken out of the code and from `git log -- <fo
 
 ## Comments in code
 
+The wiki is the documentation: each system's README is its guide page, and its `##` comments are its reference page. So comments are written to be read as reference, short and plain. `tools/docs/check_comment_style.py` measures every file against this section.
+
 **The header.** A plain `#` line first, so it stays out of the reference:
 ```gdscript
 # Written by Claude (claude-opus-5-5), 2026-11-08. History: navigation/CHANGELOG.md.
 ## The pawn's only contact with navigation: finds paths and says which way to walk.
 ##
-## The longer description...
+## One short paragraph on what it's for and how to use it.
 class_name NavigationManager
 ```
 Keep the original date of a file's header. A file someone else wrote keeps its author.
 
-**Doc comments (`##`)** sit right above the class, a member, a signal, a constant or a function, and are what the editor's help and `REFERENCE.md` show. Godot joins their lines into one paragraph, blank `##` lines too, so structure is written in its markup:
-- The first paragraph, up to the first blank `##` line, is the brief: one line saying what the thing is.
-- `## [br]` on its own line between paragraphs.
-- `## [br]- ` starts each item of a list; an item's next lines are indented two spaces (`##   more`).
-- `[codeblock]` ... `[/codeblock]` for usage examples, each line as `## code`.
-- `[ClassName]` links to a class; `[method name]`, `[member name]`, `[signal name]` name things in the same class. `[code]x[/code]` for code in a sentence, `[b]bold[/b]` sparingly.
+**Class `##` comment** (at most about 12 lines):
+- A one-line summary: what it is.
+- One short paragraph: what it's for, how it's used, what it works with.
+- Optionally a small `[codeblock]` example (2 to 5 lines) and one `Design: <spec> <section>.` line.
+- Not here: history, who decided what, long lists of odd cases (the tests hold those), or how it works inside (the README, or `#` comments at the spot).
 
-**Plain `#` comments** explain the how and why inside code, for whoever reads the code. Keep `GDScript note:` comments: the owner is relearning GDScript and asked for them.
+**Member, signal, constant and function `##` comments:** one line, two at most. Say what it is or does, its unit (ticks at 60 a second, metres), and what a special value means (-1: none). Not how it's done.
 
-**What leaves the code.** Dated notes (`Claude 2026-11-09: ...`, `# Claude 2026-11-16 (pawn spec 8.21): was 1`) go. For each one:
-- If it explains what the code does now or why, keep that part, rewritten in the present tense without the date. "Claude 2026-11-16: was 1" just goes; "Claude 2026-11-16: a distant pawn runs every 2nd or 4th tick, so this counts ticks_elapsed" keeps its second half.
-- The history (what it was before, when it changed, which step or audit) goes into the changelog.
-- "Was X", "now Y", "replaces Z", "moved from" are history.
-- References to spec sections stay ("pawn spec section 7"); they say where the design is.
+**Plain `#` comments** say a non-obvious why, one line each, at the spot. Not what the next line does, not language lessons (no `GDScript note:`), not history.
 
-**Wrong or stale comments** are fixed to match the code, never the other way round, and noted in the changelog's entry for the pass.
+**Always keep** (shortened, never dropped), because the code can't show it:
+- **Twin parity:** where C++ and GDScript must give the same answer (the AI decider, packet encoding, state recording, fade maths, the random hash), say so and name the other copy.
+- **Determinism and order:** pawn-id order, "after every pawn has simulated", "must run before X".
+- **Threads:** what a worker job reads, and what may not change while it runs.
+- **Rollback and network:** what is recorded, replayed or sent, and what must not be.
+- **Units and conversions:** ticks at 60 a second converted with `TickDriver.ticks_at_rate`, flat distances, real_t versus double.
+- **Gotchas:** a freed node in a typed variable, a packed array copied on assignment, anything that cost a debugging session.
+- `# REFACTOR:` tags and spec references.
 
-**`# REFACTOR:`** marks code that works but doesn't fit the project's goals: duplicated logic, a game rule hard-coded in the base, a debug tool in a production folder, a class in the wrong folder or with a misleading name, a special case layered on shared code, a hot path that does needless work, something a designer can't set without code. One line or two at the spot, saying what and which goal it misses, and a row in the changelog's table. Don't refactor in a docs pass.
+**Where the rest goes.** How a system works and how to use it, at length: its README. History, who decided, what it replaced: its CHANGELOG. Odd cases: the tests.
+
+**Godot markup** (Godot joins a `##` block into one paragraph, so structure is written in markup): `## [br]` between paragraphs; `## [br]- ` before each list item, with continuation lines indented two spaces; `[codeblock]` ... `[/codeblock]`; `[ClassName]`, `[method x]`, `[member x]`, `[signal x]`, `[constant x]` for links; `[code]x[/code]` for code in a sentence; `[b]bold[/b]` sparingly.
+
+**Example** (`ai/AIInputs.gd`, after the 2026-11-18 pass):
+```gdscript
+## One pawn's AI inputs: the named numbers its behaviours' conditions read.
+##
+## Every name has a slot, the same for every pawn, so a crowd's inputs line up as one table the C++ decider reads. The built-in inputs
+## (the constants below) are worked out the first time a condition reads them in a decision; any other name is a game's own, kept
+## until written again ([method set_input]). Names starting [code]ticks_[/code] are times in ticks, written for 60 a second.
+## Design: scaling spec 6.2.
+class_name AIInputs
+
+## Flat distance to where the AI last knew its target to be; [constant FAR] with no target.
+const TARGET_DISTANCE := &"target_distance"
+
+## The group's nearest node (null if none), kept for 2 seconds while it exists. Go To Point walks to it.
+func nearest_in_group(group: StringName, tick: int) -> Node3D:
+	# A freed node can't go in a typed variable, so it's checked as a Variant first.
+```
+
+**Dated notes** (`Claude 2026-11-09: ...`) don't belong in production code. Keep any part that explains the code as it is now, rewritten in the present tense; the history goes to the changelog. Tests, samples and tools may keep theirs.
+
+**Wrong or stale comments** are fixed to match the code, never the other way round, and noted in the changelog.
+
+**`# REFACTOR:`** marks code that works but misses a goal: duplicated logic, a game rule hard-coded in the base, a debug tool in a production folder, a misleading name, a special case on shared code, needless work in a hot path, something a designer can't set without code. One or two lines at the spot, and a row in the changelog's table. Don't refactor in a docs pass.
+
+**A comment pass, step by step:** rewrite one system's comments to this section; run `check_comments_only.py` on its files (it must report no code changes); run `check_comment_style.py <system>`; move anything long that's worth keeping into the README; add one changelog line ("Comments rewritten to the reference style"); then `make_reference.py <system>` (runs Godot, so one at a time) and the system's tests.
 
 ## Checking and building
 
 - `python tools/docs/check_comments_only.py [files]`: proves only comments changed, against the last commit (GDScript and C++). Every docs change must pass it.
+- `python tools/docs/check_comment_style.py [systems]`: measures comments against the section above (class and member comment lengths, `GDScript note:`, dated notes and decision history in production code), per system. `--strict` exits 1 on any find. No Godot needed.
 - `python tools/docs/make_reference.py [systems]`: runs Godot's doc tool (the editor binary beside the project, or `GODOT`) and writes each `REFERENCE.md`. Run it after changing doc comments. It runs Godot, so never alongside another Godot run.
 - `python tools/docs/make_class_index.py`: writes `docs/CLASS_INDEX.md`, every class A to Z with its one-line summary. No Godot needed.
 - `python tools/docs/check_links.py`: checks every relative link and #anchor in the docs. Run it after moving or renaming anything.
@@ -92,4 +125,4 @@ Keep the original date of a file's header. A file someone else wrote keeps its a
 
 ## Plain language
 
-The docs follow the owner's writing rules: short sentences, everyday words, the standard term with a short explanation, and no clever phrasing. Say what a thing does, not what it's like.
+Short sentences, everyday words, the standard term, no clever phrasing. Say what a thing does, not what it's like.

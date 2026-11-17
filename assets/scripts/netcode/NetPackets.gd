@@ -1,34 +1,21 @@
 # Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
 ## What goes on the wire (netcode spec section 11): packet types, and how one value is turned into bytes and back.
 ##
-## Every value starts with a one-byte tag saying how it's stored, so a reader never has to guess, and a bad packet can be spotted
-## and dropped.
-## [br]
-## Values follow their encoding from StateEncoding: a position at 1 mm takes 3 bytes per axis, an angle_u16 takes 2. Reading a
-## rounded value back gives exactly the same number the sender rounded to, which is why a client's prediction can compare equal to
-## what the server sent.
-## [br]
-## Never trust these bytes: [method read_value] returns [constant BAD] for anything truncated or unknown, and objects are never
-## decoded. Positions are limited to about +/- 8.3 km at 1 mm; anything further is clamped.
-## [br]
-## NetCodec in C++ ([code]native/src/net_codec.cpp[/code]) writes and reads inputs and snapshots with the same bytes, faster; this
-## class is the fallback where that library isn't loaded, and handles every other packet. A change to the format goes in both
-## (tests/net_codec_selftest compares them).
+## Every value starts with a one-byte tag saying how it's stored (a position at 1 mm is 3 bytes per axis, an angle_u16 is 2), and a
+## value reads back exactly as the sender rounded it. Never trust these bytes: [method read_value] returns [constant BAD] for anything
+## truncated or unknown, objects are never decoded, and positions clamp at about +/- 8.3 km.
+## [br]Twin: NetCodec in C++ ([code]native/src/net_codec.cpp[/code]) writes and reads inputs and snapshots with the same bytes; this is
+## the fallback and handles every other packet. A format change goes in both (tests/net_codec_selftest compares them).
+## Design: netcode spec 11.
 class_name NetPackets
 extends RefCounted
 
-## Bump this when the wire format changes. It's part of the handshake's content hash.
-## [br]
-## native/src/net_codec.cpp holds its own copy of this format and this number, so bump and change both.
+## Bump when the wire format changes; part of the handshake's content hash. Twin: net_codec.cpp has its own copy, so bump both.
 const PROTOCOL_VERSION := 5
 
-## Packet types, the first byte of every packet. New types go at the end, so the numbers before them don't move.
-## [br]
-## NetCodec only handles inputs and snapshots, so it doesn't need to know about the others. With ACK, a client says which parts of
-## which snapshots it read.
+## Packet types, the first byte of every packet. New types go at the end, so numbers don't move. ACK says which snapshot parts a client read.
 enum Type { HELLO = 1, WELCOME, REFUSED, PING, PONG, SPAWN, DESPAWN, INPUT, SNAPSHOT, WORLD_MESSAGE, OWNER_CHANGED, CLIENT_MESSAGE, ACK }
-## The types sent unreliably, in one place, so a new type is added here once (NetDebugModule reads it too). Everything else goes
-## reliably.
+## The types sent unreliably (NetDebugModule reads it too); everything else goes reliably.
 const UNRELIABLE_TYPES: Array[int] = [Type.INPUT, Type.SNAPSHOT, Type.PING, Type.PONG, Type.ACK]
 
 
@@ -36,18 +23,17 @@ const UNRELIABLE_TYPES: Array[int] = [Type.INPUT, Type.SNAPSHOT, Type.PING, Type
 static func is_unreliable(type: int) -> bool:
 	return UNRELIABLE_TYPES.has(type)
 
-## What read_value returns for a broken packet. Stop reading when you see it.
+
+## What [method read_value] returns for a broken packet. Stop reading when you see it.
 const BAD := &"__net_bad_packet__"
 ## The most values one list can hold: its count is one byte.
 const MAX_LIST_SIZE := 255
 ## The largest number 3 bytes hold, signed: about 8.3 km at 1 mm.
 const INT24_LIMIT := 8388607
-## Items per entity in [method write_world]'s list: id, state values, state encodings, sync values, sync encodings, input values,
-## input encodings, custom values.
+## Items per entity in [method write_world]'s list: id, state values and encodings, sync values and encodings, input values and encodings, custom values.
 const WORLD_ENTRY_SIZE := 8
 
-## The one-byte tag before every value, saying how it's stored. New tags go at the end, so the numbers before them don't move. An
-## int takes the smallest tag that holds it (INT8, INT16, INT32, INT64).
+## The one-byte tag before every value. New tags go at the end, so numbers don't move. An int takes the smallest tag that holds it.
 enum Tag { MISSING = 0, VECTOR3_MM, VECTOR3_CM, VECTOR2_MM, ANGLE_U16, ANGLE_BYTE, FLOAT32, BOOL_FALSE, BOOL_TRUE, INT32, INT64, OTHER, INT8, INT16 }
 
 
@@ -202,9 +188,7 @@ static func read_list(buffer: StreamPeerBuffer) -> Variant:
 
 # --- A snapshot's entities -------------------------------------------------------------------------
 
-## A snapshot's entities as bytes, from a flat list of [constant WORLD_ENTRY_SIZE] items per entity.
-## [br]
-## NetCodec in C++ does the same job, faster, with the same bytes: this version is what runs where that library isn't available.
+## A snapshot's entities as bytes, from a flat list of [constant WORLD_ENTRY_SIZE] items per entity. Twin: NetCodec does the same in C++, same bytes.
 static func write_world(entries: Array) -> PackedByteArray:
 	var world := new_buffer()
 	for at in range(0, entries.size() - WORLD_ENTRY_SIZE + 1, WORLD_ENTRY_SIZE):
@@ -216,8 +200,7 @@ static func write_world(entries: Array) -> PackedByteArray:
 	return world.data_array
 
 
-## Reads count entities written by [method write_world]: an Array of [id, state, sync, input, custom] for each. Null if the packet
-## is broken.
+## Reads count entities written by [method write_world]: [id, state, sync, input, custom] each. Null if the packet is broken.
 static func read_world(buffer: StreamPeerBuffer, count: int) -> Variant:
 	var parsed: Array = []
 	for i in count:
@@ -264,8 +247,7 @@ static func _write_plain(buffer: StreamPeerBuffer, value: Variant) -> void:
 			buffer.put_var(value, false)
 
 
-## An angle rounded to the very end of its range would need one more step than the bytes hold. It's the same direction
-## as the other end, so it wraps.
+# An angle at the very end of its range needs one step more than the bytes hold; it's the same direction as the other end, so it wraps.
 static func _wrap_steps(steps: int, half_range: int) -> int:
 	return steps - 2 * half_range if steps >= half_range else steps
 
@@ -277,7 +259,7 @@ static func _put_vector3(buffer: StreamPeerBuffer, tag: int, value: Vector3, ste
 	_put_int24(buffer, roundi(value.z / step))
 
 
-## Rounded again on arrival, because engine vectors store 32 bits: this gives the very same number the sender rounded to.
+# Rounded again on arrival, because engine vectors store 32 bits: gives the very same number the sender rounded to.
 static func _get_vector3(buffer: StreamPeerBuffer, step: float, encoding: StringName) -> Variant:
 	if not has_bytes(buffer, 9):
 		return BAD

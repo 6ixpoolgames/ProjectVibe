@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Split the tick-step rule out of `AIActivationManager` | `AIActivationManager.gd` | Two jobs in one module, freezing pawns and choosing their tick step, and the name says only the first. Apart, a game could swap either alone | M |
 | Reuse the free-spot query | `_is_free()` in `SpawnManager.gd` | A new shape and query object for every spot tried; made once and reused, a wave of spawns would allocate nothing | S |
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): class comments of `AIActivationManager`, `PawnInitializer`, `PossessionCoordinator`, `SpawnManager` and `TeamRegistry` shortened (spawn-point choice, respawn, the chunk-ring rule, the spectator's reasoning and the odd cases moved to the README's "How it works"); `SpawnManager`'s "see the class description" pointers now point to the README. History kept here: `AIActivationManager` was a first pass chosen for tier 0 (and the tick step the owner's call); `SpawnManager` follows Unreal's GameMode (the owner's call); team counts in a GameMode module rather than the pawn (the owner's call); the spectator as its own kind of thing (the owner's call). `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
+
 ## 2026-11-17
 
 - **Tick steps in whole chunks** (the C++ bundle, stage 3; roadmap: "in whole chunks"). `AIActivationManager` measures a pawn's distance from the nearest viewer in rings of chunks, not metres, so every pawn in one chunk runs at the same rate and two pawns fighting side by side never differ.

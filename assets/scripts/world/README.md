@@ -39,6 +39,16 @@ Other folders: `terrain/` (the generator), `streaming/` (the streamer and source
 
 **Stop pawns falling forever.** Place a `KillFloor` well below the lowest ground (both arenas have one at -40 m). A pawn below it gets `kill_effect` (by default all its Health) and dies the usual way. Turn `report_falls` off in a game where falling off the map is normal.
 
+## How it works
+
+**`KillFloor`** runs on the authority only (the server, or offline), every `check_every_ticks` ticks, after every pawn has simulated. A pawn below its height that isn't dead already gets `kill_effect`. Clients do nothing: the death reaches them in snapshots, as any death does. With `report_falls` on, a warning in the Debugger says where the pawn was last standing, how long before, how fast it was going, and whether there's ground where it fell: ground means it went through solid ground (a physics bug); none means it went off the loaded world (a streaming bug, or the map's end). Odd cases: a pawn with no Health or no `EffectManager` can't be killed, so it keeps falling and is warned about once; with no `kill_effect` nothing happens and a warning says so once; several kill floors each check on their own.
+
+**`TerrainNavFeeder`** also works as a child of a `TerrainGenerator` with no coordinator. With no terrain it warns and does nothing; one that arrives after chunks are built catches up on them; with no nav library it warns and markers still work; when it leaves the scene, nav and `NavMarkerManager` forget everything it told them (and are told again if it comes back); a source's changed distances remake its nav area at the new size.
+
+**`BodyNavFeeder`**: a parent that isn't a `StaticBody3D` gets a warning (a moving body would need its tiles rebuilt as it goes); other shapes than boxes are skipped with a warning; with no C++ library it does nothing, and the body still blocks pawns through physics. After moving the body by code, call `refresh()` so nav sees the new place.
+
+**`WorldCoordinator`** with no `TerrainGenerator` among its children warns and does nothing.
+
 ## Settings worth knowing
 
 | Setting | Where | Default | What it does |

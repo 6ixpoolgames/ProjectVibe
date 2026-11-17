@@ -24,6 +24,11 @@ Where pawns appear and how they're kept topped up: spawn points placed in a leve
 
 **Place where players start.** Put `SpawnPoint`s on the floor, turned the way pawns should face, with a `team` (-1 for anyone).
 
+## How it works
+
+- **PawnSpawner** fills up to `keep_alive` as soon as it's switched on, and after that whenever it has fewer living pawns and no replacement is waiting. A pawn of its own that dies has its body removed after `body_seconds` and a replacement due `respawn_seconds` after the death; the replacement is a fresh pawn, so its AI starts with no memory of the fight. A pawn removed another way counts as a death with no body to remove. `total_limit` above 0 stops it after that many in all. With `only_where_loaded` on it waits while the ground around it isn't loaded (the `AIActivationManager` rule; no terrain counts as loaded). All delays count ticks.
+- **Where pawns appear.** With `spawn_group` empty, within `scatter_radius` of the spawner facing its way; with a group, at `SpawnPoint`s in it that accept the pawn's team. A request with no group may use any point its team may use. How a point is chosen: the game_mode README.
+
 ## Tests
 
 No tests of its own; `game_mode/tests/spawn_manager_selftest` covers spawn points and spawners, and the arena samples' tests use spawners.

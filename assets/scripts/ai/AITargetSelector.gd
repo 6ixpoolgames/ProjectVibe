@@ -1,39 +1,22 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Picks the AI's current target from its memory, by priority: the standard threat or aggro table, kept small.
 ##
-## A part on the pawn, added by PawnInitializer. Pawn spec section 10.5, "Target selection". At each decision, before the state is
-## checked, every memory entry at awareness [member min_awareness] or more is a candidate, with:
+## A part on the pawn. At each decision, before the state is checked, every memory entry at awareness [member min_awareness] or more
+## is a candidate, and the highest priority wins (ties go to the nearer, then the lower id); the winner becomes the context's
+## current_target. The current target gets a fading bonus so the pawn doesn't flick between two close targets.
 ## [codeblock]
-## priority = awareness_weight × awareness
-##          + distance_weight × (1 − distance / distance_range)     (distance to its last known position)
-##          + threat_weight × threat
-##          + current_target_bonus × current_target_fade's value    (only for the current target)
+## priority = awareness_weight Ã— awareness
+##          + distance_weight Ã— (1 âˆ’ distance / distance_range)     (distance to its last known position)
+##          + threat_weight Ã— threat
+##          + current_target_bonus Ã— current_target_fade's value    (only for the current target)
 ## [/codeblock]
-## The highest wins; ties go to the nearer, then to the lower id. The winner goes on the context as current_target, where behaviours
-## that need a target and states such as Combat read it.
-## [br]
-## The current target bonus stops the pawn flicking between two close targets. It fades by a FadeProfile counted from when the
-## target was picked: by default +0.3, held 60 ticks, gone 60 ticks later.
-## [br]
-## Forcing a target, for taunts: [method force_target] overrides the choice for hold_ticks (-1: until released). A new force replaces
-## the current one only if its priority is equal or higher, the same rule as forced states. It asks for a decision with that
-## priority, so a strong taunt can interrupt the running behaviour. On a client it does nothing and warns. Called during a tick (by
-## another pawn's ability or behaviour, say), it's queued and applied at the start of this pawn's next AI step, in the order the
-## calls were made, so the result never depends on which pawn went first (scaling spec step 3); it returns true for "queued", and a
-## weaker force is refused (and logged) when it's applied. Called between ticks (game code, a UI, a test), it applies at once.
-## [method release_forced_target] works the same way.
-## [br]
-## A game with its own targeting rules extends this and overrides [method target_priority]. The built-in scoring loop runs in the
-## pawn's memory store (AIMemoryStore in C++ when available, pawn spec 10.11) with the weights below. A script that overrides
-## target_priority() is noticed when the selector is ready, and then every entry is scored by that function in GDScript instead, so
-## a game's own rules always win.
-## [br]
-## How to use it (outside code only talks to the selector):
+## [method force_target] overrides the choice, for taunts. A game with its own rules overrides [method target_priority]; the loop then
+## runs in GDScript instead of the memory store ([code]AIMemoryStore[/code] in C++, whose [code]best_target[/code] must match this
+## formula). Listen to [signal target_changed]:
 ## [codeblock]
-## pawn.ai_context.target_selector.get_current_target()
 ## pawn.ai_context.target_selector.force_target(player_pawn, 180, 40, "taunt")
 ## [/codeblock]
-## Listen to [signal target_changed] to follow its choices.
+## Design: pawn spec 10.5 and 10.11, scaling spec step 3.
 # REFACTOR: forcing and queueing are the same code as AIStateManager's force_state (reusable). See CHANGELOG.md.
 class_name AITargetSelector
 extends Node
@@ -87,7 +70,7 @@ func _ready() -> void:
 		current_target_fade.mode = FadeProfile.Mode.LINEAR
 		current_target_fade.hold_ticks = 60
 		current_target_fade.fade_ticks = 60
-	# Whether a game scores targets its own way: a script below this one overrides target_priority() (ScriptOverrides).
+	# A script below this one overrides target_priority() (ScriptOverrides): the game scores targets its own way.
 	_custom_priority = ScriptOverrides.overrides(get_script(), &"target_priority")
 
 
@@ -155,9 +138,8 @@ func target_priority(memory: AIMemory, index: int, tick: int) -> float:
 	return priority
 
 
-## Makes this entity the target for hold_ticks (-1: until released). Returns false, and changes nothing, if a stronger force is
-## holding, the entity is gone, or this isn't where the AI runs. During a tick it's queued instead and returns true; the priority
-## check happens when it's applied.
+## Makes this entity the target for hold_ticks at 60 a second (-1: until released). Returns false, changing nothing, if a stronger
+## force holds, the entity is gone, or this isn't where the AI runs. During a tick it's queued and returns true.
 func force_target(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool:
 	if pawn == null or not is_instance_valid(entity):
 		return false
@@ -221,9 +203,8 @@ func check_force_expiry(tick: int) -> void:
 func _set_target(entity: Node3D, reason: String, tick: int) -> void:
 	if entity == _current:
 		return
-	# A target that has been freed since (a dead pawn's body removed) is announced as null. Sent as the freed object, listeners with
-	# typed parameters (the replay's gameplay channel, the AI debug timeline) fail with "Cannot convert argument 1 from Object to
-	# Object".
+	# A freed target (a dead pawn's body removed) is announced as null: listeners with typed parameters (the replay's gameplay
+	# channel, the AI debug timeline) fail on a freed Object.
 	var old: Node3D = _current if is_instance_valid(_current) else null
 	_current = entity
 	_picked_tick = tick

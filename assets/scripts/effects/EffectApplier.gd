@@ -1,29 +1,22 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
-## Applies effects when its ability does something: a child node of an ability, or of a HitInterceptor.
+## Applies effects when its ability does something: a child node of an ability, or of a [HitInterceptor].
 ##
-## The owner's design ("ability modifier nodes"): the ability itself carries no damage or knockback; its EffectApplier children say
-## what it does to whom. Pawn spec 8.11.
-## [br]
-## Three triggers:
-## [br]- [b]ON_START[/b]: when the ability starts, to its own pawn. Every machine that runs the ability does it, rollback replays
-##   included, so an over-time effect from it (a combo boost) is predicted. [member applies_to] is ignored: there's no target yet.
-## [br]- [b]ON_HIT[/b]: when the ability hits a pawn (its MeleeSweepStep), on the server. TARGET puts the effects on the pawn hit,
-##   SELF on the attacker (gaining a combo boost only when a swing connects, say).
-## [br]- [b]ON_INTERCEPT[/b]: under a [HitInterceptor], when it stops a hit, on the server (pawn spec 8.23). TARGET puts the effects on
-##   the attacker, in a hit of their own (the parry's push-back), SELF on the pawn that stopped it (a reward for parrying, say).
-## [br]
-## An ability can have any number of these. The AbilityManager collects them when it starts up ([member AbilityBase.on_start_effects],
-## the on-hit lists, and each interceptor's own), so nothing searches for them while playing. Effects are usually saved .tres files,
-## so one file tunes every ability that uses it.
+## The ability itself carries no damage or knockback; its EffectApplier children say what it does to whom. An ability can have any
+## number; the AbilityManager collects them at startup, so nothing searches for them while playing. See [enum Trigger] for when each runs.
+## Design: pawn spec 8.11, 8.23.
 class_name EffectApplier
 extends Node
 
-# ON_INTERCEPT keeps the number 2, which scenes saved with the old parry trigger hold, so they keep working. Add new triggers at the end.
+# ON_INTERCEPT keeps the number 2, which scenes saved with the old parry trigger hold. Add new triggers at the end.
+## When the effects apply. ON_START: when the ability starts, to its own pawn, on every machine that runs it (rollback replays included).
+## [br]ON_HIT: when the ability hits a pawn (its MeleeSweepStep), on the server. ON_INTERCEPT: under a [HitInterceptor] that stops a hit, on the server.
 enum Trigger { ON_START, ON_HIT, ON_INTERCEPT }
+## Who gets the effects. TARGET: the pawn hit (with ON_INTERCEPT, the attacker, in a hit of their own). SELF: the applying pawn.
 enum AppliesTo { TARGET, SELF }
 
+## When it applies its effects.
 @export var trigger := Trigger.ON_HIT
-## With ON_HIT or ON_INTERCEPT: who gets the effects.
+## With ON_HIT or ON_INTERCEPT: who gets the effects. Ignored with ON_START (there is no target yet).
 @export var applies_to := AppliesTo.TARGET
 ## The effects, applied in this order.
 @export var effects: Array[Effect] = []

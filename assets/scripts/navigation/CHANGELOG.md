@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move `TerrainSettings` out of navigation | `TerrainSettings.gd` | It describes a terrain (where it is, its chunk size), so it belongs in `terrain/` or `world/`; names and folders should say what things are | S |
 | Move `NavMarkerDebugModule` to `diagnostics/` | `modules/NavMarkerDebugModule.gd` | A debug tool in a production folder. `diagnostics/NavDebugView` already uses it; the two sample scenes that place it would follow | S |
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): moved to the README's new "How a move works" section: `NavigationManager`'s odd cases (no nav, nav still building, unreachable and partial paths, links, paths at scale). Class comments shortened for `NavTags`, `NavMarkerModule`, `NavLinkModule`, `NavMarkerNode`, the markers and the debug module; `GDScript note:` comments removed. No stale comments found.
+
 ## 2026-11-17
 
 - **`NavigationManager.path_ended(reached)`** (scaling spec 6.2's wake-ups): sent once when a path ends, arrived (after `arrived`) or given up (no way after all, waited too long for nav, a link that couldn't be crossed); not for `stop()`. The AI's behaviours wait for it instead of checking every few ticks whether a walk is still under way.

@@ -15,6 +15,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Threat through a signal | `EffectManager._run_once` | Effects write threat straight into the AI's memory, so this system knows the AI. A signal for Health taken, which the AI listens to (as it does to `hit_arrived`), keeps effects usable without the AI and open to other listeners (UI, scoring) | S |
 | One tag-set class for abilities, nav and effects | `EffectTags`, `tags/TagRegistry`, `navigation/NavTags` | The third copy of the same tag rules, kept apart so working code didn't change. One class used three times cuts the code and the tests to one, and a game's own tag set would come free. The same row is in navigation's changelog | M |
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): shorter class and member comments, teaching notes removed; the long class explanations (applying order, the tick, the active list's layout, resistance counting, tag rules, the odd-case lists) moved to the README's new "How it works" section. `EffectApplier`'s triggers and `AbilityPriorityPart`'s numbers are now documented on their enums. No stale comments were found.
+
 ## 2026-11-17
 
 - **The AbilityManager hears when effects change** (scaling spec 6.2, step 5b): working out the held totals again calls `AbilityManager.readiness_changed()`, since a priority boost can change what may start, which the AI keeps rather than asking at every decision.

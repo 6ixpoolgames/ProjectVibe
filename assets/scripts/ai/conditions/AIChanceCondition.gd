@@ -1,12 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: ai/CHANGELOG.md.
 ## A condition that passes on a random roll, with a chance from 0 to 1, the same roll on every run.
 ##
-## Scaling spec 6.2. The roll comes from the AI's replayable random numbers ([method AIContextComponent.random_unit_at]): the pawn,
-## a tick and a salt. By default it's rolled again at every decision. With [member once_per_input] set, the input's value takes the
-## tick's place, so the roll stays the same until that input changes: Parry rolls once per swing, with incoming_attack_tick.
+## The roll comes from [method AIContextComponent.random_unit_at] (pawn, tick, salt), rolled again at every decision by default. With
+## [member once_per_input] set, that input's value takes the tick's place, so the roll holds until the input changes: Parry rolls once per
+## swing. The C++ decider rolls the same hash, so both give the same answer.
 ## [codeblock]
 ## chance 0.3, once_per_input incoming_attack_tick, salt_input incoming_attacker   # 30%, once per swing
 ## [/codeblock]
+## Design: scaling spec 6.2.
 class_name AIChanceCondition
 extends AICondition
 

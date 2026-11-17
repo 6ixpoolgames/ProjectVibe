@@ -1,18 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: ai/CHANGELOG.md.
 ## Parries a swing coming at the pawn, some of the time ([member parry_chance]).
 ##
-## The owner's request: AI pawns parry too, about 30% of swings, so a mass fight has some variety and parry gets tested under load.
-## [br]
-## How it hears about a swing: an enemy's MeleeAttackAbility, when it starts on the server, tells the AI of each pawn it may reach
-## ([method AIContextComponent.note_incoming_attack]), which notes it and asks for a decision at once. Ordinary decisions come every
-## 15 ticks, longer than a swing's windup, so without that the parry would usually come too late.
-## [br]
-## When it's available: a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up: two conditions. The roll
-## is made from the swing's start tick and the attacker's pawn number, so each swing is rolled once, however many decisions happen
-## during its windup, and a replay rolls the same.
-## [br]
-## What it does: looks at the attacker and presses parry (presses_action, so it's skipped while the parry is cooling down or locked
-## out, for example mid-swing). It finishes two ticks later, and forgets the swing. ParryAbility does the rest.
+## Available when a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up (two conditions). An enemy's
+## MeleeAttackAbility tells the AI of a swing when it starts, on the server ([method AIContextComponent.note_incoming_attack]), which asks
+## for a decision at once: ordinary decisions come every 15 ticks, longer than a swing's windup. The roll comes from the swing's start
+## tick and the attacker's pawn number, so each swing is rolled once and a replay rolls the same. It looks at the attacker and presses
+## parry ([member AIBehaviourBase.presses_action], so it's skipped while the parry is cooling down or locked out), finishes two ticks
+## later and forgets the swing; ParryAbility does the rest.
+## Design: scaling spec 6.2.
 class_name AIParryBehaviour
 extends AIBehaviourBase
 

@@ -1,34 +1,17 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
-## Replay v0's viewer: plays and scrubs a recording (docs/replay/REPLAY_SPEC.md).
+## Plays and scrubs a recording: ghost capsules for the pawns, outlines for the built chunks and the chunk sources' load distances.
 ##
-## Runs replay_viewer.tscn. It shows each pawn as a ghost capsule, the chunks that were built as outlines on the ground, the chunk
-## sources with their load distances, and the events around the tick shown. Nothing is simulated: it only shows what was recorded,
-## which is what debugging needs (a pawn standing on a chunk that went away, say).
-## [br]
-## Which file: [member file_path] if set, else [code]-- --file=<path>[/code] on the command line, else the newest recording in
-## user://replays/host (or user://replays/client with [code]-- --client[/code]).
-## [br]
-## Keys:
-## [br]- Space: play and pause. ← →: one tick back or forward (Shift: ten). Home, End: the start or end.
-## [br]- + -: playback speed. [ ]: select the previous or next pawn. F: follow the selected pawn.
-## [br]- L: labels on every pawn (on to begin with when there are 40 or fewer).
-## [br]- Right mouse drag turns the camera, the mouse wheel zooms, W A S D move it (when not following).
-## [br]- The slider at the bottom scrubs.
-## [br]
-## Diagnostics (docs/diagnostics/DIAGNOSTICS_SPEC.md): a recording with the diagnostics channel shows a strip above the slider, the
-## slowest frame in each of its columns (blue up to about 1/60 s, orange up to about 1/30 s, red beyond, with lines at both), with the
-## tick shown marked; click it to jump there. The panel then also shows the frame at that tick: its parts and its most expensive
-## scopes. The strip is filled in the background, a few blocks a frame, so a long recording opens at once.
-## [br]
-## What the ghosts show: the team's colour; grey and lying down when dead; pale blue when frozen (switched off by the AI switch-off,
-## not ticking at all); darker when sleeping (idle, skipping physics but still ticking). The labels list the flags as letters: G on the
-## ground, D dead, F frozen, S sleeping, C keeps chunks loaded (a source of its own), P a player has it.
+## Runs [code]replay_viewer.tscn[/code]. Nothing is simulated; it only shows what was recorded. The file is [member file_path], else
+## [code]-- --file=<path>[/code], else the newest recording in the host folder ([code]-- --client[/code]: the client folder). A
+## recording with the diagnostics channel also shows a strip of its slowest frames above the slider, filled in the background; click
+## it to jump. Keys, ghost colours and the strip are in the replay README.
+## Design: replay spec, diagnostics spec.
 class_name ReplayViewer
 extends Node3D
 
 ## The recording to open. Empty: the command line's --file=, else the newest recording.
 @export_file("*.pbreplay") var file_path := ""
-## Where the newest recording is looked for.
+## The folder the newest recording is looked for in.
 @export var replays_folder := "user://replays"
 
 const TEAM_COLOURS: Array[Color] = [Color(0.35, 0.65, 1.0), Color(1.0, 0.35, 0.3), Color(0.4, 0.5, 1.0), Color(0.5, 0.9, 0.4),
@@ -36,7 +19,7 @@ const TEAM_COLOURS: Array[Color] = [Color(0.35, 0.65, 1.0), Color(1.0, 0.35, 0.3
 const SPEEDS: Array[float] = [0.1, 0.25, 0.5, 1.0, 2.0, 4.0]
 
 var _reader: ReplayReader = null
-var _tick := 0.0 # the tick shown, as a float so playback can move by fractions of a tick per frame
+var _tick := 0.0 # the tick shown; a float so playback can move by fractions of a tick
 var _shown_tick := -1
 var _playing := false
 var _speed_index := 3
@@ -84,7 +67,7 @@ func _ready() -> void:
 	_show(true)
 
 
-## Shows a tick: the nearest recorded one at or before it.
+## Shows the nearest recorded tick at or before this one.
 func show_tick(tick: int) -> void:
 	_tick = tick
 	_show(true)
@@ -104,6 +87,7 @@ func get_visible_ghost_count() -> int:
 	return count
 
 
+## The reader behind the viewer, for tests.
 func get_reader() -> ReplayReader:
 	return _reader
 

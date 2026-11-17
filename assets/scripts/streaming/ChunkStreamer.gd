@@ -1,37 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: streaming/CHANGELOG.md.
 ## Loads terrain chunks around every streaming source, and unloads the ones nothing needs any more, without stalling the game.
 ##
-## How to use it:
-## [br]1. Add this node to the scene and set its [member terrain]. Under a [WorldCoordinator] that's done for you.
-## [br]2. On the TerrainGenerator, turn [code]build_on_start[/code] off (the WorldCoordinator does this too).
-## [br]3. Add a [StreamingSource] to whatever should keep the world loaded. A pawn that keeps the world loaded is a source itself.
-## [br]
-## To see it working, open streaming_sample.tscn. The tests and stress test are in tests/.
-## [br]
-## [b]The ground is always there.[/b] The chunks directly under a source are built immediately, right before each tick, and ignore the
-## budget. That costs a few milliseconds at most, and only when something has appeared or teleported somewhere new. Everything further
-## out comes through the budget below. So a pawn with a source has ground on its very first tick.
-## [br]
-## [b]It stays smooth.[/b] Building a chunk is split into small steps ([method TerrainGenerator.build_chunk_step]), and each frame this
-## runs steps until [member max_ms_per_frame] is used up. A slower machine finishes chunks later, but its frames stay short.
-## [br]
-## [b]Multiplayer.[/b] Each machine runs its own streamer and loads what it needs: the server around every player, and a client around
-## its own pawn. They don't send terrain to each other, because the same settings build the same ground on every machine. See
-## StreamingSource and tests/net_streaming_selftest.gd.
-## [br]
-## [b]No reloading the same chunk over and over.[/b] A chunk loads within a source's load_distance, but only unloads past
-## load_distance + [member unload_margin]. So walking back and forth along that line doesn't keep rebuilding it.
-## [br]
-## What happens in odd cases (all checked in tests/chunk_streaming_selftest.gd):
-## [br]- No terrain set: it warns once and does nothing.
-## [br]- No active sources: everything stays loaded, unless [member hold_when_no_sources] is off. A player respawning or changing
-##   pawns shouldn't make the world vanish.
-## [br]- More chunks wanted than the limit: the nearest ones win, and it warns once.
-## [br]- A slow chunk: at least one step runs every frame, however small the budget.
-## [br]- No TickDriver: the ground check runs once per physics frame instead of before each tick.
-## [br]
-## Not yet: it serves one terrain. Props or other things that load by chunk, or the blended level generators the world spec aims
-## for, would need it to serve more.
+## Add it to the scene and set its [member terrain] (a [WorldCoordinator] does this, and turns off the terrain's [code]build_on_start[/code]),
+## then add a [StreamingSource] to whatever should keep the world loaded; a pawn that does is a source itself. Building a chunk is
+## split into steps ([method TerrainGenerator.build_chunk_step]) and each frame runs steps until [member max_ms_per_frame] is used up,
+## so a slower machine finishes chunks later but its frames stay short. The chunks directly under a source are built at once, right
+## before each tick, outside the budget, so a pawn has ground on its first tick. A chunk loads within a source's load_distance and only
+## unloads past load_distance + [member unload_margin]. Each machine runs its own streamer; terrain isn't sent, since the same
+## settings build the same ground. Design: streaming spec (docs/streaming/STREAMING_SPEC.md).
 class_name ChunkStreamer
 extends Node
 
@@ -46,8 +22,8 @@ signal chunk_unloaded(key: Vector2i)
 @export_range(0.0, 16.0, 0.1, "or_greater") var max_ms_per_frame := 2.0
 ## How far past a source's load_distance a chunk stays loaded, in metres, so that hovering around the edge doesn't rebuild it.
 @export_range(0.0, 1000.0, 1.0, "or_greater") var unload_margin := 64.0
-## The most chunks that may be loaded per active source. A safety limit against running out of memory. It's per source, not one
-## total, because a server needs chunks around every player. At the defaults a source wants about 37 chunks.
+## The most chunks loaded per active source, a safety limit against running out of memory. Per source because a server needs chunks
+## around every player. At the defaults a source wants about 37 chunks.
 @export_range(1, 4096, 1, "or_greater") var max_chunks_per_source := 256
 ## How often to check where the sources are, in seconds. Shorter reacts faster and costs more.
 @export_range(0.0, 2.0, 0.01, "or_greater") var refresh_seconds := 0.2
@@ -59,7 +35,6 @@ const MIN_GROUND_REACH := 2.0
 ## More than this between two checks, in metres, counts as a jump instead of movement. That's 480 m/s at 60 ticks a second.
 const MAX_PREDICTED_MOVE := 8.0
 
-# GDScript note: Array[Vector2i] is a list that can only hold chunk positions.
 var _build_queue: Array[Vector2i] = [] # chunks to build, most urgent first
 var _unload_queue: Array[Vector2i] = []
 var _current_build := Vector2i.ZERO # the chunk being built, which is finished before starting another
@@ -86,7 +61,6 @@ func _init() -> void:
 
 func _ready() -> void:
 	if terrain == null:
-		# GDScript note: "as" gives null when the parent isn't a terrain, rather than an error.
 		terrain = get_parent() as TerrainGenerator
 	# A snapshot can teleport a pawn during before_tick. This connects after NetworkSession, so it runs after that and before the
 	# tick's movement.
@@ -141,8 +115,8 @@ func _on_rollback_state_loaded(_from_tick: int) -> void:
 # --- The ground guarantee ---
 
 
-# Builds, right now, any missing chunk a source is over or could step into before the next check. The owner's rule: the ground gets
-# generated first, instead of working around its absence. When nothing is missing, this only costs a few lookups.
+# Builds, right now, any missing chunk a source is over or could step into before the next check. The ground is generated first,
+# instead of working around its absence. When nothing is missing, this only costs a few lookups.
 func _build_ground_under_sources() -> void:
 	if not is_instance_valid(terrain) or not terrain.is_inside_tree() or not terrain.is_node_ready():
 		return
@@ -179,7 +153,6 @@ func _process(delta: float) -> void:
 
 # The work itself, timed by _process.
 func _stream_chunks(delta: float) -> void:
-	# GDScript note: is_instance_valid is false for a freed object, which a plain null check wouldn't catch.
 	if not is_instance_valid(terrain) or not terrain.is_inside_tree():
 		if not _warned_no_terrain:
 			_warned_no_terrain = true
@@ -230,8 +203,7 @@ func _refresh() -> void:
 		# A score above 0 is past load_distance: it may stay if it's loaded, but it isn't worth loading.
 		if _scores[key] <= 0.0 and not terrain.has_chunk(key) and not (_has_current_build and key == _current_build):
 			_build_queue.append(key)
-	# GDScript note: sort_custom sorts with a function you give it, which says whether a goes before b. "func(a, b):"
-	# makes a small function right here. It can read _scores because it belongs to this object.
+	# Sorts by score, nearest first. The function can read _scores because it belongs to this object.
 	_build_queue.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return _scores[a] < _scores[b])
 
 	_unload_queue.clear()
@@ -310,7 +282,6 @@ func _has_build_work() -> bool:
 
 func _build_next_step() -> void:
 	if not _has_current_build:
-		# GDScript note: pop_front removes the first item and gives it back.
 		_current_build = _build_queue.pop_front()
 		# The ground check may have built it already, since this list was made.
 		if terrain.has_chunk(_current_build):

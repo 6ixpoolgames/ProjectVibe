@@ -7,11 +7,8 @@
 ## The names follow the tags: dots become underscores, letters go upper case. Each tag's parent levels have constants too, because a
 ## lockout often names a whole branch ([code]Tags.MOVEMENT[/code] locks every movement tag).
 ## [br]
-## This is for code only. Designers pick tags in the inspector from a dropdown (addons/tag_picker), and add new ones to the
-## declarations file (resources/tag_declarations.tres) without touching this. A constant here must be declared there:
-## tags/tests/tag_registry_selftest checks it. A tag declared there needs a constant here only if code uses it.
-## [br]
-## GDScript note: a script with only constants is never instantiated; [code]Tags.MOVEMENT[/code] is read straight from the class.
+## For code only: designers pick tags from a dropdown (addons/tag_picker) and add new ones to resources/tag_declarations.tres. A
+## constant here must be declared there (tags/tests/tag_registry_selftest checks); a declared tag needs a constant only if code uses it.
 class_name Tags
 extends RefCounted
 

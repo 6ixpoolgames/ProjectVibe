@@ -1,11 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
-## Replay channel 3, "spawns": which pawns exist (replay spec section 3).
+## Replay channel 3, "spawns": which pawns exist.
 ##
-## Events: "spawned" (data: name, scene, team) and "despawned" (no data). A keyframe's snapshot lists every live pawn the same way, so
-## a reader starting at any block knows who's there.
-## [br]
-## Reading: state["pawns"] is replay id -> {name, scene, team}, for the pawns alive at that tick. The other channels' records are
-## only shown for pawns listed here.
+## Events: "spawned" (name, scene, team) and "despawned". A keyframe's snapshot lists every live pawn, so a reader starting at any
+## block knows who's there. Reading: [code]state["pawns"][/code] is replay id -> [code]{name, scene, team}[/code] for the pawns alive
+## at that tick; other channels' records are only shown for pawns listed here.
+## Design: replay spec 3.
 class_name ReplaySpawnChannel
 extends ReplayEventChannel
 

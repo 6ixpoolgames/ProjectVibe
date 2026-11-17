@@ -13,6 +13,10 @@ Code that works but doesn't yet fit the project's goals. Each is marked `REFACTO
 |---|---|---|---|
 | One shared "is the ground loaded here" check | `PawnSpawner._ground_loaded()` | A copy of AIActivationManager's rule; the two could drift apart | S |
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): the `PawnSpawner` and `SpawnPoint` class comments shortened (what it does, between ticks, moved to the README's "How it works"). `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
+
 ## 2026-11-17
 
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup.

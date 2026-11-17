@@ -1,11 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
 ## Walking on the ground: accelerating, slowing, steering in the air and turning to face where it's going. The default locomotion.
 ##
-## Pawn spec section 8.5. The pawn adds gravity. Its numbers come from the pawn's stats, so a buff or a different pawn changes them
-## without touching this: [member speed_stat] (MoveSpeed), Acceleration, Deceleration, AirControl, TurnRate (degrees per second). Each
-## has a fallback for a pawn without that stat.
-## [br]
-## While its category is locked out (an attack that roots the pawn), it stops steering and the pawn slows to a stop.
+## Its numbers come from the pawn's stats, so a buff or a different pawn changes them: [member speed_stat] (MoveSpeed), Acceleration,
+## Deceleration, AirControl and TurnRate (degrees per second), each with a fallback for a pawn without it. The pawn adds gravity. While
+## its category is locked out (an attack that roots the pawn) it stops steering and the pawn slows to a stop.
+## Design: pawn spec 8.5.
 class_name WalkAbility
 extends AbilityBase
 
@@ -14,8 +13,7 @@ extends AbilityBase
 ## Top speed when the pawn has no such stat.
 @export var fallback_speed := 5.0
 
-# The five stats, kept here and read again only when the StatManager's version changes (pawn spec 15.2). Reading all five every
-# tick was about a third of this ability's cost.
+# The five stats, read again only when the StatManager's version changes (pawn spec 15.2); every tick was a third of the cost.
 var _stats_version := -1
 var _stats_speed_stat: StringName = &""
 var _speed := 0.0
@@ -28,11 +26,10 @@ var _turn_rate := 0.0
 func _init() -> void:
 	super()
 	kind = Kind.LOCOMOTION
-	# Tags as Tags constants (tags/Tags.gd), so a misspelling is an error, not a warning while playing.
+	# Tags are constants, so a misspelling is an error, not a warning while playing.
 	category = Tags.MOVEMENT_WALK
 	extra_categories = [Tags.MOVEMENT_BASIC] # a group, so a rule can name all basic movement at once
-	# Moving cancels only actions with a threshold of 0, such as an emote. Locomotion never blocks an action: anything that
-	# conflicts with it stops it.
+	# Moving cancels only actions with a threshold of 0, such as an emote. Locomotion never blocks an action.
 	interrupt_priority = 0
 	interrupt_threshold = 0
 

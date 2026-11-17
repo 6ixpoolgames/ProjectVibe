@@ -1,11 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
-## A volume that changes how nav treats the ground in it: a nav modifier volume (nav spec section 21.3).
+## A volume that changes how nav treats the ground in it (nav spec 21.3).
 ##
-## Tags such as area.road, area.hazard and area.water say what it means. NavAreaModule will hand these to nav; until that exists
-## they're registered and do nothing.
-## [br]
-## An area names a surface instead of storing a cost, because each kind of agent has its own cost per surface
-## (NavFilter, nav spec section 4). That lets a soldier avoid mud that a tank drives through.
+## Tags such as area.road, area.hazard and area.water say what it means. An area names a surface, not a cost, because each kind of
+## agent has its own cost per surface (NavFilter, nav spec 4): a soldier avoids mud a tank drives through. NavAreaModule will hand
+## areas to nav; until it exists they're registered and do nothing.
 class_name NavArea
 extends NavMarker
 

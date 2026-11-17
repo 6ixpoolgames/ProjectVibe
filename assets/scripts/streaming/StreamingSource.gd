@@ -1,31 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: streaming/CHANGELOG.md.
 ## Marks something as keeping the world loaded around it.
 ##
-## "Streaming source" is the usual name for this in game engines. It does nothing by itself: a [ChunkStreamer] finds every source and
-## loads chunks around the active ones.
+## A [ChunkStreamer] finds every source and loads chunks around the active ones. Add this as a child of whatever should keep the world
+## loaded (an RTS camera, a spawner); it follows its parent, so it needs no code. Turn [member active] off when it shouldn't count. A
+## Pawn needs none: it's a source itself, and is in the group only while it might keep the world loaded.
 ## [br]
-## How to use it: add this node as a child of whatever should keep the world loaded, such as an RTS camera or a spawner. It follows
-## its parent because it's a Node3D, so it needs no code. Turn [member active] off when that thing shouldn't count. It's a node of its
-## own, not a setting on a controller, so that things without a pawn controller can use it too. A Pawn needs none: it's a source
-## itself (its [code]keeps_world_loaded[/code] flag, or a player has it), and is in the group only while it might keep the world
-## loaded, so the group holds the few sources, not every pawn.
+## [b]The source contract.[/b] Anything in [constant GROUP] with these counts as a source; the chunk streamer, [TerrainNavFeeder],
+## AIActivationManager and the replay read sources only through them:
+## [br]- [code]global_position[/code], [code]load_distance[/code], [code]nav_distance[/code] (metres).
+## [br]- [code]counts_on_this_machine() -> bool[/code] and [code]distance_moved_since_last_check() -> float[/code].
 ## [br]
-## [b]The source contract.[/b] Anything in [constant GROUP] with these counts as a source, a StreamingSource node or a Pawn. The chunk
-## streamer, the nav feeder (TerrainNavFeeder), the AI switch-off (AIActivationManager) and the replay read sources only through these:
-## [br]- [code]global_position[/code]: where it is.
-## [br]- [code]load_distance[/code], [code]nav_distance[/code]: how far it loads ground and builds nav, in metres.
-## [br]- [code]counts_on_this_machine() -> bool[/code]: whether it loads anything on this machine right now.
-## [br]- [code]distance_moved_since_last_check() -> float[/code]: how far it moved since the streamer last asked.
-## [br]
-## In multiplayer, a source on a networked entity counts only where it should, with no setup needed:
-## [br]- On the server, or offline: it counts, so the world stays loaded around every player, wherever they are.
-## [br]- On a client: only on that client's own pawn. Another player's pawn doesn't make this machine load the world around it.
-## [br]
-## Anything that isn't a networked entity, such as a camera, always counts on the machine it's on.
-## [br]
-## What happens in odd cases (all checked in tests/chunk_streaming_selftest.gd):
-## [br]- No ChunkStreamer in the scene: nothing happens, and nothing breaks.
-## [br]- Removed from the scene or freed: it stops counting by itself, at the streamer's next refresh.
+## In multiplayer a source counts on the server or offline, and on a client only for that client's own pawn.
 class_name StreamingSource
 extends Node3D
 
@@ -45,8 +30,7 @@ var _last_checked_position := Vector3.ZERO
 var _has_been_checked := false
 
 
-# GDScript note: _init runs when the object is made, before it's in a scene. A node keeps its groups when it leaves the
-# scene and comes back, so joining once here is enough.
+# A node keeps its groups when it leaves the scene and comes back, so joining once here is enough.
 func _init() -> void:
 	add_to_group(GROUP)
 

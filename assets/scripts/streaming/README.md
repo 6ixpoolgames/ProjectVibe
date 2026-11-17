@@ -28,6 +28,16 @@ Loads the ground in chunks around the things that need it (players, cameras, spa
 
 In multiplayer each machine streams for itself: the server around every player, a client around its own pawn. Terrain isn't sent: the same settings make the same ground everywhere.
 
+A chunk loads within a source's `load_distance` but only unloads past `load_distance + unload_margin`, so walking back and forth along that line doesn't rebuild it. The ground under a source is built right before each tick (a few milliseconds at most, and only when something appears or teleports somewhere new); everything further out goes through the budget. Odd cases:
+
+- No terrain set: it warns once and does nothing.
+- No active sources: everything stays loaded, unless `hold_when_no_sources` is off, so a respawn or a pawn change doesn't make the world vanish.
+- More chunks wanted than the limit: the nearest win, and it warns once.
+- A slow chunk: at least one step runs every frame, however small the budget.
+- No `TickDriver`: the ground check runs once per physics frame instead of before each tick.
+- A source removed from the scene or freed stops counting at the streamer's next refresh; with no streamer in the scene nothing happens.
+- Not yet: one terrain only. Props that load by chunk, or the blended level generators of the world spec, would need more.
+
 ## How to use it
 
 **Load the world around the player.** Under a `WorldCoordinator`, add a `ChunkStreamer` beside the `TerrainGenerator`; the coordinator connects them and turns off the terrain's `build_on_start`. A player's pawn is a source by itself. Open `streaming_sample.tscn` to see it.

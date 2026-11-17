@@ -1,14 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Walks over to see what something half-noticed was.
 ##
-## Pawn spec section 10.7. Allowed in Alert by default. It scores high while the most aware entry in memory isn't certain yet, and
-## walks, without sprinting, to that entry's last known position. If the position moves more than [member repath_distance] (the
-## target was seen again somewhere else), it heads for the new one. It succeeds on arriving, and fails if there's no way there. Its
-## cooldown stops it walking to the same spot over and over.
-## [br]
-## It's only available while something uncertain is remembered (Search handles enemies it became certain of), or while an unknown
-## attacker hit the pawn within [member hit_memory_ticks]: then it walks to where the hit came from, with no memory entry (no damage
-## sense, the owner's call).
+## Allowed in Alert. Available while the most aware memory entry isn't certain yet (Search handles certain ones), or while an unknown
+## attacker hit the pawn within [member hit_memory_ticks], when it walks to where the hit came from. It walks, without sprinting, to the
+## entry's last known position and heads for a new one if that moves more than [member repath_distance]. It succeeds on arriving and
+## fails if there's no way there; its cooldown stops it walking to the same spot over and over.
+## Design: pawn spec 10.7.
 class_name AIInvestigateBehaviour
 extends AIBehaviourBase
 
@@ -31,8 +28,7 @@ func _init() -> void:
 	tick_interval_ticks = 5 # it only needs to notice arriving, or the position moving
 
 
-## Only for something half-noticed: an uncertain most aware entry, or a hit within [member hit_memory_ticks] from an attacker it
-## doesn't remember. Two conditions, either of which will do. Its score is always max_score.
+## Only for something half-noticed: an uncertain most aware entry, or a recent hit from an attacker it doesn't remember. Either will do.
 func own_conditions() -> Array[AICondition]:
 	return AIInputs.half_noticed_conditions(hit_memory_ticks)
 

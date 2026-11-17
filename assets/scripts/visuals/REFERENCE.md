@@ -13,17 +13,9 @@ Every class in `assets/scripts/visuals/`, from its doc comments. The overview is
 
 A sword that floats beside the pawn and swings through each attack, exactly where the hit is checked.
 
-The owner's toy look (pawn spec 8.12): the pawn doesn't hold it; it hovers at its right side like a toy waved next to a figure, and swoops through the swing. Put it under the pawn's Visual (not Model, which rocks with the waddle). It makes the sword itself from `sword_scene`.
+Part of the toy look (pawn spec 8.12): the pawn doesn't hold it; it hovers at its right side, about chest high, blade up. Put it under the pawn's Visual (not Model, which rocks with the waddle); it makes the sword from `sword_scene`. A running MeleeAttackAbility drives it through windup, hit (the blade sweeps the path the hits check, `hit_offset_at`) and recovery; a running ParryAbility makes it guard in front of the chest; death drops it flat.
 
-What it shows, frame by frame:
-- Hovering: at the pawn's side, about chest high, blade up, bobbing and swaying gently.
-- A swing (any MeleeAttackAbility on the pawn that's running), through its phases (MeleeAttackAbility.swing_phase, from its steps): windup, it swings back to just behind where the hit starts; hit, it sweeps through the hit, blade pointing out from the pawn's chest through each spot the hit checks (MeleeAttackAbility.hit_offset_at, the same path the hits use), edge first, so what you see is what hits, including swings that rise, fall or chop straight down; recovery, it drifts back to hovering.
-- A parry (ParryAbility running): it guards in front of the pawn's chest, blade held flat across, edge out, for as long as the parry runs (`guard_forward`, `guard_height`).
-- Dead: it drops to the ground beside the pawn, lying flat.
-
-Combo swings alternate: after a swing it rests on the side where the swing ended, so the next swing starts from there. A swing ending on the left leaves it hovering at the pawn's left, the second swing then sweeps from left to right, and so on. A swing ending in the middle (a chop) leaves it where it was. After `return_seconds` with no swing it goes back to the right, round the front of the pawn rather than through it.
-
-Visual only: it runs once per rendered frame, only reads the pawn, and changes nothing the game simulates. The swing's progress comes from the ability's state, which rolls back and reaches clients in snapshots, so a client sees other pawns' swings too, and the tick driver's interpolation fraction makes it smooth between ticks. With no display (a headless server or test), it builds nothing and never runs, since nothing can see it (RunEnvironment.runs_visuals). A host playing in a window still draws it.
+Visual only: it runs once per rendered frame and only reads the pawn (swing progress is ability state, which rolls back and reaches clients in snapshots), so it changes nothing simulated. With no display it builds nothing and never runs (RunEnvironment.runs_visuals).
 
 ### Settings and properties
 
@@ -53,18 +45,9 @@ Visual only: it runs once per rendered frame, only reads the pawn, and changes n
 
 Makes a pawn's model move like a toy being played with: rocking, hopping, leaning into a dash and falling over when it dies.
 
-The owner's toy look (pawn spec 8.12): it rocks from side to side and hops a little with each step instead of walking with legs, leans into a dash, tips back when knocked back, and falls over when it dies. Put it under the pawn's Visual/Model, with nothing else needed: it makes the model itself from `toy_scene`, and stands it on a coloured base like a figurine's, so teams can be told apart.
+Part of the toy look (pawn spec 8.12). Put it under the pawn's Visual/Model; it makes the model from `toy_scene` (held in the first frame of `pose_animation`) and stands it on a coloured base so teams can be told apart. It moves only itself, with its origin at the pawn's feet, so "forward" is the pawn's -Z. The waddle's speed comes from how fast the drawn model moves, not the pawn's velocity, so pawns drawn from snapshots on a client waddle too.
 
-What it is and isn't:
-- Visual only. It runs once per rendered frame, only reads the pawn, and changes nothing the game simulates, so it needs no rollback and works the same on the server, on a client predicting its own pawn, and on a client drawing other pawns.
-- It moves only itself (this node). The pawn turns Visual/Model to face the way the pawn faces, and this sits inside that, so "forward" here is always the pawn's forward (-Z) and "side to side" is its left and right.
-- Its origin is at the pawn's feet, so rocking and tipping over pivot on the ground, as a toy standing on a table does.
-
-How fast it waddles comes from how fast the drawn model moves (Visual, smoothed between ticks), not from the pawn's velocity, so a pawn drawn from snapshots on a client waddles too. The step rate grows with speed: `steps_per_metre` steps for every metre.
-
-The model: toy_scene is instanced as a child at `toy_scale` (turned round if `turn_model_round` is on). If it has an AnimationPlayer, the first frame of `pose_animation` holds the model in a still pose for the waddle to move.
-
-With no display (a headless server or test), the figure isn't built and its per-frame waddle never runs, since nothing can see it (RunEnvironment.runs_visuals). A host playing in a window still draws it.
+Visual only: once per rendered frame, only reads the pawn, changes nothing simulated, so it needs no rollback. With no display it builds nothing and never runs (RunEnvironment.runs_visuals).
 
 ### Settings and properties
 

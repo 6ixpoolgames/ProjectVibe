@@ -1,35 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: terrain/CHANGELOG.md.
-## Remembers every edit to a TerrainGenerator, so that a chunk built later still has them.
+## Remembers every edit to a [TerrainGenerator], so a chunk built later still has them.
 ##
-## An optional module: add it as a child of the [TerrainGenerator], and edits survive unloading. Without it, the ground goes back to
-## how it was generated whenever a chunk unloads. If this node is deleted while the game runs, or its saved data won't load, the world
-## simply goes back to its default state. Nothing else depends on it.
-## [br]
-## How it works: it stores the edits themselves, not the heights they produce. Each one is a center, radius, amount and tick, 20 bytes
-## ([constant BYTES_PER_EDIT]). When a chunk is built, its edits are applied in the order they happened. Each edit is listed under
-## every chunk it touches, including unloaded ones, so two chunks that share a border always agree on it.
-## [br]
-## [b]Multiplayer.[/b] The server's log is the one that counts, and only the server edits ([method refuses_edit]). Clients get each
-## edit as soon as it reaches them, which is after the server has applied it, by about half their ping. Prediction can differ for that
-## moment, and normal corrections fix it. A late joiner gets the whole log, even an empty one, so a client that loaded edits of its own
-## doesn't keep ground the server doesn't have. The whole log goes as [method to_bytes], the same bytes a save file holds.
-## [br]
-## [b]Saving.[/b] [method save_to_file] and [method load_from_file] keep the log in a file, as a 4-byte "PBTE" header and then
-## to_bytes(). Saving writes a temporary file and renames it over the old one, so a crash mid-save never leaves a broken save: at worst
-## the temporary file is left, and loading falls back to it. For designers, three settings do it with no code: [member save_path]
-## (empty: no file), [member load_on_start], and [member save_every_seconds] (0: only when the log leaves the tree, such as on quit).
-## Only the server or an offline game saves and loads: in multiplayer the server's log is the one that counts, and clients get it over
-## the network.
-## [br]
-## What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
-## [br]- from_bytes given broken data: it's refused, and the log stays as it was. Every record is checked before anything changes.
-## [br]- from_bytes given data from a terrain with different settings: it's refused, because those edits were meant for other
-##   ground. The world stays as it is.
-## [br]- The parent isn't a TerrainGenerator: it warns and does nothing.
-## [br]- A chunk with a very long list costs more to build. Nothing merges old edits yet.
-## [br]- A save file that's missing, broken, or made for a terrain with different settings is refused, and the log and the ground stay
-##   as they were. The log then won't save itself over that file, so one run with a different seed doesn't delete the saved edits.
-## [br]- Loading or saving on a client does nothing.
+## An optional child of the [TerrainGenerator]. Without it the ground goes back to how it was generated whenever a chunk unloads.
+## It stores the edits, not the heights: each is a center, radius, amount and tick, [constant BYTES_PER_EDIT] bytes, applied in the
+## order they happened. Only the server edits ([method refuses_edit]); clients get each edit, and a late joiner the whole log
+## ([method to_bytes]). The ground is the same on every machine. For saving, set [member save_path], [member load_on_start] and
+## [member save_every_seconds]; only the server or an offline game saves and loads.
+## Design: world spec (docs/world/WORLD_SPEC.md).
 class_name TerrainEditLog
 extends Node
 
@@ -95,7 +72,7 @@ func _exit_tree() -> void:
 		_terrain.edit_log_left(self)
 
 
-## Saves the log to a file: a temporary file first, then renamed over the old one. Returns OK, or why not. Does nothing on a client.
+## Saves the log to a file: a temporary file first, then renamed over the old one. Returns OK, or why not; does nothing on a client.
 ## Saving to [member save_path] on purpose lets the log save itself there again after a refused load.
 func save_to_file(path: String = save_path) -> Error:
 	if path == "" or not _may_use_files():
@@ -109,7 +86,6 @@ func save_to_file(path: String = save_path) -> Error:
 	file.store_buffer(FILE_HEADER.to_ascii_buffer())
 	file.store_buffer(to_bytes())
 	file.close()
-	# GDScript note: DirAccess works on absolute paths; globalize_path turns "user://..." into the real folder on this computer.
 	var final_path := ProjectSettings.globalize_path(path)
 	if FileAccess.file_exists(path):
 		DirAccess.remove_absolute(final_path)
@@ -369,7 +345,6 @@ func _add(x: float, z: float, radius: float, amount: float, tick: int) -> int:
 	_tick.append(tick)
 	if _terrain != null:
 		for key in _terrain.chunks_touched_by_edit(x, z, radius):
-			# GDScript note: a packed array in a Dictionary has to be stored back after changing it, to be sure it sticks.
 			var list: PackedInt32Array = _by_chunk.get(key, PackedInt32Array())
 			list.append(index)
 			_by_chunk[key] = list

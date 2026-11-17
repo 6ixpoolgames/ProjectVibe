@@ -1,84 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
 ## Makes an entity rollback-ready without writing code (netcode spec sections 5 and 6).
 ##
-## Add it as a child of the entity and list property names in the inspector. It rounds them every tick, keeps their recent history,
-## and can put the entity back to any recent tick and replay it. The entity itself keeps implementing _tick_input and _tick_simulate
-## as normal; those are all it needs.
-## [br]
-## The lists:
-## [br]- [member input_properties]: what the entity wants each tick. Saved after the input phase, restored during replay.
-## [br]- [member state_properties]: everything that affects the next tick: position, velocity, grounded, cooldowns... If a value
-##   influences the future and isn't listed, replays drift.
-## [br]- [member sync_properties]: server-only values (health, team). Not rolled back. Sent in every snapshot; clients show the
-##   latest.
-## [br]
-## How to write an entry (the optional "@encoding" is one of those in StateEncoding; the default is by type):
+## Add it as a child of the entity and list property names in the inspector: [member input_properties] (what the entity wants each
+## tick), [member state_properties] (everything that affects the next tick) and [member sync_properties] (server-only values). It rounds
+## them every tick, keeps recent history, and can put the entity back to any recent tick and replay it.
 ## [codeblock]
 ## "velocity"                 # a property on the parent
 ## "Walk:phase"               # a property on a node below the parent
-## ":rotation:y @angle_u16"   # part of a property on the parent (note the leading colon)
+## ":rotation:y @angle_u16"   # part of a property on the parent, with an encoding from StateEncoding
 ## [/codeblock]
-## Parts added after the scene was made (abilities from PawnInitializer) add theirs with [method add_state_properties].
-## [br]
-## Unusual state: if the parent, or a node in [member custom_state_nodes], has [code]save_state() -> Dictionary[/code] and
-## [code]load_state(Dictionary)[/code], those run alongside the lists. save_state must return a new Dictionary each call. The
-## Dictionary also goes to clients in every snapshot, and clients correct it like list entries. That makes two rules: its values must
-## come out exactly equal on server and client, so use ints, bools or floats you've rounded yourself, and keep it small, since there
-## are no encodings to shrink it. After every entity has loaded, the parent's [code]_on_state_loaded(tick)[/code] runs if it has one
-## (for things only the engine can restore). It waits for all of them, so a floor check there sees the others where they were.
-## [br]
-## Rules and corner cases (all checked in tests/tick_state_selftest.gd):
-## [br]- Entries are matched to nodes when ticks run, not at ready, because children become ready before their parent and
-##   PawnInitializer may add parts later. An entry whose node or property isn't there warns once and is looked for again every tick,
-##   so it starts working as soon as the part exists. An unusable entry never causes an error.
-## [br]- A listed node that gets freed (an ability removed at runtime) just stops being saved. Ticks saved while it was there leave
-##   whatever replaced it alone: only properties saved for that tick are restored.
-## [br]- Arrays and Dictionaries are copied in and out of the history, so every tick keeps its own contents. Objects can't be
-##   copied: listing one warns, and it won't roll back. Use save_state/load_state, or an id.
-## [br]- No lists at all, or none usable yet: harmless. The entity isn't predicted, because there is nothing to restore.
-## [br]- An entity with only sync properties still records its ticks (with an empty state list), so it goes into snapshots.
-## [br]- [member history_size] is in ticks, default 64 (about 1 s at 60/s). Anything older is gone: asking about it returns empty or
-##   false, and a rollback carries on without this entity.
-## [br]- [method correct_state] for a tick that's gone can't replay, so it snaps the entity to the given values and warns.
-## [br]- Replay with an input missing for a tick: the last input stays in place.
-## [br]- Only values that changed are written back after rounding, so setters don't run needlessly.
-## [br]- No TickDriver autoload: stays idle.
-## [br]- [member history_interval_ticks] says which ticks are saved; the rest are only rounded. NetworkEntity sets it: every tick on
-##   a client, snapshot ticks on a server, none offline.
-## [br]- Recording runs in C++ ([code]TickStateRecorder[/code]) once every entry is matched and its encoding settled, with exactly
-##   the same values as the GDScript path, which handles everything else.
-## [br]
-## [b]Following the server[/b] (netcode spec section 6.5). [member rollback_mode] decides what a rollback does with this entity:
-## [br]- RESIMULATE (the default): it's put back and its _tick_simulate runs again. For what this machine predicts: your own pawn.
-## [br]- FOLLOW_SERVER: it isn't simulated: it's for what this machine doesn't predict, like other players' pawns. It's drawn between
-##   snapshots with [method follow_server_at], which writes only the values that change. NetworkEntity stops its parent ticking
-##   live. During a rollback it normally stays where it's drawn. With [member follows_during_rollback] on, it stands where the server
-##   says instead, so that predicted bodies bump into it there.
-## [br]
-## The snapshot code passes what the server says to [method receive_authoritative_values]. With follows_during_rollback on, during a
-## replay, each tick:
-## [br]- The server sent this tick: the entity stands exactly there.
-## [br]- Otherwise: it starts from the newest server state before this tick and moves on that state's velocity, up to
-##   [member extrapolation_cap_seconds], then holds. This is velocity-only prediction: no steering, gravity or collisions.
-## [br]
-## Follow-server rules, also checked in the test:
-## [br]- When the replay ends, the entity gets back exactly what it had before. It only stands there during the replay; where it's
-##   drawn doesn't change. Its _tick_simulate and _on_state_loaded don't run.
-## [br]- It keeps no history of its own and doesn't round its properties. Its input isn't saved. [method get_state] returns empty.
-## [br]- No server data yet, or none from before the replay's first tick: it stays where it is until a server tick is reached.
-## [br]- The position is the parent's "position" or "global_position". The velocity is any entry whose property is called "velocity",
-##   on the parent or a node below it ("Motor:velocity"), with the parent's preferred. Without both, or if they're different types,
-##   it holds still after the newest server state, which suits a door. If that looks like a mistake, because one is listed and the
-##   other isn't but the parent has a velocity, it warns once.
-## [br]- Vector3 ignores up and down by default ([member extrapolate_vertical]), because with no gravity a falling pawn would sink
-##   into the floor. Vector2 always uses both axes.
-## [br]- FOLLOW_SERVER with nothing listed uses "position", plus "velocity" if the parent has one, so the mode never does nothing.
-##   These aren't added to state_properties, so [method get_schema] stays the same on machines using either mode. List them to have
-##   them sent over the network.
-## [br]- save_state/load_state and custom_state_nodes aren't used in this mode: the server only sends listed properties.
-## [br]- A late packet older than what its history slot already holds is ignored. After a teleport or respawn, call
-##   [method clear_authoritative_state] so nothing is estimated from before it.
-## [br]- Tested with CharacterBody3D and plain nodes. Rigid bodies and animated platforms aren't tested yet.
+## Twin: recording runs in C++ ([code]TickStateRecorder[/code]) with exactly the same values as the GDScript path; a change to what is
+## recorded or how it rounds goes in both. Design: netcode spec 5, 6.
 extends Node
 class_name TickStateComponent
 # REFACTOR: two jobs in one class: recording and replaying this machine's own state, and placing an entity it follows from server
@@ -98,7 +30,8 @@ class_name TickStateComponent
 ## Ticks of history kept.
 @export var history_size: int = 64
 
-## What a rollback does with this entity. See "Following the server" in the class description.
+## What a rollback does with this entity: RESIMULATE puts it back and runs its [code]_tick_simulate[/code] again (what this machine predicts);
+## FOLLOW_SERVER draws it from server data (what it doesn't; netcode spec 6.5).
 enum RollbackMode { RESIMULATE, FOLLOW_SERVER }
 ## RESIMULATE for what this machine predicts, FOLLOW_SERVER for what it draws from snapshots. NetworkEntity sets it from its role.
 @export var rollback_mode: RollbackMode = RollbackMode.RESIMULATE
@@ -108,48 +41,22 @@ enum RollbackMode { RESIMULATE, FOLLOW_SERVER }
 @export var extrapolation_cap_seconds: float = 0.2
 ## Also move it up and down on its velocity. Off by default: with no gravity in the estimate, a falling pawn would sink.
 @export var extrapolate_vertical: bool = false
-## How often a FOLLOW_SERVER entity writes every value again, including those the server says haven't changed.
-## [br]
-## Between these it only writes what changes (see _follow_before), which trusts that nothing else writes the properties. If something
-## does (a script on the node, an animation), the value is wrong until the server next changes it; with this, for at most this long.
-## Entities take turns, so they don't all do it on the same tick. 0: never.
+## How often a FOLLOW_SERVER entity rewrites every value, not only the changed ones; 0 never. It bounds how long something else writing a property (a script, an animation) can leave it wrong.
 @export var follow_refresh_seconds: float = 0.5
-## During a rollback, stand on server data and extrapolate, instead of staying where it's drawn.
-## [br]
-## Off by default, which is the standard behaviour: over real connections it made no clear difference (netcode spec section 6.5).
+## During a rollback, stand on server data and extrapolate, instead of staying where it's drawn. Off by default: no clear difference over real connections (spec 6.5).
 @export var follows_during_rollback: bool = false
-## With [member follows_during_rollback] on, this entity only joins a rollback if it's this close to something being resimulated. 0
-## means no limit. A guess to tune: it only has to reach anything a replaying pawn could touch during a replay (netcode spec section
-## 6.5).
+## With [member follows_during_rollback] on, it only joins a rollback within this distance of something being resimulated; 0 is no limit. A guess to tune.
 @export var follow_server_radius: float = 10.0
-## FOLLOW_SERVER normally saves no input. Your own pawn with prediction off still has inputs to send. NetworkEntity turns it on for
-## the entities this machine controls.
+## Keep input history in FOLLOW_SERVER mode too, for your own pawn with prediction off. NetworkEntity sets it for entities this machine controls.
 var keep_input_history: bool = false
-## The server never replays, so it has no use for a record of what each tick's input turned out to be, unless clients predicting this
-## entity need it sent to them. Inputs arriving from clients are still stored until their tick comes. NetworkEntity sets it.
+## Server: don't record each tick's input (it never replays), unless clients predicting this entity need it. Client inputs still queue. NetworkEntity sets it.
 var skip_input_capture: bool = false
-## Which ticks' state goes into the history (pawn spec 12.1, open question 16).
-## [br]
-## Whether the ticks that aren't saved are still rounded is [member rounds_every_tick]. NetworkEntity sets it, like
-## [member skip_input_capture]:
-## [br]- 1: every tick (the default): a client's predicted entities, which replay, and anything not in a network session.
-## [br]- N: only ticks that are a multiple of N: a server, which never replays and only reads the history to send snapshots.
-## [br]- 0: never: offline, where nothing replays, unless [code]NetworkEntity.keep_history_offline[/code] is on.
+## Which ticks' state is saved (pawn spec 12.1); NetworkEntity sets it. 1: every tick (clients, which replay); N: multiples of N (a server, its snapshot ticks); 0: none (offline).
 var history_interval_ticks: int = 1
-## Whether this entity's values are rounded every tick ([member quantize_each_tick]), or only on the ticks that are saved. Rounding
-## every tick is what lets a machine that replays this entity (a client predicting it) land on exactly the server's values; where no
-## machine ever replays it, it's work for nothing, and at 600 pawns it was most of the record phase (5 of 5.8 ms a tick). On by default.
-## NetworkEntity turns it off:
-## [br]- offline, where nothing replays (unless [code]NetworkEntity.keep_history_offline[/code] is on);
-## [br]- on a server, for an entity no client predicts: not owned by a client, not [code]is_predicted[/code], and not every entity
-##   predicted ([code]NetworkSession.default_predicted[/code]). AI pawns, and the host's own pawn.
-## [br]
-## Ticks that are saved are rounded either way, so snapshots carry the same values. A change of owner (possession) sets it again.
+## Round every tick, or only the saved ticks. Every tick lets a machine that replays this entity land on the server's exact values; NetworkEntity turns it off
+## where nothing replays it (offline; a server entity no client predicts). Saved ticks are rounded either way. Possession sets it again.
 var rounds_every_tick: bool = true
-## Recording runs in C++ ([code]TickStateRecorder[/code], in native/) when the library is there, which gives exactly the same values.
-## Off: GDScript for every component, for comparing the two. Tests take [code]-- --gdscript-record[/code].
-## [br]
-## GDScript note: a static var belongs to the class, not to each component, so one switch covers them all.
+## Record in C++ ([code]TickStateRecorder[/code]) when the library is there. Off: GDScript for every component, for comparing (tests take [code]-- --gdscript-record[/code]).
 static var use_native: bool = true
 
 ## Stored in a history slot for a property that didn't exist that tick.
@@ -254,12 +161,8 @@ func _ready() -> void:
 	_authoritative_values.resize(history_size)
 
 
-## Adds state entries for parts that arrive after the scene was made, such as abilities PawnInitializer adds (pawn spec step 6).
-## [br]
-## Entries are written as in [member state_properties], with node paths relative to the parent
-## ("AbilityManager/Sprint:time_left"). Only before the first tick is recorded, because every saved tick has to hold the same list.
-## Every machine must add the same entries in the same order, which holds when they come from the same parts. They aren't part of
-## [method get_schema], because that reads the scene as made, so the handshake doesn't check them. False if refused.
+## Adds state entries for parts that arrive after the scene was made (abilities from PawnInitializer), written as in [member state_properties]. False if refused.
+## [br]Only before the first tick is recorded. Every machine must add the same entries in the same order; they aren't in [method get_schema], so the handshake doesn't check them.
 func add_state_properties(entries: Array[String]) -> bool:
 	if _newest_state_tick >= 0:
 		push_warning("[TickStateComponent] %s: state entries can only be added before the first tick is recorded, so %s won't roll back." % [_root.name if _root else name, str(entries)])
@@ -300,12 +203,8 @@ func _build_state_list() -> void:
 			_velocity_index = i
 
 
-## A position rounded the way this component's recording rounds its "position" entry (its encoding, such as millimetres).
-## [br]
-## Only when it rounds every tick ([member quantize_each_tick]). Something that sets the position itself during a tick, such as the
-## CrowdMover (pawn spec 8.22), rounds with this so the position is already what the recording will make it, and the recording changes
-## nothing: a still pawn stays exactly still. As is if there's no position entry, its encoding isn't settled yet, or this doesn't round
-## each tick.
+## A position rounded the way the recording rounds the "position" entry, for code that sets position itself (CrowdMover, pawn spec 8.22) so a still pawn stays still.
+## [br]Returned as is with no position entry, an unsettled encoding, or no per-tick rounding.
 func round_position(value: Vector3) -> Vector3:
 	if not quantize_each_tick or not rounds_every_tick or _position_index < 0:
 		return value
@@ -354,9 +253,7 @@ func _tick_record(tick: int) -> void:
 		_state_custom[slot] = _save_customs()
 
 
-## Records the state list through the C++ recorder: into values, or with values null only rounds. False if it
-## can't right now (no library, use_native off, an entry not matched yet, an encoding not settled, or a node gone), and then the
-## caller does it in GDScript, which also matches entries, settles encodings and warns. The recorder is filled again next time.
+## Records the state list through the C++ recorder into values (null: only round). False if it can't right now; the caller then does it in GDScript.
 func _record_natively(values: Variant) -> bool:
 	if not _recorder_ready:
 		if not use_native or _states.is_empty() or not ClassDB.class_exists(&"TickStateRecorder"):
@@ -365,7 +262,7 @@ func _record_natively(values: Variant) -> bool:
 			if not is_instance_valid(p.node) or p.encoding == StateEncoding.AUTO:
 				return false # the GDScript path matches it and settles its encoding first
 		if _recorder == null:
-			# GDScript note: made by name, so this script still runs where the C++ library isn't available.
+			# Made by name, so this script still runs where the C++ library isn't available.
 			_recorder = ClassDB.instantiate(&"TickStateRecorder")
 		_recorder.clear()
 		for p in _states:
@@ -379,8 +276,7 @@ func _record_natively(values: Variant) -> bool:
 	return false
 
 
-## Rounds each property and writes back the ones that changed, saving nothing. The GDScript path for a tick whose
-## state isn't kept, and the same steps as _capture without the copy.
+## Rounds each property and writes back the changed ones, saving nothing (the GDScript path for an unsaved tick).
 func _round_in_place(props: Array[Prop]) -> void:
 	for p in props:
 		if not _bind(p):
@@ -392,8 +288,7 @@ func _round_in_place(props: Array[Prop]) -> void:
 			p.write(q)
 
 
-## Rollback step 1: put the entity back to how it ended this tick. False if there's nothing to restore for that tick,
-## in which case the entity keeps its current state and sits the replay out.
+## Rollback step 1: put the entity back to how it ended this tick. False if nothing is saved for it; it then sits the replay out.
 func _rollback_load(tick: int) -> bool:
 	if rollback_mode == RollbackMode.FOLLOW_SERVER:
 		return _begin_following(tick)
@@ -433,10 +328,8 @@ func _rollback_simulate(dt: float, tick: int) -> void:
 		_root._tick_simulate(dt, tick)
 
 
-## Makes the physics world see where this body is right now. Normally a moved body reaches the collision world only at the next
-## physics step, so when several ticks run within one frame, as in a replay or a frame with two ticks, bodies would collide with
-## out-of-date positions of each other. Kinematic bodies are deferred by the physics engine, but a static body's position applies at
-## once, so it's static for just this call.
+## Makes the physics world see where this body is right now, so several ticks in one frame (a replay) don't collide with stale positions.
+## [br]A moved body reaches the collision world only at the next physics step; a static body's position applies at once, so it's static for this call.
 func _sync_collision() -> void:
 	# Not yet (netcode spec section 17): rigid bodies get flipped too.
 	if not (_root is PhysicsBody3D) or not _root.is_inside_tree():
@@ -448,8 +341,7 @@ func _sync_collision() -> void:
 	PhysicsServer3D.body_set_mode(rid, mode)
 
 
-## Rollback's last step. A following entity gets back what it had before the replay. Its collision position has to follow, because
-## the replay's last sync left it at the last replayed tick.
+## Rollback's last step: a following entity gets back what it had before the replay, and its collision position follows.
 func _rollback_finished() -> void:
 	if rollback_mode != RollbackMode.FOLLOW_SERVER:
 		return
@@ -458,8 +350,7 @@ func _rollback_finished() -> void:
 	_sync_collision()
 
 
-## True in FOLLOW_SERVER mode. The driver loads resimulated entities first, then asks this and [method wants_to_join_rollback] about
-## each following one, so a following entity far from every replaying body doesn't cost anything.
+## True in FOLLOW_SERVER mode. The driver asks this and [method wants_to_join_rollback] of each following entity, so far-off ones cost nothing.
 func is_following_server() -> bool:
 	return rollback_mode == RollbackMode.FOLLOW_SERVER
 
@@ -489,9 +380,8 @@ func is_near_any(centres: Array) -> bool:
 
 # --- Server data for following -------------------------------------------------------------------
 
-## What the server says this entity's state was on a tick, as {entry: value}: the dictionary form of
-## [method receive_authoritative_values], which snapshots use. Entries not given stay as they are during that tick; names not in
-## state_properties are ignored.
+## What the server says this entity's state was on a tick, as {entry: value}: the dictionary form of [method receive_authoritative_values].
+## [br]Entries not given stay as they are; names not in state_properties are ignored.
 func receive_authoritative_state(tick: int, values: Dictionary) -> void:
 	# REFACTOR: only tests call this; snapshots use receive_authoritative_values. A test-only door in production code (production
 	# kept apart from test code): the tests could build the list themselves. See CHANGELOG.md.
@@ -506,11 +396,8 @@ func receive_authoritative_state(tick: int, values: Dictionary) -> void:
 	receive_authoritative_values(tick, saved)
 
 
-## What the server says this entity's state was on a tick, as a whole list in declared order, as a snapshot carries it. The snapshot
-## code calls it for every entity it reads.
-## [br]
-## The list is kept as it is, not copied: the caller hands over a list of its own, already rounded by the server's encodings, and
-## nothing changes it afterwards. A list of the wrong size is ignored.
+## What the server says this entity's state was on a tick, as a whole list in declared order, as a snapshot carries it.
+## [br]Kept without copying (the caller hands over its own, already rounded list); a list of the wrong size is ignored.
 func receive_authoritative_values(tick: int, values: Array) -> void:
 	# An empty list means the server had nothing for it that tick: every entry MISSING, as the dictionary version does with an empty
 	# dictionary.
@@ -545,9 +432,7 @@ func clear_authoritative_state() -> void:
 
 
 ## Places the entity for drawing, part way between the two snapshots around this tick.
-## [br]
-## If nothing newer has arrived, it moves on from the newest on its velocity, up to the cap, then holds. With extrapolation off, it
-## just holds at the newest. Before any data, it stays put.
+## [br]With nothing newer it moves on its velocity up to [member extrapolation_cap_seconds], then holds; with no data it stays put.
 func follow_server_at(render_tick: float, allow_extrapolation: bool = true) -> void:
 	if _authoritative_ticks.is_empty() or _newest_authoritative_tick < 0:
 		return
@@ -579,9 +464,7 @@ func follow_server_at(render_tick: float, allow_extrapolation: bool = true) -> v
 	_place_between(before, after, older, newer, weight)
 
 
-## Places a following entity weight of the way from older (tick before) to newer (tick after), writing as little as it can. The
-## result is the same as writing StateEncoding.blend() of every value: values that can't blend, or are the same in both, hold at
-## older's; positions, velocities and angles that differ blend.
+## Places a following entity weight of the way from older to newer, writing as little as it can; same result as writing [method StateEncoding.blend] of every value.
 func _place_between(before: int, after: int, older: Array, newer: Array, weight: float) -> void:
 	if _follow_written.size() != _states.size():
 		_follow_written.resize(_states.size())
@@ -606,7 +489,7 @@ func _place_between(before: int, after: int, older: Array, newer: Array, weight:
 				continue
 			var p := _states[i]
 			if _bind(p):
-				# GDScript note: arrays are shared, not copied, when assigned, so the node gets its own copy of one.
+				# Gotcha: arrays are shared when assigned, so the node gets its own copy.
 				p.write(StateEncoding.copy_value(value))
 				_follow_written[i] = value
 	for i in _follow_moving:
@@ -615,23 +498,20 @@ func _place_between(before: int, after: int, older: Array, newer: Array, weight:
 			p.write(StateEncoding.blend(older[i], newer[i], weight, p.encoding))
 
 
-## On a new pair of snapshots, forgets what was last written if follow_refresh_seconds has
-## passed, so this pair writes every value. The first time, it only picks this entity's turn: its instance id spreads entities over
-## the interval, so 150 pawns that appeared together refresh a few a tick, not all on one.
+## On a new pair of snapshots, forgets what was last written once [member follow_refresh_seconds] has passed. Instance ids spread entities' turns, so they don't all refresh on one tick.
 func _refresh_follow_if_due(tick: int) -> void:
 	if follow_refresh_seconds <= 0.0 or _driver == null:
 		return
 	var interval: int = _driver.seconds_to_ticks(follow_refresh_seconds)
 	if _follow_refreshed < 0:
 		_follow_refreshed = tick - int(get_instance_id() % interval)
-	# GDScript note: absi, so a clock that jumped back (a resync) still counts as time passed.
+	# absi, so a clock that jumped back (a resync) still counts as time passed.
 	elif absi(tick - _follow_refreshed) >= interval:
 		_follow_refreshed = tick
 		_follow_written.fill(UNWRITTEN)
 
 
-## True if a value changes between the two snapshots in a way blend() moves smoothly: vectors and
-## floats of the same type that differ.
+## True if a value differs between the two snapshots in a way blend() moves smoothly (same-type vectors and floats).
 static func _blends(a: Variant, b: Variant) -> bool:
 	var type := typeof(a)
 	if type != typeof(b) or not (type == TYPE_VECTOR3 or type == TYPE_VECTOR2 or type == TYPE_FLOAT):
@@ -700,9 +580,7 @@ func get_sync_encodings() -> Array:
 	return _cached_encodings(&"sync", _syncs)
 
 
-## How many entries each list has: [state, sync, input, custom]. A snapshot's lists must have
-## these sizes; NetworkSession checks them before using one, so a mismatch is refused and reported rather than read as empty.
-## GDScript note: a PackedInt32Array is a plain list of whole numbers, cheaper than an Array for this.
+## How many entries each list has: [state, sync, input, custom]. NetworkSession checks a snapshot's lists against these and refuses a mismatch.
 func get_list_sizes() -> PackedInt32Array:
 	return PackedInt32Array([_states.size(), _syncs.size(), _inputs.size(), _custom_paths.size()])
 
@@ -723,8 +601,7 @@ func apply_sync_values(values: Array) -> void:
 		_apply(_syncs, values)
 
 
-## Server: keeps a client's input for the tick it belongs to. Entries not given stay as they are. A wrong type or a
-## not-a-number value is dropped too, so an entity with no sanitize_network_input hook is still protected.
+## Server: keeps a client's input for its tick; entries not given stay as they are. Wrong types and NaN values are dropped, so even an entity with no sanitize hook is protected.
 func receive_input(tick: int, values: Dictionary) -> void:
 	if tick < 0 or _input_ticks.is_empty():
 		return
@@ -803,10 +680,8 @@ func get_custom_values(tick: int) -> Array:
 	return saved if saved is Array else []
 
 
-## True if these values match what's saved for that tick, within tolerance. Only compares list entries that are given
-## and were saved. This is the reconciliation question: "was my prediction for this tick right?"
-## [br]
-## custom is what the authority's save_state returned, from [method get_custom_values]. Those compare exactly.
+## True if these values match what's saved for that tick, within tolerance: "was my prediction right?" Compares only entries given and saved.
+## [br]custom is the authority's save_state result ([method get_custom_values]); it compares exactly.
 func matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 	if not has_state(tick):
 		return false
@@ -824,12 +699,8 @@ func matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 	return true
 
 
-## Overwrites saved list entries for a tick with what the authority says was true; follow with TickDriver.rollback(tick) to replay
-## from them. Entries not given stay as predicted. Returns true if the history took it.
-## [br]
-## If that tick has already fallen out of the history, a replay is impossible, so this snaps the entity straight to the given values
-## and warns, and returns false (netcode spec section 15). A tick that hasn't happened yet changes nothing. custom corrects what
-## save_state saved; the replay's first step then hands it to load_state.
+## Overwrites saved entries for a tick with what the authority says was true; follow with [code]TickDriver.rollback(tick)[/code]. True if the history took it.
+## [br]A tick already out of the history can't replay: the entity snaps to the values, with a warning, and it returns false (spec 15).
 func correct_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 	var custom_usable := custom.size() == _custom_paths.size() and not custom.is_empty()
 	if has_state(tick):

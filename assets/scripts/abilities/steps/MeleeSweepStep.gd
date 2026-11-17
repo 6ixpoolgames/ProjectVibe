@@ -1,30 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
 ## An attack's hit window: a hit sphere moves from a start point to an end point over length_ticks, and pawns it touches are hit.
 ##
-## Pawn spec 8.20, the owner's design. Each point is around the pawn, relative to where it faces at each tick:
-## [br]- angle: degrees, positive to the pawn's left, 0 straight ahead.
-## [br]- height: metres above the pawn's feet.
-## [br]- reach: metres from the pawn to the far edge of the hit sphere.
-## [br]
-## Each goes straight from start to end, so a slash changes angle, a thrust changes reach, a chop changes height, and a diagonal cut
-## changes two. Longer patterns (a zig-zag, a spin) are several sweeps in a row. Visuals draw exactly this path ([method offset_at]),
-## so a new pattern needs no visual work.
-## [br]
-## Hits, on the server only (or offline), never in a rollback replay:
-## [br]- Each tick checks every spot the sphere passes through during that tick, no more than half its radius apart, so a fast sweep
-##   or a 30 Hz match leaves no gaps. In a session they're checked through lag compensation (LagCompensation.melee_spheres), against
-##   where the player saw others; when nothing would be rewound (AI swings, offline play), through the pawn grid in C++
-##   (AIPawnGrid.find_touching); without the C++ library, through physics.
-## [br]- Each pawn is hit at most once per run of the ability, across all its sweeps (AbilityBase.pawns_hit_this_run). Its own team is
-##   skipped unless [member hits_own_team] is on; an invulnerable pawn isn't hit or marked, so a later tick can catch it.
-## [br]- A hit carries the ability's on-hit effects (its EffectApplier children) and goes to the target's
-##   [method AbilityManager.receive_hit].
-## [br]
-## Signals go out on the ability, if it has them (MeleeAttackAbility does): hit_window_started on the first tick, hit_area_moved on
-## every tick (both on every machine running it, outside replays), and hit_landed for each hit (on the server).
-# REFACTOR: the signals are sent by name on the ability (has_signal, emit_signal), so an ability using this step only gets them if
-# it declares the same three. Declaring them once (on AbilityBase, or as the step's own) would make a new attack ability work
-# without copying them; extensible.
+## Each point is around the pawn, relative to where it faces each tick: angle (degrees, positive to the left, 0 straight ahead), height
+## (metres above the feet) and reach (metres to the sphere's far edge). Each goes straight from start to end, so a slash changes angle, a
+## thrust reach, a chop height; longer patterns are several sweeps in a row. Visuals draw the same path ([method offset_at]).
+## [br][br]Hits are decided on the server only (or offline), never in a rollback replay. Each pawn is hit at most once per run of the
+## ability, its own team is skipped unless [member hits_own_team], and a hit carries the ability's on-hit effects. Signals go out on the
+## ability if it declares them ([MeleeAttackAbility] does).
+## Design: pawn spec 8.20.
+# REFACTOR: the signals are sent by name on the ability (has_signal, emit_signal), so an ability using this step only gets them if it
+# declares the same three. Declared once (on AbilityBase, or the step) a new attack would work without copying; extensible.
 class_name MeleeSweepStep
 extends AbilityStep
 
@@ -55,23 +40,22 @@ func _init() -> void:
 	length_ticks = 4
 
 
-## Where the hit sphere's centre is at this point of the sweep (0 its start, 1 its end), from the pawn's feet, for a facing in radians.
+## Where the hit sphere's centre is at this point of the sweep (0 start, 1 end), from the pawn's feet, for a facing in radians.
 func offset_at(at: float, facing: float) -> Vector3:
-	# GDScript note: the parameter is "at", not "progress", which is a function every step has (AbilityStep.progress()).
+	# The parameter is "at" because "progress" is a method every step has.
 	var angle := facing + deg_to_rad(lerpf(start_angle, end_angle, at))
 	var forward := Vector3(-sin(angle), 0.0, -cos(angle)) # Godot's forward is -Z; a bigger yaw turns left
 	var reach := lerpf(start_reach, end_reach, at)
 	return forward * maxf(reach - hit_radius, 0.0) + Vector3(0.0, lerpf(start_height, end_height, at), 0.0)
 
 
-## The spots the sphere passes through on this tick of the sweep (0 for the first), in the world: from where it is at the tick's start
-## to where it is at its end, no more than half its radius apart. One spot if it doesn't move.
+## The spots the sphere passes through on this sweep tick (0 is the first), in the world, no more than half its radius apart. One spot
+## if it doesn't move, so a fast sweep or a 30 Hz match leaves no gaps.
 func centres_for_tick(sweep_tick: int) -> Array[Vector3]:
 	return centres_for_ticks(sweep_tick, 1)
 
 
-## The same over count ticks from sweep_tick, for a pawn that runs every Nth tick and sweeps N ticks' worth at once (pawn spec 8.21).
-## It never goes past the sweep's end.
+## The same over count ticks from sweep_tick, for a pawn running every Nth tick (pawn spec 8.21). Never goes past the sweep's end.
 func centres_for_ticks(sweep_tick: int, count: int) -> Array[Vector3]:
 	var out: Array[Vector3] = []
 	var ticks := float(maxi(length(), 1))
@@ -79,8 +63,7 @@ func centres_for_ticks(sweep_tick: int, count: int) -> Array[Vector3]:
 	var to_progress := minf((sweep_tick + maxi(count, 1)) / ticks, 1.0)
 	var from_spot := offset_at(from_progress, pawn.yaw)
 	var to_spot := offset_at(to_progress, pawn.yaw)
-	# The straight distance between where it starts and ends this tick: close to the arc for one tick's part of a sweep, and it counts
-	# a change of reach or height too.
+	# The straight distance this tick: close to the arc for one tick's part of a sweep, and counts reach or height changes too.
 	var moved := from_spot.distance_to(to_spot)
 	if moved < 0.0001:
 		out.append(pawn.global_position + offset_at((from_progress + to_progress) * 0.5, pawn.yaw))
@@ -92,7 +75,7 @@ func centres_for_ticks(sweep_tick: int, count: int) -> Array[Vector3]:
 
 
 func tick(_dt: float) -> Status:
-	# In a rollback replay nothing below happens (no signals, no hits), so it leaves before working out the spots.
+	# In a replay nothing below happens (no signals, no hits), so leave before working out the spots.
 	if TickDriver.is_resimulating():
 		return Status.RUNNING
 	var centres := centres_for_ticks(step_ticks, ability.ticks_elapsed()) # every tick this run covers (pawn spec 8.21)
@@ -112,10 +95,8 @@ func weapon_point(facing: float) -> Variant:
 func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 	var targets: Array[Pawn] = []
 	var entity := pawn.get_network_entity()
-	# Through lag compensation in a network session; offline there's nobody to rewind, and pawns aren't tagged for it.
-	# When nothing would be rewound (every AI swing, and offline play), the pawn grid finds who the spheres touch in C++
-	# (AIPawnGrid.find_touching), instead of a physics query per spot. Same answer: the exact shapes, where they are now. Without the
-	# C++ library, physics.
+	# In a session, through lag compensation (against where the player saw others). When nothing would be rewound (AI swings, offline
+	# play), the C++ pawn grid finds who the spheres touch: the same answer as physics, without a query per spot.
 	var view_behind := ability.view_ticks_behind()
 	if entity and entity.session and LagCompensation.would_rewind(entity, view_behind):
 		for found in LagCompensation.melee_spheres(entity, centres, hit_radius, view_behind):
@@ -131,8 +112,7 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 	for target in targets:
 		if target == pawn or target.is_dead() or ability.pawns_hit_this_run.has(target.get_instance_id()):
 			continue
-		# An invulnerable pawn (a dash's first moments) isn't hit, and isn't marked as hit either, so the rest of the sweep can catch it
-		# once its invulnerability ends.
+		# An invulnerable pawn isn't hit or marked, so a later tick of the sweep can catch it once that ends.
 		if target.ability_manager and target.ability_manager.is_invulnerable():
 			continue
 		if target.team == pawn.team and not hits_own_team:
@@ -159,10 +139,9 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 
 var _query: PhysicsShapeQueryParameters3D = null # kept between hit ticks (_plain_spheres)
 
-# Without the C++ pawn grid and with nobody to rewind: the same spheres, through physics.
+# Without the C++ pawn grid and with nobody to rewind: the same spheres through physics.
 func _plain_spheres(centres: Array[Vector3]) -> Array[Pawn]:
 	var found: Array[Pawn] = []
-	# The sphere and the query are made once and kept, not on every hit tick.
 	if _query == null:
 		_query = PhysicsShapeQueryParameters3D.new()
 		_query.shape = SphereShape3D.new()

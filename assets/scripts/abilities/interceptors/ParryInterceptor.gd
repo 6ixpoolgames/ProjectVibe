@@ -1,14 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: abilities/CHANGELOG.md.
 ## Turns away hits from the front: a parry.
 ##
-## A TURN_AWAY [HitInterceptor] (pawn spec 8.23): the hit arrives, so the AI notices it, then none of its effects land if the attacker
-## is within [member front_degrees] of where the pawn faces. Its ON_INTERCEPT EffectApplier children say what happens next (in the
-## samples, parry_knockback.tres pushes the attacker back). A ParryAbility with no interceptor of its own makes one.
-## [br]
-## Odd cases:
-## [br]- A hit with no attacker (a trap, a poison's tick) isn't turned away: there's no "front" for it to come from.
-## [br]- A pawn's own hit on itself isn't turned away.
-## [br]- A reply to an interception can't be turned away (HitInterceptor's rule), so two pawns parrying each other don't bounce hits.
+## A TURN_AWAY [HitInterceptor] (pawn spec 8.23): the hit arrives, so the AI notices it, then none of its effects land if the attacker is
+## within [member front_degrees] of where the pawn faces. Its ON_INTERCEPT EffectApplier children say what happens next. A hit with no
+## attacker (a trap, a poison tick) or from the pawn itself isn't turned away. A [ParryAbility] with none of its own makes one.
 class_name ParryInterceptor
 extends HitInterceptor
 
@@ -29,7 +24,7 @@ func intercept(hit: HitInfo) -> Result:
 	return Result.STOP if faces(attacker.global_position) else Result.PASS
 
 
-## The front's width now. One place to read it, so it can come from a stat later (see HitInterceptor, "Room for stats").
+## The front's width now. One place to read it, so it can come from a stat later.
 func front_degrees_now() -> float:
 	return front_degrees
 

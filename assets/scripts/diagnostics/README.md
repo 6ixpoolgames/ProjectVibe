@@ -60,6 +60,18 @@ Names are dotted, general first. Name animation work `animation.something` and i
 
 **Leave it out.** Take `DiagnosticsManager.gd` out of the `modules` setting, or its `.release` override for release builds only.
 
+## How it works
+
+**Measuring a frame.** A frame is timed from the end of the last frame's scripts to the end of this one's, so a slow frame's time and its breakdown stay together (Godot's `delta` would put the time on the next frame). Its parts: **physics** is the frame's physics steps (all of its ticks), stamped by a helper node that runs first in both physics and process; **scripts** is every node's `_process`, ending with the manager, which runs last; **rest** is what is left, drawing the last frame and waiting for the screen. Added to it: TickDriver's phases (as `tick.` scopes), every `PerfScopes` timing, render CPU and GPU time, draw calls, and memory, object, node and orphan counts (a leak shows as a count that only climbs). A spike is a frame over `spike_over_budget` times the tick's budget, kept with its whole breakdown; the first 30 frames (loading) never count.
+
+**Scopes.** `PerfScopes` is main thread only: work on worker threads is timed by whoever waits for it. A scope costs about a microsecond, so ones that run per pawn per tick use `begin_detailed()`, which times only while F4 is open (or `mass_battle_measure --scopes` runs).
+
+**Always on.** The manager starts a replay when play starts (hosting, joining, or a player taking a pawn offline) and none is running, so recordings exist for bug reports. It ships in release builds: the project setting's `.release` override lists it, and a game can leave it out of either list. The panels ship too; F9 and F10 are debug-only. Its window title also names the role and process id.
+
+**What the panels show.** F1 the keys and the session log's name; F2 the last seconds, a bar per frame split into physics, scripts and rest, lines at 1/60 and 1/30 s; F4 the last second's averages, the tick and up to 14 scopes; F6 the newest spikes; F7 a pawn's flags, abilities, effects, AI and input; F8 warnings and errors with counts; F12 a capture. "Late" is over 20 ms, "very late" over 34 ms.
+
+**`get_summary(seconds)` keys.** The frame: `seconds`, `frames`, `fps`, `frame_ms`, `physics_ms`, `scripts_ms`, `rest_ms`, `steps_per_frame`, `frame_worst_ms`, `over_60_percent` (frames over 20 ms), `over_30_percent` (over 34 ms), `render_cpu_ms`, `render_gpu_ms`, `draw_calls`, `animation_ms` (every `animation.` scope). Ticks: `ticks_per_second`, `dropped_per_second`, `load_step`, `step_counts` (AI pawns running every tick, 2nd and 4th), `tick_ms`, `tick_parts` (each phase and network part, ms a tick). `scopes`: name to `[ms a frame, calls a frame]`, most expensive first. Counts: `objects`, `nodes`, `orphans`, `memory_mb`, `pawns`, `dead`, `frozen`, `role`, `window`, `vsync`. `server`: `tick_rate` (as set), `ticks_per_second` (how fast its ticks really went: this machine's own offline or hosting, measured from snapshots on a client), `load_percent` and `load_step` (-1 before a client has any). `net`, in a session: `sent_kb_s`, `received_kb_s`, `snapshots_per_second`, `snapshot_kb` (average: as sent on a server, as received on a client), `largest_sent_kb`, `largest_received_kb`, `corrections_per_second`, `resyncs`, `underruns_per_second`, and the worst connection's `rtt_ms`, `loss_percent` and `seconds_since_heard`.
+
 ## Settings worth knowing
 
 | Setting | Where | Default | What it does |

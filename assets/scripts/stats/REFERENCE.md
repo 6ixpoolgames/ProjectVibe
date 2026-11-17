@@ -23,7 +23,7 @@ With a `table_column`, the value is also copied into that column of the pawn tab
 
 ### Settings and properties
 
-- `base_value: float` = `0.0`
+- `base_value: float` = `0.0`: The value it starts with. Setting it works `value` out again, keeping what effects add.
 - `value: float` = `0.0`: The value right now: `base_value` with effects. A change tells the StatManager (its `StatManager.version` goes up), so abilities that keep stat values read them again, and copies it into `table_column` if there is one.
 - `table_column: StringName` = `&""`: The name of a pawn table column to copy this stat's value into whenever it changes, so C++ (the sensing job, say) reads it from the table instead of asking the pawn. Empty: not copied. The column must be a pushed one (`PawnTable.add_pushed_column`), as the built-in "detectability" is, which the default Detectability stat fills. The table takes the new value at its next tick.
 - `changes_during_play: bool` = `false`: On, this stat also has a `current` value that goes up and down during play, such as Health. `value` is then its most.
@@ -39,26 +39,15 @@ With a `table_column`, the value is also copied into that column of the pawn tab
 
 Holds a pawn's stats, one [`Stat`](#stat) node each, and finds them by name.
 
-A part on the pawn, added by PawnInitializer. Pawn spec section 9.
-
-How to use it:
+A part on the pawn, added by PawnInitializer (pawn spec 9). A Stat's name is its node's name; stats can be added and removed while running. A missing stat is never an error: `get_value()` gives the fallback and `get_stat()` gives null. A stat that changes during play is filled and listed for rollback when the manager is ready, so one added later starts at 0 and doesn't roll back.
 
 ```gdscript
 pawn.stat_manager.get_value(&"MoveSpeed", 5.0)   # the value, or the fallback if there's no such stat
-pawn.stat_manager.get_stat(&"Health")            # the Stat node, or null
 pawn.stat_manager.get_current(&"Health", 0.0)    # how much a stat that changes during play has now
-pawn.stat_manager.change_current(&"Health", -20) # the server: adds, kept between 0 and the stat's value; returns the new amount
-pawn.stat_manager.get_health()                   # how much Health the pawn has now, 0 without a Health stat
+pawn.stat_manager.change_current(&"Health", -20) # the server: adds, kept between 0 and its value; returns the new amount
 ```
 
-A Stat's name is its node's name. Stats can be added and removed while running; the manager notices. A stat that changes during play is filled and listed for rollback when the manager is ready, so one added later starts at 0 and doesn't roll back.
-
-Health has one name, `HEALTH`, which everything that means "the pawn's health" reads (Death, hits, the kill floor, the readouts). A fuller stats pass comes with the game mechanics.
-
-What happens in odd cases (all checked in tests/stat_selftest.gd):
-- A stat that isn't there: `get_value()` gives the fallback, and `get_stat()` gives null. Never an error.
-- A child that isn't a Stat: ignored.
-- Two stats with the same name can't happen, because Godot renames a second child with the same name.
+Everything that means "the pawn's health" reads `HEALTH`.
 
 ### Settings and properties
 

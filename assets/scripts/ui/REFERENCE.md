@@ -12,16 +12,7 @@ Every class in `assets/scripts/ui/`, from its doc comments. The overview is in [
 
 A start menu's match options, built from the settings themselves.
 
-What it shows: a heading and one row per setting, for any object that names some of its own properties. Every GameMode module can name its settings (GameModeModule.get_match_options), so `add_from_game_mode()` lists whichever modules this game has: take a module out of the project setting project_base/game_mode/modules and its options leave the menu, with nothing here naming it. A level, an autoload or anything else is added the same way with `add_section()`.
-
-How a row is made: from the property's own description, as the inspector does (Object.get_property_list):
-- a bool: a check box
-- an int with an enum (@export_enum): a drop-down of its names
-- an int or float: a number box, with the range, step and "or_greater" of an @export_range when it has one
-
-Changing a row sets the property at once, so a setter runs as it would from code. `refresh()` reads every value again (call it when the menu is shown, since keys or code may have changed them).
-
-Use:
+One heading and a row per setting, for any object that names some of its own properties (`GameModeModule.get_match_options()`). `add_from_game_mode()` lists whichever modules the game has, so a module taken out of the project setting project_base/game_mode/modules leaves the menu; `add_section()` adds a level, an autoload or anything else. A row is made from the property's description, as the inspector does: a bool is a check box, an int with @export_enum a drop-down, an int or float a number box with its @export_range. Changing a row sets the property at once; `refresh()` reads the values again.
 
 ```gdscript
 var panel := MatchOptionsPanel.new()

@@ -1,36 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: game_mode/CHANGELOG.md.
 ## Gives every pawn the parts it needs to work, from one list per game.
 ##
-## A module of GameMode, reached as GameMode.pawn_initializer (pawn spec section 11). There's no nexus node on the pawn: the parts
-## attach to it directly, and this one shared module fills in what's missing.
+## A module of GameMode (GameMode.pawn_initializer). A Pawn calls [method initialize] from its _enter_tree; for each part in the
+## defaults file, in order, it adds the part unless the pawn already has a child of that name. So a designer overrides a default by
+## putting their own part with that name in the scene, and every machine gets the same names in the same order. The defaults are
+## resources/pawn_defaults.tres (a [PawnDefaultsRes]) or the file named by the project setting
+## [code]project_base/game_mode/pawn_defaults[/code]. It never adds TickStateComponent or NetworkEntity: NetworkSession reads them
+## before the pawn joins the tree, so they stay in the scene.
 ## [br]
-## How it works: a Pawn calls GameMode.pawn_initializer.initialize(self) from its own _enter_tree. For each part in the game's
-## defaults file, in order, it adds that part unless the pawn already has a child of the same name. So:
-## [br]- a designer overrides a default by putting their own part with that name in the pawn's scene, and
-## [br]- parts get the same names in the same order on every machine.
-## [br]
-## A pawn adds to itself here, rather than a child adding to it, because Godot doesn't let a child add to its parent while the scene
-## is starting up.
-## [br]
-## The defaults file is resources/pawn_defaults.tres (a [PawnDefaultsRes]), or the one named by the project setting
-## "project_base/game_mode/pawn_defaults". It holds the ControllerManager, NavigationManager, StatManager, EffectManager and
-## AbilityManager, and the AI's parts (context, sensing, memory, target selector, state manager and behaviour manager).
-## [br]
-## A game can set a default AI brain (PawnDefaultsRes.ai_brain), an AIBehaviourManager with behaviours, which a pawn whose scene has no
-## AIBehaviourManager gets instead of the plain one. The arena samples set theirs while they run.
-## [br]
-## What it never adds: TickStateComponent and NetworkEntity. NetworkSession reads those as soon as it creates a pawn, before the pawn
-## joins the tree, so they have to be in the pawn's scene.
-## [br]
-## Ways out:
-## [br]- One pawn, every default: turn off Pawn.fill_in_default_parts.
-## [br]- One pawn, some defaults: list their names in Pawn.skip_default_parts.
-## [br]- The whole game: leave this module out of GameMode's list, and pawns get only what their scenes have.
-## [br]
-## What happens in odd cases (all checked in tests/pawn_initializer_selftest.gd):
-## [br]- No defaults file, or the wrong kind of file: a warning, and pawns get nothing added.
-## [br]- An empty slot in the list: skipped.
-## [br]- A pawn enters the tree again, such as after being moved: nothing is added twice, because its parts are already there.
+## To opt out: Pawn.fill_in_default_parts off (one pawn, every default), Pawn.skip_default_parts (some), or leave this module out of
+## GameMode (the whole game). Design: pawn spec 11.
 class_name PawnInitializer
 extends GameModeModule
 

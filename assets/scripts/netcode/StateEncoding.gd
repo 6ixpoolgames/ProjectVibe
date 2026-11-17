@@ -2,49 +2,41 @@
 ## How precisely networked values are stored (netcode spec section 5.3).
 ##
 ## Every networked property has an encoding. Values are rounded to it at the end of every tick, on server and client alike, so both
-## simulate from exactly what the network can carry and rounding alone never causes a misprediction. The C++ recorder
-## ([code]TickStateRecorder[/code]) and codec ([code]NetCodec[/code]) round the same way ([code]native/src/state_encoding.h[/code]),
-## so a change to [method quantize] goes in both.
-## [br]
-## Encodings:
-## [br]- [code]auto[/code]: pick by the value's type: Vector3 is vector3_mm, Vector2 is vector2_mm, float is float, anything else raw.
-## [br]- [code]vector3_mm[/code]: 1 mm per axis. The default for positions and velocities.
-## [br]- [code]vector2_mm[/code]: the same, for a Vector2.
-## [br]- [code]vector3_cm[/code]: 1 cm per axis. Only for values that don't build up tick by tick (a target point, say).
-## [br]- [code]angle_u16[/code]: an angle in radians, 65536 steps per turn (about 0.005 degrees).
-## [br]- [code]angle_byte[/code]: an angle in radians, 256 steps per turn. Only for values that don't build up tick by tick.
-## [br]- [code]float[/code]: a 32-bit float.
-## [br]- [code]raw[/code]: left alone: ints, bools, bitmasks, StringNames.
-## [br]
-## Why the rounding step matters: a value that changes by less than half a step per tick is rounded straight back and never changes.
-## At 60 ticks/s and 1 mm, that stalls anything moving slower than about 3 cm/s, and speeds in general are off by up to 3 cm/s. At
-## 1 cm it would be 30 cm/s, which is why positions aren't in cm.
-## [br]
-## Physics bodies, two rules (see samples/TickSamplePawn.gd):
-## [br]- safe_margin must not be a whole number of steps, and Godot's default of 1 mm is. A body rests one margin above the floor, so
-##   rounding would park it exactly on the edge of "touching". Float noise then flips the contact, and the engine snaps it up to
-##   2.4 cm into the floor.
-## [br]- Don't turn the body by writing rotation every tick. That slowly changes its scale, and so its collision shape, differently in
-##   a replay. Keep facing as a plain number and turn only the model.
-## [br]
-## Corner cases (checked in tests/tick_state_selftest.gd): an encoding that doesn't fit the value's type leaves the value unchanged;
-## an unknown encoding name is reported by [method is_known] and the component falls back to auto.
+## simulate from exactly what the network can carry. Encodings: [code]auto[/code] (by type), [code]vector3_mm[/code] (default for
+## positions), [code]vector2_mm[/code], [code]vector3_cm[/code], [code]angle_u16[/code], [code]angle_byte[/code], [code]float[/code],
+## [code]raw[/code] (ints, bools, StringNames).
+## [br]Twin: the C++ recorder and codec round the same way ([code]native/src/state_encoding.h[/code]); a change to [method quantize]
+## goes in both.
+## Design: netcode spec 5.3.
 class_name StateEncoding
 extends RefCounted
 
+## Picks by the value's type: Vector3 is vector3_mm, Vector2 is vector2_mm, float is float, anything else raw.
 const AUTO := &"auto"
+## 1 mm per axis. The default for positions and velocities.
 const VECTOR3_MM := &"vector3_mm"
+## The same, for a Vector2.
 const VECTOR2_MM := &"vector2_mm"
+## 1 cm per axis. Only for values that don't build up tick by tick (a target point).
 const VECTOR3_CM := &"vector3_cm"
+## An angle in radians, 65536 steps per turn (about 0.005 degrees).
 const ANGLE_U16 := &"angle_u16"
+## An angle in radians, 256 steps per turn. Only for values that don't build up tick by tick.
 const ANGLE_BYTE := &"angle_byte"
+## A 32-bit float.
 const FLOAT := &"float"
+## Left alone: ints, bools, bitmasks, StringNames.
 const RAW := &"raw"
 
+## One millimetre, the step of the mm encodings.
 const MM := 0.001
+## One centimetre, the step of vector3_cm.
 const CM := 0.01
+## The angle_u16 step in radians.
 const U16_STEP := TAU / 65536.0
+## The angle_byte step in radians.
 const BYTE_STEP := TAU / 256.0
+## How close two floats must be to count as the same state.
 const FLOAT_TOLERANCE := 0.0001
 
 
@@ -67,7 +59,7 @@ static func resolve(encoding: StringName, value: Variant) -> StringName:
 	return RAW
 
 
-## The value rounded to its encoding. Rounding an already rounded value changes nothing.
+## The value rounded to its encoding (twin of the C++ [code]state_encoding.h[/code]; change both). Rounding a rounded value changes nothing.
 static func quantize(value: Variant, encoding: StringName) -> Variant:
 	match encoding:
 		VECTOR3_MM:
@@ -91,16 +83,12 @@ static func quantize(value: Variant, encoding: StringName) -> Variant:
 	return value
 
 
-## GDScript floats are 64-bit, but engine properties like rotation store 32 bits. Rounded values go through this so a
-## value reads back from such a property exactly as it was written, and doesn't look changed on the next tick. NetPackets uses it
-## too.
+## The float rounded to 32 bits, as engine properties like rotation store it, so it reads back exactly as written. NetPackets uses it too.
 static func as_float32(value: float) -> float:
 	return Vector2(value, 0.0).x
 
 
-## A value part way between two others, for drawing between snapshots.
-## [br]
-## Things that can't blend, like bools, stay at the first value until the second arrives.
+## A value part way between two others, for drawing between snapshots. Things that can't blend (bools) stay at the first.
 static func blend(a: Variant, b: Variant, weight: float, encoding: StringName) -> Variant:
 	if typeof(a) != typeof(b):
 		return a
@@ -114,8 +102,7 @@ static func blend(a: Variant, b: Variant, weight: float, encoding: StringName) -
 	return a
 
 
-## A copy of the value that shares nothing with the original. Arrays, Dictionaries and packed arrays are held by
-## reference in GDScript, so saving one without copying would leave every history slot pointing at the same live object.
+## A copy sharing nothing with the original. Gotcha: arrays, dictionaries and packed arrays are held by reference, so history slots must copy.
 static func copy_value(value: Variant) -> Variant:
 	var type := typeof(value)
 	if type == TYPE_ARRAY or type == TYPE_DICTIONARY:
@@ -125,7 +112,7 @@ static func copy_value(value: Variant) -> Variant:
 	return value
 
 
-## True if two values count as the same state. Reconciliation uses this to decide whether a prediction was right.
+## True if two values count as the same state; reconciliation uses it to decide whether a prediction was right.
 static func nearly_equal(a: Variant, b: Variant, encoding: StringName) -> bool:
 	if typeof(a) != typeof(b):
 		return false

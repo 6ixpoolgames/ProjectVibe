@@ -1,31 +1,29 @@
-## Written by Claude (claude-opus-5-5), 2026-11-04: on-screen controls for testing multiplayer at its worst (netcode spec section 16).
-## Add this to a scene to change the fake network and switch features on and off while playing. Debug builds only: in a
-## release build it removes itself, because a real game must not let a client change these.
+# Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
+## On-screen controls for testing multiplayer at its worst (netcode spec section 16; debug code).
 ##
-## Keys:
-##   [ ]      ping down / up by 10 ms          - =      jitter down / up by 5 ms
-##   , .      loss down / up by 1%             ; '      how much jitter wanders, down / up
-##   B        a 1 s burst of lost packets      N        a 1 s lag spike of 300 ms
-##   Shift+F1-F5   presets: off, good, wifi, mobile, worst (Claude 2026-11-16, wider audit: with Shift, because F1, F2 and F4 alone
-##            open diagnostics panels, and F4 for the timings also switched the fake network to "mobile")
-##   1-9, 0   switch a feature on or off, listed on screen
-##   H        hide or show this panel
-##
-## Ping is split evenly between sending and receiving, so one window sets its whole connection. Switches for things the server
-## decides, like lag compensation, are sent to the server, which only obeys if allow_debug_commands is on there. On a client,
-## those lines show what the server says, so if it refuses, the panel stays as it was.
+## Add it to a scene to change the fake network and switch features on and off while playing. Debug builds only: in a release build it
+## removes itself. Ping is split evenly between sending and receiving. Switches for things the server decides are sent to it, and on a
+## client the lines show what the server says, so a refusal leaves the panel as it was.
+## [br]Keys: [code][ ][/code] ping, [code]- =[/code] jitter, [code], .[/code] loss, [code]; '[/code] jitter wander, B a 1 s burst, N a 1 s
+## spike, Shift+F1-F5 presets (off, good, wifi, mobile, worst; with Shift because F1, F2 and F4 alone open diagnostics panels), 1-9 and 0
+## feature switches, H hide the panel.
 extends CanvasLayer
 class_name NetTestBench
 
+## The keys (with Shift) that apply a preset.
 const PRESET_KEYS := {KEY_F1: "off", KEY_F2: "good", KEY_F3: "wifi", KEY_F4: "mobile", KEY_F5: "worst"}
+## The keys that switch the features, in the order of [constant NetDebugModule.FEATURES].
 const FEATURE_KEYS := [KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0]
+## How much one key press changes ping and jitter (milliseconds), loss (fraction) and jitter wander (fraction).
 const PING_STEP := 10.0
 const JITTER_STEP := 5.0
 const LOSS_STEP := 0.01
 const VARIATION_STEP := 0.1
 
+## The session being tested, found at ready.
 var session: NetworkSessionSingleton = null
-var _debug: NetDebugModule = null # Claude 2026-11-07: the fake network and the switches moved here from the session
+var _debug: NetDebugModule = null
+## The preset last applied ("off" at the start).
 var preset_name: String = "off"
 var _panel: Label = null
 var _ping_ms := 0.0
@@ -54,8 +52,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if key == null or not key.pressed or key.echo:
 		return
 	if PRESET_KEYS.has(key.keycode) and not key.shift_pressed:
-		return # Claude 2026-11-16 (wider audit): left for the diagnostics panels
-	# Claude 2026-11-16 (wider audit): a key that meant something here is used up, so nothing else acts on it as well.
+		return # left for the diagnostics panels
+	# A key that meant something here is used up, so nothing else acts on it as well.
 	if handle_key(key.keycode):
 		get_viewport().set_input_as_handled()
 
@@ -110,6 +108,7 @@ func set_ping(milliseconds: float) -> void:
 	_debug.fake_in.latency_ms = _ping_ms * 0.5
 
 
+## The jitter limit across the whole connection in milliseconds, half each way.
 func set_jitter(milliseconds: float) -> void:
 	_jitter_ms = maxf(milliseconds, 0.0)
 	_debug.fake.jitter_ms = _jitter_ms * 0.5
@@ -123,12 +122,14 @@ func set_loss(chance: float) -> void:
 	_debug.fake_in.loss = clamped * 0.5
 
 
+## How much jitter wanders, 0 to 1.
 func set_variation(amount: float) -> void:
 	var clamped := clampf(amount, 0.0, 1.0)
 	_debug.fake.jitter_variation = clamped
 	_debug.fake_in.jitter_variation = clamped
 
 
+## Applies a named preset to both directions.
 func apply_preset(new_preset: String) -> void:
 	preset_name = new_preset
 	_debug.fake.apply_preset(new_preset)
@@ -137,7 +138,7 @@ func apply_preset(new_preset: String) -> void:
 	_jitter_ms = _debug.fake.jitter_ms * 2.0
 
 
-## Switches the feature at this place in NetworkSession.FEATURES.
+## Switches the feature at this place in [constant NetDebugModule.FEATURES].
 func toggle_feature(index: int) -> void:
 	if index < 0 or index >= NetDebugModule.FEATURES.size():
 		return
@@ -145,6 +146,7 @@ func toggle_feature(index: int) -> void:
 	_debug.set_feature(feature, not _debug.is_feature_on(feature))
 
 
+## The panel's text.
 func status_text() -> String:
 	var lines := PackedStringArray()
 	var now := Time.get_ticks_usec()

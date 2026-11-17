@@ -15,31 +15,11 @@ Every class in `assets/scripts/game_mode/`, from its doc comments. The overview 
 
 `res://assets/scripts/game_mode/AIActivationManager.gd`, extends [`GameModeModule`](#gamemodemodule)
 
-Switches AI pawns off when the ground around them isn't loaded, and back on when it is; and sets how often the rest run.
+Switches AI pawns off when the ground around them isn't loaded, back on when it is, and sets how often the rest run.
 
-A module of GameMode, reached as GameMode.ai_activation_manager. A horde costs almost nothing where no player is, and nothing walks off the edge of the world. A pawn that's off stops its NetworkEntity and TickState too, which leaves only this module's checks, and it's left out of snapshots.
+A module of GameMode (GameMode.ai_activation_manager), server or offline only. An AI pawn runs only while every chunk within `edge_margin` of it is built; a pawn that keeps the world loaded (`Pawn.counts_on_this_machine()`) is always left on, and a possession is checked at once. A pawn that's off stops its NetworkEntity and TickState and is left out of snapshots. Pawns register with `add_pawn()` and `remove_pawn()` (Pawn does both) and need a `set_frozen(frozen)`.
 
-The rule: an AI pawn runs only while every chunk within `edge_margin` of it is built. In other words, it's near enough to a source. Every pawn is watched, and one that keeps the world loaded (counts_on_this_machine, the source contract) has ground wherever it goes, so it's left running, checked each time it's looked at. Nothing has to tell this when that changes, so a pawn can't be left unwatched. A possession is checked at once (its ControllerManager's possession_changed signal), so a frozen pawn a player takes starts at once.
-
-This is a first pass, chosen by the owner for tier 0. It's meant to be replaced or added to: a game that needs AI simulated out of sight, such as ecology, migration or faction wars, can listen to `ai_deactivated` and `ai_activated`, and simulate those pawns some cheaper way while they're off. None of that exists yet.
-
-What a pawn needs:
-- To call `add_pawn()` with itself when it's ready, and `remove_pawn()` when it leaves the tree. Pawn does both.
-- A method set_frozen(frozen: bool), which stops and restarts its ticks and leaves all its state as it is.
-
-**How often each pawn runs.** It also sets the Pawn.tick_step of each AI pawn it leaves on, rechecked with the rest (pawn spec 8.21, scaling spec 7.1, the owner's call):
-- Every tick within `full_rate_within_chunks` chunks of the nearest viewer, every 2nd tick up to `every_4th_tick_beyond_chunks` chunks, and every 4th beyond that. Viewers are pawns a player has, and this machine's player's camera (a spectator, or the overview). With no viewer at all, distance changes nothing.
-- Distance is counted in whole chunks, the rings of chunks around the viewer's chunk (0 its own, 1 the eight around it, and so on), not metres. So every pawn in one chunk runs at the same rate, and two pawns fighting side by side never run at different rates because one stands a step further off. A ring counts as within a setting when it's below it: 2 means rings 0 and 1. (It's left in GDScript: a few sums per pawn, spread over frames.)
-- And at least TickDriver.load_step, the load ladder: while the game is overloaded, every AI pawn runs every 2nd or 4th tick.
-- A pawn a player has always runs every tick.
-
-So a pawn far from the action costs a half or a quarter as much, and still walks as far and fights as long (Pawn.ticks_elapsed). Only the server or offline does this; a client's pawns are told their step in snapshots, where it's rolled-back state.
-
-What happens in odd cases (all checked in game_mode/tests/game_mode_selftest.gd):
-- No terrain in the scene: every pawn stays on.
-- On a client: this does nothing, because AI only runs on the server.
-- A pawn that's freed: it's dropped from the list.
-- The module is removed: every pawn it switched off goes back on, at every tick.
+It also sets `Pawn.tick_step` for each running AI pawn: every tick within `full_rate_within_chunks` chunks of the nearest viewer (pawns a player has, and this machine's player's camera), every 2nd up to `every_4th_tick_beyond_chunks`, every 4th beyond, and never less often than TickDriver.load_step. Distance is in whole chunk rings, not metres, so pawns in one chunk share a rate. A pawn a player has always runs every tick. A game can listen to `ai_deactivated` and `ai_activated` to simulate switched-off pawns more cheaply. Design: pawn spec 8.21, scaling spec 7.1.
 
 ### Settings and properties
 
@@ -81,7 +61,7 @@ Extend it, and override what's useful. A module with no per-frame work should sw
 
 - `_on_module_added(_game_mode: GameModeSingleton) -> void`: Just added. Fill in your line on GameMode here, if you have one, such as game_mode.ai_activation_manager = self.
 - `_on_module_removed(_game_mode: GameModeSingleton) -> void`: About to be removed. Clear your line on GameMode here, and undo anything you've changed in the world.
-- `get_match_options() -> PackedStringArray`: The names of this module's settings a start menu may offer before a match.  Each is a property of this module (an @export, so its range and type show). MatchOptionsPanel.add_from_game_mode() lists them for every module the game has. Empty: none.
+- `get_match_options() -> PackedStringArray`: The names of this module's settings (its @exports) a start menu may offer before a match; MatchOptionsPanel lists them. Empty: none.
 
 ## PawnInitializer
 
@@ -89,29 +69,9 @@ Extend it, and override what's useful. A module with no per-frame work should sw
 
 Gives every pawn the parts it needs to work, from one list per game.
 
-A module of GameMode, reached as GameMode.pawn_initializer (pawn spec section 11). There's no nexus node on the pawn: the parts attach to it directly, and this one shared module fills in what's missing.
+A module of GameMode (GameMode.pawn_initializer). A Pawn calls `initialize()` from its _enter_tree; for each part in the defaults file, in order, it adds the part unless the pawn already has a child of that name. So a designer overrides a default by putting their own part with that name in the scene, and every machine gets the same names in the same order. The defaults are resources/pawn_defaults.tres (a [`PawnDefaultsRes`](../resources/REFERENCE.md#pawndefaultsres)) or the file named by the project setting `project_base/game_mode/pawn_defaults`. It never adds TickStateComponent or NetworkEntity: NetworkSession reads them before the pawn joins the tree, so they stay in the scene.
 
-How it works: a Pawn calls GameMode.pawn_initializer.initialize(self) from its own _enter_tree. For each part in the game's defaults file, in order, it adds that part unless the pawn already has a child of the same name. So:
-- a designer overrides a default by putting their own part with that name in the pawn's scene, and
-- parts get the same names in the same order on every machine.
-
-A pawn adds to itself here, rather than a child adding to it, because Godot doesn't let a child add to its parent while the scene is starting up.
-
-The defaults file is resources/pawn_defaults.tres (a [`PawnDefaultsRes`](../resources/REFERENCE.md#pawndefaultsres)), or the one named by the project setting "project_base/game_mode/pawn_defaults". It holds the ControllerManager, NavigationManager, StatManager, EffectManager and AbilityManager, and the AI's parts (context, sensing, memory, target selector, state manager and behaviour manager).
-
-A game can set a default AI brain (PawnDefaultsRes.ai_brain), an AIBehaviourManager with behaviours, which a pawn whose scene has no AIBehaviourManager gets instead of the plain one. The arena samples set theirs while they run.
-
-What it never adds: TickStateComponent and NetworkEntity. NetworkSession reads those as soon as it creates a pawn, before the pawn joins the tree, so they have to be in the pawn's scene.
-
-Ways out:
-- One pawn, every default: turn off Pawn.fill_in_default_parts.
-- One pawn, some defaults: list their names in Pawn.skip_default_parts.
-- The whole game: leave this module out of GameMode's list, and pawns get only what their scenes have.
-
-What happens in odd cases (all checked in tests/pawn_initializer_selftest.gd):
-- No defaults file, or the wrong kind of file: a warning, and pawns get nothing added.
-- An empty slot in the list: skipped.
-- A pawn enters the tree again, such as after being moved: nothing is added twice, because its parts are already there.
+To opt out: Pawn.fill_in_default_parts off (one pawn, every default), Pawn.skip_default_parts (some), or leave this module out of GameMode (the whole game). Design: pawn spec 11.
 
 ### Settings and properties
 
@@ -133,32 +93,15 @@ What happens in odd cases (all checked in tests/pawn_initializer_selftest.gd):
 
 Who controls which pawn: players possess and let go of pawns through here.
 
-A module of GameMode, reached as GameMode.possession_coordinator. It creates this machine's PlayerController at the start, which then lasts for the whole game, with or without a pawn.
-
-How to use it:
+A module of GameMode (GameMode.possession_coordinator). It creates this machine's PlayerController at the start, which lasts the whole game with or without a pawn. The possessable flag on the pawn's ControllerManager is the check. In multiplayer the server decides and a client's call is only a request; a possessed pawn's owner_peer is its player (0 on letting go, so the server runs it). The pawn's ControllerManager hears of it through possession_changed and its AIController takes over. Respawning or removing a pawn belongs to the game, which can listen to `released`.
 
 ```gdscript
-GameMode.possession_coordinator.possess(pawn)            # offline, or a client asking the server for this pawn
+GameMode.possession_coordinator.possess(pawn)            # offline, or a client asking the server
 GameMode.possession_coordinator.possess_for(peer, pawn)  # server: gives this player this pawn
-GameMode.possession_coordinator.release()                # lets go. Offline or a client's own, or release_for(peer) on the server
-GameMode.possession_coordinator.controller               # this machine's PlayerController
-GameMode.possession_coordinator.spectate()               # lets go and flies the spectator (FreeFlyCamera)
-GameMode.possession_coordinator.stop_spectating()        # stops flying; possessing a pawn stops it too
-GameMode.possession_coordinator.is_spectating()
+GameMode.possession_coordinator.spectate()               # lets go and flies a FreeFlyCamera; possessing stops it
 ```
 
-Every request comes here, and the possessable flag on the pawn's ControllerManager is the check: the simplest version, as the owner asked. In multiplayer the server decides, and a client's call is only a request. A possessed pawn's owner_peer is its player, so its inputs come from that player and it's predicted on their machine. Letting go sets owner_peer to 0, so the server runs it.
-
-What a pawn does once it's let go isn't decided here. Its ControllerManager hears about it through possession_changed: its AIController takes over at once if it has one, and otherwise the pawn stands idle. The AI never asks here; it only drives pawns no player has. Respawning or removing a pawn belongs to the game, which can listen to `released` here, and to NetworkSession.player_left, which fires afterwards. Creating a controller never spawns a pawn.
-
-What happens in odd cases (all checked in pawn/tests/possession_selftest.gd and net_pawn_selftest.gd):
-- A pawn with possessable off, with no ControllerManager, held by someone else, or freed: refused, with the `refused` signal.
-- A possessed pawn is removed: the player has no pawn, and the camera holds where it was.
-- A player leaves: they let go of their pawn, and it stays in the world. Anything else they own is removed by NetworkSession.
-- No module at all: the game runs with no controller, and a scene's own camera carries on working.
-- A client asking for something broken: the server ignores it.
-
-**Spectating** (the owner's call). The spectator is a FreeFlyCamera, not a Pawn: nearly the whole game looks for Pawn (abilities, AI, teams, the kill floor, replays, spawning), and a spectator should be in none of it. So this recognises it as its own kind of thing: `spectate()` lets go of the pawn and has this machine's PlayerController fly it, and possessing any pawn ends it. Like Unreal's spectator, it's local: only this machine knows its player is spectating. Telling the server, for a respawn queue or a scoreboard, waits until something needs it. A dedicated server has no player, so it never spectates.
+Spectating is local: only this machine knows its player is spectating, and the spectator is a FreeFlyCamera, not a Pawn. Design: pawn spec 6.2.
 
 ### Settings and properties
 
@@ -204,35 +147,15 @@ What happens in odd cases (all checked in pawn/tests/possession_selftest.gd and 
 
 Puts pawns into the world at SpawnPoints, and brings players back after they die.
 
-A module of GameMode, reached as GameMode.spawn_manager. Unreal's GameMode does the same job (it picks a PlayerStart and restarts players there), the owner's call. With no spawn points placed it does nothing, so it costs nothing in a game that doesn't use it.
-
-How to use it (on the server, or offline; a client never spawns):
+A module of GameMode (GameMode.spawn_manager), like Unreal's GameMode picking a PlayerStart. With no spawn points placed it does nothing. Server or offline only. Type names are NetworkSession's (register_type), so every spawned pawn exists on every machine; a pawn's team comes from its scene. Delays count ticks on TickDriver and run between ticks, so pausing the driver pauses them.
 
 ```gdscript
-GameMode.spawn_manager.spawn("goblin")                  # at a point its team may use, any group
 GameMode.spawn_manager.spawn("goblin", &"red_base")     # at a point in that group
-GameMode.spawn_manager.spawn_near("goblin", node, 3.0)  # within 3 m of a node, facing its way (PawnSpawner uses this)
-GameMode.spawn_manager.spawn_player(peer)               # a player's pawn, possessed for them, and brought back when it dies
-GameMode.spawn_manager.after_seconds(2.0, callable)     # runs it after 2 s of ticks
+GameMode.spawn_manager.spawn_near("goblin", node, 3.0)  # within 3 m of a node (PawnSpawner uses this)
+GameMode.spawn_manager.spawn_player(peer)               # possessed for them, and brought back when it dies
 ```
 
-Type names are NetworkSession's (register_type), so every spawned pawn exists on every machine. A pawn's team comes from its scene: the manager reads it once per type, and uses it to choose points.
-
-Choosing a point:
-
-1. Every enabled SpawnPoint that accepts the pawn's team and the group asked for (SpawnPoint.accepts).
-
-2. In a shuffled order, from the tick's own random numbers (TickDriver.tick_rng), so it's repeatable.
-
-3. On each point, up to `tries_per_point` spots inside its scatter_radius, and the first free one wins: no pawn body within `clearance_radius` of where the new one's middle would be, and no spot handed out in the last `claim_ticks` ticks within twice clearance_radius. Physics only sees a pawn that was just placed after its next step, so without that, two pawns spawned or brought back in the same tick would land inside each other, and physics would push them apart at speed.
-
-4. If every spot is taken, it uses a spot on the first point anyway. A crowded spawn is better than none.
-
-5. No point at all: a warning, and nothing spawns.
-
-Players: a pawn from `spawn_player()` that dies comes back after `player_respawn_seconds`, with full Health. It's the same pawn, so its player keeps it, and its entity and history carry on. With `player_respawn_at_spawn_point` on, it's moved to a point for its team first; with that off, or with no point, it comes back where it fell. On a client, the move shows as a quick slide (the client's correction smoothing), which is fine for now.
-
-Timing: every delay here counts ticks on TickDriver, and runs between ticks (after_tick_loop), never during one. So pausing the tick driver (the arena's P key) pauses the delays too, and stepping runs them a tick at a time.
+Points are chosen by team and group, shuffled with the tick's random numbers (repeatable); the first free spot wins (README).
 
 ### Settings and properties
 
@@ -260,15 +183,14 @@ Timing: every delay here counts ticks on TickDriver, and runs between ticks (aft
 - `spawn(type_name: String, group: StringName = &"", owner_peer: int = 0) -> Pawn`: Spawns a pawn of this type at a point its team may use, in this group (or any group, with &""). owner_peer is whose input it follows, 0 for the server's own. Returns the pawn, or null if there's no point or this machine can't spawn.
 - `spawn_near(type_name: String, around: Node3D, scatter_radius: float, owner_peer: int = 0) -> Pawn`: Spawns a pawn of this type within scatter_radius of a node, facing the node's way, with no spawn point needed. PawnSpawner uses this when it has no group of points.
 - `spawn_player(peer: int, type_name: String = "pawn", group: StringName = &"") -> Pawn`: A player's pawn: spawned at a point for its team, possessed for this player, and brought back when it dies (respawn_players). peer is the player's network peer; offline, anything (it's possessed for the one local player).
-- `find_place(team: int, group: StringName = &"") -> Dictionary`: Where a pawn of this team would appear, asked for with this group: {"position": Vector3, "yaw": float}, or {} with no point. See "Choosing a point" in the class description.
+- `find_place(team: int, group: StringName = &"") -> Dictionary`: Where a pawn of this team would appear, asked for with this group: {"position": Vector3, "yaw": float}, or {} with no point. See "How a spawn point is chosen" in the README.
 - `after_seconds(seconds: float, what: Callable) -> void`: Runs what after this many seconds of ticks, between ticks. Pausing the tick driver pauses the count. For delays that are part of the game's rules, such as respawns and body removal.
 - `_free_spot(world_node: Node3D, centre: Vector3, yaw: float, radius: float, rng: RandomNumberGenerator) -> Dictionary`: A free spot near this centre, or {}. The node is only for its physics world.
 - `_spot(centre: Vector3, yaw: float, radius: float, rng: RandomNumberGenerator) -> Dictionary`: A spot inside the circle, on the ground if there's terrain.
 - `_ground_height(at: Vector3) -> float`: The height a pawn appears at here: on terrain, just above the ground (building that chunk first if it isn't yet, since the server may have no ground there); without terrain, the height it was given.
 - `_is_free(world_node: Node3D, feet: Vector3) -> bool`: True if no pawn body is within clearance_radius of a new pawn's middle here, and no spot handed out lately is within twice clearance_radius (two pawns' worth), since physics doesn't see those pawns yet.
-- `_claim(feet: Vector3) -> void`: Remembers a spot a pawn was just put on, for claim_ticks ticks (see "Choosing a point" in the class description).
+- `_claim(feet: Vector3) -> void`: Remembers a spot a pawn was just put on, for claim_ticks ticks (see the README).
 - `_team_of(type_name: String) -> int`: A pawn type's team, read from its scene once: an instance is made, read and freed, without entering the tree.
-- `_next_rng() -> RandomNumberGenerator`: GDScript note: tick_rng hands back one shared generator, seeded from the tick and these numbers, so it's used at once and never kept. The roll count as the key means two rolls in one tick differ.
 - `_run_due() -> void`: Between ticks: runs every delay whose tick has come, in the order they were asked for.
 
 ## TeamRegistry
@@ -277,11 +199,7 @@ Timing: every delay here counts ticks on TickDriver, and runs between ticks (aft
 
 How many pawns are on each team, kept current as pawns enter and leave the tree and change team.
 
-A module of GameMode, reached as GameMode.team_registry. AI sensing asks it whether there's anyone on another team at all, and skips looking when there isn't (pawn spec 10.4). Team counts are a GameMode module's job, not the pawn's (the owner's call).
-
-How it keeps count: every pawn joins Pawn.GROUP when it enters the tree, so the pawns already there are counted when this module starts; after that, the tree's node_added and node_removed signals, and each pawn's team_changed signal.
-
-Without this module (a game that leaves it out), nothing breaks: sensing just looks every time, as if someone might be there.
+A module of GameMode (GameMode.team_registry). AI sensing asks it whether anyone is on another team at all, and skips looking when nobody is (pawn spec 10.4). It counts the pawns in Pawn.GROUP when it starts, then follows the tree's node_added and node_removed and each pawn's team_changed. Without this module nothing breaks: sensing just looks every time.
 
 ### Functions
 

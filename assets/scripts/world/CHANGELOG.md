@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 The "one shared way to reach `NavServer`" row in navigation's changelog applies here too: `TerrainNavFeeder` looks the library up by name in three places.
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): moved to the README's new "How it works" section: `KillFloor`'s fall reports and odd cases, `TerrainNavFeeder`'s and `BodyNavFeeder`'s odd cases. "The owner's rule" wording removed from `ChunkStreamer` (streaming) and "the owner's end goal" from `WorldCoordinator`. No stale comments found.
+
 ## 2026-11-17
 
 - **Edits rebuild only the nav they touch.** `TerrainNavFeeder` passes the terrain's `edit_area` to `NavServer.submit_mesh` as `dirty_bounds`, so an edit rebuilds the nav tiles under it, not every tile under the chunk (the C++ bundle, stage 2).

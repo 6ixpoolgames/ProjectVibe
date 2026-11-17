@@ -24,26 +24,16 @@ Every class in `assets/scripts/replay/`, from its doc comments. The overview is 
 
 The base for one kind of data in a replay file (replay spec section 3).
 
-A channel has an id, a name and a version, which go in the file's header, and the same class both writes its data (for [`ReplayRecorder`](#replayrecorder)) and reads it back (for [`ReplayReader`](#replayreader)), so the layout of its bytes lives in one place.
+The same class writes its data for [`ReplayRecorder`](#replayrecorder) and reads it back for [`ReplayReader`](#replayreader), so the layout of its bytes lives in one place. Its id, name and version go in the file's header. A recording calls `begin()` once, `write_tick()` every tick (`keyframe` is true on the first tick of every block: write everything, not just what changed), `pawn_added()` and `pawn_removed()` as pawns come and go, and `end()` once. A reader calls `read_tick()` to apply one tick's bytes to `state`, a Dictionary the channel owns the layout of (empty on a keyframe).
 
-How a recording uses a channel:
-- `begin()` once, when recording starts. Connect to signals here.
-- `write_tick()` once a tick: write this tick's data into out. keyframe is true on the first tick of every block, when the channel writes everything as it is, not just what changed.
-- `pawn_added()` and `pawn_removed()` as pawns enter and leave the tree while recording.
-- `end()` once, when recording stops. Disconnect here.
-
-How a reader uses it: `read_tick()` applies one tick's bytes to state, a Dictionary the channel owns the layout of. On a keyframe, state starts empty.
-
-To add a kind of data: extend this (or [`ReplayEntityChannel`](#replayentitychannel) or [`ReplayEventChannel`](#replayeventchannel)), give it an unused id, and add it with `ReplayRecorder.add_channel()` before recording starts, and with `ReplayReader.add_channel()` to read it. A reader without it skips its bytes (replay spec section 2).
-
-GDScript note: RefCounted, not Node: a channel isn't in the scene tree, and is freed by itself once nothing holds it.
+To add a kind of data, extend this (or [`ReplayEntityChannel`](#replayentitychannel) or [`ReplayEventChannel`](#replayeventchannel)), give it an unused id, and add it with `ReplayRecorder.add_channel()` and `ReplayReader.add_channel()`. A reader without it skips its bytes. Design: replay spec 3.
 
 ### Settings and properties
 
 - `channel_id: int` = `0`: The id in the file. 1 to 99 are the base's (replay spec section 3); a game's own channels use 100 and up.
-- `file_version: int` = `1`: Reading: the version the file was written with, from its header. read_tick checks it when a channel reads older layouts too, such as the motion channel's version 1.
-- `channel_name: String` = `""`: A name for people: shown by the viewer and kept in the header.
-- `version: int` = `1`: Raised when the layout of this channel's bytes changes, so a reader can tell old files from new ones.
+- `file_version: int` = `1`: Reading: the version the file was written with. `read_tick()` checks it when a channel reads older layouts too.
+- `channel_name: String` = `""`: A name for people, shown by the viewer and kept in the header.
+- `version: int` = `1`: Raised whenever the layout of this channel's bytes changes, so a reader can tell old files from new ones.
 - `recorder: ReplayRecorder` = `null`: The recorder, while recording; null when reading.
 
 ### Functions
@@ -54,7 +44,7 @@ GDScript note: RefCounted, not Node: a channel isn't in the scene tree, and is f
 - `pawn_removed(_pawn: Pawn, _id: int) -> void`: A pawn left the tree while recording.
 - `write_tick(_tick: int, _out: StreamPeerBuffer, _keyframe: bool) -> void`: This tick's data, written into out. keyframe: write everything, not just what changed.
 - `read_tick(_tick: int, _data: StreamPeerBuffer, _keyframe: bool, _state: Dictionary) -> void`: Reading: one tick's bytes, applied to state. A keyframe's state starts empty.
-- `copy_state(state: Dictionary) -> Dictionary`: Reading: a copy of state that read_tick can change without changing the original. The reader keeps one per tick, so this is shallow by default, which is enough when read_tick replaces values rather than changing them in place. Override it when state holds a Dictionary or Array that read_tick changes in place, and copy that too.
+- `copy_state(state: Dictionary) -> Dictionary`: Reading: a copy of state that `read_tick()` can change without changing the original. Shallow by default; override it when read_tick changes a nested Dictionary or Array in place.
 
 ## ReplayDiagnosticsChannel
 
@@ -62,29 +52,20 @@ GDScript note: RefCounted, not Node: a channel isn't in the scene tree, and is f
 
 Replay channel 6, "diagnostics": how each frame went, recorded alongside the game.
 
-Diagnostics hook into replay (the owner's call; docs/diagnostics/DIAGNOSTICS_SPEC.md), so one recording holds what happened and what it cost. It's a plain data channel in the base, like the others: something else fills it. That's the [`DiagnosticsManager`](../diagnostics/REFERENCE.md#diagnosticsmanager) (diagnostics/), which adds this channel to the recorder; in a game without it, nothing is recorded here.
+One recording then holds what happened and what it cost. The [`DiagnosticsManager`](../diagnostics/REFERENCE.md#diagnosticsmanager) adds this channel and fills it; in a game without it nothing is recorded here. A tick writes the frames that finished since the last tick (a frame can run two ticks, or none while paused), each with its own frame number.
 
-Frames and ticks aren't the same: a frame can run two ticks when it catches up, or none while paused. So each tick writes the frames that finished since the last tick, each with its own frame number.
-
-A tick's bytes:
-- On a keyframe, the snapshot (put_var: the scope names so far, so reading can start at any block).
-- The frame count (u16), and for each frame: frame number (u32); frame, physics, scripts and rest times (4 × f32, ms); physics steps (u8); drawing on the CPU and GPU (2 × f32, ms); draw calls, objects, nodes, orphan nodes, memory in KB (5 × u32); then its scopes: count (u16), and for each: the name's number (u16), microseconds (u32), calls (u16).
-- The events, as every event channel ([`ReplayEventChannel`](#replayeventchannel)): "scope_name" (data: number, name) the first time a name is used; "log" (data: level, text, count) for warnings and errors; "capture" (data: folder) when a capture was taken (F12).
-
-Recording, from whatever measures frames:
+A tick's bytes: on a keyframe, the snapshot (put_var: the scope names so far); the frame count (u16), then per frame: number (u32); frame, physics, scripts and rest ms (4 × f32); physics steps (u8); render CPU and GPU ms (2 × f32); draw calls, objects, nodes, orphans, memory KB (5 × u32); scopes: count (u16), then name number (u16), microseconds (u32), calls (u16); then the events. Events ([`ReplayEventChannel`](#replayeventchannel)): "scope_name" (number, name), "log" (level, text, count), "capture" (folder; F12).
 
 ```gdscript
-channel.add_frame(record)  # {frame, frame_ms, physics_ms, scripts_ms, rest_ms, steps, render_cpu_ms, render_gpu_ms,
-                           #  draw_calls, objects, nodes, orphans, memory_kb, scopes: {name: [microseconds, calls]}}
-channel.add_event("log", 0, {level, text, count})
+channel.add_frame({frame, frame_ms, ..., scopes: {name: [microseconds, calls]}})
 ```
 
-Reading: state["frames"] holds this tick's frames, as records like the above (scopes by name).
+Reading: `state["frames"]` holds this tick's frames as such records. Design: diagnostics spec.
 
 ### Constants
 
 - `ID = 6`
-- `MAX_WAITING_FRAMES = 600`: Frames kept waiting while no tick runs (a paused game), so a long pause doesn't fill memory. The oldest go first.
+- `MAX_WAITING_FRAMES = 600`: Most frames kept waiting while no tick runs (a paused game); the oldest go first.
 
 ### Functions
 
@@ -102,17 +83,7 @@ Reading: state["frames"] holds this tick's frames, as records like the above (sc
 
 A replay channel with one record per pawn (replay spec section 3).
 
-Each tick it writes the pawns whose record changed since they were last written, and on a keyframe every pawn. Input extends it; motion extends it too, but writes its ticks its own way (field by field, see [`ReplayMotionChannel`](#replaymotionchannel)).
-
-A tick's bytes: count (u16), then for each pawn: its replay id (u32) and its record (what `write_record()` writes).
-
-An extending channel overrides four things:
-- `same_as_last()`: true if nothing in the record changed. last is what `remember()` returned last time, or null for a pawn not written yet. Cheap checks only: this runs for every pawn every tick.
-- `remember()`: what same_as_last compares against next time.
-- `write_record()`: the record's bytes.
-- `read_record()`: the record back from its bytes, as the reader keeps it (state[id] = this).
-
-The reader's state for this channel: replay id -> record. A pawn's last record stays in it, because a pawn that didn't change writes nothing; the reader shows it only while the spawns channel lists the pawn as alive.
+Each tick it writes the pawns whose record changed since they were last written, and every pawn on a keyframe. Input extends it; motion does too, but writes its ticks field by field ([`ReplayMotionChannel`](#replaymotionchannel)). A tick's bytes: count (u16), then per pawn its replay id (u32) and its record. An extending channel overrides `same_as_last()`, `remember()`, `write_record()` and `read_record()`. The reader's state is replay id -> record; a pawn's last record stays in it, shown only while the spawns channel lists the pawn as alive. Design: replay spec 3.
 
 ### Functions
 
@@ -121,10 +92,10 @@ The reader's state for this channel: replay id -> record. A pawn's last record s
 - `end() -> void`
 - `write_tick(_tick: int, out: StreamPeerBuffer, keyframe: bool) -> void`
 - `read_tick(_tick: int, data: StreamPeerBuffer, _keyframe: bool, state: Dictionary) -> void`
-- `same_as_last(_pawn: Pawn, _last_value: Variant) -> bool`
-- `remember(_pawn: Pawn) -> Variant`
-- `write_record(_pawn: Pawn, _out: StreamPeerBuffer) -> void`
-- `read_record(_data: StreamPeerBuffer) -> Variant`
+- `same_as_last(_pawn: Pawn, _last_value: Variant) -> bool`: True if nothing in the pawn's record changed since `remember()`'s last value (null if not written yet). Runs for every pawn every tick: cheap checks only.
+- `remember(_pawn: Pawn) -> Variant`: What `same_as_last()` compares against next time.
+- `write_record(_pawn: Pawn, _out: StreamPeerBuffer) -> void`: The pawn's record bytes.
+- `read_record(_data: StreamPeerBuffer) -> Variant`: Reading: one record from its bytes, as the reader keeps it (`state[id]`).
 
 ## ReplayEventChannel
 
@@ -132,21 +103,17 @@ The reader's state for this channel: replay id -> record. A pawn's last record s
 
 A replay channel of events: things that happen at a moment (replay spec section 3).
 
-Each event is a kind, a pawn's replay id (0 for none) and a Dictionary of plain values. Spawns, world, gameplay and diagnostics extend it.
+Each event is a kind, a pawn's replay id (0 for none) and a Dictionary of plain values (never objects, so a file can't carry code). Spawns, world, gameplay and diagnostics extend it. Anything calls `add_event()`; the next tick writes it, except during a rollback replay (it already happened once).
 
-A tick's bytes: on a keyframe, the snapshot (put_var of a Dictionary: what this channel's state is right now, such as every live pawn); then the event count (u16), and for each event: its kind (UTF-8), the pawn id (u32), its data (put_var).
+A tick's bytes: on a keyframe the snapshot (put_var of a Dictionary: the channel's state now, such as every live pawn); the event count (u16); per event its kind (UTF-8), pawn id (u32) and data (put_var).
 
-Recording: anything calls `add_event()` between this tick's write and the next, and the next write_tick writes it. Events that happen during a rollback replay are left out, since they already happened once (a client replays ticks it predicted).
-
-Reading: state["events"] holds this tick's events only, as Dictionaries {tick, kind, id, data}. An extending channel keeps its own lasting state alongside, such as who's alive, by overriding `snapshot()`, `read_snapshot()` and `apply_event()`.
-
-GDScript note: put_var is Godot's own encoding of a Variant. Only plain values go in (numbers, strings, vectors, arrays, dictionaries), never objects, so a file can't carry code.
+Reading: `state["events"]` holds this tick's events as `{tick, kind, id, data}`. An extending channel keeps lasting state by overriding `snapshot()`, `read_snapshot()` and `apply_event()`. Design: replay spec 3.
 
 ### Functions
 
 - `begin(for_recorder: ReplayRecorder) -> void`
 - `end() -> void`
-- `add_event(kind: String, id: int, data: Dictionary = {}) -> void`: Notes an event, written with the next tick. kind is a short name such as "died"; id is the pawn's replay id, or 0.
+- `add_event(kind: String, id: int, data: Dictionary = {}) -> void`: Notes an event for the next tick. `kind` is a short name such as "died"; `id` the pawn's replay id, or 0.
 - `write_tick(_tick: int, out: StreamPeerBuffer, keyframe: bool) -> void`
 - `read_tick(tick: int, data: StreamPeerBuffer, keyframe: bool, state: Dictionary) -> void`
 - `snapshot() -> Dictionary`: Recording: this channel's lasting state right now, for a keyframe. Plain values only.
@@ -157,26 +124,9 @@ GDScript note: put_var is Godot's own encoding of a Variant. Only plain values g
 
 `res://assets/scripts/replay/ReplayGameplayChannel.gd`, extends [`ReplayEventChannel`](#replayeventchannel)
 
-Replay channel 5, "gameplay": what happened, as events (replay spec section 3).
+Replay channel 5, "gameplay": what happened, as events.
 
-The same events the AI debug timeline lists, for every pawn, plus freezes, possession and falls. Each event's id is the pawn it happened to.
-
-Events, and their data:
-- "hit": attacker (replay id, 0 if none), ability (name), damage (Health taken).
-- "hit_intercepted": by (the attacker's replay id, 0 if none), interceptor (the HitInterceptor that stopped it, such as a parry's; pawn spec 8.23).
-- "died": killer (replay id, 0 if none).
-- "ability_started": ability.
-- "ability_cancelled": ability, by (the ability that cancelled it, "" if none).
-- "step_started": ability, step (a step of a stepped ability, pawn spec 8.20).
-- "step_finished": ability, step, reason ("done", "failed" or "cancelled").
-- "ai_state": from, to (state names), reason.
-- "ai_behaviour": from, to (behaviour names), reason.
-- "ai_target": from, to (replay ids, 0 for none), reason.
-- "frozen", "unfrozen" (no data): the AI switch-off stopped or restarted it (AIActivationManager).
-- "possessed", "released": peer, a player took it or let it go (PossessionCoordinator).
-- "fell": report, the kill floor's report of how it got there (KillFloor.pawn_fell).
-
-Reading: only state["events"], this tick's events. Nothing lasts.
+The same events the AI debug timeline lists, for every pawn, plus freezes, possession and falls; each event's id is the pawn it happened to. The kinds: hit, hit_intercepted, died, ability_started, ability_cancelled, step_started, step_finished, ai_state, ai_behaviour, ai_target, frozen, unfrozen, possessed, released and fell. The data of each is listed in the replay README. Reading: only `state["events"]`, this tick's events; nothing lasts. Design: replay spec 3, pawn spec 8.20 and 8.23.
 
 ### Constants
 
@@ -196,9 +146,9 @@ Reading: only state["events"], this tick's events. Nothing lasts.
 
 Replay channel 2, "input": each pawn's input command (replay spec section 1).
 
-Recorded at the owner's call for v0. The v0 viewer only shows it; it's here so a later replay can re-simulate from a keyframe, and so a recording shows what a player or the AI was pressing when something went wrong. The input is the pawn's ControllerManager's; a pawn without one records nothing pressed.
+Shows what a player or the AI was pressing when something went wrong, and lets a later replay re-simulate from a keyframe. The viewer only shows it for now. The input is the pawn's ControllerManager's; a pawn without one records nothing pressed.
 
-A record, 20 bytes: move input (3 × half), look yaw (half), look pitch (half), held actions (u64, bits from InputActions), view ticks behind (half). Read back as a Dictionary: {move_input: Vector3, look_yaw: float, look_pitch: float, held_actions: int, view_ticks_behind: float}.
+A record, 20 bytes: move input (3 × half), look yaw (half), look pitch (half), held actions (u64, bits from [`InputActions`](../controllers/REFERENCE.md#inputactions)), view ticks behind (half). Read back as `{move_input: Vector3, look_yaw, look_pitch, held_actions: int, view_ticks_behind}`. Design: replay spec 1.
 
 ### Constants
 
@@ -217,19 +167,15 @@ A record, 20 bytes: move input (3 × half), look yaw (half), look pitch (half), 
 
 Replay channel 1, "motion": where each pawn is and what it's doing (replay spec section 3).
 
-The data t0 debugging needs most, such as seeing a pawn walk off loaded ground and fall.
+Read back as `{position: Vector3, yaw, velocity: Vector3, flags: int, mm: Vector3i}`; test a flag with `(record.flags & ReplayMotionChannel.FLAG_DEAD) != 0`.
 
-Read back as a Dictionary: {position: Vector3, yaw: float, velocity: Vector3, flags: int, mm: Vector3i}. Test a flag with FLAG_*, as in `(record.flags & ReplayMotionChannel.FLAG_DEAD) != 0`.
+Version 2's bytes for a tick are laid out field by field, because zstd shrinks a column of similar numbers far better than mixed records: count (u16); ids (u32 each); position x, y, z changes (i32 each, whole millimetres); yaws (half); velocities x, y, z (half); flags (u8, bit 7: the position is whole, not a change). A pawn that didn't change writes nothing; a keyframe or a pawn's first record writes the whole position. Version 1 (21-byte records, positions as f32) is still read.
 
-Version 2's bytes for a tick are laid out field by field (all the ids, then all the x changes, and so on), because zstd shrinks a column of similar small numbers far better than mixed records: count (u16); ids (u32 each); position x, y, z changes (i32 each, whole millimetres); yaws (half); velocities x, y, z (half); flags (u8, with bit 7 meaning "the position is whole, not a change").
-
-Positions are kept in whole millimetres, which loses nothing that matters: rollback already rounds them to 1 mm. Each is written as the change since that pawn's last record, so a walking pawn's is a few dozen, and a standing one writes nothing at all. A keyframe, or a pawn's first record, writes the whole position, so reading can start at any block. Version 1 (21-byte records one after another, positions as f32) is still read, for older recordings.
-
-The comparing and packing runs in C++ (ReplayMotionPacker) when the navcore library is there, with the same bytes; this script still gathers each pawn's values. With `use_cpp_packing` off, or no library, it runs in GDScript.
+Twin parity: the comparing and packing runs in C++ (`ReplayMotionPacker`, navcore library) with the same bytes as the GDScript here, which is used with `use_cpp_packing` off or no library. The replay selftest compares them. Design: replay spec 3.
 
 ### Settings and properties
 
-- `use_cpp_packing: bool` = `true`: Pack each tick in C++ (ReplayMotionPacker) when the library is there. Set it before recording starts: the two keep their own record of what was last written, so switching mid-recording would lose the changes.
+- `use_cpp_packing: bool` = `true`: Pack in C++ when the library is there. Set it before recording starts: the two keep their own last-written record.
 
 ### Constants
 
@@ -245,7 +191,7 @@ The comparing and packing runs in C++ (ReplayMotionPacker) when the navcore libr
 
 - `flags_of(pawn: Pawn) -> int` *(static)*: The flags for a pawn now.
 - `write_tick(_tick: int, out: StreamPeerBuffer, keyframe: bool) -> void`
-- `pack_lists(ids: PackedInt64Array, positions: PackedVector3Array, yaws: PackedFloat64Array, velocities: PackedVector3Array, flags: PackedByteArray, keyframe: bool) -> PackedByteArray`: One tick's bytes from each pawn's id, position, yaw, velocity and flags, leaving out pawns with nothing changed since they were last written (unless keyframe): in C++ (ReplayMotionPacker) when it can be, else in GDScript. Both give the same bytes; replay_selftest compares them.
+- `pack_lists(ids: PackedInt64Array, positions: PackedVector3Array, yaws: PackedFloat64Array, velocities: PackedVector3Array, flags: PackedByteArray, keyframe: bool) -> PackedByteArray`: One tick's bytes from the pawns' values, leaving out unchanged pawns (unless keyframe). C++ or GDScript, same bytes.
 - `pawn_removed(pawn: Pawn, id: int) -> void`
 - `end() -> void`
 - `read_tick(tick: int, data: StreamPeerBuffer, keyframe: bool, state: Dictionary) -> void`
@@ -257,42 +203,32 @@ The comparing and packing runs in C++ (ReplayMotionPacker) when the navcore libr
 
 Reads a replay file (docs/replay/REPLAY_SPEC.md) and gives the state at any tick.
 
-The viewer uses it, and so can a test or a tool.
+The viewer uses it, and so can a test or a tool. It finds the tick's block, decodes it from its keyframe (caching the last few) and reads the state at that tick. A file cut short opens with everything up to its last whole block (`is_cut_short()`); a channel it has no class for is skipped.
 
 ```gdscript
 var reader := ReplayReader.new()
-if reader.open("user://replays/host/....pbreplay") == OK:
-    reader.get_header()        # tick_rate, role, started, game, channels...
-    reader.get_first_tick()    # and get_last_tick()
-    var frame := reader.get_frame(tick)
-    # frame.tick         the tick shown (the nearest recorded one at or before the asked-for tick)
-    # frame.pawns        replay id -> {name, scene, team, motion: {...} or null, input: {...} or null}
-    # frame.terrains, frame.sources   from the world channel (ReplayWorldChannel)
-    # frame.events       this tick's events from every event channel: {tick, channel, kind, id, data}
-    # frame.diagnostics  the frames that finished this tick, when the recording has the diagnostics channel
-    reader.get_events(from_tick, to_tick)       # every event in that range, oldest first
-    reader.get_diagnostics(from_tick, to_tick)  # [tick, frame record] for every frame in that range
+if reader.open(path) == OK:
+    var frame := reader.get_frame(tick)  # tick, pawns (id -> name, scene, team, motion, input), terrains, sources, events, diagnostics
+    reader.get_events(from_tick, to_tick)
 ```
 
-How it finds a tick: the file is a list of blocks, each opening with a keyframe (replay spec section 2). It finds the tick's block, decodes it from its keyframe (keeping the last few decoded blocks), and reads the state at that tick. Nothing before that block is needed.
-
-Damaged files: reading stops at the first block that's cut short or won't decompress, so a recording from a game that crashed opens with everything up to its last whole block (`is_cut_short()` says so). Channels it has no class for are skipped.
+Design: replay spec 2.
 
 ### Settings and properties
 
-- `blocks_cached: int` = `4`: How many decoded blocks are kept, so stepping back and forth doesn't decode the same block again.
+- `blocks_cached: int` = `4`: How many decoded blocks are kept, so stepping back and forth doesn't decode one twice.
 
 ### Functions
 
 - `add_channel(channel: ReplayChannel) -> void`: Adds a game's own channel class, so its data is read too. Before open().
 - `open(path: String) -> int`: Reads the file's header and finds its blocks. Returns an error if it isn't a replay file, or one this code can't read.
-- `get_header() -> Dictionary`
+- `get_header() -> Dictionary`: The file's header: tick_rate, first_tick, role, started, game, block_seconds, channels, format.
 - `is_cut_short() -> bool`: True if the file ends partway through a block, as one from a game that crashed or was killed does.
-- `get_block_count() -> int`
+- `get_block_count() -> int`: How many whole blocks the file holds.
 - `get_first_tick() -> int`: The first tick recorded, or -1 for an empty recording.
 - `get_last_tick() -> int`: The last tick recorded, or -1 for an empty recording.
 - `get_ticks() -> int[]`: Every tick recorded, in order. Usually every tick from first to last, but a client's ticks can jump.
-- `get_frame(tick: int) -> Dictionary`: The state at a tick: see the top of the file. A tick before the first gives the first, and one after the last gives the last.
+- `get_frame(tick: int) -> Dictionary`: The state at a tick: `{tick (the nearest recorded one at or before it), pawns, terrains, sources, events, diagnostics}`. Before the first tick gives the first, after the last gives the last.
 - `get_events(from_tick: int, to_tick: int) -> Array`: Every event from from_tick to to_tick, both included, oldest first. Each is {tick, channel, kind, id, data}.
 - `get_diagnostics(from_tick: int, to_tick: int) -> Array`: Every diagnostics frame from from_tick to to_tick, both included, as [tick, frame record], oldest first. Empty for a recording without the diagnostics channel.
 
@@ -300,39 +236,27 @@ Damaged files: reading stops at the first block that's cut short or won't decomp
 
 `res://assets/scripts/replay/ReplayRecorder.gd`, extends [`GameModeModule`](../game_mode/REFERENCE.md#gamemodemodule)
 
-Records the game to a replay file (replay v0, docs/replay/REPLAY_SPEC.md).
+Records every pawn, every tick, to a replay file.
 
-A GameMode module, reached as `GameMode.replay_recorder`. It records nothing until `start_recording()` is called, which the game does when play starts: on the host when the player picks Offline or Host, and on a client once Join has connected (the samples do this). [`DiagnosticsManager`](../diagnostics/REFERENCE.md#diagnosticsmanager) also starts one when play starts and none is running.
+A GameMode module (`GameMode.replay_recorder`) that records nothing until `start_recording()` is called when play starts (the samples do; [`DiagnosticsManager`](../diagnostics/REFERENCE.md#diagnosticsmanager) does if none is running). Once a tick (`TickDriver.after_tick`, which never fires during a rollback replay) it gives new pawns a replay id and has each channel write its bytes into the current block; every `block_seconds` the block, opening with a keyframe, goes to the [`ReplayWriter`](#replaywriter). A game adds its own channels with `add_channel()` before recording starts.
 
-What it records: every pawn, AI ones included, every tick, through its channels (replay spec section 3): motion (where each pawn is and its flags), input (its input command), spawns (who exists), world (chunks and chunk sources) and gameplay (hits, deaths, abilities, AI changes, freezes, possession, falls). A game can add its own channels with `add_channel()` before recording starts; DiagnosticsManager adds the diagnostics channel this way.
+Files: `<folder>/<role>/<date>_<time>.pbreplay`, role "host" (also offline) or "client"; a run with no display uses `<folder>/headless/<role>`. Only the newest `keep_recordings` per folder are kept.
 
-How it works, once a tick (TickDriver's after_tick, which never fires while a rollback replays ticks, so nothing is recorded twice):
-- Pawns that entered the tree since last tick are given a replay id and handed to every channel.
-- Each channel writes this tick's bytes into its part of the current block. A block's first tick is a keyframe: every channel writes everything as it is, so a reader can start there.
-- After `block_seconds` of ticks, the block is finished and handed to the [`ReplayWriter`](#replaywriter), which compresses and writes it on its own thread.
-
-Files: <folder>/<role>/<date>_<time>.pbreplay, with role "host" (host and offline) or "client"; a run with no display uses <folder>/headless/<role> (`headless_runs_apart`). Only the newest `keep_recordings` in each folder are kept; older ones are deleted when a new recording starts.
-
-Safeguards (replay spec section 3.1): a recording can never run away, outnumber the cap, or grow without limit. Each stops the recording with a warning saying why (`get_stopped_reason()`), and the file stays readable:
-- `max_recording_seconds` (3 hours): a recording stops when it's this long.
-- `max_file_megabytes` (2 GB): a recording stops when its file is this big, whatever its length.
-- `min_free_megabytes` (1 GB): a recording doesn't start, or stops, when the disk has less room than this. Checked every minute.
-- `max_folder_megabytes` (4 GB): old recordings in a role's folder are deleted, oldest first, until the folder is under this, as well as down to keep_recordings. The file being recorded is never deleted, and one another instance still has open can't be (Windows refuses), so it's skipped.
-- The writer's queue: if the disk falls so far behind that `max_queued_blocks` blocks are waiting, the recording stops rather than filling memory. And if writing fails (a full disk, a lost drive), the writer stops writing and the recording stops.
+Safeguards stop a recording with a warning (`get_stopped_reason()`) and leave the file readable: length, file size, free disk space, folder size, and the writer falling behind or failing. Each limit is a setting below; 0 switches it off. Design: replay spec 3 and 3.1.
 
 ### Settings and properties
 
-- `enabled: bool` = `true`: Off: start_recording() does nothing. For a game, or a test, that doesn't want recordings.
+- `enabled: bool` = `true`: Off: `start_recording()` does nothing.
 - `folder: String` = `"user://replays"`: Where recordings go. Each role gets a folder of its own inside it.
-- `headless_runs_apart: bool` = `true`: On, a run with no display (a test, or a dedicated server) records into folder/headless/<role> instead, with its own keep_recordings, so the many headless runs never push out recordings of games played in a window. The replay viewer's default (the newest in folder/host) is then always a played game.
-- `keep_recordings: int` = `10`: How many recordings to keep in each role's folder. Older ones are deleted when a new one starts. 0 keeps them all, and then max_folder_megabytes isn't applied either.
-- `block_seconds: float` = `1.0`: How long each block is, in seconds. Seeking starts from a block's keyframe, so shorter blocks seek faster but make bigger files.
-- `write_on_thread: bool` = `true`: Off: blocks are written on the main thread, at once (ReplayWriter.use_thread). For tests, which set it in code; not in the inspector, since it's no setting for a game.
-- `max_recording_seconds: float` = `10800.0`: The longest a recording may be, in seconds: 3 hours by default (the owner's call). This and the safeguards below are switched off by 0 (see the top of the file).
-- `max_file_megabytes: int` = `2048`: The biggest a recording's file may get, in megabytes.
-- `min_free_megabytes: int` = `1024`: The least free disk space recording needs, in megabytes.
-- `max_folder_megabytes: int` = `4096`: The most a role's folder may hold, in megabytes. Older recordings are deleted to stay under it.
-- `max_queued_blocks: int` = `60`: How many finished blocks may wait for the writer before the recording gives up: with 1 s blocks, how many seconds the disk may fall behind. 60 (about a minute) is the owner's call; at mass-battle sizes a full queue is a few MB.
+- `headless_runs_apart: bool` = `true`: On, a run with no display (a test, a dedicated server) records into folder/headless/<role> instead, with its own `keep_recordings`.
+- `keep_recordings: int` = `10`: Recordings kept per role's folder; older ones are deleted when a new one starts. 0 keeps all, and skips `max_folder_megabytes` too.
+- `block_seconds: float` = `1.0`: Block length in seconds. Seeking starts at a block's keyframe: shorter seeks faster, longer makes smaller files.
+- `write_on_thread: bool` = `true`: Off: blocks are written on the main thread (`ReplayWriter.use_thread`). For tests; not an inspector setting.
+- `max_recording_seconds: float` = `10800.0`: The longest a recording may be, in seconds (3 hours). 0 switches it off, as for the other safeguards below.
+- `max_file_megabytes: int` = `2048`: The biggest a recording's file may get, in megabytes (2 GB).
+- `min_free_megabytes: int` = `1024`: The least free disk space recording needs, in megabytes (1 GB). Checked at the start and every minute.
+- `max_folder_megabytes: int` = `4096`: The most a role's folder may hold, in megabytes (4 GB); oldest recordings are deleted to stay under it, never the one being written.
+- `max_queued_blocks: int` = `60`: How many finished blocks may wait for the writer before the recording stops: with 1 s blocks, the seconds the disk may fall behind.
 
 ### Signals
 
@@ -343,32 +267,30 @@ Safeguards (replay spec section 3.1): a recording can never run away, outnumber 
 
 - `FILE_EXTENSION = "pbreplay"`
 - `MAGIC = "PBRP"`: The first bytes of every replay file.
-- `FORMAT_VERSION = 1`: Raised when the file's layout changes (replay spec section 2), not when a channel changes: channels have their own versions.
+- `FORMAT_VERSION = 1`: Raised when the file's layout changes (replay spec 2); channels have their own versions.
 - `LOCAL_IDS_START = 1073741824`: Ids given to pawns that aren't networked start here, well above any entity id.
 
 ### Functions
 
 - `get_match_options() -> PackedStringArray`: The settings a start menu may offer (GameModeModule.get_match_options): whether this match is recorded.
-- `add_channel(channel: ReplayChannel) -> void`: Adds a channel, before recording starts. Its id must be unused; 1 to 99 are the base's (6 is diagnostics), so a game's own use 100 and up.
+- `add_channel(channel: ReplayChannel) -> void`: Adds a channel before recording starts. Its id must be unused: 1 to 99 are the base's (6 is diagnostics), a game's own use 100+.
 - `get_channels() -> ReplayChannel[]`: The channels, in the order they're written.
-- `start_recording(role: String) -> int`: Starts recording to a new file. role is "host" (also for offline play) or "client"; it picks the folder. Stops any recording already running first. Returns the error if the file couldn't be made.
-- `stop_recording() -> void`: Stops recording: the block so far is written, the file closed and the writer's thread stopped. Does nothing if not recording.
-- `is_recording() -> bool`
-- `get_stopped_reason() -> String`: Why the last recording stopped on its own (a safeguard), or "" if it was stopped by stop_recording() or is still running.
-- `get_recording_path() -> String`: The file being recorded, or the last one recorded. GDScript note: not get_path(), which every Node already has (its place in the scene tree).
+- `start_recording(role: String) -> int`: Starts recording to a new file, after stopping any running one. `role` ("host", also offline, or "client") picks the folder. Returns the error if the file can't be made.
+- `stop_recording() -> void`: Stops recording: writes the block so far, closes the file and stops the writer's thread.
+- `is_recording() -> bool`: True while a recording is running.
+- `get_stopped_reason() -> String`: Why a safeguard stopped the last recording, or "" if `stop_recording()` did or it is still running.
+- `get_recording_path() -> String`: The file being recorded, or the last one recorded.
 - `get_ticks_recorded() -> int`: How many ticks this recording holds so far.
 - `get_bytes_written() -> int`: The file's size so far, in bytes (as of the last block written).
-- `get_replay_id(node: Node) -> int`: A pawn's id in the recording: its NetworkEntity id where it has one (the same on every machine), or one handed out here. 0 for null, or for anything that isn't a pawn being recorded.
+- `get_replay_id(node: Node) -> int`: A pawn's id in the recording: its NetworkEntity id where it has one (the same on every machine), else one handed out here. 0 for none.
 
 ## ReplaySpawnChannel
 
 `res://assets/scripts/replay/ReplaySpawnChannel.gd`, extends [`ReplayEventChannel`](#replayeventchannel)
 
-Replay channel 3, "spawns": which pawns exist (replay spec section 3).
+Replay channel 3, "spawns": which pawns exist.
 
-Events: "spawned" (data: name, scene, team) and "despawned" (no data). A keyframe's snapshot lists every live pawn the same way, so a reader starting at any block knows who's there.
-
-Reading: state["pawns"] is replay id -> {name, scene, team}, for the pawns alive at that tick. The other channels' records are only shown for pawns listed here.
+Events: "spawned" (name, scene, team) and "despawned". A keyframe's snapshot lists every live pawn, so a reader starting at any block knows who's there. Reading: `state["pawns"]` is replay id -> `{name, scene, team}` for the pawns alive at that tick; other channels' records are only shown for pawns listed here. Design: replay spec 3.
 
 ### Constants
 
@@ -388,27 +310,14 @@ Reading: state["pawns"] is replay id -> {name, scene, team}, for the pawns alive
 
 `res://assets/scripts/replay/ReplayViewer.gd`, extends [`Node3D`](https://docs.godotengine.org/en/stable/classes/class_node3d.html)
 
-Replay v0's viewer: plays and scrubs a recording (docs/replay/REPLAY_SPEC.md).
+Plays and scrubs a recording: ghost capsules for the pawns, outlines for the built chunks and the chunk sources' load distances.
 
-Runs replay_viewer.tscn. It shows each pawn as a ghost capsule, the chunks that were built as outlines on the ground, the chunk sources with their load distances, and the events around the tick shown. Nothing is simulated: it only shows what was recorded, which is what debugging needs (a pawn standing on a chunk that went away, say).
-
-Which file: `file_path` if set, else `-- --file=<path>` on the command line, else the newest recording in user://replays/host (or user://replays/client with `-- --client`).
-
-Keys:
-- Space: play and pause. ← →: one tick back or forward (Shift: ten). Home, End: the start or end.
-- + -: playback speed. [ ]: select the previous or next pawn. F: follow the selected pawn.
-- L: labels on every pawn (on to begin with when there are 40 or fewer).
-- Right mouse drag turns the camera, the mouse wheel zooms, W A S D move it (when not following).
-- The slider at the bottom scrubs.
-
-Diagnostics (docs/diagnostics/DIAGNOSTICS_SPEC.md): a recording with the diagnostics channel shows a strip above the slider, the slowest frame in each of its columns (blue up to about 1/60 s, orange up to about 1/30 s, red beyond, with lines at both), with the tick shown marked; click it to jump there. The panel then also shows the frame at that tick: its parts and its most expensive scopes. The strip is filled in the background, a few blocks a frame, so a long recording opens at once.
-
-What the ghosts show: the team's colour; grey and lying down when dead; pale blue when frozen (switched off by the AI switch-off, not ticking at all); darker when sleeping (idle, skipping physics but still ticking). The labels list the flags as letters: G on the ground, D dead, F frozen, S sleeping, C keeps chunks loaded (a source of its own), P a player has it.
+Runs `replay_viewer.tscn`. Nothing is simulated; it only shows what was recorded. The file is `file_path`, else `-- --file=<path>`, else the newest recording in the host folder (`-- --client`: the client folder). A recording with the diagnostics channel also shows a strip of its slowest frames above the slider, filled in the background; click it to jump. Keys, ghost colours and the strip are in the replay README. Design: replay spec, diagnostics spec.
 
 ### Settings and properties
 
 - `file_path: String` = `""`: The recording to open. Empty: the command line's --file=, else the newest recording.
-- `replays_folder: String` = `"user://replays"`: Where the newest recording is looked for.
+- `replays_folder: String` = `"user://replays"`: The folder the newest recording is looked for in.
 
 ### Constants
 
@@ -417,30 +326,18 @@ What the ghosts show: the team's colour; grey and lying down when dead; pale blu
 
 ### Functions
 
-- `show_tick(tick: int) -> void`: Shows a tick: the nearest recorded one at or before it.
+- `show_tick(tick: int) -> void`: Shows the nearest recorded tick at or before this one.
 - `get_shown_tick() -> int`: The tick shown now.
 - `get_visible_ghost_count() -> int`: How many ghosts are visible now, for tests.
-- `get_reader() -> ReplayReader`
+- `get_reader() -> ReplayReader`: The reader behind the viewer, for tests.
 
 ## ReplayWorldChannel
 
 `res://assets/scripts/replay/ReplayWorldChannel.gd`, extends [`ReplayEventChannel`](#replayeventchannel)
 
-Replay channel 4, "world": the loaded ground and what keeps it loaded (replay spec section 3).
+Replay channel 4, "world": the loaded ground and what keeps it loaded.
 
-For seeing a pawn standing on a chunk that went away.
-
-Events (the pawn id is 0 for all of them):
-- "chunk_built" (data: terrain, its id here; chunk, a Vector2i): a terrain finished building a chunk.
-- "chunk_collision" (data: terrain, chunk): its collision is in, so things can stand on it.
-- "chunk_removed" (data: terrain, chunk).
-- "source_added" (data: source, its id here; position, load, nav, active, counts): a chunk source started keeping the world loaded here. Pawns can be sources, so only sources that count on this machine are tracked (counts_on_this_machine).
-- "source_removed" (data: source): a source left, or stopped counting here (switched off).
-- "source_on" and "source_off" are no longer written, but are still read in older recordings.
-
-A keyframe's snapshot: every terrain (id, name, chunk size, origin, built chunks) and every source (id, position, load and nav distances, active and counts, which are always true now, since only sources that count are tracked).
-
-Reading: state["terrains"] is terrain id -> {name, chunk_size, origin, chunks: {Vector2i: true}}, and state["sources"] is source id -> {position, load, nav, active, counts}. Source positions are updated only by keyframes and their own events, so a moving source (a player's pawn, say) is up to a second out of date; the pawn's own motion record has the exact place.
+For seeing a pawn standing on a chunk that went away. Events (pawn id 0): chunk_built, chunk_collision, chunk_removed (data: terrain, chunk), and source_added, source_removed (data: source, its id here). Only chunk sources that count on this machine are tracked. "source_on" and "source_off" are no longer written but still read. A keyframe's snapshot lists every terrain and source. Reading: `state["terrains"]` is terrain id -> `{name, chunk_size, origin, chunks}` and `state["sources"]` is source id -> `{position, load, nav, active, counts}`. A source's position is up to a second old (keyframes and its own events only); the pawn's motion record has the exact place. Design: replay spec 3.
 
 ### Constants
 
@@ -460,34 +357,30 @@ Reading: state["terrains"] is terrain id -> {name, chunk_size, origin, chunks: {
 
 `res://assets/scripts/replay/ReplayWriter.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-Writes a replay file on a thread of its own (replay spec sections 1 and 2).
+Writes a replay file on a thread of its own, so the game's ticks never wait for the disk.
 
-The recorder hands it each finished block; this thread compresses the block with zstd and appends it to the file. So the game's ticks never wait for the disk.
-
-Why its own thread and not the job scheduler's: the scheduler's workers run work a tick is waiting for, such as AI sensing. A slow disk on one of them would hold a tick up. This thread sleeps until a block arrives, so it costs almost nothing.
-
-How to use it ([`ReplayRecorder`](#replayrecorder) does):
+[`ReplayRecorder`](#replayrecorder) hands it each finished block; the thread compresses it with zstd and appends it to the file. It has its own thread, not the job scheduler's, because a slow disk on a scheduler worker would hold up a tick; this one sleeps until a block arrives. The thread touches only the queue (under a mutex) and the file.
 
 ```gdscript
 var writer := ReplayWriter.new()
 writer.open(path, header_bytes)  # writes the header at once, then starts the thread
-writer.push_block(raw_bytes)     # any number of times, from the main thread; false if refused
-writer.close()                   # writes what's left, then waits for the thread to finish
+writer.push_block(raw_bytes)     # from the main thread; false if refused
+writer.close()                   # writes what's left, then waits for the thread
 ```
 
-GDScript note: Mutex and Semaphore are how threads take turns safely. The mutex guards the queue, so the two threads never change it at the same moment; the semaphore counts blocks waiting, and the writing thread sleeps on it until there's one.
+Design: replay spec 1 and 2.
 
 ### Settings and properties
 
-- `use_thread: bool` = `true`: Off: blocks are compressed and written on the calling thread instead, at once. For tests that compare the two, and for platforms without threads.
-- `max_queued_blocks: int` = `60`: The most blocks that may wait to be written. push_block refuses more, so a disk that can't keep up never fills memory; the recorder then stops recording.
+- `use_thread: bool` = `true`: Off: blocks are compressed and written on the calling thread, at once (for tests, and platforms without threads).
+- `max_queued_blocks: int` = `60`: The most blocks that may wait. `push_block()` refuses more, so a slow disk never fills memory; the recorder then stops.
 
 ### Functions
 
-- `open(path: String, header: PackedByteArray) -> int`: Creates the file (replacing one at that path), writes the header, and starts the thread. Returns the error if the file couldn't be made.
-- `push_block(raw: PackedByteArray) -> bool`: Queues a finished block. Returns at once; the block is written on the thread. False if it was refused: the file isn't open, writing has already failed (`get_error()`), or `max_queued_blocks` are already waiting.
+- `open(path: String, header: PackedByteArray) -> int`: Creates the file (replacing one at that path), writes the header and starts the thread. Returns the error if the file can't be made.
+- `push_block(raw: PackedByteArray) -> bool`: Queues a finished block and returns at once. False if refused: not open, a write already failed, or `max_queued_blocks` waiting.
 - `close() -> void`: Writes every queued block, closes the file and stops the thread. Safe to call twice.
-- `is_open() -> bool`
+- `is_open() -> bool`: True between `open()` and `close()`.
 - `get_error() -> int`: The first error writing hit, or OK.
-- `get_blocks_written() -> int`: Blocks written so far, and the file's size. GDScript note: read from the main thread while the writer runs, so they may be a block behind; that's fine for a readout.
-- `get_bytes_written() -> int`
+- `get_blocks_written() -> int`: Blocks written so far. Read from the main thread while the writer runs, so it may be a block behind.
+- `get_bytes_written() -> int`: The file's size so far, header included (may be a block behind).

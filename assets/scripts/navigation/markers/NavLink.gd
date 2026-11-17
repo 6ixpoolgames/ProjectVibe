@@ -1,11 +1,8 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
-## A connection nav can't walk across: an off-mesh link (nav spec section 21.3).
+## A connection nav can't walk across: an off-mesh link (nav spec 21.3).
 ##
 ## A ladder, a jump, a door and a teleporter are all NavLinks, told apart by their tags (link.climb, link.jump, link.door,
-## link.teleport), because they hold the same data. NavLinkModule hands them to nav, so pawns' paths can use them; without that module
-## in the level they're registered and do nothing.
-# GDScript note: "extends NavMarker" means a NavLink has everything a NavMarker has, plus what's below.
-# class_name also adds it to the inspector's list of types, and "marker is NavLink" works anywhere.
+## link.teleport). NavLinkModule hands them to nav so paths can use them; without that module in the level they do nothing.
 class_name NavLink
 extends NavMarker
 
@@ -28,6 +25,5 @@ func get_end_position() -> Vector3:
 
 ## Turning a placed link turns where it ends too.
 func place_at(world_transform: Transform3D) -> void:
-	# GDScript note: super.place_at runs the parent class's version, and this adds to it.
 	super.place_at(world_transform)
 	end_offset = world_transform.basis * end_offset

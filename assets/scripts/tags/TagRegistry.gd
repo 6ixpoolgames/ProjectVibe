@@ -1,35 +1,19 @@
 # Written by Claude (claude-opus-5-5), 2026-11-04. History: tags/CHANGELOG.md.
 ## The ability tags: turns tag names like "combat.melee.sword" into bits, so checks are one AND instead of comparing text.
 ##
-## The shared tag registry of pawn spec section 7.1 and netcode spec section 13. Abilities carry these tags (a category and extra
-## categories), and lockouts, interrupts and the AI's [code]action_for_tag[/code] ask by them. Code writes them as [Tags] constants.
+## The shared tag registry (pawn spec 7.1, netcode spec 13). Abilities carry tags, and lockouts, interrupts and the AI's
+## [code]action_for_tag[/code] ask by them. Code writes them as [Tags] constants.
 ## [br]
-## How tags work:
-## [br]- A tag is a StringName with dot-separated levels. A dot means "sub-category": combat.melee is inside combat. Tags are names
-##   only, not class hierarchy or scene-tree position.
-## [br]- Every level gets its own bit. combat, combat.melee and combat.melee.sword are three bits.
-## [br]- A tag's mask holds its own bit plus all its parents' bits. So a query or lockout for "combat" catches combat.melee.sword with
-##   one AND, and never catches "combatant" (whole levels only).
-## [br]- Matching is from the root only: "combat.melee" matches combat.melee.sword, "sword" doesn't.
+## Tag bit rules:
+## [br]- A tag is a StringName with dot-separated levels; a dot means sub-category (combat.melee is inside combat). Names only.
+## [br]- Every level gets its own bit: combat, combat.melee and combat.melee.sword are three bits.
+## [br]- A tag's mask is its own bit plus its parents' bits, so a query for "combat" catches combat.melee.sword with one AND, and
+##   never "combatant". Matching is from the root only: "combat.melee" matches combat.melee.sword, "sword" doesn't.
+## [br]- At most 64 levels; extras get no bit (mask 0, match nothing) with a warning.
 ## [br]
-## Why declarations: in multiplayer every machine must give the same tag the same bit. Bits handed out on first use would depend on
-## what happened to run first. So the game lists its tags in a TagDeclarationsRes (resources/tag_declarations.tres), and the registry
-## sorts and numbers them all at startup, identically everywhere. The netcode handshake compares [method content_hash].
-## [br]
-## Corner cases (all checked in tests/tag_registry_selftest.gd):
-## [br]- Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
-## [br]- Messy names ("combat..melee", " combat.melee ") are cleaned up (empty levels and spaces dropped).
-## [br]- A tag nobody declared, used at runtime: added on the spot with a one-time warning. Fine offline; a desync risk online, which
-##   is what the warning is for. Only setting things up adds tags ([method declare], [method bit_of], [method own_bit],
-##   [method mask_of] and the list versions); queries ([method matches], [method has_tag]) never do: an unknown tag just matches
-##   nothing.
-## [br]- Declaring after the registry is in use: same as undeclared (appended, warned). Sorting again would change bits that are
-##   already stored in masks.
-## [br]- More than 64 levels in total: the extra ones get no bit (mask 0, match nothing) and a warning. The mask could later become an
-##   array of ints without changing how designers use tags.
-## [br]- No declarations file: the registry still works, every tag is just "undeclared".
-## [br]
-## A static class (not an autoload), so it works in headless tests and in --script mode.
+## Every machine must give a tag the same bit, so the game declares its tags in a TagDeclarationsRes (resources/tag_declarations.tres)
+## and the registry sorts and numbers them at startup; the netcode handshake compares [method content_hash]. A tag nobody declared is
+## added on the spot with a warning (a desync risk online). Queries never add tags. A static class, so it works in headless tests.
 # REFACTOR: NavTags (navigation/) and EffectTags (effects/) are copies of these rules, made on purpose so working code didn't change.
 # One tag-set class, used once per tag set, would be one place to fix and test, and a game's own tag set would come free (reusable).
 class_name TagRegistry

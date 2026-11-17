@@ -1,22 +1,17 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
 ## Replay channel 1, "motion": where each pawn is and what it's doing (replay spec section 3).
 ##
-## The data t0 debugging needs most, such as seeing a pawn walk off loaded ground and fall.
+## Read back as [code]{position: Vector3, yaw, velocity: Vector3, flags: int, mm: Vector3i}[/code]; test a flag with
+## [code](record.flags & ReplayMotionChannel.FLAG_DEAD) != 0[/code].
 ## [br]
-## Read back as a Dictionary: {position: Vector3, yaw: float, velocity: Vector3, flags: int, mm: Vector3i}. Test a flag with
-## FLAG_*, as in [code](record.flags & ReplayMotionChannel.FLAG_DEAD) != 0[/code].
+## Version 2's bytes for a tick are laid out field by field, because zstd shrinks a column of similar numbers far better than mixed
+## records: count (u16); ids (u32 each); position x, y, z changes (i32 each, whole millimetres); yaws (half); velocities x, y, z
+## (half); flags (u8, bit 7: the position is whole, not a change). A pawn that didn't change writes nothing; a keyframe or a pawn's
+## first record writes the whole position. Version 1 (21-byte records, positions as f32) is still read.
 ## [br]
-## Version 2's bytes for a tick are laid out field by field (all the ids, then all the x changes, and so on), because zstd shrinks a
-## column of similar small numbers far better than mixed records: count (u16); ids (u32 each); position x, y, z changes (i32 each,
-## whole millimetres); yaws (half); velocities x, y, z (half); flags (u8, with bit 7 meaning "the position is whole, not a change").
-## [br]
-## Positions are kept in whole millimetres, which loses nothing that matters: rollback already rounds them to 1 mm. Each is written
-## as the change since that pawn's last record, so a walking pawn's is a few dozen, and a standing one writes nothing at all. A
-## keyframe, or a pawn's first record, writes the whole position, so reading can start at any block. Version 1 (21-byte records one
-## after another, positions as f32) is still read, for older recordings.
-## [br]
-## The comparing and packing runs in C++ (ReplayMotionPacker) when the navcore library is there, with the same bytes; this script
-## still gathers each pawn's values. With [member use_cpp_packing] off, or no library, it runs in GDScript.
+## Twin parity: the comparing and packing runs in C++ ([code]ReplayMotionPacker[/code], navcore library) with the same bytes as
+## the GDScript here, which is used with [member use_cpp_packing] off or no library. The replay selftest compares them.
+## Design: replay spec 3.
 class_name ReplayMotionChannel
 extends ReplayEntityChannel
 
@@ -38,8 +33,7 @@ const FLAG_HAS_PLAYER := 32
 # In the file only (version 2): this record's position is whole, not a change. Never in a record read back.
 const _WHOLE_POSITION := 128
 
-## Pack each tick in C++ (ReplayMotionPacker) when the library is there. Set it before recording starts: the two keep their own record
-## of what was last written, so switching mid-recording would lose the changes.
+## Pack in C++ when the library is there. Set it before recording starts: the two keep their own last-written record.
 var use_cpp_packing := true
 var _packer: Object = null # the C++ packer, made on first use
 
@@ -68,8 +62,7 @@ static func flags_of(pawn: Pawn) -> int:
 	return flags
 
 
-# Version 2's writing, in place of ReplayEntityChannel's record by record: gathers each pawn's values here, and packs them with
-# pack_lists.
+# Version 2's writing: gathers each pawn's values, then packs them with pack_lists.
 func write_tick(_tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
 	var ids := PackedInt64Array()
 	var positions := PackedVector3Array()
@@ -88,9 +81,7 @@ func write_tick(_tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
 	out.put_data(pack_lists(ids, positions, yaws, velocities, flags, keyframe))
 
 
-## One tick's bytes from each pawn's id, position, yaw, velocity and flags, leaving out pawns with nothing changed since they were
-## last written (unless keyframe): in C++ (ReplayMotionPacker) when it can be, else in GDScript. Both give the same bytes;
-## replay_selftest compares them.
+## One tick's bytes from the pawns' values, leaving out unchanged pawns (unless keyframe). C++ or GDScript, same bytes.
 func pack_lists(ids: PackedInt64Array, positions: PackedVector3Array, yaws: PackedFloat64Array, velocities: PackedVector3Array,
 		flags: PackedByteArray, keyframe: bool) -> PackedByteArray:
 	if use_cpp_packing and ClassDB.class_exists(&"ReplayMotionPacker"):
@@ -100,7 +91,7 @@ func pack_lists(ids: PackedInt64Array, positions: PackedVector3Array, yaws: Pack
 	return _pack_lists_gdscript(ids, positions, yaws, velocities, flags, keyframe)
 
 
-# The GDScript packing (see the top of the file for the layout).
+# The GDScript packing (layout in the class comment).
 func _pack_lists_gdscript(given_ids: PackedInt64Array, positions: PackedVector3Array, given_yaws: PackedFloat64Array,
 		given_velocities: PackedVector3Array, given_flags: PackedByteArray, keyframe: bool) -> PackedByteArray:
 	var out := StreamPeerBuffer.new()
@@ -116,7 +107,7 @@ func _pack_lists_gdscript(given_ids: PackedInt64Array, positions: PackedVector3A
 		var velocity := given_velocities[i]
 		var pawn_flags := given_flags[i]
 		var last: Variant = _last.get(id)
-		# GDScript note: == on Vector3 compares exactly, which is what's wanted: any change at all is written.
+		# Exact comparison: any change at all is written.
 		if not keyframe and last != null and last[0] == at and last[1] == yaw and last[2] == velocity and last[3] == pawn_flags:
 			continue
 		var mm := Vector3i(roundi(at.x * 1000.0), roundi(at.y * 1000.0), roundi(at.z * 1000.0))

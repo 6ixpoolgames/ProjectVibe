@@ -16,34 +16,26 @@ Every class in `assets/scripts/controllers/`, from its doc comments. The overvie
 
 The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick.
 
-A child of the pawn's ControllerManager, in charge whenever no player has the pawn (pawn spec section 6.3). It decides nothing. The AI's behaviours (or a script or test) tell it what to do, and it turns that into the same shape of input a player's controller makes. `move_to()` walks a nav path, through the pawn's NavigationManager.
-
-How to use it:
+A child of the pawn's ControllerManager, in charge whenever no player has the pawn. It decides nothing: the AI's behaviours (or a script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until changed, except `press()`, which lasts one tick. Until `look_at_point()` is called it keeps the pawn's own look.
 
 ```gdscript
 ai.move_to(point)                        # walks there along a nav path; false if there's no way there
-ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way until told otherwise; drops any path
-ai.stop()                                # stands still; drops any path
+ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way; drops any path
 ai.press(&"jump")                        # held for one tick, so the pawn sees one press
 ai.hold(&"sprint", true)                 # held until hold(&"sprint", false)
-ai.look_at_point(target)
-ai.stop_looking()                        # keeps whatever look the pawn already has
-ai.release_all()                         # back to idle: standing, nothing held
 ```
 
-Everything it's told stays until changed, except press(), which lasts one tick. Until look_at_point() is called, it keeps the pawn's own look, so taking over from a player doesn't snap the pawn's head to straight ahead.
-
-**While it isn't in charge** (pawn spec 6.3 and 10.3): a player has the pawn and the AI keeps deciding anyway (AIContextComponent.while_possessed FULL). Then move_to() only remembers the point, without touching the pawn's NavigationManager, so it can't overwrite the player's path, and returns true. When it's in charge again, its next take_input_command() starts that walk. stop(), move_in_direction() and release_all() forget it, and leave the player's path alone. `is_following_order()` says whether its own last move_to is still under way, in charge or not.
+While a player has the pawn but the AI keeps deciding, `move_to()` only remembers the point (and returns true), so it can't overwrite the player's path; the walk starts when the AI is in charge again. Design: pawn spec 6.3, 10.3.
 
 ### Functions
 
-- `move_to(point: Vector3) -> bool`: Walks to this point along a nav path, and stands still once there. Returns false if there's no way there, or the pawn has no NavigationManager, and then the pawn stands still. pawn.navigation_manager.has_arrived() says when it's there. While not in charge, it remembers the point for later and returns true (see the class description).
+- `move_to(point: Vector3) -> bool`: Walks to this point along a nav path, and stands still once there. Returns false (and stands still) if there's no way there. While not in charge it only remembers the point and returns true.
 - `is_following_order() -> bool`: True while its own last move_to is under way: following its path (or waiting for nav, PENDING) when in charge, or waiting to start it when not. False once it arrives, gives up, or is told to do something else.
 - `move_in_direction(direction: Vector3) -> void`: Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
 - `stop() -> void`: Stands still. Held actions stay held.
 - `look_at_point(point: Vector3) -> void`: Looks at a point in the world. Does nothing without a pawn, since there's nowhere to look from.
-- `look_at_node(node: Node3D, offset: Vector3 = Vector3(0, 0, 0)) -> void`: Stops looking at anything in particular, and keeps whatever look the pawn already has. Keeps looking at a node, at offset from its origin (such as Vector3(0, 1, 0) for a pawn's chest), worked out again at every input, until `stop_looking()` or another look. For a behaviour that sleeps between events (Attack, during its swing): the aim follows the node every tick without the behaviour having to run. A freed node ends it.
-- `stop_looking() -> void`
+- `look_at_node(node: Node3D, offset: Vector3 = Vector3(0, 0, 0)) -> void`: Keeps looking at a node, at offset from its origin, worked out again at every input, until `stop_looking()` or another look. For a behaviour that sleeps through a swing. A freed node ends it.
+- `stop_looking() -> void`: Stops looking at anything in particular, and keeps whatever look the pawn already has.
 - `is_looking_at_point() -> bool`: True while it's looking at a point it was given. AI sight faces this way then (SightSense).
 - `press(action: StringName) -> void`: Holds this action for the next tick only, so the pawn sees one press.
 - `hold(action: StringName, held: bool = true) -> void`: Holds or lets go of this action, until changed.
@@ -78,38 +70,20 @@ How to make one: extend this, and override `take_input_command()`.
 
 Picks whose input a pawn follows, and holds that input and whether a player has the pawn.
 
-A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child (pawn spec sections 6.4 and 8.17). The rule is fixed and simple:
-- A player's controller is attached here (this machine's player has the pawn): that controller is in charge.
-- A player elsewhere has the pawn: nobody here is in charge, because the input arrives over the network.
-- Nobody has it: the AI controller is in charge. That's how the AI takes over the moment a player lets go.
+A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child. This machine's player controller is in charge when it has the pawn; nobody is when a player elsewhere has it (the input arrives over the network); otherwise the AI is, so it takes over the moment a player lets go. The pawn calls `tick_input()` once per tick, which asks the controller in charge and writes its command into the input. Controllers never write to the pawn themselves.
 
-The pawn calls `tick_input()` once per tick, in its input phase, which asks the controller in charge and writes its command into the input. Controllers never write to the pawn themselves.
-
-How to use it:
+The input rolls back (the pawn's TickStateComponent lists it, with `previous_held_actions` as state). The server's checks on a client's input are here too (`sanitize_network_input()`), as the NetworkEntity's input_owner.
 
 ```gdscript
 pawn.controller_manager.get_controller_in_charge()   # a ControllerBase, or null
-pawn.controller_manager.ai_controller                 # the AI's hands
-pawn.controller_manager.move_input                    # this tick's input; also held_actions, look_yaw, look_pitch
-pawn.controller_manager.was_action_pressed(&"jump")   # held this tick but not last tick; is_action_held for a hold
-pawn.controller_manager.has_player()                  # a player has the pawn (PossessionCoordinator sets it)
+pawn.controller_manager.was_action_pressed(&"jump")  # held this tick, not last tick
 ```
 
-PlayerController calls `attach_player()` and `detach_player()` when it takes or lets go of a pawn. Nothing else should.
-
-The input rolls back: the pawn's TickStateComponent lists "ControllerManager:move_input" and the others as input, and `previous_held_actions` as state. The server's checks on a client's input (`sanitize_network_input()`, `_network_input_missing`) are here too: this registers as its NetworkEntity's input_owner. A pawn without a ControllerManager has no input and no player: it stands still, and can't be possessed.
-
-What happens in odd cases (all checked in tests/controller_manager_selftest.gd):
-- Its parent isn't a Pawn: it warns, and nobody is ever in charge.
-- No AIController child: an unpossessed pawn has nobody in charge, and its input stays as it is.
-- A player's controller is freed while attached: it's ignored, as if it had let go.
-- Control changes hands while the pawn is following a path: the path is dropped.
+Only PlayerController calls `attach_player()` and `detach_player()`. Design: pawn spec 6.4, 8.17.
 
 ### Settings and properties
 
-- `possessable: bool` = `true`: Whether a player may take control of this pawn. Turn it off on pawns players should never control.
-  
-  On by default: off, people would be left wondering why their pawn doesn't work. Something still has to ask for a possession, so a wrong one is a clear bug that gets looked at. To turn it off in a pawn scene whose ControllerManager comes from the game's defaults, add parts/ControllerManager.tscn to the scene yourself and untick it there: PawnInitializer leaves a part the scene already has alone.
+- `possessable: bool` = `true`: Whether a player may take control of this pawn. Turn it off on pawns players should never control. To change it where the ControllerManager comes from the game's defaults, add parts/ControllerManager.tscn to the pawn scene first.
 - `missing_input_hold_ticks: int` = `-1`: On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own.
 - `missing_input_fade_ticks: int` = `-1`: Then its direction fades to nothing over this many ticks. -1 uses NetworkSession's setting.
 - `move_input: Vector3` = `Vector3(0, 0, 0)`: the direction to go, in world space, up to length 1
@@ -131,7 +105,7 @@ What happens in odd cases (all checked in tests/controller_manager_selftest.gd):
 
 - `get_controller_in_charge() -> ControllerBase`: Who the pawn follows right now, or null. See the rule in the class description.
 - `take_input_command(tick: int) -> InputCommand`: This tick's input from the controller in charge, or null when nobody here is.
-- `tick_input(tick: int) -> void`: The pawn calls this once per tick, in its input phase: where this pawn's input is decided here, asks the controller in charge and writes its command into the input. A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
+- `tick_input(tick: int) -> void`: The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. A script that writes input later in the same phase wins.
 - `apply_input(command: InputCommand) -> void`: Writes a command into this tick's input.
 - `is_action_held(action: StringName) -> bool`: True if a named action is held this tick.
 - `was_action_pressed(action: StringName) -> bool`: True if a named action is held this tick but wasn't last tick: a press.
@@ -140,8 +114,8 @@ What happens in odd cases (all checked in tests/controller_manager_selftest.gd):
 - `decides_own_input() -> bool`: True where this pawn's input is decided: offline, its owner's machine, or the server for a pawn nobody owns. False on the server for a client's pawn, whose input arrives over the network, and on a client for anyone else's pawn.
 - `has_player() -> bool`: True if a player controls this pawn. On a client, that's any player, not only this machine's.
 - `set_has_player(value: bool) -> void`: PossessionCoordinator tells the pawn's manager. Nothing else should call this.
-- `sanitize_network_input(values: Dictionary) -> Dictionary`: On the server: a client's input is never trusted. Wrong types are replaced, and direction is limited to full speed. The values are keyed as the pawn's TickState lists them ("ControllerManager:move_input"); plain names ("move_input") work too, for scripts and tests.
-- `_network_input_missing() -> void`: On the server: this tick's input never arrived, so the last one repeats. A held direction repeats fine, and a press doesn't, since a repeated hold isn't "newly held". After missing_input_hold_ticks, the direction fades out over missing_input_fade_ticks. Held actions are left alone, so a key still held when input comes back doesn't count as a new press.
+- `sanitize_network_input(values: Dictionary) -> Dictionary`: On the server: a client's input is never trusted. Wrong types are replaced and direction is limited to full speed. Keys are as the pawn's TickState lists them ("ControllerManager:move_input"); plain names work too.
+- `_network_input_missing() -> void`: On the server: this tick's input never arrived, so the last one repeats (a held direction repeats; a press doesn't). After missing_input_hold_ticks the direction fades out over missing_input_fade_ticks. Held actions are left alone.
 - `attach_player(controller: ControllerBase) -> void`: PlayerController calls this when it takes the pawn.
 - `detach_player(controller: ControllerBase) -> void`: PlayerController calls this when it lets go. A controller that isn't the attached one changes nothing.
 - `_refresh() -> void`: Checks at the end of the frame whether who's in charge changed. Several changes in one frame give one check.
@@ -152,17 +126,9 @@ What happens in odd cases (all checked in tests/controller_manager_selftest.gd):
 
 Turns action names like &"jump" into bits, so an input command carries every held action in one int.
 
-Pawn spec section 5. Why bits: an input command goes over the network every tick, and one int is much smaller than a list of names. Checking "is jump held?" is one AND.
+One int is much smaller than a list of names on the network, and "is jump held?" is one AND. Every machine must give an action the same bit, so the game lists its actions in resources/input_actions.tres (an InputActionsRes) and each gets the bit of its place in the list; the list is part of NetworkSession's content hash. An unlisted action is added with a warning offline, and gets no bit (never held) in a network session. Past 64 actions the extras get no bit.
 
-Why a declared list: in multiplayer every machine must give the same action the same bit. So the game lists its actions in resources/input_actions.tres (an InputActionsRes), and each one gets the bit of its place in that list, the same everywhere. The file is the only place the list lives. The list is part of NetworkSession's content hash, so machines with different lists can't connect.
-
-What happens in odd cases (all checked in tests/input_actions_selftest.gd):
-- No list file: a warning, and the list starts empty. Each action used is then added as it's first seen, with its own warning.
-- An action nobody listed, used at runtime: offline, added at the end with a one-time warning. A typo such as &"Jump" shows up the same way. While a network session is running it gets no bit (it's never held), with a one-time warning, because two machines adding names in a different order would disagree on what a bit means.
-- Empty or blank name: no bit (0). Never an error.
-- More than 64 actions: the extra ones get no bit, with a warning.
-
-A static class, not an autoload, so it works in headless tests. TagRegistry works the same way.
+A static class, not an autoload, so it works in headless tests. Design: pawn spec 5.
 
 ### Constants
 

@@ -1,9 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: ai/CHANGELOG.md.
 ## A condition that passes if any one of its conditions passes: "this, or that".
 ##
-## Scaling spec 6.2. A behaviour's own list of conditions needs all of them ("this and that"); this is how to say "or". Look Toward,
-## for example, runs while something half-noticed is in memory, or an unknown attacker hit the pawn lately. With an empty list it
-## never passes (none of nothing passes). The conditions are checked in order and it stops at the first that passes.
+## A behaviour's own list of conditions needs all of them; this is how to say "or" (Look Toward: something half-noticed, or an unknown
+## attacker hit lately). The conditions are checked in order and it stops at the first that passes; an empty list never passes.
+## Design: scaling spec 6.2.
 class_name AIAnyCondition
 extends AICondition
 

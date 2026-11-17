@@ -15,6 +15,10 @@ None in this folder yet. Serving one terrain only is a "not yet" (streaming spec
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): moved to the README: `ChunkStreamer`'s unload margin, the ground-under-sources budget rule and its odd cases (no terrain, no sources, over the limit, no `TickDriver`, no streamer). The source contract stays in `StreamingSource`, shortened. No stale comments found.
+
 ## 2026-11-17
 
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup. The source contract now names all four readers (the streamer, the nav feeder, the AI switch-off and the replay), and the "how to use" steps say the `WorldCoordinator` connects the streamer and turns off `build_on_start` itself.

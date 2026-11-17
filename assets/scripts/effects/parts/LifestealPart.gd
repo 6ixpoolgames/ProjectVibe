@@ -1,8 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## Gives whoever applied the effect a share of the damage it just dealt, once. A do-once part ([EffectPart]).
 ##
-## Pawn spec 8.11. Put it after the effect's StatChangePart: parts run in order, and this reads the Health they've taken so far in
-## this application (after resistances), so a resisted hit heals less. Nothing happens with no source, a dead source, or no damage.
+## Put it after the effect's StatChangePart: parts run in order, and this reads the damage taken so far in this application (after
+## resistances). Nothing happens with no source, a dead source, or no damage.
+## Design: pawn spec 8.11.
 class_name LifestealPart
 extends EffectPart
 

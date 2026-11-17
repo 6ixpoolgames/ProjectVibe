@@ -1,23 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-12. History: world/CHANGELOG.md.
-## A height below which pawns die.
+## A height below which pawns die, like Unreal's "kill Z".
 ##
-## Like Unreal's "kill Z": place one in a level, at the height you want (its own Y), well below the lowest ground. A pawn that falls
-## below it gets [member kill_effect], which by default takes all its Health, so it dies the usual way: its Death ability runs, a
-## player comes back at a spawn point (SpawnManager), and a spawner's pawn is replaced.
-## [br]
-## How it works: on the authority only (the server, or offline), every [member check_every_ticks] ticks, after every pawn has
-## simulated, it looks at each pawn in the tree. One below the height that isn't dead already gets the effect. Clients do nothing: the
-## death reaches them in snapshots, as any death does.
-## [br]
-## [b]Reporting falls[/b] ([member report_falls]). When a pawn falls this far, a warning in the Debugger says how it got there: where it
-## was last standing, how long before, how fast it was going, and whether there's ground at the spot it fell through. Ground there
-## means it went through solid ground (a physics bug); no ground means it went off the edge of the loaded world (a streaming bug, or the
-## end of the map).
-## [br]
-## What happens in odd cases (checked in tests/kill_floor_selftest.gd):
-## [br]- A pawn with no Health or no EffectManager can't be killed here, so it keeps falling. It's warned about once, by name.
-## [br]- No kill_effect: nothing happens to anyone, and a warning says so once.
-## [br]- Several KillFloors: each checks on its own.
+## Place one in a level at the height you want (its own Y), well below the lowest ground. A pawn that falls below it gets
+## [member kill_effect], by default all its Health, so it dies the usual way (its Death ability, a respawn at a SpawnManager spawn
+## point, a spawner's replacement). It runs on the authority only (the server, or offline), every [member check_every_ticks] ticks, after
+## every pawn has simulated; clients see the death in snapshots. With [member report_falls] on, a warning says how the pawn got there.
 # REFACTOR: the fall report is a debugging aid inside a gameplay class, on by default, and it tracks every pawn's last standing place
 # on every check. A diagnostics module could do the tracking and write the report when pawn_fell fires (production kept apart from
 # debug code). See CHANGELOG.md.
@@ -49,7 +36,6 @@ var _last_on_ground := {}
 
 func _ready() -> void:
 	add_to_group(GROUP)
-	# GDScript note: after_simulate fires once per tick, after every pawn has simulated, with the tick's length and number.
 	TickDriver.after_simulate.connect(_on_after_simulate)
 
 
@@ -82,7 +68,7 @@ func _check_pawns(tick: int) -> void:
 				seen[id] = _last_on_ground[id]
 			continue
 		# The report is written before it dies, and shown only if it did, so a pawn that can't die (which carries on falling) isn't
-		# reported on every check. GDScript note: dictionary.get(key) gives null when the key isn't there.
+		# reported on every check.
 		var report := fall_report(pawn, _last_on_ground.get(id), tick) if report_falls else ""
 		if kill(pawn) and report_falls:
 			push_warning(report)

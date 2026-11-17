@@ -1,26 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-12. History: visuals/CHANGELOG.md.
 ## Makes a pawn's model move like a toy being played with: rocking, hopping, leaning into a dash and falling over when it dies.
 ##
-## The owner's toy look (pawn spec 8.12): it rocks from side to side and hops a little with each step instead of walking with legs,
-## leans into a dash, tips back when knocked back, and falls over when it dies. Put it under the pawn's Visual/Model, with nothing
-## else needed: it makes the model itself from [member toy_scene], and stands it on a coloured base like a figurine's, so teams can
-## be told apart.
+## Part of the toy look (pawn spec 8.12). Put it under the pawn's Visual/Model; it makes the model from [member toy_scene] (held in
+## the first frame of [member pose_animation]) and stands it on a coloured base so teams can be told apart. It moves only itself, with
+## its origin at the pawn's feet, so "forward" is the pawn's -Z. The waddle's speed comes from how fast the drawn model moves, not the
+## pawn's velocity, so pawns drawn from snapshots on a client waddle too.
 ## [br]
-## What it is and isn't:
-## [br]- Visual only. It runs once per rendered frame, only reads the pawn, and changes nothing the game simulates, so it needs no
-##   rollback and works the same on the server, on a client predicting its own pawn, and on a client drawing other pawns.
-## [br]- It moves only itself (this node). The pawn turns Visual/Model to face the way the pawn faces, and this sits inside that, so
-##   "forward" here is always the pawn's forward (-Z) and "side to side" is its left and right.
-## [br]- Its origin is at the pawn's feet, so rocking and tipping over pivot on the ground, as a toy standing on a table does.
-## [br]
-## How fast it waddles comes from how fast the drawn model moves (Visual, smoothed between ticks), not from the pawn's velocity, so a
-## pawn drawn from snapshots on a client waddles too. The step rate grows with speed: [member steps_per_metre] steps for every metre.
-## [br]
-## The model: toy_scene is instanced as a child at [member toy_scale] (turned round if [member turn_model_round] is on). If it has an
-## AnimationPlayer, the first frame of [member pose_animation] holds the model in a still pose for the waddle to move.
-## [br]
-## With no display (a headless server or test), the figure isn't built and its per-frame waddle never runs, since nothing can see it
-## (RunEnvironment.runs_visuals). A host playing in a window still draws it.
+## Visual only: once per rendered frame, only reads the pawn, changes nothing simulated, so it needs no rollback. With no display it
+## builds nothing and never runs (RunEnvironment.runs_visuals).
 class_name ToyWaddle
 extends Node3D
 
@@ -106,7 +93,7 @@ func _ready() -> void:
 func _bind() -> void:
 	_bound = true
 	_visual = _pawn.get_visual()
-	# GDScript note: "is" checks the class, so a scene's own Dash subclass counts.
+	# "is" checks the class, so a scene's own Dash subclass counts.
 	if _pawn.ability_manager:
 		for ability in _pawn.ability_manager.get_abilities():
 			if ability is DashAbility and _dash == null:
@@ -134,7 +121,7 @@ func _animate(delta: float) -> void:
 	moved.y = 0.0
 	_last_position = at
 	# Named blend, not ease, which is one of Godot's own functions.
-	var blend := 1.0 - exp(-ease_rate * delta) # GDScript note: exp() gives the same easing at any frame rate
+	var blend := 1.0 - exp(-ease_rate * delta) # the same easing at any frame rate
 	_speed = lerpf(_speed, moved.length() / delta, blend)
 	var dead := _pawn.is_dead()
 	var amount := 0.0 if dead else clampf(_speed / walk_speed, 0.0, 1.5) # 0 standing, 1 walking, up to 1.5 sprinting
@@ -161,7 +148,7 @@ func _animate(delta: float) -> void:
 	_fall = lerpf(_fall, deg_to_rad(death_fall_degrees) if dead else 0.0, 1.0 - exp(-ease_rate * 0.5 * delta))
 
 	position = Vector3(0.0, hop + breathe, 0.0)
-	# GDScript note: rotation is in radians, x then y then z. z turns it to its side (rocking, falling); x tips it forward or back.
+	# Radians, x then y then z: z turns it to its side (rocking, falling), x tips it forward or back.
 	rotation = Vector3(_lean, 0.0, -(rock + _fall))
 
 
@@ -181,7 +168,7 @@ func _hold_pose(model: Node) -> void:
 		return
 	for player: AnimationPlayer in model.find_children("*", "AnimationPlayer", true, false):
 		if player.has_animation(pose_animation):
-			# GDScript note: play() then pause() at the start shows that frame and leaves it there.
+			# play() then pause() at the start shows that frame and leaves it there.
 			player.play(pose_animation)
 			player.seek(0.0, true)
 			player.pause()

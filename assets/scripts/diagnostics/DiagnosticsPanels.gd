@@ -1,28 +1,19 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: diagnostics/CHANGELOG.md.
-## Diagnostics' on-screen panels, one key each (docs/diagnostics/DIAGNOSTICS_SPEC.md).
+## The on-screen panels, one key each, for reading [DiagnosticsManager]'s numbers.
 ##
-## One key each is the owner's call, for readability. They use a small fixed-width font, in two columns so they never overlap each
-## other: F1, F2 and F4 down the top right, F6, F7 and F8 up from the bottom left.
-## [br]- F1 help: these keys, and the session log's name.
-## [br]- F2 frame graph: the last few seconds, one bar per frame, split into physics, scripts and the rest, with lines at 1/60 and
-##   1/30 s.
-## [br]- F4 timings: the last second's averages, the frame's parts, the tick, and the most expensive timing scopes (up to
-##   [constant SCOPES_LISTED]).
-## [br]- F6 spikes: the newest frames over budget, each with what took the time.
-## [br]- F7 pawn inspector: Ctrl + left click a pawn to see its flags, abilities, effects, AI and input.
-## [br]- F8 log: warnings and errors, with how often each came.
-## [br]- F9 nav view: the nav mesh, nav links and nav markers in the world around the camera ([NavDebugView], debug builds only).
-## [br]- F12 capture: saves a capture folder ([method DiagnosticsManager.capture]) and says where.
-## [br]
-## A proper look comes with UI v0 (the roadmap); this is for reading numbers.
+## A small fixed-width font in two columns so they never overlap: F1, F2 and F4 down the top right, F6, F7 and F8 up from the bottom
+## left. F1 help, F2 frame graph, F4 timings (up to [constant SCOPES_LISTED] scopes), F6 spikes, F7 pawn inspector (Ctrl + left click
+## a pawn), F8 log, F9 nav view ([NavDebugView], debug builds only), F12 capture ([method DiagnosticsManager.capture]). The
+## diagnostics README lists what each shows.
+## Design: diagnostics spec.
 class_name DiagnosticsPanels
 extends CanvasLayer
 
-## Panels are refreshed this often, in seconds; the graph every frame.
+## Seconds between panel refreshes; the graph redraws every frame.
 const REFRESH_SECONDS := 0.25
 const FONT_SIZE := 12
 const WIDTH := 470.0
-## The most scopes the timings panel lists, so it fits on screen.
+## The most scopes the timings panel lists.
 const SCOPES_LISTED := 14
 
 var manager: DiagnosticsManager
@@ -246,7 +237,7 @@ func _timings_text(n: Dictionary) -> String:
 	lines.append("frame %6.1f ms %4.0f fps  worst %4.0f  late %3.0f%%  very late %3.0f%%" % [n.frame_ms, n.fps, n.frame_worst_ms, n.over_60_percent, n.over_30_percent])
 	lines.append("  (late: over 20 ms, a missed 1/60 s; very late: over 34 ms)")
 	lines.append("  physics %6.1f ms (%.2f steps)   scripts %5.1f   rest %5.1f" % [n.physics_ms, n.steps_per_frame, n.scripts_ms, n.rest_ms])
-	# The animation category (the owner's request), the part of the scripts spent animating (every animation.* scope)
+	# The animation category: the part of the scripts spent animating (every animation.* scope).
 	lines.append("    of which animation %5.2f ms" % n.get("animation_ms", 0.0))
 	lines.append("  tick    %6.2f ms   %3.0f ticks/s   dropped %.1f/s" % [n.tick_ms, n.ticks_per_second, n.dropped_per_second])
 	# The load ladder (pawn spec 8.21), and how many AI pawns run every tick, every 2nd and every 4th.

@@ -1,27 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Shared data and settings for one pawn's AI, and the step that runs the AI parts in order.
 ##
-## A part on the pawn, added by PawnInitializer. Pawn spec section 10. It makes no decisions. It holds what the other AI parts share,
-## so they don't each look it up again:
-## [br]- references: the pawn, its AI controller (the hands), and the other AI parts ([member state_manager],
-##   [member behaviour_manager], [member sensing_manager], [member memory], [member target_selector])
-## [br]- settings for the whole AI: [member while_possessed], [member decision_interval_ticks], [member random_seed]
-## [br]- the decision waiting to happen this tick, if any, and how strong its reason is (the "event", pawn spec 10.7)
-## [br]- random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
-## [br]- the current target, and shared inputs behaviours read ([method current_target_index], [method most_aware_index])
-## [br]- the pawn's AI inputs ([member inputs]): the named numbers behaviours' conditions read (scaling spec 6.2)
-## [br]- the last hit the pawn took and the latest swing coming at it, for states and behaviours
-## [br]
-## The pawn calls [method run_ai] from its own tick, which runs the AI parts in a fixed order. Nothing here ticks on its own.
-## [br]
-## How to use it (behaviours and states get it as their "context"):
+## A part on the pawn, added by PawnInitializer. It makes no decisions: it holds what the other AI parts share (the pawn, its AI
+## controller, the other parts, the current target, the pawn's [AIInputs], the last hit and swing coming, the waiting decision, and
+## random numbers that replay the same), and the pawn calls [method run_ai] from its own tick. Behaviours and states get it as their
+## "context":
 ## [codeblock]
-## context.pawn, context.controller, context.memory, context.state_manager, context.behaviour_manager
+## context.controller, context.memory, context.state_manager, context.behaviour_manager
 ## context.current_tick            # the tick the AI is running now
-## context.current_state_name()    # &"Idle", or &"" before the first state is picked
-## context.has_target()            # true while the target selector has picked a target
-## context.random_unit(salt)       # a number from 0 up to 1, the same on every run for this pawn and tick
+## context.random_unit(salt)       # 0 up to 1, the same on every run for this pawn and tick
 ## [/codeblock]
+## Design: pawn spec 10, 10.7 and 10.9.
 class_name AIContextComponent
 extends Node
 
@@ -32,14 +21,12 @@ enum WhilePossessed {
 	FULL, ## everything runs. The AI controller keeps its last order without acting on it until it's in charge again
 }
 
-## What the AI does while a player has the pawn. Which is right depends on the game: MEMORY_ONLY suits possessing an NPC and
-## letting go, where the AI should already know what's around.
+## What the AI does while a player has the pawn. MEMORY_ONLY suits possessing an NPC and letting go: the AI already knows what's around.
 @export var while_possessed := WhilePossessed.MEMORY_ONLY
-## How often the AI decides, in ticks: 15 is four times a second at 60 ticks a second. Each pawn is offset by its own number, so a
-## crowd doesn't all decide on the same tick. Some events wake a decision early (pawn spec 10.9).
+## How often the AI decides, in ticks at 60 a second (15: four times a second). Each pawn is offset by its own number, so a crowd
+## doesn't all decide on one tick. Some events wake a decision early (pawn spec 10.9).
 @export_range(1, 600, 1, "or_greater") var decision_interval_ticks := 15
-## Part of every random number this AI uses. Two pawns with the same seed still differ, because their own number goes in too.
-## A game can set it from its world seed, so a replay of the same world makes the same choices.
+## Part of every random number this AI uses; pawn numbers still make two pawns differ. A game can set it from its world seed.
 @export var random_seed := 0
 
 ## The pawn this AI belongs to, or null if its parent isn't one.
@@ -65,14 +52,14 @@ var _event_is_normal := true # true when every reason was an ordinary decision t
 
 
 func _init() -> void:
-	# GDScript note: nothing here runs per frame. The pawn calls into the AI parts on its tick.
+	# Nothing here runs per frame: the pawn calls into the AI parts on its tick.
 	set_process(false)
 	set_physics_process(false)
 	inputs = AIInputs.new(self)
 
 
 func _enter_tree() -> void:
-	pawn = get_parent() as Pawn # GDScript note: "as" gives null when the parent isn't a Pawn, rather than an error
+	pawn = get_parent() as Pawn
 	if pawn == null:
 		push_warning("AIContextComponent: its parent isn't a Pawn, so this AI has nothing to drive.")
 		return
@@ -106,9 +93,8 @@ var controller: AIController:
 			return pawn.controller_manager.ai_controller as AIController
 		return null
 
-# The context finds the pawn's other AI parts itself (pawn.ai_context.memory, say), so the pawn holds only ai_context. They're
-# looked for the first time one is asked for, and again after a part is added to or removed from the pawn.
-# GDScript note: "get:" under a variable runs whenever it's read, so pawn.ai_context.memory works like a plain variable.
+# The context finds the pawn's other AI parts itself, so the pawn holds only ai_context. They're looked for the first time one is
+# asked for, and again after a part is added to or removed from the pawn.
 
 ## The pawn's state manager, or null.
 var state_manager: AIStateManager:
@@ -229,9 +215,8 @@ func current_state_name() -> StringName:
 	return state.name if state else &""
 
 
-## The tick of the last hit this pawn took, noted from the AbilityManager's hit_arrived on the server; -1: never hit. State rules
-## (AIAwarenessState) and behaviours read it; the hit isn't turned into a memory entry, because there's no damage sense (the owner's
-## call).
+## The tick of the last hit this pawn took, noted from the AbilityManager's hit_arrived on the server; -1: never hit. Not a memory
+## entry: there's no damage sense.
 var last_hit_tick := -1
 ## Who made the last hit.
 var last_attacker: Node3D = null
@@ -298,10 +283,9 @@ func unknown_hit_point(within_ticks: int) -> Variant:
 	return null
 
 
-## Something half-noticed to look at or go and see: the most aware memory entry's last known position while that entry isn't
-## certain yet, or else where an attacker the AI doesn't remember hit from, if that was within this many ticks (at 60 a second);
-## null when there's neither. Look Toward and Investigate head there. Their conditions check the same two facts through the inputs
-## ([method AIInputs.half_noticed_conditions]), which the C++ decider can read.
+## Something half-noticed to look at or go and see: the most aware memory entry's last known position while it isn't certain yet,
+## or else where an unremembered attacker hit from, within this many ticks (at 60 a second); null when neither. Their conditions
+## check the same facts through [method AIInputs.half_noticed_conditions], which the C++ decider can read.
 func point_of_interest(within_ticks: int) -> Variant:
 	var index := most_aware_index()
 	if index >= 0 and not memory.is_certain_at(index):
@@ -324,14 +308,8 @@ func has_target() -> bool:
 # --- Running the AI ---
 
 
-## The AI's step, in a fixed order (pawn spec sections 4 and 10.9). The pawn calls it in its input phase; the AI's core part runs
-## the AI, and the pawn only calls this. Runs only where the AI runs (offline or the server), never while a rollback replays ticks,
-## and, while a player has the pawn, only as far as [member while_possessed] allows. Order:
-## [br]1. Forces and taunts asked for during the last tick are applied, in the order they were asked for, even while possessed.
-## [br]2. Sensing, which writes into memory. MEMORY_ONLY stops after this.
-## [br]3. On a decision tick, or when something asked for a decision: the target is picked, the state is checked, then the
-##   behaviour manager decides.
-## [br]4. The running behaviour ticks, which calls the AI controller.
+## The AI's step, in a fixed order (pawn spec 4 and 10.9), called by the pawn in its input phase. Runs only where the AI runs (offline
+## or the server), never while a rollback replays ticks; while a player has the pawn, only as far as [member while_possessed] allows.
 func run_ai(tick: int) -> void:
 	if pawn == null or not pawn.runs_ai_here():
 		return
@@ -445,17 +423,16 @@ func clear_decision() -> void:
 # --- Random numbers that replay the same ---
 
 
-## A number from 0 up to (not including) 1 for this tick. salt says what it's for, so two uses on one tick differ: a behaviour
-## uses its name's hash. The same seed, pawn, tick and salt always give the same number, on every machine and every run.
+## A number from 0 up to (not including) 1 for this tick. salt says what it's for (a behaviour uses its name's hash). The same
+## seed, pawn, tick and salt give the same number on every machine and run.
 func random_unit(salt: int) -> float:
 	return random_unit_at(current_tick, salt)
 
 
 ## random_unit() for a given tick.
 func random_unit_at(tick: int, salt: int) -> float:
-	# GDScript note: ints are 64-bit. Each step keeps the value to 32 bits, so the multiplications never overflow, and the result
-	# is the same everywhere. This is a small integer hash, not a random generator: nothing is stored between calls, so skipping a
-	# call never changes the next one.
+	# A small integer hash, not a generator: nothing is stored, so skipping a call never changes the next. Each step stays within
+	# 32 bits so nothing overflows. Bit-for-bit twin of the hash in native/src/ai_batch_decider.cpp.
 	var h := (random_seed * 83492791) ^ (pawn_number() * 19349663) ^ (tick * 73856093) ^ salt
 	h &= 0xFFFFFFFF
 	h = ((h ^ (h >> 16)) * 0x45D9F3B) & 0xFFFFFFFF
@@ -481,15 +458,14 @@ func pawn_number() -> int:
 	if entity and entity.entity_id >= 0:
 		return entity.entity_id
 	# The hash is kept until the name changes, since it's asked for at least twice a tick for every pawn.
-	# GDScript note: comparing two StringNames is one pointer comparison, far cheaper than hashing the text.
+	# StringNames compare by pointer, far cheaper than hashing the text.
 	if pawn.name != _number_name:
 		_number_name = pawn.name
 		_name_number = String(pawn.name).hash() & 0x7FFFFFFF
 	return _name_number
 
 
-## Any pawn's number, as [method pawn_number] gives it, for a pawn that may have no AI of its own (a player's, say): its network id
-## when it has one, or else a hash of its name. 0 for null.
+## Any pawn's number, as [method pawn_number] gives it, for a pawn that may have no AI of its own. 0 for null.
 static func number_of(other: Pawn) -> int:
 	if other == null:
 		return 0

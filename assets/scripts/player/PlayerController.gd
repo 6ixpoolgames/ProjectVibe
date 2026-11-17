@@ -1,30 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: player/CHANGELOG.md.
 ## One player's controls: reads their devices, aims their camera, and gives their pawn input.
 ##
-## A first version: enough to drive a pawn and aim a camera. It survives with no pawn, as Unreal's does, and PossessionCoordinator
-## creates it and tells it which pawn it has (pawn spec sections 5 and 6.2).
+## Survives with no pawn, as Unreal's does. PossessionCoordinator creates it and tells it which pawn it has. It reads the player's
+## devices (this machine only), holds the look direction and aims the camera arm, owns the player's one arm (it moves to each pawn
+## taken), and gives its pawn this tick's input when the ControllerManager asks ([method take_input_command]). Named actions come from
+## keys through [member action_keys]. It moves nothing itself: the pawn's abilities do. To drive it from a script, extend it and
+## override the _read functions.
 ## [br]
-## What it does:
-## [br]- reads the player's devices, on this machine only
-## [br]- holds the look direction, and tells the current camera arm where to look
-## [br]- gives its pawn this tick's input as an InputCommand, when the pawn's ControllerManager asks ([method take_input_command]).
-##   Named actions (jump, sprint, ...) come from keys through [member action_keys].
-## [br]- owns the player's one camera arm, which moves to each pawn they take (CameraMount, pawn spec 8.18)
-## [br]
-## What it doesn't do: move anything. The pawn's abilities do that, so an RTS or a flying pawn needs no special controller.
-## [br]
-## To drive it from a script, as a test or a replay viewer would, extend it and override the _read functions.
-## [br]
-## [b]Spectating.[/b] PossessionCoordinator.spectate() lets go of the pawn and calls [method start_spectating], and the player flies a
-## FreeFlyCamera ([member spectator_scene]) with the same keys and mouse, the view starting where the camera was. Taking a pawn stops
-## it. Nothing starts it by itself: the game decides when a player spectates (between matches, waiting to respawn, after letting go
-## of a pawn). The controls are in FreeFlyCamera's description.
-## [br]
-## What happens in odd cases (all checked in pawn/tests/possession_selftest.gd):
-## [br]- No pawn: it keeps reading look input, and nothing moves.
-## [br]- Spectating with a pawn still attached, as on a client between asking to let go and the server's answer: the keys fly the
-##   spectator and the pawn gets no movement or actions from them. The answer then lets go without stopping the spectating.
-## [br]- An action missing from the project's input map: treated as not pressed.
+## [b]Spectating:[/b] PossessionCoordinator.spectate() lets go of the pawn and calls [method start_spectating]; the player then flies
+## a FreeFlyCamera ([member spectator_scene]). Taking a pawn stops it. While spectating with a pawn still attached (a client waiting
+## for the server's answer), the keys fly the spectator and the pawn gets no input from them.
+## Design: pawn spec 5, 6.2, 8.18.
 # REFACTOR: the InputMap names for moving, the wheel and the mouse buttons (move_left, scrollWheel_up, left_click, middleMouse_button)
 # are written in the code, unlike action_keys; settings would let a designer remap them without code. See CHANGELOG.md.
 class_name PlayerController
@@ -48,7 +34,6 @@ enum LookMode {
 @export var click_to_move := false
 ## Which key in the project's input map presses which named action. The left side is an action from InputActions, and the right is an
 ## action in Project Settings > Input Map. An action with no key here is never pressed by the player.
-# GDScript note: Dictionary[StringName, StringName] is a typed dictionary, so the inspector only accepts names on both sides.
 # dash is Left Alt and primary the left mouse button (a melee swing).
 @export var action_keys: Dictionary[StringName, StringName] = {&"jump": &"move_jump", &"sprint": &"move_sprint", &"dash": &"move_dash", &"primary": &"attack_primary"}
 ## The free-flying camera used while spectating (start_spectating()). Its root must be a FreeFlyCamera. Empty: a

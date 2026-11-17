@@ -1,17 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## The base for one AI state, such as Idle, Alert or Combat: "what situation am I in".
 ##
-## A child of the pawn's AIStateManager. Pawn spec section 10.6. A state doesn't act: it decides which behaviours are allowed (each
-## behaviour lists its states by node name) and, with its [member priority], how strong a reason its arrival is for interrupting the
-## running behaviour.
-## [br]
-## How the state is picked: the state manager checks each state's [method prerequisites_met] from the highest priority down, and the
-## first that holds wins. No separate rules for staying, and no minimum time in a state.
-## [br]
-## How to make one: extend this and override [method prerequisites_met]. Read thresholds from @export settings, never from numbers
-## in code, so designers can tune them. Optionally override [method enter] and [method exit].
-## [br]
-## The state's name is its node name, such as Idle. Behaviours' allowed_states and the debug readout use it.
+## A child of the pawn's [AIStateManager]. A state doesn't act: it decides which behaviours are allowed (they list states by node name)
+## and, with its [member priority], how strong a reason its arrival is for interrupting the running behaviour. The manager checks each
+## state's [method prerequisites_met] from the highest priority down and the first that holds wins; there is no minimum time in a state.
+## Extend it and override [method prerequisites_met], reading thresholds from exports so designers can tune them; optionally
+## [method enter] and [method exit]. Its node name is its name.
+## Design: pawn spec 10.6.
 class_name AIStateBase
 extends Node
 

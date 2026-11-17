@@ -1,42 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## The base for one AI behaviour, such as Wander or Chase: one concrete thing to do.
 ##
-## A child of the pawn's AIBehaviourManager. Pawn spec section 10.7. Each behaviour holds its own checks, score and actions; the
-## behaviour manager only judges between them (pawn spec 10.8). It acts only through the AI controller, the pawn's hands:
-## [code]context.controller.move_to()[/code], [code]press()[/code], [code]hold()[/code], [code]look_at_point()[/code]. It never touches
-## abilities or the body directly (pawn spec section 3, rule 4).
-## [br]
-## How to make one: extend this, set the settings below in the inspector or in _init(), and override any of:
-## [br]- [method own_conditions]: when it may run, as conditions built from its settings (scaling spec 6.2)
-## [br]- [method enter]: once, when it starts
-## [br]- [method tick]: while it runs, every [member tick_interval_ticks], or sooner when woken (below). Return SUCCEEDED or FAILED
-##   to finish
-## [br]- [method exit]: once, when it stops, whatever the reason. Clean up here, such as [code]context.controller.stop()[/code]
-## [br]
-## [b]Wake-ups[/b] (scaling spec 6.2): a behaviour that's waiting for something can say so, and its tick() runs when it happens instead
-## of checking every few ticks: [method wake_on_path_end] (a walk it started ends, arrived or given up), [method wake_on_action_end]
-## (an ability on that action finishes or is cancelled) and [method wake_at] (a tick, such as the end of a pause). The navigation
-## and ability managers already watch these, so telling the behaviour costs one signal per event. [member tick_interval_ticks] is
-## then the longest it sleeps, a safety net. Wake-ups are cleared when it starts; set them in [method enter] and again in tick() as
-## needed (wake_at is used up when it fires).
-## [br]
-## [b]When it may run[/b] is plain data: conditions ([AICondition]) over the pawn's inputs ([AIInputs]), all of which must pass.
-## Its own come from [method own_conditions] (Attack: the target within its swing's reach); a designer adds more in
-## [member conditions], and shapes its score with [member score_curves], without code. Because they're data, the same decision
-## can be made in C++ for a crowd (AIBatchDecider). Overriding [method is_available] or [method score] with code still works, but
-## the C++ decider then has to ask GDScript for that behaviour's answers ([method has_own_code]).
-## [br]
-## The behaviour's name is its node name, such as Wander. The fixed order and the random numbers read it, so give it a real name.
-## [br]
-## Every setting here counted in ticks is written for 60 ticks a second, and converted to the match's rate where it's read
-## ([code]TickDriver.ticks_at_rate[/code]), so it lasts the same time at any rate.
-## [br]
-## Settings worth knowing (pawn spec 10.7):
-## [br]- [member persistence], [member persistence_fade]: from when it's chosen, its score gets persistence × the fade's value. +
-##   keeps it chosen, - makes the AI prefer something else for a while. Empty fade: no persistence.
-## [br]- [member interrupt_threshold], [member cannot_be_interrupted], [member min_run_ticks]: what may replace it while it runs.
-## [br]- [member score_jitter]: a random offset on its score at each decision, for variety. -1 uses the manager's
-##   default_score_jitter.
+## A child of the pawn's [AIBehaviourManager], which only judges between behaviours. A behaviour holds its own conditions, score and
+## actions, and acts only through the AI controller ([code]context.controller.move_to()[/code], [code]press()[/code]), never on
+## abilities or the body. Extend it, set the settings below, and override [method own_conditions], [method enter], [method tick]
+## (return SUCCEEDED or FAILED to finish) and [method exit]. Its node name is its name: the fixed order and the random numbers read
+## it. Settings counted in ticks are written for 60 a second and converted where read ([code]TickDriver.ticks_at_rate[/code]).
+## Design: pawn spec 10.7, scaling spec 6.2.
 class_name AIBehaviourBase
 extends Node
 
@@ -45,7 +15,7 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 
 ## States it may run in, by node name, such as &"Idle". Empty: any state.
 @export var allowed_states: Array[StringName] = []
-## The highest score() can return. Used to skip it without running its code when it can't win.
+## The highest score() can return. Lets the manager skip it without running its code when it can't win.
 @export var max_score := 0.5
 ## Optional: the lowest score() can return. Left at -inf it can't help skip others, but it's never wrong.
 @export var min_score := -INF
@@ -69,19 +39,15 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 @export var cannot_be_interrupted := false
 ## ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
 @export var score_jitter := -1.0
-## While it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after, and sooner when a
-## wake-up it asked for happens. The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now
-## and then, or to wake when a walk ends. 1: every tick.
-## Pawns start behaviours on different ticks, so a crowd's ticks spread out by themselves. Count time in ticks with
-## context.current_tick, not by counting tick() calls, so a behaviour behaves the same at any interval.
+## While it runs, [method tick] is called every this many ticks, and sooner when a wake-up it asked for happens (the longest it
+## sleeps). Count time with context.current_tick, not by counting tick() calls. 1: every tick.
 @export_range(1, 600, 1, "or_greater") var tick_interval_ticks := 1
 ## Added to its score from when it's chosen, times persistence_fade's value. +: tends to keep it chosen. -: prefers others for a while.
 @export var persistence := 0.0
 ## How persistence fades over ticks. Empty: no persistence.
 @export var persistence_fade: FadeProfile
-## This pawn's own mask over [member persistence_fade]: multiplied with it, so something can reshape one pawn's persistence without
-## changing the brain the others share. Null: none. Set through [method AIBehaviourManager.set_persistence_mask] so C++ hears of it.
-## A hook for now (the owner's call); nothing sets one yet.
+## This pawn's own mask over [member persistence_fade], multiplied with it. Null: none. Set through
+## [method AIBehaviourManager.set_persistence_mask] so C++ hears of it. A hook; nothing sets one yet.
 var persistence_mask: FadeProfile = null
 
 ## Set by the AIBehaviourManager.
@@ -243,7 +209,7 @@ func is_allowed_in(state_name: StringName) -> bool:
 
 
 ## True while its cooldown hasn't finished.
-# These functions' tick parameters are named at_tick: "tick" would clash with tick() above, which the editor warns about.
+# Parameters are named at_tick, not tick: that would clash with tick() above.
 func is_cooling_down(at_tick: int) -> bool:
 	return cooldown_ticks > 0 and ended_tick >= 0 and at_tick - ended_tick < TickDriver.ticks_at_rate(cooldown_ticks)
 

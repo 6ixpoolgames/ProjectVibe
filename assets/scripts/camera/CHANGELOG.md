@@ -9,6 +9,10 @@ The camera system is this folder: `PlayerCamera`, `VirtualCamera`, `CameraArm`, 
 
 None found in the documentation pass.
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): the `FreeFlyCamera`, `CameraArm` and `CameraMount` class comments shortened (the spectator's reasoning and controls moved to the README's "How it works"). `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
+
 ## 2026-11-17
 
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup.

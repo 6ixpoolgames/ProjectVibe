@@ -1,32 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
-## Effect type tags, such as damage.elemental.fire, turned into bits (pawn spec 8.11).
+## Effect type tags, such as damage.elemental.fire, turned into bits.
 ##
-## What [i]kind[/i] of effect something is: resistances, immunities and "remove every poison" go by these. The owner's design: a
-## separate tag set from the abilities' (TagRegistry), so each has its own 64 bits.
-## [br]
-## The same rules as TagRegistry and NavTags:
-## [br]- A tag is a name with dot-separated levels. A dot means "inside": damage.elemental.fire is inside damage.elemental, which is
-##   inside damage.
-## [br]- Every level gets its own bit. damage, damage.elemental and damage.elemental.fire are three bits.
-## [br]- A tag's mask holds its own bit plus its parents' bits. So a resistance to "damage.elemental" catches fire and frost with one
-##   AND, and never catches "damaged" (whole levels only).
-## [br]- The game lists its tags in a declarations file (resources/effect_tag_declarations.tres), and they're sorted and numbered at
-##   startup, the same on every machine.
-## [br]
-## Code writes tags as the constants below ([code]EffectTags.DAMAGE_PHYSICAL[/code]), never as text, so a misspelling is an error
-## when the script is checked. Designers pick them from dropdowns (addons/tag_picker). A constant here must be declared in the file:
-## effects/tests/effect_selftest checks it.
-## [br]
-## What happens in odd cases (checked in effects/tests/effect_selftest.gd):
-## [br]- Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
-## [br]- A tag nobody declared: added on the spot with a one-time warning. Fine offline; machines may disagree online, which is what
-##   the warning is for. Questions ([method has_tag]) never add tags.
-## [br]- More than 64 levels: the extra ones get no bit, match nothing, and warn once.
-## [br]- No declarations file: everything still works, and every tag just counts as undeclared.
+## What kind of effect something is: resistances, immunities and "remove every poison" go by these. The same rules as [TagRegistry] and
+## NavTags (a dot means "inside", every level gets a bit, a tag's mask includes its parents), but a separate set with its own 64 bits.
+## Code uses the constants below, never text, so a misspelling is an error; each must be declared in the declarations file.
+## Design: pawn spec 8.11.
 # REFACTOR: the third copy of the same tag rules (TagRegistry, NavTags, EffectTags), kept apart so working code didn't change. One
 # tag-set class used three times would cut the code and the tests to one; reusable. See CHANGELOG.md.
-#
-# GDScript note: everything here is static, so nobody makes an EffectTags object: call EffectTags.mask_of(...) on the class.
 class_name EffectTags
 extends RefCounted
 
@@ -44,9 +24,11 @@ const BUFF_COMBO := &"buff.combo"
 const DEBUFF := &"debuff"
 const DEBUFF_SLOW := &"debuff.slow"
 
+## The most tag levels there are bits for; more get no bit, match nothing, and warn once.
 const MAX_BITS := 64
 ## The file read by default. A game can point somewhere else with the project setting below.
 const DEFAULT_DECLARATIONS_PATH := "res://assets/scripts/resources/effect_tag_declarations.tres"
+## The project setting that points at another declarations file.
 const DECLARATIONS_SETTING := "project_base/effects/tag_declarations_path"
 
 static var _bit_of: Dictionary = {}      # tag name -> its bit number. Every level is a tag of its own.

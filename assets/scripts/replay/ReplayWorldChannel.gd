@@ -1,23 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
-## Replay channel 4, "world": the loaded ground and what keeps it loaded (replay spec section 3).
+## Replay channel 4, "world": the loaded ground and what keeps it loaded.
 ##
-## For seeing a pawn standing on a chunk that went away.
-## [br]
-## Events (the pawn id is 0 for all of them):
-## [br]- "chunk_built" (data: terrain, its id here; chunk, a Vector2i): a terrain finished building a chunk.
-## [br]- "chunk_collision" (data: terrain, chunk): its collision is in, so things can stand on it.
-## [br]- "chunk_removed" (data: terrain, chunk).
-## [br]- "source_added" (data: source, its id here; position, load, nav, active, counts): a chunk source started keeping the world
-##   loaded here. Pawns can be sources, so only sources that count on this machine are tracked (counts_on_this_machine).
-## [br]- "source_removed" (data: source): a source left, or stopped counting here (switched off).
-## [br]- "source_on" and "source_off" are no longer written, but are still read in older recordings.
-## [br]
-## A keyframe's snapshot: every terrain (id, name, chunk size, origin, built chunks) and every source (id, position, load and nav
-## distances, active and counts, which are always true now, since only sources that count are tracked).
-## [br]
-## Reading: state["terrains"] is terrain id -> {name, chunk_size, origin, chunks: {Vector2i: true}}, and state["sources"] is source
-## id -> {position, load, nav, active, counts}. Source positions are updated only by keyframes and their own events, so a moving
-## source (a player's pawn, say) is up to a second out of date; the pawn's own motion record has the exact place.
+## For seeing a pawn standing on a chunk that went away. Events (pawn id 0): chunk_built, chunk_collision, chunk_removed (data:
+## terrain, chunk), and source_added, source_removed (data: source, its id here). Only chunk sources that count on this machine
+## are tracked. "source_on" and "source_off" are no longer written but still read. A keyframe's snapshot lists every terrain and
+## source. Reading: [code]state["terrains"][/code] is terrain id -> [code]{name, chunk_size, origin, chunks}[/code] and
+## [code]state["sources"][/code] is source id -> [code]{position, load, nav, active, counts}[/code]. A source's position is up to a
+## second old (keyframes and its own events only); the pawn's motion record has the exact place.
+## Design: replay spec 3.
 class_name ReplayWorldChannel
 extends ReplayEventChannel
 
@@ -128,7 +118,7 @@ func _find_terrains() -> void:
 			continue
 		_terrains.append(terrain)
 		var id := _terrains.size()
-		# GDScript note: bind() adds the terrain's id to every call, after the signal's own arguments.
+		# bind() adds the terrain's id after the signal's own arguments.
 		terrain.chunk_built.connect(_on_chunk_built.bind(id))
 		terrain.collision_built.connect(_on_collision_built.bind(id))
 		terrain.chunk_removed.connect(_on_chunk_removed.bind(id))

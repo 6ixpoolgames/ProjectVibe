@@ -1,15 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Walks to random nearby points, pausing between them: what a pawn does when nothing more interesting can run.
 ##
-## Pawn spec section 10.7. Allowed in Idle by default. What it does, over and over: picks a random point within
-## [member wander_radius] of its home (where the pawn was when it first started wandering), walks there with the AI controller's
-## move_to, so it follows nav paths and crosses links, then stands for a random time between [member min_pause_ticks] and
-## [member max_pause_ticks].
-## [br]
-## The random points and pauses come from the context's replayable random numbers, so the same seed, pawn and ticks give the same
-## walk. A point with no way there is skipped, and another is tried on its next tick.
-## [br]
-## It never finishes on its own (it returns RUNNING), so it runs until something better comes along.
+## Allowed in Idle, with a low fixed score. It picks a random point within [member wander_radius] of its home (where the pawn first
+## started wandering), walks there with the AI controller's move_to, then stands for a random time between [member min_pause_ticks]
+## and [member max_pause_ticks]. The points and pauses come from the context's replayable random numbers, so the same seed, pawn and
+## ticks give the same walk. A point with no way there is skipped and another tried soon. It never finishes on its own.
+## Design: pawn spec 10.7.
 class_name AIWanderBehaviour
 extends AIBehaviourBase
 
@@ -69,7 +65,7 @@ func tick(context: AIContextComponent) -> Status:
 		_pause_until = context.current_tick + shortest + int(context.random_unit(PAUSE_SALT) * (maxi(longest - shortest, 0) + 1))
 		wake_at(_pause_until)
 		return Status.RUNNING
-	# GDScript note: sqrt makes points spread evenly over the circle; without it they'd bunch up near the middle.
+	# sqrt makes points spread evenly over the circle; without it they'd bunch up near the middle.
 	var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
 	var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * wander_radius
 	var point := _home + Vector3(cos(angle), 0.0, sin(angle)) * distance

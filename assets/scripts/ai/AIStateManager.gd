@@ -1,41 +1,17 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Picks the pawn's current AI state: the highest-priority state whose prerequisites hold.
 ##
-## A part on the pawn, added by PawnInitializer, with its states ([AIStateBase] nodes) as children. Pawn spec section 10.6. At each
-## decision, the states are checked from the highest priority down, and the pawn moves to the first whose prerequisites hold. That's
-## all. Smoothness comes from memory, which rises and fades steadily; a pawn flickering between states is fixed in that state's
-## prerequisites, not with a new mechanism. It works the way AbilityManager picks a locomotion.
-## [br]
-## When the state changes, it asks the context for a decision with the new state's priority as the reason, so the behaviour manager
-## decides at once and the running behaviour may be interrupted (pawn spec 10.7).
-## [br]
-## How to use it (outside code only talks to the manager):
+## A part on the pawn with its [AIStateBase] nodes as children. At each decision it moves the pawn to the first state, checked from the
+## highest priority down, whose prerequisites hold, and a change asks for a decision with the new state's priority as the reason.
+## States are sorted by priority, then name, once, when the manager is ready. Outside code only talks to the manager; a forced state
+## skips the normal check for a while, and during a tick a force is queued until the pawn's next AI step so the order never depends on
+## which pawn went first (scaling spec step 3). Server and offline only.
 ## [codeblock]
 ## pawn.ai_context.state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
 ## pawn.ai_context.state_manager.force_state(&"Combat", 120, 50, "scripted") # skip the normal check for 120 ticks
 ## pawn.ai_context.state_manager.release_forced_state()
 ## [/codeblock]
-## [signal state_changed] is for debug readouts and, later, animation.
-## [br]
-## Forcing a state (pawn spec 10.6):
-## [br]- The normal check is skipped for hold_ticks (or until [method release_forced_state] when hold_ticks is -1), then it takes
-##   over again.
-## [br]- A new force replaces the current one only if its priority is equal or higher. A weaker one is refused and logged.
-## [br]- It takes effect at once. The behaviour manager decides at the pawn's next AI step, which is this tick if that hasn't run
-##   yet.
-## [br]- Server only: on a client it does nothing and warns.
-## [br]- Called during a tick (by another pawn's ability or behaviour, say), it's queued and applied at the start of this pawn's next
-##   AI step, in the order the calls were made, so the result never depends on which pawn went first (scaling spec step 3). It
-##   returns true for "queued"; a missing state is still refused at once, and a weaker force is refused (and logged) when it's
-##   applied. Called between ticks (game code, a UI, a test), it applies at once. Releases work the same way.
-## [br]
-## The fixed order: states are sorted by priority, then name, once, when the manager is ready. Never by the order they were added.
-## [br]
-## What happens in odd cases (checked in ai/tests/ai_state_manager_selftest.gd):
-## [br]- Its parent isn't a Pawn: it warns and never picks a state.
-## [br]- No state fits: it keeps the current one and warns once. An AIIdleState, which always fits, prevents this.
-## [br]- A state with an automatic name (starting with "@"): it warns, because names must be the same on every run.
-## [br]- force_state with a name it doesn't have: it warns and returns false.
+## Design: pawn spec 10.6 and 10.7.
 # REFACTOR: forcing with a priority and a hold, and queueing requests made during a tick, is the same code as AITargetSelector's
 # force_target. One small shared helper would keep the two rules from drifting apart (reusable). See CHANGELOG.md.
 class_name AIStateManager
@@ -109,10 +85,10 @@ func update_state(tick: int) -> void:
 			return
 	if not _warned_none_fits:
 		_warned_none_fits = true
-		push_warning("AIStateManager: no state fits on %s, so it stays in %s. An AIIdleState, which always fits, prevents this." % [pawn.name, String(_current.name) if _current else "no state"]) # String(), so both sides are text
+		push_warning("AIStateManager: no state fits on %s, so it stays in %s. An AIIdleState, which always fits, prevents this." % [pawn.name, String(_current.name) if _current else "no state"])
 
 
-## [method AIContextComponent.run_ai] calls this every tick, so a force that runs out hands back to the normal check on time, not at the next decision.
+## [method AIContextComponent.run_ai] calls this every tick, so a force that runs out hands back to the normal check on time.
 func check_force_expiry(tick: int) -> void:
 	if _forced and _force_until_tick >= 0 and tick >= _force_until_tick:
 		_end_force()
@@ -231,6 +207,6 @@ func _collect_states() -> void:
 			_states.append(child)
 			if String(child.name).begins_with("@"):
 				push_warning("AIStateManager: the state %s has an automatic name, which can differ between runs. Give it a name." % child.name)
-	# GDScript note: sort_custom returns true when a should come before b. Names are unique among siblings, so the order is fixed.
+	# Sorted by priority, then name; names are unique among siblings, so the order is fixed.
 	_states.sort_custom(func(a: AIStateBase, b: AIStateBase) -> bool:
 		return a.priority > b.priority or (a.priority == b.priority and String(a.name) < String(b.name)))

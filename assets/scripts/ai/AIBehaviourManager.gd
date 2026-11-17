@@ -1,75 +1,25 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Picks and runs the pawn's AI behaviour, judging between its behaviours by score.
 ##
-## A part on the pawn, added by PawnInitializer (or the game's AI brain, [code]PawnDefaultsRes.ai_brain[/code]), with its behaviours
-## ([AIBehaviourBase] nodes) as children. Pawn spec sections 10.7 and 10.8. It only judges between behaviours. Each behaviour holds its
-## own checks, score and actions.
-## [br]
-## At each decision (pawn spec 10.8):
-## [br]First, the pawn's inputs ([AIInputs]) start afresh: each is worked out the first time a condition reads it this decision.
-## [br]0. Interrupts: if the running behaviour can't be replaced by this decision's reason, it keeps running and that's all.
-## [br]1. Valid: the behaviours the current state allows.
-## [br]2. Hard rules, with no behaviour code run: drop any on cooldown, needing a target when there's none, or whose action can't
-##   start.
-## [br]3. Ranges: each one's result can only land between floor = min_score + persistence - jitter and ceiling = max_score +
-##   persistence + jitter. One whose ceiling is below the highest floor can't win, so it's dropped. A floor is only certain if its
-##   behaviour is available, so the highest floor is taken from the first available behaviour, checking from the highest floor down
-##   (usually one is_available() call).
-## [br]4. Scoring, highest ceiling first: is_available() and score() run, persistence and this decision's jitter are added. As soon
-##   as the next ceiling can't beat the best result, the rest are skipped.
-## [br]5. Jitter: each behaviour gets its own offset within ± its jitter, from the context's replayable random numbers.
-## [br]6. Ties: results within [member tie_margin] are a tie. With [member randomize_ties] one is picked at random, otherwise the
-##   fixed order decides.
-## [br]7. Switching: if the winner isn't the running one, the old one's exit() runs, then the new one's enter(), and its persistence
-##   starts.
-## [br]
-## Between decisions only the running behaviour's tick() runs, every tick_interval_ticks, or sooner when a wake-up it asked for
-## happens (a walk ending, an ability on its action ending, a tick it named; [method AIBehaviourBase.wake_at]). When it returns
-## SUCCEEDED or FAILED, the manager decides at once. When the pawn dies, the running behaviour stops (reason "died").
-## [br]
-## How to use it (outside code only talks to the manager):
+## A part on the pawn (added by PawnInitializer or the game's AI brain) with its [AIBehaviourBase] nodes as children. At each decision
+## it checks whether the running behaviour may be replaced, drops behaviours that fail a hard rule, scores the rest and starts the
+## winner; between decisions only the running behaviour's tick runs. Behaviours are kept sorted by name (the fixed order), never by
+## the order added. Outside code only talks to the manager:
 ## [codeblock]
 ## pawn.ai_context.behaviour_manager.get_running_behaviour()
 ## pawn.ai_context.behaviour_manager.add_persistence_ticks(&"Chase", 60)    # say after landing a hit
-## pawn.ai_context.behaviour_manager.set_persistence_speed(&"Chase", 0.5)
-## pawn.ai_context.behaviour_manager.set_interrupt_threshold(&"Chase", 25)  # say for a berserk effect
 ## pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say for a confused effect
 ## [/codeblock]
-## Listen to [signal behaviour_changed] to follow its choices.
-## [br]
-## [b]C++ makes the decisions; this is the backup[/b] (scaling spec 6.2, the owner's call). With the [AIDecisionModule] in the game,
-## a pawn whose [member decides_in] is C++ (the default) has each decision made by AIBatchDecider (native/src/ai_batch_decider.cpp)
-## from plain data, and this manager only starts what it chose. The GDScript steps below run for a pawn set to GDScript, a "special
-## mind" C++ can't read (a behaviour with its own is_available() or score() code), a game without the C++ library or the module, and
-## in shadow mode, where C++ is checked against them. The two follow the same steps: a change to [method decide] goes in both, and
-## ai/tests/ai_batch_decider_selftest and ai_conditions_selftest check they agree. C++ keeps its own copy of each pawn's decision state
-## (running behaviour, cooldowns, persistence), kept in step by the events this manager passes on (a behaviour stopping, persistence
-## and jitter changes).
-## [br]
-## To see what each decision was made from, set [member decision_listener] (the [AIDecisionRecorder] does). While it's empty, no
-## record is made.
-## [br]
-## The fixed order: behaviours are sorted by name once, when the manager is ready. Never by the order they were added.
-## [br]
-## What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd):
-## [br]- Its parent isn't a Pawn: it warns and does nothing.
-## [br]- No behaviours at all: it does nothing, so a script can drive the AI controller directly. That's the default part.
-## [br]- A state that allows none of its behaviours: the pawn stands still, with a warning naming the state, once.
-## [br]- Every allowed behaviour is ruled out for now (cooldowns, no target): the pawn stands still until one can run. No warning.
-## [br]- A score() outside min_score to max_score: a warning naming the behaviour, once, in debug builds. It would break step 3 or 4.
-## [br]- A behaviour with an automatic name (starting with "@"): it warns, because names must be the same on every run.
-## [br]- A behaviour asked for by name that doesn't exist: it warns and does nothing.
+## With the [AIDecisionModule] in the game, C++ makes the decisions and this manager is the backup ([method decide]).
+## Design: pawn spec 10.7 and 10.8, scaling spec 6.2.
 class_name AIBehaviourManager
 extends Node
 
 ## Sent each time the running behaviour changes. Either can be null: nothing was running, or nothing runs now.
 signal behaviour_changed(old_behaviour: AIBehaviourBase, new_behaviour: AIBehaviourBase, reason: String)
 
-## Called after every decision of every pawn, with an [AIDecisionRecord] of what it was made from and what it chose, and this
-## manager: [code]func(record: AIDecisionRecord, manager: AIBehaviourManager)[/code]. For diagnostics and for checking another
-## decider against this one (scaling spec 6.2). Empty, the default: no record is made, which costs one check per decision.
-## [br]
-## GDScript note: "static" means one for every manager, so one listener hears every pawn.
+## Called after every decision of every pawn: [code]func(record: AIDecisionRecord, manager: AIBehaviourManager)[/code]. Static, so one
+## listener hears every pawn. For diagnostics and checking another decider (scaling spec 6.2). Empty (default): no record is made.
 static var decision_listener := Callable()
 ## The [AIDecisionModule] running decisions in C++, set by it while it's in the game; null otherwise (every pawn decides here).
 static var decision_module: AIDecisionModule = null
@@ -166,10 +116,8 @@ func get_behaviour_list() -> Array[AIBehaviourBase]:
 	return _behaviours
 
 
-## This brain as plain data: the manager's settings, the AI context's, and each behaviour's, in the fixed order. Everything a
-## decision reads that doesn't change from one decision to the next. AIBatchDecider.add_brain() takes it, and AIDecisionRecorder
-## saves it. The pawn's own fields are pawn_number, pawn, random_seed and decision_interval_ticks; the rest is the same for every pawn
-## with the same behaviour set. Settings changed during play (set_score_jitter, set_interrupt_threshold) show in the next call.
+## This brain as plain data: the manager's, the AI context's and each behaviour's settings, in the fixed order. Taken by
+## [code]AIBatchDecider.add_brain()[/code] and saved by [AIDecisionRecorder]. Settings changed during play show in the next call.
 func describe() -> Dictionary:
 	var context := pawn.ai_context if pawn else null
 	var behaviours: Array = []
@@ -202,9 +150,8 @@ func describe() -> Dictionary:
 	}
 
 
-## [method AIContextComponent.run_ai] calls this when a decision is waiting (see [method AIContextComponent.request_decision]). Uses
-## up the waiting decision. record: the [AIDecisionRecord] to fill in while [member decision_listener] is set; run_ai passes one
-## with the target and state updates in it. Null makes one here if something listens.
+## Makes the waiting decision ([method AIContextComponent.request_decision]) and starts what it chose. record: filled in while
+## [member decision_listener] is set (null: made here). Twin of C++ [code]AIBatchDecider[/code]: same steps, a change goes in both.
 func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	if pawn == null or pawn.ai_context == null:
 		return
@@ -274,9 +221,8 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	if not any_allowed and not _warned_states.has(state_name):
 		_warned_states[state_name] = true
 		push_warning("AIBehaviourManager: no behaviour on %s is allowed in the state %s, so it stands still there." % [pawn.name, state_name])
-	# 3, continued. A floor is only certain if its behaviour is available, so the highest floor comes from the first available
-	# behaviour, checking from the highest floor down. Otherwise a behaviour with a fixed score that doesn't apply right now, such as
-	# Search with nothing certain, would shut out ones that do.
+	# 3, continued. A floor is only certain if its behaviour is available, so take the highest floor from the first available
+	# behaviour, highest floor down (else a fixed-score behaviour that doesn't apply, like Search, would shut out ones that do).
 	var highest_floor := -INF
 	_candidates.sort_custom(_by_floor)
 	for behaviour in _candidates:
@@ -380,9 +326,8 @@ func set_persistence_speed(behaviour_name: StringName, speed: float) -> void:
 			decision_module.persistence_speed_set(self, behaviour.decision_index, speed, _now())
 
 
-## Gives this pawn's behaviour a persistence mask: a fade multiplied with its own persistence fade, for this pawn only, so something
-## can reshape how one pawn's persistence fades without changing the brain every pawn shares (the owner's call: the hook now, its
-## uses later). Null: no mask. Counted from when the behaviour starts, as the fade is.
+## Gives this pawn's behaviour a persistence mask: a fade multiplied with its own persistence fade, for this pawn only. Null: none.
+## Counted from when the behaviour starts, as the fade is.
 func set_persistence_mask(behaviour_name: StringName, mask: FadeProfile) -> void:
 	var behaviour := _find(behaviour_name)
 	if behaviour:
@@ -593,7 +538,7 @@ func _collect_behaviours() -> void:
 			_behaviours.append(child)
 			if String(child.name).begins_with("@"):
 				push_warning("AIBehaviourManager: the behaviour %s has an automatic name, which can differ between runs. Give it a name." % child.name)
-	# GDScript note: names are unique among siblings, so sorting by name gives one fixed order whatever order they were added in.
+	# Sorted by name: one fixed order whatever order they were added in.
 	_behaviours.sort_custom(func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool: return String(a.name) < String(b.name))
 	for i in _behaviours.size():
 		_behaviours[i].decision_index = i

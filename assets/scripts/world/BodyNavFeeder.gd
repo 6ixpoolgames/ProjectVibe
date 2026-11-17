@@ -1,22 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: navigation/CHANGELOG.md.
 ## Puts a static body (a wall, a rock, a building) into the nav mesh.
 ##
-## The way TerrainNavFeeder puts the terrain in. Pawns then plan paths around it, and a pawn walking along the nav mesh (CrowdMover's C++ batch,
-## NavWalking) slides along it instead of being handed to physics. Without it, nav doesn't know the body is there: paths go straight
-## through it and only physics stops the pawn.
-## [br]
-## How to use it: add this as a child of a StaticBody3D. Its box collision shapes (BoxShape3D) go into nav when it enters the tree and
-## come out when it leaves. Other shapes are skipped with a warning; boxes cover walls and blocks, which is what t0 needs.
-## [br]
-## What happens in odd cases:
-## [br]- The parent isn't a StaticBody3D: it warns and does nothing (a body that moves would need its nav tiles rebuilt as it goes).
-## [br]- No C++ library: it does nothing, quietly. The body still blocks pawns through physics.
-## [br]- The body is moved by code after it's placed: call refresh() so nav sees the new place.
+## Add it as a child of a StaticBody3D, the way [TerrainNavFeeder] puts the terrain in. Its box shapes go into nav when it enters the
+## tree and come out when it leaves; other shapes are skipped with a warning. Pawns then plan paths around the body, and a pawn walking
+## the nav mesh (CrowdMover's C++ batch, NavWalking) slides along it instead of being handed to physics. Without it, paths go straight
+## through the body and only physics stops the pawn. After moving the body by code, call [method refresh].
 class_name BodyNavFeeder
 extends Node
 
 # Every feeder's boxes go into one shared input layer, each body as its own mesh, so a level with many props doesn't add a layer per prop
-# (every tile build goes through every layer). GDScript note: a static var belongs to the script, shared by every feeder.
+# (every tile build goes through every layer). Static: shared by every feeder.
 static var _layer := -1
 
 var _body: StaticBody3D = null

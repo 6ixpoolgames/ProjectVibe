@@ -1,12 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## Changes how much of a stat a pawn has, once: Health -20 is damage, Health +15 a heal. A do-once part ([EffectPart]).
 ##
-## Pawn spec 8.11. For a stat that changes during play (Stat.changes_during_play, such as Health), kept between 0 and the stat's
-## value. A stat the pawn doesn't have: nothing happens.
-## [br]- On a harmful effect, a negative amount is reduced by the pawn's resistance (EffectApplication.resistance): 25% resistance
-##   takes a quarter off, and a weakness (below 0) adds to it. A positive amount (a heal) is never changed.
-## [br]- With stacks, the amount is multiplied by them: a poison with 3 stacks takes three times as much each period.
-## [br]- Health taken is added to the application's damage_dealt, for LifestealPart and the AI's threat.
+## Kept between 0 and the stat's value; a stat the pawn doesn't have is ignored. The amount is multiplied by the stacks, and a harmful
+## negative amount is reduced by the pawn's resistance. Health taken is added to the application's damage_dealt.
+## Design: pawn spec 8.11.
 class_name StatChangePart
 extends EffectPart
 

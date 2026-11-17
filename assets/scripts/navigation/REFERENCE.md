@@ -22,22 +22,15 @@ Every class in `assets/scripts/navigation/`, from its doc comments. The overview
 
 `res://assets/scripts/navigation/NavMarkerNode.gd`, extends [`Node3D`](https://docs.godotengine.org/en/stable/classes/class_node3d.html)
 
-Places a nav marker by hand in a scene (nav spec section 21.5).
+Places a nav marker by hand in a scene (nav spec 21.5).
 
-Add this node, choose a marker type in the inspector, and fill in its values. The node's position and rotation say where the marker is. Generators skip this node and register their markers directly.
+Add this node, choose a marker type in the inspector and fill in its values; the node's position and rotation say where the marker is. On entering the scene it registers its own copy of the marker (so instances of one scene don't share a door's state), and on leaving it removes it. Generators skip this node and register their markers directly.
 
-What it does:
-- On entering the scene, it makes its own copy of the marker and registers that. Without the copy, every instance of a scene would share one marker, so opening one door would open them all.
-- On leaving the scene, it removes the marker.
-
-What happens in odd cases (all checked in tests/nav_marker_node_selftest.gd):
-- No marker set, or an undeclared tag: an inspector warning. At runtime it registers nothing, and the game runs.
-- A marker's id comes from this node's scene path, so moving or renaming the node changes the id. A node with an automatic name, which starts with @, may get a different id on each machine, so it warns.
-- Moving the node after it has registered doesn't move the marker.
+The marker's id comes from this node's scene path, so renaming or moving the node changes it; an automatic name (starting with `@`) may differ per machine, so it warns. Moving the node after it has registered doesn't move the marker.
 
 ### Settings and properties
 
-- `marker: NavMarker`
+- `marker: NavMarker`: The marker this node places. Pick a type such as NavLink or NavPoint from the inspector's list.
 
 ### Functions
 
@@ -49,24 +42,11 @@ What happens in odd cases (all checked in tests/nav_marker_node_selftest.gd):
 
 `res://assets/scripts/navigation/NavTags.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-Navigation's own tag names and bits (nav spec section 21.3).
+Navigation's own tag names and bits (nav spec 21.3).
 
-Turns names like "link.jump" into bits, so nav and AI can check tags with one AND instead of comparing text. Abilities have their own tags (TagRegistry); each system gets its own 64 bits. A NavLink connects the two by naming the action a pawn presses.
+Turns names like "link.jump" into bits, so nav and AI check tags with one AND instead of comparing text. Abilities have their own tags ([`TagRegistry`](../tags/REFERENCE.md#tagregistry)); each system gets its own 64 bits. A tag is a name with dot-separated levels, and each level has its own bit: a tag's mask is its own bit plus its parents', so a search for "link" finds link.jump but never "linkage".
 
-How tags work:
-- A tag is a name with dot-separated levels. A dot means "inside": link.jump is inside link.
-- Every level gets its own bit. link and link.jump are two bits.
-- A tag's mask holds its own bit plus its parents' bits. So a search for "link" finds link.jump with one AND, and never finds "linkage", because only whole levels count.
-
-Why tags are declared in a file: in multiplayer, every machine must give the same tag the same bit. Handing out bits on first use would depend on what happened to run first. So the game lists its tags in a declarations file, and NavTags sorts and numbers them at startup, identically everywhere.
-
-What happens in odd cases (all checked in tests/nav_tags_selftest.gd):
-- Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
-- Messy names ("link..jump", " link.jump ") are cleaned up.
-- A tag nobody declared: added on the spot with a one-time warning. Fine offline, but machines may disagree online, which is what the warning is for. Searches never add tags.
-- Declaring after NavTags is in use: treated the same as undeclared. Sorting again would change bits already stored in masks.
-- More than 64 levels: the extra ones get no bit, match nothing, and warn once.
-- No declarations file: everything still works, and every tag just counts as undeclared.
+In multiplayer every machine must give a tag the same bit, so the game lists its tags in a declarations file and NavTags sorts and numbers them at startup, identically everywhere. An undeclared tag is added on the spot with a one-time warning (machines may disagree online); declaring after use counts as undeclared, since sorting again would change stored masks. Past 64 levels, tags get no bit and match nothing. Searches never add tags.
 
 ### Constants
 
@@ -77,13 +57,13 @@ What happens in odd cases (all checked in tests/nav_tags_selftest.gd):
 ### Functions
 
 - `declare(tags: Array) -> void` *(static)*: Adds tags to the declared list. The file is read automatically, so most games never call this. If you do, call it at startup, before anything uses NavTags.
-- `reset(read_declarations_file: bool = true) -> void` *(static)*
-- `bit_of(tag: Variant) -> int` *(static)*
-- `own_bit(tag: Variant) -> int` *(static)*
+- `reset(read_declarations_file: bool = true) -> void` *(static)*: Forgets everything, including that the file was read. For tests and tools that reload content. Masks saved before a reset mean nothing afterwards.
+- `bit_of(tag: Variant) -> int` *(static)*: The tag's own bit number, or -1 if it has none (empty tag, or past the 64 limit).
+- `own_bit(tag: Variant) -> int` *(static)*: Just the tag's own bit as a mask, with no parents. For a "forbidden" list: forbidding link.door shouldn't forbid all of link.
 - `mask_of(tag: Variant) -> int` *(static)*: The tag's bit plus its parents' bits. This is what a marker stores, so a search for any level finds it.
 - `mask_of_list(tags: Array) -> int` *(static)*: Several tags' own bits together. For a list like forbidden = [link.door, area.hazard].
 - `full_mask_of_list(tags: Array) -> int` *(static)*: Several tags' full masks together, parents included. For a pawn's capabilities, such as [link.jump, link.climb], because a link's mask includes its parents' bits and has to fit inside this.
-- `matches(mask: int, search_tag: Variant) -> bool` *(static)*: True if something with this mask answers to the search tag. Matching starts from the first level: "link" and "link.jump" both find link.jump, and "jump" doesn't. A search never adds tags: an unknown tag just matches nothing.
+- `matches(mask: int, search_tag: Variant) -> bool` *(static)*: True if something with this mask answers to the search tag, from the first level: "link" and "link.jump" find link.jump, "jump" doesn't. Never adds tags: an unknown tag matches nothing.
 - `has_tag(tag: Variant) -> bool` *(static)*: True if the tag has a bit already. Never adds it.
 - `names_of(mask: int) -> StringName[]` *(static)*: The tag names for the bits in a mask, in bit order. For debug text.
 - `get_tag_count() -> int` *(static)*
@@ -99,35 +79,15 @@ What happens in odd cases (all checked in tests/nav_tags_selftest.gd):
 
 The pawn's only contact with navigation: finds paths and says which way to walk.
 
-A part on the pawn, added by PawnInitializer. Both controllers use it: PlayerController for click-to-move, and AIController for move_to. It never moves the pawn and never ticks on its own. A controller asks `get_move_direction()` once per tick and puts the answer in its InputCommand's move, the same way a player's keys would. So over the network a client follows its own path and only sends directions: the server never sees a path (pawn spec section 7).
-
-How to use it:
+A part on the pawn, added by PawnInitializer. A controller (player click-to-move, AI move_to) calls `move_to()`, then asks `get_move_direction()` once per tick and puts the answer in its InputCommand's move, as a player's keys would. It never moves the pawn and never ticks on its own. Over the network a client follows its own path and only sends directions (pawn spec 7).
 
 ```gdscript
 pawn.navigation_manager.move_to(point)        # finds a path; false if there's no way there
 pawn.navigation_manager.get_move_direction()  # which way to walk this tick; zero when there's no path
 pawn.navigation_manager.get_path_state()      # NONE, FOLLOWING, PENDING, ARRIVED or UNREACHABLE
-pawn.navigation_manager.is_under_way()        # following a path, or waiting for nav so it can find one
-pawn.navigation_manager.has_arrived()         # true once the last move_to got there, until the next move_to or stop()
-pawn.navigation_manager.is_partial()          # the path ends at the closest place it can reach, not at the point
-pawn.navigation_manager.stop()
 ```
 
-The path's corners stay private; `get_path_corners()` gives them for debug drawing.
-
-**Links.** A path may cross links: jumps over gaps, jumps up ledges and drops off them, which nav finds by itself, and links a designer placed (NavLinkModule). When the pawn reaches a link's start, `take_link_action()` gives the named action to press, such as jump, and the controller presses it for one tick. A drop has no action: the pawn walks off. If the pawn hasn't reached the link's far end within `link_timeout`, say after a jump that fell short, it finds a new path to the same place, once per move_to. Missing a second time, it gives up (UNREACHABLE), so a link that can't be crossed is never tried forever.
-
-**Paths at scale.** `paths_now_per_tick` paths are found straight away each tick, across every pawn. Any more go to NavServer's queue and those pawns wait, PENDING, so an army given a new goal in one tick doesn't stall that tick.
-
-What happens in odd cases (all checked in tests/navigation_manager_selftest.gd). Each ends in a path state:
-- No NavServer (the navcore library isn't loaded), or no nav under the pawn and none being built: it walks in a straight line to the point, so click-to-move works in a bare test level. That's `straight_line_without_nav`, on by default; off, move_to returns false (UNREACHABLE).
-- Nav still being built and none under the pawn yet: PENDING. move_to returns true, the pawn stands, and it tries again every `pending_retry_ticks` until it finds a path (FOLLOWING), nav finishes with still none under it (the straight line), or `pending_give_up_ticks` pass (UNREACHABLE).
-- Nav under the pawn, but the point nowhere near nav: move_to returns false (UNREACHABLE) and any old path is dropped, even while nav is still building elsewhere. In a streaming game it nearly always is, and whatever asked (AIGoToPointBehaviour's legs, say) picks a nearer point when told no, rather than standing and waiting.
-- A point on nav it can't reach, such as an island: the path goes to the nearest place it can reach, and the pawn arrives there. `is_partial()` says so, while following and after arriving, with links on or off.
-- Its parent isn't a Pawn: it warns, and move_to always returns false.
-- The controller in charge changes: ControllerManager calls `stop()`, so the AI never walks the rest of a player's path.
-
-Not yet (from the old guide's section 8): finding a new path when nav tiles change, size tiers per pawn, and domains (air, ships).
+Paths may cross links (jumps, drops, placed [`NavLink`](#navlink)s): `take_link_action()` gives the action to press at a link's start. No nav at all means a straight line (`straight_line_without_nav`); nav still building means PENDING. The README's "How a move works" has the odd cases.
 
 ### Settings and properties
 
@@ -139,15 +99,13 @@ Not yet (from the old guide's section 8): finding a new path when nav tiles chan
 - `straight_line_without_nav: bool` = `true`: On, a move_to where there's no nav at all, and none being built, walks in a straight line (bare test levels, click-to-move without nav). Off, it's UNREACHABLE, for a game where walking off the nav would be a bug.
 - `pending_retry_ticks: int` = `10`: While PENDING for nav to be built, how often it tries again to find a path, in ticks at 60 a second.
 - `pending_give_up_ticks: int` = `300`: How long it stays PENDING, in ticks at 60 a second, for nav to be built or a queued path to come, before giving up (UNREACHABLE). 300 is 5 s.
-- `paths_now_per_tick: int` = `8`: How many paths every pawn together finds straight away in one tick. Any more go to NavServer's queue, which searches within its own budget a tick (query_iterations_per_tick, across links too) and spreads them over the next ticks, and each of those pawns waits, PENDING, for its path. Most ticks need a handful; this is for a mass repath. 0 sends every path through the queue.
-  
-  GDScript note: a static var is shared by every NavigationManager, since the budget is the whole game's.
+- `paths_now_per_tick: int` = `8`: How many paths all pawns together find straight away in one tick. Any more go to NavServer's queue (searched within its own budget a tick, across links too), and those pawns wait PENDING. 0 sends every path through the queue. Shared by every NavigationManager.
 - `pawn: Pawn` = `null`: The pawn this manager belongs to, or null if its parent isn't one.
 
 ### Signals
 
 - `arrived()`: Sent once when the end of a path is reached.
-- `path_ended(reached: bool)`: Sent once when a path ends, whichever way: reached is true when it arrived (after `arrived`), false when it gave up (no way there after all, waited too long for nav, or a link that couldn't be crossed). Not sent for `stop()`. The AI's behaviours wait for it instead of checking every few ticks (AIBehaviourBase.wake_on_path_end).
+- `path_ended(reached: bool)`: Sent once when a path ends: reached is true after `arrived`, false when it gave up (no way, nav too slow, a link not crossed). Not sent for `stop()`. AI behaviours wait on it (AIBehaviourBase.wake_on_path_end).
 
 ### Constants
 
@@ -175,9 +133,9 @@ Not yet (from the old guide's section 8): finding a new path when nav tiles chan
 
 `res://assets/scripts/navigation/TerrainSettings.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-Where a terrain is and how big its chunks are, as plain values (nav spec section 21.6).
+Where a terrain is and how big its chunks are, as plain values (nav spec 21.6).
 
-A TerrainNavFeeder gives NavMarkerManager a copy of this when it registers a terrain. NavMarkerManager keeps it in its own memory, which outlives any chunk, and uses it to work out which chunk a position is in. It's a copy, so changing the terrain afterwards means registering again.
+A [`TerrainNavFeeder`](../world/REFERENCE.md#terrainnavfeeder) gives NavMarkerManager a copy when it registers a terrain, and NavMarkerManager uses it to work out which chunk a position is in. It's a copy, so changing the terrain afterwards means registering again.
 
 ### Settings and properties
 
@@ -188,11 +146,9 @@ A TerrainNavFeeder gives NavMarkerManager a copy of this when it registers a ter
 
 `res://assets/scripts/navigation/markers/NavArea.gd`, extends [`NavMarker`](#navmarker)
 
-A volume that changes how nav treats the ground in it: a nav modifier volume (nav spec section 21.3).
+A volume that changes how nav treats the ground in it (nav spec 21.3).
 
-Tags such as area.road, area.hazard and area.water say what it means. NavAreaModule will hand these to nav; until that exists they're registered and do nothing.
-
-An area names a surface instead of storing a cost, because each kind of agent has its own cost per surface (NavFilter, nav spec section 4). That lets a soldier avoid mud that a tank drives through.
+Tags such as area.road, area.hazard and area.water say what it means. An area names a surface, not a cost, because each kind of agent has its own cost per surface (NavFilter, nav spec 4): a soldier avoids mud a tank drives through. NavAreaModule will hand areas to nav; until it exists they're registered and do nothing.
 
 ### Settings and properties
 
@@ -203,9 +159,9 @@ An area names a surface instead of storing a cost, because each kind of agent ha
 
 `res://assets/scripts/navigation/markers/NavLink.gd`, extends [`NavMarker`](#navmarker)
 
-A connection nav can't walk across: an off-mesh link (nav spec section 21.3).
+A connection nav can't walk across: an off-mesh link (nav spec 21.3).
 
-A ladder, a jump, a door and a teleporter are all NavLinks, told apart by their tags (link.climb, link.jump, link.door, link.teleport), because they hold the same data. NavLinkModule hands them to nav, so pawns' paths can use them; without that module in the level they're registered and do nothing.
+A ladder, a jump, a door and a teleporter are all NavLinks, told apart by their tags (link.climb, link.jump, link.door, link.teleport). NavLinkModule hands them to nav so paths can use them; without that module in the level they do nothing.
 
 ### Settings and properties
 
@@ -223,11 +179,9 @@ A ladder, a jump, a door and a teleporter are all NavLinks, told apart by their 
 
 `res://assets/scripts/navigation/markers/NavMarker.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
-The base data object for nav markers: "this spot means something to nav or AI" (nav spec section 21.2).
+The base data object for nav markers: "this spot means something to nav or AI" (nav spec 21.2).
 
-A ladder, a cover spot or a seat. It's plain data with no behaviour: modules (NavMarkerModule) hold the code that acts on markers, so a marker nothing handles is simply ignored.
-
-A marker is input. When it's registered, NavMarkerManager copies its position, tag and enabled state into its own rows, so changing those here afterwards does nothing. To switch a marker on or off during play, call NavMarkerManager.set_enabled(id, value).
+Plain data with no behaviour: modules ([`NavMarkerModule`](#navmarkermodule)) hold the code that acts on markers, so a marker nothing handles is ignored. Registering copies its position, tag and enabled state into NavMarkerManager's rows, so changing them here afterwards does nothing; switch one during play with `NavMarkerManager.set_enabled(id, value)`.
 
 ### Settings and properties
 
@@ -245,9 +199,9 @@ A marker is input. When it's registered, NavMarkerManager copies its position, t
 
 `res://assets/scripts/navigation/markers/NavObstacle.gd`, extends [`NavMarker`](#navmarker)
 
-Something that doesn't navigate but affects paths: a dynamic obstacle (nav spec sections 11 and 21.3).
+Something that doesn't navigate but affects paths: a dynamic obstacle, such as a crate or a fallen tree (nav spec 11 and 21.3).
 
-A crate, a parked vehicle or a fallen tree. NavObstacleModule will hand these to nav's ObstacleSystem. Until that exists they're registered and do nothing.
+NavObstacleModule will hand these to nav's ObstacleSystem; until it exists they're registered and do nothing.
 
 ### Settings and properties
 
@@ -265,17 +219,17 @@ A crate, a parked vehicle or a fallen tree. NavObstacleModule will hand these to
 
 `res://assets/scripts/navigation/markers/NavPoint.gd`, extends [`NavMarker`](#navmarker)
 
-A spot that means something to AI: a tactical point, or point of interest (nav spec section 21.3).
+A spot that means something to AI: a tactical point or point of interest (nav spec 21.3).
 
-Tags such as point.cover, point.patrol, point.ambush and point.wander say what it's for. It needs nothing beyond the base marker for now. It's a class of its own so that "marker is NavPoint" works as a filter, and so a module can announce that it handles points.
+Tags such as point.cover, point.patrol, point.ambush and point.wander say what it's for. It adds nothing to [`NavMarker`](#navmarker); it's a class of its own so "marker is NavPoint" works as a filter and a module can say it handles points.
 
 ## NavSmartObject
 
 `res://assets/scripts/navigation/markers/NavSmartObject.gd`, extends [`NavPoint`](#navpoint)
 
-A point that AI can use, with room for a limited number of users: a smart object (nav spec section 21.3).
+A point AI can use, with room for a limited number of users (nav spec 21.3).
 
-Tags such as use.seat, use.work and use.pickup say how it's used. Who is using it right now changes during play, so that belongs to NavSmartObjectModule, not to this data.
+Tags such as use.seat, use.work and use.pickup say how it's used. Who is using it changes during play, so that belongs to NavSmartObjectModule, not to this data.
 
 ### Settings and properties
 
@@ -285,21 +239,11 @@ Tags such as use.seat, use.work and use.pickup say how it's used. Who is using i
 
 `res://assets/scripts/navigation/modules/NavLinkModule.gd`, extends [`NavMarkerModule`](#navmarkermodule)
 
-Hands placed NavLink markers to nav, so paths can use them (nav spec sections 21.4 and 19, phase 3).
+Hands placed [`NavLink`](#navlink) markers to nav, so paths can use them (nav spec 21.4 and 19, phase 3).
 
-Add this node to a level that places links by hand, such as a jump between two rooftops or a ladder.
+Add it to a level that places links by hand, such as a jump between rooftops or a ladder. Links nav finds by itself at ledges and gaps (NavServer's auto_links setting) need nothing here. An enabled link becomes `NavServer.add_link` with its start, end, two_way and press_action (its tile rebuilds a tick or two later); disabled, removed, or this module leaving removes it.
 
-Links nav finds by itself at ledges and gaps (NavServer's auto_links setting) need nothing here. This is only for the ones a designer marks, where the automatic search wouldn't find one, or where a link should press a different action.
-
-What it does with each NavLink marker:
-- Enabled: calls NavServer.add_link with the marker's start, end, two_way and press_action. The tile holding the start rebuilds to include it, a tick or two later.
-- Disabled (NavMarkerManager.set_enabled), removed, or this module leaving the level: NavServer.remove_link.
-
-A link only works while nav is built at both ends. Detour joins its far end when that tile loads, so a link into ground that isn't loaded yet is simply not used until it is. Nothing here needs to watch for that. Not used yet: a NavLink's extra_cost. Links cost their length, like walking.
-
-What happens in odd cases (all checked in tests/nav_link_module_selftest.gd):
-- No NavServer (the navcore library isn't loaded): it does nothing, and markers stay registered as usual.
-- A marker switched on twice, or off when it was never on: nothing changes.
+A link only works while nav is built at both ends: Detour joins the far end when that tile loads, so a link into unloaded ground is unused until it is. Not used yet: a link's extra_cost (links cost their length). Without NavServer (no navcore library) it does nothing.
 
 ### Functions
 
@@ -311,17 +255,9 @@ What happens in odd cases (all checked in tests/nav_link_module_selftest.gd):
 
 `res://assets/scripts/navigation/modules/NavMarkerDebugModule.gd`, extends [`NavMarkerModule`](#navmarkermodule)
 
-Draws every nav marker while the game runs (nav spec section 21.4).
+Draws every nav marker while the game runs (nav spec 21.4).
 
-Add this node to a level to see its markers, through walls and terrain, or press F9 (diagnostics' NavDebugView makes one). It does nothing in a release build.
-
-How markers look:
-- Every marker is a small cross at its position, with a line showing which way it faces.
-- A link also has a line from its start to its end.
-- Areas and obstacles also have a box showing their size.
-- Colours follow the type. A disabled marker is grey.
-
-It only looks at markers, so it doesn't count as handling them in the debug report. Otherwise, adding it would hide that nothing actually acts on them. The drawing is rebuilt from scratch when markers change, at most a few times a second, which is cheap at hundreds of markers. Past max_drawn it stops drawing the rest and warns once.
+Add it to a level to see its markers through walls and terrain, or press F9 (diagnostics' [`NavDebugView`](../diagnostics/REFERENCE.md#navdebugview) makes one). It does nothing in a release build. Every marker is a small cross with a line for its facing; links add a line to their end, areas and obstacles a box; colours follow the type and a disabled marker is grey. It doesn't count as handling markers in the debug report. The drawing is rebuilt at most a few times a second; past `max_drawn` it stops drawing and warns once.
 
 ### Settings and properties
 
@@ -353,29 +289,17 @@ It only looks at markers, so it doesn't count as handling them in the debug repo
 
 `res://assets/scripts/navigation/modules/NavMarkerModule.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
-The base for code that acts on nav markers (nav spec section 21.4).
+The base for code that acts on nav markers (nav spec 21.4).
 
-Markers are plain data. All the code for a kind of marker lives in a module, a node you add to a level that wants that behaviour and leave out of one that doesn't. A marker with no module simply does nothing.
-
-To make a module, extend this class, list your types in `handled_types()`, and fill in the calls you need:
+Markers are plain data; a module is a node you add to a level that wants that behaviour, and a marker with no module does nothing. Extend this class, list your types in `handled_types()` and fill in the calls you need:
 
 ```gdscript
 class_name MyLadderModule extends NavMarkerModule
-func handled_types() -> Array[Script]:
-    return [NavLink]
-func _markers_added(ids: PackedInt64Array) -> void:
-    for id in ids:
-        var link: NavLink = NavMarkerManager.get_marker(id)
-        ...
+func handled_types() -> Array[Script]: return [NavLink]
+func _markers_added(ids: PackedInt64Array) -> void: ...
 ```
 
-Rules, all checked in tests/nav_markers_selftest.gd:
-- Calls arrive during the tick, once per batch, with a list of ids rather than one call per marker.
-- Load order doesn't matter. A module joining late gets every matching marker already there, on the next tick.
-- A module handles subclasses of its types too, so a modder's subclass of NavLink just works.
-- Several modules can handle one type.
-- When a module leaves, it gets a final _markers_removed straight away, so it can undo exactly what it did. Markers belong to NavMarkerManager and stay registered, so other modules aren't affected.
-- Requests made during a call wait for the next tick.
+Calls arrive during the tick, once per batch, with a list of ids. A late module gets every matching marker on the next tick. Subclasses of a handled type are handled too, and several modules can handle one type. A leaving module gets a final `_markers_removed()` at once, so it can undo what it did; the markers stay registered.
 
 ### Functions
 

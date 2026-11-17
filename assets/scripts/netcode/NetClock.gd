@@ -1,16 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
 ## A client's estimate of the server's clock (netcode spec section 4).
 ##
-## The client sends pings; each pong says which tick the server was on. A ping that came back quickly spent little time waiting in
-## queues, so the estimate uses the fastest recent one, while the round trip uses the average of them all.
-## [br]
-## A client runs ahead of the server by half the round trip plus a safety margin, set when it starts ticking, and set again only if
-## it drifts well away (a hitch, say). Day to day it's kept right by time dilation, which nudges [code]TickDriver.tick_factor[/code]
-## from the margins the server reports ([code]NetworkSession._update_dilation[/code]).
+## The client feeds it pongs ([method add_sample]); it estimates the server's tick from the fastest recent ping and the round trip from
+## the average. Times are microseconds, ticks are 60 a second.
+## Design: netcode spec 4.
 class_name NetClock
 extends RefCounted
 
-## How many recent pings count. About 4 s at the usual ping rate.
+## How many recent pings count (about 4 s at the usual ping rate).
 const MAX_SAMPLES := 16
 
 var _samples: Array[Dictionary] = [] # {rtt: usec, server_tick_at_receive: float, received: usec}
@@ -21,7 +18,7 @@ func reset() -> void:
 	_samples.clear()
 
 
-## Records a pong. tick_usec is the length of one tick.
+## Records a pong: when the ping was sent and the pong received (microseconds), the server tick it carried, and the length of a tick.
 func add_sample(sent_usec: int, received_usec: int, server_tick: int, tick_usec: float) -> void:
 	var rtt := maxi(received_usec - sent_usec, 0)
 	_samples.append({
@@ -82,10 +79,8 @@ func get_lowest_rtt_usec() -> float:
 	return float(lowest)
 
 
-## How many ticks ahead of the server a client should run.
-## [br]
-## [code]from_lowest[/code] uses the fastest recent ping instead of the average, for when time dilation will add whatever more is
-## needed.
+## How many ticks ahead of the server a client should run: half the round trip plus [code]margin_ticks[/code].
+## [br][code]from_lowest[/code] uses the fastest ping instead of the average, since time dilation adds whatever more is needed.
 func get_lead_ticks(tick_usec: float, margin_ticks: int, from_lowest: bool = false) -> int:
 	var rtt := get_lowest_rtt_usec() if from_lowest else get_rtt_usec()
 	return ceili(rtt * 0.5 / tick_usec) + margin_ticks

@@ -1,17 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: ai/CHANGELOG.md.
 ## The base for a condition: one check a behaviour needs to pass before it may run, made of plain data.
 ##
-## Scaling spec 6.2. A behaviour runs only while all of its conditions pass ([method AIBehaviourBase.all_conditions]). A condition
-## reads named numbers from the pawn's [AIInputs], never game objects, so the same check can be made in C++ for a whole crowd at
-## once (AIBatchDecider). Utility AI calls these "considerations".
-## [br]
-## The kinds, each a Resource made in the inspector:
-## [br]- [AICompareCondition]: an input against a number, or against another input
-## [br]- [AIChanceCondition]: a random roll that replays the same
-## [br]- [AIAnyCondition]: passes if any one of its conditions does
-## [br]
-## A new kind needs the same check in C++ too (native/src/ai_batch_decider.cpp), and [method describe] giving what C++ reads.
-## Most needs are met by an input instead: a game writes its own input ([method AIInputs.set_input]), and a compare condition reads it.
+## A behaviour runs only while all its conditions pass ([method AIBehaviourBase.all_conditions]). A condition reads named numbers from
+## the pawn's [AIInputs], never game objects, so the C++ decider ([code]AIBatchDecider[/code]) can make the same check for a crowd. The
+## kinds, each a Resource made in the inspector, are [AICompareCondition], [AIChanceCondition] and [AIAnyCondition]. A new kind needs the
+## same check in C++ (native/src/ai_batch_decider.cpp) and a [method describe] giving what C++ reads; most needs are met by a game
+## writing its own input ([method AIInputs.set_input]) instead.
+## Design: scaling spec 6.2.
 class_name AICondition
 extends Resource
 

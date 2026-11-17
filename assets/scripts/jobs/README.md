@@ -11,3 +11,5 @@
 - It's static, not an autoload, to keep autoloads few.
 
 Every class and function: [REFERENCE.md](REFERENCE.md) (`python tools/docs/make_reference.py jobs`). History: built 2026-11-09 (scaling spec step 2); no changes since. Tests: `ai/tests/ai_sensing_job_selftest`.
+
+- 2026-11-18: **Comments rewritten to the reference style** (the documentation pass): the `TickJobs` class comment shortened; `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.

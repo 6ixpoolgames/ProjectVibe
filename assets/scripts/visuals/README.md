@@ -43,6 +43,12 @@ Both only read the pawn, once a rendered frame. They're never simulated, rolled 
 | `sword_scene`, `sword_scale` | `FloatingSword` | empty, 2.2 | The sword and how much bigger it's drawn |
 | `hover_side`, `hover_height` | `FloatingSword` | 0.8, 1.0 m | Where it hovers |
 
+## How it works
+
+- **FloatingSword**, frame by frame: hovering (at the pawn's side, chest high, bobbing and swaying); a swing through its phases (windup pulls back to just behind where the hit starts, hit sweeps the blade out from the chest through each spot the hit checks, recovery drifts back); a parry (guards flat across in front of the chest for as long as the parry runs); dead (lies on the ground beside the pawn). Combo swings alternate: after a swing it rests on the side where the swing ended (a swing ending on the left leaves it on the left, so the next sweeps left to right; a chop ending in the middle leaves it where it was), and after `return_seconds` with no swing it goes back to the right, round the front of the pawn.
+- **ToyWaddle** moves only itself: the pawn turns `Visual/Model`, and this sits inside it, so "forward" is the pawn's forward and its origin is at the feet. The step rate grows with speed (`steps_per_metre`). `toy_scene` is instanced at `toy_scale` (turned round if `turn_model_round` is on), and the first frame of `pose_animation` holds the model still.
+- Both are visual only, so they need no rollback and work the same on the server, a predicting client and a client drawing other pawns; with no display they build nothing (`RunEnvironment.runs_visuals`).
+
 ## Tests
 
 `visuals/tests/visuals_selftest`. Run it with `bash tools/run_tests.sh visuals`.

@@ -67,6 +67,33 @@ A stronger force replaces a weaker one; during a tick, forces wait for the pawn'
 
 **Record its decisions.** `ai/debug/AIDecisionRecorder.gd` keeps an `AIDecisionRecord` of every decision of every pawn (the reasons, the state, each behaviour's hard rule, range, availability and score, and the choice) plus each pawn's brain settings, and saves them as JSON lines. `mass_battle_measure -- --record-decisions=<file>` records a whole fight. It's the first piece of checking a C++ decider against this one (scaling spec 6.2); it listens through `AIBehaviourManager.decision_listener`, and with no listener no record is made. `ai_batch_decider_compare -- --file=<file>` replays a recording through the C++ decider (`AIBatchDecider`), which isn't used by the game yet, and counts where it agrees. Live, the `AIDecisionModule`'s shadow mode (`check_against_gdscript`, `mass_battle_measure -- --ai-shadow`) has GDScript decide and C++ decide beside it, compares, and changes nothing.
 
+## How it works
+
+Details the code's doc comments leave out.
+
+**A decision** (`AIBehaviourManager.decide`; the C++ `AIBatchDecider` follows the same steps, so a change goes in both). The pawn's inputs start afresh (each is worked out when a condition first reads it), then:
+0. Interrupts: if the running behaviour can't be replaced by this decision's reason (`cannot_be_interrupted`, `interrupt_threshold`, `min_run_ticks`), it keeps running.
+1. Valid: the behaviours the current state allows.
+2. Hard rules, with no behaviour code run: drop any on cooldown, needing a target when there is none, or whose action can't start.
+3. Ranges: each result can only land between floor (`min_score` + persistence - jitter) and ceiling (`max_score` + persistence + jitter). One whose ceiling is below the highest floor can't win. A floor is only certain if its behaviour is available, so the highest floor comes from the first available behaviour, from the highest floor down.
+4. Scoring, highest ceiling first: `is_available()` and `score()`, plus persistence and this decision's jitter (each behaviour's own offset from the context's replayable random numbers). Once the next ceiling can't beat the best result, the rest are skipped.
+5. Ties: results within `tie_margin` tie; `randomize_ties` picks at random, otherwise the fixed order (behaviours sorted by name) decides.
+6. Switching: the old behaviour's `exit()`, then the new one's `enter()`, and its persistence starts.
+
+Between decisions only the running behaviour's `tick()` runs. When it returns SUCCEEDED or FAILED the manager decides at once; when the pawn dies it stops (reason "died"). Odd cases are in `ai_behaviour_manager_selftest`: a state allowing no behaviour makes the pawn stand still with one warning; a `score()` outside its range warns once in debug builds; a behaviour with an automatic name (starting with `@`) warns, because names must be the same every run.
+
+**Behaviours.** Settings counted in ticks are written for 60 a second and converted where read. A behaviour that waits asks to be woken (`wake_on_path_end`, `wake_on_action_end`, `wake_at`; cleared when it starts, `wake_at` used up when it fires), so `tick_interval_ticks` is only the longest it sleeps. Count time with `context.current_tick`, not by counting `tick()` calls. Persistence adds `persistence` times the fade's value from when the behaviour is chosen: positive keeps it chosen, negative makes the AI prefer something else for a while.
+
+**States and forcing.** The state manager checks states from the highest priority down; the first whose prerequisites hold wins, with no minimum time in a state. `force_state` and `force_target` skip the normal choice for `hold_ticks` (-1: until released); a new force replaces the current one only if its priority is equal or higher. Called during a tick (by another pawn's ability, say), a force is queued and applied at the start of this pawn's next AI step, in the order asked, so the result never depends on which pawn went first (scaling spec step 3); it returns true for "queued". Forces work on the server and offline only.
+
+**Memory and awareness.** A sense adds gain each time it sees an entity, up to 1; a certain entry refills to 1 at once. Sightings within `continuous_sighting_ticks` with no unseen check between count as one look. While unseen, awareness stays full for the delay, then fades: awareness now = awareness when seen x fade value at (ticks since seen - delay). Nothing drains in the background; entries are forgotten once the fade has ended (`forget_old` on each full pass) or the entity is freed or dies. A new entry or a newly certain one asks for a decision at once.
+
+**Sensing on worker threads.** With the navcore library, `AIPawnGrid` (one grid of every pawn, built once a tick) finds the nearest candidates, and the full pass's search, visibility and line of sight run as the shared `AISensingJob` between ticks. At the end of the tick before a pawn's pass, it asks the job, which reads the shared pawn table and works while the next tick waits; on the pass's tick the sight sense only records the result. A pass with no result (a pawn not due, a test calling `full_pass`) runs on the main thread, as does everything with `TickJobs.enabled` off. Without the library, a physics shape query on `candidate_mask` is used. When no pawn of another team exists (TeamRegistry), the query is skipped.
+
+**C++ decisions.** The `AIDecisionModule` keeps per-pawn rows in the C++ decider, written through when a fact changes (state, target, hits, swings, a game's inputs, which actions could start). Where a pawn decides is settled when it first decides, and again only when something changes it. Special minds (own `is_available`/`score` code, a fade with its own `value_at`, an unknown condition kind) stay in GDScript, with a warning. Shadow mode (`check_against_gdscript`) compares the two; in debug builds a sampled check warns when a written fact is stale.
+
+**Rollback and network.** The AI runs only on the server or offline, never while a rollback replays ticks, so its decisions aren't rolled back.
+
 ## Settings worth knowing
 
 | Setting | Where | Default | What it does |

@@ -19,6 +19,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, and nothing parry-specific is left in the manager or the base: `ParryAbility` is a plain timed ability that makes a default `ParryInterceptor`, and `guard()` is only read by the debug drawing and tests.
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): class comments are a summary, a short paragraph and a design line, member comments one or two lines, history and `GDScript note:` lines are gone (dated notes in `AbilityDebugDraw` too). The long explanations (the tick order, lockouts and cancelling, how steps run, rollback, swing hit checks, the hit path and its order, the Dash numbers, odd cases) moved to the README's new "How it works" section. No comment was found to disagree with the code. No code changed.
+
 ## 2026-11-17
 
 - **One override check:** the AbilityManager asks `ScriptOverrides.overrides()` (`platform/`) whether an ability's script has its own `every_tick()` or `can_start()`, instead of two copies of the check of its own.

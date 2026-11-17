@@ -66,6 +66,13 @@ for node in get_tree().get_nodes_in_group(Pawn.GROUP):
 | `skip_move_when_still` | `Pawn` | on | A still pawn that's awake skips its physics move |
 | Detectability | the pawn's StatManager | 1 | How easy it is for AI to see (0 invisible) |
 
+## How it works
+
+- **Scene.** All optional: an `AbilityManager` (with none, nothing steers it and it only falls), a `TickStateComponent` and `NetworkEntity` (rollback and multiplayer; they stay in the scene because `NetworkSession` reads them before the pawn joins the tree) and a `Node3D` called `Visual`. `pawn.tscn` puts bodies on collision layer 2, colliding with layers 1 and 2; the ground is on layer 1, so a camera arm can tell the ground from a pawn walking past.
+- **Visual exists** because the body moves in ticks and gets corrected, which looks jerky. Visual follows it smoothly per rendered frame and fades corrections out, so anything on screen hangs from it.
+- **Where things live** (they used to be on the pawn): input, presses and whether a player has the pawn on `ControllerManager` (`move_input`, `has_player()`, `possessable`); hits, death and their signals on `AbilityManager` (`died`); camera pieces on `CameraMount`; team counts in `TeamRegistry`; Health on `StatManager`.
+- **Odd cases** (`tests/pawn_selftest.gd`): with no `TickDriver` it ticks itself from `_physics_process`; an AI pawn in unloaded ground is frozen by `AIActivationManager` and keeps all its state.
+
 ## Tests
 
 `pawn/tests/`: `pawn_selftest` (input, presses, rollback, odd cases), `possession_selftest`, `tick_step_selftest` (every 2nd or 4th tick), `pawn_table_selftest` (the C++ table), `rollback_coverage_selftest` (anything that changes in play without rolling back), `net_pawn_selftest` (real connections, about 4 minutes), and `pawn_stress` (what whole pawns cost per tick, about 5 minutes). Run them with `bash tools/run_tests.sh <name>`.

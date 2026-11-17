@@ -1,27 +1,17 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
-## Places a nav marker by hand in a scene (nav spec section 21.5).
+## Places a nav marker by hand in a scene (nav spec 21.5).
 ##
-## Add this node, choose a marker type in the inspector, and fill in its values. The node's position and rotation say where the marker
-## is. Generators skip this node and register their markers directly.
+## Add this node, choose a marker type in the inspector and fill in its values; the node's position and rotation say where the
+## marker is. On entering the scene it registers its own copy of the marker (so instances of one scene don't share a door's state),
+## and on leaving it removes it. Generators skip this node and register their markers directly.
 ## [br]
-## What it does:
-## [br]- On entering the scene, it makes its own copy of the marker and registers that. Without the copy, every instance of a scene
-##   would share one marker, so opening one door would open them all.
-## [br]- On leaving the scene, it removes the marker.
-## [br]
-## What happens in odd cases (all checked in tests/nav_marker_node_selftest.gd):
-## [br]- No marker set, or an undeclared tag: an inspector warning. At runtime it registers nothing, and the game runs.
-## [br]- A marker's id comes from this node's scene path, so moving or renaming the node changes the id. A node with an automatic
-##   name, which starts with @, may get a different id on each machine, so it warns.
-## [br]- Moving the node after it has registered doesn't move the marker.
-# GDScript note: @tool makes a script run inside the editor as well as in the game. It's needed here for the
-# inspector warnings, so the code below is careful to do its game work only when the game is running.
+## The marker's id comes from this node's scene path, so renaming or moving the node changes it; an automatic name (starting with
+## [code]@[/code]) may differ per machine, so it warns. Moving the node after it has registered doesn't move the marker.
 @tool
 class_name NavMarkerNode
 extends Node3D
 
 ## The marker this node places. Pick a type such as NavLink or NavPoint from the inspector's list.
-# GDScript note: a "set" block runs whenever the property is assigned, including from the inspector.
 @export var marker: NavMarker:
 	set(value):
 		marker = value
@@ -57,8 +47,7 @@ func _get_configuration_warnings() -> PackedStringArray:
 	return warnings
 
 
-# GDScript note: as in NavMarkerModule, _notification runs at every level of inheritance, so a subclass with
-# its own _enter_tree can't stop this. The editor check is what keeps this out of the scene you're editing.
+# Runs at every level of inheritance, so a subclass's own _enter_tree can't stop it. The editor check keeps it out of the edited scene.
 func _notification(what: int) -> void:
 	if Engine.is_editor_hint():
 		return

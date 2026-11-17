@@ -1,84 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-04. History: singletons/CHANGELOG.md.
-## The tick driver: runs all gameplay in numbered, fixed-length ticks, online and offline. Autoload "TickDriver".
+## Runs all gameplay in numbered, fixed-length ticks, online and offline. Autoload "TickDriver".
 ##
-## Every machine runs it. All gameplay simulation runs inside its ticks, in a fixed phase order, instead of in each node's own
-## _process/_physics_process. The abilities, the AI and the netcode all run on it. Design: netcode spec section 3, and scaling spec
-## section 7 for the tick rate.
-## [br]
-## How an entity takes part:
+## Every machine runs it. Pawns, TickStateComponent and NetworkEntity register with it and get called once a tick, in phases, instead
+## of in their own _physics_process; abilities, AI and netcode all run on it. [code]dt[/code] is always the fixed tick length.
 ## [codeblock]
-## TickDriver.register(self)    # a Pawn, TickStateComponent or NetworkEntity does this itself in _enter_tree
-## TickDriver.unregister(self)  # or just get freed; freed participants are dropped automatically
+## TickDriver.register(self)   # then write any of _tick_input(dt, tick), _tick_capture_input(tick),
+##                             # _tick_simulate(dt, tick), _tick_record(tick); each is optional
 ## [/codeblock]
-## and implements any of these (all optional; a participant only gets the calls it has):
-## [codeblock]
-## func _tick_input(dt: float, tick: int) -> void      # phase 1: controllers write this tick's input command
-## func _tick_capture_input(tick: int) -> void         # phase 2: save the input for replay (usually TickStateComponent)
-## func _tick_simulate(dt: float, tick: int) -> void   # phase 3: abilities, movement, move_and_slide
-## func _tick_record(tick: int) -> void                # phase 4: predicted parts save their state
-## [/codeblock]
-## dt is [b]always[/b] the fixed tick length, never the frame's delta.
-## [br]
-## Gotcha: if a participant also defines _physics_process (as a fallback when there's no driver, say), turn it off with
-## set_physics_process(false) in _ready, not _enter_tree. Godot switches it on at ready, and the object would then tick twice. Example:
-## assets/scripts/samples/TickSamplePawn.gd.
-## [br]
-## One tick runs: [signal before_tick], every _tick_input, every _tick_capture_input, every _tick_simulate, [signal after_simulate],
-## every _tick_record, [signal after_tick]. A frame runs as many ticks as the elapsed time covers (usually exactly one), wrapped in
-## [signal before_tick_loop] and [signal after_tick_loop].
-## [br]
-## Rules and corner cases (all checked in tests/tick_driver_selftest.gd):
-## [br]- Order within a phase: lower [code]order[/code] first (register's second argument, default 0); equal order keeps registration
-##   order. Every machine registers a level's pawns in the same order, so they run in the same order.
-## [br]- Registering twice changes nothing (the first registration stands). Unregistering an unknown object does nothing.
-## [br]- Registering during a tick takes effect from the next tick. Unregistering during a tick stops its calls at once (a pawn
-##   despawned mid-tick isn't simulated or recorded afterwards).
-## [br]- A freed participant is skipped and dropped, never called.
-## [br]- Catch-up spiral: at most [member max_ticks_per_frame] ticks per frame. Time beyond that is dropped (the game slows down
-##   instead of freezing) and counted in [member dropped_ticks].
-## [br]- [member tick_factor] scales how fast ticks happen (time dilation): the netcode nudges it on clients, and it's 1.0 offline and
-##   on the server.
-## [br]- A frame running more than one tick (dilation, catching up, or a tick_rate above the physics rate) calls each participant's
-##   optional _sync_collision() between its ticks, so bodies collide with each other's latest positions, as they would with one tick
-##   per frame. Frames with one tick pay nothing. [method step] is for tests, and doesn't do this. Only entities with a
-##   TickStateComponent get this; a body moved by anything else stays out of date until the step.
-## [br]- [member active] = false pauses ticking; nothing builds up while paused.
-## [br]- Runs in _physics_process, so physics queries are safe during ticks. The default tick_rate is the project's physics rate, and
-##   the autoload sets physics to the tick rate anyway ([member physics_follows_tick_rate]), so it's one tick per physics frame.
-## [br]- move_and_slide scales velocity by Godot's physics delta, not by the tick. If tick_rate differs from the physics rate, a motor
-##   multiplies velocity by [method get_physics_factor] before move_and_slide and divides after.
-## [br]
-## [b]The load ladder[/b] (pawn spec 8.21, the owner's call). Each tick's cost is measured against its budget (the tick's length).
-## While ticks use more than [member raise_above] of it for [member raise_after_ticks], [member load_step] doubles (1, 2, 4). It halves
-## again after [member lower_after_ticks] ticks in a row under [member lower_below], or in a row where the load it predicts for the
-## lower step, from what stepping up saved, fits under raise_above less [member step_down_headroom] (see _lower_step_fits). The
-## AIActivationManager makes every AI pawn run at most every load_step-th tick, so an overloaded game sheds AI work, the bulk of a
-## tick, instead of falling behind: the whole game's AI at 30 (or 15) ticks a second, with every timer still lasting as long
-## (Pawn.ticks_elapsed). Players' pawns always run every tick. Tick numbers don't change, so nothing in the netcode does either.
-## [member load_step_override] forces a step; [member load_ladder_enabled] off keeps it at 1.
-## [br]
-## [b]Rollback[/b] (netcode spec section 3.5). [method rollback] puts predicted participants back to how they ended from_tick, then
-## replays every later tick up to the last finished one. A participant is predicted if it has _rollback_load(tick) -> bool,
-## _rollback_input(tick), _rollback_simulate(dt, tick) and _tick_record(tick). TickStateComponent provides all four, so entities
-## normally just add that node. Rules, also tested:
-## [br]- While replaying: [method is_resimulating] is true (cosmetic effects must check it), [member tick] reads as the tick being
-##   replayed, and the [method tick_rng] rolls repeat exactly. Input phases don't run; saved inputs are restored instead.
-## [br]- Everything not predicted stays where it is during the replay, the standard accepted inaccuracy. The exception is an entity
-##   in FOLLOW_SERVER mode with follows_during_rollback on: it stands on server data, extrapolates past it on its velocity, then
-##   returns to where it was.
-## [br]- Each replaying participant's optional _rollback_finished() runs once the replay is over, before [signal after_rollback].
-## [br]- Loading happens in stages: resimulated participants load first. If none could, nothing happens and it returns false,
-##   because a replay would have nothing to do. Following ones then join if they want to and are near one of those
-##   (wants_to_join_rollback). Then collision positions sync, then each one's optional _rollback_after_load(tick) runs, so a floor
-##   check there sees everyone else in place. is_resimulating() is true through all of this and the finish step.
-## [br]- When two or more participants replay, each one's optional _sync_collision() runs after loading and after each replayed tick,
-##   so physics bodies collide with each other's replayed positions rather than their final ones.
-## [br]- Allowed between ticks or from before_tick (where the netcode applies snapshots). During the phases, or during another
-##   replay, it warns and returns false.
-## [br]- With physics bodies, call it during the physics frame (before_tick is). Outside it, move_and_slide uses the rendered frame's
-##   delta instead, so replayed movement would be the wrong length.
-## [br]- A participant that no longer has from_tick keeps its current state and sits the replay out.
-## [br]- Returns false if nothing could be loaded or from_tick is in the future. No side effects then.
+## One tick: [signal before_tick], input, capture input, simulate, [signal after_simulate], record, [signal after_tick]. Within a phase,
+## lower [code]order[/code] runs first, then registration order. Rollback and the load ladder are in the README.
+## Design: netcode spec 3 (rollback 3.5), scaling spec 7, pawn spec 8.21 (load ladder).
 extends Node
 class_name TickDriverSingleton
 
@@ -88,91 +19,80 @@ signal before_tick_loop
 signal before_tick(dt: float, tick: int)
 ## Sent at the end of each tick, after every phase. A rollback from here counts this tick as finished.
 signal after_tick(dt: float, tick: int)
-## Sent after every participant has simulated and before anything is recorded (pawn spec 15.1). Effects one entity queued for another
-## during simulate, such as hits, are delivered here, so they never depend on which simulated first. Not sent during a rollback's
-## replay.
+## Sent after every participant has simulated, before anything is recorded (pawn spec 15.1). Queued effects, such as hits, are delivered
+## here, so they never depend on simulate order. Not sent during a replay.
 signal after_simulate(dt: float, tick: int)
 ## Sent once a frame, after the frame's last tick. Delays counted in ticks (SpawnManager's, say) run here, between ticks.
 signal after_tick_loop
 ## Sent when a rollback's replay is over: it went back to from_tick and replayed up to to_tick.
 signal after_rollback(from_tick: int, to_tick: int)
-## State is back to from_tick, and the replay is about to run. A correction can put a pawn somewhere new here,
-## and anything that has to be ready before it moves, such as the ground, gets its chance now.
+## State is back to from_tick and the replay is about to run. A correction can move a pawn here, and anything that must be ready
+## before it moves (the ground, say) gets its chance now.
 signal rollback_state_loaded(from_tick: int)
 
 ## The project setting for the tick rate. 0 or missing: the project's physics rate.
 const TICK_RATE_SETTING := "project_base/network/tick_rate"
-## Settings counted in ticks are written for 60 ticks a second, whatever rate a game runs at,
-## so designers tune in the same numbers everywhere. ticks_at_rate() turns one into ticks at the rate this match runs at.
+## Settings counted in ticks are written for 60 ticks a second, whatever rate a game runs at.
+## [method ticks_at_rate] turns one into ticks at this match's rate.
 const REFERENCE_RATE := 60
 
-## Ticks per second. 0 (the default): the project setting, or else the project's physics rate. Chosen before a match starts and not
-## changed during it (scaling spec section 7): clients take the server's in the handshake, before anything spawns. A dedicated server
-## can choose it at start-up with [code]-- --tick-rate=30[/code]. Settings counted in ticks are written for 60 a second and converted
-## with [method ticks_at_rate].
+## Ticks per second; 0 is the project setting, else the physics rate. Fixed before a match (scaling spec 7): clients take the server's in
+## the handshake. A dedicated server can set it with [code]-- --tick-rate=30[/code].
 @export var tick_rate: int = 0:
 	set(value):
 		tick_rate = value
 		_refresh_rate()
-## Most ticks one frame may run, so a slow frame can't cause ever more ticks (a catch-up spiral). The rest of the time is dropped: an
-## overloaded game slows down instead of freezing.
-## [br]
-## The autoload sets Godot's own limit on physics steps a frame (Engine.max_physics_steps_per_frame) to the same number. Each physics
-## step runs one tick, so Godot's limit is the one that really counts.
+## Most ticks one frame may run; the rest of the time is dropped (the game slows down instead of freezing). The autoload sets
+## Godot's [code]max_physics_steps_per_frame[/code] to match, since that limit is the one that really counts.
 @export var max_ticks_per_frame: int = 3:
 	set(value):
 		max_ticks_per_frame = maxi(1, value)
 		_apply_physics_rate()
-## On, the autoload sets Godot's physics rate to the tick rate whenever the rate is chosen, so there's one tick per physics step and the physics engine doesn't step twice for every tick at 30. Pawns are drawn between ticks
-## anyway (Visual's smoothing). Turn it off to keep physics at the project's rate with ticks at another.
+## On, the autoload sets Godot's physics rate to the tick rate, so there is one tick per physics step. Off, physics keeps the project's
+## rate with ticks at another.
 @export var physics_follows_tick_rate := true
 ## False pauses ticking.
 @export var active: bool = true
 
-## Current tick number: the last tick that ran. Starts at 0 before any tick. Change it only with [method set_tick].
+## Current tick number: the last tick that ran, 0 before any. Change it only with [method set_tick].
 var tick: int = 0
-## Time dilation multiplier: how fast ticks happen. 1.0 offline and on the server; on a client the netcode nudges it to keep its
-## clock right (NetClock).
+## Time dilation multiplier: how fast ticks happen. 1.0 offline and on the server; on a client the netcode nudges it to keep its clock right.
 var tick_factor: float = 1.0
-## Ticks skipped by the max_ticks_per_frame limit, and time Godot dropped beyond its own limit, for diagnostics.
+## Ticks dropped by the [member max_ticks_per_frame] limit, plus time Godot dropped beyond its own limit; for diagnostics.
 var dropped_ticks: int = 0
 
-## Sent when [member load_step] changes (the load ladder; see the class description).
+## Sent when [member load_step] changes (see the load ladder in the README).
 signal load_step_changed(step: int)
-## On, load_step follows how loaded the ticks are. Off, it stays at 1 (unless load_step_override says otherwise).
+## On, [member load_step] follows how loaded the ticks are. Off, it stays at 1 (unless [member load_step_override] says otherwise).
 @export var load_ladder_enabled := true
-## The highest load_step the ladder goes to: 1, 2 or 4.
+## The highest [member load_step] the ladder goes to: 1, 2 or 4.
 @export_enum("1:1", "2:2", "4:4") var max_load_step := 4
-## 0 (the default): automatic. 1, 2 or 4: forced, for testing a level or a game that wants one.
+## 0: automatic. 1, 2 or 4: forced, for testing a level or a game that wants one.
 @export_enum("Automatic:0", "1:1", "2:2", "4:4") var load_step_override := 0
-## The share of a tick's budget above which the ladder steps up, after raise_after_ticks in a row.
+## The share of a tick's budget above which the ladder steps up, after [member raise_after_ticks] in a row.
 @export_range(0.1, 2.0, 0.05) var raise_above := 0.85
-## How many ticks in a row over raise_above before it steps up, at 60 a second. 30: half a second.
+## Ticks in a row over [member raise_above] before it steps up, at 60 a second. 30: half a second.
 @export_range(1, 600, 1) var raise_after_ticks := 30
-## The share of a tick's budget below which the ladder always steps down, after lower_after_ticks in a row. It also steps down when
-## it predicts the lower step fits ([member step_down_headroom]): much of a tick doesn't shrink with the AI's step (recording, the
-## player's pawn, the replay), so a game at step 4 can sit at about half its budget, never under this line.
+## The share of a tick's budget below which the ladder steps down, after [member lower_after_ticks] in a row. It also steps down when
+## it predicts the lower step fits ([member step_down_headroom]), as much of a tick doesn't shrink with the AI's step.
 @export_range(0.0, 1.0, 0.05) var lower_below := 0.4
-## The ladder also steps down when the load it predicts for the lower step is under raise_above minus this, after
-## lower_after_ticks in a row. The prediction is the load now plus what stepping up saved when it last did (measured: the load just
-## before the step up, less the load once it had settled). With no measurement yet, it assumes the load doubles.
+## It also steps down when the load predicted for the lower step is under [member raise_above] minus this. Predicted: the load now plus
+## what stepping up saved last time; with no measurement yet, twice the load.
 @export_range(0.0, 1.0, 0.05) var step_down_headroom := 0.15
-## How long after a step up the load is measured again to work out what it saved, in ticks at 60 a second. About three times what
-## the average takes to settle.
+## Ticks after a step up before the load is measured to work out what it saved, at 60 a second. About three times what the average
+## takes to settle.
 @export_range(1, 600, 1) var saving_measured_after_ticks := 30
-## A measured saving under this share of the budget is treated as not measured (the load probably rose for another reason while
-## measuring, such as a fight starting), so stepping down assumes the load doubles instead of that it barely changes, which would
-## bounce the ladder up and down.
+## A measured saving under this share of the budget counts as not measured (the load likely rose for another reason), so stepping down
+## assumes the load doubles; this stops the ladder bouncing.
 @export_range(0.0, 1.0, 0.01) var smallest_believable_saving := 0.05
-## How many ticks in a row under lower_below (or with the lower step predicted to fit) before it steps down, at 60 a second. 180:
-## three seconds.
+## Ticks in a row under [member lower_below] (or with the lower step predicted to fit) before it steps down, at 60 a second. 180: three
+## seconds.
 @export_range(1, 3600, 1) var lower_after_ticks := 180
-## The most every AI pawn may run, as a step: 1 every tick, 2 every 2nd, 4 every 4th. Read it; set load_step_override to force it.
+## The most every AI pawn may run, as a step: 1 every tick, 2 every 2nd, 4 every 4th. Read it; set [member load_step_override] to force it.
 var load_step := 1
 ## How much of its budget a tick has used lately, smoothed over about ten ticks: 1.0 is the whole tick's length.
 var load_average := 0.0
-# The ladder's prediction: step -> how much of the budget stepping up to it saved (load before less load after),
-# measured once the average has settled after the step up; and the step being measured, the load before it, and the ticks left.
+# The ladder's prediction: step -> budget share that stepping up to it saved, measured once the average settled; then the step being measured.
 var _saving_at := {}
 var _measuring_step := 0
 var _load_before_raise := 0.0
@@ -182,12 +102,12 @@ var _under_ticks := 0
 var _physics_steps_this_frame := 0 # physics steps since the last rendered frame
 # REFACTOR: profile is a second way of timing work beside diagnostics' PerfScopes, with its own names and its own switch. One timing
 # tool would be one place to look and one thing to learn (reusable).
-## On, each tick phase adds up its time in microseconds into [member profile], for finding what's slow. Off, it costs a few checks
-## of this flag per tick.
+## On, each tick phase adds up its time in microseconds into [member profile], for finding what's slow. Off, it costs a few flag checks
+## per tick.
 var profile_enabled: bool = false
 ## The entries of [member profile] that count things. The rest are times in microseconds.
 const PROFILE_COUNTS: Array[String] = ["ticks", "rollbacks", "rollback_ticks"]
-## Each phase's time in microseconds, and the counts in PROFILE_COUNTS, while profile_enabled is on. Emptied by
+## Each phase's time in microseconds, plus the counts in [constant PROFILE_COUNTS], while [member profile_enabled] is on. Emptied by
 ## [method reset_profile].
 var profile: Dictionary = {}
 
@@ -200,9 +120,8 @@ var _in_simulate := false         # inside a tick's simulate phase (not a replay
 var _removed_now: Dictionary = {} # unregistered during the current tick
 var _tick_random := RandomNumberGenerator.new()
 
-# Each entry keeps its object's id and which phases it takes part in (worked out once, when it registers), and the list is kept in
-# order as entries arrive. _registered answers "is this one in?" without a search. So a pawn spawning, dying or freezing costs no
-# sort and no asking every participant which functions it has.
+# Each entry keeps its object's id and phases (worked out once, at register) and the list stays in order as entries arrive, so a pawn
+# spawning or dying costs no sort and no asking what functions it has.
 var _entries: Array = []      # [{object, order, seq, id, phases}] in order: by order, then seq
 var _registered: Dictionary = {} # instance id -> the seq of its entry
 const _PHASE_INPUT := 1
@@ -228,7 +147,7 @@ func _ready() -> void:
 func _init() -> void:
 	process_priority = -100 # tick before other nodes' own processing
 	process_physics_priority = -100
-	# A dedicated server can choose its rate at start-up, with "-- --tick-rate=30" after Godot's own arguments. It wins over the project setting. Clients take the server's rate in the handshake anyway.
+	# A dedicated server can set its rate at start-up ("-- --tick-rate=30"); it wins over the project setting. Clients take the server's.
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--tick-rate="):
 			tick_rate = maxi(0, int(arg.trim_prefix("--tick-rate=")))
@@ -241,9 +160,8 @@ func _physics_process(delta: float) -> void:
 		advance(delta)
 
 
-# Godot drops the time beyond max_physics_steps_per_frame itself, before advance() sees it, so it's counted here,
-# once a rendered frame: a frame that ran the most steps it may, and was longer than they cover, dropped the rest. Counted in
-# dropped_ticks with the driver's own, so diagnostics show when the game slows down. Only the autoload, which sets Godot's limit.
+# Godot drops time beyond max_physics_steps_per_frame itself, before advance() sees it, so it's counted here once a rendered frame
+# (a frame that ran the most steps and was longer than they cover) in dropped_ticks. Only the autoload, which sets Godot's limit.
 func _process(delta: float) -> void:
 	var steps := _physics_steps_this_frame
 	_physics_steps_this_frame = 0
@@ -257,7 +175,8 @@ func _process(delta: float) -> void:
 
 # --- Registry ----------------------------------------------------------------------------------
 
-## Adds a participant. `order`: lower runs first within each phase.
+## Adds a participant. [code]order[/code]: lower runs first within each phase; equal order keeps registration order. Registering twice
+## changes nothing; during a tick it takes effect next tick. Gotcha: a participant that also has _physics_process must turn it off in _ready, not _enter_tree, or it ticks twice.
 func register(participant: Object, order: int = 0) -> void:
 	if participant == null:
 		return
@@ -276,7 +195,7 @@ func register(participant: Object, order: int = 0) -> void:
 	_dirty = true
 
 
-## Removes a participant. During a tick, its calls stop at once.
+## Removes a participant. During a tick its calls stop at once (a pawn despawned mid-tick isn't simulated or recorded). Freed ones are dropped by themselves.
 func unregister(participant: Object) -> void:
 	if participant == null:
 		return
@@ -319,8 +238,8 @@ func _phases_of(o: Object) -> int:
 
 # --- Time --------------------------------------------------------------------------------------
 
-## Feeds elapsed time in and runs the ticks it covers. Called every physics frame while active;
-## tests call it directly.
+## Feeds elapsed time in and runs the ticks it covers, at most [member max_ticks_per_frame] (the rest is dropped and counted). Called every
+## physics frame while [member active]; tests call it directly.
 func advance(elapsed: float) -> void:
 	var dt := get_tick_dt()
 	_accumulator += elapsed * tick_factor
@@ -329,8 +248,8 @@ func advance(elapsed: float) -> void:
 	before_tick_loop.emit()
 	var ran := 0
 	while _accumulator >= dt and ran < max_ticks_per_frame:
-		# A later tick in this frame must see where the last one left things. Without this, two pawns touching drift from a
-		# one-tick-per-frame run (up to 21 cm in testing; netcode spec section 4.2).
+		# A later tick in this frame must see where the last one left things, or touching pawns drift from a one-tick-per-frame run
+		# (up to 21 cm in testing; netcode spec 4.2). Frames with one tick pay nothing.
 		if ran > 0:
 			_sync_collision_world()
 		_run_tick(dt)
@@ -355,18 +274,16 @@ func get_tick_rate() -> int:
 	return _rate
 
 
-## A setting counted in ticks at the reference rate (60 a second), as ticks at this match's
-## rate, so it lasts the same time: round(ticks × rate ÷ 60), and at least 1 where the setting is above 0. 0 and negative settings
-## (which usually mean "off" or "use the default") come back as they are. At 60 it changes nothing. An 8-tick wind-up is 8 ticks at
-## 60 and 4 at 30: 0.13 s either way. A setting that doesn't divide evenly is up to half a tick off.
+## A setting counted in ticks at the reference rate (60 a second) as ticks at this match's rate, so it lasts the same time: round(ticks
+## × rate ÷ 60), at least 1 if the setting is above 0; 0 and negative come back unchanged. An 8-tick wind-up is 4 ticks at 30.
 func ticks_at_rate(reference_ticks: int) -> int:
 	if reference_ticks <= 0 or _rate == REFERENCE_RATE:
 		return reference_ticks
 	return maxi(1, roundi(reference_ticks * float(_rate) / REFERENCE_RATE))
 
 
-## An amount added each tick at the reference rate (sight's fill_rate, say), as the amount each tick at
-## this match's rate adds, so the total over a second is the same: amount × 60 ÷ rate.
+## An amount added each tick at the reference rate (sight's fill_rate, say) as the amount each tick adds at this match's rate:
+## amount × 60 ÷ rate.
 func per_tick_at_rate(reference_amount: float) -> float:
 	return reference_amount * REFERENCE_RATE / float(_rate)
 
@@ -376,21 +293,20 @@ func get_tick_dt() -> float:
 	return 1.0 / _rate
 
 
-## Multiply velocity by this before move_and_slide (and divide after) so a tick moves the pawn
-## velocity * tick_dt even when tick_rate isn't the physics rate. 1.0 when they match.
+## Multiply velocity by this before move_and_slide (and divide after), which scales by Godot's physics delta, so a tick moves the pawn
+## velocity × tick length even if tick_rate isn't the physics rate. 1.0 when they match.
 func get_physics_factor() -> float:
 	return float(Engine.physics_ticks_per_second) / _rate
 
 
-## How far between the last tick and the next one we are, 0..1. For smoothing visuals per rendered frame.
+## How far between the last tick and the next it is, 0 to 1. For smoothing visuals per rendered frame.
 func get_interpolation_fraction() -> float:
 	var physics_dt := 1.0 / Engine.physics_ticks_per_second
 	var t := _accumulator + Engine.get_physics_interpolation_fraction() * physics_dt * tick_factor
 	return clampf(t / get_tick_dt(), 0.0, 1.0)
 
 
-## Seconds (as designers type them) to whole ticks. Any time above zero is at least one tick,
-## so a short buffer window or cooldown never silently becomes zero.
+## Seconds (as designers type them) to whole ticks. Any time above zero is at least one tick, so a short window never becomes zero.
 func seconds_to_ticks(seconds: float) -> int:
 	if seconds <= 0.0:
 		return 0
@@ -402,8 +318,8 @@ func ticks_to_seconds(ticks: int) -> float:
 	return ticks * get_tick_dt()
 
 
-## Jumps to a tick number. For a client setting its clock from the server's; use nothing else to change
-## tick. Not allowed during a tick. Saved history stays valid, because each slot remembers which tick it holds.
+## Jumps to a tick number; the only way to change [member tick]. For a client setting its clock from the server's. Not allowed during a tick
+## or a replay. Saved history stays valid, as each slot remembers which tick it holds.
 func set_tick(new_tick: int) -> void:
 	if _in_tick or _resimulating:
 		push_warning("[TickDriver] set_tick(%d) ignored: not allowed during a tick or a replay" % new_tick)
@@ -412,33 +328,32 @@ func set_tick(new_tick: int) -> void:
 	_accumulator = 0.0
 
 
-## True while a rollback is replaying ticks. Cosmetic effects (sounds, particles) should not fire then.
+## True while a rollback replays ticks. Cosmetic effects (sounds, particles) must not fire then.
 func is_resimulating() -> bool:
 	return _resimulating
 
 
-## True while a tick runs, from before_tick to after_tick. A request aimed at another pawn's AI
-## made then is queued and applied at that pawn's next AI step (pawn spec 15.1), so it never depends on which pawn went first.
+## True while a tick runs, from before_tick to after_tick. A request aimed at another pawn's AI made then is queued for that pawn's next
+## AI step (pawn spec 15.1), so it never depends on which pawn went first.
 func is_in_tick() -> bool:
 	return _in_tick
 
 
-## True while a tick's simulate phase runs (not a rollback's replay). An effect aimed at another entity during
-## it is queued and delivered from after_simulate (pawn spec 15.1).
+## True while a tick's simulate phase runs (not a replay's). An effect aimed at another entity then is queued and delivered from
+## [signal after_simulate] (pawn spec 15.1).
 func is_in_simulate() -> bool:
 	return _in_simulate
 
 
-## Repeatable randomness for gameplay, instead of randf(). The rolls depend only on key, tick and
-## salt, so a replay of the same tick gets the same results and there's no generator state to save. Use it right
-## away; the same object is returned every call. key is usually an entity id; salt separates rolls within a tick.
+## Repeatable randomness for gameplay, instead of randf(): the rolls depend only on key (usually an entity id), tick and salt (separates
+## rolls in one tick), so a replayed tick rolls the same. Use it at once; the same object is returned every call.
 func tick_rng(key: int, salt: int = 0) -> RandomNumberGenerator:
 	_tick_random.seed = hash(Vector3i(key, tick, salt))
 	return _tick_random
 
 
-## Puts predicted participants back to how they ended from_tick and replays up to the last finished tick. See the rules in the
-## class description. Returns true if a replay happened.
+## Rolls predicted participants back to how they ended from_tick, then replays every tick up to the last finished one (netcode spec 3.5).
+## Only between ticks or from before_tick; else warns and returns false, as it does if nothing could load or from_tick is in the future. Rules in the README.
 func rollback(from_tick: int) -> bool:
 	if _in_phases or _resimulating:
 		push_warning("[TickDriver] rollback(%d) ignored: not allowed during a tick's phases or another replay" % from_tick)
@@ -497,8 +412,8 @@ func rollback(from_tick: int) -> bool:
 	return true
 
 
-## Loads resimulated participants, then the following ones near them. Far-away following entities are
-## skipped, which is what keeps a large swarm affordable. Empty if no resimulated participant could load.
+## Loads resimulated participants, then following ones near them (far-away followers are skipped, which keeps a swarm affordable).
+## Empty if no resimulated participant could load.
 func _load_for_rollback(from_tick: int) -> Array:
 	var loaded: Array = []
 	var following: Array = []
@@ -526,20 +441,19 @@ func _load_for_rollback(from_tick: int) -> Array:
 
 
 ## Brings every body's collision up to date between two ticks of one frame. One body alone never collides with itself, so this only
-## does anything for two or more.
+## matters for two or more.
 func _sync_collision_world() -> void:
 	if _dirty:
 		_rebuild_phases()
 	if _syncing.size() < 2:
 		return
 	for p in _syncing:
-		# Following entities don't move during a tick's simulation, and this runs when the machine is already
-		# behind, so a large swarm mustn't add to it.
+		# Following entities don't move during simulation, and this runs when the machine is already behind, so a swarm mustn't add to it.
 		if is_instance_valid(p) and not (p.has_method(&"is_following_server") and p.is_following_server()):
 			p._sync_collision()
 
 
-## Empties the timing record. See profile_enabled.
+## Empties the timing record. See [member profile_enabled].
 func reset_profile() -> void:
 	profile = {"ticks": 0, "before_tick": 0, "input": 0, "capture": 0, "simulate": 0, "record": 0, "after_tick": 0, "rollback": 0, "rollbacks": 0, "rollback_ticks": 0}
 
@@ -609,7 +523,7 @@ func get_match_options() -> PackedStringArray:
 	return PackedStringArray(["load_ladder_enabled", "load_step_override"])
 
 
-# The load ladder's rule, from one tick's cost in microseconds (pawn spec 8.21). See the class description.
+# The load ladder's rule, from one tick's cost in microseconds (pawn spec 8.21; see the README).
 # REFACTOR: the ladder is a policy for shedding AI work, with its own tuning and match options, inside the universal tick driver. The
 # driver could just report each tick's cost, and a GameMode module (beside AIActivationManager) own the rule (few autoloads).
 func _note_tick_cost(microseconds: int, dt: float) -> void:
@@ -641,11 +555,11 @@ func _note_tick_cost(microseconds: int, dt: float) -> void:
 		_measure_ticks_left = ticks_at_rate(saving_measured_after_ticks)
 	elif _under_ticks >= ticks_at_rate(lower_after_ticks) and load_step > 1:
 		_under_ticks = 0
-		_set_load_step(load_step >> 1) # GDScript note: >> 1 halves a whole number, with no warning about dropping a fraction
+		_set_load_step(load_step >> 1)
 
 
-## True if the next step down looks safe now: the load is under lower_below, or the load predicted for the lower
-## step (the load now plus what this step saved, or twice the load if that isn't known) is under raise_above less step_down_headroom.
+## True if the next step down looks safe now: load under [member lower_below], or the predicted load for the lower step (load now plus
+## what this step saved, or twice the load if unknown) under [member raise_above] less [member step_down_headroom].
 func _lower_step_fits() -> bool:
 	if load_step <= 1:
 		return false
@@ -672,12 +586,10 @@ func _profile_phase(phase: StringName, mark: int) -> int:
 	return now
 
 
-## Sorts participants and splits them by the phase methods they have. Only runs when the registry
-## changed, never per tick. Also drops freed participants.
+## Sorts participants and splits them by the phase methods they have. Only runs when the registry changed. Also drops freed participants.
 func _rebuild_phases() -> void:
 	_dirty = false
-	# One pass. Entries unregistered since (their id is gone from _registered, or belongs to a newer
-	# entry of the same object) and freed ones are dropped; the rest are already in order, with their phases known.
+	# One pass: entries unregistered since (id gone, or owned by a newer entry of the same object) and freed ones are dropped.
 	var kept: Array = []
 	for e in _entries:
 		if _registered.get(e.id, -1) != e.seq:
@@ -720,8 +632,7 @@ func _refresh_rate() -> void:
 	_apply_physics_rate()
 
 
-# Sets Godot's physics rate and catch-up limit to the driver's. Only the autoload, never a test's own driver, and only when it's in
-# the tree.
+# Sets Godot's physics rate and catch-up limit to the driver's. Only the autoload (not a test's own driver), and only in the tree.
 func _apply_physics_rate() -> void:
 	if not (physics_follows_tick_rate and is_inside_tree() and get_parent() == get_tree().root):
 		return

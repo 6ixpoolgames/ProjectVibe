@@ -1,37 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: game_mode/CHANGELOG.md.
 ## Puts pawns into the world at SpawnPoints, and brings players back after they die.
 ##
-## A module of GameMode, reached as GameMode.spawn_manager. Unreal's GameMode does the same job (it picks a PlayerStart and restarts
-## players there), the owner's call. With no spawn points placed it does nothing, so it costs nothing in a game that doesn't use it.
-## [br]
-## How to use it (on the server, or offline; a client never spawns):
+## A module of GameMode (GameMode.spawn_manager), like Unreal's GameMode picking a PlayerStart. With no spawn points placed it does
+## nothing. Server or offline only. Type names are NetworkSession's (register_type), so every spawned pawn exists on every machine;
+## a pawn's team comes from its scene. Delays count ticks on TickDriver and run between ticks, so pausing the driver pauses them.
 ## [codeblock]
-## GameMode.spawn_manager.spawn("goblin")                  # at a point its team may use, any group
 ## GameMode.spawn_manager.spawn("goblin", &"red_base")     # at a point in that group
-## GameMode.spawn_manager.spawn_near("goblin", node, 3.0)  # within 3 m of a node, facing its way (PawnSpawner uses this)
-## GameMode.spawn_manager.spawn_player(peer)               # a player's pawn, possessed for them, and brought back when it dies
-## GameMode.spawn_manager.after_seconds(2.0, callable)     # runs it after 2 s of ticks
+## GameMode.spawn_manager.spawn_near("goblin", node, 3.0)  # within 3 m of a node (PawnSpawner uses this)
+## GameMode.spawn_manager.spawn_player(peer)               # possessed for them, and brought back when it dies
 ## [/codeblock]
-## Type names are NetworkSession's (register_type), so every spawned pawn exists on every machine. A pawn's team comes from its
-## scene: the manager reads it once per type, and uses it to choose points.
-## [br]
-## Choosing a point:
-## [br]1. Every enabled SpawnPoint that accepts the pawn's team and the group asked for (SpawnPoint.accepts).
-## [br]2. In a shuffled order, from the tick's own random numbers (TickDriver.tick_rng), so it's repeatable.
-## [br]3. On each point, up to [member tries_per_point] spots inside its scatter_radius, and the first free one wins: no pawn body
-##   within [member clearance_radius] of where the new one's middle would be, and no spot handed out in the last [member claim_ticks]
-##   ticks within twice clearance_radius. Physics only sees a pawn that was just placed after its next step, so without that, two
-##   pawns spawned or brought back in the same tick would land inside each other, and physics would push them apart at speed.
-## [br]4. If every spot is taken, it uses a spot on the first point anyway. A crowded spawn is better than none.
-## [br]5. No point at all: a warning, and nothing spawns.
-## [br]
-## Players: a pawn from [method spawn_player] that dies comes back after [member player_respawn_seconds], with full Health. It's the
-## same pawn, so its player keeps it, and its entity and history carry on. With [member player_respawn_at_spawn_point] on, it's moved
-## to a point for its team first; with that off, or with no point, it comes back where it fell. On a client, the move shows as a quick
-## slide (the client's correction smoothing), which is fine for now.
-## [br]
-## Timing: every delay here counts ticks on TickDriver, and runs between ticks (after_tick_loop), never during one. So pausing the
-## tick driver (the arena's P key) pauses the delays too, and stepping runs them a tick at a time.
+## Points are chosen by team and group, shuffled with the tick's random numbers (repeatable); the first free spot wins (README).
 class_name SpawnManager
 extends GameModeModule
 
@@ -135,7 +113,7 @@ func spawn_player(peer: int, type_name: String = "pawn", group: StringName = &""
 	if pawn == null:
 		return null
 	_players[pawn.get_instance_id()] = peer
-	# GDScript note: the instance id is bound, not the pawn, so a pawn freed before the call doesn't break it.
+	# The instance id is bound, not the pawn, so a pawn freed before the call doesn't break it.
 	if pawn.ability_manager: # died is the AbilityManager's signal
 		pawn.ability_manager.died.connect(_on_player_died.bind(pawn.get_instance_id()))
 	var coordinator: PossessionCoordinator = _game_mode.possession_coordinator if _game_mode else null
@@ -148,7 +126,7 @@ func spawn_player(peer: int, type_name: String = "pawn", group: StringName = &""
 
 
 ## Where a pawn of this team would appear, asked for with this group: {"position": Vector3, "yaw": float}, or {} with no point.
-## See "Choosing a point" in the class description.
+## See "How a spawn point is chosen" in the README.
 func find_place(team: int, group: StringName = &"") -> Dictionary:
 	var points: Array[SpawnPoint] = []
 	for node in get_tree().get_nodes_in_group(SpawnPoint.GROUP):
@@ -159,7 +137,7 @@ func find_place(team: int, group: StringName = &"") -> Dictionary:
 		return {}
 	# Tree order first, so the same points shuffle the same way for the same roll.
 	var rng := _next_rng()
-	for i in range(points.size() - 1, 0, -1): # GDScript note: a Fisher-Yates shuffle, with our own random numbers
+	for i in range(points.size() - 1, 0, -1): # Fisher-Yates shuffle with our own random numbers
 		var j := rng.randi_range(0, i)
 		var swap := points[i]
 		points[i] = points[j]
@@ -274,7 +252,7 @@ func _is_free(world_node: Node3D, feet: Vector3) -> bool:
 	return world_node.get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
 
 
-## Remembers a spot a pawn was just put on, for claim_ticks ticks (see "Choosing a point" in the class description).
+## Remembers a spot a pawn was just put on, for claim_ticks ticks (see the README).
 func _claim(feet: Vector3) -> void:
 	_forget_old_claims()
 	_claimed.append([_driver.tick if _driver else 0, feet])
@@ -283,7 +261,6 @@ func _claim(feet: Vector3) -> void:
 # Drops claims older than claim_ticks, by which time physics has stepped and sees those pawns itself.
 func _forget_old_claims() -> void:
 	var now: int = _driver.tick if _driver else 0
-	# GDScript note: filter() keeps the entries the function returns true for.
 	_claimed = _claimed.filter(func(claim: Array) -> bool: return now - int(claim[0]) < claim_ticks)
 
 
@@ -301,8 +278,7 @@ func _team_of(type_name: String) -> int:
 	return _team_of_type[type_name]
 
 
-## GDScript note: tick_rng hands back one shared generator, seeded from the tick and these numbers, so it's used at once and never
-## kept. The roll count as the key means two rolls in one tick differ.
+# One shared generator, seeded from the tick and these numbers: use it at once, never keep it. The roll count keeps two rolls in one tick different.
 func _next_rng() -> RandomNumberGenerator:
 	_roll_count += 1
 	return _driver.tick_rng(_roll_count, RANDOM_SALT) if _driver else RandomNumberGenerator.new()

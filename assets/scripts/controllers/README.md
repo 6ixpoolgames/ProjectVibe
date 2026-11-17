@@ -52,6 +52,13 @@ ai.press(&"attack")    # one press, this tick
 | `missing_input_hold_ticks` | `ControllerManager` | -1 (NetworkSession's, 3) | On the server, how long a client's last input repeats when one goes missing |
 | `missing_input_fade_ticks` | `ControllerManager` | -1 (NetworkSession's, 6) | Then how long its direction takes to fade out |
 
+## How it works
+
+- **While the AI isn't in charge** (a player has the pawn, but the AI keeps deciding: `AIContextComponent.while_possessed` FULL), `AIController.move_to()` only remembers the point and returns true, so it can't overwrite the player's path. The walk starts when the AI is in charge again. `stop()`, `move_in_direction()` and `release_all()` forget it. `is_following_order()` says whether its own last `move_to` is still under way.
+- **The input rolls back.** The pawn's `TickStateComponent` lists `ControllerManager:move_input` and the others as input, and `previous_held_actions` as state. The ControllerManager is its NetworkEntity's `input_owner`, so the server's checks on a client's input (`sanitize_network_input`, `_network_input_missing`) live here.
+- **Odd cases** (`tests/controller_manager_selftest.gd`): a parent that isn't a Pawn warns and nobody is in charge; no AIController child leaves an unpossessed pawn with nobody in charge; a freed player controller is ignored; control changing hands drops the pawn's path. A pawn without a ControllerManager has no input and can't be possessed.
+- **Unlisted input actions** (`tests/input_actions_selftest.gd`): with no list file the list starts empty and each action is added as first seen, with a warning. Offline, an unlisted action is added at the end with a one-time warning; in a network session it gets no bit (never held), because machines adding names in a different order would disagree. A blank name has no bit; past 64 actions the extras get none.
+
 ## Tests
 
 `controllers/tests/`: `controller_manager_selftest` (who's in charge, paths dropped on a change of hands, odd cases), `input_actions_selftest` (bits, the list, unlisted actions). Possession end to end is `pawn/tests/possession_selftest`. Run them with `bash tools/run_tests.sh <name>`.

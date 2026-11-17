@@ -51,6 +51,18 @@ Add a `TerrainEditLog` child so edits survive their chunk unloading and reach ot
 
 **Read the ground.** `height_at(x, z)` and `raycast(origin, direction)` work without physics.
 
+## How edits work
+
+The `TerrainEditLog` stores the edits themselves, not the heights they make: a centre, radius, amount and tick each, 20 bytes (the first four are 32-bit floats, so every machine reads back the same numbers). When a chunk is built, its edits are applied in the order they happened. Each edit is listed under every chunk it touches, including unloaded ones, so two chunks that share a border agree on it. A chunk with a very long list costs more to build; nothing merges old edits yet.
+
+**Multiplayer.** The server's log is the one that counts, and only the server edits. A client gets each edit as it reaches it, which is after the server applied it by about half the ping, so prediction can differ for that moment and the usual corrections fix it. A late joiner gets the whole log, even an empty one, so a client that loaded edits of its own doesn't keep ground the server doesn't have. The whole log goes as `to_bytes()`, the same bytes a save file holds. Data from a terrain with different settings is refused, and so is broken data (every record is checked before anything changes).
+
+**Saving.** A save file is a 4-byte `PBTE` header and then `to_bytes()`. Saving writes a temporary file and renames it over the old one, so a crash mid-save never leaves a broken save; loading falls back to the temporary file. A file that is missing, broken or made for different settings is refused and the ground stays as it was; the log then won't save itself over that file, so one run with a different seed doesn't delete the saved edits. Only the server or an offline game saves and loads.
+
+**Body lifter.** `TerrainBodyLifter` moves bodies in the group `stays_above_terrain` (a `Pawn` joins by itself) up onto raised ground. A body's position must be at its feet; digging moves nothing, because a body just falls into the hole. A body over an unbuilt chunk is left alone.
+
+**Markers per chunk.** What `_make_chunk_markers` returns: new markers every call (`get_chunk_markers` moves them into place), positioned from the terrain node, built from the chunk's numbers and not random ones so every machine gets the same list (a marker's id is its place in the list, which is also why an edit changes heights and never the list), with tags declared in `nav_tag_declarations.tres` or they're refused.
+
 ## Settings worth knowing
 
 | Setting | Where | Default | What it does |

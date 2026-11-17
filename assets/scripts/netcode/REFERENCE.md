@@ -17,28 +17,22 @@ Every class in `assets/scripts/netcode/`, from its doc comments. The overview is
 
 The server checking a late attack against what the shooter saw (netcode spec section 9).
 
-A client draws other players in the past, so when its attack reaches the server, the target has moved on. The server moves everyone else back to where the shooter saw them, checks the hit, and puts them back.
+A client draws other players in the past, so when its attack reaches the server the target has moved on. These checks move everyone else back to where the shooter saw them, test the hit, and put them back. Authority only, attacks only, inside a tick; movement is never rewound. With no time to go back (AI swings, offline play, lag compensation off) nothing is rewound.
 
-How far back: the client says how many ticks behind its own tick it was drawing others (`view_ticks_behind`). The server never trusts that blindly: it's limited to between 0 and `NetworkSession.rewind_cap_seconds`, and to what that client's snapshot acknowledgements make believable (`NetworkSession.limit_view_ticks_behind`). With no time to go back (every AI swing, all offline play, or lag compensation switched off), nothing is rewound at all.
+```gdscript
+var hit := LagCompensation.hitscan(shooter_entity, origin, direction, 50.0, view_ticks_behind)
+```
 
-Rules, checked in tests/net_selftest.gd:
-- Past the cap, a high-ping shooter has to lead the target.
-- An entity with no record of that tick stays where it is for the check.
-- Everyone goes back to their real position before this returns, including in the collision world.
-- Only for attacks. Movement is never rewound on the server.
-- Only runs on the authority, inside a tick.
-- Tier 0 rewinds once per check, not once per tick for all checks, which costs more if many fire on the same tick. `melee_spheres()` checks several spheres in one rewind.
+Design: netcode spec 9.
 
 ### Functions
 
-- `hitscan(shooter: NetworkEntity, origin: Vector3, direction: Vector3, length: float, view_ticks_behind: float) -> Dictionary` *(static)*: A ray from origin along direction. Returns {} for no hit, otherwise {"position": Vector3, "collider": Object, "entity": NetworkEntity or null}. A wall in the way blocks it, because the world doesn't rewind.
+- `hitscan(shooter: NetworkEntity, origin: Vector3, direction: Vector3, length: float, view_ticks_behind: float) -> Dictionary` *(static)*: A ray from origin along direction. Returns {} for no hit, else {"position", "collider", "entity": NetworkEntity or null}.
+  
+  A wall in the way blocks it, because the world doesn't rewind.
 - `melee(shooter: NetworkEntity, centre: Vector3, radius: float, view_ticks_behind: float) -> NetworkEntity[]` *(static)*: A sphere around centre, such as a melee swing. Returns every entity it touched, as an Array of NetworkEntity.
-- `melee_spheres(shooter: NetworkEntity, centres: Vector3[], radius: float, view_ticks_behind: float) -> NetworkEntity[]` *(static)*: Several spheres of one radius, checked in one rewind, such as the spots a sweeping swing passes through in one tick.
-  
-  Rewinding moves every other entity, which costs far more than a sphere check, so it's done once for the lot. Returns every entity any of them touched, each once, as an Array of NetworkEntity.
-- `would_rewind(shooter: NetworkEntity, view_ticks_behind: float) -> bool` *(static)*: True if a check for this shooter would move other entities back in time first.
-  
-  When it wouldn't (every AI swing, and all offline play), a check can ask where pawns are now, as MeleeSweepStep does through the pawn grid.
+- `melee_spheres(shooter: NetworkEntity, centres: Vector3[], radius: float, view_ticks_behind: float) -> NetworkEntity[]` *(static)*: Several spheres of one radius (such as a sweeping swing's spots in one tick), checked in one rewind. Returns each entity touched once.
+- `would_rewind(shooter: NetworkEntity, view_ticks_behind: float) -> bool` *(static)*: True if a check for this shooter would move other entities back first; if not, it can use where pawns are now (as MeleeSweepStep does).
 
 ## NetClock
 
@@ -46,26 +40,24 @@ Rules, checked in tests/net_selftest.gd:
 
 A client's estimate of the server's clock (netcode spec section 4).
 
-The client sends pings; each pong says which tick the server was on. A ping that came back quickly spent little time waiting in queues, so the estimate uses the fastest recent one, while the round trip uses the average of them all.
-
-A client runs ahead of the server by half the round trip plus a safety margin, set when it starts ticking, and set again only if it drifts well away (a hitch, say). Day to day it's kept right by time dilation, which nudges `TickDriver.tick_factor` from the margins the server reports (`NetworkSession._update_dilation`).
+The client feeds it pongs (`add_sample()`); it estimates the server's tick from the fastest recent ping and the round trip from the average. Times are microseconds, ticks are 60 a second. Design: netcode spec 4.
 
 ### Constants
 
-- `MAX_SAMPLES = 16`: How many recent pings count. About 4 s at the usual ping rate.
+- `MAX_SAMPLES = 16`: How many recent pings count (about 4 s at the usual ping rate).
 
 ### Functions
 
 - `reset() -> void`: Forgets everything, for a new connection.
-- `add_sample(sent_usec: int, received_usec: int, server_tick: int, tick_usec: float) -> void`: Records a pong. tick_usec is the length of one tick.
+- `add_sample(sent_usec: int, received_usec: int, server_tick: int, tick_usec: float) -> void`: Records a pong: when the ping was sent and the pong received (microseconds), the server tick it carried, and the length of a tick.
 - `get_sample_count() -> int`: How many pongs are being remembered, up to `MAX_SAMPLES`.
 - `get_rtt_usec() -> float`: The average round trip in microseconds. 0 before any sample.
 - `get_jitter_usec() -> float`: How much the round trip varies, in microseconds (standard deviation).
 - `estimate_server_tick(now_usec: int, tick_usec: float) -> float`: Which tick the server is on right now, from the fastest recent ping. 0 before any sample.
 - `get_lowest_rtt_usec() -> float`: The fastest recent round trip in microseconds, which a lag spike doesn't inflate. 0 before any sample.
-- `get_lead_ticks(tick_usec: float, margin_ticks: int, from_lowest: bool = false) -> int`: How many ticks ahead of the server a client should run.
+- `get_lead_ticks(tick_usec: float, margin_ticks: int, from_lowest: bool = false) -> int`: How many ticks ahead of the server a client should run: half the round trip plus `margin_ticks`.
   
-  `from_lowest` uses the fastest recent ping instead of the average, for when time dilation will add whatever more is needed.
+  `from_lowest` uses the fastest ping instead of the average, since time dilation adds whatever more is needed.
 
 ## NetPackets
 
@@ -73,19 +65,13 @@ A client runs ahead of the server by half the round trip plus a safety margin, s
 
 What goes on the wire (netcode spec section 11): packet types, and how one value is turned into bytes and back.
 
-Every value starts with a one-byte tag saying how it's stored, so a reader never has to guess, and a bad packet can be spotted and dropped.
+Every value starts with a one-byte tag saying how it's stored (a position at 1 mm is 3 bytes per axis, an angle_u16 is 2), and a value reads back exactly as the sender rounded it. Never trust these bytes: `read_value()` returns `BAD` for anything truncated or unknown, objects are never decoded, and positions clamp at about +/- 8.3 km.
 
-Values follow their encoding from StateEncoding: a position at 1 mm takes 3 bytes per axis, an angle_u16 takes 2. Reading a rounded value back gives exactly the same number the sender rounded to, which is why a client's prediction can compare equal to what the server sent.
-
-Never trust these bytes: `read_value()` returns `BAD` for anything truncated or unknown, and objects are never decoded. Positions are limited to about +/- 8.3 km at 1 mm; anything further is clamped.
-
-NetCodec in C++ (`native/src/net_codec.cpp`) writes and reads inputs and snapshots with the same bytes, faster; this class is the fallback where that library isn't loaded, and handles every other packet. A change to the format goes in both (tests/net_codec_selftest compares them).
+Twin: NetCodec in C++ (`native/src/net_codec.cpp`) writes and reads inputs and snapshots with the same bytes; this is the fallback and handles every other packet. A format change goes in both (tests/net_codec_selftest compares them). Design: netcode spec 11.
 
 ### Constants
 
-- `PROTOCOL_VERSION = 5`: Bump this when the wire format changes. It's part of the handshake's content hash.
-  
-  native/src/net_codec.cpp holds its own copy of this format and this number, so bump and change both.
+- `PROTOCOL_VERSION = 5`: Bump when the wire format changes; part of the handshake's content hash. Twin: net_codec.cpp has its own copy, so bump both.
 - `Type.HELLO = 1`
 - `Type.WELCOME = 2`
 - `Type.REFUSED = 3`
@@ -99,11 +85,11 @@ NetCodec in C++ (`native/src/net_codec.cpp`) writes and reads inputs and snapsho
 - `Type.OWNER_CHANGED = 11`
 - `Type.CLIENT_MESSAGE = 12`
 - `Type.ACK = 13`
-- `UNRELIABLE_TYPES = Array[int]([8, 9, 4, 5, 13])`: The types sent unreliably, in one place, so a new type is added here once (NetDebugModule reads it too). Everything else goes reliably.
-- `BAD = &"__net_bad_packet__"`: What read_value returns for a broken packet. Stop reading when you see it.
+- `UNRELIABLE_TYPES = Array[int]([8, 9, 4, 5, 13])`: The types sent unreliably (NetDebugModule reads it too); everything else goes reliably.
+- `BAD = &"__net_bad_packet__"`: What `read_value()` returns for a broken packet. Stop reading when you see it.
 - `MAX_LIST_SIZE = 255`: The most values one list can hold: its count is one byte.
 - `INT24_LIMIT = 8388607`: The largest number 3 bytes hold, signed: about 8.3 km at 1 mm.
-- `WORLD_ENTRY_SIZE = 8`: Items per entity in `write_world()`'s list: id, state values, state encodings, sync values, sync encodings, input values, input encodings, custom values.
+- `WORLD_ENTRY_SIZE = 8`: Items per entity in `write_world()`'s list: id, state values and encodings, sync values and encodings, input values and encodings, custom values.
 - `Tag.MISSING = 0`
 - `Tag.VECTOR3_MM = 1`
 - `Tag.VECTOR3_CM = 2`
@@ -129,12 +115,8 @@ NetCodec in C++ (`native/src/net_codec.cpp`) writes and reads inputs and snapsho
 - `read_value(buffer: StreamPeerBuffer) -> Variant` *(static)*: Reads one value, or returns BAD. Vectors and angles come back exactly as StateEncoding.quantize would round them.
 - `write_list(buffer: StreamPeerBuffer, values: Array, encodings: Array) -> void` *(static)*: Writes a count, then each value with its encoding. values and encodings must be the same size.
 - `read_list(buffer: StreamPeerBuffer) -> Variant` *(static)*: Reads a list. Returns null if the packet is broken.
-- `write_world(entries: Array) -> PackedByteArray` *(static)*: A snapshot's entities as bytes, from a flat list of `WORLD_ENTRY_SIZE` items per entity.
-  
-  NetCodec in C++ does the same job, faster, with the same bytes: this version is what runs where that library isn't available.
-- `read_world(buffer: StreamPeerBuffer, count: int) -> Variant` *(static)*: Reads count entities written by `write_world()`: an Array of [id, state, sync, input, custom] for each. Null if the packet is broken.
-- `_wrap_steps(steps: int, half_range: int) -> int` *(static)*: An angle rounded to the very end of its range would need one more step than the bytes hold. It's the same direction as the other end, so it wraps.
-- `_get_vector3(buffer: StreamPeerBuffer, step: float, encoding: StringName) -> Variant` *(static)*: Rounded again on arrival, because engine vectors store 32 bits: this gives the very same number the sender rounded to.
+- `write_world(entries: Array) -> PackedByteArray` *(static)*: A snapshot's entities as bytes, from a flat list of `WORLD_ENTRY_SIZE` items per entity. Twin: NetCodec does the same in C++, same bytes.
+- `read_world(buffer: StreamPeerBuffer, count: int) -> Variant` *(static)*: Reads count entities written by `write_world()`: [id, state, sync, input, custom] each. Null if the packet is broken.
 
 ## NetworkEntity
 
@@ -142,37 +124,21 @@ NetCodec in C++ (`native/src/net_codec.cpp`) writes and reads inputs and snapsho
 
 Makes an entity exist across the network (netcode spec sections 7, 10, 13).
 
-Add it as a child of the entity, after its TickStateComponent. NetworkSession gives it an id, an owner and a role when it spawns, and the same id on every machine. Anything referring to another entity over the network uses that id.
+Add it as a child of the entity, after its TickStateComponent. NetworkSession gives it an id (the same on every machine, and what anything referring to another entity over the network uses), an owner and a role. Offline it is AUTHORITY and local, nothing is sent, and the entity plays as single player. The parent may define optional hooks (see the README, "Hooks on the parent").
 
-Roles, set per machine:
-- AUTHORITY: the server (or offline). It simulates for real and its results count.
-- LOCAL_PREDICTED: your own pawn on your client. It simulates ahead and gets corrected.
-- LOCAL_UNPREDICTED: your own pawn with prediction off: MOBA-style. It sends inputs and waits, so what you do shows up after your ping. It's drawn from snapshots like a remote entity.
-- REMOTE_FOLLOWING: anything else on a client, by default. It doesn't simulate: it's drawn in the past between snapshots (interpolation), and stays where it's drawn during a rollback.
-- REMOTE_PREDICTED: anything else on a client, when predicted. It simulates ahead on its last known input and gets corrected, like Rocket League cars. Off by default: it costs CPU on every rollback, needs input in every snapshot, and puts enemies at their present position, which doesn't suit aiming.
+```gdscript
+# in the entity's scene: TickStateComponent first, then NetworkEntity
+NetworkSession.spawn("pawn", peer_id, Vector3(0, 1, 0))
+```
 
-Hooks on the parent, all optional:
-- `_on_network_role(entity)`: told its role before entering the tree, so it can pick where input comes from.
-- `sanitize_network_input(values) -> Dictionary`: the server cleans a client's input. Never trust it.
-- `_network_input_missing()`: the server has no input for this tick and repeats the last one.
-- `_on_network_interpolated()`: a remote entity was just moved between snapshots.
-- `_on_network_corrected(jump)`: a rollback moved it by this much, for hiding the jump on the visible model.
-
-The two input hooks go to `input_owner` when it's set (a Pawn's ControllerManager sets itself, since it holds the input), and to the parent otherwise.
-
-Rules, checked in tests/net_selftest.gd:
-- Offline, it's AUTHORITY and local, and nothing is sent. The entity plays as single player.
-- An entity with no TickStateComponent has nothing to send, and warns once.
-- `is_replicated` off: exists on this machine only, not spawned anywhere else. This one isn't tested yet.
+Design: netcode spec 7, 10, 13.
 
 ### Settings and properties
 
-- `is_replicated: bool` = `true`: Off: stays on this machine only, like particles or debris.
+- `is_replicated: bool` = `true`: Off: stays on this machine only, like particles or debris; not spawned anywhere else (not tested yet).
 - `is_predicted: bool` = `false`: On: other clients simulate this ahead instead of following the server. NetworkSession.default_predicted turns it on everywhere.
-- `keep_history_offline: bool` = `false`: On: offline, keep a history of state and inputs every tick, for a single-player game that rolls back (a rewind power, say).
-  
-  Off (the default): offline, values are still rounded every tick, exactly as online, but nothing is saved, because nothing replays. Saving is the biggest cost per pawn (pawn spec 12.1). Online it changes nothing.
-- `input_owner: Node` = `null`: The node that holds this entity's input, for the server's input hooks (sanitize_network_input and _network_input_missing). Null: the parent.
+- `keep_history_offline: bool` = `false`: On: offline, keep state and input history every tick, for a single-player rewind. Off: nothing is saved or rounded offline (pawn spec 12.1).
+- `input_owner: Node` = `null`: The node that holds this entity's input, for the server's input hooks (a Pawn's ControllerManager sets itself). Null: the parent.
 - `entity_id: int` = `-1`: The same on every machine, given by NetworkSession at spawn. -1 until then.
 - `type_name: String` = `""`: The name it was registered under with NetworkSession.register_type.
 - `owner_peer: int` = `0`: The peer that sends its input; 0 is the server itself, such as an AI pawn.
@@ -190,28 +156,24 @@ Rules, checked in tests/net_selftest.gd:
 - `Role.REMOTE_FOLLOWING = 2`
 - `Role.REMOTE_PREDICTED = 3`
 - `Role.LOCAL_UNPREDICTED = 4`
-- `HIT_HISTORY_SIZE = 64`: Ticks of positions kept for lag compensation, about 1 s at 60 ticks a second.
+- `HIT_HISTORY_SIZE = 64`: Ticks of positions kept for lag compensation (about 1 s).
 
 ### Functions
 
-- `configure(new_id: int, new_type: String, new_owner: int, new_role: int, local: bool, new_session: Node) -> void`: Called by NetworkSession before the entity enters the tree, so everything below it can see its role from the start.
+- `configure(new_id: int, new_type: String, new_owner: int, new_role: int, local: bool, new_session: Node) -> void`: Called by NetworkSession before the entity enters the tree, so everything below it sees its role from the start.
 - `follows_snapshots() -> bool`: True if this entity is placed from snapshots rather than simulated here.
-- `change_owner(new_owner: int, local: bool, new_role: int) -> void`: Changes who owns this entity while running, which is what swapping pawns does. Input queued from the old owner is forgotten, and the parent is told its new role again.
-- `set_role(new_role: int) -> void`: Changes role while running, when a feature switch changes (NetworkSession.refresh_entities). Its history simply starts again from here.
-- `refresh_input_saving() -> void`: Works out what the TickStateComponent saves. On a server, only entities that clients predict need their inputs saved, so they can go in snapshots. Which ticks' state is saved (`TickStateComponent.history_interval_ticks`):
-  - A server: only the ticks it sends snapshots on, the only ones it reads, since it never replays.
-  - Offline, through NetworkSession: none, and no inputs either, unless `keep_history_offline` is on. Nothing offline replays, and saving is the biggest cost per pawn (pawn spec 12.1).
-  - A client: every tick, for replays.
+- `change_owner(new_owner: int, local: bool, new_role: int) -> void`: Changes who owns this entity while running (swapping pawns). Input queued from the old owner is dropped, and the parent hears its role again.
+- `set_role(new_role: int) -> void`: Changes role while running, when a feature switch changes (NetworkSession.refresh_entities). History starts again from here.
+- `refresh_input_saving() -> void`: Works out what the TickStateComponent saves and rounds: a server saves only snapshot ticks (and inputs only if a client predicts it); offline saves nothing unless `keep_history_offline`; a client saves every tick, for replays.
   
-  An entity that NetworkSession never configured (made directly, as most tests do) keeps saving everything.
-- `set_paused(paused: bool) -> void`: Stops every tick this entity causes, or starts them again: its parent's, its TickState's and its own.
+  An entity NetworkSession never configured (made directly, as tests do) saves and rounds everything.
+- `set_paused(paused: bool) -> void`: Stops every tick this entity causes (its parent's, its TickState's, its own), or starts them again; state stays as it is.
   
-  All of its state stays as it is. While paused it records nothing, so snapshots leave it out, and clients hold it where they last saw it. Only for an entity on the machine that decides, such as a server's AI pawn out of reach of every player.
+  While paused it records nothing, so snapshots leave it out. Only for the machine that decides, such as a far-off server AI pawn.
 - `is_paused() -> bool`: True while `set_paused()` has stopped it.
-- `_apply_role_to_driver() -> void`: The one place that decides which of this entity's parts tick, so nothing else has to undo it. It registers them in the order they'd normally join: the parent first, because _tick_input below runs after the parent's. Something placed from snapshots must not also simulate itself. Your own unpredicted pawn still decides its input, in _tick_input below.
-- `_tick_input(dt: float, tick: int) -> void`: Server: hands the entity the input its owner sent for this tick. This runs after the parent's own _tick_input.
+- `_tick_input(dt: float, tick: int) -> void`: Server: hands the entity the input its owner sent for this tick. Runs after the parent's own _tick_input.
 - `_tick_record(tick: int) -> void`: Server: remembers where this entity was, so lag compensation can look back.
-- `follow_server(render_tick: float, allow_extrapolation: bool = true) -> void`: Something placed from snapshots: places it for this tick, between them.
+- `follow_server(render_tick: float, allow_extrapolation: bool = true) -> void`: Client: places a snapshot-driven entity between snapshots for this render tick.
 - `clean_input(values: Dictionary) -> Dictionary`: The server's cleaned-up version of a client's input.
 - `tell_corrected(jump: Variant) -> void`: Client: tells the parent a correction moved it by this much, so it can hide the jump on its visible model.
 - `get_position_or_null() -> Variant`: The parent's global position, or null if it has none.
@@ -224,53 +186,35 @@ Rules, checked in tests/net_selftest.gd:
 
 How precisely networked values are stored (netcode spec section 5.3).
 
-Every networked property has an encoding. Values are rounded to it at the end of every tick, on server and client alike, so both simulate from exactly what the network can carry and rounding alone never causes a misprediction. The C++ recorder (`TickStateRecorder`) and codec (`NetCodec`) round the same way (`native/src/state_encoding.h`), so a change to `quantize()` goes in both.
+Every networked property has an encoding. Values are rounded to it at the end of every tick, on server and client alike, so both simulate from exactly what the network can carry. Encodings: `auto` (by type), `vector3_mm` (default for positions), `vector2_mm`, `vector3_cm`, `angle_u16`, `angle_byte`, `float`, `raw` (ints, bools, StringNames).
 
-Encodings:
-- `auto`: pick by the value's type: Vector3 is vector3_mm, Vector2 is vector2_mm, float is float, anything else raw.
-- `vector3_mm`: 1 mm per axis. The default for positions and velocities.
-- `vector2_mm`: the same, for a Vector2.
-- `vector3_cm`: 1 cm per axis. Only for values that don't build up tick by tick (a target point, say).
-- `angle_u16`: an angle in radians, 65536 steps per turn (about 0.005 degrees).
-- `angle_byte`: an angle in radians, 256 steps per turn. Only for values that don't build up tick by tick.
-- `float`: a 32-bit float.
-- `raw`: left alone: ints, bools, bitmasks, StringNames.
-
-Why the rounding step matters: a value that changes by less than half a step per tick is rounded straight back and never changes. At 60 ticks/s and 1 mm, that stalls anything moving slower than about 3 cm/s, and speeds in general are off by up to 3 cm/s. At 1 cm it would be 30 cm/s, which is why positions aren't in cm.
-
-Physics bodies, two rules (see samples/TickSamplePawn.gd):
-- safe_margin must not be a whole number of steps, and Godot's default of 1 mm is. A body rests one margin above the floor, so rounding would park it exactly on the edge of "touching". Float noise then flips the contact, and the engine snaps it up to 2.4 cm into the floor.
-- Don't turn the body by writing rotation every tick. That slowly changes its scale, and so its collision shape, differently in a replay. Keep facing as a plain number and turn only the model.
-
-Corner cases (checked in tests/tick_state_selftest.gd): an encoding that doesn't fit the value's type leaves the value unchanged; an unknown encoding name is reported by `is_known()` and the component falls back to auto.
+Twin: the C++ recorder and codec round the same way (`native/src/state_encoding.h`); a change to `quantize()` goes in both. Design: netcode spec 5.3.
 
 ### Constants
 
-- `AUTO = &"auto"`
-- `VECTOR3_MM = &"vector3_mm"`
-- `VECTOR2_MM = &"vector2_mm"`
-- `VECTOR3_CM = &"vector3_cm"`
-- `ANGLE_U16 = &"angle_u16"`
-- `ANGLE_BYTE = &"angle_byte"`
-- `FLOAT = &"float"`
-- `RAW = &"raw"`
-- `MM = 0.001`
-- `CM = 0.01`
-- `U16_STEP = 9.587379924285257e-05`
-- `BYTE_STEP = 0.02454369260617026`
-- `FLOAT_TOLERANCE = 0.0001`
+- `AUTO = &"auto"`: Picks by the value's type: Vector3 is vector3_mm, Vector2 is vector2_mm, float is float, anything else raw.
+- `VECTOR3_MM = &"vector3_mm"`: 1 mm per axis. The default for positions and velocities.
+- `VECTOR2_MM = &"vector2_mm"`: The same, for a Vector2.
+- `VECTOR3_CM = &"vector3_cm"`: 1 cm per axis. Only for values that don't build up tick by tick (a target point).
+- `ANGLE_U16 = &"angle_u16"`: An angle in radians, 65536 steps per turn (about 0.005 degrees).
+- `ANGLE_BYTE = &"angle_byte"`: An angle in radians, 256 steps per turn. Only for values that don't build up tick by tick.
+- `FLOAT = &"float"`: A 32-bit float.
+- `RAW = &"raw"`: Left alone: ints, bools, bitmasks, StringNames.
+- `MM = 0.001`: One millimetre, the step of the mm encodings.
+- `CM = 0.01`: One centimetre, the step of vector3_cm.
+- `U16_STEP = 9.587379924285257e-05`: The angle_u16 step in radians.
+- `BYTE_STEP = 0.02454369260617026`: The angle_byte step in radians.
+- `FLOAT_TOLERANCE = 0.0001`: How close two floats must be to count as the same state.
 
 ### Functions
 
 - `is_known(encoding: StringName) -> bool` *(static)*: True if this is one of the encoding names above.
 - `resolve(encoding: StringName, value: Variant) -> StringName` *(static)*: Turns auto into a concrete encoding, from the value's type.
-- `quantize(value: Variant, encoding: StringName) -> Variant` *(static)*: The value rounded to its encoding. Rounding an already rounded value changes nothing.
-- `as_float32(value: float) -> float` *(static)*: GDScript floats are 64-bit, but engine properties like rotation store 32 bits. Rounded values go through this so a value reads back from such a property exactly as it was written, and doesn't look changed on the next tick. NetPackets uses it too.
-- `blend(a: Variant, b: Variant, weight: float, encoding: StringName) -> Variant` *(static)*: A value part way between two others, for drawing between snapshots.
-  
-  Things that can't blend, like bools, stay at the first value until the second arrives.
-- `copy_value(value: Variant) -> Variant` *(static)*: A copy of the value that shares nothing with the original. Arrays, Dictionaries and packed arrays are held by reference in GDScript, so saving one without copying would leave every history slot pointing at the same live object.
-- `nearly_equal(a: Variant, b: Variant, encoding: StringName) -> bool` *(static)*: True if two values count as the same state. Reconciliation uses this to decide whether a prediction was right.
+- `quantize(value: Variant, encoding: StringName) -> Variant` *(static)*: The value rounded to its encoding (twin of the C++ `state_encoding.h`; change both). Rounding a rounded value changes nothing.
+- `as_float32(value: float) -> float` *(static)*: The float rounded to 32 bits, as engine properties like rotation store it, so it reads back exactly as written. NetPackets uses it too.
+- `blend(a: Variant, b: Variant, weight: float, encoding: StringName) -> Variant` *(static)*: A value part way between two others, for drawing between snapshots. Things that can't blend (bools) stay at the first.
+- `copy_value(value: Variant) -> Variant` *(static)*: A copy sharing nothing with the original. Gotcha: arrays, dictionaries and packed arrays are held by reference, so history slots must copy.
+- `nearly_equal(a: Variant, b: Variant, encoding: StringName) -> bool` *(static)*: True if two values count as the same state; reconciliation uses it to decide whether a prediction was right.
 
 ## TickStateComponent
 
@@ -278,57 +222,15 @@ Corner cases (checked in tests/tick_state_selftest.gd): an encoding that doesn't
 
 Makes an entity rollback-ready without writing code (netcode spec sections 5 and 6).
 
-Add it as a child of the entity and list property names in the inspector. It rounds them every tick, keeps their recent history, and can put the entity back to any recent tick and replay it. The entity itself keeps implementing _tick_input and _tick_simulate as normal; those are all it needs.
-
-The lists:
-- `input_properties`: what the entity wants each tick. Saved after the input phase, restored during replay.
-- `state_properties`: everything that affects the next tick: position, velocity, grounded, cooldowns... If a value influences the future and isn't listed, replays drift.
-- `sync_properties`: server-only values (health, team). Not rolled back. Sent in every snapshot; clients show the latest.
-
-How to write an entry (the optional "@encoding" is one of those in StateEncoding; the default is by type):
+Add it as a child of the entity and list property names in the inspector: `input_properties` (what the entity wants each tick), `state_properties` (everything that affects the next tick) and `sync_properties` (server-only values). It rounds them every tick, keeps recent history, and can put the entity back to any recent tick and replay it.
 
 ```gdscript
 "velocity"                 # a property on the parent
 "Walk:phase"               # a property on a node below the parent
-":rotation:y @angle_u16"   # part of a property on the parent (note the leading colon)
+":rotation:y @angle_u16"   # part of a property on the parent, with an encoding from StateEncoding
 ```
 
-Parts added after the scene was made (abilities from PawnInitializer) add theirs with `add_state_properties()`.
-
-Unusual state: if the parent, or a node in `custom_state_nodes`, has `save_state() -> Dictionary` and `load_state(Dictionary)`, those run alongside the lists. save_state must return a new Dictionary each call. The Dictionary also goes to clients in every snapshot, and clients correct it like list entries. That makes two rules: its values must come out exactly equal on server and client, so use ints, bools or floats you've rounded yourself, and keep it small, since there are no encodings to shrink it. After every entity has loaded, the parent's `_on_state_loaded(tick)` runs if it has one (for things only the engine can restore). It waits for all of them, so a floor check there sees the others where they were.
-
-Rules and corner cases (all checked in tests/tick_state_selftest.gd):
-- Entries are matched to nodes when ticks run, not at ready, because children become ready before their parent and PawnInitializer may add parts later. An entry whose node or property isn't there warns once and is looked for again every tick, so it starts working as soon as the part exists. An unusable entry never causes an error.
-- A listed node that gets freed (an ability removed at runtime) just stops being saved. Ticks saved while it was there leave whatever replaced it alone: only properties saved for that tick are restored.
-- Arrays and Dictionaries are copied in and out of the history, so every tick keeps its own contents. Objects can't be copied: listing one warns, and it won't roll back. Use save_state/load_state, or an id.
-- No lists at all, or none usable yet: harmless. The entity isn't predicted, because there is nothing to restore.
-- An entity with only sync properties still records its ticks (with an empty state list), so it goes into snapshots.
-- `history_size` is in ticks, default 64 (about 1 s at 60/s). Anything older is gone: asking about it returns empty or false, and a rollback carries on without this entity.
-- `correct_state()` for a tick that's gone can't replay, so it snaps the entity to the given values and warns.
-- Replay with an input missing for a tick: the last input stays in place.
-- Only values that changed are written back after rounding, so setters don't run needlessly.
-- No TickDriver autoload: stays idle.
-- `history_interval_ticks` says which ticks are saved; the rest are only rounded. NetworkEntity sets it: every tick on a client, snapshot ticks on a server, none offline.
-- Recording runs in C++ (`TickStateRecorder`) once every entry is matched and its encoding settled, with exactly the same values as the GDScript path, which handles everything else.
-
-**Following the server** (netcode spec section 6.5). `rollback_mode` decides what a rollback does with this entity:
-- RESIMULATE (the default): it's put back and its _tick_simulate runs again. For what this machine predicts: your own pawn.
-- FOLLOW_SERVER: it isn't simulated: it's for what this machine doesn't predict, like other players' pawns. It's drawn between snapshots with `follow_server_at()`, which writes only the values that change. NetworkEntity stops its parent ticking live. During a rollback it normally stays where it's drawn. With `follows_during_rollback` on, it stands where the server says instead, so that predicted bodies bump into it there.
-
-The snapshot code passes what the server says to `receive_authoritative_values()`. With follows_during_rollback on, during a replay, each tick:
-- The server sent this tick: the entity stands exactly there.
-- Otherwise: it starts from the newest server state before this tick and moves on that state's velocity, up to `extrapolation_cap_seconds`, then holds. This is velocity-only prediction: no steering, gravity or collisions.
-
-Follow-server rules, also checked in the test:
-- When the replay ends, the entity gets back exactly what it had before. It only stands there during the replay; where it's drawn doesn't change. Its _tick_simulate and _on_state_loaded don't run.
-- It keeps no history of its own and doesn't round its properties. Its input isn't saved. `get_state()` returns empty.
-- No server data yet, or none from before the replay's first tick: it stays where it is until a server tick is reached.
-- The position is the parent's "position" or "global_position". The velocity is any entry whose property is called "velocity", on the parent or a node below it ("Motor:velocity"), with the parent's preferred. Without both, or if they're different types, it holds still after the newest server state, which suits a door. If that looks like a mistake, because one is listed and the other isn't but the parent has a velocity, it warns once.
-- Vector3 ignores up and down by default (`extrapolate_vertical`), because with no gravity a falling pawn would sink into the floor. Vector2 always uses both axes.
-- FOLLOW_SERVER with nothing listed uses "position", plus "velocity" if the parent has one, so the mode never does nothing. These aren't added to state_properties, so `get_schema()` stays the same on machines using either mode. List them to have them sent over the network.
-- save_state/load_state and custom_state_nodes aren't used in this mode: the server only sends listed properties.
-- A late packet older than what its history slot already holds is ignored. After a teleport or respawn, call `clear_authoritative_state()` so nothing is estimated from before it.
-- Tested with CharacterBody3D and plain nodes. Rigid bodies and animated platforms aren't tested yet.
+Twin: recording runs in C++ (`TickStateRecorder`) with exactly the same values as the GDScript path; a change to what is recorded or how it rounds goes in both. Design: netcode spec 5, 6.
 
 ### Settings and properties
 
@@ -341,24 +243,14 @@ Follow-server rules, also checked in the test:
 - `rollback_mode: int` = `0`: RESIMULATE for what this machine predicts, FOLLOW_SERVER for what it draws from snapshots. NetworkEntity sets it from its role.
 - `extrapolation_cap_seconds: float` = `0.2`: How far past the newest server state a FOLLOW_SERVER entity keeps moving on its velocity, before it holds. 0 = just hold. 0.2 measured best of those tried: longer gets worse on long replays, shorter worse on short ones (netcode spec section 6.5).
 - `extrapolate_vertical: bool` = `false`: Also move it up and down on its velocity. Off by default: with no gravity in the estimate, a falling pawn would sink.
-- `follow_refresh_seconds: float` = `0.5`: How often a FOLLOW_SERVER entity writes every value again, including those the server says haven't changed.
-  
-  Between these it only writes what changes (see _follow_before), which trusts that nothing else writes the properties. If something does (a script on the node, an animation), the value is wrong until the server next changes it; with this, for at most this long. Entities take turns, so they don't all do it on the same tick. 0: never.
-- `follows_during_rollback: bool` = `false`: During a rollback, stand on server data and extrapolate, instead of staying where it's drawn.
-  
-  Off by default, which is the standard behaviour: over real connections it made no clear difference (netcode spec section 6.5).
-- `follow_server_radius: float` = `10.0`: With `follows_during_rollback` on, this entity only joins a rollback if it's this close to something being resimulated. 0 means no limit. A guess to tune: it only has to reach anything a replaying pawn could touch during a replay (netcode spec section 6.5).
-- `keep_input_history: bool` = `false`: FOLLOW_SERVER normally saves no input. Your own pawn with prediction off still has inputs to send. NetworkEntity turns it on for the entities this machine controls.
-- `skip_input_capture: bool` = `false`: The server never replays, so it has no use for a record of what each tick's input turned out to be, unless clients predicting this entity need it sent to them. Inputs arriving from clients are still stored until their tick comes. NetworkEntity sets it.
-- `history_interval_ticks: int` = `1`: Which ticks' state goes into the history (pawn spec 12.1, open question 16).
-  
-  Values are still rounded every tick either way (`quantize_each_tick`), so the simulation is the same; only the saved copy is skipped. NetworkEntity sets it, like `skip_input_capture`:
-  - 1: every tick (the default): a client's predicted entities, which replay, and anything not in a network session.
-  - N: only ticks that are a multiple of N: a server, which never replays and only reads the history to send snapshots.
-  - 0: never: offline, where nothing replays, unless `NetworkEntity.keep_history_offline` is on.
-- `use_native: bool` = `true`: Recording runs in C++ (`TickStateRecorder`, in native/) when the library is there, which gives exactly the same values. Off: GDScript for every component, for comparing the two. Tests take `-- --gdscript-record`.
-  
-  GDScript note: a static var belongs to the class, not to each component, so one switch covers them all.
+- `follow_refresh_seconds: float` = `0.5`: How often a FOLLOW_SERVER entity rewrites every value, not only the changed ones; 0 never. It bounds how long something else writing a property (a script, an animation) can leave it wrong.
+- `follows_during_rollback: bool` = `false`: During a rollback, stand on server data and extrapolate, instead of staying where it's drawn. Off by default: no clear difference over real connections (spec 6.5).
+- `follow_server_radius: float` = `10.0`: With `follows_during_rollback` on, it only joins a rollback within this distance of something being resimulated; 0 is no limit. A guess to tune.
+- `keep_input_history: bool` = `false`: Keep input history in FOLLOW_SERVER mode too, for your own pawn with prediction off. NetworkEntity sets it for entities this machine controls.
+- `skip_input_capture: bool` = `false`: Server: don't record each tick's input (it never replays), unless clients predicting this entity need it. Client inputs still queue. NetworkEntity sets it.
+- `history_interval_ticks: int` = `1`: Which ticks' state is saved (pawn spec 12.1); NetworkEntity sets it. 1: every tick (clients, which replay); N: multiples of N (a server, its snapshot ticks); 0: none (offline).
+- `rounds_every_tick: bool` = `true`: Round every tick, or only the saved ticks. Every tick lets a machine that replays this entity land on the server's exact values; NetworkEntity turns it off where nothing replays it (offline; a server entity no client predicts). Saved ticks are rounded either way. Possession sets it again.
+- `use_native: bool` = `true`: Record in C++ (`TickStateRecorder`) when the library is there. Off: GDScript for every component, for comparing (tests take `-- --gdscript-record`).
 
 ### Constants
 
@@ -369,37 +261,41 @@ Follow-server rules, also checked in the test:
 
 ### Functions
 
-- `add_state_properties(entries: String[]) -> bool`: Adds state entries for parts that arrive after the scene was made, such as abilities PawnInitializer adds (pawn spec step 6).
+- `add_state_properties(entries: String[]) -> bool`: Adds state entries for parts that arrive after the scene was made (abilities from PawnInitializer), written as in `state_properties`. False if refused.
   
-  Entries are written as in `state_properties`, with node paths relative to the parent ("AbilityManager/Sprint:time_left"). Only before the first tick is recorded, because every saved tick has to hold the same list. Every machine must add the same entries in the same order, which holds when they come from the same parts. They aren't part of `get_schema()`, because that reads the scene as made, so the handshake doesn't check them. False if refused.
-- `round_position(value: Vector3) -> Vector3`: A position rounded the way this component's recording rounds its "position" entry (its encoding, such as millimetres).
+  Only before the first tick is recorded. Every machine must add the same entries in the same order; they aren't in `get_schema()`, so the handshake doesn't check them.
+- `round_position(value: Vector3) -> Vector3`: A position rounded the way the recording rounds the "position" entry, for code that sets position itself (CrowdMover, pawn spec 8.22) so a still pawn stays still.
   
-  Only when it rounds every tick (`quantize_each_tick`). Something that sets the position itself during a tick, such as the CrowdMover (pawn spec 8.22), rounds with this so the position is already what the recording will make it, and the recording changes nothing: a still pawn stays exactly still. As is if there's no position entry, its encoding isn't settled yet, or this doesn't round each tick.
+  Returned as is with no position entry, an unsettled encoding, or no per-tick rounding.
 - `_tick_capture_input(tick: int) -> void`: After every entity's input phase, before anything simulates.
 - `_tick_record(tick: int) -> void`: After simulating. Stores what state the entity ended this tick in.
-- `_record_natively(values: Variant) -> bool`: Records the state list through the C++ recorder: into values, or with values null only rounds. False if it can't right now (no library, use_native off, an entry not matched yet, an encoding not settled, or a node gone), and then the caller does it in GDScript, which also matches entries, settles encodings and warns. The recorder is filled again next time.
-- `_round_in_place(props: TickStateComponent.Prop[]) -> void`: Rounds each property and writes back the ones that changed, saving nothing. The GDScript path for a tick whose state isn't kept, and the same steps as _capture without the copy.
-- `_rollback_load(tick: int) -> bool`: Rollback step 1: put the entity back to how it ended this tick. False if there's nothing to restore for that tick, in which case the entity keeps its current state and sits the replay out.
+- `_record_natively(values: Variant) -> bool`: Records the state list through the C++ recorder into values (null: only round). False if it can't right now; the caller then does it in GDScript.
+- `_round_in_place(props: TickStateComponent.Prop[]) -> void`: Rounds each property and writes back the changed ones, saving nothing (the GDScript path for an unsaved tick).
+- `_rollback_load(tick: int) -> bool`: Rollback step 1: put the entity back to how it ended this tick. False if nothing is saved for it; it then sits the replay out.
 - `_rollback_after_load(tick: int) -> void`: Rollback step 1b, once everything is loaded and in the collision world.
 - `_rollback_input(tick: int) -> void`: Rollback step 2, per replayed tick: put back what the entity wanted that tick.
 - `_rollback_simulate(dt: float, tick: int) -> void`: Rollback step 3, per replayed tick: run the entity's normal simulation again.
-- `_sync_collision() -> void`: Makes the physics world see where this body is right now. Normally a moved body reaches the collision world only at the next physics step, so when several ticks run within one frame, as in a replay or a frame with two ticks, bodies would collide with out-of-date positions of each other. Kinematic bodies are deferred by the physics engine, but a static body's position applies at once, so it's static for just this call.
-- `_rollback_finished() -> void`: Rollback's last step. A following entity gets back what it had before the replay. Its collision position has to follow, because the replay's last sync left it at the last replayed tick.
-- `is_following_server() -> bool`: True in FOLLOW_SERVER mode. The driver loads resimulated entities first, then asks this and `wants_to_join_rollback()` about each following one, so a following entity far from every replaying body doesn't cost anything.
+- `_sync_collision() -> void`: Makes the physics world see where this body is right now, so several ticks in one frame (a replay) don't collide with stale positions.
+  
+  A moved body reaches the collision world only at the next physics step; a static body's position applies at once, so it's static for this call.
+- `_rollback_finished() -> void`: Rollback's last step: a following entity gets back what it had before the replay, and its collision position follows.
+- `is_following_server() -> bool`: True in FOLLOW_SERVER mode. The driver asks this and `wants_to_join_rollback()` of each following entity, so far-off ones cost nothing.
 - `get_rollback_centre() -> Variant`: Where this entity is, for the distance check, or null if it has no position.
 - `wants_to_join_rollback(centres: Array) -> bool`: True if this following entity should take part in a rollback around these positions.
 - `is_near_any(centres: Array) -> bool`: True if this entity is within follow_server_radius of any of the given positions. No position or no limit: always true.
-- `receive_authoritative_state(tick: int, values: Dictionary) -> void`: What the server says this entity's state was on a tick, as {entry: value}: the dictionary form of `receive_authoritative_values()`, which snapshots use. Entries not given stay as they are during that tick; names not in state_properties are ignored.
-- `receive_authoritative_values(tick: int, values: Array) -> void`: What the server says this entity's state was on a tick, as a whole list in declared order, as a snapshot carries it. The snapshot code calls it for every entity it reads.
+- `receive_authoritative_state(tick: int, values: Dictionary) -> void`: What the server says this entity's state was on a tick, as {entry: value}: the dictionary form of `receive_authoritative_values()`.
   
-  The list is kept as it is, not copied: the caller hands over a list of its own, already rounded by the server's encodings, and nothing changes it afterwards. A list of the wrong size is ignored.
+  Entries not given stay as they are; names not in state_properties are ignored.
+- `receive_authoritative_values(tick: int, values: Array) -> void`: What the server says this entity's state was on a tick, as a whole list in declared order, as a snapshot carries it.
+  
+  Kept without copying (the caller hands over its own, already rounded list); a list of the wrong size is ignored.
 - `clear_authoritative_state() -> void`: Forgets all server data, so nothing is estimated from before a teleport or respawn.
 - `follow_server_at(render_tick: float, allow_extrapolation: bool = true) -> void`: Places the entity for drawing, part way between the two snapshots around this tick.
   
-  If nothing newer has arrived, it moves on from the newest on its velocity, up to the cap, then holds. With extrapolation off, it just holds at the newest. Before any data, it stays put.
-- `_place_between(before: int, after: int, older: Array, newer: Array, weight: float) -> void`: Places a following entity weight of the way from older (tick before) to newer (tick after), writing as little as it can. The result is the same as writing StateEncoding.blend() of every value: values that can't blend, or are the same in both, hold at older's; positions, velocities and angles that differ blend.
-- `_refresh_follow_if_due(tick: int) -> void`: On a new pair of snapshots, forgets what was last written if follow_refresh_seconds has passed, so this pair writes every value. The first time, it only picks this entity's turn: its instance id spreads entities over the interval, so 150 pawns that appeared together refresh a few a tick, not all on one.
-- `_blends(a: Variant, b: Variant) -> bool` *(static)*: True if a value changes between the two snapshots in a way blend() moves smoothly: vectors and floats of the same type that differ.
+  With nothing newer it moves on its velocity up to `extrapolation_cap_seconds`, then holds; with no data it stays put.
+- `_place_between(before: int, after: int, older: Array, newer: Array, weight: float) -> void`: Places a following entity weight of the way from older to newer, writing as little as it can; same result as writing `StateEncoding.blend()` of every value.
+- `_refresh_follow_if_due(tick: int) -> void`: On a new pair of snapshots, forgets what was last written once `follow_refresh_seconds` has passed. Instance ids spread entities' turns, so they don't all refresh on one tick.
+- `_blends(a: Variant, b: Variant) -> bool` *(static)*: True if a value differs between the two snapshots in a way blend() moves smoothly (same-type vectors and floats).
 - `_forget_follow() -> void`: Something else wrote the properties, so the next placement writes everything.
 - `_find_authoritative(from_tick: int, step: int) -> int`: The nearest tick with server data, starting at from_tick and looking one way (step is 1 or -1). -1 if there's none near.
 - `get_state_values(tick: int) -> Array`: The saved state for a tick as a plain list, or empty if it's gone.
@@ -408,11 +304,11 @@ Follow-server rules, also checked in the test:
 - `get_state_encodings() -> Array`: The state list's encodings, in declared order. The same list each time until it changes, so don't change what you're given.
 - `get_input_encodings() -> Array`: The input list's encodings, kept like the state list's.
 - `get_sync_encodings() -> Array`: The sync list's encodings, kept like the state list's.
-- `get_list_sizes() -> PackedInt32Array`: How many entries each list has: [state, sync, input, custom]. A snapshot's lists must have these sizes; NetworkSession checks them before using one, so a mismatch is refused and reported rather than read as empty. GDScript note: a PackedInt32Array is a plain list of whole numbers, cheaper than an Array for this.
+- `get_list_sizes() -> PackedInt32Array`: How many entries each list has: [state, sync, input, custom]. NetworkSession checks a snapshot's lists against these and refuses a mismatch.
 - `state_values_to_dictionary(values: Array) -> Dictionary`: A state list as {entry: value}, leaving out MISSING values. Empty if the list is the wrong size.
 - `input_values_to_dictionary(values: Array) -> Dictionary`: An input list as {entry: value}, leaving out MISSING values. Empty if the list is the wrong size.
 - `apply_sync_values(values: Array) -> void`: Shows what the server says for its server-only values. A list of the wrong size is ignored.
-- `receive_input(tick: int, values: Dictionary) -> void`: Server: keeps a client's input for the tick it belongs to. Entries not given stay as they are. A wrong type or a not-a-number value is dropped too, so an entity with no sanitize_network_input hook is still protected.
+- `receive_input(tick: int, values: Dictionary) -> void`: Server: keeps a client's input for its tick; entries not given stay as they are. Wrong types and NaN values are dropped, so even an entity with no sanitize hook is protected.
 - `forget_queued_input() -> void`: Drops every input waiting here. A new owner's inputs are the only ones that count from now on.
 - `apply_input(tick: int) -> bool`: Server: puts this tick's input on the entity. False if none has arrived for this tick.
 - `hold_input_from(tick: int, values: Dictionary) -> void`: Client, for a remote entity it predicts: from this tick on, assume it kept doing what the server last said.
@@ -420,12 +316,12 @@ Follow-server rules, also checked in the test:
 - `get_state(tick: int) -> Dictionary`: The state saved for a tick as {entry: value}, or empty if it's gone. Custom state appears under the node's name. The values are copies; changing them doesn't change the history.
 - `get_input(tick: int) -> Dictionary`: The input saved for a tick as {entry: value}, or empty if it's gone.
 - `get_custom_values(tick: int) -> Array`: What save_state returned on this tick, one entry per custom state node, for sending in snapshots. Empty if this entity has none.
-- `matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool`: True if these values match what's saved for that tick, within tolerance. Only compares list entries that are given and were saved. This is the reconciliation question: "was my prediction for this tick right?"
+- `matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool`: True if these values match what's saved for that tick, within tolerance: "was my prediction right?" Compares only entries given and saved.
   
-  custom is what the authority's save_state returned, from `get_custom_values()`. Those compare exactly.
-- `correct_state(tick: int, values: Dictionary, custom: Array = []) -> bool`: Overwrites saved list entries for a tick with what the authority says was true; follow with TickDriver.rollback(tick) to replay from them. Entries not given stay as predicted. Returns true if the history took it.
+  custom is the authority's save_state result (`get_custom_values()`); it compares exactly.
+- `correct_state(tick: int, values: Dictionary, custom: Array = []) -> bool`: Overwrites saved entries for a tick with what the authority says was true; follow with `TickDriver.rollback(tick)`. True if the history took it.
   
-  If that tick has already fallen out of the history, a replay is impossible, so this snaps the entity straight to the given values and warns, and returns false (netcode spec section 15). A tick that hasn't happened yet changes nothing. custom corrects what save_state saved; the replay's first step then hands it to load_state.
+  A tick already out of the history can't replay: the entity snaps to the values, with a warning, and it returns false (spec 15).
 - `get_schema() -> PackedStringArray`: Every declared entry with its kind and encoding, in order. Same code on two machines gives the same list; the handshake's content hash includes it (NetworkSession.content_hash, netcode spec section 5.4).
 - `_capture(props: TickStateComponent.Prop[], reuse: Variant) -> Array`: Reads each property, rounds it, writes it back if rounding changed it. Reuses the slot's array, so a tick doesn't allocate once the ring is full (Arrays and Dictionaries in the list are the exception: they're copied).
 - `_settle_encoding(p: TickStateComponent.Prop, value: Variant) -> void`: Auto encodings are picked from the first real value, since a property may still be null before its owner's _ready.

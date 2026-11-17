@@ -1,13 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## One pawn's AI memory in GDScript, plus the loops that read and write it: the sight check, the most aware entry, target scoring.
 ##
-## Pawn spec sections 10.4, 10.5 and 10.11. The same thing as AIMemoryStore in the navcore C++ library, with the same functions and
-## the same rules, used where that library isn't available or [member AIMemory.use_native] is off. A change to one goes in the other,
-## and ai_perception_selftest expects the same results from each: it runs on the C++ store where it loads, and on this one with
-## [code]-- --gdscript-store[/code].
-## [br]
-## [AIMemory] owns one of these and keeps every setting; the fades, delays, sight settings and target weights are passed in. Other
-## code goes through AIMemory, not this.
+## Twin of [code]AIMemoryStore[/code] in the navcore C++ library: same functions, same rules, used where that library isn't available or
+## [member AIMemory.use_native] is off. A change to one goes in the other; ai_perception_selftest expects the same results from each
+## (on this one with [code]-- --gdscript-store[/code]). [AIMemory] owns one and passes the settings in; other code goes through
+## [AIMemory], not this.
+## Design: pawn spec 10.4, 10.5 and 10.11.
 class_name AIMemoryStoreGD
 extends RefCounted
 
@@ -63,7 +61,7 @@ func find(entity: Object) -> int:
 
 func entity_at(index: int) -> Object:
 	var id := _ids[index]
-	# GDScript note: instance_from_id gives back the object for an id, but only if it still exists, which is_instance_id_valid checks.
+	# instance_from_id gives the object only if it still exists, which is_instance_id_valid checks.
 	return instance_from_id(id) if is_instance_id_valid(id) else null
 
 
@@ -72,7 +70,7 @@ func awareness_at(index: int, tick: int) -> float:
 	# continuous_sighting_ticks ago, it hasn't faded, so a target in plain view doesn't drift down between checks.
 	if _in_view(index, tick):
 		return _awareness_when_seen[index]
-	# GDScript note: value_at of a negative tick count is full, so the delay needs no special case.
+	# value_at of a negative tick count is full, so the delay needs no special case.
 	if _certain[index]:
 		return _awareness_when_seen[index] * _certain_fade.value_at(tick - _last_seen[index] - _certain_delay)
 	return _awareness_when_seen[index] * _uncertain_fade.value_at(tick - _last_seen[index] - _uncertain_delay)

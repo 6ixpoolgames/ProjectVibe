@@ -1,33 +1,22 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
 ## Reads a replay file (docs/replay/REPLAY_SPEC.md) and gives the state at any tick.
 ##
-## The viewer uses it, and so can a test or a tool.
+## The viewer uses it, and so can a test or a tool. It finds the tick's block, decodes it from its keyframe (caching the last few)
+## and reads the state at that tick. A file cut short opens with everything up to its last whole block ([method is_cut_short]); a
+## channel it has no class for is skipped.
 ## [codeblock]
 ## var reader := ReplayReader.new()
-## if reader.open("user://replays/host/....pbreplay") == OK:
-##     reader.get_header()        # tick_rate, role, started, game, channels...
-##     reader.get_first_tick()    # and get_last_tick()
-##     var frame := reader.get_frame(tick)
-##     # frame.tick         the tick shown (the nearest recorded one at or before the asked-for tick)
-##     # frame.pawns        replay id -> {name, scene, team, motion: {...} or null, input: {...} or null}
-##     # frame.terrains, frame.sources   from the world channel (ReplayWorldChannel)
-##     # frame.events       this tick's events from every event channel: {tick, channel, kind, id, data}
-##     # frame.diagnostics  the frames that finished this tick, when the recording has the diagnostics channel
-##     reader.get_events(from_tick, to_tick)       # every event in that range, oldest first
-##     reader.get_diagnostics(from_tick, to_tick)  # [tick, frame record] for every frame in that range
+## if reader.open(path) == OK:
+##     var frame := reader.get_frame(tick)  # tick, pawns (id -> name, scene, team, motion, input), terrains, sources, events, diagnostics
+##     reader.get_events(from_tick, to_tick)
 ## [/codeblock]
-## How it finds a tick: the file is a list of blocks, each opening with a keyframe (replay spec section 2). It finds the tick's block,
-## decodes it from its keyframe (keeping the last few decoded blocks), and reads the state at that tick. Nothing before that block is
-## needed.
-## [br]
-## Damaged files: reading stops at the first block that's cut short or won't decompress, so a recording from a game that crashed opens
-## with everything up to its last whole block ([method is_cut_short] says so). Channels it has no class for are skipped.
+## Design: replay spec 2.
 # REFACTOR: open() reads the whole file into memory and decompresses every block once just to learn its ticks. A long recording
 # (hundreds of MB an hour at mass-battle sizes) would open faster and use less memory with an index of blocks. Efficient. See CHANGELOG.md.
 class_name ReplayReader
 extends RefCounted
 
-## How many decoded blocks are kept, so stepping back and forth doesn't decode the same block again.
+## How many decoded blocks are kept, so stepping back and forth doesn't decode one twice.
 var blocks_cached := 4
 
 var _header := {}
@@ -107,6 +96,7 @@ func open(path: String) -> Error:
 	return OK
 
 
+## The file's header: tick_rate, first_tick, role, started, game, block_seconds, channels, format.
 func get_header() -> Dictionary:
 	return _header
 
@@ -116,6 +106,7 @@ func is_cut_short() -> bool:
 	return _cut_short
 
 
+## How many whole blocks the file holds.
 func get_block_count() -> int:
 	return _blocks.size()
 
@@ -138,7 +129,7 @@ func get_ticks() -> Array[int]:
 	return ticks
 
 
-## The state at a tick: see the top of the file. A tick before the first gives the first, and one after the last gives the last.
+## The state at a tick: [code]{tick (the nearest recorded one at or before it), pawns, terrains, sources, events, diagnostics}[/code]. Before the first tick gives the first, after the last gives the last.
 func get_frame(tick: int) -> Dictionary:
 	if _blocks.is_empty():
 		return {"tick": -1, "pawns": {}, "terrains": {}, "sources": {}, "events": [], "diagnostics": []}

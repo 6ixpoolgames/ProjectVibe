@@ -1,29 +1,18 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: controllers/CHANGELOG.md.
 ## The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick.
 ##
-## A child of the pawn's ControllerManager, in charge whenever no player has the pawn (pawn spec section 6.3). It decides nothing.
-## The AI's behaviours (or a script or test) tell it what to do, and it turns that into the same shape of input a player's controller
-## makes. [method move_to] walks a nav path, through the pawn's NavigationManager.
-## [br]
-## How to use it:
+## A child of the pawn's ControllerManager, in charge whenever no player has the pawn. It decides nothing: the AI's behaviours (or a
+## script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until
+## changed, except [method press], which lasts one tick. Until [method look_at_point] is called it keeps the pawn's own look.
 ## [codeblock]
 ## ai.move_to(point)                        # walks there along a nav path; false if there's no way there
-## ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way until told otherwise; drops any path
-## ai.stop()                                # stands still; drops any path
+## ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way; drops any path
 ## ai.press(&"jump")                        # held for one tick, so the pawn sees one press
 ## ai.hold(&"sprint", true)                 # held until hold(&"sprint", false)
-## ai.look_at_point(target)
-## ai.stop_looking()                        # keeps whatever look the pawn already has
-## ai.release_all()                         # back to idle: standing, nothing held
 ## [/codeblock]
-## Everything it's told stays until changed, except press(), which lasts one tick. Until look_at_point() is called, it keeps the
-## pawn's own look, so taking over from a player doesn't snap the pawn's head to straight ahead.
-## [br]
-## [b]While it isn't in charge[/b] (pawn spec 6.3 and 10.3): a player has the pawn and the AI keeps deciding anyway
-## (AIContextComponent.while_possessed FULL). Then move_to() only remembers the point, without touching the pawn's
-## NavigationManager, so it can't overwrite the player's path, and returns true. When it's in charge again, its next
-## take_input_command() starts that walk. stop(), move_in_direction() and release_all() forget it, and leave the player's path
-## alone. [method is_following_order] says whether its own last move_to is still under way, in charge or not.
+## While a player has the pawn but the AI keeps deciding, [method move_to] only remembers the point (and returns true), so it can't
+## overwrite the player's path; the walk starts when the AI is in charge again.
+## Design: pawn spec 6.3, 10.3.
 class_name AIController
 extends ControllerBase
 
@@ -35,17 +24,15 @@ var _look_node: Node3D = null # look_at_node's node, followed at every input; nu
 var _look_offset := Vector3.ZERO
 var _held := 0 # bits from InputActions
 var _pressed_once := 0 # bits held for the next command only
-# One command, reused every tick, so a crowd of AI pawns doesn't make thousands of new objects a second. The ControllerManager copies
-# its values straight away, so reusing it is safe.
+# One command, reused every tick so a crowd of AI pawns makes no garbage; the ControllerManager copies it at once.
 var _command := InputCommand.new()
 # A move_to given while not in charge, started when it's in charge again.
 var _waiting_point := Vector3.ZERO
 var _has_waiting_point := false
 
 
-## Walks to this point along a nav path, and stands still once there. Returns false if there's no way there, or the pawn has no
-## NavigationManager, and then the pawn stands still. pawn.navigation_manager.has_arrived() says when it's there. While not in
-## charge, it remembers the point for later and returns true (see the class description).
+## Walks to this point along a nav path, and stands still once there. Returns false (and stands still) if there's no way there.
+## While not in charge it only remembers the point and returns true.
 func move_to(point: Vector3) -> bool:
 	_move = Vector3.ZERO # once the path ends, it stands
 	var navigation := _navigation()
@@ -95,10 +82,8 @@ func look_at_point(point: Vector3) -> void:
 	_look_set = true
 
 
-## Stops looking at anything in particular, and keeps whatever look the pawn already has.
-## Keeps looking at a node, at offset from its origin (such as Vector3(0, 1, 0) for a pawn's chest), worked out again at every
-## input, until [method stop_looking] or another look. For a behaviour that sleeps between events (Attack, during its swing): the aim
-## follows the node every tick without the behaviour having to run. A freed node ends it.
+## Keeps looking at a node, at offset from its origin, worked out again at every input, until [method stop_looking] or another
+## look. For a behaviour that sleeps through a swing. A freed node ends it.
 func look_at_node(node: Node3D, offset := Vector3.ZERO) -> void:
 	_look_node = node
 	_look_offset = offset
@@ -107,6 +92,7 @@ func look_at_node(node: Node3D, offset := Vector3.ZERO) -> void:
 		_look_node = node # look_at_point clears it
 
 
+## Stops looking at anything in particular, and keeps whatever look the pawn already has.
 func stop_looking() -> void:
 	_look_set = false
 	_look_node = null

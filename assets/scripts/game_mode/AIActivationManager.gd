@@ -1,44 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: game_mode/CHANGELOG.md.
-## Switches AI pawns off when the ground around them isn't loaded, and back on when it is; and sets how often the rest run.
+## Switches AI pawns off when the ground around them isn't loaded, back on when it is, and sets how often the rest run.
 ##
-## A module of GameMode, reached as GameMode.ai_activation_manager. A horde costs almost nothing where no player is, and nothing walks
-## off the edge of the world. A pawn that's off stops its NetworkEntity and TickState too, which leaves only this module's checks, and
-## it's left out of snapshots.
+## A module of GameMode (GameMode.ai_activation_manager), server or offline only. An AI pawn runs only while every chunk within
+## [member edge_margin] of it is built; a pawn that keeps the world loaded ([method Pawn.counts_on_this_machine]) is always left on,
+## and a possession is checked at once. A pawn that's off stops its NetworkEntity and TickState and is left out of snapshots. Pawns
+## register with [method add_pawn] and [method remove_pawn] (Pawn does both) and need a [code]set_frozen(frozen)[/code].
 ## [br]
-## The rule: an AI pawn runs only while every chunk within [member edge_margin] of it is built. In other words, it's near enough to a
-## source. Every pawn is watched, and one that keeps the world loaded (counts_on_this_machine, the source contract) has ground
-## wherever it goes, so it's left running, checked each time it's looked at. Nothing has to tell this when that changes, so a pawn
-## can't be left unwatched. A possession is checked at once (its ControllerManager's possession_changed signal), so a frozen pawn a
-## player takes starts at once.
-## [br]
-## This is a first pass, chosen by the owner for tier 0. It's meant to be replaced or added to: a game that needs AI simulated out of
-## sight, such as ecology, migration or faction wars, can listen to [signal ai_deactivated] and [signal ai_activated], and simulate
-## those pawns some cheaper way while they're off. None of that exists yet.
-## [br]
-## What a pawn needs:
-## [br]- To call [method add_pawn] with itself when it's ready, and [method remove_pawn] when it leaves the tree. Pawn does both.
-## [br]- A method set_frozen(frozen: bool), which stops and restarts its ticks and leaves all its state as it is.
-## [br]
-## [b]How often each pawn runs.[/b] It also sets the Pawn.tick_step of each AI pawn it leaves on, rechecked with the rest (pawn spec
-## 8.21, scaling spec 7.1, the owner's call):
-## [br]- Every tick within [member full_rate_within_chunks] chunks of the nearest viewer, every 2nd tick up to
-##   [member every_4th_tick_beyond_chunks] chunks, and every 4th beyond that. Viewers are pawns a player has, and this machine's
-##   player's camera (a spectator, or the overview). With no viewer at all, distance changes nothing.
-## [br]- Distance is counted in whole chunks, the rings of chunks around the viewer's chunk (0 its own, 1 the eight around it, and so
-##   on), not metres. So every pawn in one chunk runs at the same rate, and two pawns fighting side by side never run at different
-##   rates because one stands a step further off. A ring counts as within a setting when it's below it: 2 means rings 0 and 1. (It's
-##   left in GDScript: a few sums per pawn, spread over frames.)
-## [br]- And at least TickDriver.load_step, the load ladder: while the game is overloaded, every AI pawn runs every 2nd or 4th tick.
-## [br]- A pawn a player has always runs every tick.
-## [br]
-## So a pawn far from the action costs a half or a quarter as much, and still walks as far and fights as long (Pawn.ticks_elapsed).
-## Only the server or offline does this; a client's pawns are told their step in snapshots, where it's rolled-back state.
-## [br]
-## What happens in odd cases (all checked in game_mode/tests/game_mode_selftest.gd):
-## [br]- No terrain in the scene: every pawn stays on.
-## [br]- On a client: this does nothing, because AI only runs on the server.
-## [br]- A pawn that's freed: it's dropped from the list.
-## [br]- The module is removed: every pawn it switched off goes back on, at every tick.
+## It also sets [member Pawn.tick_step] for each running AI pawn: every tick within [member full_rate_within_chunks] chunks of the
+## nearest viewer (pawns a player has, and this machine's player's camera), every 2nd up to [member every_4th_tick_beyond_chunks],
+## every 4th beyond, and never less often than TickDriver.load_step. Distance is in whole chunk rings, not metres, so pawns in one
+## chunk share a rate. A pawn a player has always runs every tick. A game can listen to [signal ai_deactivated] and
+## [signal ai_activated] to simulate switched-off pawns more cheaply. Design: pawn spec 8.21, scaling spec 7.1.
 # REFACTOR: two jobs in one module, switching pawns off and choosing their tick step, and the name says only the first. Splitting the
 # step rule into its own module (or renaming this one) would let a game swap either alone (names say what things do, extensible).
 class_name AIActivationManager

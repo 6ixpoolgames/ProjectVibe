@@ -13,24 +13,9 @@ Every class in `assets/scripts/player/`, from its doc comments. The overview is 
 
 One player's controls: reads their devices, aims their camera, and gives their pawn input.
 
-A first version: enough to drive a pawn and aim a camera. It survives with no pawn, as Unreal's does, and PossessionCoordinator creates it and tells it which pawn it has (pawn spec sections 5 and 6.2).
+Survives with no pawn, as Unreal's does. PossessionCoordinator creates it and tells it which pawn it has. It reads the player's devices (this machine only), holds the look direction and aims the camera arm, owns the player's one arm (it moves to each pawn taken), and gives its pawn this tick's input when the ControllerManager asks (`take_input_command()`). Named actions come from keys through `action_keys`. It moves nothing itself: the pawn's abilities do. To drive it from a script, extend it and override the _read functions.
 
-What it does:
-- reads the player's devices, on this machine only
-- holds the look direction, and tells the current camera arm where to look
-- gives its pawn this tick's input as an InputCommand, when the pawn's ControllerManager asks (`take_input_command()`). Named actions (jump, sprint, ...) come from keys through `action_keys`.
-- owns the player's one camera arm, which moves to each pawn they take (CameraMount, pawn spec 8.18)
-
-What it doesn't do: move anything. The pawn's abilities do that, so an RTS or a flying pawn needs no special controller.
-
-To drive it from a script, as a test or a replay viewer would, extend it and override the _read functions.
-
-**Spectating.** PossessionCoordinator.spectate() lets go of the pawn and calls `start_spectating()`, and the player flies a FreeFlyCamera (`spectator_scene`) with the same keys and mouse, the view starting where the camera was. Taking a pawn stops it. Nothing starts it by itself: the game decides when a player spectates (between matches, waiting to respawn, after letting go of a pawn). The controls are in FreeFlyCamera's description.
-
-What happens in odd cases (all checked in pawn/tests/possession_selftest.gd):
-- No pawn: it keeps reading look input, and nothing moves.
-- Spectating with a pawn still attached, as on a client between asking to let go and the server's answer: the keys fly the spectator and the pawn gets no movement or actions from them. The answer then lets go without stopping the spectating.
-- An action missing from the project's input map: treated as not pressed.
+**Spectating:** PossessionCoordinator.spectate() lets go of the pawn and calls `start_spectating()`; the player then flies a FreeFlyCamera (`spectator_scene`). Taking a pawn stops it. While spectating with a pawn still attached (a client waiting for the server's answer), the keys fly the spectator and the pawn gets no input from them. Design: pawn spec 5, 6.2, 8.18.
 
 ### Settings and properties
 
@@ -77,29 +62,15 @@ What happens in odd cases (all checked in pawn/tests/possession_selftest.gd):
 
 What the mouse or crosshair points at in the world: a part of PlayerController.
 
-It's Unreal's GetHitResultUnderCursor, with the polling made explicit. It does nothing and costs nothing until something asks.
-
-Two ways to use it. One answer, right now, such as on a click:
+Like Unreal's GetHitResultUnderCursor. It costs nothing until something asks. One answer now (`query_now()`), or watching at a rate you choose; the fastest rate asked for wins, and it stops when the last user is gone. An answer is a Dictionary of position, normal and collider, empty if nothing was hit. A captured mouse points at the screen's middle. The ray is a physics query outside the physics step, safe while physics doesn't run on its own thread (Godot's default).
 
 ```gdscript
 var hit := controller.world_cursor.query_now()
+controller.world_cursor.acquire(self, 20.0)   # watch 20 times a second; 0 is every frame
+controller.world_cursor.release(self)         # or get freed, which counts as releasing
 ```
 
-Watching, such as a hover highlight or a placement preview, at a rate you choose:
-
-```gdscript
-controller.world_cursor.acquire(self, 20.0)   # 20 times a second. 0 means every frame
-controller.world_cursor.hit_changed.connect(...)
-controller.world_cursor.release(self)         # or just get freed or leave the scene, which counts as releasing
-```
-
-With several users, the fastest rate anyone asked for wins. When the last one is gone, it stops by itself.
-
-An answer is a Dictionary: {"position", "normal", "collider"}. It's empty if the ray hit nothing, or if there's no camera. A captured mouse points at the middle of the screen, as a crosshair does. A free mouse points where it is.
-
-Its ray is a physics query outside the physics step. That's safe with Godot's default setting, where physics doesn't run on its own thread. A project that turns that on would have to move this.
-
-A note on rates: anything drawn at the cursor looks laggy at a low rate, so a visible cursor wants a high one.
+Anything drawn at the cursor looks laggy at a low rate, so a visible cursor wants a high one.
 
 ### Settings and properties
 

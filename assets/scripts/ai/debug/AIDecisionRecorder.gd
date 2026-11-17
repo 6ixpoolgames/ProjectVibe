@@ -1,14 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: ai/CHANGELOG.md.
 ## Records every AI decision of every pawn, with what it was made from, and saves them to a file.
 ##
-## Debug tooling, like [AIDebugTimeline]: nothing in the game needs it. It listens through
-## [member AIBehaviourManager.decision_listener] and keeps each [AIDecisionRecord], and, once for each pawn, a description of its
-## brain: the settings of its behaviour manager and of each behaviour. Together they are everything a second decider needs to make
-## the same decisions, which is how the planned C++ decider is checked against this one (scaling spec 6.2, "shadow mode").
-## [br]
-## Only one recorder listens at a time: starting one replaces any other listener.
-## [br]
-## How to use it ([code]mass_battle_measure -- --record-decisions=<file>[/code] does):
+## Debug tooling, like [AIDebugTimeline]: nothing in the game needs it. It listens through [member AIBehaviourManager.decision_listener]
+## (only one listener at a time: starting one replaces any other) and keeps each [AIDecisionRecord] plus, once per pawn, a description
+## of its brain ([method AIBehaviourManager.describe]). Together they are what a second decider needs to make the same decisions, which
+## is how the C++ decider is checked against GDScript's (scaling spec 6.2).
+## [code]mass_battle_measure -- --record-decisions=<file>[/code] uses it:
 ## [codeblock]
 ## var recorder := AIDecisionRecorder.new()
 ## add_child(recorder)

@@ -9,6 +9,10 @@ The Resource classes in this folder (`InputActionsRes`, `PawnDefaultsRes`, `TagD
 
 None found.
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): the `PawnDefaultsRes` member comments shortened; "the owner's call" on `world_load_distance` dropped (the owner chose a game-wide setting). `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
+
 ## 2026-11-17
 
 - **Comments cleaned up** for the documentation pass. `TagDeclarationsRes` said its tags were ability categories, "later nav capabilities"; it's now used by three tag sets (abilities, nav, effects), each with its own file.

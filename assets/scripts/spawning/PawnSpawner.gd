@@ -1,28 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: spawning/CHANGELOG.md.
 ## Keeps a number of pawns of one type alive, replacing each that dies after a delay.
 ##
-## Put one in a level and set it in the inspector (pawn spec 8.9). Works on the server or offline; on a client it does nothing, since
-## the server's pawns reach clients by themselves. It spawns through GameMode.spawn_manager, which it needs.
-## [br]
-## Where its pawns appear: with [member spawn_group] empty, within [member scatter_radius] of the spawner itself, facing the
-## spawner's way; with a group, at SpawnPoints in that group that accept the pawn's team (see SpawnManager, "Choosing a point").
-## [br]
-## What it does, checked between ticks:
-## [br]- Fills up to [member keep_alive] at once when it's switched on, and after that whenever it has fewer than keep_alive living
-##   pawns and no replacement is still waiting.
-## [br]- A pawn of its own that dies: its body is removed after [member body_seconds], and a replacement is due
-##   [member respawn_seconds] after the death. The replacement is a fresh pawn, not the dead one revived, so its AI starts clean (no
-##   memory of the fight it died in).
-## [br]- A pawn of its own that's removed some other way (the game despawned it) counts as a death, without a body to remove.
-## [br]- [member total_limit] above 0 stops it after that many, in all. 0: no limit.
-## [br]- [member only_where_loaded] on: it waits while the ground around it isn't loaded, the rule AIActivationManager uses, so a
-##   spawner no player is near doesn't run AI nobody sees. With no terrain, the ground always counts as loaded.
-## [br]
-## All its delays count ticks (SpawnManager.after_seconds), so pausing the tick driver pauses them.
-## [br]
-## How to use it from code:
+## Put one in a level and set it in the inspector (pawn spec 8.9). Server or offline only; it spawns through GameMode.spawn_manager,
+## which it needs. With [member spawn_group] empty, pawns appear within [member scatter_radius] of the spawner; with a group, at
+## SpawnPoints that accept the pawn's team (see the SpawnManager README). It fills up to [member keep_alive] when switched on and
+## whenever fewer are alive; a dead pawn's body goes after [member body_seconds] and a fresh replacement is due [member respawn_seconds]
+## later (a pawn removed another way counts as a death). All delays count ticks, so pausing the tick driver pauses them.
 ## [codeblock]
-## spawner.active = true          # starts filling; false stops spawning, and leaves its pawns where they are
+## spawner.active = true          # starts filling; false stops spawning and leaves its pawns where they are
 ## spawner.refill_now()           # fills up at once, skipping the replacements' wait
 ## spawner.get_alive()            # its living pawns
 ## [/codeblock]
@@ -39,7 +24,7 @@ signal pawn_died(pawn: Pawn)
 	set(value):
 		active = value
 		if active and is_inside_tree():
-			_update.call_deferred() # GDScript note: deferred, so setting it from _ready or a signal doesn't spawn halfway through
+			_update.call_deferred() # deferred, so setting it from _ready or a signal doesn't spawn halfway through
 ## The NetworkSession type name to spawn (NetworkSession.register_type). Empty, the default: it spawns nothing, and warns once.
 @export var pawn_type := ""
 ## How many living pawns it keeps.
@@ -111,7 +96,7 @@ func _update() -> void:
 		if instance_from_id(_alive[i]) == null: # removed without dying: a replacement is due as for a death
 			_alive.remove_at(i)
 			_waiting.append(now + TickDriver.seconds_to_ticks(respawn_seconds))
-	# GDScript note: filter() keeps the entries the function returns true for; these are the replacements not due yet.
+	# filter() keeps the replacements not due yet.
 	_waiting = _waiting.filter(func(due: int) -> bool: return due > now)
 	var missing := keep_alive - _alive.size() - _waiting.size()
 	if missing <= 0:

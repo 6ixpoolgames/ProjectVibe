@@ -1,24 +1,19 @@
-## Written by Claude (claude-opus-5-5), 2026-11-09: a view-only rewind for watching the AI, the owner's request: "I mainly want to
-## scrub through what states and abilities are being called by the AI to see if there is unintended behaviour." Debug code for
-## samples, like AbilityDebugDraw; nothing in the base uses it.
+# Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
+## A view-only rewind for watching the AI: scrub back through the last few seconds of states, behaviours and abilities.
 ##
-## While the game runs, it records every tick, for each pawn it watches: where it stood, which way it faced, and a line of text (the
-## sample's readout: state, behaviour, target, last ability, Health). It also writes down events as they happen, from the base's own
-## signals: state changes, behaviour changes, target changes, abilities started and cancelled, hits taken and deaths, each with its
-## tick. It keeps the last seconds_kept seconds.
-##
-## Paused, step_view() moves what's shown back and forward through that recording: a ghost and a label for each pawn where it was on
-## that tick, and a list of the events up to it. Nothing is simulated again and nothing in the game changes: when the game runs on,
-## it carries on from the real present. That's the standard debug timeline (Unreal's Rewind Debugger works the same way); a real
-## rewind would need the AI's whole state saved every tick, which rollback doesn't keep (scaling discussion, 2026-11-09).
-##
-## How to use it (ArenaSample does):
-##   var timeline := AIDebugTimeline.new()
-##   timeline.describe = func(pawn: Pawn) -> String: return "..."   # the text recorded for each pawn each tick
-##   add_child(timeline)
-##   timeline.watch(pawn)                  # for each pawn to record
-##   timeline.step_view(-1)                # while paused: one tick back; +1 forward. Returns ticks it couldn't move (past the present)
-##   timeline.view_present()               # back to now
+## Debug code for samples, like AbilityDebugDraw; nothing in the base uses it. Every tick it records, for each pawn it watches, where
+## it stood, which way it faced and a line of text (the sample's readout), plus events as they happen (state, behaviour and target
+## changes, abilities started and cancelled, hits, deaths) for the last [member seconds_kept] seconds. Paused, [method step_view] shows a
+## ghost and a label for each pawn where it was on that tick, and the events up to it. Nothing is simulated again: running on carries on
+## from the real present.
+## [codeblock]
+## var timeline := AIDebugTimeline.new()
+## timeline.describe = func(pawn: Pawn) -> String: return "..."   # the text recorded for each pawn each tick
+## add_child(timeline)
+## timeline.watch(pawn)                  # for each pawn to record
+## timeline.step_view(-1)                # while paused: one tick back; +1 forward. Returns ticks it couldn't move (past the present)
+## timeline.view_present()               # back to now
+## [/codeblock]
 # REFACTOR: it keeps its own recording of what replay already records for every pawn (positions and facing: ReplayMotionChannel;
 # state, behaviour, target, ability, hit and death events: ReplayGameplayChannel). It could be a view over the replay being recorded,
 # with no second copy of the data (reusable). See ai/CHANGELOG.md.
@@ -33,7 +28,7 @@ extends Node3D
 ## Called for each watched pawn every tick: the text recorded for it. Empty: its name.
 var describe: Callable
 
-# GDScript note: untyped, because a freed pawn can't be held in (or taken out of) a typed array; freed ones are dropped below.
+# Untyped, because a freed pawn can't be held in (or taken out of) a typed array; freed ones are dropped in _record().
 var _watched: Array = []
 var _frames := {} # tick -> Array of [instance id, position, yaw, text]
 var _events: Array = [] # [tick, text], oldest first
@@ -48,7 +43,7 @@ func _ready() -> void:
 	var layer := CanvasLayer.new()
 	add_child(layer)
 	_panel = Label.new()
-	# GDScript note: anchored to the bottom left corner, and growing upwards as lines are added.
+	# Anchored to the bottom left corner, and growing upwards as lines are added.
 	_panel.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_panel.offset_left = 14.0
@@ -69,13 +64,13 @@ func watch(pawn: Pawn) -> void:
 		_connected = true
 		TickDriver.after_tick.connect(_record)
 	var who := String(pawn.name)
-	if pawn.ai_context and pawn.ai_context.state_manager: # Claude 2026-11-17: through the AI's core
+	if pawn.ai_context and pawn.ai_context.state_manager:
 		pawn.ai_context.state_manager.state_changed.connect(func(old: AIStateBase, new: AIStateBase, reason: String) -> void:
 			_event("%s: state %s → %s (%s)" % [who, _name_of(old), _name_of(new), reason]))
-	if pawn.ai_context and pawn.ai_context.behaviour_manager: # Claude 2026-11-17: through the AI's core
+	if pawn.ai_context and pawn.ai_context.behaviour_manager:
 		pawn.ai_context.behaviour_manager.behaviour_changed.connect(func(old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
 			_event("%s: behaviour %s → %s (%s)" % [who, _name_of(old), _name_of(new), reason]))
-	if pawn.ai_context and pawn.ai_context.target_selector: # Claude 2026-11-17: through the AI's core
+	if pawn.ai_context and pawn.ai_context.target_selector:
 		pawn.ai_context.target_selector.target_changed.connect(func(old: Node3D, new: Node3D, reason: String) -> void:
 			_event("%s: target %s → %s (%s)" % [who, _name_of(old), _name_of(new), reason]))
 	if pawn.ability_manager:
@@ -83,10 +78,10 @@ func watch(pawn: Pawn) -> void:
 			_event("%s: ability %s started" % [who, ability.name]))
 		pawn.ability_manager.ability_cancelled.connect(func(ability: AbilityBase, by: AbilityBase) -> void:
 			_event("%s: ability %s cancelled by %s" % [who, ability.name, _name_of(by)]))
-	if pawn.ability_manager == null: # Claude 2026-11-16 (pawn M3): hit_received and died moved to the AbilityManager
+	if pawn.ability_manager == null: # hit_received and died are on the AbilityManager
 		return
 	pawn.ability_manager.hit_received.connect(func(hit: HitInfo) -> void:
-		_event("%s: hit by %s (%d)" % [who, _name_of(hit.attacker), int(hit.damage_dealt)])) # Claude 2026-11-10: damage_dealt, after the hit's effects
+		_event("%s: hit by %s (%d)" % [who, _name_of(hit.attacker), int(hit.damage_dealt)])) # damage_dealt: after the hit's effects
 	pawn.ability_manager.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: _event("%s: died" % who))
 
 
@@ -208,8 +203,8 @@ func _make_ghost() -> Array:
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	body.material_override = material
 	add_child(body)
-	# Claude 2026-11-10: the same facing marker as the pawn's (pawn.tscn), so the ghost shows which way the pawn faced then. It's a
-	# child of the capsule, so it turns with it; the capsule's middle is 0.9 m up, so the marker's 1.45 m is 0.55 above that.
+	# The same facing marker as the pawn's (pawn.tscn), so the ghost shows which way it faced then. A child of the capsule, so it turns
+	# with it; the capsule's middle is 0.9 m up, so the marker's 1.45 m is 0.55 above that.
 	var facing := MeshInstance3D.new()
 	var box := BoxMesh.new()
 	box.size = Vector3(0.5, 0.12, 0.3)

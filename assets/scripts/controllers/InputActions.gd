@@ -1,23 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: controllers/CHANGELOG.md.
 ## Turns action names like &"jump" into bits, so an input command carries every held action in one int.
 ##
-## Pawn spec section 5. Why bits: an input command goes over the network every tick, and one int is much smaller than a list of
-## names. Checking "is jump held?" is one AND.
+## One int is much smaller than a list of names on the network, and "is jump held?" is one AND. Every machine must give an action the
+## same bit, so the game lists its actions in resources/input_actions.tres (an InputActionsRes) and each gets the bit of its place in
+## the list; the list is part of NetworkSession's content hash. An unlisted action is added with a warning offline, and gets no bit
+## (never held) in a network session. Past 64 actions the extras get no bit.
 ## [br]
-## Why a declared list: in multiplayer every machine must give the same action the same bit. So the game lists its actions in
-## resources/input_actions.tres (an InputActionsRes), and each one gets the bit of its place in that list, the same everywhere. The
-## file is the only place the list lives. The list is part of NetworkSession's content hash, so machines with different lists can't
-## connect.
-## [br]
-## What happens in odd cases (all checked in tests/input_actions_selftest.gd):
-## [br]- No list file: a warning, and the list starts empty. Each action used is then added as it's first seen, with its own warning.
-## [br]- An action nobody listed, used at runtime: offline, added at the end with a one-time warning. A typo such as &"Jump" shows up
-##   the same way. While a network session is running it gets no bit (it's never held), with a one-time warning, because two machines
-##   adding names in a different order would disagree on what a bit means.
-## [br]- Empty or blank name: no bit (0). Never an error.
-## [br]- More than 64 actions: the extra ones get no bit, with a warning.
-## [br]
-## A static class, not an autoload, so it works in headless tests. TagRegistry works the same way.
+## A static class, not an autoload, so it works in headless tests. Design: pawn spec 5.
 class_name InputActions
 extends RefCounted
 
@@ -42,7 +31,6 @@ static func mask_of(action: StringName) -> int:
 		return 0
 	if not _index_of.has(clean):
 		_add(clean, true)
-	# GDScript note: "a if condition else b" is GDScript's one-line if. 1 << n is the number with only bit n set.
 	return 1 << _index_of[clean] if _index_of.has(clean) else 0
 
 
@@ -57,7 +45,7 @@ static func mask_of_list(actions: Array) -> int:
 ## Every listed action's bit. The server uses it to throw away bits a client made up.
 static func all_listed_mask() -> int:
 	_ensure_loaded()
-	# GDScript note: ints are 64 bits, so 1 << 64 doesn't fit. -1 has every bit set.
+	# An int is 64 bits, so 1 << 64 doesn't fit: -1 has every bit set.
 	return -1 if _actions.size() >= 64 else (1 << _actions.size()) - 1
 
 

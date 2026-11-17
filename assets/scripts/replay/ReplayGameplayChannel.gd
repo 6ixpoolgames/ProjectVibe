@@ -1,26 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
-## Replay channel 5, "gameplay": what happened, as events (replay spec section 3).
+## Replay channel 5, "gameplay": what happened, as events.
 ##
-## The same events the AI debug timeline lists, for every pawn, plus freezes, possession and falls. Each event's id is the pawn it
-## happened to.
-## [br]
-## Events, and their data:
-## [br]- "hit": attacker (replay id, 0 if none), ability (name), damage (Health taken).
-## [br]- "hit_intercepted": by (the attacker's replay id, 0 if none), interceptor (the HitInterceptor that stopped it, such as a parry's;
-##   pawn spec 8.23).
-## [br]- "died": killer (replay id, 0 if none).
-## [br]- "ability_started": ability.
-## [br]- "ability_cancelled": ability, by (the ability that cancelled it, "" if none).
-## [br]- "step_started": ability, step (a step of a stepped ability, pawn spec 8.20).
-## [br]- "step_finished": ability, step, reason ("done", "failed" or "cancelled").
-## [br]- "ai_state": from, to (state names), reason.
-## [br]- "ai_behaviour": from, to (behaviour names), reason.
-## [br]- "ai_target": from, to (replay ids, 0 for none), reason.
-## [br]- "frozen", "unfrozen" (no data): the AI switch-off stopped or restarted it (AIActivationManager).
-## [br]- "possessed", "released": peer, a player took it or let it go (PossessionCoordinator).
-## [br]- "fell": report, the kill floor's report of how it got there (KillFloor.pawn_fell).
-## [br]
-## Reading: only state["events"], this tick's events. Nothing lasts.
+## The same events the AI debug timeline lists, for every pawn, plus freezes, possession and falls; each event's id is the pawn it
+## happened to. The kinds: hit, hit_intercepted, died, ability_started, ability_cancelled, step_started, step_finished, ai_state,
+## ai_behaviour, ai_target, frozen, unfrozen, possessed, released and fell. The data of each is listed in the replay README.
+## Reading: only [code]state["events"][/code], this tick's events; nothing lasts.
+## Design: replay spec 3, pawn spec 8.20 and 8.23.
 class_name ReplayGameplayChannel
 extends ReplayEventChannel
 
@@ -70,7 +55,6 @@ func write_tick(tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
 
 func pawn_added(pawn: Pawn, id: int) -> void:
 	var connections: Array = []
-	# GDScript note: each lambda below captures id, so the event names the right pawn even after others come and go.
 	if pawn.ability_manager: # hits, death, abilities and their steps
 		_connect(connections, pawn.ability_manager.hit_received, func(hit: HitInfo) -> void:
 			add_event("hit", id, {"attacker": recorder.get_replay_id(hit.attacker) if recorder else 0, "ability": _name_of(hit.ability),
@@ -85,7 +69,7 @@ func pawn_added(pawn: Pawn, id: int) -> void:
 			add_event("ability_started", id, {"ability": _name_of(ability)}))
 		_connect(connections, pawn.ability_manager.ability_cancelled, func(ability: AbilityBase, by: AbilityBase) -> void:
 			add_event("ability_cancelled", id, {"ability": _name_of(ability), "by": _name_of(by)}))
-		# Steps, the owner's ability.step level of detail (pawn spec 8.20).
+		# Steps of a stepped ability (pawn spec 8.20).
 		_connect(connections, pawn.ability_manager.step_started, func(ability: AbilityBase, step: AbilityStep) -> void:
 			add_event("step_started", id, {"ability": _name_of(ability), "step": _name_of(step)}))
 		_connect(connections, pawn.ability_manager.step_finished, func(ability: AbilityBase, step: AbilityStep, reason: String) -> void:
@@ -138,7 +122,7 @@ func _connect_global(which: Signal, callable: Callable) -> void:
 static func _disconnect_all(list: Array) -> void:
 	for pair: Array in list:
 		var which: Signal = pair[0]
-		# GDScript note: a signal of a freed object can't be disconnected, and needn't be: its connections went with it.
+		# A freed object's signal needn't be disconnected: its connections went with it.
 		if not which.is_null() and is_instance_valid(which.get_object()) and which.is_connected(pair[1]):
 			which.disconnect(pair[1])
 

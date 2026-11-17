@@ -48,6 +48,11 @@ var speed := pawn.stat_manager.get_value(&"MoveSpeed", 5.0)
 | `changes_during_play` | each `Stat` | off (on for Health) | Gives the stat a current amount that goes up and down and rolls back |
 | `table_column` | each `Stat` | empty (`detectability` for Detectability) | Copies the value into this pawn table column for C++ |
 
+## How it works
+
+- A stat that isn't there is never an error: `get_value` gives the fallback and `get_stat` gives null. A child that isn't a `Stat` is ignored; Godot renames a second child of the same name, so two stats can't share one.
+- **Health** has one name, `StatManager.HEALTH`, which everything that means "the pawn's health" reads (Death, hits, the kill floor, the readouts). A fuller stats pass comes with the game mechanics.
+
 ## Tests
 
 `stats/tests/stat_selftest`: values and fallbacks, stats added and removed while running, and the default stats part. Health, damage and death are also covered by `abilities/tests/combat_selftest`. Run them with `bash tools/run_tests.sh <name>`.

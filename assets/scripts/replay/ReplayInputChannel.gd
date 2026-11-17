@@ -1,13 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
 ## Replay channel 2, "input": each pawn's input command (replay spec section 1).
 ##
-## Recorded at the owner's call for v0. The v0 viewer only shows it; it's here so a later replay can re-simulate from a keyframe, and
-## so a recording shows what a player or the AI was pressing when something went wrong. The input is the pawn's ControllerManager's;
-## a pawn without one records nothing pressed.
+## Shows what a player or the AI was pressing when something went wrong, and lets a later replay re-simulate from a keyframe. The
+## viewer only shows it for now. The input is the pawn's ControllerManager's; a pawn without one records nothing pressed.
 ## [br]
-## A record, 20 bytes: move input (3 × half), look yaw (half), look pitch (half), held actions (u64, bits from InputActions), view
-## ticks behind (half). Read back as a Dictionary:
-## {move_input: Vector3, look_yaw: float, look_pitch: float, held_actions: int, view_ticks_behind: float}.
+## A record, 20 bytes: move input (3 × half), look yaw (half), look pitch (half), held actions (u64, bits from [InputActions]),
+## view ticks behind (half). Read back as [code]{move_input: Vector3, look_yaw, look_pitch, held_actions: int, view_ticks_behind}[/code].
+## Design: replay spec 1.
 class_name ReplayInputChannel
 extends ReplayEntityChannel
 
@@ -20,7 +19,7 @@ func _init() -> void:
 	version = 1
 
 
-# Compared value by value against the controller manager, without building a list: this runs for every pawn every tick.
+# Compared value by value, without building a list: this runs for every pawn every tick.
 func same_as_last(pawn: Pawn, last: Variant) -> bool:
 	if last == null:
 		return false

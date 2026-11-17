@@ -1,47 +1,18 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## What a pawn's AI has sensed, and how aware of each thing it is: awareness that rises when seen and fades when not.
 ##
-## A part on the pawn, added by PawnInitializer. Pawn spec section 10.5. One entry per sensed entity, holding:
-## [br]- where it was last seen (its last known position) and the tick it was last seen
-## [br]- awareness_when_seen: awareness at that sighting, from 0 to 1
-## [br]- certain: set the first time awareness reaches 1, cleared when the entry is forgotten
-## [br]- threat: a number game mechanics add to; damage dealt to this pawn adds [member threat_per_damage] a point (the
-##   EffectManager). Target selection reads it
-## [br]- the tick it was last checked by a sense, seen or not, so the next sighting's gain counts the right number of ticks
-## [br]
-## The entries and the loops over them live in a store: AIMemoryStore in the navcore C++ library when it's available, or
-## [AIMemoryStoreGD], the same thing in GDScript. This node keeps every setting, the signals and the functions below, and passes calls
-## on, so nothing else needs to know which store runs (pawn spec 10.11). [member use_native] off forces GDScript.
-## [br]
-## How awareness moves:
-## [br]- A sense adds gain each time it sees the entity ([method record_sighting]), up to 1.
-## [br]- Seeing an entity that's already certain refills it to 1 at once.
-## [br]- Sightings close together ([member continuous_sighting_ticks]) with no unseen check between them count as one look, so
-##   awareness doesn't fade between them; it only fades while the entity isn't seen. Reading it between checks says the same: while
-##   the last check saw it, at most continuous_sighting_ticks ago, it's held. It starts to fade (counted from when it was last seen)
-##   once a check misses it, or once that long passes with no check at all.
-## [br]- While it isn't seen, it stays full for a delay, then fades by a [FadeProfile]:
-##   awareness now = awareness_when_seen × uncertain_fade.value_at(ticks since seen − uncertain_fade_delay_ticks).
-##   [member uncertain_fade] and [member uncertain_fade_delay_ticks] are for uncertain entries; [member certain_fade] and
-##   [member certain_fade_delay_ticks] for certain ones. With the default straight lines, an entry is forgotten delay + fade ticks after
-##   it was last seen, whatever its awareness was.
-## [br]- Nothing drains in the background: awareness is worked out when something asks. An entry is forgotten once its fade has
-##   ended ([method forget_old], called by the sensing manager on each full pass), or when its entity is freed or dies.
-## [br]
-## It asks the context for a decision when an entity is first sensed and when an entry becomes certain, so the AI reacts on that
-## tick rather than at its next decision.
-## [br]
-## How to use it (indexes stay valid until the next forget_old, so use them within one tick):
+## A part on the pawn, added by PawnInitializer. One entry per sensed entity: its last known position, when it was last seen, its
+## awareness (0 to 1), whether it's certain, and its threat. The entries live in a store, [code]AIMemoryStore[/code] in the navcore
+## C++ library or else [AIMemoryStoreGD] (same rules); this node keeps the settings and signals and passes calls on. It asks for a
+## decision when an entity is first sensed or becomes certain. Indexes stay valid until the next [method forget_old], so use them
+## within one tick:
 ## [codeblock]
 ## var i := pawn.ai_context.memory.find(entity)   # -1 when it isn't remembered
 ## pawn.ai_context.memory.awareness_at(i, tick)
 ## pawn.ai_context.memory.is_certain_at(i)
-## pawn.ai_context.memory.last_known_position_at(i)
-## pawn.ai_context.memory.ticks_since_seen_at(i, tick)
 ## pawn.ai_context.memory.add_threat(entity, 5.0)
-## pawn.ai_context.memory.is_native()             # true when the C++ store runs
 ## [/codeblock]
-## Signals: [signal entity_became_certain], [signal entity_forgotten].
+## Design: pawn spec 10.5 and 10.11.
 class_name AIMemory
 extends Node
 
@@ -50,14 +21,13 @@ signal entity_became_certain(entity: Node3D)
 ## Sent when an entry is forgotten.
 signal entity_forgotten(entity: Node3D)
 
-## Ticks an entry that isn't certain stays at full awareness after it was last seen, before its fade starts. So a
-## glimpse that just reached Alert keeps the pawn Alert long enough to look and walk over. 300 is 5 s.
+## Ticks (at 60 a second) an uncertain entry stays at full awareness after it was last seen, before its fade starts. 300 is 5 s, so
+## a glimpse that reached Alert keeps the pawn Alert long enough to look and walk over.
 @export_range(0, 36000, 1, "or_greater") var uncertain_fade_delay_ticks := 300:
 	set(value):
 		uncertain_fade_delay_ticks = value
 		_configure()
-## How awareness fades for uncertain entries, once uncertain_fade_delay_ticks have passed. Empty: a straight line to nothing over 300
-## ticks.
+## How awareness fades for uncertain entries after the delay. Empty: a straight line to nothing over 300 ticks.
 @export var uncertain_fade: FadeProfile:
 	set(value):
 		_listen_to(uncertain_fade, value)
@@ -68,26 +38,25 @@ signal entity_forgotten(entity: Node3D)
 	set(value):
 		certain_fade_delay_ticks = value
 		_configure()
-## How awareness fades for certain entries, once certain_fade_delay_ticks have passed. Empty: a straight line to nothing over 1200
-## ticks (20 s).
+## How awareness fades for certain entries after the delay. Empty: a straight line to nothing over 1200 ticks (20 s).
 @export var certain_fade: FadeProfile:
 	set(value):
 		_listen_to(certain_fade, value)
 		certain_fade = value
 		_configure()
-## Two sightings with no unseen check between them, at most this many ticks apart, count as one continuous look, so awareness
-## doesn't fade between them. Keep it at least as long as the senses' gap between checks.
+## Two sightings no more than this many ticks apart, with no unseen check between, count as one continuous look, so awareness doesn't
+## fade between them. Keep it at least as long as the senses' gap between checks.
 @export_range(0, 600, 1, "or_greater") var continuous_sighting_ticks := 30:
 	set(value):
 		continuous_sighting_ticks = value
 		_configure()
 
-## Threat added to an attacker's entry for each health point of damage it does to this pawn (the EffectManager adds it). Target
-## selection weighs threat, so whoever hurts the pawn most tends to become its target.
+## Threat added to an attacker's entry per health point of damage it does to this pawn (the EffectManager adds it); target selection
+## weighs threat.
 @export var threat_per_damage := 0.01
 
-## Off, every AIMemory made from now on uses the GDScript store even where the C++ library is available. For tests
-## that compare the two, and for checking a suspected C++ problem. Read once, when each memory is made.
+## Off, every AIMemory made from now on uses the GDScript store, even with the C++ library. For tests comparing the two. Read once, when
+## each memory is made.
 static var use_native := true
 
 const _FADE_PROFILE_SCRIPT := preload("res://assets/scripts/ai/FadeProfile.gd")
@@ -117,7 +86,7 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
-	# GDScript note: a Resource export can't have a .new() default in the inspector, so the defaults are made here when empty.
+	# A Resource export can't have a .new() default in the inspector, so the defaults are made here when empty.
 	if uncertain_fade == null:
 		uncertain_fade = _straight_line(300) # after uncertain_fade_delay_ticks
 	if certain_fade == null:
@@ -198,8 +167,7 @@ func add_threat(entity: Object, amount: float) -> void:
 
 ## Forgets entries whose fade has ended or whose entity is gone. The sensing manager calls this on each full pass.
 func forget_old(tick: int) -> void:
-	# The C++ store copies a FadeProfile's settings, so they go to it again when a profile announced an edit (changed) or the tick
-	# rate changed; otherwise the copy it has is right.
+	# The C++ store copies a FadeProfile's settings, so they go to it again when a profile was edited or the tick rate changed.
 	if _fades_dirty or TickDriver.get_tick_rate() != _configured_rate:
 		_configure()
 	var forgotten: PackedInt64Array = _store.forget_old(tick)
@@ -246,7 +214,7 @@ func _configure() -> void:
 		return
 	_fades_dirty = false
 	_configured_rate = TickDriver.get_tick_rate()
-	# The delays and continuous_sighting_ticks are written for 60 ticks a second, and go to the store at this match's rate (scaling
+	# The delays and continuous_sighting_ticks are written for 60 ticks a second and go to the store at this match's rate (scaling
 	# spec step 6). The C++ store converts the profiles' own tick settings the same way as FadeProfile does.
 	if _store.has_method(&"set_tick_rate"):
 		_store.set_tick_rate(TickDriver.get_tick_rate())

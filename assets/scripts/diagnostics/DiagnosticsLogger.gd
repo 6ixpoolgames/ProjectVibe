@@ -1,17 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: diagnostics/CHANGELOG.md.
 ## Catches the engine's warnings and errors for [DiagnosticsManager].
 ##
-## So they go into the session log, the log panel (F8) and the replay, rate-limited. Godot calls a Logger for every push_warning,
-## push_error and engine error.
-## [br]
-## Godot can call this from any thread (a worker that hits an error, say), so it only stores each message under a lock; the manager
-## takes them on the main thread once a frame ([method take_messages]).
-## [br]
-## GDScript note: Logger is Godot's class for this (Godot 4.5 and later). OS.add_logger() starts calling it, OS.remove_logger() stops.
+## So they go into the session log, the log panel (F8) and the replay, rate-limited. Godot can call it from any thread, so it only
+## stores each message under a lock; the manager takes them on the main thread once a frame ([method take_messages]).
 class_name DiagnosticsLogger
 extends Logger
 
-## The most messages held between two take_messages() calls. Past it, they're counted but not kept, so a flood can't fill memory.
+## The most messages held between two [method take_messages] calls; more are counted but dropped.
 const MAX_WAITING := 500
 
 var _mutex := Mutex.new()
@@ -21,8 +16,7 @@ var _dropped := 0
 
 func _log_error(function: String, file: String, line: int, code: String, rationale: String, _editor_notify: bool, error_type: int,
 		_script_backtrace: Array[ScriptBacktrace]) -> void:
-	# GDScript note: for push_warning and push_error, the message is in code and rationale is empty; for engine errors it's the other
-	# way round, or both. Keep whichever says more.
+	# push_warning and push_error put the message in code, engine errors in rationale, or both: keep whichever says more.
 	var text := rationale if rationale != "" else code
 	if rationale != "" and code != "" and not rationale.contains(code):
 		text = "%s (%s)" % [rationale, code]

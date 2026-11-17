@@ -1,24 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: spawning/CHANGELOG.md.
 ## A place where pawns can appear, like Unreal's PlayerStart.
 ##
-## Put one in a level, move and turn it in the editor, and SpawnManager (a GameMode module) uses it. It never spawns anything itself:
-## it's only a spot. Settings:
-## [br]- [member team]: who may appear here: a pawn team number, or -1 for anyone.
-## [br]- [member group]: a name for a set of points, such as &"red_base", so a PawnSpawner or a game can ask for "a point in group X".
-##   A request that names no group may use any point its team may use, in a group or not.
-## [br]- [member scatter_radius]: how far from the point, in metres, a pawn may appear, so several don't stack on one spot.
-## [br]- [member enabled]: off, it's skipped, as if it weren't there.
-## [br]
-## A pawn appearing here faces the way the point faces (its blue Z arrow points backwards, as everything in Godot does: a pawn looks
-## along -Z). On terrain, the pawn goes on the ground under the spot it's given; without terrain, it appears at the point's height,
-## so place the point on the floor.
-## [br]
-## How SpawnManager finds points: every SpawnPoint in the tree is in the Godot group [constant GROUP], joined when it enters the tree
-## and left when it exits, so a point added or removed while the game runs counts at once.
+## Put one in a level, move and turn it in the editor, and SpawnManager (a GameMode module) uses it; it never spawns anything itself.
+## A pawn appearing here faces the way the point faces (-Z, the blue arrow's opposite) and, on terrain, is put on the ground; without
+## terrain it appears at the point's height, so place the point on the floor. Every SpawnPoint is in the Godot group [constant GROUP]
+## while in the tree, so one added or removed while the game runs counts at once.
+## Design: pawn spec 8.9.
 class_name SpawnPoint
 extends Node3D
 
-## GDScript note: a Godot group is a name that nodes join. get_tree().get_nodes_in_group(GROUP) lists every node in it.
+## The Godot group every SpawnPoint is in while it's in the tree.
 const GROUP := &"spawn_points"
 
 ## Who may appear here: a team number, or -1 for anyone.

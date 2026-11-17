@@ -1,22 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: ai/CHANGELOG.md.
 ## Walks to a meeting point: the nearest node in a Godot group, "rally_point" by default.
 ##
-## The owner's request: in the mass battle, every faction marches to the middle and fights there, instead of wandering near its
-## spawner. Like Unreal's target points: the point is a node in a Godot group ([member point_group]), placed in the level, so pawns
-## spawned at any time find it.
-## [br]
-## When it's available: there's a node in point_group, and the pawn is further than [member arrive_radius] from it (one condition on
-## the input group_distance/<point_group>; the nearest node is looked for again every 2 seconds, [method AIInputs.nearest_in_group]). Allowed in Idle,
-## the same as Wander, with a score just above Wander's (0.15 against 0.1), so an idle pawn marches, anything it notices on the way
-## (Alert, Combat) takes over, and once it's there, Wander takes over and it mills about.
-## [br]
-## How it walks: in legs of at most [member leg_metres] toward the point, each one a move_to, so each path stays short. Nav is only
-## built near streaming sources (StreamingSource.nav_distance), so one path all the way across a big level might not exist yet, while
-## a short leg does. Each pawn walks a little to one side of the straight line (up to [member spread_metres], its own offset from its
-## random numbers), so a crowd marches as a band, not in single file. A leg that can't be walked is tried again a few metres shorter
-## on its next tick.
-## [br]
-## It never finishes on its own: it returns RUNNING, and stops being available once the pawn has arrived.
+## Allowed in Idle, scoring just above Wander (0.15 against 0.1), so an idle pawn marches to the point, anything it notices on the
+## way takes over, and on arrival Wander takes over. Available while a node is in [member point_group] and the pawn is further than
+## [member arrive_radius] from it (the nearest is looked up every 2 seconds, [method AIInputs.nearest_in_group]). It walks in legs of
+## at most [member leg_metres], each a move_to, because nav is only built near streaming sources; a leg that can't be walked is retried
+## shorter. Each pawn walks a little to one side of the line (up to [member spread_metres], from its random numbers) so a crowd marches
+## as a band. It never finishes on its own: it stops being available once the pawn has arrived.
+## Design: scaling spec 6.2.
 class_name AIGoToPointBehaviour
 extends AIBehaviourBase
 
@@ -42,7 +33,7 @@ func _init() -> void:
 	tick_interval_ticks = 60 # the safety net: it wakes when a leg ends (wake_on_path_end)
 
 
-## There's a node in point_group, and the pawn is further than arrive_radius from the nearest one: two conditions.
+## A node is in point_group, and the pawn is further than arrive_radius from the nearest one: two conditions.
 func own_conditions() -> Array[AICondition]:
 	var list: Array[AICondition] = [
 		AICompareCondition.make(StringName(AIInputs.GROUP_FOUND + String(point_group)), AICompareCondition.Comparison.EQUAL, 1.0),

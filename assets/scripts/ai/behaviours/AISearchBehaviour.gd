@@ -1,13 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Hunts around where an enemy it became certain of was last seen: "I know you were here".
 ##
-## Pawn spec section 10.7. Allowed in Alert by default. It scores high while the most aware entry in memory became certain but isn't
-## fresh enough for Combat. It runs (holding sprint, if [member sprint_to_last_known] is on) to the last known position, then walks to
-## [member search_points] random points within [member search_radius] of it, standing [member pause_ticks] at each, and succeeds. If
-## the pawn is still Alert, the next decision usually picks it again, so it keeps searching until the entry fades (Idle) or the enemy
-## is seen again (Combat).
-## [br]
-## It's only available when the most aware entry became certain: Look Toward and Investigate handle half-noticed things.
+## Allowed in Alert. Available only when the most aware memory entry is certain but not fresh enough for Combat (Look Toward and
+## Investigate handle half-noticed things). It goes to the last known position (holding sprint if [member sprint_to_last_known] is on),
+## then walks to [member search_points] random points within [member search_radius] of it, standing [member pause_ticks] at each, and
+## succeeds. While still Alert it's usually picked again, so it keeps searching until the entry fades (Idle) or the enemy is seen (Combat).
+## Design: pawn spec 10.7.
 class_name AISearchBehaviour
 extends AIBehaviourBase
 
@@ -66,7 +64,7 @@ func tick(context: AIContextComponent) -> Status:
 		if _points_left <= 0:
 			return Status.SUCCEEDED
 		_points_left -= 1
-		# GDScript note: sqrt spreads the points evenly over the circle rather than bunching them in the middle.
+		# sqrt spreads the points evenly over the circle rather than bunching them in the middle.
 		var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
 		var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * search_radius
 		if not hands.move_to(_centre + Vector3(cos(angle), 0.0, sin(angle)) * distance):

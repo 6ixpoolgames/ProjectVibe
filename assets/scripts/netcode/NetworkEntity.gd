@@ -1,55 +1,32 @@
 # Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
 ## Makes an entity exist across the network (netcode spec sections 7, 10, 13).
 ##
-## Add it as a child of the entity, after its TickStateComponent. NetworkSession gives it an id, an owner and a role when it spawns,
-## and the same id on every machine. Anything referring to another entity over the network uses that id.
-## [br]
-## Roles, set per machine:
-## [br]- AUTHORITY: the server (or offline). It simulates for real and its results count.
-## [br]- LOCAL_PREDICTED: your own pawn on your client. It simulates ahead and gets corrected.
-## [br]- LOCAL_UNPREDICTED: your own pawn with prediction off: MOBA-style. It sends inputs and waits, so what you do shows up after
-##   your ping. It's drawn from snapshots like a remote entity.
-## [br]- REMOTE_FOLLOWING: anything else on a client, by default. It doesn't simulate: it's drawn in the past between snapshots
-##   (interpolation), and stays where it's drawn during a rollback.
-## [br]- REMOTE_PREDICTED: anything else on a client, when predicted. It simulates ahead on its last known input and gets corrected,
-##   like Rocket League cars. Off by default: it costs CPU on every rollback, needs input in every snapshot, and puts enemies at their
-##   present position, which doesn't suit aiming.
-## [br]
-## Hooks on the parent, all optional:
-## [br]- [code]_on_network_role(entity)[/code]: told its role before entering the tree, so it can pick where input comes from.
-## [br]- [code]sanitize_network_input(values) -> Dictionary[/code]: the server cleans a client's input. Never trust it.
-## [br]- [code]_network_input_missing()[/code]: the server has no input for this tick and repeats the last one.
-## [br]- [code]_on_network_interpolated()[/code]: a remote entity was just moved between snapshots.
-## [br]- [code]_on_network_corrected(jump)[/code]: a rollback moved it by this much, for hiding the jump on the visible model.
-## [br]
-## The two input hooks go to [member input_owner] when it's set (a Pawn's ControllerManager sets itself, since it holds the input),
-## and to the parent otherwise.
-## [br]
-## Rules, checked in tests/net_selftest.gd:
-## [br]- Offline, it's AUTHORITY and local, and nothing is sent. The entity plays as single player.
-## [br]- An entity with no TickStateComponent has nothing to send, and warns once.
-## [br]- [member is_replicated] off: exists on this machine only, not spawned anywhere else. This one isn't tested yet.
+## Add it as a child of the entity, after its TickStateComponent. NetworkSession gives it an id (the same on every machine, and what
+## anything referring to another entity over the network uses), an owner and a role. Offline it is AUTHORITY and local, nothing is
+## sent, and the entity plays as single player. The parent may define optional hooks (see the README, "Hooks on the parent").
+## [codeblock]
+## # in the entity's scene: TickStateComponent first, then NetworkEntity
+## NetworkSession.spawn("pawn", peer_id, Vector3(0, 1, 0))
+## [/codeblock]
+## Design: netcode spec 7, 10, 13.
 extends Node
 class_name NetworkEntity
 
-## What this machine does with the entity. See the class description.
+## What this machine does with the entity: AUTHORITY (server or offline), LOCAL_PREDICTED (your pawn, simulated ahead), REMOTE_FOLLOWING
+## (drawn between snapshots), REMOTE_PREDICTED (simulated ahead on its last input) or LOCAL_UNPREDICTED (your pawn, MOBA-style). See the README.
 enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED, LOCAL_UNPREDICTED }
 
-## Off: stays on this machine only, like particles or debris.
+## Off: stays on this machine only, like particles or debris; not spawned anywhere else (not tested yet).
 @export var is_replicated: bool = true
 ## On: other clients simulate this ahead instead of following the server. NetworkSession.default_predicted turns it on everywhere.
 @export var is_predicted: bool = false
-## On: offline, keep a history of state and inputs every tick, for a single-player game that rolls back (a rewind power, say).
-## [br]
-## Off (the default): offline, nothing is saved and values aren't rounded every tick, because nothing replays. Saving and rounding
-## were the biggest costs per pawn (pawn spec 12.1). Online it changes nothing.
+## On: offline, keep state and input history every tick, for a single-player rewind. Off: nothing is saved or rounded offline (pawn spec 12.1).
 @export var keep_history_offline: bool = false:
 	set(value):
 		keep_history_offline = value
 		refresh_input_saving()
 
-## The node that holds this entity's input, for the server's input hooks (sanitize_network_input and _network_input_missing). Null:
-## the parent.
+## The node that holds this entity's input, for the server's input hooks (a Pawn's ControllerManager sets itself). Null: the parent.
 var input_owner: Node = null
 ## The same on every machine, given by NetworkSession at spawn. -1 until then.
 var entity_id: int = -1
@@ -70,7 +47,7 @@ var state: TickStateComponent = null
 var last_input_tick: int = -1
 var missed_inputs: int = 0
 
-## Ticks of positions kept for lag compensation, about 1 s at 60 ticks a second.
+## Ticks of positions kept for lag compensation (about 1 s).
 const HIT_HISTORY_SIZE := 64
 # REFACTOR: a fixed 64 ticks, while how far back lag compensation goes is a setting (NetworkSession.rewind_cap_seconds). A cap above
 # about 1 s, or a higher tick rate, finds no record and silently rewinds nothing (designer friendly). See CHANGELOG.md.
@@ -82,7 +59,7 @@ var _live_position := Vector3.ZERO
 var _paused := false # see set_paused
 
 
-## Called by NetworkSession before the entity enters the tree, so everything below it can see its role from the start.
+## Called by NetworkSession before the entity enters the tree, so everything below it sees its role from the start.
 func configure(new_id: int, new_type: String, new_owner: int, new_role: Role, local: bool, new_session: Node) -> void:
 	entity_id = new_id
 	type_name = new_type
@@ -126,8 +103,7 @@ func follows_snapshots() -> bool:
 	return role == Role.REMOTE_FOLLOWING or role == Role.LOCAL_UNPREDICTED
 
 
-## Changes who owns this entity while running, which is what swapping pawns does. Input queued from the old owner
-## is forgotten, and the parent is told its new role again.
+## Changes who owns this entity while running (swapping pawns). Input queued from the old owner is dropped, and the parent hears its role again.
 func change_owner(new_owner: int, local: bool, new_role: Role) -> void:
 	owner_peer = new_owner
 	is_local = local
@@ -142,8 +118,7 @@ func change_owner(new_owner: int, local: bool, new_role: Role) -> void:
 		_root._on_network_role(self)
 
 
-## Changes role while running, when a feature switch changes (NetworkSession.refresh_entities). Its history simply starts again
-## from here.
+## Changes role while running, when a feature switch changes (NetworkSession.refresh_entities). History starts again from here.
 func set_role(new_role: Role) -> void:
 	if new_role == role:
 		return
@@ -161,17 +136,9 @@ func _apply_role_to_state() -> void:
 	refresh_input_saving()
 
 
-## Works out what the TickStateComponent saves. On a server, only entities that clients predict need their inputs saved, so they
-## can go in snapshots. Which ticks' state is saved ([code]TickStateComponent.history_interval_ticks[/code]):
-## [br]- A server: only the ticks it sends snapshots on, the only ones it reads, since it never replays.
-## [br]- Offline, through NetworkSession: none, and no inputs either, unless [member keep_history_offline] is on. Nothing offline
-##   replays, and saving is the biggest cost per pawn (pawn spec 12.1).
-## [br]- A client: every tick, for replays.
-## [br]
-## And whether its values are rounded every tick ([code]TickStateComponent.rounds_every_tick[/code]): only where some machine replays
-## it, so not offline and, on a server, not for an entity no client predicts (an AI pawn, the host's own pawn).
-## [br]
-## An entity that NetworkSession never configured (made directly, as most tests do) keeps saving and rounding everything.
+## Works out what the TickStateComponent saves and rounds: a server saves only snapshot ticks (and inputs only if a client predicts it);
+## offline saves nothing unless [member keep_history_offline]; a client saves every tick, for replays.
+## [br]An entity NetworkSession never configured (made directly, as tests do) saves and rounds everything.
 func refresh_input_saving() -> void:
 	if state == null:
 		return
@@ -189,10 +156,8 @@ func refresh_input_saving() -> void:
 		state.history_interval_ticks = 1
 
 
-## Stops every tick this entity causes, or starts them again: its parent's, its TickState's and its own.
-## [br]
-## All of its state stays as it is. While paused it records nothing, so snapshots leave it out, and clients hold it where they last
-## saw it. Only for an entity on the machine that decides, such as a server's AI pawn out of reach of every player.
+## Stops every tick this entity causes (its parent's, its TickState's, its own), or starts them again; state stays as it is.
+## [br]While paused it records nothing, so snapshots leave it out. Only for the machine that decides, such as a far-off server AI pawn.
 func set_paused(paused: bool) -> void:
 	if paused != _paused:
 		_paused = paused
@@ -204,9 +169,8 @@ func is_paused() -> bool:
 	return _paused
 
 
-## The one place that decides which of this entity's parts tick, so nothing else has to undo it. It registers them in the order
-## they'd normally join: the parent first, because _tick_input below runs after the parent's. Something placed from snapshots must not
-## also simulate itself. Your own unpredicted pawn still decides its input, in _tick_input below.
+# The one place that decides which parts tick. Registers the parent first, since this entity's _tick_input must run after the parent's.
+# Something placed from snapshots must not also simulate itself; your own unpredicted pawn still decides its input in _tick_input.
 func _apply_role_to_driver() -> void:
 	if _driver == null or _root == null or not is_inside_tree():
 		return
@@ -227,7 +191,7 @@ func _apply_role_to_driver() -> void:
 
 # --- Called by the tick driver -----------------------------------------------------------------
 
-## Server: hands the entity the input its owner sent for this tick. This runs after the parent's own _tick_input.
+## Server: hands the entity the input its owner sent for this tick. Runs after the parent's own _tick_input.
 func _tick_input(dt: float, tick: int) -> void:
 	if role == Role.LOCAL_UNPREDICTED and _root.has_method(&"_tick_input"):
 		_root._tick_input(dt, tick)
@@ -256,7 +220,7 @@ func _tick_record(tick: int) -> void:
 
 # --- Called by NetworkSession ------------------------------------------------------------------
 
-## Something placed from snapshots: places it for this tick, between them.
+## Client: places a snapshot-driven entity between snapshots for this render tick.
 func follow_server(render_tick: float, allow_extrapolation: bool = true) -> void:
 	if state == null:
 		return
@@ -302,8 +266,7 @@ func rewind_to(view_tick: float) -> bool:
 		position = position.lerp(found_after, view_tick - before)
 	_live_position = _root.global_position
 	_root.global_position = position
-	# REFACTOR: reaches into TickStateComponent's private _sync_collision, here and in restore_after_rewind. A public "sync collision
-	# now" (on the component, or a small physics helper) would say it's shared (extensible). See CHANGELOG.md.
+	# REFACTOR: calls TickStateComponent's private _sync_collision, here and in restore_after_rewind; make it public. See CHANGELOG.md.
 	if state:
 		state._sync_collision()
 	return true
@@ -320,7 +283,6 @@ func _hit_position_at(tick: int) -> Variant:
 	if tick < 0 or _hit_ticks.is_empty():
 		return null
 	var slot := tick % HIT_HISTORY_SIZE
-	# GDScript note: an if, not "a if b else null": a Vector3 and null aren't the same type, which the editor warns about.
 	if _hit_ticks[slot] == tick:
 		return _hit_positions[slot]
 	return null

@@ -42,31 +42,12 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 
 The base for one AI behaviour, such as Wander or Chase: one concrete thing to do.
 
-A child of the pawn's AIBehaviourManager. Pawn spec section 10.7. Each behaviour holds its own checks, score and actions; the behaviour manager only judges between them (pawn spec 10.8). It acts only through the AI controller, the pawn's hands: `context.controller.move_to()`, `press()`, `hold()`, `look_at_point()`. It never touches abilities or the body directly (pawn spec section 3, rule 4).
-
-How to make one: extend this, set the settings below in the inspector or in _init(), and override any of:
-- `own_conditions()`: when it may run, as conditions built from its settings (scaling spec 6.2)
-- `enter()`: once, when it starts
-- `tick()`: while it runs, every `tick_interval_ticks`, or sooner when woken (below). Return SUCCEEDED or FAILED to finish
-- `exit()`: once, when it stops, whatever the reason. Clean up here, such as `context.controller.stop()`
-
-**Wake-ups** (scaling spec 6.2): a behaviour that's waiting for something can say so, and its tick() runs when it happens instead of checking every few ticks: `wake_on_path_end()` (a walk it started ends, arrived or given up), `wake_on_action_end()` (an ability on that action finishes or is cancelled) and `wake_at()` (a tick, such as the end of a pause). The navigation and ability managers already watch these, so telling the behaviour costs one signal per event. `tick_interval_ticks` is then the longest it sleeps, a safety net. Wake-ups are cleared when it starts; set them in `enter()` and again in tick() as needed (wake_at is used up when it fires).
-
-**When it may run** is plain data: conditions ([`AICondition`](#aicondition)) over the pawn's inputs ([`AIInputs`](#aiinputs)), all of which must pass. Its own come from `own_conditions()` (Attack: the target within its swing's reach); a designer adds more in `conditions`, and shapes its score with `score_curves`, without code. Because they're data, the same decision can be made in C++ for a crowd (AIBatchDecider). Overriding `is_available()` or `score()` with code still works, but the C++ decider then has to ask GDScript for that behaviour's answers (`has_own_code()`).
-
-The behaviour's name is its node name, such as Wander. The fixed order and the random numbers read it, so give it a real name.
-
-Every setting here counted in ticks is written for 60 ticks a second, and converted to the match's rate where it's read (`TickDriver.ticks_at_rate`), so it lasts the same time at any rate.
-
-Settings worth knowing (pawn spec 10.7):
-- `persistence`, `persistence_fade`: from when it's chosen, its score gets persistence × the fade's value. + keeps it chosen, - makes the AI prefer something else for a while. Empty fade: no persistence.
-- `interrupt_threshold`, `cannot_be_interrupted`, `min_run_ticks`: what may replace it while it runs.
-- `score_jitter`: a random offset on its score at each decision, for variety. -1 uses the manager's default_score_jitter.
+A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only judges between behaviours. A behaviour holds its own conditions, score and actions, and acts only through the AI controller (`context.controller.move_to()`, `press()`), never on abilities or the body. Extend it, set the settings below, and override `own_conditions()`, `enter()`, `tick()` (return SUCCEEDED or FAILED to finish) and `exit()`. Its node name is its name: the fixed order and the random numbers read it. Settings counted in ticks are written for 60 a second and converted where read (`TickDriver.ticks_at_rate`). Design: pawn spec 10.7, scaling spec 6.2.
 
 ### Settings and properties
 
 - `allowed_states: StringName[]` = `[]`: States it may run in, by node name, such as &"Idle". Empty: any state.
-- `max_score: float` = `0.5`: The highest score() can return. Used to skip it without running its code when it can't win.
+- `max_score: float` = `0.5`: The highest score() can return. Lets the manager skip it without running its code when it can't win.
 - `min_score: float` = `inf_neg`: Optional: the lowest score() can return. Left at -inf it can't help skip others, but it's never wrong.
 - `needs_target: bool` = `false`: Skipped while the AI has no current target.
 - `presses_action: StringName` = `&""`: A named action it presses, such as &"primary". Skipped while that action couldn't start.
@@ -77,10 +58,10 @@ Settings worth knowing (pawn spec 10.7):
 - `interrupt_threshold: int` = `0`: While it runs, only events of this priority or higher can replace it: 0 for an ordinary decision, a state's priority for a state change, a force's priority for a forced state. 0: anything can.
 - `cannot_be_interrupted: bool` = `false`: Runs until it returns SUCCEEDED or FAILED, whatever happens, even if its state no longer allows it. Use sparingly.
 - `score_jitter: float` = `-1.0`: ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
-- `tick_interval_ticks: int` = `1`: While it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after, and sooner when a wake-up it asked for happens. The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now and then, or to wake when a walk ends. 1: every tick. Pawns start behaviours on different ticks, so a crowd's ticks spread out by themselves. Count time in ticks with context.current_tick, not by counting tick() calls, so a behaviour behaves the same at any interval.
+- `tick_interval_ticks: int` = `1`: While it runs, `tick()` is called every this many ticks, and sooner when a wake-up it asked for happens (the longest it sleeps). Count time with context.current_tick, not by counting tick() calls. 1: every tick.
 - `persistence: float` = `0.0`: Added to its score from when it's chosen, times persistence_fade's value. +: tends to keep it chosen. -: prefers others for a while.
 - `persistence_fade: FadeProfile`: How persistence fades over ticks. Empty: no persistence.
-- `persistence_mask: FadeProfile` = `null`: This pawn's own mask over `persistence_fade`: multiplied with it, so something can reshape one pawn's persistence without changing the brain the others share. Null: none. Set through `AIBehaviourManager.set_persistence_mask()` so C++ hears of it. A hook for now (the owner's call); nothing sets one yet.
+- `persistence_mask: FadeProfile` = `null`: This pawn's own mask over `persistence_fade`, multiplied with it. Null: none. Set through `AIBehaviourManager.set_persistence_mask()` so C++ hears of it. A hook; nothing sets one yet.
 - `manager: AIBehaviourManager` = `null`: Set by the AIBehaviourManager.
 - `pawn: Pawn` = `null`: The pawn this behaviour belongs to. Set by the AIBehaviourManager.
 - `name_hash: int` = `0`: Worked out once by the manager: a hash of the name, for random numbers.
@@ -140,62 +121,19 @@ Settings worth knowing (pawn spec 10.7):
 
 Picks and runs the pawn's AI behaviour, judging between its behaviours by score.
 
-A part on the pawn, added by PawnInitializer (or the game's AI brain, `PawnDefaultsRes.ai_brain`), with its behaviours ([`AIBehaviourBase`](#aibehaviourbase) nodes) as children. Pawn spec sections 10.7 and 10.8. It only judges between behaviours. Each behaviour holds its own checks, score and actions.
-
-At each decision (pawn spec 10.8):
-
-First, the pawn's inputs ([`AIInputs`](#aiinputs)) start afresh: each is worked out the first time a condition reads it this decision.
-
-0. Interrupts: if the running behaviour can't be replaced by this decision's reason, it keeps running and that's all.
-
-1. Valid: the behaviours the current state allows.
-
-2. Hard rules, with no behaviour code run: drop any on cooldown, needing a target when there's none, or whose action can't start.
-
-3. Ranges: each one's result can only land between floor = min_score + persistence - jitter and ceiling = max_score + persistence + jitter. One whose ceiling is below the highest floor can't win, so it's dropped. A floor is only certain if its behaviour is available, so the highest floor is taken from the first available behaviour, checking from the highest floor down (usually one is_available() call).
-
-4. Scoring, highest ceiling first: is_available() and score() run, persistence and this decision's jitter are added. As soon as the next ceiling can't beat the best result, the rest are skipped.
-
-5. Jitter: each behaviour gets its own offset within ± its jitter, from the context's replayable random numbers.
-
-6. Ties: results within `tie_margin` are a tie. With `randomize_ties` one is picked at random, otherwise the fixed order decides.
-
-7. Switching: if the winner isn't the running one, the old one's exit() runs, then the new one's enter(), and its persistence starts.
-
-Between decisions only the running behaviour's tick() runs, every tick_interval_ticks, or sooner when a wake-up it asked for happens (a walk ending, an ability on its action ending, a tick it named; `AIBehaviourBase.wake_at()`). When it returns SUCCEEDED or FAILED, the manager decides at once. When the pawn dies, the running behaviour stops (reason "died").
-
-How to use it (outside code only talks to the manager):
+A part on the pawn (added by PawnInitializer or the game's AI brain) with its [`AIBehaviourBase`](#aibehaviourbase) nodes as children. At each decision it checks whether the running behaviour may be replaced, drops behaviours that fail a hard rule, scores the rest and starts the winner; between decisions only the running behaviour's tick runs. Behaviours are kept sorted by name (the fixed order), never by the order added. Outside code only talks to the manager:
 
 ```gdscript
 pawn.ai_context.behaviour_manager.get_running_behaviour()
 pawn.ai_context.behaviour_manager.add_persistence_ticks(&"Chase", 60)    # say after landing a hit
-pawn.ai_context.behaviour_manager.set_persistence_speed(&"Chase", 0.5)
-pawn.ai_context.behaviour_manager.set_interrupt_threshold(&"Chase", 25)  # say for a berserk effect
 pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say for a confused effect
 ```
 
-Listen to `behaviour_changed` to follow its choices.
-
-**C++ makes the decisions; this is the backup** (scaling spec 6.2, the owner's call). With the [`AIDecisionModule`](#aidecisionmodule) in the game, a pawn whose `decides_in` is C++ (the default) has each decision made by AIBatchDecider (native/src/ai_batch_decider.cpp) from plain data, and this manager only starts what it chose. The GDScript steps below run for a pawn set to GDScript, a "special mind" C++ can't read (a behaviour with its own is_available() or score() code), a game without the C++ library or the module, and in shadow mode, where C++ is checked against them. The two follow the same steps: a change to `decide()` goes in both, and ai/tests/ai_batch_decider_selftest and ai_conditions_selftest check they agree. C++ keeps its own copy of each pawn's decision state (running behaviour, cooldowns, persistence), kept in step by the events this manager passes on (a behaviour stopping, persistence and jitter changes).
-
-To see what each decision was made from, set `decision_listener` (the [`AIDecisionRecorder`](https://docs.godotengine.org/en/stable/classes/class_aidecisionrecorder.html) does). While it's empty, no record is made.
-
-The fixed order: behaviours are sorted by name once, when the manager is ready. Never by the order they were added.
-
-What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd):
-- Its parent isn't a Pawn: it warns and does nothing.
-- No behaviours at all: it does nothing, so a script can drive the AI controller directly. That's the default part.
-- A state that allows none of its behaviours: the pawn stands still, with a warning naming the state, once.
-- Every allowed behaviour is ruled out for now (cooldowns, no target): the pawn stands still until one can run. No warning.
-- A score() outside min_score to max_score: a warning naming the behaviour, once, in debug builds. It would break step 3 or 4.
-- A behaviour with an automatic name (starting with "@"): it warns, because names must be the same on every run.
-- A behaviour asked for by name that doesn't exist: it warns and does nothing.
+With the [`AIDecisionModule`](#aidecisionmodule) in the game, C++ makes the decisions and this manager is the backup (`decide()`). Design: pawn spec 10.7 and 10.8, scaling spec 6.2.
 
 ### Settings and properties
 
-- `decision_listener: Callable` = `Callable()`: Called after every decision of every pawn, with an [`AIDecisionRecord`](#aidecisionrecord) of what it was made from and what it chose, and this manager: `func(record: AIDecisionRecord, manager: AIBehaviourManager)`. For diagnostics and for checking another decider against this one (scaling spec 6.2). Empty, the default: no record is made, which costs one check per decision.
-  
-  GDScript note: "static" means one for every manager, so one listener hears every pawn.
+- `decision_listener: Callable` = `Callable()`: Called after every decision of every pawn: `func(record: AIDecisionRecord, manager: AIBehaviourManager)`. Static, so one listener hears every pawn. For diagnostics and checking another decider (scaling spec 6.2). Empty (default): no record is made.
 - `decision_module: AIDecisionModule` = `null`: The [`AIDecisionModule`](#aidecisionmodule) running decisions in C++, set by it while it's in the game; null otherwise (every pawn decides here).
 - `decides_in: int` = `0`: Where this pawn's decisions are made: C++ (the default, with the [`AIDecisionModule`](#aidecisionmodule) in the game) or GDScript. The game mode can override it for every pawn (`AIDecisionModule.decider`).
 - `default_score_jitter: float` = `0.0`: The jitter for behaviours whose own score_jitter is -1. 0: no randomness.
@@ -219,13 +157,13 @@ What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd)
 - `get_running_behaviour() -> AIBehaviourBase`: The behaviour running now, or null.
 - `get_behaviours() -> AIBehaviourBase[]`: Every behaviour, in the fixed order.
 - `get_behaviour_list() -> AIBehaviourBase[]`: The same list without a copy, for code that reads it often (the AIDecisionModule). Don't change it.
-- `describe() -> Dictionary`: This brain as plain data: the manager's settings, the AI context's, and each behaviour's, in the fixed order. Everything a decision reads that doesn't change from one decision to the next. AIBatchDecider.add_brain() takes it, and AIDecisionRecorder saves it. The pawn's own fields are pawn_number, pawn, random_seed and decision_interval_ticks; the rest is the same for every pawn with the same behaviour set. Settings changed during play (set_score_jitter, set_interrupt_threshold) show in the next call.
-- `decide(tick: int, record: AIDecisionRecord = null) -> void`: `AIContextComponent.run_ai()` calls this when a decision is waiting (see `AIContextComponent.request_decision()`). Uses up the waiting decision. record: the [`AIDecisionRecord`](#aidecisionrecord) to fill in while `decision_listener` is set; run_ai passes one with the target and state updates in it. Null makes one here if something listens.
+- `describe() -> Dictionary`: This brain as plain data: the manager's, the AI context's and each behaviour's settings, in the fixed order. Taken by `AIBatchDecider.add_brain()` and saved by [`AIDecisionRecorder`](https://docs.godotengine.org/en/stable/classes/class_aidecisionrecorder.html). Settings changed during play show in the next call.
+- `decide(tick: int, record: AIDecisionRecord = null) -> void`: Makes the waiting decision (`AIContextComponent.request_decision()`) and starts what it chose. record: filled in while `decision_listener` is set (null: made here). Twin of C++ `AIBatchDecider`: same steps, a change goes in both.
 - `tick_running(tick: int) -> void`: `AIContextComponent.run_ai()` calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 - `stop_running(reason: String) -> void`: Stops the running behaviour, if any; its exit() gets this reason. Called with "died" when the pawn dies.
 - `add_persistence_ticks(behaviour_name: StringName, ticks: float) -> void`: Moves a behaviour's persistence back along its fade by this many ticks, so it lasts longer. Negative: it ends sooner.
 - `set_persistence_speed(behaviour_name: StringName, speed: float) -> void`: How fast a behaviour's persistence fades from now on: 1.0 normally, 0.5 for half speed.
-- `set_persistence_mask(behaviour_name: StringName, mask: FadeProfile) -> void`: Gives this pawn's behaviour a persistence mask: a fade multiplied with its own persistence fade, for this pawn only, so something can reshape how one pawn's persistence fades without changing the brain every pawn shares (the owner's call: the hook now, its uses later). Null: no mask. Counted from when the behaviour starts, as the fade is.
+- `set_persistence_mask(behaviour_name: StringName, mask: FadeProfile) -> void`: Gives this pawn's behaviour a persistence mask: a fade multiplied with its own persistence fade, for this pawn only. Null: none. Counted from when the behaviour starts, as the fade is.
 - `set_interrupt_threshold(behaviour_name: StringName, threshold: int) -> void`: Changes a behaviour's interrupt threshold, even while it runs.
 - `inputs_changed() -> void`: Called when a behaviour's conditions change (`AIBehaviourBase.rebuild_conditions()`), so the inputs worked out at each decision are listed again, and C++ gets the new brain.
 - `set_score_jitter(behaviour_name: StringName, jitter: float) -> void`: Changes a behaviour's jitter. -1: back to default_score_jitter.
@@ -237,32 +175,21 @@ What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd)
 
 Shared data and settings for one pawn's AI, and the step that runs the AI parts in order.
 
-A part on the pawn, added by PawnInitializer. Pawn spec section 10. It makes no decisions. It holds what the other AI parts share, so they don't each look it up again:
-- references: the pawn, its AI controller (the hands), and the other AI parts (`state_manager`, `behaviour_manager`, `sensing_manager`, `memory`, `target_selector`)
-- settings for the whole AI: `while_possessed`, `decision_interval_ticks`, `random_seed`
-- the decision waiting to happen this tick, if any, and how strong its reason is (the "event", pawn spec 10.7)
-- random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
-- the current target, and shared inputs behaviours read (`current_target_index()`, `most_aware_index()`)
-- the pawn's AI inputs (`inputs`): the named numbers behaviours' conditions read (scaling spec 6.2)
-- the last hit the pawn took and the latest swing coming at it, for states and behaviours
-
-The pawn calls `run_ai()` from its own tick, which runs the AI parts in a fixed order. Nothing here ticks on its own.
-
-How to use it (behaviours and states get it as their "context"):
+A part on the pawn, added by PawnInitializer. It makes no decisions: it holds what the other AI parts share (the pawn, its AI controller, the other parts, the current target, the pawn's [`AIInputs`](#aiinputs), the last hit and swing coming, the waiting decision, and random numbers that replay the same), and the pawn calls `run_ai()` from its own tick. Behaviours and states get it as their "context":
 
 ```gdscript
-context.pawn, context.controller, context.memory, context.state_manager, context.behaviour_manager
+context.controller, context.memory, context.state_manager, context.behaviour_manager
 context.current_tick            # the tick the AI is running now
-context.current_state_name()    # &"Idle", or &"" before the first state is picked
-context.has_target()            # true while the target selector has picked a target
-context.random_unit(salt)       # a number from 0 up to 1, the same on every run for this pawn and tick
+context.random_unit(salt)       # 0 up to 1, the same on every run for this pawn and tick
 ```
+
+Design: pawn spec 10, 10.7 and 10.9.
 
 ### Settings and properties
 
-- `while_possessed: int` = `1`: What the AI does while a player has the pawn. Which is right depends on the game: MEMORY_ONLY suits possessing an NPC and letting go, where the AI should already know what's around.
-- `decision_interval_ticks: int` = `15`: How often the AI decides, in ticks: 15 is four times a second at 60 ticks a second. Each pawn is offset by its own number, so a crowd doesn't all decide on the same tick. Some events wake a decision early (pawn spec 10.9).
-- `random_seed: int` = `0`: Part of every random number this AI uses. Two pawns with the same seed still differ, because their own number goes in too. A game can set it from its world seed, so a replay of the same world makes the same choices.
+- `while_possessed: int` = `1`: What the AI does while a player has the pawn. MEMORY_ONLY suits possessing an NPC and letting go: the AI already knows what's around.
+- `decision_interval_ticks: int` = `15`: How often the AI decides, in ticks at 60 a second (15: four times a second). Each pawn is offset by its own number, so a crowd doesn't all decide on one tick. Some events wake a decision early (pawn spec 10.9).
+- `random_seed: int` = `0`: Part of every random number this AI uses; pawn numbers still make two pawns differ. A game can set it from its world seed.
 - `pawn: Pawn` = `null`: The pawn this AI belongs to, or null if its parent isn't one.
 - `current_tick: int` = `0`: The tick the AI is running now. Set by the pawn at the start of each AI step.
 - `current_target: Node3D` = `null`: What the AI is focused on, picked by the target selector. Null when there's none.
@@ -273,7 +200,7 @@ context.random_unit(salt)       # a number from 0 up to 1, the same on every run
 - `sensing_manager: AISensingManager`: The pawn's sensing manager, or null.
 - `memory: AIMemory`: The pawn's memory, or null.
 - `target_selector: AITargetSelector`: The pawn's target selector, or null.
-- `last_hit_tick: int` = `-1`: The tick of the last hit this pawn took, noted from the AbilityManager's hit_arrived on the server; -1: never hit. State rules (AIAwarenessState) and behaviours read it; the hit isn't turned into a memory entry, because there's no damage sense (the owner's call).
+- `last_hit_tick: int` = `-1`: The tick of the last hit this pawn took, noted from the AbilityManager's hit_arrived on the server; -1: never hit. Not a memory entry: there's no damage sense.
 - `last_attacker: Node3D` = `null`: Who made the last hit.
 - `last_hit_from: Vector3` = `Vector3(0, 0, 0)`: Where the attacker stood when it hit.
 - `incoming_attacker: Pawn` = `null`: Who swung the latest swing coming at this pawn (`note_incoming_attack()`), for AIParryBehaviour, or null.
@@ -299,52 +226,28 @@ context.random_unit(salt)       # a number from 0 up to 1, the same on every run
 - `was_hit_within(ticks: int) -> bool`: True if the pawn was hit within this many ticks, counted at 60 a second like every AI setting (converted to the match's rate).
 - `last_attacker_is_known() -> bool`: True if the last attacker is in memory.
 - `unknown_hit_point(within_ticks: int) -> Variant`: Where an unknown attacker hit from, if that was within this many ticks; null otherwise. Look Toward and Investigate head there when nothing else is half-noticed.
-- `point_of_interest(within_ticks: int) -> Variant`: Something half-noticed to look at or go and see: the most aware memory entry's last known position while that entry isn't certain yet, or else where an attacker the AI doesn't remember hit from, if that was within this many ticks (at 60 a second); null when there's neither. Look Toward and Investigate head there. Their conditions check the same two facts through the inputs (`AIInputs.half_noticed_conditions()`), which the C++ decider can read.
+- `point_of_interest(within_ticks: int) -> Variant`: Something half-noticed to look at or go and see: the most aware memory entry's last known position while it isn't certain yet, or else where an unremembered attacker hit from, within this many ticks (at 60 a second); null when neither. Their conditions check the same facts through `AIInputs.half_noticed_conditions()`, which the C++ decider can read.
 - `has_target() -> bool`: True when there's a current target, picked by the target selector.
-- `run_ai(tick: int) -> void`: The AI's step, in a fixed order (pawn spec sections 4 and 10.9). The pawn calls it in its input phase; the AI's core part runs the AI, and the pawn only calls this. Runs only where the AI runs (offline or the server), never while a rollback replays ticks, and, while a player has the pawn, only as far as `while_possessed` allows. Order:
-  
-  1. Forces and taunts asked for during the last tick are applied, in the order they were asked for, even while possessed.
-  
-  2. Sensing, which writes into memory. MEMORY_ONLY stops after this.
-  
-  3. On a decision tick, or when something asked for a decision: the target is picked, the state is checked, then the behaviour manager decides.
-  
-  4. The running behaviour ticks, which calls the AI controller.
+- `run_ai(tick: int) -> void`: The AI's step, in a fixed order (pawn spec 4 and 10.9), called by the pawn in its input phase. Runs only where the AI runs (offline or the server), never while a rollback replays ticks; while a player has the pawn, only as far as `while_possessed` allows.
 - `is_decision_tick(tick: int) -> bool`: True on this pawn's regular decision ticks, every `decision_interval_ticks`, offset by its own number.
 - `request_decision(priority: int = 0, normal: bool = true) -> void`: Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state change, a force's priority for a forced state. normal is true only for an ordinary decision, the one kind a behaviour's min_run_ticks holds off. Several requests in one tick combine into one decision with the strongest reason.
 - `has_decision_waiting() -> bool`: True when a decision is waiting to happen.
 - `waiting_event_priority() -> int`: The strongest reason for the waiting decision. Only meaningful while one is waiting.
 - `waiting_event_is_normal() -> bool`: True when the waiting decision is only an ordinary one.
 - `clear_decision() -> void`: The behaviour manager calls this once it has made the decision.
-- `random_unit(salt: int) -> float`: A number from 0 up to (not including) 1 for this tick. salt says what it's for, so two uses on one tick differ: a behaviour uses its name's hash. The same seed, pawn, tick and salt always give the same number, on every machine and every run.
+- `random_unit(salt: int) -> float`: A number from 0 up to (not including) 1 for this tick. salt says what it's for (a behaviour uses its name's hash). The same seed, pawn, tick and salt give the same number on every machine and run.
 - `random_unit_at(tick: int, salt: int) -> float`: random_unit() for a given tick.
 - `random_signed(salt: int) -> float`: A number from -1 to 1. See random_unit().
 - `pawn_number() -> int`: This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on every machine, or else a hash of its name.
-- `number_of(other: Pawn) -> int` *(static)*: Any pawn's number, as `pawn_number()` gives it, for a pawn that may have no AI of its own (a player's, say): its network id when it has one, or else a hash of its name. 0 for null.
+- `number_of(other: Pawn) -> int` *(static)*: Any pawn's number, as `pawn_number()` gives it, for a pawn that may have no AI of its own. 0 for null.
 
 ## AIDecisionModule
 
 `res://assets/scripts/ai/AIDecisionModule.gd`, extends [`GameModeModule`](../game_mode/REFERENCE.md#gamemodemodule)
 
-Makes the AI's behaviour decisions in C++, the main path, and decides which pawns use GDScript's decider, the backup.
+Makes the AI's behaviour decisions in C++ (the main path) and decides which pawns use GDScript's decider (the backup).
 
-A GameMode module (`GameMode.get_module(AIDecisionModule)`). Scaling spec 6.2, steps 5c and 5d. It holds the C++ decider (AIBatchDecider): one brain per behaviour set, shared by the pawns using it, and each pawn's row: its decision state (running behaviour, cooldowns, persistence) and the facts a decision is made from. A pawn deciding in C++ asks it for each decision (`decide_in_cpp()`); C++ decides from the row alone, and the behaviour manager starts the chosen behaviour. Without this module every pawn decides in GDScript, as before.
-
-**Facts are written through** (the owner's call): whatever owns a fact writes it into the pawn's row when it changes, so a decision gathers nothing. The state manager's state_changed, the context's current_target setter, its notes of hits and swings, a game's inputs (AIInputs.set_input), the nearest point of a group when the lookup finds another, and the actions that could start when the AbilityManager's readiness_version has moved on. The pawn's position and memory are read in C++ (its body, its AIMemoryStore). Shadow mode also checks that the written facts match the live ones (`stale_facts` in `get_counts()`).
-
-Where each pawn decides (the owner's call: C++ is main, GDScript a dormant backup):
-- The pawn's own setting, `AIBehaviourManager.decides_in` (C++ by default), unless `decider` overrides it for every pawn.
-- GDScript regardless, with a warning naming why, for: a game without the C++ library, a pawn on the GDScript memory store, and a "special mind": a behaviour with its own is_available() or score() code, a persistence fade or mask whose script has its own value_at(), or a condition of a kind C++ doesn't know. C++ can't read code, so such a pawn keeps the GDScript decider; there should only be a few.
-
-Nothing watches every tick: where a pawn decides is settled when it first decides, and again only when something changes it (its setting, `decider`, its behaviours' conditions).
-
-`check_against_gdscript` (shadow mode, for tests and finding faults): every pawn decides in GDScript, and each pawn that could decide in C++ also has C++ decide beside it, from C++'s own copy of its state; the answers are compared and counted (`get_counts()`), the first few disagreements logged, and C++'s copy put right after one.
-
-A tripwire in debug builds: every `FACT_CHECK_EVERY`th C++ decision also checks the pawn's written facts against the live ones, and warns (the F8 log) when one is out of date, so a write missed by new code shows up while playing, not only in tests.
-
-Keys (debug builds): F10 switches every pawn to GDScript and back, to tell whether a fault is in the C++ decider.
-
-What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)): `ai.decide.cpp`, one pawn's decision in C++ with its inputs gathered.
+A GameMode module (`GameMode.get_module(AIDecisionModule)`). It holds the C++ decider (`AIBatchDecider`): one brain per behaviour set, and each pawn's row (its decision state and the facts a decision is made from). A pawn deciding in C++ asks it for each decision (`decide_in_cpp()`) and its [`AIBehaviourManager`](#aibehaviourmanager) starts the chosen behaviour. Without this module, or without the C++ library, every pawn decides in GDScript. Facts are written into the row when they change, so a decision gathers nothing. `check_against_gdscript` is shadow mode: GDScript decides, C++ decides beside it, and the two are compared (`get_counts()`). In debug builds F10 switches every pawn to GDScript and back, and a sampled check warns when a written fact is out of date. Timed as `ai.decide.cpp` ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)). Design: scaling spec 6.2, steps 5c and 5d.
 
 ### Settings and properties
 
@@ -358,7 +261,9 @@ What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)):
 - `Decider.ALL_CPP = 1`: every pawn in C++ (special minds and a missing library still use GDScript)
 - `Decider.ALL_GDSCRIPT = 2`: every pawn in GDScript, the backup
 - `KNOWN_CONDITION_KINDS = ["always", "compare", "chance", "any"]`
-- `FACT_CHECK_EVERY = 100`: In debug builds, every this many C++ decisions one also checks its written facts (the tripwire, see the class description).
+- `FACT_CHECK_EVERY_IDLE = 20`: The sampled fact check's pace (debug builds), in C++ decisions between checks: with time to spare (load under half the tick's budget), normally, and near the budget (above 90%). It checks most when it costs least.
+- `FACT_CHECK_EVERY = 100`
+- `FACT_CHECK_EVERY_BUSY = 1000`
 
 ### Functions
 
@@ -387,25 +292,17 @@ What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)):
 
 `res://assets/scripts/ai/AIDecisionRecord.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-What one AI decision was made from, and what it chose: a plain record for diagnostics and for checking another decider against this one.
+What one AI decision was made from, and what it chose: a plain record for diagnostics and for checking another decider.
 
-The [`AIBehaviourManager`](#aibehaviourmanager) fills one in after a decision, only while `AIBehaviourManager.decision_listener` is set, and hands it to the listener. The [`AIDecisionRecorder`](https://docs.godotengine.org/en/stable/classes/class_aidecisionrecorder.html) keeps them and saves them to a file. Nothing in the game reads them.
-
-Why it exists: the plan to make decisions in C++ on the worker threads (scaling spec 6.2) starts with a "shadow" decider that decides beside this one without being used. To compare the two exactly, the C++ one needs the same inputs this decision had, and the answer this decision gave. A record holds both:
-- the reasons for deciding: `cause`, `event_priority`, `event_is_normal`
-- the situation: `state`, `has_target`, the running behaviour and when it started
-- for each behaviour, in the fixed order: which hard rule ruled it out, if any, and otherwise its persistence, jitter, ceiling and floor, whether is_available() was asked and what it said, and its score if it was scored
-- the answer: `chosen`
-
-Behaviours the early stop skipped show `available = -1` (never asked). A decider that matches asks the same ones.
-
-How to read one:
+The [`AIBehaviourManager`](#aibehaviourmanager) fills one in after each decision, only while `AIBehaviourManager.decision_listener` is set; the [`AIDecisionRecorder`](https://docs.godotengine.org/en/stable/classes/class_aidecisionrecorder.html) keeps and saves them. It holds the reasons, the situation, each behaviour's hard rule, range, availability and score in the fixed order, and the choice. Behaviours the early stop skipped show `available = -1`. Nothing in the game reads records.
 
 ```gdscript
 record.chosen                              # &"Chase", or &"" for nothing
 record.behaviours[0]["name"]               # each entry is a Dictionary, see add_behaviour()
 record.to_dict()                           # everything as plain values, for saving as JSON
 ```
+
+Design: scaling spec 6.2.
 
 ### Settings and properties
 
@@ -447,9 +344,7 @@ record.to_dict()                           # everything as plain values, for sav
 - `note_target_before(target: Node3D) -> void`: Notes the target before the selector's update.
 - `note_target_after(target: Node3D) -> void`: Notes the target after the selector's update.
 - `changed() -> bool`: True when the running behaviour changed.
-- `add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void`: Adds one behaviour's entry, from the scratch values the manager left on it this decision. rule: the hard rule that ruled it out, or `RULE_NONE`. The entry's keys:
-  - `name`, `rule`
-  - for a candidate (no rule): `persistence`, `jitter`, `ceiling`, `floor` (null for no floor), `available` (1 yes, 0 no, -1 never asked), `score` (null when not scored)
+- `add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void`: Adds one behaviour's entry from the scratch values the manager left on it. rule: the hard rule that ruled it out, or `RULE_NONE`. Keys: name, rule, and for a candidate persistence, jitter, ceiling, floor (null: none), available (1 yes, 0 no, -1 never asked) and score (null: not scored).
 - `entry_for(behaviour_name: StringName) -> Dictionary`: The entry for this behaviour, or an empty Dictionary.
 - `to_dict() -> Dictionary`: Everything as plain values (text, numbers, arrays, dictionaries), ready for JSON.
 
@@ -457,53 +352,33 @@ record.to_dict()                           # everything as plain values, for sav
 
 `res://assets/scripts/ai/AIInputs.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-One pawn's AI inputs: the numbers its behaviours' conditions read, such as the distance to its target.
+One pawn's AI inputs: the named numbers its behaviours' conditions read.
 
-Scaling spec 6.2. A behaviour says when it may run with conditions ([`AICondition`](#aicondition)): plain data such as "target_distance at most 2.5". Conditions never call into game code; they read numbers from here. That's what lets the same decision be made in C++ (AIBatchDecider) from a table of these numbers, without calling back into GDScript for every behaviour.
-
-Every input has a name and a slot. The slot is its place in `values`, the same for every pawn in the match, so a whole crowd's inputs line up as one table. Slots are given out the first time a name is asked for (`slot_of()`).
-
-Two kinds of input:
-- **Worked out** at most once per decision, from what the AI already knows: the built-in names below. Each is worked out the first time a condition reads it in a decision (`begin_decision()`, `value()`), so a decision pays only for the inputs the behaviours it actually judges read, as the early stop allows. The C++ decider and decision records need them all, so for those every input the brain reads is worked out (`fill()`).
-- **Kept**: any other name. Whatever knows the value writes it when it changes (`set_input()`), and it stays until written again. This is how a game adds its own, such as a morale value its game mode keeps up to date.
-
-Names that begin with `ticks_` are times in ticks. A condition's value for them is written for 60 ticks a second and converted to the match's rate, like every AI setting counted in ticks.
-
-The built-in inputs:
-- `target_distance`: flat distance (ignoring height) to where the AI last knew its target to be. `FAR` with no target.
-- `most_aware_certain`: 1 if the entry it's most aware of in memory is certain, else 0.
-- `most_aware_uncertain`: 1 if there's such an entry and it isn't certain yet, else 0.
-- `ticks_since_unknown_hit`: ticks since an attacker it doesn't remember hit it. `FAR` if that never happened, or the attacker is remembered.
-- `incoming_attack`: 1 while a swing it was warned of hasn't hit yet. `incoming_attack_tick`: the tick that swing started. `incoming_attacker`: the swinging pawn's number.
-- `group_distance/<group>`: flat distance to the nearest node in that group, such as `group_distance/rally_point`. The nearest node is looked for again every 2 seconds. `FAR` if there's none, so pair a "further than" check with `group_found/<group>`, 1 while the group has a node.
-- `action_ready/<action>`: 1 while pressing that action could start an ability (`AbilityManager.can_start()`). Worked out again only when the AbilityManager says something that affects it changed (`AbilityManager.readiness_version`).
-
-How to use it:
+Every name has a slot, the same for every pawn, so a crowd's inputs line up as one table the C++ decider reads. The built-in inputs (the constants below) are worked out the first time a condition reads them in a decision; any other name is a game's own, kept until written again (`set_input()`). Names starting `ticks_` are times in ticks, written for 60 a second. Design: scaling spec 6.2.
 
 ```gdscript
-pawn.ai_context.inputs.set_input(&"morale", 0.4)                  # a game's own input, kept until written again
-pawn.ai_context.inputs.value_of(AIInputs.TARGET_DISTANCE)         # read one (worked out at the last decision)
-AIInputs.slot_of(&"morale")                                       # its slot, for reading values directly
+pawn.ai_context.inputs.set_input(&"morale", 0.4)
+pawn.ai_context.inputs.value_of(AIInputs.TARGET_DISTANCE)
 ```
 
 ### Settings and properties
 
-- `values: PackedFloat64Array` = `PackedFloat64Array()`: The values, one per slot. Slots no one has written or worked out yet are 0. May be shorter than `input_count()` until a new name's first use; `value()` reads 0 past the end.
+- `values: PackedFloat64Array` = `PackedFloat64Array()`: The values by slot; 0 where nothing was written or worked out.
 
 ### Constants
 
-- `TARGET_DISTANCE = &"target_distance"`: The built-in inputs' names. Code uses these constants, never the text, so a typo fails to compile.
-- `MOST_AWARE_CERTAIN = &"most_aware_certain"`
-- `MOST_AWARE_UNCERTAIN = &"most_aware_uncertain"`
-- `TICKS_SINCE_UNKNOWN_HIT = &"ticks_since_unknown_hit"`
-- `INCOMING_ATTACK = &"incoming_attack"`
-- `INCOMING_ATTACK_TICK = &"incoming_attack_tick"`
-- `INCOMING_ATTACKER = &"incoming_attacker"`
-- `GROUP_DISTANCE = "group_distance/"`: The start of the inputs that take a name after them.
-- `GROUP_FOUND = "group_found/"`
-- `ACTION_READY = "action_ready/"`
-- `TICKS_PREFIX = "ticks_"`: Names that begin with this are times in ticks (see the class description).
-- `FAR = 1000000000000.0`: What an input is when there's nothing to measure: no target, never hit. Bigger than any real distance or time, so "at most" conditions fail and "at least" ones pass. Not INF, so records of decisions stay valid JSON.
+- `TARGET_DISTANCE = &"target_distance"`: Flat distance to where the AI last knew its target to be; `FAR` with no target.
+- `MOST_AWARE_CERTAIN = &"most_aware_certain"`: 1 if the memory entry it's most aware of is certain, else 0.
+- `MOST_AWARE_UNCERTAIN = &"most_aware_uncertain"`: 1 if there's a most aware entry and it isn't certain yet, else 0.
+- `TICKS_SINCE_UNKNOWN_HIT = &"ticks_since_unknown_hit"`: Ticks since an attacker it doesn't remember hit it; `FAR` if none did, or the attacker is remembered.
+- `INCOMING_ATTACK = &"incoming_attack"`: 1 while a swing it was warned of hasn't hit yet.
+- `INCOMING_ATTACK_TICK = &"incoming_attack_tick"`: The tick that swing started.
+- `INCOMING_ATTACKER = &"incoming_attacker"`: The swinging pawn's number.
+- `GROUP_DISTANCE = "group_distance/"`: `group_distance/<group>`: flat distance to the group's nearest node; `FAR` if it has none.
+- `GROUP_FOUND = "group_found/"`: `group_found/<group>`: 1 while the group has a node. Pair it with a "further than" check on the distance.
+- `ACTION_READY = "action_ready/"`: `action_ready/<action>`: 1 while pressing the action could start an ability.
+- `TICKS_PREFIX = "ticks_"`: Names starting with this are times in ticks.
+- `FAR = 1000000000000.0`: The value when there's nothing to measure: larger than any real distance or time, and not INF, so records stay valid JSON.
 - `Kind.KEPT = 0`
 - `Kind.TARGET_DISTANCE = 1`
 - `Kind.MOST_AWARE_CERTAIN = 2`
@@ -519,25 +394,25 @@ AIInputs.slot_of(&"morale")                                       # its slot, fo
 
 ### Functions
 
-- `slot_of(input_name: StringName) -> int` *(static)*: The slot for an input name, given out the first time the name is asked for. Built-in names and the two prefixes are worked out at decisions; any other name is a kept input.
-- `input_count() -> int` *(static)*: How many input names have slots so far.
+- `slot_of(input_name: StringName) -> int` *(static)*: The slot for an input name, given out on first use.
+- `input_count() -> int` *(static)*: How many names have slots.
 - `name_of(slot: int) -> StringName` *(static)*: The name in a slot.
-- `is_worked_out(slot: int) -> bool` *(static)*: True if the slot's value is worked out at each decision, false for a kept input.
+- `is_worked_out(slot: int) -> bool` *(static)*: True for a built-in input, worked out at each decision.
 - `kind_of(slot: int) -> int` *(static)*: A slot's `Kind`.
-- `parameter_of(slot: int) -> StringName` *(static)*: The name after a slot's prefix, such as the group of group_distance/rally_point; &"" for the others.
-- `kinds() -> PackedInt32Array` *(static)*: Every slot's `Kind`, for the C++ decider, which works out the memory-based ones itself (scaling spec 6.2, step 5d).
-- `cpp_works_out(slot: int) -> bool` *(static)*: True if the C++ decider works this slot's input out itself from the pawn's C++ memory and facts (the target distance, the most aware entry, the last hit, the swing coming). The rest (group distances, actions, a game's own) come from here.
-- `is_ticks(slot: int) -> bool` *(static)*: True if the slot's input is a time in ticks (its name begins with `TICKS_PREFIX`).
-- `suggested_names() -> PackedStringArray` *(static)*: The input names the inspector suggests for a condition: the built-ins, then every name given a slot so far.
-- `half_noticed_conditions(hit_memory_ticks: int) -> AICondition[]` *(static)*: The conditions for "something half-noticed" (`AIContextComponent.point_of_interest()`): the most aware entry isn't certain yet, or an attacker the AI doesn't remember hit it within hit_memory_ticks (at 60 a second). Either will do. Look Toward and Investigate both use it, so the two react to the same things.
-- `set_input(input_name: StringName, value: float) -> void`: Writes a kept input. Use it for a game's own inputs; the built-in ones are worked out at each decision and would be overwritten.
-- `set_slot(slot: int, value: float) -> void`: Writes a value by slot. A kept input also goes into the pawn's row in the C++ decider, when it decides there.
-- `value(slot: int) -> float`: The value in a slot: a kept one as last written (0 if never), a worked-out one worked out now if it hasn't been yet this decision.
-- `value_of(input_name: StringName) -> float`: The value of an input by name. See `value()`.
-- `begin_decision(tick: int) -> void`: Starts a decision at this tick: every worked-out input is worked out again the first time it's read. The behaviour manager calls it at the start of each decision.
-- `fill(slots: PackedInt32Array) -> void`: Works out every listed slot now (the kept ones are left alone), for something that needs them all: the C++ decider's row, or a decision record. The behaviour manager calls it with the slots its behaviours' conditions read.
-- `nearest_in_group(group: StringName, tick: int) -> Node3D`: The nearest node in a group, kept while it's still there and looked for again every 2 seconds in case a nearer one has appeared, rather than asking the tree for the whole group at every decision. Null if the group is empty. Go To Point walks to it. The group's list is asked of the tree once a tick and shared by every pawn looking that tick.
-- `action_ready(action: StringName) -> bool`: True if pressing this action could start an ability now. Asks the AbilityManager again only when its `AbilityManager.readiness_version` has moved on, or when an ability on the action can change its mind without telling it (`AbilityBase.ready_follows_body`, such as Jump needing the ground).
+- `parameter_of(slot: int) -> StringName` *(static)*: The name after a slot's prefix (the group or action); &"" for others.
+- `kinds() -> PackedInt32Array` *(static)*: Every slot's `Kind`, for the C++ decider.
+- `cpp_works_out(slot: int) -> bool` *(static)*: True if the C++ decider works this input out itself (the memory-based ones); false for group, action and kept inputs.
+- `is_ticks(slot: int) -> bool` *(static)*: True if the slot's input is a time in ticks.
+- `suggested_names() -> PackedStringArray` *(static)*: The names the inspector suggests for a condition: the built-ins, then every name used so far.
+- `half_noticed_conditions(hit_memory_ticks: int) -> AICondition[]` *(static)*: The conditions for "something half-noticed", shared by Look Toward and Investigate: the most aware entry isn't certain yet, or an unknown attacker hit within hit_memory_ticks.
+- `set_input(input_name: StringName, value: float) -> void`: Writes a game's own input; it stays until written again.
+- `set_slot(slot: int, value: float) -> void`: Writes a value by slot. A kept input also goes to the pawn's C++ row.
+- `value(slot: int) -> float`: The value in a slot, working out a built-in one if it hasn't been yet this decision.
+- `value_of(input_name: StringName) -> float`: The value of an input by name.
+- `begin_decision(tick: int) -> void`: Starts a decision: built-in inputs are worked out again when next read.
+- `fill(slots: PackedInt32Array) -> void`: Works out every listed slot now, for something that needs them all (a decision record, shadow mode).
+- `nearest_in_group(group: StringName, tick: int) -> Node3D`: The group's nearest node (null if none), kept for 2 seconds while it exists. Go To Point walks to it.
+- `action_ready(action: StringName) -> bool`: True if pressing the action could start an ability. Asks the AbilityManager again only after its readiness_version moved on, or every time for an action whose readiness follows the body (Jump).
 
 ## AIMemory
 
@@ -545,47 +420,26 @@ AIInputs.slot_of(&"morale")                                       # its slot, fo
 
 What a pawn's AI has sensed, and how aware of each thing it is: awareness that rises when seen and fades when not.
 
-A part on the pawn, added by PawnInitializer. Pawn spec section 10.5. One entry per sensed entity, holding:
-- where it was last seen (its last known position) and the tick it was last seen
-- awareness_when_seen: awareness at that sighting, from 0 to 1
-- certain: set the first time awareness reaches 1, cleared when the entry is forgotten
-- threat: a number game mechanics add to; damage dealt to this pawn adds `threat_per_damage` a point (the EffectManager). Target selection reads it
-- the tick it was last checked by a sense, seen or not, so the next sighting's gain counts the right number of ticks
-
-The entries and the loops over them live in a store: AIMemoryStore in the navcore C++ library when it's available, or [`AIMemoryStoreGD`](#aimemorystoregd), the same thing in GDScript. This node keeps every setting, the signals and the functions below, and passes calls on, so nothing else needs to know which store runs (pawn spec 10.11). `use_native` off forces GDScript.
-
-How awareness moves:
-- A sense adds gain each time it sees the entity (`record_sighting()`), up to 1.
-- Seeing an entity that's already certain refills it to 1 at once.
-- Sightings close together (`continuous_sighting_ticks`) with no unseen check between them count as one look, so awareness doesn't fade between them; it only fades while the entity isn't seen. Reading it between checks says the same: while the last check saw it, at most continuous_sighting_ticks ago, it's held. It starts to fade (counted from when it was last seen) once a check misses it, or once that long passes with no check at all.
-- While it isn't seen, it stays full for a delay, then fades by a [`FadeProfile`](#fadeprofile): awareness now = awareness_when_seen × uncertain_fade.value_at(ticks since seen − uncertain_fade_delay_ticks). `uncertain_fade` and `uncertain_fade_delay_ticks` are for uncertain entries; `certain_fade` and `certain_fade_delay_ticks` for certain ones. With the default straight lines, an entry is forgotten delay + fade ticks after it was last seen, whatever its awareness was.
-- Nothing drains in the background: awareness is worked out when something asks. An entry is forgotten once its fade has ended (`forget_old()`, called by the sensing manager on each full pass), or when its entity is freed or dies.
-
-It asks the context for a decision when an entity is first sensed and when an entry becomes certain, so the AI reacts on that tick rather than at its next decision.
-
-How to use it (indexes stay valid until the next forget_old, so use them within one tick):
+A part on the pawn, added by PawnInitializer. One entry per sensed entity: its last known position, when it was last seen, its awareness (0 to 1), whether it's certain, and its threat. The entries live in a store, `AIMemoryStore` in the navcore C++ library or else [`AIMemoryStoreGD`](#aimemorystoregd) (same rules); this node keeps the settings and signals and passes calls on. It asks for a decision when an entity is first sensed or becomes certain. Indexes stay valid until the next `forget_old()`, so use them within one tick:
 
 ```gdscript
 var i := pawn.ai_context.memory.find(entity)   # -1 when it isn't remembered
 pawn.ai_context.memory.awareness_at(i, tick)
 pawn.ai_context.memory.is_certain_at(i)
-pawn.ai_context.memory.last_known_position_at(i)
-pawn.ai_context.memory.ticks_since_seen_at(i, tick)
 pawn.ai_context.memory.add_threat(entity, 5.0)
-pawn.ai_context.memory.is_native()             # true when the C++ store runs
 ```
 
-Signals: `entity_became_certain`, `entity_forgotten`.
+Design: pawn spec 10.5 and 10.11.
 
 ### Settings and properties
 
-- `uncertain_fade_delay_ticks: int` = `300`: Ticks an entry that isn't certain stays at full awareness after it was last seen, before its fade starts. So a glimpse that just reached Alert keeps the pawn Alert long enough to look and walk over. 300 is 5 s.
-- `uncertain_fade: FadeProfile`: How awareness fades for uncertain entries, once uncertain_fade_delay_ticks have passed. Empty: a straight line to nothing over 300 ticks.
+- `uncertain_fade_delay_ticks: int` = `300`: Ticks (at 60 a second) an uncertain entry stays at full awareness after it was last seen, before its fade starts. 300 is 5 s, so a glimpse that reached Alert keeps the pawn Alert long enough to look and walk over.
+- `uncertain_fade: FadeProfile`: How awareness fades for uncertain entries after the delay. Empty: a straight line to nothing over 300 ticks.
 - `certain_fade_delay_ticks: int` = `0`: The same delay for certain entries. Longer keeps a pawn searching longer after losing sight of an enemy.
-- `certain_fade: FadeProfile`: How awareness fades for certain entries, once certain_fade_delay_ticks have passed. Empty: a straight line to nothing over 1200 ticks (20 s).
-- `continuous_sighting_ticks: int` = `30`: Two sightings with no unseen check between them, at most this many ticks apart, count as one continuous look, so awareness doesn't fade between them. Keep it at least as long as the senses' gap between checks.
-- `threat_per_damage: float` = `0.01`: Threat added to an attacker's entry for each health point of damage it does to this pawn (the EffectManager adds it). Target selection weighs threat, so whoever hurts the pawn most tends to become its target.
-- `use_native: bool` = `true`: Off, every AIMemory made from now on uses the GDScript store even where the C++ library is available. For tests that compare the two, and for checking a suspected C++ problem. Read once, when each memory is made.
+- `certain_fade: FadeProfile`: How awareness fades for certain entries after the delay. Empty: a straight line to nothing over 1200 ticks (20 s).
+- `continuous_sighting_ticks: int` = `30`: Two sightings no more than this many ticks apart, with no unseen check between, count as one continuous look, so awareness doesn't fade between them. Keep it at least as long as the senses' gap between checks.
+- `threat_per_damage: float` = `0.01`: Threat added to an attacker's entry per health point of damage it does to this pawn (the EffectManager adds it); target selection weighs threat.
+- `use_native: bool` = `true`: Off, every AIMemory made from now on uses the GDScript store, even with the C++ library. For tests comparing the two. Read once, when each memory is made.
 - `pawn: Pawn` = `null`: The pawn this is a part of, or null.
 
 ### Signals
@@ -621,9 +475,7 @@ Signals: `entity_became_certain`, `entity_forgotten`.
 
 One pawn's AI memory in GDScript, plus the loops that read and write it: the sight check, the most aware entry, target scoring.
 
-Pawn spec sections 10.4, 10.5 and 10.11. The same thing as AIMemoryStore in the navcore C++ library, with the same functions and the same rules, used where that library isn't available or `AIMemory.use_native` is off. A change to one goes in the other, and ai_perception_selftest expects the same results from each: it runs on the C++ store where it loads, and on this one with `-- --gdscript-store`.
-
-[`AIMemory`](#aimemory) owns one of these and keeps every setting; the fades, delays, sight settings and target weights are passed in. Other code goes through AIMemory, not this.
+Twin of `AIMemoryStore` in the navcore C++ library: same functions, same rules, used where that library isn't available or `AIMemory.use_native` is off. A change to one goes in the other; ai_perception_selftest expects the same results from each (on this one with `-- --gdscript-store`). [`AIMemory`](#aimemory) owns one and passes the settings in; other code goes through [`AIMemory`](#aimemory), not this. Design: pawn spec 10.4, 10.5 and 10.11.
 
 ### Functions
 
@@ -653,14 +505,7 @@ Pawn spec sections 10.4, 10.5 and 10.11. The same thing as AIMemoryStore in the 
 
 The base for one AI sense, such as sight: notices other pawns and writes what it found into memory.
 
-A child of the pawn's AISensingManager. Pawn spec section 10.4. A sense never decides anything. It notices other pawns and writes what it found into the pawn's memory ([`AIMemory`](#aimemory)), with a gain that says how strongly it noticed them. Memory, states and behaviours don't care which sense it was.
-
-How to make one: extend this and override any of:
-- `get_range()`: how far it reaches, so the manager's one shared query is big enough for every sense
-- `full_pass()`: on each full pass. candidates are the other-team pawns within range, from the manager's query
-- `refresh()`: between full passes, a cheap check of the current target
-
-t0 has only SightSense. Hearing is deferred (pawn spec section 14), and being hit is a state rule, not a sense.
+A child of the pawn's [`AISensingManager`](#aisensingmanager). A sense never decides anything: it writes into the pawn's [`AIMemory`](#aimemory), with a gain saying how strongly it noticed. Extend it and override `get_range()` (how far it reaches, so the manager's one shared query covers every sense), `full_pass()` (candidates are the other-team pawns in range) and `refresh()` (a cheap check of the current target between full passes). Only [`SightSense`](#sightsense) exists; hearing is deferred. Design: pawn spec 10.4 and 14.
 
 ### Settings and properties
 
@@ -681,21 +526,11 @@ t0 has only SightSense. Hearing is deferred (pawn spec section 14), and being hi
 
 Runs a pawn's AI senses on their turn, and finds the other-team pawns they may notice.
 
-A part on the pawn, added by PawnInitializer, with its senses ([`AISenseBase`](#aisensebase) nodes) as children: SightSense by default. Pawn spec section 10.4. Each tick the pawn's AI runs (`AIContextComponent.run_ai()`):
-- Every `sense_interval_ticks`: a full pass. One shared query finds the pawns of other teams within the longest sense's range, and each sense gets that list. Then memory forgets entries whose fade has ended.
-- Every `refresh_interval_ticks` in between: each sense refreshes the current target, which for sight is one ray.
-
-Both are offset by the pawn's own number, so a crowd doesn't all sense on the same tick. A pawn running every 2nd or 4th tick still gets the passes that fell between its runs (pawn spec 8.21).
-
-Teams: only pawns on another team are candidates. When no pawn of another team is in the game at all (the TeamRegistry module says so), the query is skipped, so a crowd that's all on one team, like the stress tests, costs almost nothing here.
-
-**With the navcore C++ library**, the query uses AIPawnGrid: one grid of every pawn, rebuilt at most once a tick and shared by every pawn, which returns the nearest `max_candidates` first. The grid reads the shared PawnTable (Pawn.get_table()), which pawns join themselves, so ties come back in entity-id order (scaling spec step 1). The full pass's search, visibility and line of sight run on worker threads as the sensing job (AISensingJob, shared by every pawn; line of sight against SightGeometry), scaling spec steps 2 and 4. At the end of each tick, every pawn whose full pass is on its next run asks the job, and the job reads the shared table and works while the next tick waits to start. On the pass's tick, the sight sense only records the result. The answers are the same as on the main thread; only something that moves a pawn between ticks isn't seen by that pass. A pass with no result (a pawn that wasn't due, a test calling full_pass) runs on the main thread. TickJobs.enabled off turns the job off.
-
-**Without the library**, or with AIMemory.use_native off, it's a physics shape query on the layers in `candidate_mask` (pawns are on layer 2), which returns at most max_candidates, nearest not guaranteed. The sight checks themselves run in the pawn's memory store (pawn spec 10.11).
+A part on the pawn with its [`AISenseBase`](#aisensebase) nodes as children (SightSense by default). Every `sense_interval_ticks` a full pass finds the other-team pawns within the longest sense's range, hands them to each sense, then has memory forget faded entries; every `refresh_interval_ticks` in between, each sense refreshes the current target. Both are offset by the pawn's own number. With the navcore C++ library, a full pass's search, visibility and line of sight run on worker threads as a shared sensing job (`AISensingJob`) between ticks; its answers match the main thread's, except for anything that moves a pawn between ticks. Design: pawn spec 10.4 and 8.21, scaling spec steps 1, 2 and 4.
 
 ### Settings and properties
 
-- `sense_interval_ticks: int` = `10`: Ticks between full passes: 10 is six a second at 60 ticks a second.
+- `sense_interval_ticks: int` = `10`: Ticks (at 60 a second) between full passes: 10 is six a second.
 - `refresh_interval_ticks: int` = `5`: Ticks between cheap refreshes of what's already in memory.
 - `candidate_mask: int` = `2`: Physics layers the shared query looks on. Pawns are on layer 2.
 - `max_candidates: int` = `32`: The most pawns one query returns.
@@ -714,13 +549,7 @@ Teams: only pawns on another team are candidates. When no pawn of another team i
 
 The base for one AI state, such as Idle, Alert or Combat: "what situation am I in".
 
-A child of the pawn's AIStateManager. Pawn spec section 10.6. A state doesn't act: it decides which behaviours are allowed (each behaviour lists its states by node name) and, with its `priority`, how strong a reason its arrival is for interrupting the running behaviour.
-
-How the state is picked: the state manager checks each state's `prerequisites_met()` from the highest priority down, and the first that holds wins. No separate rules for staying, and no minimum time in a state.
-
-How to make one: extend this and override `prerequisites_met()`. Read thresholds from @export settings, never from numbers in code, so designers can tune them. Optionally override `enter()` and `exit()`.
-
-The state's name is its node name, such as Idle. Behaviours' allowed_states and the debug readout use it.
+A child of the pawn's [`AIStateManager`](#aistatemanager). A state doesn't act: it decides which behaviours are allowed (they list states by node name) and, with its `priority`, how strong a reason its arrival is for interrupting the running behaviour. The manager checks each state's `prerequisites_met()` from the highest priority down and the first that holds wins; there is no minimum time in a state. Extend it and override `prerequisites_met()`, reading thresholds from exports so designers can tune them; optionally `enter()` and `exit()`. Its node name is its name. Design: pawn spec 10.6.
 
 ### Settings and properties
 
@@ -740,11 +569,7 @@ The state's name is its node name, such as Idle. Behaviours' allowed_states and 
 
 Picks the pawn's current AI state: the highest-priority state whose prerequisites hold.
 
-A part on the pawn, added by PawnInitializer, with its states ([`AIStateBase`](#aistatebase) nodes) as children. Pawn spec section 10.6. At each decision, the states are checked from the highest priority down, and the pawn moves to the first whose prerequisites hold. That's all. Smoothness comes from memory, which rises and fades steadily; a pawn flickering between states is fixed in that state's prerequisites, not with a new mechanism. It works the way AbilityManager picks a locomotion.
-
-When the state changes, it asks the context for a decision with the new state's priority as the reason, so the behaviour manager decides at once and the running behaviour may be interrupted (pawn spec 10.7).
-
-How to use it (outside code only talks to the manager):
+A part on the pawn with its [`AIStateBase`](#aistatebase) nodes as children. At each decision it moves the pawn to the first state, checked from the highest priority down, whose prerequisites hold, and a change asks for a decision with the new state's priority as the reason. States are sorted by priority, then name, once, when the manager is ready. Outside code only talks to the manager; a forced state skips the normal check for a while, and during a tick a force is queued until the pawn's next AI step so the order never depends on which pawn went first (scaling spec step 3). Server and offline only.
 
 ```gdscript
 pawn.ai_context.state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
@@ -752,22 +577,7 @@ pawn.ai_context.state_manager.force_state(&"Combat", 120, 50, "scripted") # skip
 pawn.ai_context.state_manager.release_forced_state()
 ```
 
-`state_changed` is for debug readouts and, later, animation.
-
-Forcing a state (pawn spec 10.6):
-- The normal check is skipped for hold_ticks (or until `release_forced_state()` when hold_ticks is -1), then it takes over again.
-- A new force replaces the current one only if its priority is equal or higher. A weaker one is refused and logged.
-- It takes effect at once. The behaviour manager decides at the pawn's next AI step, which is this tick if that hasn't run yet.
-- Server only: on a client it does nothing and warns.
-- Called during a tick (by another pawn's ability or behaviour, say), it's queued and applied at the start of this pawn's next AI step, in the order the calls were made, so the result never depends on which pawn went first (scaling spec step 3). It returns true for "queued"; a missing state is still refused at once, and a weaker force is refused (and logged) when it's applied. Called between ticks (game code, a UI, a test), it applies at once. Releases work the same way.
-
-The fixed order: states are sorted by priority, then name, once, when the manager is ready. Never by the order they were added.
-
-What happens in odd cases (checked in ai/tests/ai_state_manager_selftest.gd):
-- Its parent isn't a Pawn: it warns and never picks a state.
-- No state fits: it keeps the current one and warns once. An AIIdleState, which always fits, prevents this.
-- A state with an automatic name (starting with "@"): it warns, because names must be the same on every run.
-- force_state with a name it doesn't have: it warns and returns false.
+Design: pawn spec 10.6 and 10.7.
 
 ### Settings and properties
 
@@ -783,7 +593,7 @@ What happens in odd cases (checked in ai/tests/ai_state_manager_selftest.gd):
 - `get_states() -> AIStateBase[]`: Every state, in the order they're checked.
 - `is_state_forced() -> bool`: True while a forced state is holding.
 - `update_state(tick: int) -> void`: `AIContextComponent.run_ai()` calls this at each decision. Checks the states in order and moves to the first that fits, unless a force holds.
-- `check_force_expiry(tick: int) -> void`: `AIContextComponent.run_ai()` calls this every tick, so a force that runs out hands back to the normal check on time, not at the next decision.
+- `check_force_expiry(tick: int) -> void`: `AIContextComponent.run_ai()` calls this every tick, so a force that runs out hands back to the normal check on time.
 - `force_state(state_name: StringName, hold_ticks: int, priority: int, reason: String) -> bool`: Moves to this state at once, and holds it for hold_ticks (-1: until `release_forced_state()`). Returns false, and changes nothing, if a stronger force is holding, the state doesn't exist, or this isn't where the AI runs. During a tick it's queued instead and returns true; the priority check happens when it's applied.
 - `apply_queued(_tick: int) -> void`: `AIContextComponent.run_ai()` calls this at the start of the AI step: applies the forces and releases queued during the last tick, in the order they were asked for.
 - `release_forced_state() -> void`: Ends a forced state. The normal check picks the state again at once. During a tick it's queued, as forces are.
@@ -794,31 +604,22 @@ What happens in odd cases (checked in ai/tests/ai_state_manager_selftest.gd):
 
 Picks the AI's current target from its memory, by priority: the standard threat or aggro table, kept small.
 
-A part on the pawn, added by PawnInitializer. Pawn spec section 10.5, "Target selection". At each decision, before the state is checked, every memory entry at awareness `min_awareness` or more is a candidate, with:
+A part on the pawn. At each decision, before the state is checked, every memory entry at awareness `min_awareness` or more is a candidate, and the highest priority wins (ties go to the nearer, then the lower id); the winner becomes the context's current_target. The current target gets a fading bonus so the pawn doesn't flick between two close targets.
 
 ```gdscript
-priority = awareness_weight × awareness
-         + distance_weight × (1 − distance / distance_range)     (distance to its last known position)
-         + threat_weight × threat
-         + current_target_bonus × current_target_fade's value    (only for the current target)
+priority = awareness_weight Ã— awareness
+         + distance_weight Ã— (1 âˆ’ distance / distance_range)     (distance to its last known position)
+         + threat_weight Ã— threat
+         + current_target_bonus Ã— current_target_fade's value    (only for the current target)
 ```
 
-The highest wins; ties go to the nearer, then to the lower id. The winner goes on the context as current_target, where behaviours that need a target and states such as Combat read it.
-
-The current target bonus stops the pawn flicking between two close targets. It fades by a FadeProfile counted from when the target was picked: by default +0.3, held 60 ticks, gone 60 ticks later.
-
-Forcing a target, for taunts: `force_target()` overrides the choice for hold_ticks (-1: until released). A new force replaces the current one only if its priority is equal or higher, the same rule as forced states. It asks for a decision with that priority, so a strong taunt can interrupt the running behaviour. On a client it does nothing and warns. Called during a tick (by another pawn's ability or behaviour, say), it's queued and applied at the start of this pawn's next AI step, in the order the calls were made, so the result never depends on which pawn went first (scaling spec step 3); it returns true for "queued", and a weaker force is refused (and logged) when it's applied. Called between ticks (game code, a UI, a test), it applies at once. `release_forced_target()` works the same way.
-
-A game with its own targeting rules extends this and overrides `target_priority()`. The built-in scoring loop runs in the pawn's memory store (AIMemoryStore in C++ when available, pawn spec 10.11) with the weights below. A script that overrides target_priority() is noticed when the selector is ready, and then every entry is scored by that function in GDScript instead, so a game's own rules always win.
-
-How to use it (outside code only talks to the selector):
+`force_target()` overrides the choice, for taunts. A game with its own rules overrides `target_priority()`; the loop then runs in GDScript instead of the memory store (`AIMemoryStore` in C++, whose `best_target` must match this formula). Listen to `target_changed`:
 
 ```gdscript
-pawn.ai_context.target_selector.get_current_target()
 pawn.ai_context.target_selector.force_target(player_pawn, 180, 40, "taunt")
 ```
 
-Listen to `target_changed` to follow its choices.
+Design: pawn spec 10.5 and 10.11, scaling spec step 3.
 
 ### Settings and properties
 
@@ -841,7 +642,7 @@ Listen to `target_changed` to follow its choices.
 - `is_target_forced() -> bool`: True while a forced target is holding.
 - `update_target(tick: int) -> void`: `AIContextComponent.run_ai()` calls this at each decision, before the state is checked.
 - `target_priority(memory: AIMemory, index: int, tick: int) -> float`: This entry's target priority. Override for a game's own rules.
-- `force_target(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool`: Makes this entity the target for hold_ticks (-1: until released). Returns false, and changes nothing, if a stronger force is holding, the entity is gone, or this isn't where the AI runs. During a tick it's queued instead and returns true; the priority check happens when it's applied.
+- `force_target(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool`: Makes this entity the target for hold_ticks at 60 a second (-1: until released). Returns false, changing nothing, if a stronger force holds, the entity is gone, or this isn't where the AI runs. During a tick it's queued and returns true.
 - `release_forced_target() -> void`: Ends a forced target. The next decision picks by priority again. During a tick it's queued, as forces are.
 - `apply_queued(_tick: int) -> void`: `AIContextComponent.run_ai()` calls this at the start of the AI step: applies the forces and releases queued during the last tick, in the order they were asked for.
 - `check_force_expiry(tick: int) -> void`: `AIContextComponent.run_ai()` calls this every tick, so a forced target that runs out hands back on time.
@@ -852,16 +653,7 @@ Listen to `target_changed` to follow its choices.
 
 How a value fades over ticks, from full to nothing, as a Resource designers tune in the inspector.
 
-Pawn spec section 10.2. Used by AI behaviour persistence (10.7), memory's awareness and the target selector's current target bonus (10.5).
-
-A fade starts at full (1.0) and ends at nothing (0.0). One profile has exactly one curve, so a designer never has to combine two kinds of fade in their head:
-- LINEAR: full for `hold_ticks`, then a straight line down to nothing over `fade_ticks`
-- HALF_LIFE: full for hold_ticks, then halves every `half_life_ticks`. Counts as nothing below 1%, which is after 7 halvings
-- CURVE: full for hold_ticks, then follows the drawn `curve` over fade_ticks (the curve's x runs 0 to 1, its y is the value)
-
-hold_ticks, fade_ticks and half_life_ticks are written for 60 ticks a second, and used at the match's rate (`TickDriver.ticks_at_rate`), so a fade lasts the same time at any rate.
-
-How to use it:
+Used by behaviour persistence, memory's awareness and the target selector's current target bonus. One profile has one curve (`Mode`): LINEAR, HALF_LIFE (counts as nothing below 1%) or CURVE (a drawn curve). Its tick settings are written for 60 a second and used at the match's rate (`TickDriver.ticks_at_rate`). For a fade no mode covers, extend it and override `value_at()` and `ends_after()`; the C++ memory store and decider then call it instead of doing the maths themselves.
 
 ```gdscript
 var fade := FadeProfile.new()  # or a .tres file made in the inspector, shared by everything that uses it
@@ -869,13 +661,7 @@ fade.value_at(30)              # 1.0 at the start, falling to 0.0
 fade.ends_after()              # ticks until it's nothing; from then on value_at() gives exactly 0.0
 ```
 
-A fade no mode covers: write a script that extends FadeProfile and overrides `value_at()` and `ends_after()`. Everything that uses a profile picks it up with no other change.
-
-What happens in odd cases (checked in ai/tests/fade_profile_selftest.gd):
-- A tick count below 0 (before the fade starts): full.
-- LINEAR or CURVE with fade_ticks 0, or HALF_LIFE with half_life_ticks 0: full for the hold, then nothing at once.
-- CURVE with no curve drawn: it behaves as LINEAR, and warns once.
-- A drawn curve that dips below 0 or rises above 1: the value is kept between 0 and 1.
+Design: pawn spec 10.2.
 
 ### Settings and properties
 
@@ -894,8 +680,8 @@ What happens in odd cases (checked in ai/tests/fade_profile_selftest.gd):
 
 ### Functions
 
-- `values_at_rate() -> Dictionary`: Its settings as plain data at the match's tick rate: mode, hold, fade, half_life (ticks) and curve. The C++ decider reads them for persistence (fade_math.h does the same maths as value_at()).
-- `value_at(ticks: float) -> float`: The value this many ticks after the fade started: 1.0 at the start, falling to 0.0. ticks can be fractional, so a fade can run slower or faster than one step per tick. ticks here are real ticks at the match's rate.
+- `values_at_rate() -> Dictionary`: Its settings as plain data at the match's tick rate: mode, hold, fade, half_life (ticks) and curve. Twin: the C++ decider's `fade_math.h` does the same maths as `value_at()`.
+- `value_at(ticks: float) -> float`: The value this many ticks after the fade started: 1.0 at the start, falling to 0.0. ticks can be fractional and are real ticks at the match's rate. A tick below 0 gives 1.0.
 - `ends_after() -> int`: Ticks from the start until the value is nothing. From then on, value_at() gives exactly 0.0.
 
 ## AIAttackBehaviour
@@ -904,9 +690,7 @@ What happens in odd cases (checked in ai/tests/fade_profile_selftest.gd):
 
 Swings at the current target once it's close enough.
 
-Pawn spec section 10.7, step 9. Allowed in Combat by default. It's available when the current target's last known position is within the pawn's MeleeAttack attack_range minus `approach_margin`: the AI steps a little closer than the attack's real reach, so the swing is more likely to land (the owner's call). Changing the attack's range changes both. Chase brings the pawn in; this scores higher (0.9 against 0.8), so it takes over at that distance.
-
-It faces the target, holds the attack's action (`AIBehaviourBase.presses_action`) through the swing, and finishes when the swing is over. It sleeps through the swing (scaling spec 6.2's wake-ups): it wakes for the press, two ticks later to see that the swing started, and when an ability on its action ends; meanwhile the AI controller keeps the aim on the target every tick (`AIController.look_at_node()`). The aim follows the target itself, which sensing keeps close to its last known position while it's in view (it was the last known position, re-aimed every tick). The first tick held is the press, which is a request: the ability manager picks what it starts (the normal swing, or the next swing of a combo), and this waits for whichever runs on that action. Holding keeps the swing turning toward its target (TurnToFaceStep, pawn spec 8.20). A second Attack behaviour with presses_action set to another action, and a higher score, uses a special attack whenever it's ready (faction_arena_sample's goblins). Its interrupt_threshold (15) keeps an ordinary decision from cutting it off mid-swing; the swing itself follows the ability rules (pawn spec 8.6).
+Allowed in Combat. Available when the target's last known position is within the MeleeAttack's attack_range minus `approach_margin`: the AI steps a little closer than the real reach so the swing lands. Chase brings the pawn in (score 0.8); this scores 0.9 and takes over at that distance. It faces the target, holds the attack's action (`AIBehaviourBase.presses_action`) through the swing, sleeps until it ends, then finishes. Its interrupt_threshold (15) stops an ordinary decision cutting a swing off. A second Attack with another action and a higher score gives a special attack (faction_arena_sample's goblins). Design: pawn spec 10.7 (step 9), 8.6 and 8.20; scaling spec 6.2.
 
 ### Settings and properties
 
@@ -914,7 +698,7 @@ It faces the target, holds the attack's action (`AIBehaviourBase.presses_action`
 
 ### Functions
 
-- `own_conditions() -> AICondition[]`: Close enough: the target's last known position is within attack_range − `approach_margin`, one condition built from those settings. With no MeleeAttack on presses_action, nothing is close enough (a reach of -1 m), so it never runs. If the attack's range changes during play, call `AIBehaviourBase.rebuild_conditions()`.
+- `own_conditions() -> AICondition[]`: Close enough: the target is within attack_range âˆ’ `approach_margin`, one condition. With no MeleeAttack on presses_action nothing is close enough, so it never runs. If the attack's range changes during play, call `AIBehaviourBase.rebuild_conditions()`.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -925,9 +709,7 @@ It faces the target, holds the attack's action (`AIBehaviourBase.presses_action`
 
 Runs after the current target, and stops within reach for Attack to take over.
 
-Pawn spec section 10.7. Allowed in Combat by default. It follows the current target's last known position (which sight keeps updating while the target is in view), holding sprint, and looks at it the whole time, so the AI's eyes stay on the target. It finds a new path every `repath_ticks`, or sooner when the target has moved more than `repath_distance` from where the path leads, rather than every tick. Within `stop_distance` it stops and faces the target; the Attack behaviour takes over from there. With `dash_to_close` on, it also dashes to close the last few metres.
-
-It never finishes on its own. When the target is out of sight long enough, Combat's prerequisites fail and the state change replaces it.
+Allowed in Combat. It follows the target's last known position, holding sprint and looking at it the whole time. It finds a new path every `repath_ticks`, or sooner when the target has moved more than `repath_distance` from where the path leads. Within `stop_distance` it stops and faces the target for Attack. With `dash_to_close` on it also dashes to close the last few metres. It never finishes on its own: when the target is out of sight long enough, Combat's prerequisites fail and the state change replaces it. Design: pawn spec 10.7.
 
 ### Settings and properties
 
@@ -935,8 +717,8 @@ It never finishes on its own. When the target is out of sight long enough, Comba
 - `repath_distance: float` = `1.5`: How far, in metres, the target must move from where the path leads before a new path is found early.
 - `stop_distance: float` = `1.2`: How close, in metres, it gets before stopping.
 - `sprint: bool` = `true`: On: it holds sprint while chasing. Sprint's own cooldown decides when it actually sprints.
-- `dash_to_close: bool` = `false`: On: it presses dash to close in, when the target is between `dash_to_distance` and `dash_from_distance` away and Dash can start (off cooldown, nothing it can't cancel running; in the air too, Dash's usable_in_air). Off by default; the arena's goblins turn it on, so the owner can see the AI switch abilities. A dash goes the way the pawn is moving, which is along its path.
-- `close_in_tag: StringName` = `&"movement.advanced"`: The group of ability it uses to close in, not one ability by name: any ability tagged with it that can start (AbilityManager.action_for_tag), so a pawn with a grappling hook in that group closes in the same way. Advanced movement by default.
+- `dash_to_close: bool` = `false`: On: it presses dash to close in, when the target is between `dash_to_distance` and `dash_from_distance` away and the ability can start (in the air too, Dash's usable_in_air). Off by default. A dash goes the way the pawn is moving, along its path.
+- `close_in_tag: StringName` = `&"movement.advanced"`: The group of ability it uses to close in, not one ability by name: any ability tagged with it that can start (`AbilityManager.action_for_tag()`). Advanced movement by default.
 - `dash_from_distance: float` = `7.5`: The farthest the target can be for a dash, in metres.
 - `dash_to_distance: float` = `5.5`: The nearest the target can be for a dash, in metres. A dash from a sprint (9 m/s) covers about 4.2 m, so 5.5 lands it a little outside stop_distance.
 
@@ -952,13 +734,7 @@ It never finishes on its own. When the target is out of sight long enough, Comba
 
 Walks to a meeting point: the nearest node in a Godot group, "rally_point" by default.
 
-The owner's request: in the mass battle, every faction marches to the middle and fights there, instead of wandering near its spawner. Like Unreal's target points: the point is a node in a Godot group (`point_group`), placed in the level, so pawns spawned at any time find it.
-
-When it's available: there's a node in point_group, and the pawn is further than `arrive_radius` from it (one condition on the input group_distance/<point_group>; the nearest node is looked for again every 2 seconds, `AIInputs.nearest_in_group()`). Allowed in Idle, the same as Wander, with a score just above Wander's (0.15 against 0.1), so an idle pawn marches, anything it notices on the way (Alert, Combat) takes over, and once it's there, Wander takes over and it mills about.
-
-How it walks: in legs of at most `leg_metres` toward the point, each one a move_to, so each path stays short. Nav is only built near streaming sources (StreamingSource.nav_distance), so one path all the way across a big level might not exist yet, while a short leg does. Each pawn walks a little to one side of the straight line (up to `spread_metres`, its own offset from its random numbers), so a crowd marches as a band, not in single file. A leg that can't be walked is tried again a few metres shorter on its next tick.
-
-It never finishes on its own: it returns RUNNING, and stops being available once the pawn has arrived.
+Allowed in Idle, scoring just above Wander (0.15 against 0.1), so an idle pawn marches to the point, anything it notices on the way takes over, and on arrival Wander takes over. Available while a node is in `point_group` and the pawn is further than `arrive_radius` from it (the nearest is looked up every 2 seconds, `AIInputs.nearest_in_group()`). It walks in legs of at most `leg_metres`, each a move_to, because nav is only built near streaming sources; a leg that can't be walked is retried shorter. Each pawn walks a little to one side of the line (up to `spread_metres`, from its random numbers) so a crowd marches as a band. It never finishes on its own: it stops being available once the pawn has arrived. Design: scaling spec 6.2.
 
 ### Settings and properties
 
@@ -973,7 +749,7 @@ It never finishes on its own: it returns RUNNING, and stops being available once
 
 ### Functions
 
-- `own_conditions() -> AICondition[]`: There's a node in point_group, and the pawn is further than arrive_radius from the nearest one: two conditions.
+- `own_conditions() -> AICondition[]`: A node is in point_group, and the pawn is further than arrive_radius from the nearest one: two conditions.
 - `enter(_context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -984,9 +760,7 @@ It never finishes on its own: it returns RUNNING, and stops being available once
 
 Walks over to see what something half-noticed was.
 
-Pawn spec section 10.7. Allowed in Alert by default. It scores high while the most aware entry in memory isn't certain yet, and walks, without sprinting, to that entry's last known position. If the position moves more than `repath_distance` (the target was seen again somewhere else), it heads for the new one. It succeeds on arriving, and fails if there's no way there. Its cooldown stops it walking to the same spot over and over.
-
-It's only available while something uncertain is remembered (Search handles enemies it became certain of), or while an unknown attacker hit the pawn within `hit_memory_ticks`: then it walks to where the hit came from, with no memory entry (no damage sense, the owner's call).
+Allowed in Alert. Available while the most aware memory entry isn't certain yet (Search handles certain ones), or while an unknown attacker hit the pawn within `hit_memory_ticks`, when it walks to where the hit came from. It walks, without sprinting, to the entry's last known position and heads for a new one if that moves more than `repath_distance`. It succeeds on arriving and fails if there's no way there; its cooldown stops it walking to the same spot over and over. Design: pawn spec 10.7.
 
 ### Settings and properties
 
@@ -996,7 +770,7 @@ It's only available while something uncertain is remembered (Search handles enem
 
 ### Functions
 
-- `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a hit within `hit_memory_ticks` from an attacker it doesn't remember. Two conditions, either of which will do. Its score is always max_score.
+- `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a recent hit from an attacker it doesn't remember. Either will do.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -1007,11 +781,7 @@ It's only available while something uncertain is remembered (Search handles enem
 
 Stops and looks toward something half-noticed: the first reaction to a glimpse.
 
-Pawn spec section 10.7. Allowed in Alert by default. "Huh, what was that?": it scores high while the most aware entry in memory isn't certain yet, stops the pawn, and looks at that entry's last known position for `look_ticks`. Looking turns the AI's eyes (SightSense sees where the AI looks), so a target that stays in view keeps filling awareness.
-
-Look first, then go and see (the owner's call): it scores above Investigate (0.6 against 0.5), because turning to look is the cheaper way to become certain. Once it has looked, its persistence is negative (-0.3, held about 10 s, then fading over 5 s), so Investigate (0.5) wins over it (0.3) and it doesn't catch again while Investigate walks over. It runs again only when Investigate can't: Investigate's cooldown after it finishes without finding anything, when Look Toward is the only thing left to do in Alert. `min_run_ticks` is its look, so the penalty that starts with it doesn't cut the look short.
-
-It's only available while something uncertain is remembered, so it never runs for an enemy it's already certain of, or while an unknown attacker hit the pawn within `hit_memory_ticks`: then it looks where the hit came from. There's no memory entry for that attacker (no damage sense, the owner's call), only the context's note of the hit.
+Allowed in Alert. Available while the most aware memory entry isn't certain yet, or an unknown attacker hit the pawn within `hit_memory_ticks` (then it looks where the hit came from). It stops the pawn and looks at that position for `look_ticks`; looking turns the AI's eyes, so a target still in view keeps filling awareness. It scores 0.6, above Investigate (0.5), because turning to look is the cheaper way to become certain; once it has looked, a negative persistence (-0.3) drops it to 0.3, so Investigate wins and Look Toward doesn't catch again while it walks over. It runs again only when Investigate is cooling down. Design: pawn spec 10.7.
 
 ### Settings and properties
 
@@ -1020,7 +790,7 @@ It's only available while something uncertain is remembered, so it never runs fo
 
 ### Functions
 
-- `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a hit within `hit_memory_ticks` from an attacker it doesn't remember. Two conditions, either of which will do. Its score is always max_score.
+- `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a recent hit from an attacker it doesn't remember. Either will do.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -1031,13 +801,7 @@ It's only available while something uncertain is remembered, so it never runs fo
 
 Parries a swing coming at the pawn, some of the time (`parry_chance`).
 
-The owner's request: AI pawns parry too, about 30% of swings, so a mass fight has some variety and parry gets tested under load.
-
-How it hears about a swing: an enemy's MeleeAttackAbility, when it starts on the server, tells the AI of each pawn it may reach (`AIContextComponent.note_incoming_attack()`), which notes it and asks for a decision at once. Ordinary decisions come every 15 ticks, longer than a swing's windup, so without that the parry would usually come too late.
-
-When it's available: a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up: two conditions. The roll is made from the swing's start tick and the attacker's pawn number, so each swing is rolled once, however many decisions happen during its windup, and a replay rolls the same.
-
-What it does: looks at the attacker and presses parry (presses_action, so it's skipped while the parry is cooling down or locked out, for example mid-swing). It finishes two ticks later, and forgets the swing. ParryAbility does the rest.
+Available when a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up (two conditions). An enemy's MeleeAttackAbility tells the AI of a swing when it starts, on the server (`AIContextComponent.note_incoming_attack()`), which asks for a decision at once: ordinary decisions come every 15 ticks, longer than a swing's windup. The roll comes from the swing's start tick and the attacker's pawn number, so each swing is rolled once and a replay rolls the same. It looks at the attacker and presses parry (`AIBehaviourBase.presses_action`, so it's skipped while the parry is cooling down or locked out), finishes two ticks later and forgets the swing; ParryAbility does the rest. Design: scaling spec 6.2.
 
 ### Settings and properties
 
@@ -1060,9 +824,7 @@ What it does: looks at the attacker and presses parry (presses_action, so it's s
 
 Hunts around where an enemy it became certain of was last seen: "I know you were here".
 
-Pawn spec section 10.7. Allowed in Alert by default. It scores high while the most aware entry in memory became certain but isn't fresh enough for Combat. It runs (holding sprint, if `sprint_to_last_known` is on) to the last known position, then walks to `search_points` random points within `search_radius` of it, standing `pause_ticks` at each, and succeeds. If the pawn is still Alert, the next decision usually picks it again, so it keeps searching until the entry fades (Idle) or the enemy is seen again (Combat).
-
-It's only available when the most aware entry became certain: Look Toward and Investigate handle half-noticed things.
+Allowed in Alert. Available only when the most aware memory entry is certain but not fresh enough for Combat (Look Toward and Investigate handle half-noticed things). It goes to the last known position (holding sprint if `sprint_to_last_known` is on), then walks to `search_points` random points within `search_radius` of it, standing `pause_ticks` at each, and succeeds. While still Alert it's usually picked again, so it keeps searching until the entry fades (Idle) or the enemy is seen (Combat). Design: pawn spec 10.7.
 
 ### Settings and properties
 
@@ -1089,11 +851,7 @@ It's only available when the most aware entry became certain: Look Toward and In
 
 Walks to random nearby points, pausing between them: what a pawn does when nothing more interesting can run.
 
-Pawn spec section 10.7. Allowed in Idle by default. What it does, over and over: picks a random point within `wander_radius` of its home (where the pawn was when it first started wandering), walks there with the AI controller's move_to, so it follows nav paths and crosses links, then stands for a random time between `min_pause_ticks` and `max_pause_ticks`.
-
-The random points and pauses come from the context's replayable random numbers, so the same seed, pawn and ticks give the same walk. A point with no way there is skipped, and another is tried on its next tick.
-
-It never finishes on its own (it returns RUNNING), so it runs until something better comes along.
+Allowed in Idle, with a low fixed score. It picks a random point within `wander_radius` of its home (where the pawn first started wandering), walks there with the AI controller's move_to, then stands for a random time between `min_pause_ticks` and `max_pause_ticks`. The points and pauses come from the context's replayable random numbers, so the same seed, pawn and ticks give the same walk. A point with no way there is skipped and another tried soon. It never finishes on its own. Design: pawn spec 10.7.
 
 ### Settings and properties
 
@@ -1119,7 +877,7 @@ It never finishes on its own (it returns RUNNING), so it runs until something be
 
 A condition that passes if any one of its conditions passes: "this, or that".
 
-Scaling spec 6.2. A behaviour's own list of conditions needs all of them ("this and that"); this is how to say "or". Look Toward, for example, runs while something half-noticed is in memory, or an unknown attacker hit the pawn lately. With an empty list it never passes (none of nothing passes). The conditions are checked in order and it stops at the first that passes.
+A behaviour's own list of conditions needs all of them; this is how to say "or" (Look Toward: something half-noticed, or an unknown attacker hit lately). The conditions are checked in order and it stops at the first that passes; an empty list never passes. Design: scaling spec 6.2.
 
 ### Settings and properties
 
@@ -1138,11 +896,13 @@ Scaling spec 6.2. A behaviour's own list of conditions needs all of them ("this 
 
 A condition that passes on a random roll, with a chance from 0 to 1, the same roll on every run.
 
-Scaling spec 6.2. The roll comes from the AI's replayable random numbers (`AIContextComponent.random_unit_at()`): the pawn, a tick and a salt. By default it's rolled again at every decision. With `once_per_input` set, the input's value takes the tick's place, so the roll stays the same until that input changes: Parry rolls once per swing, with incoming_attack_tick.
+The roll comes from `AIContextComponent.random_unit_at()` (pawn, tick, salt), rolled again at every decision by default. With `once_per_input` set, that input's value takes the tick's place, so the roll holds until the input changes: Parry rolls once per swing. The C++ decider rolls the same hash, so both give the same answer.
 
 ```gdscript
 chance 0.3, once_per_input incoming_attack_tick, salt_input incoming_attacker   # 30%, once per swing
 ```
+
+Design: scaling spec 6.2.
 
 ### Settings and properties
 
@@ -1166,7 +926,7 @@ chance 0.3, once_per_input incoming_attack_tick, salt_input incoming_attacker   
 
 A condition that compares one input with a number, or with another input plus a number.
 
-Scaling spec 6.2. Examples:
+Inputs that are yes or no are 1 or 0, so compare them with EQUAL 1 or EQUAL 0. Design: scaling spec 6.2. Examples:
 
 ```gdscript
 target_distance  AT_MOST  2.5                           # the target is within 2.5 m
@@ -1174,8 +934,6 @@ most_aware_certain  EQUAL  1                            # the AI is certain abou
 ticks_since_unknown_hit  AT_MOST  300                   # hit by someone unknown within 5 s (ticks at 60 a second)
 target_distance  AT_MOST  -0.5, other_input "reach"     # within the "reach" input minus half a metre
 ```
-
-Inputs that are yes or no are 1 or 0, so compare them with EQUAL 1 or EQUAL 0.
 
 ### Settings and properties
 
@@ -1206,14 +964,7 @@ Inputs that are yes or no are 1 or 0, so compare them with EQUAL 1 or EQUAL 0.
 
 The base for a condition: one check a behaviour needs to pass before it may run, made of plain data.
 
-Scaling spec 6.2. A behaviour runs only while all of its conditions pass (`AIBehaviourBase.all_conditions()`). A condition reads named numbers from the pawn's [`AIInputs`](#aiinputs), never game objects, so the same check can be made in C++ for a whole crowd at once (AIBatchDecider). Utility AI calls these "considerations".
-
-The kinds, each a Resource made in the inspector:
-- [`AICompareCondition`](#aicomparecondition): an input against a number, or against another input
-- [`AIChanceCondition`](#aichancecondition): a random roll that replays the same
-- [`AIAnyCondition`](#aianycondition): passes if any one of its conditions does
-
-A new kind needs the same check in C++ too (native/src/ai_batch_decider.cpp), and `describe()` giving what C++ reads. Most needs are met by an input instead: a game writes its own input (`AIInputs.set_input()`), and a compare condition reads it.
+A behaviour runs only while all its conditions pass (`AIBehaviourBase.all_conditions()`). A condition reads named numbers from the pawn's [`AIInputs`](#aiinputs), never game objects, so the C++ decider (`AIBatchDecider`) can make the same check for a crowd. The kinds, each a Resource made in the inspector, are [`AICompareCondition`](#aicomparecondition), [`AIChanceCondition`](#aichancecondition) and [`AIAnyCondition`](#aianycondition). A new kind needs the same check in C++ (native/src/ai_batch_decider.cpp) and a `describe()` giving what C++ reads; most needs are met by a game writing its own input (`AIInputs.set_input()`) instead. Design: scaling spec 6.2.
 
 ### Constants
 
@@ -1257,13 +1008,7 @@ target_distance, from 20 to 2     # 0 at 20 m or further, 1 at 2 m or closer: th
 
 Keeps the shared SightGeometry (line of sight in C++) fed with the solid things in the scene.
 
-Scaling spec step 4. With the geometry fed, line of sight can be tested off the main thread instead of with physics rays.
-
-On first use it finds every body already in the tree, then follows the tree: a body entering is added, one leaving is removed, and a collision shape node added to or taken from a body marks that body to be read again. Everything else (a body moving, a shape's resource changing, a new collision layer) the geometry notices itself, once a tick. So a designer only puts a prop on a layer that sight's sight_blocking_mask includes (layer 1, the world, by default), and it blocks sight.
-
-What's left out: areas, which sight's rays never stop at, and pawns, which move every tick. A sight sense whose mask includes the pawns' own layer uses physics rays (in AIMemoryStore's check_one, in C++).
-
-Not an autoload and never instanced: everything here is static (minimize autoloads), like TickJobs.
+With the geometry fed, line of sight can be tested off the main thread instead of with physics rays. On first use it finds every body in the tree, then follows the tree (a body entering or leaving, a collision shape added to or removed from a body); anything else the geometry notices itself, once a tick. So a designer only puts a prop on a layer in sight's sight_blocking_mask (layer 1 by default) and it blocks sight. Areas and pawns are left out. Never instanced: everything is static, so no autoload is needed. Design: scaling spec step 4.
 
 ### Settings and properties
 
@@ -1279,31 +1024,18 @@ Not an autoload and never instanced: everything here is static (minimize autoloa
 
 Sight, for basic stealth: fills awareness of other-team pawns it can see, faster when they're close and in front.
 
-A child of the pawn's AISensingManager. Pawn spec section 10.4. For each other-team pawn it checks, on a full pass or a refresh:
+A child of the pawn's [`AISensingManager`](#aisensingmanager). For each other-team pawn it checks, on a full pass or a refresh:
 
 ```gdscript
 if there's no line of sight: no gain
-gain = fill_rate × ticks_since_last_check × distance_factor × angle_factor × target.detectability
+gain = fill_rate Ã— ticks_since_last_check Ã— distance_factor Ã— angle_factor Ã— target.detectability
 ```
 
-- ticks_since_last_check makes the checking rate not matter: a target checked every 10 ticks gets 10 ticks' worth. It's capped at `max_gain_ticks`, so a pawn that wasn't sensing for a while (say while possessed with while_possessed OFF) doesn't jump.
-- distance_factor: 1 inside `near_range`, falling in a straight line to 0 at `sight_range`.
-- angle_factor: 1 inside the central cone, `periphery_multiplier` in the periphery, nothing outside it. Angles are measured flat, from the direction the pawn's eyes face (below).
-- target.detectability: the target pawn's own number, 1 normally (its Detectability stat). Games set it from their stealth rules.
-
-With the defaults, someone close and in front fills awareness in half a second, which is basically instant; someone 20 m away at the edge of the periphery takes several seconds.
-
-Line of sight is one ray, from `eye_height` above this pawn's feet to `target_height` above the target's feet. Only layers in `sight_blocking_mask` block it: the world (layer 1) by default, so other pawns don't hide each other. With the C++ library, the ray is tested in C++ against SightGeometry ([`SightGeometryFeeder`](#sightgeometryfeeder) keeps it fed), on worker threads when the sensing job runs, instead of a physics ray (scaling spec step 4). A mask that includes the pawns' own layer keeps physics rays, because pawns aren't in the geometry.
-
-Which way the eyes face: where the AI is looking when it has a look target (AIController.look_at_point), or else the way the body faces. While a player has the pawn, where the player looks. So a goblin looking toward a noise sees that way, and a walking goblin sees where it's going.
-
-Refreshes check only the current target, the same way, so a tracked target stays fresh between full passes for one ray.
-
-The checks themselves run in the pawn's memory store, AIMemoryStore in C++ when available ([`AIMemoryStoreGD`](#aimemorystoregd) otherwise), with these settings handed over each pass. `visibility_of()` and `has_line_of_sight()` are the same rules in GDScript, for tests and debug readouts.
+Ticks since the last check (capped at `max_gain_ticks`) make the checking rate not matter; the distance factor is 1 inside `near_range` and falls to 0 at `sight_range`; the angle factor is 1 in the central cone, `periphery_multiplier` in the periphery, 0 outside. Line of sight is one ray from the eyes to the target, blocked only by `sight_blocking_mask`. The eyes face where the AI is looking, else the way the body faces (where the player looks while one has the pawn). The checks run in the pawn's memory store (`AIMemoryStore` in C++, else [`AIMemoryStoreGD`](#aimemorystoregd)); with C++ the ray is tested against [`SightGeometryFeeder`](#sightgeometryfeeder)'s geometry, on worker threads when the sensing job runs. Refreshes check only the current target. Design: pawn spec 10.4, scaling spec step 4.
 
 ### Settings and properties
 
-- `fill_rate: float` = `0.03333333333333333`: Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Per tick at 60 ticks a second, like every setting here counted in ticks; at another rate it's converted to fill at the same speed.
+- `fill_rate: float` = `0.03333333333333333`: Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Per tick at 60 a second; at another rate it's converted to fill at the same speed.
 - `near_range: float` = `8.0`: Inside this distance, in metres, distance doesn't weaken sight at all.
 - `sight_range: float` = `25.0`: Beyond this distance, in metres, nothing is seen.
 - `central_cone_degrees: float` = `90.0`: The width of the central cone, in degrees, where sight is at full strength.
@@ -1330,18 +1062,7 @@ The checks themselves run in the pawn's memory store, AIMemoryStore in C++ when 
 
 One tunable state for every "how aware am I of an enemy" situation, such as Alert and Combat.
 
-Pawn spec section 10.6. The default Alert and Combat are two nodes running this script with different settings, so a designer makes a new awareness state, say a jumpy "Startled", by adding a node and filling in the settings, with no code.
-
-Its prerequisites hold when the entry it looks at (the current target, or any entry in memory) meets every setting:
-- `min_awareness`: awareness now is at least this
-- `requires_certain`: the entry became certain (reached full awareness) at some point
-- `max_ticks_since_seen`: it was seen within this many ticks (-1: any time)
-
-Or, separately, the pawn was hit recently:
-- `hit_within_ticks`: hit within this many ticks (-1: off)
-- `attacker`: KNOWN, the attacker is in memory; UNKNOWN, it isn't; ANY, either
-
-So Combat holds when a known attacker hits, and Alert when an unknown one does: the owner's rule, with no damage sense.
+The default Alert and Combat are two nodes running this script with different settings, so a designer makes a new awareness state by adding a node and filling in the settings, with no code. Its prerequisites hold when the entry it looks at (the current target, or any entry in memory) meets `min_awareness`, `requires_certain` and `max_ticks_since_seen`, or separately when the pawn was hit within `hit_within_ticks` by an `attacker` of the right kind. So Combat holds when a known attacker hits, and Alert when an unknown one does (there is no damage sense). Design: pawn spec 10.6.
 
 ### Settings and properties
 
@@ -1370,7 +1091,7 @@ So Combat holds when a known attacker hits, and Alert when an unknown one does: 
 
 The state for when nothing else fits: its prerequisites always hold.
 
-Pawn spec section 10.6. With the lowest priority it catches every case the other states don't. Every state manager should have one, or there are moments when no state fits.
+It has the lowest priority and catches every case the other states don't. Every state manager should have one, or there are moments when no state fits. Design: pawn spec 10.6.
 
 ### Functions
 

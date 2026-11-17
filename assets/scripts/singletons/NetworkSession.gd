@@ -1,51 +1,18 @@
 # Written by Claude (claude-opus-5-5), 2026-11-04. History: netcode/CHANGELOG.md.
 ## The multiplayer session (autoload "NetworkSession"): connects machines, spawns entities on all of them, and moves inputs and
-## snapshots between them (netcode spec sections 4, 6, 10, 11).
+## snapshots between them. Offline it does nothing and entities play as single player.
 ##
-## Everything happens inside TickDriver's ticks. Nothing here is needed offline: with no session, entities play as single player.
-## [br]
-## The model is the standard one for competitive action games:
-## [br]- The server is the authority. Clients send it inputs only, never positions or results.
-## [br]- A client runs ahead of the server, so that its input for tick T arrives before the server runs T. Tick numbers mean the same
-##   thing everywhere, so "my prediction for tick T" can be compared with "the server's result for tick T".
-## [br]- Your own pawn is predicted: it reacts at once, and when a snapshot says otherwise it's corrected (reconciliation).
-## [br]- Everything else is drawn in the past between snapshots (entity interpolation).
-## [br]- Attacks are checked by the server against what the shooter saw (lag compensation, see LagCompensation).
-## [br]
-## How to use it:
+## The standard model for competitive action games: the server is the authority and clients send it inputs only; a client runs ahead so
+## its input for tick T arrives before the server runs T; its own pawn is predicted and corrected (reconciliation); everything else is
+## drawn in the past between snapshots (interpolation); the server checks attacks (LagCompensation). It all runs inside TickDriver's
+## ticks. Non-entity systems, such as terrain edits, send their own messages through world and client channels.
 ## [codeblock]
 ## NetworkSession.register_type("pawn", preload("res://pawn.tscn"))  # same types in the same order on every machine
 ## NetworkSession.world_root = $Entities
 ## NetworkSession.host(port)   # or NetworkSession.join(address, port)
-## # On the server, whenever the game wants something to exist. A player joining spawns nothing by itself.
-## NetworkSession.spawn("pawn", peer_id, Vector3(0, 1, 0))
+## NetworkSession.spawn("pawn", peer_id, Vector3(0, 1, 0))   # on the server; a joining player spawns nothing by itself
 ## [/codeblock]
-## Snapshots carry each entity's changes since the last snapshot of it the client acknowledged (delta snapshots, netcode spec
-## 11.4.1), cut into parts under ENet's packet size. Systems that aren't entities, such as terrain edits, send their own messages
-## through world channels (server to clients) and client channels (client to server).
-## [br]
-## Time dilation (netcode spec section 4.2): the server reports how early each client's inputs have been arriving. A client cutting it
-## too fine speeds up at once, going by the last half second. It only slows down again if the last 5 seconds have all been safe, so a
-## rough connection keeps the lead it has shown it needs. Its lead settles on the smallest that gets inputs there in time, whatever
-## the connection is doing. Only clients dilate. A client well behind where its clock says it should be, after a freeze say, jumps
-## straight back instead of slowly catching up, because every tick behind is another input arriving too late.
-## [br]
-## Test tools: the fake bad network and switching features while running are in NetDebugModule, an optional child that fills
-## [member packet_filter]. Without one, this does none of that. See docs/TEST_AND_DEBUG_CODE.md.
-## [br]
-## One tick on a client: before_tick: world messages, then snapshots (which may roll back), then remote entities are moved; the tick's
-## phases; after_tick: inputs and snapshot acknowledgements are sent.
-## [br]
-## One tick on the server: before_tick: received inputs are queued; the tick's phases; after_tick: snapshots are sent.
-## [br]
-## Rules, checked in tests/net_selftest.gd:
-## [br]- A client with a different content hash is refused with a message saying so.
-## [br]- Input for an entity the sender doesn't own, broken packets of any kind, and too many packets from one client are dropped.
-## [br]- A snapshot older than the newest one seen is dropped. Input for a tick the server has already run is dropped, and the client
-##   gets corrected. The server repeats the last input when one is missing, and never rewinds for movement.
-## [br]- A client that joins late gets everything that exists. Entities still owned by a client that leaves are removed.
-##   [signal player_leaving] fires first, so something can take back what it wants to keep. PossessionCoordinator does this for a
-##   possessed pawn, which stays in the world with no owner.
+## Design: netcode spec 4, 6, 10, 11. Tick order, packet formats, time dilation and the rules: the README.
 extends Node
 class_name NetworkSessionSingleton
 # REFACTOR: one class doing many jobs, about 2000 lines: the connection and handshake, the entity list and spawning, the clock and
@@ -59,7 +26,7 @@ signal hosted
 signal joined
 ## Client: couldn't join, and why.
 signal refused(reason: String)
-## The connection ended (after [signal connection_ended] gives the reason).
+## The connection ended; [signal connection_ended] was sent just before, with the reason.
 signal disconnected
 ## Server: a client passed the handshake.
 signal player_connected(peer: int)
@@ -73,12 +40,8 @@ signal entity_spawned(entity: NetworkEntity)
 signal entity_despawned(entity_id: int)
 ## An entity has a new owner, on every machine.
 signal entity_owner_changed(entity: NetworkEntity)
-## A connection ended, and why, for diagnostics.
-## [br]
-## On a client, peer is 1 (the server), sent just before [signal disconnected]. On a server, once for each client that goes, and once
-## with peer 0 when the server itself stops. reason is plain text. details has "seconds_connected", "seconds_since_heard" (since the
-## last packet from that peer), and "rtt_ms" and "loss_percent" (the connection's last round trip and packet loss as ENet measured
-## them, -1 if never measured).
+## A connection ended, and why, for diagnostics. peer is 1 on a client (sent just before [signal disconnected]); on a server, once per client
+## that goes, and 0 when the server stops. details: seconds_connected, seconds_since_heard, rtt_ms, loss_percent (-1: never measured).
 signal connection_ended(peer: int, reason: String, details: Dictionary)
 
 ## Whether this machine is offline, a server, or a client.
@@ -93,9 +56,7 @@ const MARGIN_SHORT_WINDOW := 30
 ## How many recent input packets count for the slow check that slows down: 5 seconds at 60 a second.
 const MARGIN_LONG_WINDOW := 300
 
-## Snapshots per second.
-## [br]
-## A server's entities save their state only on snapshot ticks (NetworkEntity.refresh_input_saving), so changing this tells them.
+## Snapshots per second. A server's entities save state only on snapshot ticks (NetworkEntity.refresh_input_saving), so changing this tells them.
 @export var snapshot_rate: int = 30:
 	set(value):
 		snapshot_rate = value
@@ -172,11 +133,8 @@ var world_root: Node = null
 var bind_address: String = "*"
 # REFACTOR: the three packet limits below and bind_address are plain vars, not exports like the settings above, so a designer can't
 # set them without code (designer friendly). See CHANGELOG.md.
-## Server: the most packets one client may send a second, so a broken or hostile client can't bury the server in work.
-## [br]
-## Past this, or [member max_bytes_per_second], or with a packet over [member max_packet_bytes], its packets are dropped and counted in
-## stats. 0 means no limit. A normal client sends about 60 packets and 6 KB a second for each pawn it controls, plus a few pings, so
-## raise these for a game that gives one client over about 30 pawns.
+## Server: most packets one client may send a second, so a broken or hostile client can't bury the server. Over it, [member max_bytes_per_second]
+## or [member max_packet_bytes], packets are dropped and counted in stats (0: no limit). A pawn costs a client about 60 packets and 6 KB a second.
 var max_packets_per_second: int = 2000
 ## Server: the most bytes one client may send a second. See [member max_packets_per_second].
 var max_bytes_per_second: int = 256 * 1024
@@ -185,11 +143,8 @@ var max_packet_bytes: int = 64 * 1024
 ## Something that can hold packets back on their way out and in, or null, which is normal. NetDebugModule fills it with its fake
 ## network. It has hold_outgoing(peer, bytes, reliable), hold_incoming(peer, bytes), release_due(now_usec) and clear().
 var packet_filter: Object = null
-## Bytes and packets sent and received, and more, for diagnostics.
-## [br]
-## On a server, snapshots_sent and snapshot_bytes (one per client per snapshot, and the bytes those carried), so their ratio is a
-## client's average snapshot; on a client, snapshot_bytes_received with snapshots_received; snapshot_parts_received and
-## deltas_without_baseline; and the biggest packet each way since the start.
+## Bytes, packets and more, for diagnostics. A server counts snapshots_sent and snapshot_bytes (one per client per snapshot); a client
+## snapshot_bytes_received, snapshot_parts_received and deltas_without_baseline; both the largest packet each way.
 var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_received": 0, "snapshots_received": 0,
 		"corrections": 0, "correction_total": 0.0, "correction_worst": 0.0, "jump_total": 0.0, "jump_worst": 0.0, "resyncs": 0,
 		"bad_packets": 0, "packets_over_limit": 0, "rejected_inputs": 0, "snapshots_encoded": 0, "schema_mismatches": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
@@ -219,9 +174,8 @@ const PING_INTERVAL := 0.25
 const BUILD_ID_SETTING := "project_base/network/build_id"
 ## The file types [method content_hash] reads when no build id is set.
 const HASHED_FILE_TYPES: PackedStringArray = ["gd", "gdc", "tscn", "scn", "tres", "res"]
-## Most packets the server keeps from one client between ticks, so one client can't crowd out others. A client sends one per pawn per
-## tick, and they pile up while the server is frozen, so this has room for 4 pawns through a freeze of half a second. A client doesn't
-## cap what its server sends (see handle_packet).
+## Most packets the server keeps from one client between ticks, so one client can't crowd out others. A client sends one per pawn per tick,
+## so 128 holds 4 pawns through a half-second freeze. A client doesn't cap what its server sends (see handle_packet).
 const MAX_INBOX_PER_PEER := 128
 ## Most inputs one packet may carry. Fixed, because input_redundancy is a setting each machine has its own copy of.
 const MAX_INPUTS_PER_PACKET := 16
@@ -353,10 +307,8 @@ func _ready() -> void:
 	multiplayer.server_disconnected.connect(_on_server_disconnected)
 	(multiplayer as SceneMultiplayer).peer_packet.connect(_on_packet)
 	(multiplayer as SceneMultiplayer).server_relay = false
-	# The netcode's graphs in the editor's Debugger > Monitors, only while that debugger is attached (a game run from the editor), so
-	# an exported game or a headless test never has them. See netcode/debug/NetMonitors.gd. Found by its file, not its class name, so
-	# a game exported without the netcode/debug/ folder still loads this script.
-	# GDScript note: call_deferred on a script runs one of its static functions after this frame's setup.
+	# The netcode's graphs in the editor's Debugger > Monitors, only while that debugger is attached. Loaded by file, not class name, so a
+	# game exported without netcode/debug/ still loads this script. Deferred, so it runs after this frame's setup.
 	if EngineDebugger.is_active() and ResourceLoader.exists(NET_MONITORS_SCRIPT):
 		(load(NET_MONITORS_SCRIPT) as GDScript).call_deferred(&"on", self)
 
@@ -564,11 +516,8 @@ func get_missed_inputs() -> int:
 	return _missed_inputs
 
 
-## How many ticks behind its own tick a client can believably be drawing others, for lag compensation. It can't be drawing
-## anything newer than the snapshot it last acknowledged, and it can't be further behind that than the interpolation limit.
-## Acknowledgements only ever move forward, and one older than the rewind cap gets no rewind. A client that deliberately
-## acknowledges late still gets through, but that looks exactly like really having high ping, so this can't stop it entirely.
-## Offline, the host's own pawn and AI aren't limited.
+## How many ticks behind its own tick a client can believably be drawing others (lag compensation): no newer than its last acknowledged
+## snapshot, no further behind that than the interpolation limit, and none past the rewind cap. Offline, the host's own pawn and AI aren't limited.
 func limit_view_ticks_behind(peer: int, claimed: float, tick: int) -> float:
 	if not _peers.has(peer):
 		return claimed
@@ -577,18 +526,11 @@ func limit_view_ticks_behind(peer: int, claimed: float, tick: int) -> float:
 	if acknowledged < 0 or age > rewind_cap_seconds * _driver.get_tick_rate():
 		return 0.0
 	var interpolation_limit: float = max_interpolation_seconds * _driver.get_tick_rate()
-	return minf(claimed, age + interpolation_limit + 1.0)
+	return minf(claimed, age + interpolation_limit + 1.0) # a client that acknowledges late on purpose gets through: it looks like high ping
 
 
-## A number that's the same on two machines only if they run the same content. The handshake refuses a client whose number differs.
-## [br]
-## It covers the packet format, the tag sets (abilities, nav) and the named input actions, the engine build, every physics setting,
-## the game's own files, and every registered entity type's TickStateComponent schema. Not the tick rate: the server chooses that
-## for the match and hands it over in WELCOME, after this is checked.
-## [br]
-## Set the project setting [constant BUILD_ID_SETTING] to give a build a name instead of reading its files. That's the normal way for
-## a release: stamp the build number when exporting, and only builds with the same number play together. Also use it if the same
-## project on different operating systems refuses itself, since line endings can differ.
+## A number that's the same on two machines only if they run the same content; the handshake refuses a client whose differs. It covers the
+## packet format, tag sets, input actions, engine build, physics settings, entity schemas, and the game's files (or [constant BUILD_ID_SETTING] if set).
 func content_hash() -> int:
 	if _hash_is_cached:
 		return _cached_hash
@@ -600,8 +542,7 @@ func content_hash() -> int:
 	parts.append(str(TagRegistry.content_hash()))
 	# Navigation has its own tags, and machines must agree on those bits too.
 	parts.append(str(NavTags.content_hash()))
-	# The named actions too, in bit order, so peers agree on what each input bit means even when a build id replaces the file part
-	# below.
+	# The named actions in bit order, so peers agree on what each input bit means even when a build id replaces the file part below.
 	parts.append(",".join(InputActions.get_actions()))
 	parts.append(String(Engine.get_version_info()["hash"]))
 	# The tick rate isn't part of this. The server chooses it for the match and hands it over in WELCOME, but the hash is checked
@@ -1043,9 +984,8 @@ func _new_link() -> Dictionary:
 	return {"connected_usec": now, "heard_usec": now, "rtt_ms": -1, "loss_percent": -1.0, "reason": ""}
 
 
-## Every LINK_CHECK_INTERVAL_USEC, each connection's round trip and packet loss as ENet measures them,
-## kept because ENet can't be asked once a connection has gone. GDScript note: "as" gives null when the peer isn't an
-## ENetMultiplayerPeer (a test's own kind of peer), so those are skipped.
+## Every LINK_CHECK_INTERVAL_USEC, each connection's round trip and packet loss as ENet measures them, kept because ENet can't be asked
+## once a connection has gone. Skipped when the peer isn't an ENetMultiplayerPeer (a test's own kind).
 func _check_links(now: int) -> void:
 	if now < _next_link_check_usec or _links.is_empty():
 		return
@@ -1130,9 +1070,8 @@ func _on_pong(peer: int, bytes: PackedByteArray) -> void:
 			joined.emit()
 
 
-## Client: jumps the tick back to its target if it has drifted too far. Checked every frame rather than when a ping returns, so a
-## client that froze is back on time at once. The clock goes by the fastest recent ping, so a lag spike doesn't look like falling
-## behind.
+## Client: jumps the tick back to its target if it has drifted too far. Checked every frame, so a client that froze is back on time at
+## once. The clock goes by the fastest recent ping, so a lag spike doesn't look like falling behind.
 func _jump_back_if_drifted() -> void:
 	var target := _target_tick(Time.get_ticks_usec())
 	var behind: int = target - _driver.tick
@@ -1181,9 +1120,8 @@ func _on_despawn(peer: int, bytes: PackedByteArray) -> void:
 
 
 # --- World messages ----------------------------------------------------------------------------
-# For changes to the world that aren't entities, such as terrain edits. The server sends, in order and reliably,
-# and each client gets them at the start of a tick. A system registers a channel by a name that's the same on every machine, with
-# a function to receive and, optionally, a function giving what a late joiner needs. A channel nobody has registered is ignored.
+# For changes to the world that aren't entities (terrain edits). The server sends reliably and in order, and each client gets them at the
+# start of a tick. A channel's name is the same on every machine; one nobody registered is ignored.
 
 ## Sets up a channel. receive(bytes) runs on clients. catch_up() runs on the server when a client joins, and returns the bytes
 ## to send it, or empty for nothing.
@@ -1245,8 +1183,8 @@ func _deliver_world_messages() -> void:
 
 
 # --- Client messages ---------------------------------------------------------------------------
-# The other direction, for a client asking the server for something, so that the session needn't know what. Reliable
-# and in order, and handled as they arrive. A client can send anything, so whatever receives these has to check it.
+# The other direction: a client asks the server for something, so the session needn't know what. Reliable and in order, handled as they
+# arrive. A client can send anything, so whatever receives these has to check it.
 
 ## Sets up a channel. receive(peer, bytes) runs on the server.
 func register_client_channel(channel: String, receive: Callable) -> void:
@@ -1368,10 +1306,8 @@ func _send_inputs(tick: int) -> void:
 		_send(1, buffer.data_array, false)
 
 
-## Client: says which snapshot parts it has read since the last time, one ACK packet a
-## tick at most: [ACK, how many ticks (up to 8, newest first), then for each: the tick (u32), its part count (u8), and a bit per part
-## (1 = read, every entity in it)]. Sent unreliably: a lost ACK only means the server keeps using older baselines for those
-## entities, and the next snapshot's parts are acknowledged as usual.
+## Client: says which snapshot parts it has read since the last time, one ACK packet a tick at most: type, count u8 (up to 8, newest first),
+## then per tick its tick u32, part count u8 and a bit per part (1: read, every entity in it). Unreliable: a lost ACK only keeps older baselines in use.
 func _send_part_acks() -> void:
 	if _acks_to_send.is_empty():
 		return
@@ -1405,10 +1341,8 @@ func _note_part_read(tick: int, part: int, part_count: int) -> void:
 	_newest_read_tick = maxi(_newest_read_tick, tick)
 
 
-## Server: a client says which parts of which snapshots it read. Every entity that was in
-## a part it read now has that tick as its baseline for this client (if newer than the one it had), so the next snapshot can send it
-## as changes since then. Parts of a snapshot the server no longer remembers sending, and ticks that haven't happened, are ignored.
-## It also counts for lag compensation, like the field in input packets: it only moves forward.
+## Server: a client says which parts of which snapshots it read. Each entity in a read part gets that tick as its baseline for this client
+## if newer. Unknown parts and future ticks are ignored. It also counts for lag compensation (only moves forward).
 func _on_ack(peer: int, bytes: PackedByteArray) -> void:
 	if _mode != Mode.SERVER or not _peers.has(peer) or not _peers[peer].welcomed or bytes.size() < 2:
 		stats["bad_packets"] += 1
@@ -1495,9 +1429,8 @@ func _on_input(peer: int, bytes: PackedByteArray, tick: int) -> void:
 		entity.state.receive_input(input_tick, entity.clean_input(entity.state.input_values_to_dictionary(values)))
 
 
-## Server: the two timing reports for a client's next snapshot, [the worst margin over the last half second, over the last 5].
-## NO_MARGIN for either that isn't known. A client whose newest input is older than the short window (it stopped sending: spectating,
-## or its pawn died) gets NO_MARGIN for both, and its old margins are dropped, so it doesn't keep speeding up or slowing down on them.
+## Server: the two timing reports for a client's next snapshot: its worst margin over the last half second and over the last 5; NO_MARGIN if
+## unknown. A client silent for the short window (spectating, dead pawn) gets NO_MARGIN for both and its margins are dropped.
 func _margins_to_report(info: PeerRecord, tick: int) -> PackedInt32Array:
 	var margins: Array = info.margins
 	if not margins.is_empty() and tick - int(info.newest_input) > _driver.ticks_at_rate(MARGIN_SHORT_WINDOW):
@@ -1508,9 +1441,8 @@ func _margins_to_report(info: PeerRecord, tick: int) -> PackedInt32Array:
 	return PackedInt32Array([margins.slice(-MARGIN_SHORT_WINDOW).min(), margins.min() if margins.size() >= MARGIN_LONG_WINDOW else NO_MARGIN])
 
 
-## Server: how early this input packet arrived, for time dilation. Only packets bringing something new count: a duplicate, or one
-## overtaken on the way, isn't late input, because the server already has what it carries. What a client acknowledges only
-## moves forward, and a client can't have seen the future.
+## Server: how early this input packet arrived, for time dilation. Only packets with something new count (a duplicate isn't late input).
+## What a client acknowledges only moves forward, and a client can't have seen the future.
 func _note_input_timing(peer: int, newest: int, acknowledged: int, tick: int) -> void:
 	var info: PeerRecord = _peers[peer]
 	if newest > int(info.newest_input):
@@ -1542,9 +1474,8 @@ func is_using_native_encoding() -> bool:
 	return _codec != null
 
 
-## Whether an entity goes in this tick's snapshot. It does if it recorded this tick, even with no state list at all: an entity whose
-## only state is save_state() data, or that has only sync properties, records its ticks too. A paused entity records nothing, so it's
-## left out.
+## Whether an entity goes in this tick's snapshot: it does if it recorded this tick, even with no state list (only save_state() data or
+## sync properties). A paused entity records nothing, so it's left out.
 func _is_in_snapshot(entity: NetworkEntity, tick: int) -> bool:
 	return entity.is_replicated and entity.state != null and entity.state.has_state(tick)
 
@@ -1559,18 +1490,13 @@ func _has_welcomed_peer() -> bool:
 
 ## Server: sends the world to every client, with a note for each on how its input is arriving, for time dilation.
 func _send_snapshots(tick: int) -> void:
-	# With no welcomed client there's nobody to send to, so nothing is gathered or encoded. Recording for rollback and lag
-	# compensation is TickStateComponent's and carries on regardless; a client that joins later gets a full snapshot at the next
-	# snapshot tick.
+	# With no welcomed client nothing is gathered or encoded. Recording for rollback and lag compensation is TickStateComponent's and carries on;
+	# a client that joins later gets a full snapshot at the next snapshot tick.
 	if not _has_welcomed_peer():
 		return
-	# How it's built:
-	#   - Each client gets each entity's changes since a baseline (the standard delta against an acknowledged baseline). The baseline
-	#     is per entity: the newest snapshot in which the part holding that entity reached this client (_on_ack). An encoding is made
-	#     once per entity and baseline and shared by every client that needs it.
-	#   - Each entity is encoded on its own (the codec's world bytes are just its entities one after another), so the snapshot can be
-	#     cut into parts of up to SNAPSHOT_PART_BYTES, each sent as its own packet with the same tick. Which entities went in which part
-	#     is kept per client for DELTA_MAX_BASELINE_AGE ticks, so an ACK can say which of them arrived.
+	# Each client gets each entity's changes since its baseline: the newest snapshot whose part holding that entity it acknowledged (_on_ack).
+	# An encoding is made once per entity and baseline and shared. Entities are encoded one by one and cut into parts (SNAPSHOT_PART_BYTES), each
+	# its own packet with the same tick; which entities went in which part is kept per client, so an ACK can say which arrived.
 	var in_snapshot: Array[NetworkEntity] = []
 	for entity: NetworkEntity in get_entities():
 		if _is_in_snapshot(entity, tick):
@@ -1582,7 +1508,7 @@ func _send_snapshots(tick: int) -> void:
 	var missed_by_peer: Dictionary = {}
 	for entity: NetworkEntity in get_entities():
 		missed_by_peer[entity.owner_peer] = int(missed_by_peer.get(entity.owner_peer, 0)) + entity.missed_inputs
-	# GDScript note: a Vector2i (entity id, baseline tick) works as a dictionary key, compared by value. Baseline -1 is "in full".
+	# Key: (entity id, baseline tick); baseline -1 is "in full".
 	var encoded: Dictionary = {}
 	stats["snapshots_encoded"] += 1
 	# The server's load, the same for every client and part, worked out once.
@@ -1656,12 +1582,8 @@ func _encode_entities(entries: Array) -> PackedByteArray:
 	return _codec.write_world(entries) if _codec != null else NetPackets.write_world(entries)
 
 
-## An entity encoded as its changes since baseline, or empty if it has to go in full (no state list, nothing saved for the baseline
-## tick, or a list too long for one).
-## [br]
-## The state list becomes [tick - baseline, mask, mask, ..., the changed values], and the id gets DELTA_ID_BIT. Each mask covers
-## DELTA_MASK_BITS entries in order, a bit set for each that changed. An entity that changed nothing still sends its id, the ticks
-## back and its empty masks.
+## An entity encoded as its changes since baseline, or empty if it must go in full (no state list, nothing saved for that tick, or a list
+## too long). The state list becomes ticks back, masks, changed values; the id gets [constant DELTA_ID_BIT]; each mask covers [constant DELTA_MASK_BITS] entries.
 func _delta_entity_bytes(entity: NetworkEntity, tick: int, baseline: int) -> PackedByteArray:
 	var now := entity.state.get_state_values(tick)
 	if now.is_empty() or not entity.state.has_state(baseline):
@@ -1670,21 +1592,16 @@ func _delta_entity_bytes(entity: NetworkEntity, tick: int, baseline: int) -> Pac
 	if then.size() != now.size():
 		return PackedByteArray()
 	var encodings := entity.state.get_state_encodings()
-	# The comparing is done by NetCodec.delta_state in C++ when the library is there, and by
-	# delta_state_lists below otherwise. They give the same lists (tests/net_codec_selftest compares them).
+	# NetCodec.delta_state in C++ when the library is there, delta_state_lists otherwise. Same lists (tests/net_codec_selftest compares them).
 	var lists: Array = _codec.delta_state(now, then, encodings, tick - baseline, DELTA_MASK_BITS) if _codec != null 			else delta_state_lists(now, then, encodings, tick - baseline)
 	if lists.is_empty():
 		return PackedByteArray()
 	return _encode_entities(_snapshot_entry(entity, tick, entity.entity_id | DELTA_ID_BIT, lists[0], lists[1]))
 
 
-## The change check for a delta: [values, encodings] to send, [ticks_back, mask, mask, ..., each changed value].
-## [br]
-## now and then are an entity's state values at this tick and at its baseline, ticks_back the ticks between them. Empty if the lists
-## differ in length or the result is too long for one list. A value is unchanged when its type and value are both the same. The C++
-## one (NetCodec.delta_state) gives the same lists, and tests/net_codec_selftest compares them.
-## [br]
-## GDScript note: static, so it can be called on the class without a session (NetworkSessionSingleton.delta_state_lists(...)).
+## The change check for a delta: returns the values and encodings to send, laid out as ticks_back, masks, then each changed value. Empty if
+## the lists differ in length or the result is too long. A value is unchanged if type and value match. Twin of NetCodec.delta_state (C++).
+## Static, so it can be called without a session.
 static func delta_state_lists(now: Array, then: Array, encodings: Array, ticks_back: int) -> Array:
 	if now.size() != then.size():
 		return []
@@ -1697,7 +1614,7 @@ static func delta_state_lists(now: Array, then: Array, encodings: Array, ticks_b
 	values.append_array(masks)
 	for i in masks_needed:
 		codes.append(StateEncoding.RAW)
-	# GDScript note: two Arrays compared with == compare every element (in C++), so an unchanged entity costs one comparison.
+	# Arrays compare element by element in C++, so an unchanged entity costs one comparison.
 	if now != then:
 		for i in now.size():
 			var a: Variant = now[i]
@@ -1713,9 +1630,8 @@ static func delta_state_lists(now: Array, then: Array, encodings: Array, ticks_b
 	return [values, codes]
 
 
-## Groups encoded entities into parts of at most SNAPSHOT_PART_BYTES each (one bigger than that goes alone), with the
-## entity id of each chunk (ids, in the same order). Always at least one part, so a snapshot with no entities still arrives. At most
-## 255 parts.
+## Groups encoded entities into parts of at most SNAPSHOT_PART_BYTES (a bigger one goes alone), with each chunk's entity id in ids. Always at
+## least one part, so an empty snapshot still arrives; at most 255.
 func _cut_into_parts(chunks: Array[PackedByteArray], ids: PackedInt32Array) -> Array[SnapshotPart]:
 	var parts: Array[SnapshotPart] = []
 	var part := SnapshotPart.new()
@@ -1730,7 +1646,7 @@ func _cut_into_parts(chunks: Array[PackedByteArray], ids: PackedInt32Array) -> A
 	return parts
 
 
-## Client: the features the server decides are whatever it says. default_predicted changes roles here, so this matters in a real game too.
+## Client: the features the server decides are whatever it says. default_predicted changes roles, so this matters in a real game too.
 func _apply_server_features(mask: int) -> void:
 	var changed := false
 	for i in SERVER_FEATURES.size():
@@ -1830,7 +1746,7 @@ func _rebuild_from_delta(entity: NetworkEntity, tick: int, delta: Array) -> Vari
 	var base: Variant = _baseline_at(entity.entity_id, tick - int(delta[0]))
 	if base == null or (base as Array).size() != size:
 		return null
-	var rebuilt: Array = (base as Array).duplicate() # GDScript note: shallow, so an array inside is shared; nothing changes them
+	var rebuilt: Array = (base as Array).duplicate() # shallow: an array inside is shared, but nothing changes them
 	var next := 1 + masks_needed
 	for m in masks_needed:
 		var mask: Variant = delta[1 + m]
@@ -1846,7 +1762,7 @@ func _rebuild_from_delta(entity: NetworkEntity, tick: int, delta: Array) -> Vari
 				next += 1
 			mask >>= 1
 			bit += 1
-	# GDScript note: an if, not "a if b else null", because an Array and null aren't one type and the editor warns about that.
+	# An if, not a ternary: an Array and null aren't one type.
 	if next != delta.size():
 		return null
 	return rebuilt
@@ -1873,11 +1789,9 @@ func _baseline_at(entity_id: int, tick: int) -> Variant:
 	return ring.lists[tick % BASELINE_RING]
 
 
-# True if a snapshot's lists for this entity have the sizes its
-# TickStateComponent expects: state, sync, input, custom (item[1] to item[4]). An empty list is fine: it means the server had
-# nothing for it that tick (an input that's gone, no custom state). Any other size means the two machines declare different
-# properties for this entity, which the handshake's content hash should have caught; it's counted in stats.schema_mismatches and
-# warned about once per entity type, and the entity is skipped for this snapshot.
+# True if a snapshot's lists for this entity have the sizes its TickStateComponent expects (state, sync, input, custom: item[1] to item[4]). An empty
+# list is fine: the server had nothing that tick. Another size means the builds differ (the content hash should have caught it): counted in
+# stats.schema_mismatches, warned once per entity type, and the entity is skipped for this snapshot.
 func _snapshot_lists_fit(entity: NetworkEntity, item: Array) -> bool:
 	var sizes := entity.state.get_list_sizes()
 	for i in sizes.size():
@@ -1983,9 +1897,8 @@ func _note_snapshot_timing(tick: int) -> void:
 
 # --- Time dilation -----------------------------------------------------------------------------
 
-## Client: the server said how early our inputs have been arriving, at worst, over the last half second and the last 5.
-## Too close over the short one: speed up, more the further out it is. Plenty to spare over the whole of the long one: slow down.
-## Otherwise, normal speed. The difference is deliberate: being late costs inputs, and being early only costs a little.
+## Client: the server said how early our inputs arrived, at worst, over the last half second and the last 5. Too close over the short one:
+## speed up, more the further out. Plenty to spare over the long one: slow down. Else normal speed; late costs inputs, early only a little.
 func _update_dilation(margin: int, margin_long: int) -> void:
 	_last_feedback_usec = Time.get_ticks_usec()
 	if margin == NO_MARGIN:

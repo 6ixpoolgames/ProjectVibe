@@ -1,14 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: jobs/README.md.
 ## Finds the one job scheduler every job kind shares (scaling spec section 4).
 ##
-## The scheduler itself is C++ (JobScheduler in navcore): worker threads that take batches of plain-data work, such as the sensing
-## job (AISensingJob), from one shared queue. This class only holds it, so any script can find it, and keeps the two settings a game
-## or a test might change.
-## [br]
-## Not an autoload and never instanced: everything here is static (few autoloads). GDScript note: a static var belongs to the class,
-## not to an object, so there's one of each for the whole game, like Pawn's shared table.
-## [br]
-## Without the C++ library, [method get_scheduler] returns null and every job kind runs on the main thread instead.
+## The scheduler is C++ (JobScheduler in navcore): worker threads that take batches of plain-data work, such as the sensing job
+## (AISensingJob), from one shared queue. This class only holds it and the two settings a game or test might change. Everything is
+## static; it's never instanced and isn't an autoload. Without the C++ library, [method get_scheduler] returns null and every job
+## kind runs on the main thread.
 class_name TickJobs
 extends RefCounted
 
@@ -26,7 +22,7 @@ static func get_scheduler() -> Object:
 	if not enabled or not ClassDB.class_exists(&"JobScheduler"):
 		return null
 	if _scheduler == null:
-		# GDScript note: made by name, so this script still runs where the C++ library isn't available.
+		# Made by name, so this script still runs where the C++ library isn't available.
 		_scheduler = ClassDB.instantiate(&"JobScheduler")
 		_scheduler.set_worker_count(_worker_count)
 	return _scheduler

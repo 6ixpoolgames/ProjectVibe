@@ -9,6 +9,10 @@ UI is this folder: `MatchOptionsPanel`. Overview: [README.md](README.md).
 
 None found in the documentation pass.
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): the `MatchOptionsPanel` class comment shortened. `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
+
 ## 2026-11-17
 
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup.

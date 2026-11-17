@@ -1,41 +1,18 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: game_mode/CHANGELOG.md.
 ## Who controls which pawn: players possess and let go of pawns through here.
 ##
-## A module of GameMode, reached as GameMode.possession_coordinator. It creates this machine's PlayerController at the start, which
-## then lasts for the whole game, with or without a pawn.
-## [br]
-## How to use it:
+## A module of GameMode (GameMode.possession_coordinator). It creates this machine's PlayerController at the start, which lasts the
+## whole game with or without a pawn. The possessable flag on the pawn's ControllerManager is the check. In multiplayer the server
+## decides and a client's call is only a request; a possessed pawn's owner_peer is its player (0 on letting go, so the server runs
+## it). The pawn's ControllerManager hears of it through possession_changed and its AIController takes over. Respawning or removing a
+## pawn belongs to the game, which can listen to [signal released].
 ## [codeblock]
-## GameMode.possession_coordinator.possess(pawn)            # offline, or a client asking the server for this pawn
+## GameMode.possession_coordinator.possess(pawn)            # offline, or a client asking the server
 ## GameMode.possession_coordinator.possess_for(peer, pawn)  # server: gives this player this pawn
-## GameMode.possession_coordinator.release()                # lets go. Offline or a client's own, or release_for(peer) on the server
-## GameMode.possession_coordinator.controller               # this machine's PlayerController
-## GameMode.possession_coordinator.spectate()               # lets go and flies the spectator (FreeFlyCamera)
-## GameMode.possession_coordinator.stop_spectating()        # stops flying; possessing a pawn stops it too
-## GameMode.possession_coordinator.is_spectating()
+## GameMode.possession_coordinator.spectate()               # lets go and flies a FreeFlyCamera; possessing stops it
 ## [/codeblock]
-## Every request comes here, and the possessable flag on the pawn's ControllerManager is the check: the simplest version, as the owner
-## asked. In multiplayer the server decides, and a client's call is only a request. A possessed pawn's owner_peer is its player, so its
-## inputs come from that player and it's predicted on their machine. Letting go sets owner_peer to 0, so the server runs it.
-## [br]
-## What a pawn does once it's let go isn't decided here. Its ControllerManager hears about it through possession_changed: its
-## AIController takes over at once if it has one, and otherwise the pawn stands idle. The AI never asks here; it only drives pawns no
-## player has. Respawning or removing a pawn belongs to the game, which can listen to [signal released] here, and to
-## NetworkSession.player_left, which fires afterwards. Creating a controller never spawns a pawn.
-## [br]
-## What happens in odd cases (all checked in pawn/tests/possession_selftest.gd and net_pawn_selftest.gd):
-## [br]- A pawn with possessable off, with no ControllerManager, held by someone else, or freed: refused, with the
-##   [signal refused] signal.
-## [br]- A possessed pawn is removed: the player has no pawn, and the camera holds where it was.
-## [br]- A player leaves: they let go of their pawn, and it stays in the world. Anything else they own is removed by NetworkSession.
-## [br]- No module at all: the game runs with no controller, and a scene's own camera carries on working.
-## [br]- A client asking for something broken: the server ignores it.
-## [br]
-## [b]Spectating[/b] (the owner's call). The spectator is a FreeFlyCamera, not a Pawn: nearly the whole game looks for Pawn
-## (abilities, AI, teams, the kill floor, replays, spawning), and a spectator should be in none of it. So this recognises it as its own
-## kind of thing: [method spectate] lets go of the pawn and has this machine's PlayerController fly it, and possessing any pawn ends
-## it. Like Unreal's spectator, it's local: only this machine knows its player is spectating. Telling the server, for a respawn queue
-## or a scoreboard, waits until something needs it. A dedicated server has no player, so it never spectates.
+## Spectating is local: only this machine knows its player is spectating, and the spectator is a FreeFlyCamera, not a Pawn.
+## Design: pawn spec 6.2.
 class_name PossessionCoordinator
 extends GameModeModule
 

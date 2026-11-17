@@ -1,14 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
-## The base data object for nav markers: "this spot means something to nav or AI" (nav spec section 21.2).
+## The base data object for nav markers: "this spot means something to nav or AI" (nav spec 21.2).
 ##
-## A ladder, a cover spot or a seat. It's plain data with no behaviour: modules (NavMarkerModule) hold the code that acts on markers,
-## so a marker nothing handles is simply ignored.
-## [br]
-## A marker is input. When it's registered, NavMarkerManager copies its position, tag and enabled state into its own
-## rows, so changing those here afterwards does nothing. To switch a marker on or off during play, call
-## NavMarkerManager.set_enabled(id, value).
-# GDScript note: a Resource is a data object Godot can edit in the inspector and save to a file.
-# It's much lighter than a node, because it isn't in the scene tree and gets no per-frame calls.
+## Plain data with no behaviour: modules ([NavMarkerModule]) hold the code that acts on markers, so a marker nothing handles is
+## ignored. Registering copies its position, tag and enabled state into NavMarkerManager's rows, so changing them here afterwards
+## does nothing; switch one during play with [code]NavMarkerManager.set_enabled(id, value)[/code].
 class_name NavMarker
 extends Resource
 
@@ -19,8 +14,7 @@ extends Resource
 ## False = registered, but not used until someone switches it on.
 @export var starts_enabled := true
 
-# GDScript note: no @export on these two, so they don't appear in the inspector.
-# The generator or the placing node sets them just before registering.
+# Not exported: the generator or the placing node sets these just before registering.
 var position := Vector3.ZERO
 ## Which way it faces, for cover direction, seats and so on.
 var facing := Vector3.FORWARD
@@ -30,5 +24,4 @@ var facing := Vector3.FORWARD
 func place_at(world_transform: Transform3D) -> void:
 	position = world_transform.origin
 	# Godot's forward is minus Z, so that's the way a node "faces".
-	# GDScript note: a Transform3D holds a basis (rotation and scale) plus an origin (position).
 	facing = -world_transform.basis.z.normalized()

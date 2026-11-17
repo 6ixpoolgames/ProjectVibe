@@ -1,20 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: ui/CHANGELOG.md.
 ## A start menu's match options, built from the settings themselves.
 ##
-## What it shows: a heading and one row per setting, for any object that names some of its own properties. Every GameMode module can
-## name its settings (GameModeModule.get_match_options), so [method add_from_game_mode] lists whichever modules this game has: take a
-## module out of the project setting project_base/game_mode/modules and its options leave the menu, with nothing here naming it. A
-## level, an autoload or anything else is added the same way with [method add_section].
-## [br]
-## How a row is made: from the property's own description, as the inspector does (Object.get_property_list):
-## [br]- a bool: a check box
-## [br]- an int with an enum (@export_enum): a drop-down of its names
-## [br]- an int or float: a number box, with the range, step and "or_greater" of an @export_range when it has one
-## [br]
-## Changing a row sets the property at once, so a setter runs as it would from code. [method refresh] reads every value again (call
-## it when the menu is shown, since keys or code may have changed them).
-## [br]
-## Use:
+## One heading and a row per setting, for any object that names some of its own properties ([method GameModeModule.get_match_options]).
+## [method add_from_game_mode] lists whichever modules the game has, so a module taken out of the project setting
+## project_base/game_mode/modules leaves the menu; [method add_section] adds a level, an autoload or anything else. A row is made from
+## the property's description, as the inspector does: a bool is a check box, an int with @export_enum a drop-down, an int or float a
+## number box with its @export_range. Changing a row sets the property at once; [method refresh] reads the values again.
 ## [codeblock]
 ## var panel := MatchOptionsPanel.new()
 ## menu_box.add_child(panel)
@@ -37,7 +28,7 @@ func add_section(heading: String, target: Object, names: PackedStringArray) -> v
 	title.text = heading
 	title.add_theme_font_size_override(&"font_size", 15)
 	add_child(title)
-	# GDScript note: get_property_list() gives a Dictionary per property: "name", "type", "hint" and "hint_string" are the ones used here.
+	# get_property_list() gives a Dictionary per property: name, type, hint and hint_string are used here.
 	var described := {}
 	for info: Dictionary in target.get_property_list():
 		described[info["name"]] = info
@@ -99,7 +90,7 @@ func _add_row(target: Object, info: Dictionary) -> void:
 	var property: String = info["name"]
 	var row := HBoxContainer.new()
 	var label := Label.new()
-	label.text = property.capitalize() # GDScript note: "spawn_distance" becomes "Spawn Distance"
+	label.text = property.capitalize() # "spawn_distance" becomes "Spawn Distance"
 	label.custom_minimum_size.x = 230
 	row.add_child(label)
 	var control: Control = null
@@ -151,7 +142,7 @@ func _number_box(target: Object, property: String, type: int, hint: int, hint_st
 			box.step = float(parts[2])
 		box.allow_greater = parts.has("or_greater")
 		box.allow_lesser = parts.has("or_less")
-	# GDScript note: an if, not "a if b else c", because an int and a float aren't one type and the editor warns about that.
+	# An if, not "a if b else c": an int and a float aren't one type and the editor warns.
 	box.value_changed.connect(func(value: float) -> void:
 		if type == TYPE_INT:
 			target.set(property, int(value))

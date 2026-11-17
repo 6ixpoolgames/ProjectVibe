@@ -1,12 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
-## Something that doesn't navigate but affects paths: a dynamic obstacle (nav spec sections 11 and 21.3).
+## Something that doesn't navigate but affects paths: a dynamic obstacle, such as a crate or a fallen tree (nav spec 11 and 21.3).
 ##
-## A crate, a parked vehicle or a fallen tree.
-## NavObstacleModule will hand these to nav's ObstacleSystem. Until that exists they're registered and do nothing.
+## NavObstacleModule will hand these to nav's ObstacleSystem; until it exists they're registered and do nothing.
 class_name NavObstacle
 extends NavMarker
 
-# GDScript note: an enum inside a class is reached from outside as NavObstacle.Mode.CARVE.
 enum Mode {
 	AVOID, ## Agents steer around it, and paths ignore it. Almost free, so it suits moving things.
 	CARVE, ## Cut out of the nav map, so paths go around it. Rebuilds tiles, so it suits things that stay put.

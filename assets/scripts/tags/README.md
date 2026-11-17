@@ -52,6 +52,10 @@ A lockout or a query on a branch uses `own_bit(tag)`; an ability's category uses
 | `tags` | `resources/tag_declarations.tres` | the project's list | The tags the game declares; every machine numbers them the same |
 | `project_base/tags/declarations_path` | Project Settings | `res://assets/scripts/resources/tag_declarations.tres` | Where the declarations file is, if a game keeps it elsewhere |
 
+## How it works
+
+- **Corner cases** (`tests/tag_registry_selftest.gd`): an empty or blank tag has no bit, mask 0, and matches nothing. Messy names (`combat..melee`, ` combat.melee `) are cleaned up. A tag nobody declared and used at runtime is added on the spot with a one-time warning (fine offline, a desync risk online); only setting up (`declare`, `bit_of`, `own_bit`, `mask_of` and the list versions) adds tags, while queries (`matches`, `has_tag`) never do. Declaring after the registry is in use counts as undeclared (appended and warned), since sorting again would change bits already stored in masks. With no declarations file every tag is simply undeclared. If 64 bits ever aren't enough, the mask could become an array of ints without changing how designers use tags.
+
 ## Tests
 
 `tags/tests/tag_registry_selftest`: bits and masks, two machines agreeing, matching from the root only, late and messy tags, the 64-level limit, and that every `Tags` constant is declared. Also `addons/tag_picker/tests/tag_picker_selftest`. Run them with `bash tools/run_tests.sh <name>`.

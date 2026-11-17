@@ -51,6 +51,12 @@ var hit := controller.world_cursor.query_now()   # {"position", "normal", "colli
 | `spectator_scene` | `PlayerController` | empty (a default FreeFlyCamera) | The spectator camera |
 | `collision_mask` | `WorldCursor` | 3 | What the cursor's ray hits: ground and pawns |
 
+## How it works
+
+- **Spectating.** `PossessionCoordinator.spectate()` lets go of the pawn and calls `start_spectating()`; the player flies a `FreeFlyCamera` with the same keys and mouse, starting where the camera was. Taking a pawn stops it. Nothing starts it by itself: the game decides when. With a pawn still attached (a client between asking to let go and the server's answer) the keys fly the spectator and the pawn gets no input from them.
+- **Odd cases** (`pawn/tests/possession_selftest.gd`): with no pawn it keeps reading look input and nothing moves; an action missing from the project's input map counts as not pressed.
+- **`WorldCursor`** casts one physics ray, outside the physics step (safe while physics doesn't run on its own thread, Godot's default).
+
 ## Tests
 
 `player/tests/world_cursor_selftest`. Taking and letting go of pawns, and spectating, are in `pawn/tests/possession_selftest`. Run them with `bash tools/run_tests.sh <name>`.

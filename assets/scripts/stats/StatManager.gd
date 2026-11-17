@@ -1,26 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: stats/CHANGELOG.md.
 ## Holds a pawn's stats, one [Stat] node each, and finds them by name.
 ##
-## A part on the pawn, added by PawnInitializer. Pawn spec section 9.
-## [br]
-## How to use it:
+## A part on the pawn, added by PawnInitializer (pawn spec 9). A Stat's name is its node's name; stats can be added and removed while
+## running. A missing stat is never an error: [method get_value] gives the fallback and [method get_stat] gives null. A stat that
+## changes during play is filled and listed for rollback when the manager is ready, so one added later starts at 0 and doesn't roll back.
 ## [codeblock]
 ## pawn.stat_manager.get_value(&"MoveSpeed", 5.0)   # the value, or the fallback if there's no such stat
-## pawn.stat_manager.get_stat(&"Health")            # the Stat node, or null
 ## pawn.stat_manager.get_current(&"Health", 0.0)    # how much a stat that changes during play has now
-## pawn.stat_manager.change_current(&"Health", -20) # the server: adds, kept between 0 and the stat's value; returns the new amount
-## pawn.stat_manager.get_health()                   # how much Health the pawn has now, 0 without a Health stat
+## pawn.stat_manager.change_current(&"Health", -20) # the server: adds, kept between 0 and its value; returns the new amount
 ## [/codeblock]
-## A Stat's name is its node's name. Stats can be added and removed while running; the manager notices. A stat that changes during
-## play is filled and listed for rollback when the manager is ready, so one added later starts at 0 and doesn't roll back.
-## [br]
-## Health has one name, [constant HEALTH], which everything that means "the pawn's health" reads (Death, hits, the kill floor, the
-## readouts). A fuller stats pass comes with the game mechanics.
-## [br]
-## What happens in odd cases (all checked in tests/stat_selftest.gd):
-## [br]- A stat that isn't there: [method get_value] gives the fallback, and [method get_stat] gives null. Never an error.
-## [br]- A child that isn't a Stat: ignored.
-## [br]- Two stats with the same name can't happen, because Godot renames a second child with the same name.
+## Everything that means "the pawn's health" reads [constant HEALTH].
 class_name StatManager
 extends Node
 
@@ -40,7 +29,7 @@ var version := 1
 func _init() -> void:
 	set_process(false)
 	set_physics_process(false)
-	# GDScript note: these fire for children added at any time, including the scene's own children as they enter the tree.
+	# These fire for children added at any time, including the scene's own as they enter the tree.
 	child_entered_tree.connect(_on_child_entered)
 	child_exiting_tree.connect(_on_child_exiting)
 

@@ -16,7 +16,6 @@ class_name Stat
 extends Node
 
 ## The value it starts with. Setting it works [member value] out again, keeping what effects add.
-# GDScript note: "set(new_value):" under a variable runs every time it's assigned, including when the scene loads it.
 @export var base_value := 0.0:
 	set(new_value):
 		base_value = new_value

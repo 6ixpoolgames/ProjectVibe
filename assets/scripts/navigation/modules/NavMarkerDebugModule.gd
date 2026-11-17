@@ -1,18 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
-## Draws every nav marker while the game runs (nav spec section 21.4).
+## Draws every nav marker while the game runs (nav spec 21.4).
 ##
-## Add this node to a level to see its markers, through walls and terrain, or press F9 (diagnostics' NavDebugView makes one). It does
-## nothing in a release build.
-## [br]
-## How markers look:
-## [br]- Every marker is a small cross at its position, with a line showing which way it faces.
-## [br]- A link also has a line from its start to its end.
-## [br]- Areas and obstacles also have a box showing their size.
-## [br]- Colours follow the type. A disabled marker is grey.
-## [br]
-## It only looks at markers, so it doesn't count as handling them in the debug report. Otherwise, adding it would hide that nothing
-## actually acts on them. The drawing is rebuilt from scratch when markers change, at most a few times a second, which is cheap at
-## hundreds of markers. Past max_drawn it stops drawing the rest and warns once.
+## Add it to a level to see its markers through walls and terrain, or press F9 (diagnostics' [NavDebugView] makes one). It does
+## nothing in a release build. Every marker is a small cross with a line for its facing; links add a line to their end, areas and
+## obstacles a box; colours follow the type and a disabled marker is grey. It doesn't count as handling markers in the debug report.
+## The drawing is rebuilt at most a few times a second; past [member max_drawn] it stops drawing and warns once.
 # REFACTOR: a debug tool in a production folder. It belongs in diagnostics/ beside NavDebugView, which uses it (keep test and debug
 # code apart from production code). The two sample scenes that place it would follow. See CHANGELOG.md.
 class_name NavMarkerDebugModule
@@ -38,13 +30,11 @@ var _seconds_since_rebuild := 0.0
 var _drawn_count := 0
 var _warned_about_limit := false
 var _mesh_instance: MeshInstance3D
-# GDScript note: these two lists grow as lines are added, then become the mesh. Each line is two points in a row.
 var _points := PackedVector3Array()
 var _colors := PackedColorArray()
 
 
 func handled_types() -> Array[Script]:
-	# GDScript note: OS.is_debug_build() is true in the editor and debug exports, and false in release exports.
 	if OS.is_debug_build():
 		return [NavMarker]
 	return []
@@ -116,7 +106,7 @@ func rebuild_now() -> void:
 	if _points.is_empty():
 		return
 	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX) # a surface is an array with one slot per kind of data, most of them unused here
+	arrays.resize(Mesh.ARRAY_MAX) # one slot per kind of data
 	arrays[Mesh.ARRAY_VERTEX] = _points
 	arrays[Mesh.ARRAY_COLOR] = _colors
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
@@ -141,8 +131,6 @@ func _draw_marker(id: int) -> void:
 	var color := _color_of(marker) if NavMarkerManager.is_marker_enabled(id) else DISABLED_COLOR
 	_add_cross(center, marker.radius, color)
 	_add_line(center, center + marker.facing * FACING_LENGTH, color)
-	# GDScript note: "marker" is declared as a plain NavMarker, so each branch copies it into a variable of the
-	# right type. That lets the editor check names like end_offset and offer them as suggestions.
 	if marker is NavLink:
 		var link: NavLink = marker
 		_add_line(center, center + link.end_offset, color)

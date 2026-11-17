@@ -1,27 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: player/CHANGELOG.md.
 ## What the mouse or crosshair points at in the world: a part of PlayerController.
 ##
-## It's Unreal's GetHitResultUnderCursor, with the polling made explicit. It does nothing and costs nothing until something asks.
-## [br]
-## Two ways to use it. One answer, right now, such as on a click:
+## Like Unreal's GetHitResultUnderCursor. It costs nothing until something asks. One answer now ([method query_now]), or watching at a
+## rate you choose; the fastest rate asked for wins, and it stops when the last user is gone. An answer is a Dictionary of position,
+## normal and collider, empty if nothing was hit. A captured mouse points at the screen's middle. The ray is a physics query outside
+## the physics step, safe while physics doesn't run on its own thread (Godot's default).
 ## [codeblock]
 ## var hit := controller.world_cursor.query_now()
+## controller.world_cursor.acquire(self, 20.0)   # watch 20 times a second; 0 is every frame
+## controller.world_cursor.release(self)         # or get freed, which counts as releasing
 ## [/codeblock]
-## Watching, such as a hover highlight or a placement preview, at a rate you choose:
-## [codeblock]
-## controller.world_cursor.acquire(self, 20.0)   # 20 times a second. 0 means every frame
-## controller.world_cursor.hit_changed.connect(...)
-## controller.world_cursor.release(self)         # or just get freed or leave the scene, which counts as releasing
-## [/codeblock]
-## With several users, the fastest rate anyone asked for wins. When the last one is gone, it stops by itself.
-## [br]
-## An answer is a Dictionary: {"position", "normal", "collider"}. It's empty if the ray hit nothing, or if there's no camera. A
-## captured mouse points at the middle of the screen, as a crosshair does. A free mouse points where it is.
-## [br]
-## Its ray is a physics query outside the physics step. That's safe with Godot's default setting, where physics doesn't run on its
-## own thread. A project that turns that on would have to move this.
-## [br]
-## A note on rates: anything drawn at the cursor looks laggy at a low rate, so a visible cursor wants a high one.
+## Anything drawn at the cursor looks laggy at a low rate, so a visible cursor wants a high one.
 class_name WorldCursor
 extends Node
 
@@ -60,7 +49,7 @@ func release(user: Object) -> void:
 	if not _users.has(user):
 		return
 	_users.erase(user)
-	# GDScript note: is_instance_valid guards a freed object, whose signals can't be touched any more.
+	# A freed user's signals can't be touched any more.
 	if is_instance_valid(user) and user is Node and (user as Node).tree_exited.is_connected(release):
 		(user as Node).tree_exited.disconnect(release)
 	_update_rate()

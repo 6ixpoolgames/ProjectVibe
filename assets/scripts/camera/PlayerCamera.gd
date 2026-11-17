@@ -37,7 +37,7 @@ func _process(_delta: float) -> void:
 
 
 func _follow() -> void:
-	# GDScript note: is_instance_valid is false for a freed object, which a plain null check wouldn't catch.
+	# A freed view isn't null yet, so a plain null check would miss it.
 	if not is_instance_valid(_view):
 		_view = null
 		return

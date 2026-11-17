@@ -1,9 +1,8 @@
 # Written by Claude (claude-fable-5-2), 2026-11-16. History: effects/CHANGELOG.md.
 ## What all the held parts on one pawn add up to right now.
 ##
-## The pawn's [EffectManager] makes one whenever its list of effects changes, and asks every held part to add itself
-## ([method EffectPart.add_held]). So a new kind of held part overrides add_held and adds to one of these, with no change to the
-## manager.
+## The pawn's [EffectManager] makes one whenever its list of effects changes and asks every held part to add itself
+## ([method EffectPart.add_held]), so a new kind of held part needs no change to the manager.
 class_name EffectHeldTotals
 extends RefCounted
 

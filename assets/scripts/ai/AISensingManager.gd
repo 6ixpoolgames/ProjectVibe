@@ -1,34 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Runs a pawn's AI senses on their turn, and finds the other-team pawns they may notice.
 ##
-## A part on the pawn, added by PawnInitializer, with its senses ([AISenseBase] nodes) as children: SightSense by default. Pawn spec
-## section 10.4. Each tick the pawn's AI runs ([method AIContextComponent.run_ai]):
-## [br]- Every [member sense_interval_ticks]: a full pass. One shared query finds the pawns of other teams within the longest sense's
-##   range, and each sense gets that list. Then memory forgets entries whose fade has ended.
-## [br]- Every [member refresh_interval_ticks] in between: each sense refreshes the current target, which for sight is one ray.
-## [br]
-## Both are offset by the pawn's own number, so a crowd doesn't all sense on the same tick. A pawn running every 2nd or 4th tick still
-## gets the passes that fell between its runs (pawn spec 8.21).
-## [br]
-## Teams: only pawns on another team are candidates. When no pawn of another team is in the game at all (the TeamRegistry module
-## says so), the query is skipped, so a crowd that's all on one team, like the stress tests, costs almost nothing here.
-## [br]
-## [b]With the navcore C++ library[/b], the query uses AIPawnGrid: one grid of every pawn, rebuilt at most once a tick and shared by
-## every pawn, which returns the nearest [member max_candidates] first. The grid reads the shared PawnTable (Pawn.get_table()), which
-## pawns join themselves, so ties come back in entity-id order (scaling spec step 1). The full pass's search, visibility and line of
-## sight run on worker threads as the sensing job (AISensingJob, shared by every pawn; line of sight against SightGeometry), scaling
-## spec steps 2 and 4. At the end of each tick, every pawn whose full pass is on its next run asks the job, and the job reads the
-## shared table and works while the next tick waits to start. On the pass's tick, the sight sense only records the result. The
-## answers are the same as on the main thread; only something that moves a pawn between ticks isn't seen by that pass. A pass with
-## no result (a pawn that wasn't due, a test calling full_pass) runs on the main thread. TickJobs.enabled off turns the job off.
-## [br]
-## [b]Without the library[/b], or with AIMemory.use_native off, it's a physics shape query on the layers in [member candidate_mask]
-## (pawns are on layer 2), which returns at most max_candidates, nearest not guaranteed. The sight checks themselves run in the
-## pawn's memory store (pawn spec 10.11).
+## A part on the pawn with its [AISenseBase] nodes as children (SightSense by default). Every [member sense_interval_ticks] a full pass
+## finds the other-team pawns within the longest sense's range, hands them to each sense, then has memory forget faded entries; every
+## [member refresh_interval_ticks] in between, each sense refreshes the current target. Both are offset by the pawn's own number.
+## With the navcore C++ library, a full pass's search, visibility and line of sight run on worker threads as a shared sensing job
+## ([code]AISensingJob[/code]) between ticks; its answers match the main thread's, except for anything that moves a pawn between ticks.
+## Design: pawn spec 10.4 and 8.21, scaling spec steps 1, 2 and 4.
 class_name AISensingManager
 extends Node
 
-## Ticks between full passes: 10 is six a second at 60 ticks a second.
+## Ticks (at 60 a second) between full passes: 10 is six a second.
 @export_range(1, 600, 1, "or_greater") var sense_interval_ticks := 10:
 	set(value):
 		sense_interval_ticks = value
@@ -261,7 +243,7 @@ func _find_candidates(tick: int) -> void:
 	if reach <= 0.0 or not pawn.is_inside_tree():
 		return
 	if _use_grid:
-		# GDScript note: assign copies the grid's plain Array into the typed one, checking each item is a Pawn.
+		# assign copies the grid's plain Array into the typed one, checking each item is a Pawn.
 		_candidates.assign(_grid.query(pawn.global_position, reach, pawn.team, pawn, max_candidates, tick))
 		return
 	_sphere.radius = reach

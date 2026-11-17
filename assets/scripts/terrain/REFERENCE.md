@@ -30,23 +30,9 @@ What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
 
 `res://assets/scripts/terrain/TerrainEditLog.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
-Remembers every edit to a TerrainGenerator, so that a chunk built later still has them.
+Remembers every edit to a [`TerrainGenerator`](#terraingenerator), so a chunk built later still has them.
 
-An optional module: add it as a child of the [`TerrainGenerator`](#terraingenerator), and edits survive unloading. Without it, the ground goes back to how it was generated whenever a chunk unloads. If this node is deleted while the game runs, or its saved data won't load, the world simply goes back to its default state. Nothing else depends on it.
-
-How it works: it stores the edits themselves, not the heights they produce. Each one is a center, radius, amount and tick, 20 bytes (`BYTES_PER_EDIT`). When a chunk is built, its edits are applied in the order they happened. Each edit is listed under every chunk it touches, including unloaded ones, so two chunks that share a border always agree on it.
-
-**Multiplayer.** The server's log is the one that counts, and only the server edits (`refuses_edit()`). Clients get each edit as soon as it reaches them, which is after the server has applied it, by about half their ping. Prediction can differ for that moment, and normal corrections fix it. A late joiner gets the whole log, even an empty one, so a client that loaded edits of its own doesn't keep ground the server doesn't have. The whole log goes as `to_bytes()`, the same bytes a save file holds.
-
-**Saving.** `save_to_file()` and `load_from_file()` keep the log in a file, as a 4-byte "PBTE" header and then to_bytes(). Saving writes a temporary file and renames it over the old one, so a crash mid-save never leaves a broken save: at worst the temporary file is left, and loading falls back to it. For designers, three settings do it with no code: `save_path` (empty: no file), `load_on_start`, and `save_every_seconds` (0: only when the log leaves the tree, such as on quit). Only the server or an offline game saves and loads: in multiplayer the server's log is the one that counts, and clients get it over the network.
-
-What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
-- from_bytes given broken data: it's refused, and the log stays as it was. Every record is checked before anything changes.
-- from_bytes given data from a terrain with different settings: it's refused, because those edits were meant for other ground. The world stays as it is.
-- The parent isn't a TerrainGenerator: it warns and does nothing.
-- A chunk with a very long list costs more to build. Nothing merges old edits yet.
-- A save file that's missing, broken, or made for a terrain with different settings is refused, and the log and the ground stay as they were. The log then won't save itself over that file, so one run with a different seed doesn't delete the saved edits.
-- Loading or saving on a client does nothing.
+An optional child of the [`TerrainGenerator`](#terraingenerator). Without it the ground goes back to how it was generated whenever a chunk unloads. It stores the edits, not the heights: each is a center, radius, amount and tick, `BYTES_PER_EDIT` bytes, applied in the order they happened. Only the server edits (`refuses_edit()`); clients get each edit, and a late joiner the whole log (`to_bytes()`). The ground is the same on every machine. For saving, set `save_path`, `load_on_start` and `save_every_seconds`; only the server or an offline game saves and loads. Design: world spec (docs/world/WORLD_SPEC.md).
 
 ### Settings and properties
 
@@ -64,7 +50,7 @@ What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
 
 ### Functions
 
-- `save_to_file(path: String = save_path) -> int`: Saves the log to a file: a temporary file first, then renamed over the old one. Returns OK, or why not. Does nothing on a client. Saving to `save_path` on purpose lets the log save itself there again after a refused load.
+- `save_to_file(path: String = save_path) -> int`: Saves the log to a file: a temporary file first, then renamed over the old one. Returns OK, or why not; does nothing on a client. Saving to `save_path` on purpose lets the log save itself there again after a refused load.
 - `load_from_file(path: String = save_path) -> bool`: Replaces the log with the one saved in a file, and rebuilds whatever changes. If the file is missing, its temporary file from an interrupted save is used. False, with the log and the ground as they were, when there's no file, it's broken, it was made for a terrain with different settings, or this is a client.
 - `get_edit_count() -> int`: How many edits there are.
 - `get_chunk_edit_count(key: Vector2i) -> int`: How many edits touch this chunk.
@@ -85,23 +71,13 @@ What happens in odd cases (all checked in tests/terrain_edit_selftest.gd):
 
 Generates ground in square chunks, with a low-poly look and no visible square grid.
 
-The settings that shape the look are `noise_scale`, `grid_jitter`, `chunk_resolution` (how fine the grid is) and `chunk_size` (how big a chunk is in metres), plus `smooth_shading`. It's called a chunk, not a tile, because "tile" means nav's 12.8 m tiles everywhere else.
+The look comes from `noise_scale`, `grid_jitter`, `chunk_resolution` (squares along a chunk's side), `chunk_size` (metres) and `smooth_shading`. One list of triangles per chunk feeds the mesh, the collision and `chunk_built` (nav, through a [`TerrainNavFeeder`](../world/REFERENCE.md#terrainnavfeeder)), so what you see, stand on and what nav walks on are the same. Heights come from world positions, so chunks line up and every machine makes the same ground from the settings alone.
 
-What it has: the noise settings, UVs, a Generate button in the editor, a signal when collision is ready, seamless chunks, `height_at()`, `raycast()` and live `edit()`. It brings together the features of the first generator (procgen_tile.gd, now in assets/legacy/terrain/) and the nav demo's terrain (samples/nav_demo/nav_test_terrain.gd), which both stay as they are.
-
-How it holds together: _chunk_triangles() makes one list of triangles for each chunk. The flat-shaded mesh, the collision and whatever listens to `chunk_built` (nav, through a TerrainNavFeeder) all use that list, so what you see, what you stand on and what nav walks on are the same.
-
-How to use it: add a Node3D to a scene, attach this script, and press Play or the Generate button in the inspector. To see it working, open terrain_sample.tscn. The test is tests/terrain_selftest.tscn. For a world that loads around the player instead of one fixed block, see [`ChunkStreamer`](../streaming/REFERENCE.md#chunkstreamer) and streaming_sample.tscn.
-
-It knows nothing about building nav, networks or streaming. It says when a chunk is built or removed, and a TerrainNavFeeder, if there is one, feeds nav from that. So it stands alone, and works with or without a [`WorldCoordinator`](../world/REFERENCE.md#worldcoordinator). See docs/world/WORLD_SPEC.md. Optional modules add to it as children: [`TerrainEditLog`](#terraineditlog) (edits outlast their chunks, reach other machines and go into save files) and [`TerrainBodyLifter`](#terrainbodylifter) (bodies move up when an edit raises the ground over them).
-
-How to read this file, if you're getting back into GDScript: "GDScript note:" comments explain a language feature the first time it comes up. The other comments explain what this terrain does and why.
-
-GDScript note: a comment starting with ## is a documentation comment. Above a class, function or variable, it shows up in the editor's help, and above an @export it becomes the tooltip in the inspector. A # comment is just a note. Godot joins a doc comment's lines into one paragraph, so this project marks each new paragraph and list item with a line-break tag.
+It knows nothing about nav building, networks or streaming, so it works with or without a [`WorldCoordinator`](../world/REFERENCE.md#worldcoordinator). Optional children add to it: [`TerrainEditLog`](#terraineditlog) (edits outlast their chunks, reach clients, go into save files) and [`TerrainBodyLifter`](#terrainbodylifter). To use it, add a Node3D, attach this script and press Play or Generate. For ground that loads around the player, see [`ChunkStreamer`](../streaming/REFERENCE.md#chunkstreamer). Design: world spec (docs/world/WORLD_SPEC.md).
 
 ### Settings and properties
 
-- `edit_area: AABB` = `AABB(0, 0, 0, 0, 0, 0)`: While `chunk_built` goes out for an edit, the part of the ground the edit changed, measured from this node like the triangles: X and Z only (its Y and height are 0). Outside it, the chunk's triangles are the same as before. Empty (size zero) when a chunk is built whole. TerrainNavFeeder passes it on, so nav rebuilds only the tiles the edit touched instead of every tile under the chunk. Not an export: it's only set during an edit.
+- `edit_area: AABB` = `AABB(0, 0, 0, 0, 0, 0)`: While `chunk_built` goes out for an edit, the part of the ground it changed, measured from this node: X and Z only (Y and height are 0). Empty when a chunk is built whole. TerrainNavFeeder passes it on, so nav rebuilds only the tiles the edit touched.
 - `chunk_radius: int` = `1`: How many chunks to build around center_chunk. 0 builds one chunk, 1 builds 3×3, and 2 builds 5×5.
 - `center_chunk: Vector2i` = `Vector2i(0, 0)`: The chunk in the middle. With a radius of 0, this picks which one tile of a larger world to build. Chunks with different numbers line up exactly, because heights come from positions in the world.
 - `chunk_size: float` = `128.0`
@@ -109,7 +85,7 @@ GDScript note: a comment starting with ## is a documentation comment. Above a cl
 - `height_scale: float` = `12.0`: How far the noise moves up and down, in metres. Noise values are between about -1 and 1.
 - `grid_jitter: float` = `0.8`: How far grid points move at random, which hides the square grid. 0 is a perfect grid. 1 is as far as they can go without triangles flipping over.
 - `smooth_shading: bool` = `false`: Off: every triangle is one flat colour, which is the low-poly look. On: lighting blends smoothly across triangles.
-- `generator_version: int` = `1`: Raise this whenever the ground this generator makes changes in a way the settings don't show, such as a script extending this one changing _shape_height. It's part of ground_settings_hash, so saved terrain edits and other machines made for the old ground are refused rather than applied to different ground.
+- `generator_version: int` = `1`: Raise it when the ground changes in a way the settings don't show (a subclass changing _shape_height). It's part of ground_settings_hash, so old saved edits and other machines' ground are refused rather than applied to different ground.
 - `noise_seed: int` = `250`
 - `noise_scale: Vector2` = `Vector2(1, 1)`: Multiplies positions before reading the noise, with X and Z separate. Above 1 squeezes hills together, and below 1 spreads them out. Different values for X and Z stretch hills in one direction. It doesn't move any grid points.
 - `noise_type: int` = `1`
@@ -123,11 +99,11 @@ GDScript note: a comment starting with ## is a documentation comment. Above a cl
 - `build_collision: bool` = `true`: Makes the ground solid, so bodies can walk on it. It's skipped in the editor preview.
 - `build_on_start: bool` = `true`
 - `build_meshes: bool` = `true`
-- `generate_button: Callable` = `generate`
+- `generate_button: Callable` = `generate`: Rebuilds the terrain from the current settings. Any edits are lost, including ones in a TerrainEditLog.
 
 ### Signals
 
-- `collision_built(chunk: Vector2i, collision_node: CollisionShape3D)`
+- `collision_built(chunk: Vector2i, collision_node: CollisionShape3D)`: Sent once for each chunk whenever its collision is built or rebuilt.
 - `chunk_removed(chunk: Vector2i)`: Sent when a chunk has just been removed, straight away, so anything on it knows before its next tick.
 - `ground_raised(center: Vector2, radius: float)`: Sent when an edit has just raised the ground. center is the middle of the patch in the world, seen from above, as X and Z. TerrainBodyLifter uses it, so moving bodies isn't this script's job.
 - `chunk_built(chunk: Vector2i, triangles: PackedVector3Array)`: Sent when a chunk has been built or rebuilt, with its triangles, measured from this node. TerrainNavFeeder uses it. While it goes out for an edit, `edit_area` says which part changed.
@@ -159,18 +135,18 @@ GDScript note: a comment starting with ## is a documentation comment. Above a cl
 - `get_loaded_chunks() -> Vector2i[]`: Every completely built chunk.
 - `build_chunk_step(key: Vector2i) -> bool`
 - `load_chunk(key: Vector2i) -> void`: Builds a chunk completely, right now. Simple, but it takes several milliseconds, so it can show up as a stutter.
-- `unload_chunk(key: Vector2i) -> void`: Removes a chunk: its mesh and collision, or whatever part of them has been built. `chunk_removed` goes out, so its nav data and markers go too. With no TerrainEditLog, any edits on this chunk are lost, and it warns the first time that happens.
+- `unload_chunk(key: Vector2i) -> void`: Removes a chunk: its mesh and collision, or what's built of them. `chunk_removed` goes out, so its nav data and markers go too. With no TerrainEditLog its edits are lost, and it warns the first time.
 - `get_chunk_triangles(key: Vector2i) -> PackedVector3Array`: A built chunk's triangles, measured from this node, for something that arrives after the chunk was built.
 - `get_chunk_markers(key: Vector2i) -> NavMarker[]`: A chunk's markers, placed in the world. See _make_chunk_markers. TerrainNavFeeder announces them.
 - `height_at(world_x: float, world_z: float) -> float`: The ground's height at a position in the world, read from the same triangles as the mesh, collision and nav. Where there's no ground, it returns this node's own height. It follows this node if it's moved, but not if it's rotated or scaled.
-- `raycast(origin: Vector3, direction: Vector3, max_distance: float = 600.0) -> Variant`
+- `raycast(origin: Vector3, direction: Vector3, max_distance: float = 600.0) -> Variant`: Finds where a ray meets the ground, without using physics, so it works with collision off. Returns the point as a Vector3, or null if the ray doesn't hit within max_distance.
 - `edit(center: Vector3, radius: float, amount: float) -> void`
 - `apply_edit_from_log(x: float, z: float, radius: float, amount: float) -> void`
 - `finish_building_chunks() -> void`
 - `_apply_edit_to_loaded_chunks(x: float, z: float, radius: float, amount: float) -> void`: Changes the heights of the chunks that are built, and rebuilds them. The log isn't touched here.
 - `apply_edit_to_points(points: PackedVector3Array, x: float, z: float, radius: float, amount: float) -> bool` *(static)*: Adds one edit to a list of grid points, and returns true if any of them moved. Its position is measured from the terrain. The chunk's own edit and a chunk built later both come through here, which is what makes them match.
 - `chunks_touched_by_edit(x: float, z: float, radius: float) -> Vector2i[]`: Every chunk an edit could touch, built or not. A grid point can sit up to a square outside its chunk's plain edges.
-- `ground_settings_hash() -> int`: A number that changes if the settings that decide the ground change. TerrainEditLog uses it to refuse edits made for different ground. `generator_version` is part of it, since a script's own _shape_height changes the ground without changing any setting.
+- `ground_settings_hash() -> int`: A number that changes if the settings that decide the ground change; TerrainEditLog uses it to refuse edits made for different ground. `generator_version` is part of it, since a subclass's _shape_height changes the ground without changing a setting.
 - `edit_log_arrived(log_module: TerrainEditLog) -> void`
 - `edit_log_left(log_module: TerrainEditLog) -> void`
 - `_return_to_default_ground() -> void`: The module is gone, so anything it put on the ground goes too. Chunks with no edits don't change.
@@ -178,7 +154,6 @@ GDScript note: a comment starting with ## is a documentation comment. Above a cl
 - `finish_rebuilds() -> void`: Finishes any rebuilds still waiting, for a test or a loading screen.
 - `_fill_point_rows(points: PackedVector3Array, key: Vector2i, from_row: int, to_row: int) -> void`: Works out some rows of a chunk's grid points, so a build can stop between rows.
 - `_make_point(world_x_number: int, world_z_number: int) -> Vector3`: Where a grid point is, and how high, from its number across the whole world.
-- `_chunk_triangles(key: Vector2i) -> PackedVector3Array`: Every triangle in a chunk, as one long list with three corners each. Each square is two triangles, a-b-c and b-d-c: a --- b |  /  | c --- d Godot treats a triangle as facing you if its corners run clockwise, so this order makes them all face up.
 - `_wants_meshes() -> bool`: Whether this machine should build meshes. The editor preview always does, or there'd be nothing to see.
 - `_set_chunk_mesh(key: Vector2i, arrays: Array) -> void`: Puts a finished mesh on the chunk's node, making the node if the chunk doesn't have one yet.
 - `_start_mesh_data(data: TerrainGenerator._MeshData) -> void`: Sizes the lists up front, which is quicker than growing them one item at a time. Each row then fills its own part.

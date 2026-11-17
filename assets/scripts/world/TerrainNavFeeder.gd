@@ -1,20 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: world/CHANGELOG.md.
 ## Feeds nav from a terrain generator, so that neither has to know the other exists.
 ##
-## Spec: docs/world/WORLD_SPEC.md. [TerrainGenerator] says when a chunk is built or removed. This hands its triangles to NavServer and
-## announces its markers to NavMarkerManager. It also keeps nav built around every streaming source (within each one's
-## [code]nav_distance[/code]), and can tick NavServer ([member tick_nav]).
-## [br]
-## How to use it: normally it's a child of a [WorldCoordinator], which tells it which terrain to use. It also works as a child of a
-## TerrainGenerator with no coordinator at all. Give it a NavHooks to feed nav. With none, it only announces markers, which need no C++
-## library.
-## [br]
-## What happens in odd cases (all checked in world/tests/world_coordinator_selftest.gd):
-## [br]- No terrain: it warns and does nothing.
-## [br]- It arrives after chunks are built: it catches up on them.
-## [br]- The nav library isn't loaded: it warns, and markers still work.
-## [br]- It leaves the scene: nav and NavMarkerManager forget everything it told them, and it tells them again if it comes back.
-## [br]- A source's distances change while running: its nav area is remade at the new size.
+## [TerrainGenerator] says when a chunk is built or removed; this hands its triangles to NavServer and announces its markers to
+## NavMarkerManager. It also keeps nav built around every streaming source (within each one's [code]nav_distance[/code]), and can tick
+## NavServer ([member tick_nav]). Normally a child of a [WorldCoordinator], or of a TerrainGenerator with no coordinator. Give it a
+## NavHooks to feed nav; with none it only announces markers, which need no C++ library.
+## Design: world spec (docs/world/WORLD_SPEC.md).
 class_name TerrainNavFeeder
 extends Node
 
@@ -23,7 +14,6 @@ extends Node
 ## Give this a NavHooks resource to feed nav. Leave it empty to keep the terrain invisible to nav.
 # Typed as Resource instead of NavHooks, and NavServer is looked up by name below. Writing either name directly would stop this script
 # compiling on a build without the nav DLL. This way, a game that doesn't use nav always works.
-# GDScript note: @export_custom sets the inspector hint by hand. This one offers only NavHooks in the picker.
 @export_custom(PROPERTY_HINT_RESOURCE_TYPE, "NavHooks") var nav_hooks: Resource
 ## The nav system needs one tick per physics frame from somewhere. Turn this on if nothing else in the scene does it.
 # REFACTOR: ticking the whole nav library is a job for something universal, not the terrain's feeder. Every level has to remember to
@@ -51,7 +41,7 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	if terrain == null:
-		terrain = get_parent() as TerrainGenerator # GDScript note: "as" gives null when the parent isn't a terrain, rather than an error
+		terrain = get_parent() as TerrainGenerator
 	if terrain == null:
 		push_warning("TerrainNavFeeder: no terrain to feed from, so this does nothing. Set its terrain.")
 		return
@@ -66,7 +56,6 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
-	# GDScript note: is_instance_valid is false for a freed object, which a plain null check wouldn't catch.
 	if is_instance_valid(_listening_to):
 		_listening_to.chunk_built.disconnect(_on_chunk_built)
 		_listening_to.chunk_removed.disconnect(_on_chunk_removed)
@@ -119,7 +108,7 @@ func _on_chunk_built(key: Vector2i, triangles: PackedVector3Array) -> void:
 		# Nav works in world positions, so it's told where the terrain is. If the terrain moves later, nav won't know until the next
 		# generate() or edit().
 		# For an edit, only the part it changed is rebuilt (TerrainGenerator.edit_area). An empty area rebuilds every tile under the
-		# chunk. GDScript note: Transform3D * AABB moves a box into world space.
+		# chunk.
 		var dirty_bounds := AABB()
 		if terrain.edit_area.size != Vector3.ZERO:
 			dirty_bounds = terrain.global_transform * terrain.edit_area

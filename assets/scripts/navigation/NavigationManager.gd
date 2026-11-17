@@ -1,56 +1,24 @@
 # Written by Claude (claude-opus-5-5), 2026-11-08. History: navigation/CHANGELOG.md.
 ## The pawn's only contact with navigation: finds paths and says which way to walk.
 ##
-## A part on the pawn, added by PawnInitializer. Both controllers use it: PlayerController for click-to-move, and AIController for
-## move_to. It never moves the pawn and never ticks on its own. A controller asks [method get_move_direction] once per tick and puts the
-## answer in its InputCommand's move, the same way a player's keys would. So over the network a client follows its own path and only
-## sends directions: the server never sees a path (pawn spec section 7).
-## [br]
-## How to use it:
+## A part on the pawn, added by PawnInitializer. A controller (player click-to-move, AI move_to) calls [method move_to], then asks
+## [method get_move_direction] once per tick and puts the answer in its InputCommand's move, as a player's keys would. It never moves
+## the pawn and never ticks on its own. Over the network a client follows its own path and only sends directions (pawn spec 7).
 ## [codeblock]
 ## pawn.navigation_manager.move_to(point)        # finds a path; false if there's no way there
 ## pawn.navigation_manager.get_move_direction()  # which way to walk this tick; zero when there's no path
 ## pawn.navigation_manager.get_path_state()      # NONE, FOLLOWING, PENDING, ARRIVED or UNREACHABLE
-## pawn.navigation_manager.is_under_way()        # following a path, or waiting for nav so it can find one
-## pawn.navigation_manager.has_arrived()         # true once the last move_to got there, until the next move_to or stop()
-## pawn.navigation_manager.is_partial()          # the path ends at the closest place it can reach, not at the point
-## pawn.navigation_manager.stop()
 ## [/codeblock]
-## The path's corners stay private; [method get_path_corners] gives them for debug drawing.
-## [br]
-## [b]Links.[/b] A path may cross links: jumps over gaps, jumps up ledges and drops off them, which nav finds by itself, and links a
-## designer placed (NavLinkModule). When the pawn reaches a link's start, [method take_link_action] gives the named action to press,
-## such as jump, and the controller presses it for one tick. A drop has no action: the pawn walks off. If the pawn hasn't reached the
-## link's far end within [member link_timeout], say after a jump that fell short, it finds a new path to the same place, once per
-## move_to. Missing a second time, it gives up (UNREACHABLE), so a link that can't be crossed is never tried forever.
-## [br]
-## [b]Paths at scale.[/b] [member paths_now_per_tick] paths are found straight away each tick, across every pawn. Any more go to
-## NavServer's queue and those pawns wait, PENDING, so an army given a new goal in one tick doesn't stall that tick.
-## [br]
-## What happens in odd cases (all checked in tests/navigation_manager_selftest.gd). Each ends in a path state:
-## [br]- No NavServer (the navcore library isn't loaded), or no nav under the pawn and none being built: it walks in a straight line
-##   to the point, so click-to-move works in a bare test level. That's [member straight_line_without_nav], on by default; off, move_to
-##   returns false (UNREACHABLE).
-## [br]- Nav still being built and none under the pawn yet: PENDING. move_to returns true, the pawn stands, and it tries again every
-##   [member pending_retry_ticks] until it finds a path (FOLLOWING), nav finishes with still none under it (the straight line), or
-##   [member pending_give_up_ticks] pass (UNREACHABLE).
-## [br]- Nav under the pawn, but the point nowhere near nav: move_to returns false (UNREACHABLE) and any old path is dropped, even
-##   while nav is still building elsewhere. In a streaming game it nearly always is, and whatever asked (AIGoToPointBehaviour's legs,
-##   say) picks a nearer point when told no, rather than standing and waiting.
-## [br]- A point on nav it can't reach, such as an island: the path goes to the nearest place it can reach, and the pawn arrives
-##   there. [method is_partial] says so, while following and after arriving, with links on or off.
-## [br]- Its parent isn't a Pawn: it warns, and move_to always returns false.
-## [br]- The controller in charge changes: ControllerManager calls [method stop], so the AI never walks the rest of a player's path.
-## [br]
-## Not yet (from the old guide's section 8): finding a new path when nav tiles change, size tiers per pawn, and domains (air, ships).
+## Paths may cross links (jumps, drops, placed [NavLink]s): [method take_link_action] gives the action to press at a link's start.
+## No nav at all means a straight line ([member straight_line_without_nav]); nav still building means PENDING. The README's "How a
+## move works" has the odd cases.
 class_name NavigationManager
 extends Node
 
 ## Sent once when the end of a path is reached.
 signal arrived
-## Sent once when a path ends, whichever way: reached is true when it arrived (after [signal arrived]), false when it gave up (no
-## way there after all, waited too long for nav, or a link that couldn't be crossed). Not sent for [method stop]. The AI's behaviours
-## wait for it instead of checking every few ticks (AIBehaviourBase.wake_on_path_end).
+## Sent once when a path ends: reached is true after [signal arrived], false when it gave up (no way, nav too slow, a link not
+## crossed). Not sent for [method stop]. AI behaviours wait on it (AIBehaviourBase.wake_on_path_end).
 signal path_ended(reached: bool)
 
 ## Where the last move_to stands. Read it with [method get_path_state].
@@ -84,11 +52,8 @@ enum PathState {
 ## (UNREACHABLE). 300 is 5 s.
 @export var pending_give_up_ticks := 300
 
-## How many paths every pawn together finds straight away in one tick. Any more go to NavServer's queue, which searches within its
-## own budget a tick (query_iterations_per_tick, across links too) and spreads them over the next ticks, and each of those pawns waits,
-## PENDING, for its path. Most ticks need a handful; this is for a mass repath. 0 sends every path through the queue.
-## [br]
-## GDScript note: a static var is shared by every NavigationManager, since the budget is the whole game's.
+## How many paths all pawns together find straight away in one tick. Any more go to NavServer's queue (searched within its own budget
+## a tick, across links too), and those pawns wait PENDING. 0 sends every path through the queue. Shared by every NavigationManager.
 static var paths_now_per_tick := 8
 static var _paths_now_tick := -1 # the tick _paths_now_used counts
 static var _paths_now_used := 0
@@ -110,13 +75,13 @@ var _path_request := 0 # the queued search this pawn is waiting for (NavServer.f
 
 
 func _init() -> void:
-	# GDScript note: this part does nothing per frame. Controllers call get_move_direction() on the pawn's tick.
+	# Nothing here runs per frame: controllers call get_move_direction() on the pawn's tick.
 	set_process(false)
 	set_physics_process(false)
 
 
 func _enter_tree() -> void:
-	pawn = get_parent() as Pawn # GDScript note: "as" gives null when the parent isn't a Pawn, rather than an error
+	pawn = get_parent() as Pawn
 	if pawn == null:
 		push_warning("NavigationManager: its parent isn't a Pawn, so it can't find paths for anything.")
 
@@ -283,7 +248,6 @@ func _find_path(point: Vector3) -> PathState:
 	var nav := _nav_server()
 	if nav == null:
 		return _straight_line(start, point) # no nav library at all
-	# GDScript note: closest_point returns null when there's no nav near the point, which is why it's compared with null.
 	if nav.closest_point(start, nav_tier) == null:
 		# NavServer is idle once every tile it was asked for is built. Not idle, the nav under the pawn may just not be built yet.
 		return PathState.PENDING if not nav.is_idle() else _straight_line(start, point)
@@ -333,8 +297,7 @@ func _straight_line(start: Vector3, point: Vector3) -> PathState:
 
 
 func _nav_server() -> Object:
-	# GDScript note: NavServer comes from the navcore C++ library, registered as an engine singleton, not an autoload. If the
-	# library isn't loaded, there's no singleton, and has_singleton says so instead of erroring.
+	# NavServer is an engine singleton from the navcore library; without the library there is none.
 	if Engine.has_singleton(&"NavServer"):
 		return Engine.get_singleton(&"NavServer")
 	return null

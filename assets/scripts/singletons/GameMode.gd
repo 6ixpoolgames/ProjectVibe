@@ -1,32 +1,14 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: game_mode/CHANGELOG.md.
 ## The shell of the game's rules: holds the game's modules. Autoload "GameMode".
 ##
-## "Game mode" is Unreal's name for this job. Here it holds optional modules and does almost nothing itself, so an empty one costs
-## nothing, and each piece of a game's rules can be swapped or left out on its own.
-## [br]
-## The base's modules:
-## [br]- [PawnInitializer]: gives each pawn its default parts, from one list per game.
-## [br]- [PossessionCoordinator]: creates the PlayerController, and tracks who controls which pawn.
-## [br]- [AIActivationManager]: switches AI pawns off when no source keeps the ground under them loaded, and sets how often the rest run.
-## [br]- [SpawnManager]: puts pawns in at SpawnPoints, and brings players back after they die.
-## [br]- [ReplayRecorder]: records the game to a replay file once the game calls start_recording (replay spec).
-## [br]- [TeamRegistry]: how many pawns are on each team.
-## [br]- [CrowdMover]: moves AI pawns walking on the ground as one crowd.
-## [br]
-## How to use it:
+## It does almost nothing itself, so an empty one costs nothing and each piece of a game's rules can be swapped or left out. The modules
+## to start come from the project setting [constant MODULES_SETTING] (script paths, with a ".release" override for release builds), else
+## [constant DEFAULT_MODULES]; an empty list starts none. A path that doesn't load, or a second module of one type, warns and is skipped.
 ## [codeblock]
-## GameMode.pawn_initializer         # a module, or null if this game doesn't have it, so check first
-## GameMode.possession_coordinator   # the same, and so on for each module above
-## GameMode.get_module(SomeScript)   # any module by its script
-## GameMode.add_module(node)         # a game's own modules, which extend GameModeModule
+## GameMode.pawn_initializer        # a module, or null if this game doesn't have it, so check first
+## GameMode.get_module(SomeScript)  # any module by its script
+## GameMode.add_module(node)        # a game's own modules, which extend GameModeModule
 ## [/codeblock]
-## Which modules start with the game comes from the project setting "project_base/game_mode/modules", a list of script paths
-## (with a ".release" override for release builds). With no setting, it starts the ones in [constant DEFAULT_MODULES]. An empty list
-## starts none, and the game still runs.
-## [br]
-## What happens in odd cases (all checked in game_mode/tests/game_mode_selftest.gd):
-## [br]- A path in the setting that doesn't load, or isn't a GameModeModule: it warns and carries on without that module.
-## [br]- Adding a second module of the same type: it warns and keeps the first.
 # REFACTOR: the autoload has a named line for every base module (from game_mode/, replay/ and movement/), so adding a module to the
 # base means editing the autoload. Modules naming themselves, with get_module for the rest, would keep it universal (extensible).
 extends Node
@@ -72,7 +54,7 @@ var _modules: Array[GameModeModule] = []
 
 
 func _ready() -> void:
-	# GDScript note: this script does no work per frame. Its modules each decide whether they need to.
+	# No work per frame: its modules each decide whether they need to.
 	set_process(false)
 	set_physics_process(false)
 	var paths: Array = ProjectSettings.get_setting(MODULES_SETTING, DEFAULT_MODULES)

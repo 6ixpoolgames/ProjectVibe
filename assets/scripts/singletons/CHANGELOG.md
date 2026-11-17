@@ -17,6 +17,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-18
 
+- **Comments rewritten to the reference style** (the documentation pass): all four autoloads. The tick driver's rules (registering, time, the load ladder, rollback), the session's tick order, rules, time dilation, snapshot rules and packet formats, and the nav marker manager's storage and search notes moved to the README ("How it works"). Stale comment fixed: the session's `disconnected` signal comment said it came "after" `connection_ended` gives the reason; the code sends `connection_ended` first, and the comment now says so. `GameMode`'s class text no longer lists the modules, which its member comments and `DEFAULT_MODULES` already do.
 - **`GameMode.DEFAULT_MODULES` starts `AIDecisionModule`**, as the project's module list now does, so the AI decides in C++ (scaling spec 6.2, step 5c). The two lists still differ by `DiagnosticsManager` (the refactor row above).
 
 ## 2026-11-17

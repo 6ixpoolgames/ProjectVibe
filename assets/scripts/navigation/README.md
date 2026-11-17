@@ -52,6 +52,20 @@ The pawn walks while its controller asks for directions; `arrived` fires at the 
 
 **Big pawns.** Nav is built for pawns up to 0.4 m in radius (tier 0). A wider pawn still paths, but its walls are checked by physics, with a warning. Larger tiers come with tier 1.
 
+## How a move works
+
+`move_to(point)` ends in one of the path states (`NONE`, `FOLLOWING`, `PENDING`, `ARRIVED`, `UNREACHABLE`):
+
+- **No nav at all** (no navcore library, or nothing under the pawn and none being built): the pawn walks a straight line to the point, so click-to-move works in a bare test level. With `straight_line_without_nav` off, `move_to` returns false (`UNREACHABLE`).
+- **Nav still being built under the pawn:** `PENDING`. `move_to` returns true, the pawn stands, and it tries again every `pending_retry_ticks` until it finds a path, nav finishes with none under it (the straight line), or `pending_give_up_ticks` pass (`UNREACHABLE`).
+- **Nav under the pawn but the point nowhere near nav:** `move_to` returns false and any old path is dropped, even while nav builds elsewhere. In a streaming game that is the usual case, so whatever asked (`AIGoToPointBehaviour`'s legs, say) picks a nearer point when told no.
+- **A point nav can't reach** (an island): the path goes to the nearest place it can reach and the pawn arrives there. `is_partial()` says so, while following and after arriving.
+- **Links:** a path may cross jumps and drops (found by nav itself) and placed `NavLink`s. At a link's start `take_link_action()` gives the action to press (a drop has none). If the pawn hasn't reached the link's far end within `link_timeout`, it finds a new path to the same place once per `move_to`; missing again, it gives up (`UNREACHABLE`).
+- **Paths at scale:** `paths_now_per_tick` paths are found straight away each tick, across every pawn. Any more go to `NavServer`'s queue and those pawns wait `PENDING`, so an army given a goal in one tick doesn't stall it.
+- A change of controller calls `stop()`, so the AI never walks the rest of a player's path. If the manager's parent isn't a `Pawn` it warns and `move_to` returns false.
+
+Over the network a client follows its own path and only sends directions; the server never sees a path (pawn spec 7). Not yet: a new path when nav tiles change, size tiers per pawn, and domains (air, ships).
+
 ## Settings worth knowing
 
 | Setting | Where | Default | What it does |

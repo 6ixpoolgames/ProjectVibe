@@ -17,9 +17,6 @@ func _on_module_removed(_game_mode: GameModeSingleton) -> void:
 	pass
 
 
-## The names of this module's settings a start menu may offer before a match.
-##
-## Each is a property of this module (an @export, so its range and type show). MatchOptionsPanel.add_from_game_mode() lists them for
-## every module the game has. Empty: none.
+## The names of this module's settings (its @exports) a start menu may offer before a match; MatchOptionsPanel lists them. Empty: none.
 func get_match_options() -> PackedStringArray:
 	return PackedStringArray()

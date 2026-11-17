@@ -37,9 +37,7 @@ A test that checks visual parts while running headless turns `visuals_without_di
 
 Whether a script overrides a function of the script it extends: one place for a question several systems ask.
 
-The AbilityManager asks it to run only the abilities that have an every_tick() of their own, and to know which actions' readiness follows the body (can_start()); a behaviour asks it to know whether the C++ decider can judge it (is_available(), score()); the target selector asks it whether a game scores targets its own way (target_priority()). The answer is worked out once per script and function, and kept.
-
-GDScript note: a script's method list (`Script.get_script_method_list()`) includes the methods of the scripts it extends, and a function overridden lower down appears once for every script that defines it. So two or more entries with the name mean something overrode the base's own.
+The AbilityManager asks it to run only the abilities that have an every_tick() of their own, and which actions' readiness follows the body (can_start()); a behaviour, whether the C++ decider can judge it (is_available(), score()); the target selector, whether a game scores targets its own way (target_priority()). The answer is worked out once per script and function, and kept. It counts the entries of that name in the script's method list, which includes the scripts it extends: two or more means an override.
 
 ```gdscript
 ScriptOverrides.overrides(ability.get_script(), &"every_tick")   # true for Dash, false for Walk

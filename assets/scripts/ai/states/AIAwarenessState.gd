@@ -1,19 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## One tunable state for every "how aware am I of an enemy" situation, such as Alert and Combat.
 ##
-## Pawn spec section 10.6. The default Alert and Combat are two nodes running this script with different settings, so a designer
-## makes a new awareness state, say a jumpy "Startled", by adding a node and filling in the settings, with no code.
-## [br]
-## Its prerequisites hold when the entry it looks at (the current target, or any entry in memory) meets every setting:
-## [br]- [member min_awareness]: awareness now is at least this
-## [br]- [member requires_certain]: the entry became certain (reached full awareness) at some point
-## [br]- [member max_ticks_since_seen]: it was seen within this many ticks (-1: any time)
-## [br]
-## Or, separately, the pawn was hit recently:
-## [br]- [member hit_within_ticks]: hit within this many ticks (-1: off)
-## [br]- [member attacker]: KNOWN, the attacker is in memory; UNKNOWN, it isn't; ANY, either
-## [br]
-## So Combat holds when a known attacker hits, and Alert when an unknown one does: the owner's rule, with no damage sense.
+## The default Alert and Combat are two nodes running this script with different settings, so a designer makes a new awareness
+## state by adding a node and filling in the settings, with no code. Its prerequisites hold when the entry it looks at (the current
+## target, or any entry in memory) meets [member min_awareness], [member requires_certain] and [member max_ticks_since_seen], or
+## separately when the pawn was hit within [member hit_within_ticks] by an [member attacker] of the right kind. So Combat holds when
+## a known attacker hits, and Alert when an unknown one does (there is no damage sense).
+## Design: pawn spec 10.6.
 class_name AIAwarenessState
 extends AIStateBase
 

@@ -1,48 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
-## Applies effects to its pawn and keeps the over-time ones (pawn spec 8.11).
+## Applies effects to its pawn and keeps the over-time ones.
 ##
-## A part on the pawn, added by PawnInitializer, like the StatManager and AbilityManager. The owner's design: whatever hits a pawn
-## hands it effects, and the pawn applies them to itself, with its own resistances, through its own stats and abilities.
-## [br]
-## How to use it:
+## A part on the pawn, added by PawnInitializer. Whatever hits a pawn hands it effects, and the pawn applies them to itself, with its own
+## resistances. Instant effects run at once; over-time ones go in a rolled-back active list, count down in [method tick_effects] and
+## all end when the pawn dies. Do-once parts run on the authority only; held parts work on every machine.
 ## [codeblock]
-## pawn.effect_manager.apply_effect(effect, source)   # source is who applied it (for memory, lifesteal), or null
+## pawn.effect_manager.apply_effect(effect, source)   # source: who applied it (for memory, lifesteal), or null
 ## pawn.effect_manager.has_effect(effect)              # is an over-time effect on the pawn now?
 ## pawn.effect_manager.remove_with_tag(EffectTags.DEBUFF)   # a cleanse
-## pawn.effect_manager.resistances[EffectTags.DAMAGE_ELEMENTAL_FIRE] = 0.5   # set in the inspector, usually
 ## [/codeblock]
-## A hit ([HitInfo]) carries its ability's effects, and the target's AbilityManager hands them here ([method take_hit]).
-## [br]
-## Applying one, in order ([method apply_effect]):
-## [br]1. A dead pawn takes nothing. A harmful effect does nothing while the pawn is invulnerable (a dash), or if the pawn's
-##   resistance to it is 1 or more (immune).
-## [br]2. Instant: its do-once parts run now, on the authority only, and it's gone.
-## [br]3. Over time: it goes in the active list (or, if it's there already, its stacking rule says what happens). The first time, its
-##   do-once parts run now, on the authority only. Its held parts hold from now on, on every machine.
-## [br]
-## Do-once parts run in order; once Health reaches 0, the pawn dies (AbilityManager.health_ran_out) and the rest are skipped. Health
-## taken from a source adds threat in this pawn's AI memory for that source.
-## [br]
-## Each tick ([method tick_effects], called by the pawn before its abilities run): every active effect's ticks count down, it ends at
-## 0, and one with a period runs its do-once parts again when its period comes round. A poison of 3 s with a 1 s period runs at 0, 1
-## and 2 s. A pawn with effects on it doesn't rest (pawn spec 15.3).
-## [br]
-## Rollback: the active list is one PackedInt64Array, [member active_effects], five numbers per effect: its id (Effect.get_id), ticks
-## left, ticks to its next period, stacks, and its source (an entity id online, else an instance id). The pawn's TickStateComponent
-## rolls it back and sends it in snapshots. Empty, which most pawns are, it costs almost nothing. What the held parts add up to (stat
-## values, ability numbers, resistances) is worked out from the list whenever it changes, including when a rollback loads it, so it
-## needn't roll back itself. It's worked out at once when this script changes the list, and on the next tick after a rollback loads
-## one.
-## [br]
-## Resistances: the inspector's [member resistances], plus every held ResistancePart, as effect tag -> amount. An effect's resistance
-## is every one whose tag is one of the effect's tags or a level above one, added up: 0.2 against damage.elemental and 0.3 against
-## damage.elemental.fire make 0.5 against a fire effect. Negative is a weakness. They apply only to harmful effects.
-## [br]
-## Odd cases (checked in effects/tests/effect_selftest.gd):
-## [br]- The list is full ([member max_active_effects]): a new over-time effect is refused, with a warning once.
-## [br]- An id in the list that this machine doesn't know (an effect made in code with no effect_name, on a client): it counts down,
-##   and its held parts do nothing here, with a warning once.
-## [br]- The pawn dies: everything in the list is removed (it listens for AbilityManager.died).
+## Design: pawn spec 8.11.
 class_name EffectManager
 extends Node
 
@@ -51,7 +18,7 @@ signal effect_applied(effect: Effect, application: EffectApplication)
 ## Sent when an over-time effect ends or is removed.
 signal effect_ended(effect: Effect)
 
-## Numbers per entry in active_effects.
+## Numbers per entry in [member active_effects]; ID, TICKS_LEFT, PERIOD_LEFT, STACKS and SOURCE are their positions in an entry.
 const STRIDE := 5
 const ID := 0
 const TICKS_LEFT := 1
@@ -59,17 +26,15 @@ const PERIOD_LEFT := 2
 const STACKS := 3
 const SOURCE := 4
 
-## This pawn's own resistances, by effect tag: 0.25 takes a quarter off harmful effects with that tag; 1 or more ignores them;
-## negative is a weakness. Held ResistanceParts add to these while they last.
+## This pawn's resistances by effect tag: 0.25 takes a quarter off harmful effects, 1 or more ignores them, negative is a weakness.
+## [br]A tag counts for every effect inside it, and they add up (0.2 damage.elemental + 0.3 damage.elemental.fire = 0.5 against fire).
 @export var resistances: Dictionary[StringName, float] = {}
 ## The most over-time effects this pawn can have at once. A new one past this is refused.
 @export_range(1, 64, 1, "or_greater") var max_active_effects := 16
 
-## The active list, rolled back (see the class description). Five numbers per effect. Read it with [method get_active_effects]
-## instead.
-# GDScript note: the getter and setter make this a window onto _entries. The TickStateComponent reads and writes it through them,
-# and the setter notices a rollback loading a list. This script changes _entries in place while counting down, which doesn't go
-# through the setter, so the held parts are only worked out again when the list really changes.
+# The getter and setter make this a window onto _entries: the setter notices a rollback loading a list. Counting down changes _entries
+# in place, skipping the setter, so the held parts are only worked out again when the list really changes.
+## The active list, five numbers per effect (see [constant STRIDE]); rolled back and sent in snapshots. Read it with [method get_active_effects].
 var active_effects: PackedInt64Array:
 	get:
 		return _entries
@@ -77,6 +42,7 @@ var active_effects: PackedInt64Array:
 		_entries = value
 		_dirty = true
 
+## The pawn it belongs to (its parent).
 var pawn: Pawn = null
 
 var _entries := PackedInt64Array()
@@ -100,7 +66,7 @@ func _enter_tree() -> void:
 		push_warning("EffectManager: its parent isn't a Pawn, so it does nothing.")
 
 
-# The active list rolls back: it's listed with the pawn's TickStateComponent before the first tick, as StatManager lists Health.
+# The active list rolls back: it's listed with the pawn's TickStateComponent before the first tick, as the StatManager lists Health.
 func _ready() -> void:
 	if pawn == null:
 		return
@@ -118,8 +84,8 @@ func _ready() -> void:
 # --- Applying ----------------------------------------------------------------------------------
 
 
-## Applies an effect to this pawn (see the class description). source is who applied it, or null; source_ability and hit, if known,
-## are handed to its parts. Returns false if it was refused (dead, invulnerable, immune, the list full, or IGNORE stacking).
+## Applies an effect to this pawn. source is who applied it, or null; source_ability and hit are handed to its parts. Returns false if
+## refused: dead, invulnerable, immune, the list full, or IGNORE stacking.
 func apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> bool:
 	if effect == null or pawn == null or pawn.is_dead():
 		return false
@@ -194,7 +160,7 @@ func _health() -> float:
 # --- Each tick -----------------------------------------------------------------------------------
 
 
-## The pawn calls this once per tick, before its abilities run, while the list has something in it. See the class description.
+## The pawn calls this once per tick, before its abilities run, while the list has something in it: counts down, runs periods, ends effects.
 func tick_effects() -> void:
 	if _dirty:
 		_refresh() # a rollback loaded the list, perhaps an empty one, since the last tick
@@ -202,14 +168,12 @@ func tick_effects() -> void:
 		return
 	var due: Array = [] # [effect, stacks, source key] whose period came round this tick, run once the counting is done
 	var ended: Array[Effect] = []
-	# Every count advances by the ticks this run covers: 1, or more for a pawn running every Nth tick (pawn spec 8.21). A period that
-	# came round more than once in that time is due that many times, so the totals stay the same.
+	# Counts advance by ticks_elapsed (a pawn may run every Nth tick, spec 8.21); a period passed several times is due as many times.
 	var elapsed: int = pawn.ticks_elapsed if pawn else 1
 	var at := _entries.size() - STRIDE
 	while at >= 0: # from the end, so removing one doesn't move the ones still to come
 		var effect := Effect.find(_entries[at + ID])
-		# Periods first, for the ticks after which the effect was still running: the tick it runs out on counts for nothing, and one
-		# ending inside this run still gets the periods before that.
+		# Periods first, for the ticks it was still running: the tick it ends on counts for nothing.
 		if effect and effect.period_seconds > 0.0:
 			var lasted := mini(elapsed, maxi(int(_entries[at + TICKS_LEFT]) - 1, 0))
 			_entries[at + PERIOD_LEFT] -= lasted
@@ -295,7 +259,7 @@ func remove_with_tag(tag: StringName) -> void:
 			remove_effect(effect)
 
 
-## Removes everything. The pawn does this when it dies.
+## Removes everything. Done when the pawn dies (it listens for the AbilityManager's died).
 func remove_all() -> void:
 	var ended: Array[Effect] = []
 	for entry in get_active_effects():
@@ -308,7 +272,7 @@ func remove_all() -> void:
 		effect_ended.emit(effect)
 
 
-## This pawn's resistance to an effect (see the class description), not capped: 1 or more means immune.
+## This pawn's resistance to an effect (see [member resistances]), not capped: 1 or more means immune.
 func resistance_to(effect: Effect) -> float:
 	if _dirty:
 		_refresh()
@@ -371,7 +335,6 @@ func _find(id: int) -> int:
 
 
 func _remove_at(at: int) -> void:
-	# GDScript note: a packed array has no "remove several", so the five numbers go one at a time from the same place.
 	for i in STRIDE:
 		_entries.remove_at(at)
 	_dirty = true
@@ -387,7 +350,7 @@ func _refresh() -> void:
 	for at in range(0, _entries.size(), STRIDE):
 		var effect := Effect.find(_entries[at + ID])
 		if effect == null:
-			_warn_once("unknown:%d" % _entries[at + ID], "EffectManager: an effect on %s isn't known on this machine (id %d), so its held parts do nothing here. Give an effect made in code an effect_name." % [String(pawn.name) if pawn else "?", _entries[at + ID]]) # String(), so both sides of the "if" are text
+			_warn_once("unknown:%d" % _entries[at + ID], "EffectManager: an effect on %s isn't known on this machine (id %d), so its held parts do nothing here. Give an effect made in code an effect_name." % [String(pawn.name) if pawn else "?", _entries[at + ID]]) # String(): both sides of the if must be text
 			continue
 		var stacks := int(_entries[at + STACKS])
 		for part in effect.parts:
@@ -419,7 +382,7 @@ func _apply_stat_changes() -> void:
 			_touched_stats.erase(stat_name) # back to its base, and nothing holds it now
 
 
-# The number the list keeps for a source: its entity id online (the same on every machine), else its instance id. -1 for none.
+# What the list keeps for a source: its entity id online (the same on every machine), else its instance id. -1: none.
 func _source_key(source: Pawn) -> int:
 	if not is_instance_valid(source):
 		return -1

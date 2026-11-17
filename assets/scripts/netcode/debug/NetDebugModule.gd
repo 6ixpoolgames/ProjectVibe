@@ -1,26 +1,23 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: everything for testing multiplayer at its worst that used to live in NetworkSession: the
-## fake bad network and switching features while running. It's an optional child of the session, because a test scene can't swap an autoload
-## for an extension. Without one, the session does none of this. Approach: docs/TEST_AND_DEBUG_CODE.md.
+# Written by Claude (claude-opus-5-5), 2026-11-07. History: netcode/CHANGELOG.md.
+## Testing multiplayer at its worst: a fake bad network and switching features while running (debug code).
 ##
-## How to use it:
-##   var debug := NetDebugModule.on(NetworkSession)   # finds it, or adds it the first time
-##   debug.fake.latency_ms = 100.0                    # what this machine sends. fake_in is what it receives
-##   debug.set_feature("prediction_enabled", false)
-##
-## NetTestBench puts all of this on keys.
-##
-## What happens in odd cases (all checked in tests/net_selftest.gd):
-##   - An unknown feature: it warns and changes nothing.
-##   - A client switching something the server decides: it only asks, and the server has to have allow_debug_commands on.
-##   - A server without this module gets such a request: it counts as a bad packet, like any unknown message.
+## An optional child of the session (a test scene can't swap an autoload for an extension); without one the session does none of this.
+## A client switching something the server decides only asks, and the server needs [member allow_debug_commands] on.
+## [codeblock]
+## var debug := NetDebugModule.on(NetworkSession)   # finds it, or adds it the first time
+## debug.fake.latency_ms = 100.0                    # what this machine sends; fake_in is what it receives
+## debug.set_feature("prediction_enabled", false)
+## [/codeblock]
+## NetTestBench puts all of this on keys. Approach: docs/TEST_AND_DEBUG_CODE.md.
 class_name NetDebugModule
 extends Node
 
 ## Every switch set_feature understands, in the order NetTestBench shows them.
 const FEATURES: Array[String] = ["prediction_enabled", "reconciliation_enabled", "interpolation_enabled", "extrapolation_enabled", "correction_smoothing_enabled", "lag_compensation_enabled", "default_predicted", "follow_during_rollback", "time_dilation_enabled", "adaptive_interpolation_enabled"]
+## The client channel a client's switch request travels on.
 const CHANNEL := "net_debug_switch"
 
-## Pretend the network is bad. One for what this machine sends, one for what it receives. See NetFakeConditions.
+## Fake network conditions for what this machine sends ([member fake]) and receives ([member fake_in]). See NetFakeConditions.
 var fake := NetFakeConditions.new()
 var fake_in := NetFakeConditions.new()
 ## Server: obey test switches sent by clients. Also needs a debug build.
@@ -56,13 +53,12 @@ func _exit_tree() -> void:
 	_session = null
 
 
+## True if the session has this feature on.
 func is_feature_on(feature: String) -> bool:
 	return FEATURES.has(feature) and _session.get(feature)
 
 
-## Turns a feature on or off, even while running. On a client, a feature the server decides only changes if the server agrees: the
-## next snapshot says.
-# Claude 2026-11-12: "on" is "enabled" here: it clashed with the static on() above (an editor warning).
+## Turns a feature on or off while running. On a client, a feature the server decides only changes if the server agrees (the next snapshot says).
 func set_feature(feature: String, enabled: bool) -> void:
 	if not FEATURES.has(feature):
 		push_warning("NetDebugModule: no feature called '%s'" % feature)
@@ -72,12 +68,11 @@ func set_feature(feature: String, enabled: bool) -> void:
 		return
 	_session.set(feature, enabled)
 	_session.refresh_entities()
-	if not _session.time_dilation_enabled: # Claude 2026-11-16 (wider audit): no longer reads the session's private _driver
+	if not _session.time_dilation_enabled:
 		_session.set_tick_factor(1.0)
 
 
 ## What a client sends to ask for a switch.
-# Claude 2026-11-12: "on" is "enabled" here: it clashed with the static on() above (an editor warning).
 func switch_message(feature: String, enabled: bool) -> PackedByteArray:
 	var buffer := NetPackets.new_buffer()
 	NetPackets.write_value(buffer, feature, StateEncoding.RAW)
@@ -85,8 +80,7 @@ func switch_message(feature: String, enabled: bool) -> PackedByteArray:
 	return buffer.data_array
 
 
-## Server: a client's test switch. Refused unless this is a debug build and the game allows it, and only for SERVER_FEATURES.
-# Claude 2026-11-12: "on" is "enabled" here: it clashed with the static on() above (an editor warning).
+# Server: a client's test switch. Refused (counted as a bad packet) unless this is a debug build and the game allows it, and only for SERVER_FEATURES.
 func _on_switch_request(_peer: int, bytes: PackedByteArray) -> void:
 	if not allow_debug_commands or not OS.is_debug_build():
 		_session.stats["bad_packets"] += 1
@@ -133,4 +127,4 @@ func clear() -> void:
 
 
 func _is_reliable_type(type: int) -> bool:
-	return not NetPackets.is_unreliable(type) # Claude 2026-11-16 (audit): the one list of unreliable types, in NetPackets
+	return not NetPackets.is_unreliable(type) # the one list of unreliable types is in NetPackets

@@ -1,35 +1,18 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
-## Navigation's own tag names and bits (nav spec section 21.3).
+## Navigation's own tag names and bits (nav spec 21.3).
 ##
-## Turns names like "link.jump" into bits, so nav and AI can check tags with one AND instead of comparing text. Abilities have their
-## own tags (TagRegistry); each system gets its own 64 bits. A NavLink connects the two by naming the action a pawn presses.
+## Turns names like "link.jump" into bits, so nav and AI check tags with one AND instead of comparing text. Abilities have their own
+## tags ([TagRegistry]); each system gets its own 64 bits. A tag is a name with dot-separated levels, and each level has its own bit:
+## a tag's mask is its own bit plus its parents', so a search for "link" finds link.jump but never "linkage".
 ## [br]
-## How tags work:
-## [br]- A tag is a name with dot-separated levels. A dot means "inside": link.jump is inside link.
-## [br]- Every level gets its own bit. link and link.jump are two bits.
-## [br]- A tag's mask holds its own bit plus its parents' bits. So a search for "link" finds link.jump with one AND, and never finds
-##   "linkage", because only whole levels count.
-## [br]
-## Why tags are declared in a file: in multiplayer, every machine must give the same tag the same bit. Handing out bits on first use
-## would depend on what happened to run first. So the game lists its tags in a declarations file, and NavTags sorts and numbers them
-## at startup, identically everywhere.
-## [br]
-## What happens in odd cases (all checked in tests/nav_tags_selftest.gd):
-## [br]- Empty or blank tag: no bit, mask 0, matches nothing. Never an error.
-## [br]- Messy names ("link..jump", " link.jump ") are cleaned up.
-## [br]- A tag nobody declared: added on the spot with a one-time warning. Fine offline, but machines may disagree online, which is
-##   what the warning is for. Searches never add tags.
-## [br]- Declaring after NavTags is in use: treated the same as undeclared. Sorting again would change bits already stored in masks.
-## [br]- More than 64 levels: the extra ones get no bit, match nothing, and warn once.
-## [br]- No declarations file: everything still works, and every tag just counts as undeclared.
+## In multiplayer every machine must give a tag the same bit, so the game lists its tags in a declarations file and NavTags sorts and
+## numbers them at startup, identically everywhere. An undeclared tag is added on the spot with a one-time warning (machines may
+## disagree online); declaring after use counts as undeclared, since sorting again would change stored masks. Past 64 levels, tags get
+## no bit and match nothing. Searches never add tags.
 # REFACTOR: the same rules as TagRegistry, copied on purpose when it was written. One tag-set class used twice (abilities, nav)
 # would halve the code and the tests. See CHANGELOG.md.
-#
-# @tool lets this run inside the editor, so NavMarkerNode can warn about an undeclared tag there.
+# @tool lets this run in the editor, so NavMarkerNode can warn about an undeclared tag there.
 @tool
-# GDScript note: class_name makes "NavTags" usable from any script without loading it first.
-# Everything below is "static", meaning it belongs to the class itself. Nobody creates a NavTags object;
-# you just call NavTags.mask_of(...). That also means it works in tests with no scene or autoload.
 class_name NavTags
 extends RefCounted
 
@@ -38,8 +21,6 @@ const MAX_BITS := 64
 const DEFAULT_DECLARATIONS_PATH := "res://assets/scripts/resources/nav_tag_declarations.tres"
 const DECLARATIONS_SETTING := "project_base/nav/tag_declarations_path"
 
-# GDScript note: "static var" is one shared variable for the whole class. A plain "var" would need an object.
-# GDScript note: StringName is text that Godot stores once and compares very quickly. &"link.jump" writes one.
 static var _bit_of: Dictionary = {}      # tag name -> its bit number. Every level is a tag of its own.
 static var _tags: Array[StringName] = [] # bit number -> tag name, so the reverse of _bit_of
 static var _declared: Array[StringName] = [] # tags listed so far, before numbering
@@ -65,7 +46,6 @@ static func declare(tags: Array) -> void:
 
 ## Forgets everything, including that the file was read. For tests and tools that reload content.
 ## Masks saved before a reset mean nothing afterwards.
-# GDScript note: "read_declarations_file := true" is a default, so reset() with no argument passes true.
 static func reset(read_declarations_file := true) -> void:
 	_bit_of.clear()
 	_tags.clear()
@@ -78,7 +58,6 @@ static func reset(read_declarations_file := true) -> void:
 # --- Turning names into bits ---------------------------------------------------------------------
 
 ## The tag's own bit number, or -1 if it has none (empty tag, or past the 64 limit).
-# GDScript note: "tag" has no type here on purpose, so a String, a StringName or null are all accepted.
 static func bit_of(tag) -> int:
 	var clean_tag := normalize(tag)
 	if clean_tag == &"":
@@ -89,9 +68,7 @@ static func bit_of(tag) -> int:
 	return _bit_of.get(clean_tag, -1) # the second value is what comes back if the key isn't there
 
 
-## Just the tag's own bit as a mask, with no parents. Use this for a "forbidden" list: forbidding
-## link.door shouldn't also forbid everything that's merely inside link.
-# GDScript note: 1 << 3 shifts a 1 left by three places, which gives binary 1000. Each bit is one tag.
+## Just the tag's own bit as a mask, with no parents. For a "forbidden" list: forbidding link.door shouldn't forbid all of link.
 static func own_bit(tag) -> int:
 	var bit := bit_of(tag)
 	return 0 if bit < 0 else 1 << bit
@@ -106,7 +83,6 @@ static func mask_of(tag) -> int:
 	var path := ""
 	for level in String(clean_tag).split("."):
 		path = level if path == "" else path + "." + level
-		# GDScript note: |= means "also switch on these bits, and leave the others as they are".
 		mask |= own_bit(StringName(path))
 	return mask
 
@@ -130,15 +106,13 @@ static func full_mask_of_list(tags: Array) -> int:
 
 # --- Questions -----------------------------------------------------------------------------------
 
-## True if something with this mask answers to the search tag. Matching starts from the first level:
-## "link" and "link.jump" both find link.jump, and "jump" doesn't.
-## A search never adds tags: an unknown tag just matches nothing.
+## True if something with this mask answers to the search tag, from the first level: "link" and "link.jump" find link.jump, "jump"
+## doesn't. Never adds tags: an unknown tag matches nothing.
 static func matches(mask: int, search_tag) -> bool:
 	var clean_tag := normalize(search_tag)
 	_ensure_ready()
 	if not _bit_of.has(clean_tag):
 		return false
-	# GDScript note: & keeps only the bits switched on in both numbers. Not zero means this tag's bit is in the mask.
 	return (mask & (1 << _bit_of[clean_tag])) != 0
 
 
@@ -205,7 +179,6 @@ static func _ensure_ready() -> void:
 			path = level if path == "" else path + "." + level
 			all_levels[StringName(path)] = true # a Dictionary used as a set, so each level appears once
 	var sorted_levels: Array = all_levels.keys()
-	# GDScript note: func(a, b): ... is a small function with no name, passed in to say how to compare two items.
 	sorted_levels.sort_custom(func(a, b): return String(a) < String(b))
 	_frozen = true
 	for tag in sorted_levels:
@@ -217,7 +190,6 @@ static func _read_declarations_file() -> void:
 	if path == "" or not ResourceLoader.exists(path):
 		return # no file is allowed: every tag simply counts as undeclared
 	var loaded = load(path)
-	# GDScript note: "is" checks a type. It's safe here even if the file turned out to be something else.
 	if loaded is TagDeclarationsRes:
 		for raw_tag in loaded.tags:
 			var tag := normalize(raw_tag)

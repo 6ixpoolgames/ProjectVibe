@@ -13,23 +13,10 @@ Every class in `assets/scripts/spawning/`, from its doc comments. The overview i
 
 Keeps a number of pawns of one type alive, replacing each that dies after a delay.
 
-Put one in a level and set it in the inspector (pawn spec 8.9). Works on the server or offline; on a client it does nothing, since the server's pawns reach clients by themselves. It spawns through GameMode.spawn_manager, which it needs.
-
-Where its pawns appear: with `spawn_group` empty, within `scatter_radius` of the spawner itself, facing the spawner's way; with a group, at SpawnPoints in that group that accept the pawn's team (see SpawnManager, "Choosing a point").
-
-What it does, checked between ticks:
-- Fills up to `keep_alive` at once when it's switched on, and after that whenever it has fewer than keep_alive living pawns and no replacement is still waiting.
-- A pawn of its own that dies: its body is removed after `body_seconds`, and a replacement is due `respawn_seconds` after the death. The replacement is a fresh pawn, not the dead one revived, so its AI starts clean (no memory of the fight it died in).
-- A pawn of its own that's removed some other way (the game despawned it) counts as a death, without a body to remove.
-- `total_limit` above 0 stops it after that many, in all. 0: no limit.
-- `only_where_loaded` on: it waits while the ground around it isn't loaded, the rule AIActivationManager uses, so a spawner no player is near doesn't run AI nobody sees. With no terrain, the ground always counts as loaded.
-
-All its delays count ticks (SpawnManager.after_seconds), so pausing the tick driver pauses them.
-
-How to use it from code:
+Put one in a level and set it in the inspector (pawn spec 8.9). Server or offline only; it spawns through GameMode.spawn_manager, which it needs. With `spawn_group` empty, pawns appear within `scatter_radius` of the spawner; with a group, at SpawnPoints that accept the pawn's team (see the SpawnManager README). It fills up to `keep_alive` when switched on and whenever fewer are alive; a dead pawn's body goes after `body_seconds` and a fresh replacement is due `respawn_seconds` later (a pawn removed another way counts as a death). All delays count ticks, so pausing the tick driver pauses them.
 
 ```gdscript
-spawner.active = true          # starts filling; false stops spawning, and leaves its pawns where they are
+spawner.active = true          # starts filling; false stops spawning and leaves its pawns where they are
 spawner.refill_now()           # fills up at once, skipping the replacements' wait
 spawner.get_alive()            # its living pawns
 ```
@@ -64,15 +51,7 @@ spawner.get_alive()            # its living pawns
 
 A place where pawns can appear, like Unreal's PlayerStart.
 
-Put one in a level, move and turn it in the editor, and SpawnManager (a GameMode module) uses it. It never spawns anything itself: it's only a spot. Settings:
-- `team`: who may appear here: a pawn team number, or -1 for anyone.
-- `group`: a name for a set of points, such as &"red_base", so a PawnSpawner or a game can ask for "a point in group X". A request that names no group may use any point its team may use, in a group or not.
-- `scatter_radius`: how far from the point, in metres, a pawn may appear, so several don't stack on one spot.
-- `enabled`: off, it's skipped, as if it weren't there.
-
-A pawn appearing here faces the way the point faces (its blue Z arrow points backwards, as everything in Godot does: a pawn looks along -Z). On terrain, the pawn goes on the ground under the spot it's given; without terrain, it appears at the point's height, so place the point on the floor.
-
-How SpawnManager finds points: every SpawnPoint in the tree is in the Godot group `GROUP`, joined when it enters the tree and left when it exits, so a point added or removed while the game runs counts at once.
+Put one in a level, move and turn it in the editor, and SpawnManager (a GameMode module) uses it; it never spawns anything itself. A pawn appearing here faces the way the point faces (-Z, the blue arrow's opposite) and, on terrain, is put on the ground; without terrain it appears at the point's height, so place the point on the floor. Every SpawnPoint is in the Godot group `GROUP` while in the tree, so one added or removed while the game runs counts at once. Design: pawn spec 8.9.
 
 ### Settings and properties
 
@@ -83,7 +62,7 @@ How SpawnManager finds points: every SpawnPoint in the tree is in the Godot grou
 
 ### Constants
 
-- `GROUP = &"spawn_points"`: GDScript note: a Godot group is a name that nodes join. get_tree().get_nodes_in_group(GROUP) lists every node in it.
+- `GROUP = &"spawn_points"`: The Godot group every SpawnPoint is in while it's in the tree.
 
 ### Functions
 

@@ -1,48 +1,22 @@
 # Written by Claude (claude-opus-5-5), 2026-11-05. History: terrain/CHANGELOG.md.
 ## Generates ground in square chunks, with a low-poly look and no visible square grid.
 ##
-## The settings that shape the look are [member noise_scale], [member grid_jitter], [member chunk_resolution] (how fine the grid is)
-## and [member chunk_size] (how big a chunk is in metres), plus [member smooth_shading]. It's called a chunk, not a tile, because
-## "tile" means nav's 12.8 m tiles everywhere else.
+## The look comes from [member noise_scale], [member grid_jitter], [member chunk_resolution] (squares along a chunk's side),
+## [member chunk_size] (metres) and [member smooth_shading]. One list of triangles per chunk feeds the mesh, the collision and
+## [signal chunk_built] (nav, through a [TerrainNavFeeder]), so what you see, stand on and what nav walks on are the same. Heights come
+## from world positions, so chunks line up and every machine makes the same ground from the settings alone.
 ## [br]
-## What it has: the noise settings, UVs, a Generate button in the editor, a signal when collision is ready, seamless chunks,
-## [method height_at], [method raycast] and live [method edit]. It brings together the features of the first generator
-## (procgen_tile.gd, now in assets/legacy/terrain/) and the nav demo's terrain (samples/nav_demo/nav_test_terrain.gd), which both stay
-## as they are.
-## [br]
-## How it holds together: _chunk_triangles() makes one list of triangles for each chunk. The flat-shaded mesh, the collision and
-## whatever listens to [signal chunk_built] (nav, through a TerrainNavFeeder) all use that list, so what you see, what you stand on
-## and what nav walks on are the same.
-## [br]
-## How to use it: add a Node3D to a scene, attach this script, and press Play or the Generate button in the inspector. To see it
-## working, open terrain_sample.tscn. The test is tests/terrain_selftest.tscn. For a world that loads around the player instead of
-## one fixed block, see [ChunkStreamer] and streaming_sample.tscn.
-## [br]
-## It knows nothing about building nav, networks or streaming. It says when a chunk is built or removed, and a TerrainNavFeeder, if
-## there is one, feeds nav from that. So it stands alone, and works with or without a [WorldCoordinator]. See docs/world/WORLD_SPEC.md.
-## Optional modules add to it as children: [TerrainEditLog] (edits outlast their chunks, reach other machines and go into save
-## files) and [TerrainBodyLifter] (bodies move up when an edit raises the ground over them).
-## [br]
-## How to read this file, if you're getting back into GDScript: "GDScript note:" comments explain a language feature the first time
-## it comes up. The other comments explain what this terrain does and why.
-## [br]
-## GDScript note: a comment starting with ## is a documentation comment. Above a class, function or variable, it shows up in the
-## editor's help, and above an @export it becomes the tooltip in the inspector. A # comment is just a note. Godot joins a doc
-## comment's lines into one paragraph, so this project marks each new paragraph and list item with a line-break tag.
+## It knows nothing about nav building, networks or streaming, so it works with or without a [WorldCoordinator]. Optional children
+## add to it: [TerrainEditLog] (edits outlast their chunks, reach clients, go into save files) and [TerrainBodyLifter]. To use it, add
+## a Node3D, attach this script and press Play or Generate. For ground that loads around the player, see [ChunkStreamer].
+## Design: world spec (docs/world/WORLD_SPEC.md).
 
-# GDScript note: @tool makes this script run inside the editor as well as in the game. That's what lets the terrain
-# appear in the 3D view and the Generate button work. Engine.is_editor_hint() tells the two cases apart.
+# @tool: the terrain shows in the editor and the Generate button works there.
 @tool
-# GDScript note: class_name makes "TerrainGenerator" a global name. Other scripts can use it as a type, and it appears
-# in the editor's Add Node list.
 class_name TerrainGenerator
-# GDScript note: extends says what this script builds on. A Node3D has a position in the world and can have children.
 extends Node3D
 
 ## Sent once for each chunk whenever its collision is built or rebuilt.
-# GDScript note: a signal lets other code react without this script knowing who is listening. Someone connects with
-# terrain.collision_built.connect(my_function), and emit() below calls every connected function.
-# The parameters are the chunk's grid position and the node holding its collision shape.
 signal collision_built(chunk: Vector2i, collision_node: CollisionShape3D)
 ## Sent when a chunk has just been removed, straight away, so anything on it knows before its next tick.
 signal chunk_removed(chunk: Vector2i)
@@ -55,34 +29,25 @@ signal chunk_built(chunk: Vector2i, triangles: PackedVector3Array)
 ## Sent when generate() or start_empty() begins, with the settings it's about to use already in place.
 signal generation_started
 
-## While [signal chunk_built] goes out for an edit, the part of the ground the
-## edit changed, measured from this node like the triangles: X and Z only (its Y and height are 0). Outside it, the chunk's
-## triangles are the same as before. Empty (size zero) when a chunk is built whole. TerrainNavFeeder passes it on, so nav rebuilds
-## only the tiles the edit touched instead of every tile under the chunk. Not an export: it's only set during an edit.
+## While [signal chunk_built] goes out for an edit, the part of the ground it changed, measured from this node: X and Z only (Y and
+## height are 0). Empty when a chunk is built whole. TerrainNavFeeder passes it on, so nav rebuilds only the tiles the edit touched.
 var edit_area := AABB()
 
-# GDScript note: a const is a value that never changes.
 # How far a point can move at full jitter, as a share of one grid square. Any further, and a triangle could flip inside
 # out: its shortest height is about 0.7 of a square, and two of its corners can move toward each other.
 const MAX_JITTER_REACH := 0.34
-# Means "there's no ground here". INF is GDScript's name for infinity, which no real height will ever be.
+# No ground here: no real height is INF.
 const NO_GROUND := INF
 
-# GDScript note: @export_group puts the @export settings below it under a collapsible heading in the inspector.
 @export_group("Size")
-# GDScript note: @export shows a variable in the inspector and saves its value in the scene.
-# := means "work out the type from the value", so chunk_radius is an int. Writing it out as "var chunk_radius: int = 1"
-# means the same thing. Once a variable has a type, GDScript refuses to put a different type in it.
 ## How many chunks to build around center_chunk. 0 builds one chunk, 1 builds 3×3, and 2 builds 5×5.
 @export var chunk_radius := 1
 ## The chunk in the middle. With a radius of 0, this picks which one tile of a larger world to build.
 ## Chunks with different numbers line up exactly, because heights come from positions in the world.
 @export var center_chunk := Vector2i.ZERO
 ## How wide one chunk is, in metres.
-# It's the whole chunk, not one square, so chunk_resolution can change without changing how big the terrain is.
-# GDScript note: @export_range gives the inspector a slider. "or_greater" still lets you type a larger value by hand.
-# The defaults make squares of about 6 m. 128 m is the owner's choice after the stress test: its worst single step is about a third
-# of a 256 m chunk's, which suits slower machines.
+# The whole chunk, not one square, so chunk_resolution can change without changing how big the terrain is. Squares are about 6 m.
+# 128 m because its worst single build step is about a third of a 256 m chunk's (stress test), which suits slower machines.
 @export_range(1.0, 1000.0, 0.5, "or_greater") var chunk_size := 128.0
 ## How fine the grid is: the number of squares along each side of a chunk. Fewer squares look more low poly.
 @export_range(1, 256, 1, "or_greater") var chunk_resolution := 21
@@ -96,9 +61,8 @@ const NO_GROUND := INF
 ## Off: every triangle is one flat colour, which is the low-poly look. On: lighting blends smoothly across triangles.
 @export var smooth_shading := false
 
-## Raise this whenever the ground this generator makes changes in a way the
-## settings don't show, such as a script extending this one changing _shape_height. It's part of ground_settings_hash, so saved terrain
-## edits and other machines made for the old ground are refused rather than applied to different ground.
+## Raise it when the ground changes in a way the settings don't show (a subclass changing _shape_height). It's part of
+## ground_settings_hash, so old saved edits and other machines' ground are refused rather than applied to different ground.
 @export var generator_version := 1
 
 @export_group("Noise")
@@ -107,10 +71,7 @@ const NO_GROUND := INF
 ## spreads them out. Different values for X and Z stretch hills in one direction. It doesn't move any grid points.
 @export var noise_scale := Vector2.ONE
 ## The kind of noise.
-# Using Godot's own enum as the type means the names always match its numbers (a list of names of its own could say "Simplex"
-# and give Cellular). fractal_type below does the same, which matters there too: the first entry in Godot's list means no
-# fractal at all, not FBM.
-# GDScript note: an enum is a list of named numbers. When an @export has an enum as its type, the inspector shows a menu.
+# Godot's own enum as the type keeps the names matching its numbers. Same for fractal_type: its first entry means no fractal, not FBM.
 @export var noise_type: FastNoiseLite.NoiseType = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
 ## How big the hills are. Lower values give wide, gentle hills, and higher values give small, frequent bumps.
 @export_range(0.001, 0.5, 0.001) var frequency := 0.015
@@ -145,15 +106,9 @@ const NO_GROUND := INF
 
 @export_group("")
 ## Rebuilds the terrain from the current settings. Any edits are lost, including ones in a TerrainEditLog.
-# GDScript note: @export_tool_button draws a button in the inspector that calls this function. It needs @tool.
-# Writing "generate" without brackets doesn't call the function. It refers to the function itself, as a value.
 @export_tool_button("Generate") var generate_button := generate
 
-# GDScript note: variables without @export don't show in the inspector and aren't saved. A leading underscore is a
-# convention meaning "private to this script". GDScript doesn't enforce it.
 var _noise := FastNoiseLite.new()
-# GDScript note: a Dictionary maps keys to values, like a lookup table. Each of these uses the chunk's grid position,
-# a Vector2i, as its key. A PackedVector3Array is a compact array that can only hold Vector3s.
 var _points := {} # Vector2i -> PackedVector3Array, with (chunk_resolution + 1)^2 grid points, row by row, measured from this node
 var _mesh_nodes := {} # Vector2i -> MeshInstance3D
 var _collision_nodes := {} # Vector2i -> CollisionShape3D, each one inside its own StaticBody3D
@@ -170,7 +125,6 @@ var _rebuild_queue: Array[Vector2i] = [] # chunks to rebuild, one per frame, bec
 
 ## Everything a half-built chunk needs to remember between steps.
 # So a chunk can be built over several frames, for slower machines.
-# GDScript note: a class inside a script is a small helper type that only this script normally uses.
 class _ChunkBuild:
 	var stage := Stage.POINTS
 	var next_row := 0 # the next row to work on in the current stage
@@ -215,8 +169,6 @@ const GROUP := &"terrains"
 
 
 # --- Godot calls these by itself ---
-# GDScript note: functions starting with an underscore that Godot knows by name are callbacks. For a node, Godot calls
-# _enter_tree when it joins the scene, _ready once after its children are ready, and _exit_tree when it leaves.
 
 
 func _ready() -> void:
@@ -232,7 +184,6 @@ func _ready() -> void:
 func _enter_tree() -> void:
 	add_to_group(GROUP) # see GROUP
 	if _has_generated:
-		# GDScript note: looping over a Dictionary gives you its keys.
 		for key in _points:
 			_rebuild_solid(key)
 
@@ -260,7 +211,6 @@ func _build_block() -> void:
 	_prepare()
 
 	# All the points go first, because smooth lighting at a chunk's edge needs its neighbours' points.
-	# GDScript note: range(a, b) counts from a up to, but not including, b. That's why these have + 1.
 	for z in range(center_chunk.y - chunk_radius, center_chunk.y + chunk_radius + 1):
 		for x in range(center_chunk.x - chunk_radius, center_chunk.x + chunk_radius + 1):
 			_generate_points(Vector2i(x, z))
@@ -324,9 +274,8 @@ func get_loaded_chunks() -> Array[Vector2i]:
 	return loaded
 
 
-## Does one small piece of building a chunk, and returns true once the chunk is finished. Call it again with the same
-## chunk to continue. ChunkStreamer uses this to spread a chunk over several frames. Several chunks can be partly built
-## at once. The result is exactly the same as generate() would make, because both use the same functions.
+## Does one small piece of building a chunk, and returns true once it's finished; call again with the same chunk to continue.
+## ChunkStreamer uses it to spread a chunk over frames; several can be partly built at once. The result matches generate()'s.
 # So slower machines don't stall while a chunk loads. See POINTS_PER_STEP above.
 func build_chunk_step(key: Vector2i) -> bool:
 	if has_chunk(key):
@@ -339,7 +288,6 @@ func build_chunk_step(key: Vector2i) -> bool:
 		build.points.resize(_points_per_edge() * _points_per_edge())
 		_building[key] = build
 
-	# GDScript note: match compares a value against each option below, like a list of "if" checks.
 	match build.stage:
 		Stage.POINTS:
 			@warning_ignore("integer_division") # whole numbers on purpose
@@ -385,14 +333,12 @@ func build_chunk_step(key: Vector2i) -> bool:
 
 ## Builds a chunk completely, right now. Simple, but it takes several milliseconds, so it can show up as a stutter.
 func load_chunk(key: Vector2i) -> void:
-	# GDScript note: "pass" means do nothing. All the work here happens in the loop's condition.
 	while not build_chunk_step(key):
 		pass
 
 
-## Removes a chunk: its mesh and collision, or whatever part of them has been built. [signal chunk_removed] goes out, so its nav
-## data and markers go too.
-## With no TerrainEditLog, any edits on this chunk are lost, and it warns the first time that happens.
+## Removes a chunk: its mesh and collision, or what's built of them. [signal chunk_removed] goes out, so its nav data and markers go too.
+## With no TerrainEditLog its edits are lost, and it warns the first time.
 func unload_chunk(key: Vector2i) -> void:
 	if _edit_log == null and _edited_chunks.has(key) and not _warned_about_lost_edits:
 		_warned_about_lost_edits = true
@@ -425,8 +371,6 @@ func height_at(world_x: float, world_z: float) -> float:
 
 ## Finds where a ray meets the ground, without using physics, so it works with collision off. Returns the point as a
 ## Vector3, or null if the ray doesn't hit within max_distance.
-# GDScript note: Variant means "any type". It's needed here because the result is either a Vector3 or null, so whoever
-# calls this should check for null first.
 func raycast(origin: Vector3, direction: Vector3, max_distance := 600.0) -> Variant:
 	# Walk along the ray in short steps until we end up under the ground.
 	var step := _square_size() * 0.25
@@ -439,7 +383,6 @@ func raycast(origin: Vector3, direction: Vector3, max_distance := 600.0) -> Vari
 			# The hit is between the last two points. Keep halving that gap to narrow it down.
 			var above := previous
 			var below := point
-			# GDScript note: "for i in 12" repeats 12 times, with i counting from 0 to 11.
 			for i in 12:
 				var middle := (above + below) * 0.5
 				if _is_under_ground(middle):
@@ -451,17 +394,16 @@ func raycast(origin: Vector3, direction: Vector3, max_distance := 600.0) -> Vari
 	return null
 
 
-## Raises (amount above 0) or digs (amount below 0) a round patch centred on a position in the world, then rebuilds
-## only the chunks it touched. The middle moves by the full amount, and the outer half of the radius fades to nothing.
-## With a TerrainEditLog child, the edit outlasts its chunk. Without one, it's gone when the chunk unloads.
-## In multiplayer, add a TerrainEditLog: it tells the clients, and keeps them from editing on their own. Without one, an edit stays on
-## the machine that made it, and machines end up on different ground.
+## Raises (amount above 0) or digs (below 0) a round patch centred on a world position, and rebuilds only the chunks it touched: the
+## middle moves by the full amount and the outer half of the radius fades out.
+## Add a TerrainEditLog so it outlasts its chunk and, in multiplayer, reaches clients; without one it's gone when the chunk unloads
+## and machines end up on different ground.
 # The network rule is in TerrainEditLog, so this script doesn't need to know about networks.
 func edit(center: Vector3, radius: float, amount: float) -> void:
 	if radius <= 0.0 or (_edit_log != null and _edit_log.refuses_edit()):
 		return
-	# A half-built chunk would finish with a mesh made from the heights before this edit, so finish
-	# them first. It costs a stutter only if an edit lands while a chunk is loading.
+	# A half-built chunk would finish with a mesh made from the heights before this edit, so finish them first (a stutter only if an
+	# edit lands while a chunk loads).
 	finish_building_chunks() # a helper, which the client's path uses too
 	var local_center := center - _terrain_origin()
 	# Rounded to 32 bits first, the same as what the log stores, so that every machine gets identical ground.
@@ -472,16 +414,14 @@ func edit(center: Vector3, radius: float, amount: float) -> void:
 
 
 ## An edit from the server has reached this client, and the log has it already.
-# The caller (TerrainEditLog) finishes half-built chunks with finish_building_chunks() BEFORE it records the edit. Finishing them
-# here, after recording, would make them read the new edit from the log and then get it again below: the ground would rise twice.
-# No underscore, because another class (TerrainEditLog) calls it.
+# TerrainEditLog finishes half-built chunks BEFORE it records the edit. Finishing them here, after recording, would make them read
+# the edit from the log and get it again below: the ground would rise twice. No underscore, because TerrainEditLog calls it.
 func apply_edit_from_log(x: float, z: float, radius: float, amount: float) -> void:
 	_apply_edit_to_loaded_chunks(x, z, radius, amount)
 
 
-## Finishes every half-built chunk right now. Called before an edit goes into the log, so that no chunk is
-## caught halfway: it either finished before the edit was recorded, and gets the edit from the loaded-chunk pass, or it starts
-## later and reads the edit from the log. Never both.
+## Finishes every half-built chunk right now, before an edit is recorded: a chunk either finished first and gets the edit from the
+## loaded-chunk pass, or starts later and reads it from the log. Never both.
 # No underscore, because another class (TerrainEditLog) calls it.
 func finish_building_chunks() -> void:
 	for key: Vector2i in _building.keys():
@@ -496,7 +436,6 @@ func _apply_edit_to_loaded_chunks(x: float, z: float, radius: float, amount: flo
 	var flat_center := Vector2(x, z)
 	# The patch, plus two squares: enough to reach any chunk whose smooth lighting reads a point that moved.
 	var margin := radius + 2.0 * _square_size()
-	# GDScript note: a typed array, Array[Vector2i], can only hold that type, and GDScript checks it for you.
 	var nearby_chunks: Array[Vector2i] = []
 	var changed_chunks: Array[Vector2i] = []
 
@@ -537,7 +476,6 @@ static func apply_edit_to_points(points: PackedVector3Array, x: float, z: float,
 	for i in points.size():
 		var distance := Vector2(points[i].x, points[i].z).distance_to(flat_center)
 		if distance < radius:
-			# smoothstep goes smoothly from 0 to 1 between its first two numbers, so 1 minus it fades out.
 			points[i].y += amount * (1.0 - smoothstep(radius * 0.5, radius, distance))
 			touched = true
 	return touched
@@ -553,9 +491,8 @@ func chunks_touched_by_edit(x: float, z: float, radius: float) -> Array[Vector2i
 	return touched
 
 
-## A number that changes if the settings that decide the ground change. TerrainEditLog uses it to refuse edits made for
-## different ground.
-## [member generator_version] is part of it, since a script's own _shape_height changes the ground without changing any setting.
+## A number that changes if the settings that decide the ground change; TerrainEditLog uses it to refuse edits made for different
+## ground. [member generator_version] is part of it, since a subclass's _shape_height changes the ground without changing a setting.
 func ground_settings_hash() -> int:
 	return hash([chunk_size, chunk_resolution, height_scale, grid_jitter, noise_seed, noise_scale, int(noise_type), frequency, int(fractal_type), fractal_octaves, fractal_gain, fractal_lacunarity, generator_version])
 
@@ -565,23 +502,14 @@ func ground_settings_hash() -> int:
 
 ## Change this to shape the ground beyond the noise, such as a flat plaza or a wall. Copy tests/terrain_test_course.gd
 ## to see how. noise_height is the height so far, and the position is measured from this node.
-# GDScript note: another script can say "extends TerrainGenerator" and write its own _shape_height. GDScript then uses
-# that version everywhere, including in the calls made from this file. That script also needs @tool to show its shapes
-# in the editor preview.
+# A subclass needs @tool for its shapes to show in the editor preview.
 func _shape_height(_x: float, _z: float, noise_height: float) -> float:
-	# GDScript note: an underscore at the start of a parameter says "not used here on purpose", which stops a warning.
 	return noise_height
 
 
-## Change this to give a chunk its links and points of interest. Copy tests/terrain_marker_example.gd to see how.
-## A TerrainNavFeeder announces them to NavMarkerManager when the chunk is built and after an edit, so they can't float or get buried, and
-## releases them when it's gone. By default a chunk has none and pays nothing. Rules for what you return:
-## [br]- Make new markers every time, because get_chunk_markers moves them into place.
-## [br]- Set each marker's position measured from this node, as _shape_height does. _point_at gives grid points.
-## [br]- Build the list from the chunk's numbers, not random numbers, so every machine gets the same list. A marker's id comes from
-##   its place in the list. That's also why an edit shouldn't change the list, only the heights, or a change remembered for one
-##   marker could land on another.
-## [br]- Declare the markers' tags in nav_tag_declarations.tres, or they're refused.
+## Override to give a chunk its links and points of interest (copy tests/terrain_marker_example.gd). A TerrainNavFeeder announces them
+## when the chunk is built and after an edit, and releases them when it's gone. Return new markers each call, positioned from this
+## node, built from the chunk's numbers (not random ones), with tags declared in nav_tag_declarations.tres.
 # The nav spec's section 21.6. The generator knows its own terrain, so it says what's there.
 func _make_chunk_markers(_key: Vector2i) -> Array[NavMarker]:
 	return []
@@ -661,10 +589,8 @@ func _fill_point_rows(points: PackedVector3Array, key: Vector2i, from_row: int, 
 	var n := _points_per_edge()
 	for z in range(from_row, to_row):
 		for x in n:
-			# Points are numbered across the whole world, not within the chunk, and everything about a point comes from
-			# that number. The last point of one chunk has the same number as the first point of the next, so both
-			# chunks get exactly the same position and height. That's what makes the terrain seamless.
-			# Positions within the chunk instead would make every chunk come out the same.
+			# Points are numbered across the whole world, not within the chunk. The last point of one chunk has the same number as the
+			# first of the next, so both get the same position and height: that's what makes the terrain seamless.
 			points[x + z * n] = _make_point(key.x * chunk_resolution + x, key.y * chunk_resolution + z)
 
 
@@ -673,15 +599,13 @@ func _make_point(world_x_number: int, world_z_number: int) -> Vector3:
 	var x := world_x_number * _square_size()
 	var z := world_z_number * _square_size()
 	if grid_jitter > 0.0:
-		# hash() turns anything into a big number that looks random, but is always the same for the same input. So
-		# every machine gets the same terrain, with no random numbers to keep in step.
-		# GDScript note: Vector3i is three whole numbers. Here it just bundles the three things that decide the shift.
+		# hash() gives the same big number for the same input on every machine, so the terrain agrees with no random numbers to
+		# keep in step.
 		var random := hash(Vector3i(world_x_number, world_z_number, noise_seed))
-		# Split the big number into two numbers from 0 to 1. "&" keeps only some of its bits, and ">>" slides them along.
+		# Split it into two numbers from 0 to 1.
 		var random_1 := (random & 0xFFFF) / 65535.0
 		var random_2 := ((random >> 16) & 0xFFFF) / 65535.0
-		# Pick a direction, and a distance inside a circle. The square root spreads points evenly over the circle,
-		# instead of bunching them near the middle. A circle looks more natural than shifting X and Z separately.
+		# A direction, and a distance inside a circle; the square root spreads points evenly over it.
 		var direction := random_1 * TAU # TAU is a full circle in radians
 		var reach := sqrt(random_2) * grid_jitter * MAX_JITTER_REACH * _square_size()
 		x += cos(direction) * reach
@@ -704,11 +628,10 @@ func _apply_noise_settings() -> void:
 	_noise.fractal_lacunarity = fractal_lacunarity
 
 
-## Every triangle in a chunk, as one long list with three corners each. Each square is two triangles, a-b-c and b-d-c:
-##     a --- b
-##     |  /  |
-##     c --- d
-## Godot treats a triangle as facing you if its corners run clockwise, so this order makes them all face up.
+## Every triangle in a chunk, three corners each; a square is a-b-c and b-d-c, clockwise so they face up.
+# a --- b
+# |  /  |
+# c --- d
 func _chunk_triangles(key: Vector2i) -> PackedVector3Array:
 	var points: PackedVector3Array = _points[key]
 	var n := _points_per_edge()
@@ -748,30 +671,24 @@ func _wants_meshes() -> bool:
 
 ## Puts a finished mesh on the chunk's node, making the node if the chunk doesn't have one yet.
 func _set_chunk_mesh(key: Vector2i, arrays: Array) -> void:
-	# GDScript note: get() on a Dictionary returns null, rather than an error, when the key isn't there.
 	var mesh_node: MeshInstance3D = _mesh_nodes.get(key)
 	if mesh_node == null:
 		mesh_node = MeshInstance3D.new()
 		# These nodes have no "owner", so Godot doesn't save them in the scene file. The terrain is rebuilt on load.
 		add_child(mesh_node)
 		_mesh_nodes[key] = mesh_node
-	# GDScript note: "x if condition else y" picks one of two values. An empty object counts as false.
 	mesh_node.material_override = material if material else _plain_material
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	mesh_node.mesh = mesh
 
 
-## Sets up a chunk's triangles, UVs and normals. A normal is the direction the surface faces at a vertex, and lighting
-## is worked out from it. This is separate from _rebuild_mesh so the test can read the result without a mesh.
-##
-## The one idea behind normals: a vertex has one normal, so how you share vertices decides the look. A flat look needs
-## each triangle to have its own three vertices, with one normal between them. A smooth look needs triangles to share
-## one vertex at each corner, with a normal blended from every triangle touching that corner.
-# Both normals are worked out here, not with SurfaceTool.generate_normals(). That only sees one chunk's triangles, so the two
-# sides of a chunk border would get different lighting and show a faint line.
-# This fills arrays directly instead of using SurfaceTool, which took 5.6 ms of the 10.7 ms a 256 m chunk cost, because it needs
-# several script calls per vertex.
+## Sets up a chunk's triangles, UVs and normals (the direction a surface faces, which lighting uses). Separate from _rebuild_mesh so
+## the test can read the result without a mesh.
+# Flat: each triangle has its own three vertices and one normal. Smooth: triangles share a vertex per corner, with a normal blended
+# from every triangle touching it.
+# Normals are worked out here, not by SurfaceTool.generate_normals(): that sees one chunk, so the two sides of a border would light
+# differently and show a faint line. Filling arrays directly also skips SurfaceTool's script calls per vertex (5.6 of a 256 m chunk's 10.7 ms).
 func _make_mesh_arrays(key: Vector2i) -> Array:
 	var data := _MeshData.new()
 	_start_mesh_data(data)
@@ -810,8 +727,7 @@ func _fill_mesh_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int)
 
 
 func _fill_flat_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int) -> void:
-	# GDScript note: packed arrays are shared, not copied, when assigned like this, so writing to these local names
-	# fills the lists in data. Going through local names is also quicker than writing data.vertices[i] each time.
+	# Packed arrays are shared, not copied, when assigned like this, so writing to these locals fills the lists in data (and is quicker).
 	var vertices := data.vertices
 	var normals := data.normals
 	var uvs := data.uvs
@@ -827,8 +743,7 @@ func _fill_flat_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int)
 			var b := points[x + 1 + z * n]
 			var c := points[x + (z + 1) * n]
 			var d := points[x + 1 + (z + 1) * n]
-			# A cross product gives a direction square-on to two others, which makes it the way a triangle faces.
-			# The order of the two matters: this way round points up, and the other way would point into the ground.
+			# The order of the two matters: this way round points up.
 			var normal_1 := (c - a).cross(b - a).normalized()
 			var normal_2 := (c - b).cross(d - b).normalized()
 			# The same sum as _uv_of, written out here because this loop runs thousands of times per chunk.
@@ -870,8 +785,7 @@ func _fill_smooth_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: in
 			normals[i] = _smooth_normal(key.x * chunk_resolution + x, key.y * chunk_resolution + z)
 			uvs[i] = _uv_of(key, points[i])
 			vertices[i] = points[i]
-		# With shared vertices, a triangle is three vertex numbers instead of three positions. This is the same a-b-c
-		# and b-d-c split as _chunk_triangles. The last row of vertices has no squares below it.
+		# With shared vertices a triangle is three vertex numbers: the same a-b-c and b-d-c split as _chunk_triangles. The last row has no squares below it.
 		if z < chunk_resolution:
 			var next := z * chunk_resolution * 6
 			for x in chunk_resolution:
@@ -904,7 +818,6 @@ func _smooth_normal(world_x_number: int, world_z_number: int) -> Vector3:
 	]
 	var total := Vector3.ZERO
 	for i in around.size():
-		# "%" is the remainder after dividing. It makes the last neighbour wrap around to the first one.
 		var this_one: Vector3 = around[i]
 		var next_one: Vector3 = around[(i + 1) % around.size()]
 		# A cross product's length is twice the triangle's area, so adding them up gives bigger triangles more say.
@@ -933,7 +846,6 @@ func _rebuild_collision(key: Vector2i, triangles: PackedVector3Array) -> void:
 		body.add_child(collision_node)
 		add_child(body)
 		_collision_nodes[key] = collision_node
-	# GDScript note: "as" converts the type, here so that set_faces is known to exist on the shape.
 	(collision_node.shape as ConcavePolygonShape3D).set_faces(triangles)
 	collision_built.emit(key, collision_node)
 
@@ -1015,7 +927,6 @@ func _prepare() -> void:
 
 
 func _clear() -> void:
-	# GDScript note: keys() makes a separate list, which makes it safe to remove items from the Dictionary while looping.
 	for key: Vector2i in _points.keys():
 		_forget_chunk(key)
 	_building.clear() # any left have no points yet, so nothing else has been made for them

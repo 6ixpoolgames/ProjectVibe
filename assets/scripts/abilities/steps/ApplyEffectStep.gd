@@ -1,9 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
 ## Applies effects to its own pawn when it starts, then is done on its next tick.
 ##
-## Pawn spec 8.20. For effects that belong to a moment in an ability, such as after its hit, rather than to its start (an
-## EffectApplier with ON_START does that). Like on-start effects, they're applied on every machine that runs the ability (replays
-## too), and their do-once parts only run on the authority (EffectManager).
+## For effects that belong to a moment in an ability, such as after its hit, rather than to its start. Like on-start effects they're
+## applied on every machine that runs the ability (replays too), and their do-once parts only run on the authority.
+## Design: pawn spec 8.20.
 class_name ApplyEffectStep
 extends AbilityStep
 
@@ -12,7 +12,7 @@ extends AbilityStep
 
 
 func setup() -> void:
-	# GDScript note: registering gives each effect an id every machine agrees on, so one in the pawn's active list is recognised.
+	# Registering gives each effect an id every machine agrees on, so one in the pawn's active list is recognised.
 	for effect in effects:
 		if effect:
 			effect.register()

@@ -1,14 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: ai/CHANGELOG.md.
 ## A condition that compares one input with a number, or with another input plus a number.
 ##
-## Scaling spec 6.2. Examples:
+## Inputs that are yes or no are 1 or 0, so compare them with EQUAL 1 or EQUAL 0. Design: scaling spec 6.2. Examples:
 ## [codeblock]
 ## target_distance  AT_MOST  2.5                           # the target is within 2.5 m
 ## most_aware_certain  EQUAL  1                            # the AI is certain about what it's most aware of
 ## ticks_since_unknown_hit  AT_MOST  300                   # hit by someone unknown within 5 s (ticks at 60 a second)
 ## target_distance  AT_MOST  -0.5, other_input "reach"     # within the "reach" input minus half a metre
 ## [/codeblock]
-## Inputs that are yes or no are 1 or 0, so compare them with EQUAL 1 or EQUAL 0.
 class_name AICompareCondition
 extends AICondition
 
@@ -79,8 +78,8 @@ func add_input_slots(slots: Dictionary) -> void:
 		slots[_other_slot] = true
 
 
-# The inputs' slots, looked up once. GDScript note: a Resource can be shared by many pawns (the same brain scene); the slots are the
-# same for every pawn, so sharing the looked-up numbers is safe.
+# The inputs' slots, looked up once. A Resource can be shared by many pawns (the same brain scene); the slots are the same for every
+# pawn, so sharing the looked-up numbers is safe.
 func _resolve() -> void:
 	_resolved = true
 	_slot = AIInputs.slot_of(StringName(input))

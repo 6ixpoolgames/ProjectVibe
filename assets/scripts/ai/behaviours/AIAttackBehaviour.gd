@@ -1,20 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Swings at the current target once it's close enough.
 ##
-## Pawn spec section 10.7, step 9. Allowed in Combat by default. It's available when the current target's last known position is
-## within the pawn's MeleeAttack attack_range minus [member approach_margin]: the AI steps a little closer than the attack's real
-## reach, so the swing is more likely to land (the owner's call). Changing the attack's range changes both. Chase brings the pawn
-## in; this scores higher (0.9 against 0.8), so it takes over at that distance.
-## [br]
-## It faces the target, holds the attack's action ([member AIBehaviourBase.presses_action]) through the swing, and finishes when the
-## swing is over. It sleeps through the swing (scaling spec 6.2's wake-ups): it wakes for the press, two ticks later to see that the
-## swing started, and when an ability on its action ends; meanwhile the AI controller keeps the aim on the target every tick
-## ([method AIController.look_at_node]). The aim follows the target itself, which sensing keeps close to its last known position
-## while it's in view (it was the last known position, re-aimed every tick). The first tick held is the press, which is a request: the ability manager picks what it starts (the normal swing,
-## or the next swing of a combo), and this waits for whichever runs on that action. Holding keeps the swing turning toward its
-## target (TurnToFaceStep, pawn spec 8.20). A second Attack behaviour with presses_action set to another action, and a higher score,
-## uses a special attack whenever it's ready (faction_arena_sample's goblins). Its interrupt_threshold (15) keeps an ordinary
-## decision from cutting it off mid-swing; the swing itself follows the ability rules (pawn spec 8.6).
+## Allowed in Combat. Available when the target's last known position is within the MeleeAttack's attack_range minus
+## [member approach_margin]: the AI steps a little closer than the real reach so the swing lands. Chase brings the pawn in (score 0.8);
+## this scores 0.9 and takes over at that distance. It faces the target, holds the attack's action ([member AIBehaviourBase.presses_action])
+## through the swing, sleeps until it ends, then finishes. Its interrupt_threshold (15) stops an ordinary decision cutting a swing off.
+## A second Attack with another action and a higher score gives a special attack (faction_arena_sample's goblins).
+## Design: pawn spec 10.7 (step 9), 8.6 and 8.20; scaling spec 6.2.
 # REFACTOR: it finds its reach only on a MeleeAttackAbility, so a ranged or other attack can't use this behaviour. Asking the ability
 # for its reach through AbilityBase would let one Attack behaviour drive any attack (extensible). See CHANGELOG.md.
 class_name AIAttackBehaviour
@@ -22,8 +14,7 @@ extends AIBehaviourBase
 
 ## How much closer than the attack's range the AI steps before swinging, in metres.
 @export_range(0.0, 5.0, 0.05, "or_greater") var approach_margin := 0.3
-# The action that starts the swing is presses_action (AIBehaviourBase), which the behaviour manager also reads to skip an attack it
-# couldn't press.
+# presses_action (AIBehaviourBase) is the action that starts the swing; the behaviour manager also reads it to skip an attack it couldn't press.
 
 var _melee: MeleeAttackAbility = null
 var _started_tick := 0
@@ -41,9 +32,8 @@ func _init() -> void:
 	tick_interval_ticks = 60 # the safety net: it wakes for the press and when the swing ends
 
 
-## Close enough: the target's last known position is within attack_range − [member approach_margin], one condition built from those
-## settings. With no MeleeAttack on presses_action, nothing is close enough (a reach of -1 m), so it never runs. If the attack's range
-## changes during play, call [method AIBehaviourBase.rebuild_conditions].
+## Close enough: the target is within attack_range âˆ’ [member approach_margin], one condition. With no MeleeAttack on presses_action
+## nothing is close enough, so it never runs. If the attack's range changes during play, call [method AIBehaviourBase.rebuild_conditions].
 func own_conditions() -> Array[AICondition]:
 	var melee := _find_melee()
 	var reach := melee.attack_range - approach_margin if melee else -1.0
@@ -59,8 +49,8 @@ func enter(context: AIContextComponent) -> void:
 	else:
 		_look_at_target(context)
 	wake_on_action_end(presses_action)
-	# Held, not pressed once: a swing keeps turning toward its target only while its action is held (TurnToFaceStep, pawn spec 8.20). The first tick held is the press, so if the pawn's last input still had it held (the swing before ended this
-	# very tick), it's let go for one tick first: held twice in a row is no press, and the swing would never start.
+	# Held, not pressed once: a swing keeps turning toward its target only while its action is held (TurnToFaceStep). The first tick held
+	# is the press, so if the last input still held it (the swing before ended this tick), it's let go for one tick first or no press happens.
 	_started_tick = context.current_tick
 	if pawn.controller_manager and pawn.controller_manager.held_actions & InputActions.mask_of(presses_action) != 0:
 		hands.hold(presses_action, false)

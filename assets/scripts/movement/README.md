@@ -27,6 +27,18 @@ Moves crowds cheaply: AI pawns walking on the ground are moved together once a t
 
 Who it moves: an AI pawn, on the server or offline, on the ground, not jumping, with no Dash or Knockback running, and `crowd_movement` on. Everything else moves by physics, as does any pawn the batch can't place (a wall, no ground, too steep).
 
+## How it works
+
+A pawn the AI drives still runs its abilities and gravity (Walk and Sprint set its velocity from the AI's input). Then, instead of `move_and_slide` (about 24 microseconds a pawn, one of a tick's biggest costs in the mass battle), it hands its move to `try_take_move` and waits. `CrowdMover` runs last in `TickDriver`'s simulate phase (`TICK_ORDER`), after every pawn: it moves each by its velocity for the tick, flat; pushes pawns apart where they overlap (separation, from a grid of cells built once a tick); then checks walls and stands each on the ground. Each pawn then finishes its tick (`Pawn.finish_crowd_move`) or, where a check failed, moves by physics at once (`Pawn.finish_move_by_physics`), which handles the edge, the wall or the fall properly.
+
+**Separation.** AI pawns don't collide with each other physically. Two crowd pawns each take half the push; a pawn moving by physics (a player's, one in the air) doesn't move, so a crowd pawn takes all of it.
+
+**Walls and ground, in C++.** With the navcore library the batch runs in `CrowdBatch` on the job scheduler's worker threads. Walls come from the nav mesh: a pawn on it walks along it (Detour's `moveAlongSurface` for its nav tier, Unreal's NavWalking), sliding along an edge instead of being handed to physics at a wall, and the ground comes from `SightGeometry`'s copy of the level. A pawn it can't walk that way (no nav mesh under it, a body wider than its tier's radius, or crossing a nav link) gets the physics checks. See `crowd_batch.h`.
+
+**Walls and ground by physics** (the GDScript batch, `_move_batch`, used without the library and for the pawns the C++ batch hands back; it must give the same answer as `CrowdBatch`): the pawn's collision shape is swept along the move, lifted by the step it may climb, against the level (not pawns), then one ray goes down where it ends up. Anything taller than the step blocks the sweep; anything lower is a step the ray stands it on. No ground, a step or slope too steep, a wall, or no collision shape: it moves by physics instead.
+
+**Who it moves** (`try_take_move`): an AI pawn, on the server or offline, on the ground, with no ability running that wants full movement (`AbilityBase.needs_full_movement`: Dash and Knockback), and its own `crowd_movement` on. A player's pawn, anything on a client and anything in the air always moves by physics, so prediction and rollback, which only clients do and only for their own pawn, never meet this. A rollback replay, or a test calling a pawn's `_tick_simulate` itself, also moves by physics, since the mover wouldn't run until the next tick.
+
 ## How to use it
 
 **Turn it on or off.** It's in the project's GameMode modules by default (the project setting `project_base/game_mode/modules`). Its `enabled` and `separation_strength` are in the start menu's match options.

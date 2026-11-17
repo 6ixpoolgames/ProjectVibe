@@ -1,20 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
 ## A replay channel of events: things that happen at a moment (replay spec section 3).
 ##
-## Each event is a kind, a pawn's replay id (0 for none) and a Dictionary of plain values. Spawns, world, gameplay and diagnostics
-## extend it.
+## Each event is a kind, a pawn's replay id (0 for none) and a Dictionary of plain values (never objects, so a file can't carry
+## code). Spawns, world, gameplay and diagnostics extend it. Anything calls [method add_event]; the next tick writes it, except
+## during a rollback replay (it already happened once).
 ## [br]
-## A tick's bytes: on a keyframe, the snapshot (put_var of a Dictionary: what this channel's state is right now, such as every live
-## pawn); then the event count (u16), and for each event: its kind (UTF-8), the pawn id (u32), its data (put_var).
+## A tick's bytes: on a keyframe the snapshot (put_var of a Dictionary: the channel's state now, such as every live pawn); the
+## event count (u16); per event its kind (UTF-8), pawn id (u32) and data (put_var).
 ## [br]
-## Recording: anything calls [method add_event] between this tick's write and the next, and the next write_tick writes it. Events that
-## happen during a rollback replay are left out, since they already happened once (a client replays ticks it predicted).
-## [br]
-## Reading: state["events"] holds this tick's events only, as Dictionaries {tick, kind, id, data}. An extending channel keeps its own
-## lasting state alongside, such as who's alive, by overriding [method snapshot], [method read_snapshot] and [method apply_event].
-## [br]
-## GDScript note: put_var is Godot's own encoding of a Variant. Only plain values go in (numbers, strings, vectors, arrays,
-## dictionaries), never objects, so a file can't carry code.
+## Reading: [code]state["events"][/code] holds this tick's events as [code]{tick, kind, id, data}[/code]. An extending channel keeps
+## lasting state by overriding [method snapshot], [method read_snapshot] and [method apply_event].
+## Design: replay spec 3.
 class_name ReplayEventChannel
 extends ReplayChannel
 
@@ -33,7 +29,7 @@ func end() -> void:
 	super()
 
 
-## Notes an event, written with the next tick. kind is a short name such as "died"; id is the pawn's replay id, or 0.
+## Notes an event for the next tick. [code]kind[/code] is a short name such as "died"; [code]id[/code] the pawn's replay id, or 0.
 func add_event(kind: String, id: int, data: Dictionary = {}) -> void:
 	if recorder == null:
 		return

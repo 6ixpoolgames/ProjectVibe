@@ -19,6 +19,10 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 | `detectability` off the pawn | `detectability`, `_own_detectability`, `_detectability_stat()` | A pass-through to the Detectability stat (M6), kept for pawns without one. Callers could read the stat and the table take a default | S |
 | Input clearing on a role change | `_on_network_role()` | Input is the ControllerManager's (M4); it could watch the role change itself | S |
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): the `Pawn` class comment cut to the tick order, the unwritten body rotation, Visual and the scene's optional children (scene needs, Visual's reason, "where things live now" and the odd cases moved to the README's "How it works"). `tick_step`, the sleeping rule and the streaming members shortened, with the tick rules kept. The "tier -1" wording in the summary was dropped. `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
+
 ## 2026-11-17
 
 - **Detectability is a stat** (the C++ bundle stage 4, pawn M6): `detectability` reads and writes the Detectability stat (`StatManager.DETECTABILITY`), mirrored into the pawn table, so effects can change it. It left the inspector, so there's one place to set it.

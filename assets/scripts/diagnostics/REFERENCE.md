@@ -16,15 +16,11 @@ Every class in `assets/scripts/diagnostics/`, from its doc comments. The overvie
 
 Catches the engine's warnings and errors for [`DiagnosticsManager`](#diagnosticsmanager).
 
-So they go into the session log, the log panel (F8) and the replay, rate-limited. Godot calls a Logger for every push_warning, push_error and engine error.
-
-Godot can call this from any thread (a worker that hits an error, say), so it only stores each message under a lock; the manager takes them on the main thread once a frame (`take_messages()`).
-
-GDScript note: Logger is Godot's class for this (Godot 4.5 and later). OS.add_logger() starts calling it, OS.remove_logger() stops.
+So they go into the session log, the log panel (F8) and the replay, rate-limited. Godot can call it from any thread, so it only stores each message under a lock; the manager takes them on the main thread once a frame (`take_messages()`).
 
 ### Constants
 
-- `MAX_WAITING = 500`: The most messages held between two take_messages() calls. Past it, they're counted but not kept, so a flood can't fill memory.
+- `MAX_WAITING = 500`: The most messages held between two `take_messages()` calls; more are counted but dropped.
 
 ### Functions
 
@@ -34,38 +30,30 @@ GDScript note: Logger is Godot's class for this (Godot 4.5 and later). OS.add_lo
 
 `res://assets/scripts/diagnostics/DiagnosticsManager.gd`, extends [`GameModeModule`](../game_mode/REFERENCE.md#gamemodemodule)
 
-Diagnostics v0: measures every frame, keeps logs, feeds the replay and shows the panels (docs/diagnostics/DIAGNOSTICS_SPEC.md).
+Measures every frame, keeps the history, spikes and session log, feeds the replay and shows the panels.
 
-A GameMode module, listed by the project setting project_base/game_mode/modules, so the base never names it (docs/TEST_AND_DEBUG_CODE.md). It ships in release builds too, the owner's call, for bug reports (session logs, captures and replays from players' machines): the setting's .release override lists it as well. A game can leave it out of either list.
+A GameMode module listed in the project setting `project_base/game_mode/modules` (the base never names it). It ships in release builds for bug reports, so the setting's `.release` override lists it too; a game can leave it out of either.
 
-What it does, every frame, wherever the game runs (the editor, a window, headless):
-- Measures the frame: the physics steps (all of this frame's ticks), every node's _process, and the rest (drawing the last frame, and waiting for the screen), with timestamps from a helper that runs first and this module running last. A frame is counted from the end of the last frame's scripts to the end of this one's, so a slow frame's time and its breakdown stay together (Godot's delta would put the time on the next frame). Plus TickDriver's phases, every [`PerfScopes`](#perfscopes) timing, drawing on the CPU and GPU, draw calls, and memory, object, node and orphan-node counts (a leak shows as a count that only climbs).
-- Keeps the last `history_seconds` of frames in memory, and every frame over budget as a spike, with its full breakdown.
-- Hands each frame to the replay recording ([`ReplayDiagnosticsChannel`](../replay/REFERENCE.md#replaydiagnosticschannel)), so one file holds the game and what it cost.
-- Writes a session log per instance (user://diagnostics/sessions/): a header saying how it was run, a summary every `log_every_seconds`, every spike, and every warning and error, rate-limited.
-- Starts a replay recording when a game starts and none is running (hosting, joining, or a player taking a pawn offline), so recordings are always on, the owner's call.
-- Feeds the editor's Debugger > Monitors with its main numbers, for live graphs when running from the editor.
-- Shows panels, one key each ([`DiagnosticsPanels`](#diagnosticspanels)), and takes captures (F12).
-
-Reading it from code: `GameMode.get_module(DiagnosticsManager)` (not a named line on GameMode, since the base never names it).
+A frame is timed from the end of the last frame's scripts to the end of this one's, so a slow frame's time and breakdown stay together. Its parts: physics (the frame's physics steps, stamped by a helper that runs first), scripts (every node's `_process`, ending with this module, which runs last) and the rest (drawing the last frame, waiting for the screen). Alongside: [`TickDriver`](https://docs.godotengine.org/en/stable/classes/class_tickdriver.html)'s phases, every [`PerfScopes`](#perfscopes) timing, render CPU and GPU time, draw calls, and memory, object, node and orphan counts. Always-on recordings: it starts a replay when play starts and none is running.
 
 ```gdscript
-get_summary(seconds)  # averages over the last seconds; the keys are listed at get_summary
-get_frames()          # the history, oldest first; get_spikes(), the spikes, newest last
-get_log_lines()       # the warnings and errors so far, as [level, text, where, count]
-capture()             # saves a capture folder now, and returns its path
+var manager := GameMode.get_module(DiagnosticsManager)
+manager.get_summary(5.0)   # averages over the last 5 seconds; keys in the diagnostics README
+manager.capture()          # saves a capture folder (F12) and returns its path
 ```
+
+Design: diagnostics spec.
 
 ### Settings and properties
 
 - `history_seconds: float` = `30.0`: How much history is kept in memory, in seconds.
-- `spike_over_budget: float` = `1.2`: A frame is a spike when it takes longer than the tick's budget times this (1.2: over 20 ms at 60 ticks a second). Not much less: with vsync on, ordinary frames measure a millisecond either side of 16.7 ms, and would all count.
+- `spike_over_budget: float` = `1.2`: A frame is a spike when it takes longer than the tick's budget times this (1.2: over 20 ms at 60 ticks a second). Not lower: with vsync, ordinary frames jitter a millisecond.
 - `spikes_kept: int` = `50`: How many spikes are kept, newest last.
 - `log_every_seconds: float` = `5.0`: How often a summary line goes into the session log, in seconds.
-- `repeats_logged: int` = `3`: How many times one warning or error is written out in full; after that, it's counted and the count goes in the next summary.
+- `repeats_logged: int` = `3`: Times one warning or error is written out in full; after that it's only counted, and the count goes in the next summary.
 - `folder: String` = `"user://diagnostics"`: Where session logs and captures go.
-- `headless_runs_apart: bool` = `true`: On, a run with no display (a test, or a dedicated server) writes its session logs and captures into folder/headless instead, with its own logs_kept, so the many headless runs never push out the logs of games played in a window.
-- `logs_kept: int` = `30`: How many session logs to keep. The oldest are deleted when a session starts.
+- `headless_runs_apart: bool` = `true`: On, a run with no display (a test, a dedicated server) writes into folder/headless instead, with its own `logs_kept`.
+- `logs_kept: int` = `30`: Session logs kept; the oldest are deleted when a session starts.
 
 ### Functions
 
@@ -73,40 +61,24 @@ capture()             # saves a capture folder now, and returns its path
 - `get_spikes() -> Array`: The spikes kept, newest last.
 - `get_log_lines() -> Array`: Every warning and error so far, as [level, text, where, count], in the order they first came.
 - `get_log_path() -> String`: The session log's path.
-- `get_summary(seconds: float = 1.0) -> Dictionary`: Averages over the last seconds of history, as a Dictionary.  Its keys:
-  - The frame: seconds, frames, fps, frame_ms, physics_ms, scripts_ms, rest_ms, steps_per_frame, frame_worst_ms, over_60_percent (frames over 20 ms), over_30_percent (over 34 ms), render_cpu_ms, render_gpu_ms, draw_calls, animation_ms (the animation category: every "animation." scope, ms a frame).
-  - Ticks: ticks_per_second, dropped_per_second, load_step, step_counts (AI pawns running every tick, 2nd and 4th), tick_ms (TickDriver's phases a tick), tick_parts (each phase and network part -> ms a tick).
-  - scopes: name -> [ms a frame, calls a frame], most expensive first.
-  - Counts: objects, nodes, orphans, memory_mb, pawns, dead, frozen; and role, window, vsync.
-  - server: tick_rate (what it's set to), ticks_per_second (how fast its ticks really went: this machine's own offline or hosting, measured from snapshots on a client), load_percent and load_step (the load ladder's; on a client, as the server's snapshots report them, -1 before any). For profiling on different hardware, the owner's request.
-  - net, while in a session: sent_kb_s, received_kb_s, snapshots_per_second, snapshot_kb (the average snapshot: as sent on a server, as received on a client), largest_sent_kb and largest_received_kb (the biggest packets since the start), corrections_per_second, resyncs, underruns_per_second, and the worst connection's rtt_ms, loss_percent and seconds_since_heard.
+- `get_summary(seconds: float = 1.0) -> Dictionary`: Averages over the last seconds of history as a Dictionary: the frame's parts in ms, ticks, scopes (ms a frame), counts, server and net. Its keys are in the diagnostics README.
 - `steps_text(counts: Variant) -> String` *(static)*: "a/b/c" for how many AI pawns run every tick, every 2nd and every 4th, or "-" without the counts.
-- `get_server_ticks(seconds: float = 1.0) -> Dictionary`: The server's tick rate over the last seconds, as in a summary's "server" (tick_rate, ticks_per_second, load_percent, load_step).  Cheap enough for every frame: it only adds up the newest frames' tick counts, unlike `get_summary()`. A game's HUD can show it; the arena samples' status line does (`server_text()`).
+- `get_server_ticks(seconds: float = 1.0) -> Dictionary`: The server's tick rate over the last seconds, as in a summary's "server". Cheap enough for a HUD every frame, unlike `get_summary()`.
 - `server_text(server: Dictionary) -> String` *(static)*: A summary's "server" as a short line: "server 60 ticks/s, running 59.8, load 63%, step 1".
-- `average_snapshot_kb(bytes: float, snapshots: float) -> float` *(static)*: An average snapshot's size in KB, from bytes and how many snapshots carried them (0 with none). Shared with the networked measure, so both work it out the same way.
+- `average_snapshot_kb(bytes: float, snapshots: float) -> float` *(static)*: An average snapshot's size in KB from its bytes and count (0 with none). Shared with the networked measure.
 - `connection_ended_text(peer: int, reason: String, details: Dictionary) -> String` *(static)*: A NetworkSession.connection_ended as one line of text, shared with the networked measure.
-- `get_last_summary() -> Dictionary`: The last summary written to the log (every `log_every_seconds`), for a game's own readout. Nothing in the base reads it.
+- `get_last_summary() -> Dictionary`: The last summary written to the log (every `log_every_seconds`), for a game's own readout.
 - `summary_text(n: Dictionary) -> String`: A summary (get_summary) as one line of text, as the session log writes it.
 - `net_text(n: Dictionary) -> String` *(static)*: The network part of a summary line, or empty offline.
-- `capture() -> String`: Saves a capture now: a screenshot, the history as a table, the spikes, the warnings and errors, and where the replay is, in a folder of its own. Returns the folder's path.
+- `capture() -> String`: Saves a capture folder now (screenshot, history table, spikes, warnings and errors, replay path) and returns its path.
 
 ## DiagnosticsPanels
 
 `res://assets/scripts/diagnostics/DiagnosticsPanels.gd`, extends [`CanvasLayer`](https://docs.godotengine.org/en/stable/classes/class_canvaslayer.html)
 
-Diagnostics' on-screen panels, one key each (docs/diagnostics/DIAGNOSTICS_SPEC.md).
+The on-screen panels, one key each, for reading [`DiagnosticsManager`](#diagnosticsmanager)'s numbers.
 
-One key each is the owner's call, for readability. They use a small fixed-width font, in two columns so they never overlap each other: F1, F2 and F4 down the top right, F6, F7 and F8 up from the bottom left.
-- F1 help: these keys, and the session log's name.
-- F2 frame graph: the last few seconds, one bar per frame, split into physics, scripts and the rest, with lines at 1/60 and 1/30 s.
-- F4 timings: the last second's averages, the frame's parts, the tick, and the most expensive timing scopes (up to `SCOPES_LISTED`).
-- F6 spikes: the newest frames over budget, each with what took the time.
-- F7 pawn inspector: Ctrl + left click a pawn to see its flags, abilities, effects, AI and input.
-- F8 log: warnings and errors, with how often each came.
-- F9 nav view: the nav mesh, nav links and nav markers in the world around the camera ([`NavDebugView`](#navdebugview), debug builds only).
-- F12 capture: saves a capture folder (`DiagnosticsManager.capture()`) and says where.
-
-A proper look comes with UI v0 (the roadmap); this is for reading numbers.
+A small fixed-width font in two columns so they never overlap: F1, F2 and F4 down the top right, F6, F7 and F8 up from the bottom left. F1 help, F2 frame graph, F4 timings (up to `SCOPES_LISTED` scopes), F6 spikes, F7 pawn inspector (Ctrl + left click a pawn), F8 log, F9 nav view ([`NavDebugView`](#navdebugview), debug builds only), F12 capture (`DiagnosticsManager.capture()`). The diagnostics README lists what each shows. Design: diagnostics spec.
 
 ### Settings and properties
 
@@ -114,10 +86,10 @@ A proper look comes with UI v0 (the roadmap); this is for reading numbers.
 
 ### Constants
 
-- `REFRESH_SECONDS = 0.25`: Panels are refreshed this often, in seconds; the graph every frame.
+- `REFRESH_SECONDS = 0.25`: Seconds between panel refreshes; the graph redraws every frame.
 - `FONT_SIZE = 12`
 - `WIDTH = 470.0`
-- `SCOPES_LISTED = 14`: The most scopes the timings panel lists, so it fits on screen.
+- `SCOPES_LISTED = 14`: The most scopes the timings panel lists.
 
 ### Functions
 
@@ -132,23 +104,14 @@ A proper look comes with UI v0 (the roadmap); this is for reading numbers.
 
 A debug view of navigation: the live nav mesh, the nav links and the nav markers, on F9.
 
-The markers include points of interest, links, areas and the rest. Part of diagnostics: F9 shows and hides it in any level, through DiagnosticsPanels, which makes it the first time. Debug builds only: in a release build it does nothing.
-
-What it draws, around the camera (or the follow node), radius metres each way:
-- The nav mesh: the triangles pawns can walk on, just above the ground, coloured by how much room they have (NavServer's tier colours: blue only the smallest pawns fit, then green, yellow and orange for room enough for the biggest).
-- Nav links: an arc from each link's start to its end, the jumps and drops nav found and the links a designer placed. Cyan goes both ways; orange is one way, with a tick at the end it lands on.
-- Nav markers, through NavMarkerDebugModule (its colours: points white, links cyan, areas green, obstacles red, smart objects yellow, switched-off markers grey). Points of interest are NavPoint markers (point.cover, point.patrol...).
-
-Hidden, it costs nothing: the marker drawer is made when the view is shown and freed when it's hidden.
-
-Without the C++ library there's no nav mesh or links to draw, so only the markers show.
+F9 shows and hides it in any level, through [`DiagnosticsPanels`](#diagnosticspanels), which makes it the first time. Debug builds only: in a release build it does nothing. Around the camera (or `follow`), `radius` metres each way, it draws the nav mesh (coloured by how much room each triangle has, from `NavServer`'s tiers), the nav links (arcs; cyan both ways, orange one way) and the nav markers (through `NavMarkerDebugModule`). Hidden, it costs nothing. Without the C++ library only the markers show.
 
 ### Settings and properties
 
-- `shown: bool` = `false`: Shown or not. set_shown() changes it.
+- `shown: bool` = `false`: Shown or not; `set_shown()` changes it.
 - `radius: float` = `60.0`: The drawn area: this many metres each way from the centre.
-- `follow: Node3D`: The centre of the drawn area. Empty: the current camera, as seen from above (the point under it on the ground plane).
-- `rebuild_interval: float` = `0.5`: The most often the nav mesh drawing is rebuilt, in seconds. It's rebuilt when nav tiles change or the centre moves a quarter of radius.
+- `follow: Node3D`: The centre of the drawn area. Empty: the point on the ground plane the current camera looks at.
+- `rebuild_interval: float` = `0.5`: The least time between rebuilds of the drawing, in seconds. It rebuilds when nav tiles change or the centre moves a quarter of `radius`.
 
 ### Constants
 
@@ -172,40 +135,24 @@ Without the C++ library there's no nav mesh or links to draw, so only the marker
 
 Timing scopes: systems mark the work they do, and a diagnostics tool reads how long each took, frame by frame.
 
-The piece of diagnostics the rest of the base calls (the owner's call; docs/diagnostics/DIAGNOSTICS_SPEC.md). When nothing is listening (`enabled` off, as in a game without [`DiagnosticsManager`](#diagnosticsmanager)), a scope costs one check of a true-or-false, so the marks can stay in shipping code, as TickDriver's profile does (docs/TEST_AND_DEBUG_CODE.md).
-
-How to mark work:
+When nothing is listening (`enabled` off, as in a game without [`DiagnosticsManager`](#diagnosticsmanager)) a scope costs one boolean check, so the marks stay in shipping code. Names are dotted, general first ("ai.sensing"), so a tool can add up a group; one name used many times a frame (once per pawn) adds up its times and counts its calls. Main thread only: the totals aren't guarded for threads, and work on worker threads is timed by whoever waits for it.
 
 ```gdscript
 var started := PerfScopes.begin()       # 0 when nothing is listening, else the time now
-# ... the work ...
-PerfScopes.end(&"ai.sensing", started)  # adds the time since begin() to "ai.sensing" for this frame
+PerfScopes.end(&"ai.sensing", started)  # adds the time since begin() to this frame's "ai.sensing"
 ```
 
-Names are dotted, from the general to the particular ("ai.sensing", "net.snapshots.send"), so a tool can add up a group ("ai"). The same name can be used many times a frame, such as once per pawn: the times add up, and the count says how many.
-
-How a tool reads them (DiagnosticsManager does, once a frame):
-
-```gdscript
-PerfScopes.enabled = true
-var frame := PerfScopes.take_frame()  # name -> [microseconds, count] since the last take_frame(), and starts afresh
-```
-
-Main thread only: the totals aren't guarded for threads. Work on worker threads is timed by whoever waits for it.
-
-Detail: a scope that runs very often, such as one per behaviour per pawn per tick, starts with `begin_detailed()` instead. It only times while `detailed` is on as well, because a scope costs about a microsecond, and thousands a frame would change the numbers they're meant to show. The F4 timings panel switches it on while it's open, and `mass_battle_measure --scopes` does too.
-
-GDScript note: everything here is static, so it's used as PerfScopes.begin() with no object made, like TickJobs.
+A scope that runs very often (one per behaviour per pawn per tick) uses `begin_detailed()`: a scope costs about a microsecond, so these only time while `detailed` is on (F4 switches it on while open; so does `mass_battle_measure --scopes`). Design: diagnostics spec.
 
 ### Settings and properties
 
-- `enabled: bool` = `false`: On while a tool is listening. Off, begin() returns 0 and end() does nothing.
+- `enabled: bool` = `false`: On while a tool is listening. Off, `begin()` returns 0 and `end()` does nothing.
 - `detailed: bool` = `false`: On while a tool wants the fine-grained scopes too (`begin_detailed()`). Off by default.
 
 ### Functions
 
-- `begin() -> int` *(static)*: The time now, in microseconds, to hand to end(); or 0 when nothing is listening.
-- `begin_detailed() -> int` *(static)*: begin() for a scope that runs very often: the time now only while both `enabled` and `detailed` are on, else 0. end() it as usual.
-- `end(name: StringName, started: int) -> void` *(static)*: Adds the time since started (from begin()) to name's total for this frame. Does nothing if started is 0.
-- `add(name: StringName, microseconds: int, count: int = 1) -> void` *(static)*: Adds a time measured some other way, in microseconds, such as one a C++ class reports.
-- `take_frame() -> Dictionary` *(static)*: Everything timed since the last call, as name -> [microseconds, count], and starts afresh.
+- `begin() -> int` *(static)*: The time now, in microseconds, to hand to `end()`; 0 when nothing is listening.
+- `begin_detailed() -> int` *(static)*: `begin()` for a scope that runs very often: times only while both `enabled` and `detailed` are on, else 0.
+- `end(name: StringName, started: int) -> void` *(static)*: Adds the time since `started` (from `begin()`) to the name's total for this frame. Does nothing if it is 0.
+- `add(name: StringName, microseconds: int, count: int = 1) -> void` *(static)*: Adds a time measured some other way (microseconds), such as one a C++ class reports.
+- `take_frame() -> Dictionary` *(static)*: Everything timed since the last call as name -> [microseconds, count], and starts afresh.

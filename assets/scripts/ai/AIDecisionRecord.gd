@@ -1,27 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: ai/CHANGELOG.md.
-## What one AI decision was made from, and what it chose: a plain record for diagnostics and for checking another decider against
-## this one.
+## What one AI decision was made from, and what it chose: a plain record for diagnostics and for checking another decider.
 ##
-## The [AIBehaviourManager] fills one in after a decision, only while [member AIBehaviourManager.decision_listener] is set, and
-## hands it to the listener. The [AIDecisionRecorder] keeps them and saves them to a file. Nothing in the game reads them.
-## [br]
-## Why it exists: the plan to make decisions in C++ on the worker threads (scaling spec 6.2) starts with a "shadow" decider that
-## decides beside this one without being used. To compare the two exactly, the C++ one needs the same inputs this decision had,
-## and the answer this decision gave. A record holds both:
-## [br]- the reasons for deciding: [member cause], [member event_priority], [member event_is_normal]
-## [br]- the situation: [member state], [member has_target], the running behaviour and when it started
-## [br]- for each behaviour, in the fixed order: which hard rule ruled it out, if any, and otherwise its persistence, jitter,
-##   ceiling and floor, whether is_available() was asked and what it said, and its score if it was scored
-## [br]- the answer: [member chosen]
-## [br]
-## Behaviours the early stop skipped show [code]available = -1[/code] (never asked). A decider that matches asks the same ones.
-## [br]
-## How to read one:
+## The [AIBehaviourManager] fills one in after each decision, only while [member AIBehaviourManager.decision_listener] is set; the
+## [AIDecisionRecorder] keeps and saves them. It holds the reasons, the situation, each behaviour's hard rule, range, availability and
+## score in the fixed order, and the choice. Behaviours the early stop skipped show [code]available = -1[/code]. Nothing in the game
+## reads records.
 ## [codeblock]
 ## record.chosen                              # &"Chase", or &"" for nothing
 ## record.behaviours[0]["name"]               # each entry is a Dictionary, see add_behaviour()
 ## record.to_dict()                           # everything as plain values, for saving as JSON
 ## [/codeblock]
+## Design: scaling spec 6.2.
 class_name AIDecisionRecord
 extends RefCounted
 
@@ -104,11 +93,9 @@ func changed() -> bool:
 	return chosen != running_before
 
 
-## Adds one behaviour's entry, from the scratch values the manager left on it this decision. rule: the hard rule that ruled it out,
-## or [constant RULE_NONE]. The entry's keys:
-## [br]- [code]name[/code], [code]rule[/code]
-## [br]- for a candidate (no rule): [code]persistence[/code], [code]jitter[/code], [code]ceiling[/code], [code]floor[/code]
-##   (null for no floor), [code]available[/code] (1 yes, 0 no, -1 never asked), [code]score[/code] (null when not scored)
+## Adds one behaviour's entry from the scratch values the manager left on it. rule: the hard rule that ruled it out, or
+## [constant RULE_NONE]. Keys: name, rule, and for a candidate persistence, jitter, ceiling, floor (null: none), available
+## (1 yes, 0 no, -1 never asked) and score (null: not scored).
 func add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void:
 	var entry := {"name": behaviour.name, "rule": rule}
 	if rule == RULE_NONE:

@@ -17,11 +17,7 @@ Every class in `assets/scripts/camera/`, from its doc comments. The overview is 
 
 Holds a VirtualCamera out from a pawn, following a look direction, and pulls it in so walls don't come between camera and pawn.
 
-It's Unreal's spring arm, as a plain node. The PlayerController owns one arm per player and moves it to each pawn it takes (see CameraMount); a pawn's scene may also place its own.
-
-It's idle unless it's active, which is when a player is looking through it. An idle arm does no work and reads nothing, and it never reads input itself: PlayerController tells it where to look. So AI or a cutscene could drive it just the same.
-
-Its one collision check each frame is a physics query outside the physics step. That's safe with Godot's default setting, where physics doesn't run on its own thread. A project that turns that on would have to move this.
+Like Unreal's spring arm, as a plain node. The PlayerController owns one arm per player and moves it to each pawn it takes (see [`CameraMount`](#cameramount)); a pawn's scene may also place its own. It's idle unless active (a player is looking through it), and never reads input itself: PlayerController tells it where to look. Its one collision check a frame is a physics query outside the physics step, which is safe while physics doesn't run on its own thread (Godot's default).
 
 ### Settings and properties
 
@@ -47,16 +43,14 @@ Its one collision check each frame is a physics query outside the physics step. 
 
 Where a player's camera arm attaches to a pawn, and with what settings.
 
-One camera per player, owned by the PlayerController (pawn spec 8.18). A CameraMount is a plain marker a pawn's scene places under its Visual node. It does nothing itself: the PlayerController moves its one arm here when it takes the pawn, and applies this preset.
-
-A pawn without one gets the arm on its Visual node, with the default settings (CameraPreset's). A pawn whose scene places its own CameraArm, or a VirtualCamera of its own (at the eyes, say), uses that instead, and no mount is needed.
-
-How to use it: add a CameraMount under the pawn scene's Visual node, and give it a CameraPreset (arm length, height, field of view). Its position is ignored: the preset's mount_height and shoulder_offset place the arm. The static functions find a pawn's camera pieces:
+A plain marker a pawn's scene places under its Visual node, with a [`CameraPreset`](#camerapreset) (arm length, height, field of view). It does nothing itself: the PlayerController moves its one camera arm here when it takes the pawn, and applies the preset. Its position is ignored; the preset's mount_height and shoulder_offset place the arm. A pawn without one gets the arm on its Visual with default settings; a pawn with its own CameraArm or VirtualCamera uses that.
 
 ```gdscript
 CameraMount.arm_of(pawn)      # its arm, or null
 CameraMount.view_of(pawn)     # the view a camera attaches to
 ```
+
+Design: pawn spec 8.18.
 
 ### Settings and properties
 
@@ -99,19 +93,9 @@ A pawn type with its own feel gets its own preset (on its CameraMount). With non
 
 A camera that flies freely, for a player with no pawn: the spectator.
 
-For the spectator view between matches, while waiting to respawn, or after letting go of a pawn. PossessionCoordinator.spectate() starts it: the PlayerController makes one the first time and flies it with the player's keys and mouse.
+Started by PossessionCoordinator.spectate(); the PlayerController flies it with the player's keys and mouse. It isn't a Pawn: it's local and moves per rendered frame, so it's never ticked, networked, rolled back or seen by the AI. It carries a VirtualCamera (View, which the real camera follows) and a StreamingSource that keeps the world loaded around it (`keeps_world_loaded`). It goes through ground and walls.
 
-It isn't a Pawn. A Pawn is a whole character: it's simulated on ticks, rolled back, networked, recorded in replays, counted on a team, seen by the AI and killed by the kill floor. A spectator needs none of that. Unreal does the same: its PlayerController spawns its spectator on its own machine only, and nothing else in the game knows it's there. So it's local and per rendered frame, like the camera arm: never ticked, never sent over the network, never rolled back.
-
-What it carries:
-- View: a VirtualCamera, which the PlayerController's real camera follows while spectating.
-- StreamingSource: keeps the world loaded around it while it's flying (`keeps_world_loaded`), so flying away from every pawn still shows ground. On a client it loads only that client's world, as any camera's source does.
-
-How to use it: nothing to set up for the default. A game wanting different settings or a model for its spectator makes a scene whose root is a FreeFlyCamera and sets it as the PlayerController's spectator_scene.
-
-Controls (read by the PlayerController): WASD flies where the view looks, Space and Ctrl go straight up and down (the jump and crouch keys, the PlayerController's fly_up_key and fly_down_key), and the mouse looks. 10 m/s, 25 with the sprint key held, and with it held the wheel ramps that fast speed up or down, up to 75. The wheel on its own zooms, by narrowing the field of view as a lens does, so it stays where it is; the mouse turns slower to match. The middle mouse button (middleMouse_button) resets the zoom.
-
-It goes through ground and walls: there's no collision.
+To use a different model or settings, make a scene whose root is a FreeFlyCamera and set it as the PlayerController's spectator_scene. The controls (WASD, Space and Ctrl, the wheel, speeds) are in the README.
 
 ### Settings and properties
 
@@ -123,7 +107,7 @@ It goes through ground and walls: there's no collision.
 - `max_zoom: float` = `8.0`: The most it zooms in, as a multiple of how big things look at fov.
 - `seconds_to_full_speed: float` = `0.15`: How long it takes to reach full speed from standing, or to stop, in seconds. 0 is at once.
 - `fov: float` = `75.0`: The field of view while it's the view, in degrees.
-- `keeps_world_loaded: bool` = `true`: On: it keeps the world loaded around it while it's flying, through its StreamingSource. It can be changed while flying (the mass battle turns it off, so its own sources decide what's loaded). GDScript note: set(value) runs whenever the value is assigned, so the source follows at once.
+- `keeps_world_loaded: bool` = `true`: On: it keeps the world loaded around it while it's flying, through its StreamingSource. It can be changed while flying (the mass battle turns it off, so its own sources decide what's loaded).
 - `view: VirtualCamera` = `null`: Where the real camera goes. Made here if the scene doesn't have one called View.
 - `streaming_source: StreamingSource` = `null`: The source that keeps the world loaded around it. Made here if the scene doesn't have one called StreamingSource.
 

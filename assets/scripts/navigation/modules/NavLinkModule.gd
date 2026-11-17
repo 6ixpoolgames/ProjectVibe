@@ -1,24 +1,13 @@
 # Written by Claude (claude-opus-5-5), 2026-11-08. History: navigation/CHANGELOG.md.
-## Hands placed NavLink markers to nav, so paths can use them (nav spec sections 21.4 and 19, phase 3).
+## Hands placed [NavLink] markers to nav, so paths can use them (nav spec 21.4 and 19, phase 3).
 ##
-## Add this node to a level that places links by hand, such as a jump between two rooftops or a ladder.
+## Add it to a level that places links by hand, such as a jump between rooftops or a ladder. Links nav finds by itself at ledges and
+## gaps (NavServer's auto_links setting) need nothing here. An enabled link becomes [code]NavServer.add_link[/code] with its start,
+## end, two_way and press_action (its tile rebuilds a tick or two later); disabled, removed, or this module leaving removes it.
 ## [br]
-## Links nav finds by itself at ledges and gaps (NavServer's auto_links setting) need nothing here. This is only for the ones a
-## designer marks, where the automatic search wouldn't find one, or where a link should press a different action.
-##
-## [br]
-## What it does with each NavLink marker:
-## [br]- Enabled: calls NavServer.add_link with the marker's start, end, two_way and press_action. The tile holding the start
-##   rebuilds to include it, a tick or two later.
-## [br]- Disabled (NavMarkerManager.set_enabled), removed, or this module leaving the level: NavServer.remove_link.
-## [br]
-## A link only works while nav is built at both ends. Detour joins its far end when that tile loads, so a link into ground that
-## isn't loaded yet is simply not used until it is. Nothing here needs to watch for that. Not used yet: a NavLink's extra_cost.
-## Links cost their length, like walking.
-## [br]
-## What happens in odd cases (all checked in tests/nav_link_module_selftest.gd):
-## [br]- No NavServer (the navcore library isn't loaded): it does nothing, and markers stay registered as usual.
-## [br]- A marker switched on twice, or off when it was never on: nothing changes.
+## A link only works while nav is built at both ends: Detour joins the far end when that tile loads, so a link into unloaded ground
+## is unused until it is. Not used yet: a link's extra_cost (links cost their length). Without NavServer (no navcore library) it
+## does nothing.
 class_name NavLinkModule
 extends NavMarkerModule
 
@@ -80,7 +69,6 @@ func _remove_link(marker_id: int) -> void:
 
 # REFACTOR: the same lookup is written out in NavigationManager, BodyNavFeeder and NavDebugView; one shared helper would do.
 func _nav_server() -> Object:
-	# GDScript note: NavServer comes from the navcore C++ library, as an engine singleton. Without the library there's none.
 	if Engine.has_singleton(&"NavServer"):
 		return Engine.get_singleton(&"NavServer")
 	return null

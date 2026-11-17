@@ -43,6 +43,12 @@ What the player sees through: one real camera that follows a placed view, a spri
 | `collision_mask` | `CameraPreset` | 1 (ground) | What pulls the camera in |
 | `speed`, `fast_speed` | `FreeFlyCamera` | 10, 25 m/s | Spectator flying speeds |
 
+## How it works
+
+- **The spectator** (`FreeFlyCamera`) isn't a Pawn: a Pawn is simulated on ticks, rolled back, networked, recorded in replays, counted on a team and seen by the AI, and a spectator needs none of that. Like Unreal's, it's local and moves per rendered frame, and carries a `VirtualCamera` (View) and a `StreamingSource` that keeps the world loaded around it (`keeps_world_loaded`; on a client it loads only that client's world). There's no collision.
+- **Spectator controls** (read by the PlayerController): WASD flies where the view looks; Space and Ctrl go straight up and down (`fly_up_key`, `fly_down_key`); the mouse looks. 10 m/s, 25 with sprint held; with sprint held the wheel ramps the fast speed up or down to 75; on its own the wheel zooms by narrowing the field of view (the mouse turns slower to match), and the middle button resets it.
+- **The camera arm** does one physics query a frame outside the physics step, which is safe while physics doesn't run on its own thread (Godot's default); a project that turns that on would have to move it.
+
 ## Tests
 
 No tests of its own; `pawn/tests/possession_selftest` covers the arm moving between pawns and spectating.

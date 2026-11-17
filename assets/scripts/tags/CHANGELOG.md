@@ -14,6 +14,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 |---|---|---|---|
 | One tag-set class for abilities, nav and effects | `TagRegistry`, `navigation/NavTags`, `effects/EffectTags` | The same rules, copied on purpose when NavTags and EffectTags were written so working code didn't change. A single class used once per tag set is one place to fix and test, and a game's own tag set would come free. The matching row is in navigation's changelog | M |
 
+## 2026-11-18
+
+- **Comments rewritten to the reference style** (the documentation pass): the `TagRegistry` class comment cut to the bit rules (the corner cases moved to the README's "How it works"); the `Tags` class comment shortened. `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
+
 ## 2026-11-17
 
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup so the editor's help and `REFERENCE.md` show them properly. `MOVEMENT_BASIC` and `MOVEMENT_ADVANCED` got a doc line each, and `get_tag_count` a brief. The REFACTOR row above is marked in `TagRegistry`.

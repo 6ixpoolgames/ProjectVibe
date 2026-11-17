@@ -1,93 +1,49 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
 ## Starts, runs and stops a pawn's abilities, and takes the hits that land on it.
 ##
-## A part on the pawn, added by PawnInitializer, with the abilities as its children. Pawn spec section 8.
-## [br]
-## How to use it (outside code only talks to the manager):
+## A part on the pawn, added by PawnInitializer, with the abilities as its children. The pawn calls [method tick_abilities] once a tick,
+## after its input arrives and before [code]move_and_slide[/code]: counters count down, one locomotion ability runs, then pressed actions
+## start the ready ability with the highest priority. It owns the cancelling rules, the combo counter and the hit path. Everything that
+## persists between ticks lives on the abilities (and the combo counter here) and rolls back. Outside code only talks to the manager:
 ## [codeblock]
-## pawn.ability_manager.can_start(&"jump")      # could a press start something right now? For an AI deciding what to press
+## pawn.ability_manager.can_start(&"jump")      # could a press start something now? (the AI asks)
 ## pawn.ability_manager.action_for_tag(tag)     # the action to press for a kind of ability, such as movement.advanced
-## pawn.ability_manager.is_busy()               # is a timed action running?
-## pawn.ability_manager.has_action(&"sprint")   # does anything answer to this action?
-## pawn.ability_manager.cancel(&"sprint")       # stops whatever is running for this action
-## pawn.ability_manager.start_ability(ability)  # starts one that has no trigger action, such as Knockback, by the same rules
-## pawn.ability_manager.receive_hit(hit)        # something hit this pawn (on the server)
+## pawn.ability_manager.start_ability(ability)  # starts one with no trigger action, such as Knockback, by the same rules
+## pawn.ability_manager.receive_hit(hit)        # something hit this pawn (server)
 ## [/codeblock]
-## The pawn calls [method tick_abilities] once per tick, after its input arrives and before move_and_slide. Each tick, in this order:
-## [br]1. Counters: cooldowns, waiting presses and the combo window count down, and every_tick() runs on the abilities that override
-##   it.
-## [br]2. Locomotion: exactly one runs. A locomotion ability whose trigger_action is held, and which can run, wins, by priority and
-##   then tree order (Sprint). Otherwise the default runs: the first locomotion ability with no trigger_action (Walk).
-## [br]3. Actions: running timed ones tick, and their steps run. A pressed action starts the ability bound to it that can start with
-##   the highest priority (plus its priority_jitter's offset, and what effects add), then the first in the tree. One that can't yet
-##   keeps the press for its buffer_window and tries again each tick. A press waiting in a buffer is a press of its action, so when the
-##   wait ends every ability on that action that's ready competes, including the one that just finished.
-## [br]
-## Each step only touches what has a reason to run (pawn spec 15.2): the locks only after an action started or stopped, the counters
-## only of running timers, every_tick() only where an ability overrides it, and the action step only with a press, a buffered press
-## or a running action. Everything that persists between ticks lives on the abilities (and the combo counter here) and rolls back
-## (see AbilityBase).
-## [br]
-## [b]Lockouts.[/b] While an ability runs, the categories in its locks_out can't start, and a locked-out locomotion ability stops
-## steering (the pawn slows to a stop). Categories are tags (TagRegistry), so locking &"movement" also locks &"movement.jump".
-## [br]
-## [b]Cancelling[/b] (pawn spec 8.6): two abilities conflict when either one's locks_out covers the other's category. A conflicting
-## ability can start only if its interrupt_priority is at least the interrupt_threshold of every conflicting ability running; then
-## those are cancelled (they stop, their cooldowns start, and [signal ability_cancelled] goes out) and it starts. Otherwise it's
-## locked out. So Dash (40) cancels MeleeAttack (15) and Sprint (10) doesn't; moving cancels only actions with a threshold of 0. An
-## ability's cancelled_by lists categories that can cancel it whatever the numbers say, for the exceptions. An action with
-## pauses_locomotion stops Walk running at all while it runs (Dash), where a locked-out Walk would otherwise slow the pawn. The rules
-## live here, not in the controllers, so a player and the AI cancel the same way and a rollback replays the same cancels.
-## [method get_interrupt_table] shows what cancels what for this pawn.
-## [br]
-## [b]Effects[/b] (pawn spec 8.11): effects on the pawn add to the numbers while they last (AbilityPriorityPart): a press compares
-## priority plus those, and cancelling compares interrupt_priority and interrupt_threshold plus those. An ability's EffectApplier
-## children are collected here once; on-start effects are applied to the pawn when it starts.
-## [br]
-## [b]Combos[/b] (pawn spec 8.20): abilities with combo_positions share one counter. One starting takes the next position if the
-## window is open and it fits there, else 1; the window closes as it starts, and its OpenComboStep opens it again after its hit.
-## [br]
-## [b]Hits and death[/b] (pawn spec 8.16, 8.23): see [method receive_hit]. Hits pass this pawn's HitInterceptors first; at 0 Health
-## its DeathAbility starts and [signal died] goes out.
-## [br]
-## What happens in odd cases (all checked in tests/ability_selftest.gd):
-## [br]- Its parent isn't a Pawn: it warns and does nothing.
-## [br]- No locomotion with an empty trigger_action: when nothing else runs, nothing steers, and the pawn keeps its velocity.
-## [br]- Two abilities on one action: only one starts per press, and the others' waiting presses are dropped.
-## [br]- No TickStateComponent on the pawn: abilities work, but nothing about them rolls back.
+## Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 class_name AbilityManager
 extends Node
 
-# Abilities _run_actions started this tick in place of the one it was looking at, so the same pass doesn't also tick them. Only used
-# inside that function; kept here so it isn't made anew every tick.
+# Abilities _run_actions started in place of the one it was looking at, so the same pass doesn't also tick them. Kept so it isn't made
+# anew every tick.
 var _started_later: Array[AbilityBase] = []
 
-## A HitInterceptor stopped a hit, on the server, after its response went out (pawn spec 8.23). For debug drawing, the replay and
-## game rules.
+## A [HitInterceptor] stopped a hit, on the server, after its response went out (pawn spec 8.23).
 signal hit_intercepted(hit: HitInfo, interceptor: HitInterceptor)
 
+## An ability started.
 signal ability_started(ability: AbilityBase)
+## An ability stopped, finished or cancelled.
 signal ability_finished(ability: AbilityBase)
-## Sent when an ability is cancelled by another starting, after ability_finished for it.
+## An ability was cancelled by another starting, sent after [signal ability_finished] for it.
 signal ability_cancelled(ability: AbilityBase, by: AbilityBase)
-## A step of a stepped ability started (pawn spec 8.20).
-## GDScript note: the abilities send these two (AbilityBase.start_step), so the editor's "never used in this class" warning is switched off.
+## A step of a stepped ability started (pawn spec 8.20). Sent by [method AbilityBase.start_step].
 @warning_ignore("unused_signal")
 signal step_started(ability: AbilityBase, step: AbilityStep)
-## A step stopped: reason is "done", "released", "failed" or "cancelled".
+## A step stopped; reason is "done", "released", "failed" or "cancelled". Sent by [method AbilityBase.stop_step].
 @warning_ignore("unused_signal")
 signal step_finished(ability: AbilityBase, step: AbilityStep, reason: String)
-## A hit reached this pawn, on the server: it isn't dead or invulnerable. Sent before a HitInterceptor can turn it away and before its
-## effects land, so the AI notes every attack (AIContextComponent listens).
+## A hit reached this pawn, on the server (not dead or invulnerable). Sent before an interceptor can turn it away and before its effects
+## land, so the AI notes every attack.
 signal hit_arrived(hit: HitInfo)
-## Sent on the server when something hits this pawn, after its effects are applied (pawn spec 8.11); hit.damage_dealt says how much
-## Health it took. Not sent for a hit a HitInterceptor stopped.
+## A hit landed, on the server, after its effects were applied (pawn spec 8.11); hit.damage_dealt is the Health it took. Not sent for a
+## hit an interceptor stopped.
 signal hit_received(hit: HitInfo)
-## Sent once on the server when this pawn dies, after its Death ability starts. hit is what did it, or null. Each part cleans up after
-## itself by listening (the EffectManager, the AI behaviour manager, the ControllerManager).
+## This pawn died, once, on the server, after its Death ability started. hit is what did it, or null. Parts clean up by listening.
 signal died(pawn: Pawn, hit: HitInfo)
 
-# Every ability's HitInterceptors, by stage, highest priority first (pawn spec 8.23).
+# Every ability's HitInterceptors by stage, highest priority first (pawn spec 8.23).
 var _miss_interceptors: Array[HitInterceptor] = []
 var _turn_away_interceptors: Array[HitInterceptor] = []
 var _full_movement_abilities: Array[AbilityBase] = [] # those with needs_full_movement (pawn spec 8.22)
@@ -99,8 +55,7 @@ var pawn: Pawn = null
 var _driver: Node = null # the TickDriver, for hits during simulate
 var _death: DeathAbility = null # found with the abilities
 var _knockback: KnockbackAbility = null # likewise, for get_knockback()
-# Hits queued during simulate, for every pawn, and the tick driver that delivers them (pawn spec 15.4).
-# GDScript note: static, so one queue is shared by every manager.
+# Hits queued during simulate, for every pawn, and the tick driver that delivers them (pawn spec 15.4). Static: one queue for all managers.
 static var _queued_hits: Array = [] # [attacker's entity id, target's entity id, place in the queue, HitInfo]
 static var _hit_queue_driver: Node = null
 
@@ -115,24 +70,20 @@ var _timed: Array[AbilityBase] = [] # abilities with a timer running (a run, a c
 var _by_action := {} # trigger action -> Array[AbilityBase] answering to it, in run order, so can_start() looks only at those
 const _NONE: Array[AbilityBase] = [] # what _by_action gives for an action nothing answers to
 
-# The combo counter, shared by every ability with combo_positions (pawn spec 8.20, the owner's design). Both roll back. A combo
-# ability starting takes the next position if the window is open and it fits there, else 1; the window closes as it starts, and its
-# OpenComboStep opens it again after its hit.
-## The combo position the last combo ability took (0: none yet).
+# The combo counter, shared by every ability with combo_positions (pawn spec 8.20). Both values roll back.
+## The combo position the last combo ability took; 0: none yet.
 var combo_position := 0
-## Ticks left in the combo window: while above 0, a follow-up whose positions include combo_position + 1 can start.
+## Ticks left in the combo window; while above 0 a follow-up for the next position can start.
 var combo_window_ticks_left := 0
-## Goes up by one whenever something changes that can change what [method can_start] answers: an ability starting, finishing or
-## being cancelled, a step starting or ending (its cancel window), a cooldown or the combo window running out, the abilities being
-## collected again, or the pawn's effects changing (their priority boosts). The AI asks can_start again only after it moves on
-## (AIInputs.action_ready, scaling spec 6.2), the event-based way, instead of at every decision. Never goes down.
+## Goes up by one whenever something changes that can change what [method can_start] answers (an ability or step starting or ending, a
+## cooldown or the combo window running out, effects changing). The AI keeps its last answer until this moves ([AIInputs]; scaling spec 6.2). Never goes down.
 var readiness_version := 0
 var _timers_dirty := true # a timer started or reached 0, so _timed is rebuilt before it's next used
 var _locks_dirty := true # an action started or stopped, so the locks are worked out again before they're next used
 var _every_tick_abilities: Array[AbilityBase] = [] # abilities whose script overrides every_tick()
 var _action_bits := 0 # the input bits of every action's trigger_action: the presses anything here answers to
 var _follows_body := {} # trigger action -> true when an ability on it has its own can_start(), such as Jump needing the ground
-# Script -> whether it overrides every_tick(), worked out once per script. GDScript note: a static var is shared by every manager.
+# Script -> whether it overrides every_tick(), worked out once per script. Static: shared by every manager.
 static var _overrides_every_tick := {}
 
 
@@ -156,7 +107,7 @@ func _ready() -> void:
 	_register_rollback_state()
 
 
-## The pawn calls this once per tick. dt is the fixed tick length. See the class description for the order.
+## The pawn calls this once a tick; dt is the fixed tick length. Order: counters, locomotion, then actions (see the README).
 func tick_abilities(dt: float) -> void:
 	if pawn == null:
 		return
@@ -192,25 +143,23 @@ func timers_changed() -> void:
 	readiness_version += 1
 
 
-## Moves [member readiness_version] on, for a change made outside the abilities that can change what can start: the EffectManager
-## calls it when the pawn's effects change.
+## Moves [member readiness_version] on for a change made outside the abilities; the EffectManager calls it when effects change.
 func readiness_changed() -> void:
 	readiness_version += 1
 
 
-## True if an ability on this action has a can_start() of its own, which can change its answer without telling the manager (Jump
-## needs the ground). Such an action is asked again at every decision, whatever [member readiness_version] says.
+## True if an ability on this action has its own [method AbilityBase.can_start], which can change without telling the manager (Jump
+## needs the ground). The AI asks such an action at every decision, whatever [member readiness_version] says.
 func ready_follows_body(action: StringName) -> bool:
 	return _follows_body.has(action)
 
 
-## True if the pawn can sleep as far as its abilities go (pawn spec 15.3): no timer running (unless its ability says it can wait), no
-## combo window open, and every ability with every_tick() agrees.
+## True if the pawn can sleep as far as its abilities go (pawn spec 15.3): no timer running (unless that ability can wait), no combo
+## window open, and every every_tick() ability agrees.
 func can_sleep() -> bool:
 	if _timers_dirty:
 		_rebuild_timed()
-	# A running ability keeps the pawn awake unless it says it can wait (Death, while Health is 0), so a corpse doesn't run its
-	# abilities and movement every tick for as long as it lies there.
+	# Death can wait while Health is 0, so a corpse doesn't run its abilities every tick.
 	for ability in _timed:
 		if not ability.can_sleep_while_running():
 			return false
@@ -222,8 +171,8 @@ func can_sleep() -> bool:
 	return true
 
 
-## True if pressing this action now would start something, counting abilities it would cancel. Asking changes nothing.
-## Only the abilities on that action are looked at (the AI asks this at every decision, for each behaviour that presses one).
+## True if pressing this action now would start something, counting abilities it would cancel. Changes nothing; looks only at the
+## abilities on that action.
 func can_start(action: StringName) -> bool:
 	for ability: AbilityBase in _by_action.get(action, _NONE):
 		if not ability.is_running_timed() and _is_ready(ability):
@@ -231,12 +180,9 @@ func can_start(action: StringName) -> bool:
 	return false
 
 
-## The action to press to start an ability in this group (its category or one of its extra_categories, such as
-## &"movement.advanced"), picking the highest-priority one that could start right now, boosts included; &"" if none could. For the
-## AI, so a behaviour asks for a kind of ability instead of naming one: a pawn with a grappling hook instead of a dash closes in the
-## same way. It answers with an action, not an ability, because everything a pawn does goes through its input, which rolls back.
-## Asking changes nothing. The press goes through the usual rules, so if another ability shares that action and wins it, that one
-## starts.
+## The action to press to start an ability in this group (a category or extra_category such as &"movement.advanced"): the
+## highest-priority one that could start now, boosts included; &"" if none. For the AI, so a behaviour asks for a kind of ability, not
+## one by name. It answers with an action because everything a pawn does goes through its (rolled back) input. Changes nothing.
 func action_for_tag(tag: StringName) -> StringName:
 	var bit := TagRegistry.own_bit(tag) if TagRegistry.has_tag(tag) else 0
 	if bit == 0:
@@ -249,16 +195,14 @@ func action_for_tag(tag: StringName) -> StringName:
 	return best.trigger_action if best else &""
 
 
-## Starts an ability by the same rules as a press: its cooldown, can_start(), and cancelling what it conflicts with. For abilities
-## with no trigger action, started by code, such as Knockback from a hit. One already running starts again from the beginning.
-## Returns false if it couldn't start.
+## Starts an ability by the same rules as a press (cooldown, can_start, cancelling what conflicts). For abilities started by code,
+## such as Knockback. One already running starts again from the beginning. Returns false if it couldn't start.
 func start_ability(ability: AbilityBase) -> bool:
 	if ability == null or ability.manager != self:
 		return false
 	if ability.is_running_timed():
-		# Starting again ends the run it has properly first: its steps end, stop() runs and ability_finished goes out, as for any
-		# ability that ends. Whether it may start is checked first, as if it weren't running; if it may not, the run it has carries
-		# on.
+		# Starting again ends the run properly first (steps end, stop() runs, ability_finished goes out). Whether it may start is
+		# checked first, as if it weren't running; if not, the run carries on.
 		var left := ability.ticks_left
 		ability.ticks_left = 0
 		var may_restart := _is_ready(ability)
@@ -274,8 +218,8 @@ func start_ability(ability: AbilityBase) -> bool:
 	return true
 
 
-## The first active TURN_AWAY HitInterceptor that stops this hit, or null (pawn spec 8.23). It has already sent its response
-## (HitInterceptor.respond) and [signal hit_intercepted] has gone out. A reply to an interception isn't turned away.
+## The first active TURN_AWAY interceptor that stops this hit, or null (pawn spec 8.23). Its response and [signal hit_intercepted] have
+## gone out. A reply to an interception isn't turned away.
 func intercept_hit(hit: HitInfo) -> HitInterceptor:
 	if hit.from_interception:
 		return null
@@ -287,8 +231,7 @@ func intercept_hit(hit: HitInfo) -> HitInterceptor:
 	return null
 
 
-## True while no hit can reach the pawn: an InvulnerabilityInterceptor (any MISS-stage HitInterceptor) is on, such as a Dash's for its
-## first 0.18 s. Harmful effects are refused then too (EffectManager), and a swing's sweep doesn't mark the pawn (MeleeSweepStep).
+## True while a MISS-stage interceptor is on, such as a Dash's first 0.18 s. Hits don't arrive and harmful effects are refused.
 func is_invulnerable() -> bool:
 	for interceptor in _miss_interceptors:
 		if interceptor.is_active():
@@ -332,13 +275,12 @@ func is_locked(ability: AbilityBase) -> bool:
 	return ability.category_mask & _locked_mask != 0
 
 
-## Seconds as whole ticks, at least 1 for anything above 0.
+## Seconds as whole ticks at 60 a second, at least 1 for anything above 0.
 func ticks_for(seconds: float) -> int:
 	return 0 if seconds <= 0.0 else maxi(1, roundi(seconds * _tick_rate))
 
 
-## True while an ability with needs_full_movement runs (Dash, Knockback), so the pawn moves by physics instead of with the CrowdMover
-## (pawn spec 8.22).
+## True while an ability with needs_full_movement runs (Dash, Knockback), so the pawn moves by physics, not the CrowdMover (pawn spec 8.22).
 func needs_full_movement() -> bool:
 	for ability in _full_movement_abilities:
 		if ability.is_running_timed():
@@ -351,13 +293,12 @@ func get_abilities() -> Array[AbilityBase]:
 	return _abilities.duplicate()
 
 
-## This pawn's Knockback ability, or null, found once with the abilities. A KnockbackPart asks on every push.
+## This pawn's Knockback ability, or null. A KnockbackPart asks on every push.
 func get_knockback() -> KnockbackAbility:
 	return _knockback
 
 
-## True while any ability on this action runs. For asking every tick (the AI's attack does): it looks through the few abilities with
-## a timer going, where get_abilities() copies the whole list.
+## True while any ability on this action runs. Cheap, for asking every tick: looks only at abilities with a timer going.
 func is_action_running(action: StringName) -> bool:
 	if _timers_dirty:
 		_rebuild_timed()
@@ -418,8 +359,7 @@ func _run_actions(dt: float) -> void:
 	# This tick's presses as bits, worked out once (pawn spec 15.2).
 	var pressed_bits: int = _held() & ~_previous_held()
 	var used_bits := 0 # actions that started something this tick, so one press starts one ability
-	# Actions with a press waiting in some ability's buffer. Every ready ability on such an action competes when the wait ends, not
-	# only the one holding it, so the swing that was running when the press came can win it too.
+	# Actions with a press waiting in a buffer: every ready ability on one competes when the wait ends, not only the one holding it.
 	var waiting_bits := 0
 	for ability in _timed:
 		if ability.buffer_ticks_left > 0:
@@ -427,8 +367,7 @@ func _run_actions(dt: float) -> void:
 	_started_later.clear()
 	for ability in _actions:
 		if ability.is_running_timed():
-			# Started a moment ago in this same pass, by a press an earlier ability in the list handled (_best_ready picked this
-			# one). Its first tick is the next one, as for an ability started at its own place in the list.
+			# Started in this pass by an earlier ability's press (_best_ready picked it); its first tick is the next one.
 			if not _started_later.is_empty() and _started_later.has(ability):
 				continue
 			ability.tick(dt)
@@ -444,8 +383,7 @@ func _run_actions(dt: float) -> void:
 		if not pressed and ability.buffer_ticks_left <= 0:
 			continue
 		if _is_ready(ability):
-			# The best ready one on this action: jitter or an effect's boost can lift another above this one. With neither, it's
-			# this one.
+			# Jitter or an effect's boost can lift another ability on this action above this one.
 			var chosen := _best_ready(ability, pressed_bits | waiting_bits)
 			_clear_way(chosen) # cancels what it's strong enough to cancel
 			_start(chosen)
@@ -461,9 +399,8 @@ func _run_actions(dt: float) -> void:
 				ability.buffer_ticks_left = 0
 
 
-# Of the abilities on first's action that are pressed or waiting and ready, the one with the highest priority plus jitter and boosts
-# (pawn spec 8.11); ties go to the earlier in the list (first itself, when nobody has jitter). The list is sorted by priority, so with
-# no jitter and no boost this is always first. wanted_bits is the actions pressed this tick or waiting in a buffer.
+# Of the ready abilities on first's action that are pressed or waiting, the highest priority plus jitter and boosts (pawn spec 8.11);
+# ties go to the earlier in the list. With no jitter and no boost that is always first. wanted_bits: actions pressed or buffered.
 func _best_ready(first: AbilityBase, wanted_bits: int) -> AbilityBase:
 	var best := first
 	var best_score := _priority_now(first)
@@ -481,8 +418,7 @@ func _best_ready(first: AbilityBase, wanted_bits: int) -> AbilityBase:
 	return best
 
 
-# Priority plus boosts from effects (press_priority_now), plus this tick's random offset, from the tick's own random numbers, so a
-# replay draws the same.
+# Priority plus effect boosts plus this tick's random offset, drawn from the tick's own random numbers so a replay draws the same.
 func _priority_now(ability: AbilityBase) -> float:
 	if ability.priority_jitter <= 0.0:
 		return float(press_priority_now(ability))
@@ -492,8 +428,7 @@ func _priority_now(ability: AbilityBase) -> float:
 	return press_priority_now(ability) + rng.randf_range(-ability.priority_jitter, ability.priority_jitter)
 
 
-## An ability's priority right now: its own, plus what effects on the pawn add to it (AbilityPriorityPart, pawn spec 8.11). Without
-## priority_jitter's random offset.
+## An ability's priority now: its own plus what effects add (AbilityPriorityPart, pawn spec 8.11), without the jitter offset.
 func press_priority_now(ability: AbilityBase) -> int:
 	return ability.priority + _bonus(ability, AbilityPriorityPart.Number.PRESS_PRIORITY)
 
@@ -503,8 +438,7 @@ func interrupt_priority_now(ability: AbilityBase) -> int:
 	return ability.interrupt_priority + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_PRIORITY)
 
 
-## Its interrupt_threshold right now, with what effects add. For a stepped ability, the strictest of its running steps' thresholds
-## (AbilityBase.current_interrupt_threshold).
+## Its interrupt_threshold now, with what effects add; for a stepped ability, the strictest of its running steps'.
 func interrupt_threshold_now(ability: AbilityBase) -> int:
 	return ability.current_interrupt_threshold() + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD)
 
@@ -523,14 +457,14 @@ func _is_ready(ability: AbilityBase) -> bool:
 	return ability.cooldown_ticks_left <= 0 and _combo_allows(ability) and _conflicts_allow(ability) and ability.can_start()
 
 
-## Opens the combo window for this many ticks. An OpenComboStep calls it after its ability's hit.
+## Opens the combo window for this many ticks. An [OpenComboStep] calls it after its ability's hit.
 func open_combo_window(ticks: int) -> void:
 	combo_window_ticks_left = maxi(ticks, 0)
 	readiness_version += 1
 
 
-## The combo position this ability would take if it started now: the next one, if the window is open and it fits there; else 1, if
-## it's an opener; else 0, meaning it can't start now. 0 too for an ability with no combo_positions.
+## The combo position it would take if it started now: the next, if the window is open and it fits; else 1 for an opener; else 0
+## (can't start now). 0 too with no combo_positions.
 func combo_position_for(ability: AbilityBase) -> int:
 	if ability.combo_positions.is_empty():
 		return 0
@@ -550,9 +484,8 @@ func _conflicts(a: AbilityBase, b: AbilityBase) -> bool:
 	return a.locks_out_mask & b.category_mask != 0 or b.locks_out_mask & a.category_mask != 0
 
 
-# True if every running ability that conflicts with this one would let it through (_lets_through).
-# Only abilities with a timer can be running, so while _timed is up to date only those are looked at. It's never rebuilt here:
-# _run_actions loops over _timed while it asks this. Out of date, every ability is looked at, which gives the same answer.
+# True if every running ability that conflicts with this one lets it through (_lets_through). Looks at _timed, never rebuilding it
+# here because _run_actions loops over it while asking; when it's out of date, every ability is looked at, with the same answer.
 func _conflicts_allow(ability: AbilityBase) -> bool:
 	for other in (_abilities if _timers_dirty else _timed):
 		if other != ability and other.is_running_timed() and not _lets_through(ability, other):
@@ -560,22 +493,16 @@ func _conflicts_allow(ability: AbilityBase) -> bool:
 	return true
 
 
-# The one rule, shared by starting abilities and the interrupt table so the two can't disagree: true if running lets starting start:
-# they don't conflict, or starting is strong enough (with what effects add to the two numbers), or running lists starting's group
-# in cancelled_by.
+# The one rule, shared by starting and the interrupt table so they can't disagree: they don't conflict, or starting is strong enough
+# (effects included), or running lists starting's group in cancelled_by.
 func _lets_through(starting: AbilityBase, running: AbilityBase) -> bool:
 	return not _conflicts(starting, running) or interrupt_threshold_now(running) <= interrupt_priority_now(starting) \
 			or running.cancelled_by_mask & starting.category_mask != 0
 
 
-## For the interrupt table: what happens if starting tries to start while running runs, by this pawn's numbers now, including what
-## effects add, so a change made while playing (a berserk state raising a threshold) shows. It doesn't look at cooldowns or
-## can_start().
-## [br]
-## Returns {"result": "alongside" | "cancels" | "blocked", "reason": text}:
-## [br]- alongside: they don't conflict: neither's locks_out covers the other, so both run.
-## [br]- cancels: running stops and starting starts (priority at least the threshold, or cancelled_by).
-## [br]- blocked: starting can't start while running runs (for a locomotion ability: it stops steering instead).
+## What happens if starting tries to start while running runs, by this pawn's numbers now (effects included). Ignores cooldowns and can_start.
+## [br]Returns {"result": "alongside" | "cancels" | "blocked", "reason": text}: alongside (no lockout between them), cancels (priority at
+## least the threshold, or cancelled_by), blocked (a locomotion ability stops steering instead).
 func interrupt_rule(starting: AbilityBase, running: AbilityBase) -> Dictionary:
 	if not _conflicts(starting, running):
 		return {"result": "alongside", "reason": "no lockout between them"}
@@ -588,14 +515,12 @@ func interrupt_rule(starting: AbilityBase, running: AbilityBase) -> Dictionary:
 	return {"result": "blocked", "reason": "priority %d < threshold %d" % [priority, threshold]}
 
 
-## The interrupt table for this pawn (pawn spec 8.10): one row per ability that could be running (timed ones, and locomotion), one
-## entry per other ability, each [method interrupt_rule]'s answer plus "running" and "starting" names. In run order. An action that
-## happens at once, such as Jump, never runs, so it has no row; it's still in every row's entries, as something starting.
+## The interrupt table (pawn spec 8.10): a row per ability that can run (timed ones and locomotion), in run order, with an
+## [method interrupt_rule] answer per other ability. Instant actions such as Jump have no row.
 func get_interrupt_table() -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
 	for running in _abilities:
-		# Timed abilities roll back their timer, ticks_left: that's how to tell them from instant ones, whose length can come from
-		# duration, steps (MeleeAttack), phases (Dash) or a push (Knockback).
+		# Timed abilities roll back ticks_left, which tells them from instant ones (their length can come from steps, phases or a push).
 		if running.kind != AbilityBase.Kind.LOCOMOTION and not running.get_rollback_properties().has("ticks_left"):
 			continue
 		var row := {"running": running.name, "priority": interrupt_priority_now(running), "threshold": interrupt_threshold_now(running), "cells": {}}
@@ -606,7 +531,7 @@ func get_interrupt_table() -> Array[Dictionary]:
 	return rows
 
 
-## The interrupt table as text, for a debug print or a readout: a line per running ability, with what cancels it and what it blocks.
+## The interrupt table as text, a line per ability with what cancels it and what it blocks.
 func get_interrupt_table_text() -> String:
 	var lines: PackedStringArray = []
 	for row in get_interrupt_table():
@@ -623,7 +548,7 @@ func get_interrupt_table_text() -> String:
 	return "\n".join(lines)
 
 
-# Cancels every running ability that conflicts with this one. Call it only after _conflicts_allow said yes.
+# Cancels every running ability that conflicts with this one. Only after _conflicts_allow said yes.
 func _clear_way(ability: AbilityBase) -> void:
 	var cancelled := false
 	for other in _abilities:
@@ -635,7 +560,7 @@ func _clear_way(ability: AbilityBase) -> void:
 		_recompute_locks()
 
 
-# The categories locked out right now, from every running timed action.
+# The categories locked out now, from every running timed action.
 func _recompute_locks() -> void:
 	_locked_mask = 0
 	_locks_dirty = false
@@ -653,8 +578,7 @@ func _rebuild_timed() -> void:
 			_timed.append(ability)
 
 
-# The input channel: whether _run_actions would do anything this tick. It does with a new press of an action something here answers
-# to, or an action running, or a press waiting in a buffer. Otherwise it would only loop and skip.
+# Whether _run_actions has work this tick: a new press of an action answered here, an action running, or a buffered press.
 func _actions_have_work() -> bool:
 	if _held() & ~_previous_held() & _action_bits != 0:
 		return true
@@ -668,7 +592,7 @@ func _start(ability: AbilityBase) -> void:
 	readiness_version += 1
 	ability.buffer_ticks_left = 0
 	ability.pawns_hit_this_run.clear()
-	# A combo ability takes its position, and the window closes until its OpenComboStep opens it again.
+	# A combo ability takes its position and closes the window until its OpenComboStep opens it again.
 	var taken := combo_position_for(ability)
 	if taken > 0:
 		combo_position = taken
@@ -677,8 +601,8 @@ func _start(ability: AbilityBase) -> void:
 	if ability.kind == AbilityBase.Kind.ACTION and ability.is_running_timed():
 		_locked_mask |= ability.locks_out_mask # later abilities this tick respect it at once
 	ability.start()
-	# Its on-start effects, on its own pawn, on every machine that runs it (replays too), so an over-time one such as a combo boost
-	# is predicted. Their do-once parts only run on the authority (EffectManager). Pawn spec 8.11.
+	# On-start effects go on its own pawn on every machine that runs it, replays too, so an over-time one (a combo boost) is
+	# predicted; their do-once parts run only on the authority (EffectManager). Pawn spec 8.11.
 	if not ability.on_start_effects.is_empty() and pawn.effect_manager:
 		pawn.effect_manager.apply_effects(ability.on_start_effects, pawn, ability)
 	ability_started.emit(ability)
@@ -700,18 +624,9 @@ func _finish(ability: AbilityBase) -> void:
 # --- Hits and death (pawn spec 8.16: hits and death are abilities' business) ---
 
 
-## Something hit this pawn. Called on the server by the attacker, such as a MeleeSweepStep. In order:
-## [br]1. An invulnerable pawn (an active MISS interceptor) or a dead one: nothing happens.
-## [br]2. [signal hit_arrived] goes out, and the AI notes the hit (its AIContextComponent listens), for the "being hit" state rules.
-## [br]3. An active TURN_AWAY HitInterceptor can turn it away (a parry, from the front): no effects land, and its response goes out
-##   instead (pawn spec 8.23).
-## [br]4. Its EffectManager applies the hit's effects: damage (a StatChangePart; at 0 Health the Death ability starts and died goes
-##   out), the push (a KnockbackPart starting Knockback here), and threat for the Health taken.
-## [br]5. [signal hit_received] goes out, and the attacker gets the hit's attacker_effects.
-## [br]
-## Called during the simulate phase, as an ability's hit is, it's queued, and every queued hit is delivered after all pawns have
-## simulated, in a fixed order, so the result never depends on whether this pawn simulated before or after its attacker (pawn spec
-## 15.4). Called at any other time, such as from game code or a test, it takes effect at once.
+## Something hit this pawn; the server's attacker calls it, such as a [MeleeSweepStep]. Dead or invulnerable pawns ignore it. During
+## simulate it's queued and delivered after every pawn has simulated, in a fixed order (attacker's entity id, target's, queue order),
+## so it never depends on who simulated first (pawn spec 15.4); otherwise it takes effect at once. Steps: see the README.
 func receive_hit(hit: HitInfo) -> void:
 	if pawn == null or not pawn.is_authority() or hit == null or pawn.is_dead():
 		return
@@ -721,14 +636,14 @@ func receive_hit(hit: HitInfo) -> void:
 	_take_hit(hit)
 
 
-## The EffectManager calls this on the authority when an effect has just taken this pawn's Health to 0: its Death ability starts and
-## died goes out. hit is the hit that did it, or null (a poison's tick). Nothing happens if it's already dead.
+## The EffectManager calls this on the authority when an effect took Health to 0: Death starts and [signal died] goes out. hit is the
+## hit that did it, or null (a poison's tick). Nothing if already dead.
 func health_ran_out(hit: HitInfo) -> void:
 	if pawn and pawn.is_authority() and not pawn.is_dead():
 		_die(hit)
 
 
-## Brings a dead pawn back with full Health, on the server. Its Death ability ends on its next tick.
+## Brings a dead pawn back with full Health, on the server. Death ends on its next tick.
 func revive() -> void:
 	if pawn == null or not pawn.is_authority() or pawn.stat_manager == null:
 		return
@@ -737,8 +652,8 @@ func revive() -> void:
 		stat.current = stat.value
 
 
-# The hit itself, the steps in receive_hit's description. Checked again here, because a queued hit can arrive after another killed
-# it, and for invulnerability, checked when the hit is delivered: a dash started in the same tick dodges it.
+# The hit itself. Checked again here: a queued hit can arrive after another killed this pawn, and a dash started in the same tick
+# dodges it.
 func _take_hit(hit: HitInfo) -> void:
 	if not pawn.is_authority() or pawn.is_dead() or is_invulnerable():
 		return
@@ -754,8 +669,7 @@ func _take_hit(hit: HitInfo) -> void:
 		attacker.effect_manager.apply_effects(hit.attacker_effects, attacker, hit.ability, hit)
 
 
-# Health reached 0: the Death ability starts, which locks out everything and stops the pawn steering; then died goes out, and the
-# parts that care clean up (effects end, the AI's behaviour stops, its hands let go).
+# Health reached 0: Death starts (it locks out everything), then died goes out and the parts that care clean up.
 func _die(hit: HitInfo) -> void:
 	if _death == null:
 		return
@@ -763,12 +677,10 @@ func _die(hit: HitInfo) -> void:
 	died.emit(pawn, hit)
 
 
-# Holds a hit until after simulate. One queue for all pawns, delivered by the tick driver's after_simulate signal, which is connected
-# the first time a hit is queued.
+# Holds a hit until after simulate: one queue for all pawns, delivered on the tick driver's after_simulate (connected on first use).
 func _queue_hit(hit: HitInfo) -> void:
 	if _hit_queue_driver != _driver:
-		# GDScript note: AbilityManager._deliver_queued_hits is a Callable on the class itself, not on this manager, so it keeps working
-		# after this one is freed.
+		# The Callable is on the class, not this manager, so it keeps working after this one is freed.
 		if is_instance_valid(_hit_queue_driver) and _hit_queue_driver.after_simulate.is_connected(AbilityManager._deliver_queued_hits):
 			_hit_queue_driver.after_simulate.disconnect(AbilityManager._deliver_queued_hits)
 		_driver.after_simulate.connect(AbilityManager._deliver_queued_hits)
@@ -776,8 +688,7 @@ func _queue_hit(hit: HitInfo) -> void:
 	_queued_hits.append([_order_key(hit.attacker), _order_key(pawn), _queued_hits.size(), hit])
 
 
-# The entity id, which is the same on every machine, or -1 for a pawn that isn't networked (the queue order then decides, which is
-# the order pawns simulated in).
+# The entity id, the same on every machine; -1 for a pawn that isn't networked (the queue order then decides).
 static func _order_key(node: Node) -> int:
 	var target := node as Pawn
 	if target == null or not is_instance_valid(target) or target.get_network_entity() == null:
@@ -785,7 +696,7 @@ static func _order_key(node: Node) -> int:
 	return target.get_network_entity().entity_id
 
 
-# Delivers every queued hit, sorted by the attacker's entity id, then the target's, then the order they were queued.
+# Delivers every queued hit, sorted by attacker's entity id, then target's, then queue order.
 static func _deliver_queued_hits(_dt: float, _tick: int) -> void:
 	if _queued_hits.is_empty():
 		return
@@ -821,8 +732,7 @@ func _collect_abilities() -> void:
 			child.collect_steps()
 			_collect_interceptors(child) # after its steps, which can hold them too
 			_abilities.append(child)
-	# GDScript note: sort_custom keeps this rule; abilities with equal priority keep their tree order because each has a distinct index.
-	# Highest priority first.
+	# Highest priority first, then tree order.
 	_abilities.sort_custom(func(a: AbilityBase, b: AbilityBase) -> bool:
 		return a.priority > b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
 	_death = null
@@ -836,8 +746,8 @@ func _collect_abilities() -> void:
 			_stepped.append(ability)
 		if ability.needs_full_movement:
 			_full_movement_abilities.append(ability)
-		# REFACTOR: Death and Knockback are found by class, so a game can only change dying or staggering by extending these two
-		# classes. Finding them by tag (status.dead, combat.knockback) would let any ability fill the role; extensible.
+		# REFACTOR: Death and Knockback are found by class, so a game changes dying or staggering only by extending them. A tag
+		# (status.dead, combat.knockback) would let any ability fill the role; extensible.
 		if ability is DeathAbility and _death == null:
 			_death = ability
 		if ability is KnockbackAbility and _knockback == null:
@@ -875,8 +785,8 @@ func _collect_abilities() -> void:
 	readiness_version += 1
 
 
-# The ability's EffectApplier children, into its three effect lists (pawn spec 8.11). Each effect is registered, so an over-time one
-# in a pawn's active list is recognised by its id on every machine (Effect.register).
+# The ability's EffectApplier children, into its three effect lists (pawn spec 8.11). Each effect is registered so an over-time one in
+# the active list is recognised by id on every machine (Effect.register).
 func _collect_effects(ability: AbilityBase) -> void:
 	ability.on_start_effects.clear()
 	ability.on_hit_effects.clear()
@@ -900,9 +810,8 @@ func _collect_effects(ability: AbilityBase) -> void:
 				ability.on_hit_effects.append(effect)
 
 
-# An ability's HitInterceptors (pawn spec 8.23), under it and under its steps (making its defaults first if it has none), each told
-# its ability, step and pawn, with its ON_INTERCEPT effects; and into the manager's two lists, highest priority first, tree order
-# between equals. GDScript note: sort_custom isn't stable, so the order they were found in is kept as a tie-break.
+# An ability's HitInterceptors (pawn spec 8.23), under it and its steps (its defaults are made first if it has none), into the two
+# lists, highest priority first. sort_custom isn't stable, so the order found is kept as the tie-break.
 func _collect_interceptors(ability: AbilityBase) -> void:
 	var found: Array[HitInterceptor] = []
 	_find_interceptors(ability, null, ability, found)
@@ -934,7 +843,7 @@ func _collect_interceptors(ability: AbilityBase) -> void:
 			return a.priority > b.priority or (a.priority == b.priority and int(a.get_meta(&"found_order")) < int(b.get_meta(&"found_order"))))
 
 
-# The interceptors directly under node (an ability, or one of its steps), and under its steps.
+# The interceptors directly under node (an ability or a step), and under its steps.
 func _find_interceptors(node: Node, step: AbilityStep, ability: AbilityBase, found: Array[HitInterceptor]) -> void:
 	for child in node.get_children():
 		if child is HitInterceptor:
@@ -944,7 +853,7 @@ func _find_interceptors(node: Node, step: AbilityStep, ability: AbilityBase, fou
 			_find_interceptors(child, child, ability, found)
 
 
-## Tells the pawn's TickStateComponent which ability properties roll back, before the first tick is recorded.
+# Tells the pawn's TickStateComponent which ability properties roll back, before the first tick is recorded.
 func _register_rollback_state() -> void:
 	if pawn == null:
 		return
@@ -965,7 +874,7 @@ func _register_rollback_state() -> void:
 		var path := String(pawn.get_path_to(ability))
 		for property in ability.get_rollback_properties():
 			entries.append("%s:%s" % [path, property])
-		# And its steps' own extra state, so a replay lands in the same steps on the same tick.
+		# Its steps' extra state too, so a replay lands in the same steps on the same tick.
 		for step in ability.steps:
 			var step_path := String(pawn.get_path_to(step))
 			for property in step.get_rollback_properties():

@@ -1,16 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## The base for one AI sense, such as sight: notices other pawns and writes what it found into memory.
 ##
-## A child of the pawn's AISensingManager. Pawn spec section 10.4. A sense never decides anything. It notices other pawns and writes
-## what it found into the pawn's memory ([AIMemory]), with a gain that says how strongly it noticed them. Memory, states and
-## behaviours don't care which sense it was.
-## [br]
-## How to make one: extend this and override any of:
-## [br]- [method get_range]: how far it reaches, so the manager's one shared query is big enough for every sense
-## [br]- [method full_pass]: on each full pass. candidates are the other-team pawns within range, from the manager's query
-## [br]- [method refresh]: between full passes, a cheap check of the current target
-## [br]
-## t0 has only SightSense. Hearing is deferred (pawn spec section 14), and being hit is a state rule, not a sense.
+## A child of the pawn's [AISensingManager]. A sense never decides anything: it writes into the pawn's [AIMemory], with a gain saying
+## how strongly it noticed. Extend it and override [method get_range] (how far it reaches, so the manager's one shared query covers
+## every sense), [method full_pass] (candidates are the other-team pawns in range) and [method refresh] (a cheap check of the current
+## target between full passes). Only [SightSense] exists; hearing is deferred.
+## Design: pawn spec 10.4 and 14.
 class_name AISenseBase
 extends Node
 

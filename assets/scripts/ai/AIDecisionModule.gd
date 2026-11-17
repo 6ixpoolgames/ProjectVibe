@@ -1,43 +1,14 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: ai/CHANGELOG.md.
-## Makes the AI's behaviour decisions in C++, the main path, and decides which pawns use GDScript's decider, the backup.
+## Makes the AI's behaviour decisions in C++ (the main path) and decides which pawns use GDScript's decider (the backup).
 ##
-## A GameMode module ([code]GameMode.get_module(AIDecisionModule)[/code]). Scaling spec 6.2, steps 5c and 5d. It holds the C++
-## decider (AIBatchDecider): one brain per behaviour set, shared by the pawns using it, and each pawn's row: its decision state
-## (running behaviour, cooldowns, persistence) and the facts a decision is made from. A pawn deciding in C++ asks it for each decision
-## ([method decide_in_cpp]); C++ decides from the row alone, and the behaviour manager starts the chosen behaviour. Without this module
-## every pawn decides in GDScript, as before.
-## [br]
-## [b]Facts are written through[/b] (the owner's call): whatever owns a fact writes it into the pawn's row when it changes, so a
-## decision gathers nothing. The state manager's state_changed, the context's current_target setter, its notes of hits and swings, a
-## game's inputs (AIInputs.set_input), and the actions that could start when the AbilityManager's readiness_version has moved on.
-## A group's nearest point is the one fact sent at every decision of a pawn whose conditions read it (Go To Point): the point can move
-## or be freed between the lookup's 2-second looks, and GDScript reads where it is at each decision, so C++ must too. The pawn's position and memory are read in C++ (its body, its
-## AIMemoryStore). Shadow mode also checks that the written facts match the live ones ([code]stale_facts[/code] in [method get_counts]).
-## [br]
-## Where each pawn decides (the owner's call: C++ is main, GDScript a dormant backup):
-## [br]- The pawn's own setting, [member AIBehaviourManager.decides_in] (C++ by default), unless [member decider] overrides it for
-##   every pawn.
-## [br]- GDScript regardless, with a warning naming why, for: a game without the C++ library, a pawn on the GDScript memory store, and a
-##   "special mind": a behaviour with
-##   its own is_available() or score() code, a persistence fade or mask whose script has its own value_at(), or a condition of a
-##   kind C++ doesn't know. C++ can't read code, so such a pawn keeps the GDScript decider; there should only be a few.
-## [br]
-## Nothing watches every tick: where a pawn decides is settled when it first decides, and again only when something changes it (its
-## setting, [member decider], its behaviours' conditions).
-## [br]
-## [member check_against_gdscript] (shadow mode, for tests and finding faults): every pawn decides in GDScript, and each pawn that
-## could decide in C++ also has C++ decide beside it, from C++'s own copy of its state; the answers are compared and counted
-## ([method get_counts]), the first few disagreements logged, and C++'s copy put right after one.
-## [br]
-## A tripwire in debug builds: every so many C++ decisions, one also checks the pawn's written facts against the live ones, and warns
-## (the F8 log) when one is out of date, so a write missed by new code shows up while playing, not only in tests. Its pace follows how
-## busy the tick is (TickDriver.load_average): every [constant FACT_CHECK_EVERY_IDLE]th with time to spare, every
-## [constant FACT_CHECK_EVERY]th normally, every [constant FACT_CHECK_EVERY_BUSY]th near the budget, so it checks most when it costs
-## least.
-## [br]
-## Keys (debug builds): F10 switches every pawn to GDScript and back, to tell whether a fault is in the C++ decider.
-## [br]
-## What it costs is timed ([PerfScopes]): [code]ai.decide.cpp[/code], one pawn's decision in C++ with its inputs gathered.
+## A GameMode module ([code]GameMode.get_module(AIDecisionModule)[/code]). It holds the C++ decider ([code]AIBatchDecider[/code]): one
+## brain per behaviour set, and each pawn's row (its decision state and the facts a decision is made from). A pawn deciding in C++
+## asks it for each decision ([method decide_in_cpp]) and its [AIBehaviourManager] starts the chosen behaviour. Without this module,
+## or without the C++ library, every pawn decides in GDScript. Facts are written into the row when they change, so a decision gathers
+## nothing. [member check_against_gdscript] is shadow mode: GDScript decides, C++ decides beside it, and the two are compared
+## ([method get_counts]). In debug builds F10 switches every pawn to GDScript and back, and a sampled check warns when a written fact
+## is out of date. Timed as [code]ai.decide.cpp[/code] ([PerfScopes]).
+## Design: scaling spec 6.2, steps 5c and 5d.
 class_name AIDecisionModule
 extends GameModeModule
 
@@ -62,8 +33,8 @@ enum Decider {
 @export_range(0, 100, 1, "or_greater") var warnings_kept := 5
 
 const KNOWN_CONDITION_KINDS := ["always", "compare", "chance", "any"] # the kinds AIBatchDecider reads
-## The tripwire's pace (see the class description), in C++ decisions between checks: under half the tick's budget, up to 90% of it,
-## and above that.
+## The sampled fact check's pace (debug builds), in C++ decisions between checks: with time to spare (load under half the tick's
+## budget), normally, and near the budget (above 90%). It checks most when it costs least.
 const FACT_CHECK_EVERY_IDLE := 20
 const FACT_CHECK_EVERY := 100
 const FACT_CHECK_EVERY_BUSY := 1000
@@ -250,8 +221,8 @@ func decide_in_cpp(manager: AIBehaviourManager, tick: int, event_priority: int, 
 	if AIInputs.input_count() != _kinds_sent:
 		_kinds_sent = AIInputs.input_count()
 		_decider.set_input_kinds(AIInputs.kinds())
-	# The two facts written here rather than by their owner, each only when it changed: the actions that could start (once the
-	# AbilityManager's readiness_version has moved on), and a group's nearest point (when the lookup, every 2 seconds, finds another).
+	# Written here, not by their owner, and only when changed: the actions that could start (once the AbilityManager's
+	# readiness_version moves on), and a group's nearest point (when the lookup, every 2 seconds, finds another).
 	var abilities := manager.pawn.ability_manager
 	if abilities and (abilities.readiness_version != kept["ready_version"] or kept["follows_body"]):
 		kept["ready_version"] = abilities.readiness_version
@@ -345,8 +316,8 @@ func _write_readiness(manager: AIBehaviourManager, kept: Dictionary) -> void:
 		_decider.set_input(manager.cpp_row, slot, inputs.value(slot))
 
 
-# Each group's nearest point, where it is now. The lookup keeps the node for 2 seconds but checks it's still there at every call, as
-# GDScript's own reading does, and a point can move (one carried by a hero), so its position goes over at every decision.
+# Each group's nearest point, where it is now. The node is kept 2 seconds but checked at every call (as GDScript's reading does), and
+# a point can move (one carried by a hero), so its position goes over at every decision.
 func _write_group_points(manager: AIBehaviourManager, kept: Dictionary, tick: int) -> void:
 	var inputs := manager.pawn.ai_context.inputs
 	for group: Array in kept["groups"]:

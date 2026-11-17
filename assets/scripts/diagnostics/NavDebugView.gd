@@ -1,30 +1,20 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17, at the owner's request. History: navigation/CHANGELOG.md.
 ## A debug view of navigation: the live nav mesh, the nav links and the nav markers, on F9.
 ##
-## The markers include points of interest, links, areas and the rest. Part of diagnostics: F9 shows and hides it in any level, through
-## DiagnosticsPanels, which makes it the first time. Debug builds only: in a release build it does nothing.
-## [br]
-## What it draws, around the camera (or the follow node), radius metres each way:
-## [br]- The nav mesh: the triangles pawns can walk on, just above the ground, coloured by how much room they have (NavServer's tier
-##   colours: blue only the smallest pawns fit, then green, yellow and orange for room enough for the biggest).
-## [br]- Nav links: an arc from each link's start to its end, the jumps and drops nav found and the links a designer placed. Cyan goes
-##   both ways; orange is one way, with a tick at the end it lands on.
-## [br]- Nav markers, through NavMarkerDebugModule (its colours: points white, links cyan, areas green, obstacles red, smart objects
-##   yellow, switched-off markers grey). Points of interest are NavPoint markers (point.cover, point.patrol...).
-## [br]
-## Hidden, it costs nothing: the marker drawer is made when the view is shown and freed when it's hidden.
-## [br]
-## Without the C++ library there's no nav mesh or links to draw, so only the markers show.
+## F9 shows and hides it in any level, through [DiagnosticsPanels], which makes it the first time. Debug builds only: in a release
+## build it does nothing. Around the camera (or [member follow]), [member radius] metres each way, it draws the nav mesh (coloured by
+## how much room each triangle has, from [code]NavServer[/code]'s tiers), the nav links (arcs; cyan both ways, orange one way) and the
+## nav markers (through [code]NavMarkerDebugModule[/code]). Hidden, it costs nothing. Without the C++ library only the markers show.
 class_name NavDebugView
 extends Node3D
 
-## Shown or not. set_shown() changes it.
+## Shown or not; [method set_shown] changes it.
 @export var shown := false
 ## The drawn area: this many metres each way from the centre.
 @export var radius := 60.0
-## The centre of the drawn area. Empty: the current camera, as seen from above (the point under it on the ground plane).
+## The centre of the drawn area. Empty: the point on the ground plane the current camera looks at.
 @export var follow: Node3D
-## The most often the nav mesh drawing is rebuilt, in seconds. It's rebuilt when nav tiles change or the centre moves a quarter of radius.
+## The least time between rebuilds of the drawing, in seconds. It rebuilds when nav tiles change or the centre moves a quarter of [member radius].
 @export var rebuild_interval := 0.5
 
 const LIFT := 0.08 # the nav mesh is drawn this far above the ground, so it doesn't flicker into it
@@ -51,7 +41,7 @@ func _ready() -> void:
 		return
 	if Engine.has_singleton(&"NavServer"):
 		_nav = Engine.get_singleton(&"NavServer")
-		# GDScript note: connect() with a lambda; the tiles' list isn't needed, only that something changed.
+		# Only that something changed matters, not the tiles' list.
 		_nav.tiles_changed.connect(func(_tiles: Variant) -> void: _needs_rebuild = true)
 	var mesh_material := StandardMaterial3D.new()
 	mesh_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -169,7 +159,7 @@ func _draw_nav_mesh(data: Dictionary) -> void:
 	for i in vertices.size():
 		vertices[i].y += LIFT
 	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX) # a surface is an array with one slot per kind of data, most of them unused here
+	arrays.resize(Mesh.ARRAY_MAX) # one slot per kind of data; most are unused here
 	arrays[Mesh.ARRAY_VERTEX] = vertices
 	arrays[Mesh.ARRAY_COLOR] = data.get("colors", PackedColorArray())
 	var mesh := ArrayMesh.new()

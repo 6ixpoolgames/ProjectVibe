@@ -1,33 +1,23 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: replay/CHANGELOG.md.
 ## Replay channel 6, "diagnostics": how each frame went, recorded alongside the game.
 ##
-## Diagnostics hook into replay (the owner's call; docs/diagnostics/DIAGNOSTICS_SPEC.md), so one recording holds what happened and what
-## it cost. It's a plain data channel in the base, like the others: something else fills it. That's the [DiagnosticsManager]
-## (diagnostics/), which adds this channel to the recorder; in a game without it, nothing is recorded here.
+## One recording then holds what happened and what it cost. The [DiagnosticsManager] adds this channel and fills it; in a game
+## without it nothing is recorded here. A tick writes the frames that finished since the last tick (a frame can run two ticks, or
+## none while paused), each with its own frame number.
 ## [br]
-## Frames and ticks aren't the same: a frame can run two ticks when it catches up, or none while paused. So each tick writes the frames
-## that finished since the last tick, each with its own frame number.
-## [br]
-## A tick's bytes:
-## [br]- On a keyframe, the snapshot (put_var: the scope names so far, so reading can start at any block).
-## [br]- The frame count (u16), and for each frame: frame number (u32); frame, physics, scripts and rest times (4 × f32, ms); physics
-##   steps (u8); drawing on the CPU and GPU (2 × f32, ms); draw calls, objects, nodes, orphan nodes, memory in KB (5 × u32); then its
-##   scopes: count (u16), and for each: the name's number (u16), microseconds (u32), calls (u16).
-## [br]- The events, as every event channel ([ReplayEventChannel]): "scope_name" (data: number, name) the first time a name is used;
-##   "log" (data: level, text, count) for warnings and errors; "capture" (data: folder) when a capture was taken (F12).
-## [br]
-## Recording, from whatever measures frames:
+## A tick's bytes: on a keyframe, the snapshot (put_var: the scope names so far); the frame count (u16), then per frame: number (u32);
+## frame, physics, scripts and rest ms (4 × f32); physics steps (u8); render CPU and GPU ms (2 × f32); draw calls, objects, nodes,
+## orphans, memory KB (5 × u32); scopes: count (u16), then name number (u16), microseconds (u32), calls (u16); then the events.
+## Events ([ReplayEventChannel]): "scope_name" (number, name), "log" (level, text, count), "capture" (folder; F12).
 ## [codeblock]
-## channel.add_frame(record)  # {frame, frame_ms, physics_ms, scripts_ms, rest_ms, steps, render_cpu_ms, render_gpu_ms,
-##                            #  draw_calls, objects, nodes, orphans, memory_kb, scopes: {name: [microseconds, calls]}}
-## channel.add_event("log", 0, {level, text, count})
+## channel.add_frame({frame, frame_ms, ..., scopes: {name: [microseconds, calls]}})
 ## [/codeblock]
-## Reading: state["frames"] holds this tick's frames, as records like the above (scopes by name).
+## Reading: [code]state["frames"][/code] holds this tick's frames as such records. Design: diagnostics spec.
 class_name ReplayDiagnosticsChannel
 extends ReplayEventChannel
 
 const ID := 6
-## Frames kept waiting while no tick runs (a paused game), so a long pause doesn't fill memory. The oldest go first.
+## Most frames kept waiting while no tick runs (a paused game); the oldest go first.
 const MAX_WAITING_FRAMES := 600
 
 var _frames: Array = [] # records waiting for the next tick
@@ -68,8 +58,7 @@ func snapshot() -> Dictionary:
 
 
 func write_tick(tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
-	# The frames first, numbering new scope names as events (written below, by super), so a reader knows each name before the next
-	# tick. The snapshot on a keyframe has every name, so the frames of that tick are readable even from a block's start.
+	# New scope names become events (written by super below); a keyframe's snapshot has every name, so a block start is readable.
 	var frames := _frames
 	_frames = []
 	var body := StreamPeerBuffer.new()
@@ -96,7 +85,7 @@ func write_tick(tick: int, out: StreamPeerBuffer, keyframe: bool) -> void:
 	if keyframe:
 		out.put_var(snapshot())
 	out.put_data(body.data_array)
-	# The events, without a second snapshot: the base class writes one on a keyframe, so it's told this isn't one.
+	# keyframe is false here: the snapshot is already written above.
 	super(tick, out, false)
 
 
@@ -110,8 +99,7 @@ func read_tick(tick: int, data: StreamPeerBuffer, keyframe: bool, state: Diction
 		state["names"] = names
 	elif not state.has("names"):
 		state["names"] = {}
-	# The frames are read after this tick's events, because a name first used this tick arrives as an event after them. So the
-	# frame bytes are kept, the events read, then the frames decoded.
+	# A name first used this tick arrives as an event after the frames, so the frames are decoded after the events are read.
 	var count := data.get_u16()
 	var raw_frames: Array = []
 	for i in count:

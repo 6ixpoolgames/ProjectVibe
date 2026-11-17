@@ -15,14 +15,7 @@ Every class in `assets/scripts/world/`, from its doc comments. The overview is i
 
 Puts a static body (a wall, a rock, a building) into the nav mesh.
 
-The way TerrainNavFeeder puts the terrain in. Pawns then plan paths around it, and a pawn walking along the nav mesh (CrowdMover's C++ batch, NavWalking) slides along it instead of being handed to physics. Without it, nav doesn't know the body is there: paths go straight through it and only physics stops the pawn.
-
-How to use it: add this as a child of a StaticBody3D. Its box collision shapes (BoxShape3D) go into nav when it enters the tree and come out when it leaves. Other shapes are skipped with a warning; boxes cover walls and blocks, which is what t0 needs.
-
-What happens in odd cases:
-- The parent isn't a StaticBody3D: it warns and does nothing (a body that moves would need its nav tiles rebuilt as it goes).
-- No C++ library: it does nothing, quietly. The body still blocks pawns through physics.
-- The body is moved by code after it's placed: call refresh() so nav sees the new place.
+Add it as a child of a StaticBody3D, the way [`TerrainNavFeeder`](#terrainnavfeeder) puts the terrain in. Its box shapes go into nav when it enters the tree and come out when it leaves; other shapes are skipped with a warning. Pawns then plan paths around the body, and a pawn walking the nav mesh (CrowdMover's C++ batch, NavWalking) slides along it instead of being handed to physics. Without it, paths go straight through the body and only physics stops the pawn. After moving the body by code, call `refresh()`.
 
 ### Functions
 
@@ -33,18 +26,9 @@ What happens in odd cases:
 
 `res://assets/scripts/world/KillFloor.gd`, extends [`Node3D`](https://docs.godotengine.org/en/stable/classes/class_node3d.html)
 
-A height below which pawns die.
+A height below which pawns die, like Unreal's "kill Z".
 
-Like Unreal's "kill Z": place one in a level, at the height you want (its own Y), well below the lowest ground. A pawn that falls below it gets `kill_effect`, which by default takes all its Health, so it dies the usual way: its Death ability runs, a player comes back at a spawn point (SpawnManager), and a spawner's pawn is replaced.
-
-How it works: on the authority only (the server, or offline), every `check_every_ticks` ticks, after every pawn has simulated, it looks at each pawn in the tree. One below the height that isn't dead already gets the effect. Clients do nothing: the death reaches them in snapshots, as any death does.
-
-**Reporting falls** (`report_falls`). When a pawn falls this far, a warning in the Debugger says how it got there: where it was last standing, how long before, how fast it was going, and whether there's ground at the spot it fell through. Ground there means it went through solid ground (a physics bug); no ground means it went off the edge of the loaded world (a streaming bug, or the end of the map).
-
-What happens in odd cases (checked in tests/kill_floor_selftest.gd):
-- A pawn with no Health or no EffectManager can't be killed here, so it keeps falling. It's warned about once, by name.
-- No kill_effect: nothing happens to anyone, and a warning says so once.
-- Several KillFloors: each checks on its own.
+Place one in a level at the height you want (its own Y), well below the lowest ground. A pawn that falls below it gets `kill_effect`, by default all its Health, so it dies the usual way (its Death ability, a respawn at a SpawnManager spawn point, a spawner's replacement). It runs on the authority only (the server, or offline), every `check_every_ticks` ticks, after every pawn has simulated; clients see the death in snapshots. With `report_falls` on, a warning says how the pawn got there.
 
 ### Settings and properties
 
@@ -71,16 +55,7 @@ What happens in odd cases (checked in tests/kill_floor_selftest.gd):
 
 Feeds nav from a terrain generator, so that neither has to know the other exists.
 
-Spec: docs/world/WORLD_SPEC.md. [`TerrainGenerator`](../terrain/REFERENCE.md#terraingenerator) says when a chunk is built or removed. This hands its triangles to NavServer and announces its markers to NavMarkerManager. It also keeps nav built around every streaming source (within each one's `nav_distance`), and can tick NavServer (`tick_nav`).
-
-How to use it: normally it's a child of a [`WorldCoordinator`](#worldcoordinator), which tells it which terrain to use. It also works as a child of a TerrainGenerator with no coordinator at all. Give it a NavHooks to feed nav. With none, it only announces markers, which need no C++ library.
-
-What happens in odd cases (all checked in world/tests/world_coordinator_selftest.gd):
-- No terrain: it warns and does nothing.
-- It arrives after chunks are built: it catches up on them.
-- The nav library isn't loaded: it warns, and markers still work.
-- It leaves the scene: nav and NavMarkerManager forget everything it told them, and it tells them again if it comes back.
-- A source's distances change while running: its nav area is remade at the new size.
+[`TerrainGenerator`](../terrain/REFERENCE.md#terraingenerator) says when a chunk is built or removed; this hands its triangles to NavServer and announces its markers to NavMarkerManager. It also keeps nav built around every streaming source (within each one's `nav_distance`), and can tick NavServer (`tick_nav`). Normally a child of a [`WorldCoordinator`](#worldcoordinator), or of a TerrainGenerator with no coordinator. Give it a NavHooks to feed nav; with none it only announces markers, which need no C++ library. Design: world spec (docs/world/WORLD_SPEC.md).
 
 ### Settings and properties
 
@@ -101,17 +76,12 @@ What happens in odd cases (all checked in world/tests/world_coordinator_selftest
 
 Puts a level together from its parts: terrain, streaming and the nav feeder.
 
-Spec: docs/world/WORLD_SPEC.md. It wires its parts together and builds nothing itself, so that the terrain generator generates terrain and nav builds from what it's fed, with neither knowing the other exists. Tier 0 works with one TerrainGenerator. The owner's end goal, interchangeable and eventually blended level generators, is in the spec and isn't built.
-
-How to use it: add one to a level and give it these as children. It finds them by itself:
+Add one to a level with these as children; it finds them by itself and wires them together, and builds nothing itself. Code reaches them as `world.terrain_generator`, `world.chunk_streamer` and `world.nav_feeder`.
 - [`TerrainGenerator`](../terrain/REFERENCE.md#terraingenerator): required. It generates the ground.
-- [`ChunkStreamer`](../streaming/REFERENCE.md#chunkstreamer): optional. It loads chunks around streaming sources. Without it, the terrain builds its fixed block.
-- [`TerrainNavFeeder`](#terrainnavfeeder): optional. It feeds nav. Without it, there's no nav.
+- [`ChunkStreamer`](../streaming/REFERENCE.md#chunkstreamer): optional. It loads chunks around streaming sources; without it the terrain builds its fixed block.
+- [`TerrainNavFeeder`](#terrainnavfeeder): optional. It feeds nav; without it there's no nav.
 
-Code reaches them as `world.terrain_generator`, `world.chunk_streamer` and `world.nav_feeder`.
-
-What happens in odd cases (all checked in tests/world_coordinator_selftest.gd):
-- No terrain generator: it warns and does nothing.
+Tier 0 works with one terrain generator; interchangeable, eventually blended level generators are the end goal, not built. Design: world spec (docs/world/WORLD_SPEC.md).
 
 ### Settings and properties
 

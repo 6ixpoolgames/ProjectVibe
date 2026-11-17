@@ -1,44 +1,25 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Sight, for basic stealth: fills awareness of other-team pawns it can see, faster when they're close and in front.
 ##
-## A child of the pawn's AISensingManager. Pawn spec section 10.4. For each other-team pawn it checks, on a full pass or a refresh:
+## A child of the pawn's [AISensingManager]. For each other-team pawn it checks, on a full pass or a refresh:
 ## [codeblock]
 ## if there's no line of sight: no gain
-## gain = fill_rate × ticks_since_last_check × distance_factor × angle_factor × target.detectability
+## gain = fill_rate Ã— ticks_since_last_check Ã— distance_factor Ã— angle_factor Ã— target.detectability
 ## [/codeblock]
-## [br]- ticks_since_last_check makes the checking rate not matter: a target checked every 10 ticks gets 10 ticks' worth. It's capped
-##   at [member max_gain_ticks], so a pawn that wasn't sensing for a while (say while possessed with while_possessed OFF) doesn't jump.
-## [br]- distance_factor: 1 inside [member near_range], falling in a straight line to 0 at [member sight_range].
-## [br]- angle_factor: 1 inside the central cone, [member periphery_multiplier] in the periphery, nothing outside it. Angles are
-##   measured flat, from the direction the pawn's eyes face (below).
-## [br]- target.detectability: the target pawn's own number, 1 normally (its Detectability stat). Games set it from their stealth
-##   rules.
-## [br]
-## With the defaults, someone close and in front fills awareness in half a second, which is basically instant; someone 20 m away at
-## the edge of the periphery takes several seconds.
-## [br]
-## Line of sight is one ray, from [member eye_height] above this pawn's feet to [member target_height] above the target's feet. Only
-## layers in [member sight_blocking_mask] block it: the world (layer 1) by default, so other pawns don't hide each other. With the C++
-## library, the ray is tested in C++ against SightGeometry ([SightGeometryFeeder] keeps it fed), on worker threads when the sensing
-## job runs, instead of a physics ray (scaling spec step 4). A mask that includes the pawns' own layer keeps physics rays, because
-## pawns aren't in the geometry.
-## [br]
-## Which way the eyes face: where the AI is looking when it has a look target (AIController.look_at_point), or else the way the body
-## faces. While a player has the pawn, where the player looks. So a goblin looking toward a noise sees that way, and a walking goblin
-## sees where it's going.
-## [br]
-## Refreshes check only the current target, the same way, so a tracked target stays fresh between full passes for one ray.
-## [br]
-## The checks themselves run in the pawn's memory store, AIMemoryStore in C++ when available ([AIMemoryStoreGD] otherwise), with
-## these settings handed over each pass. [method visibility_of] and [method has_line_of_sight] are the same rules in GDScript, for
-## tests and debug readouts.
+## Ticks since the last check (capped at [member max_gain_ticks]) make the checking rate not matter; the distance factor is 1 inside
+## [member near_range] and falls to 0 at [member sight_range]; the angle factor is 1 in the central cone, [member periphery_multiplier]
+## in the periphery, 0 outside. Line of sight is one ray from the eyes to the target, blocked only by [member sight_blocking_mask]. The
+## eyes face where the AI is looking, else the way the body faces (where the player looks while one has the pawn). The checks run in the
+## pawn's memory store ([code]AIMemoryStore[/code] in C++, else [AIMemoryStoreGD]); with C++ the ray is tested against
+## [SightGeometryFeeder]'s geometry, on worker threads when the sensing job runs. Refreshes check only the current target.
+## Design: pawn spec 10.4, scaling spec step 4.
 # REFACTOR: visibility_of() and has_line_of_sight() are a third copy of the sight rule (beside AIMemoryStoreGD and C++'s
 # ai_sight_rules.h). Asking the pawn's memory store would leave one GDScript copy to keep in step (reusable). See CHANGELOG.md.
 class_name SightSense
 extends AISenseBase
 
-## Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Per tick at 60 ticks a second, like
-## every setting here counted in ticks; at another rate it's converted to fill at the same speed.
+## Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Per tick at 60 a second; at another rate
+## it's converted to fill at the same speed.
 @export_range(0.0, 1.0, 0.001, "or_greater") var fill_rate := 1.0 / 30.0:
 	set(value):
 		fill_rate = value
@@ -92,7 +73,7 @@ extends AISenseBase
 # Reused for every ray, so checks create no new objects.
 var _ray := PhysicsRayQueryParameters3D.new()
 # The settings handed to memory's store and the sensing job, in the order AIMemoryStore.set_sight_settings takes them. Filled again
-# only when a setting changes (each setting's setter marks them) or the match's tick rate does, and sent to the store only then.
+# only when a setting or the match's tick rate changes, and sent to the store only then.
 var _settings := PackedFloat64Array()
 var _settings_dirty := true
 var _settings_rate := -1 # the tick rate they were filled at
@@ -251,7 +232,7 @@ func _fill_settings() -> void:
 	_settings[10] = TickDriver.ticks_at_rate(manager.sense_interval_ticks if manager else 10) # the manager marks a change
 
 
-# Which way the eyes face, as a yaw: see the class description.
+# Which way the eyes face, as a yaw: the player's look, else where the AI was told to look, else the body's.
 func _eye_yaw() -> float:
 	var controllers := pawn.controller_manager
 	if controllers and controllers.has_player():

@@ -1,29 +1,22 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: replay/CHANGELOG.md.
-## Writes a replay file on a thread of its own (replay spec sections 1 and 2).
+## Writes a replay file on a thread of its own, so the game's ticks never wait for the disk.
 ##
-## The recorder hands it each finished block; this thread compresses the block with zstd and appends it to the file. So the game's
-## ticks never wait for the disk.
-## [br]
-## Why its own thread and not the job scheduler's: the scheduler's workers run work a tick is waiting for, such as AI sensing. A slow
-## disk on one of them would hold a tick up. This thread sleeps until a block arrives, so it costs almost nothing.
-## [br]
-## How to use it ([ReplayRecorder] does):
+## [ReplayRecorder] hands it each finished block; the thread compresses it with zstd and appends it to the file. It has its own
+## thread, not the job scheduler's, because a slow disk on a scheduler worker would hold up a tick; this one sleeps until a block
+## arrives. The thread touches only the queue (under a mutex) and the file.
 ## [codeblock]
 ## var writer := ReplayWriter.new()
 ## writer.open(path, header_bytes)  # writes the header at once, then starts the thread
-## writer.push_block(raw_bytes)     # any number of times, from the main thread; false if refused
-## writer.close()                   # writes what's left, then waits for the thread to finish
+## writer.push_block(raw_bytes)     # from the main thread; false if refused
+## writer.close()                   # writes what's left, then waits for the thread
 ## [/codeblock]
-## GDScript note: Mutex and Semaphore are how threads take turns safely. The mutex guards the queue, so the two threads never change
-## it at the same moment; the semaphore counts blocks waiting, and the writing thread sleeps on it until there's one.
+## Design: replay spec 1 and 2.
 class_name ReplayWriter
 extends RefCounted
 
-## Off: blocks are compressed and written on the calling thread instead, at once. For tests that compare the two, and for platforms
-## without threads.
+## Off: blocks are compressed and written on the calling thread, at once (for tests, and platforms without threads).
 var use_thread := true
-## The most blocks that may wait to be written. push_block refuses more, so a disk that can't keep up never fills memory; the
-## recorder then stops recording.
+## The most blocks that may wait. [method push_block] refuses more, so a slow disk never fills memory; the recorder then stops.
 var max_queued_blocks := 60 # the recorder sets it from its own max_queued_blocks
 
 var _file: FileAccess = null
@@ -37,8 +30,7 @@ var _blocks_written := 0
 var _bytes_written := 0
 
 
-## Creates the file (replacing one at that path), writes the header, and starts the thread. Returns the error if the file couldn't
-## be made.
+## Creates the file (replacing one at that path), writes the header and starts the thread. Returns the error if the file can't be made.
 func open(path: String, header: PackedByteArray) -> Error:
 	_file = FileAccess.open(path, FileAccess.WRITE)
 	if _file == null:
@@ -54,8 +46,7 @@ func open(path: String, header: PackedByteArray) -> Error:
 	return OK
 
 
-## Queues a finished block. Returns at once; the block is written on the thread. False if it was refused: the file isn't open,
-## writing has already failed ([method get_error]), or [member max_queued_blocks] are already waiting.
+## Queues a finished block and returns at once. False if refused: not open, a write already failed, or [member max_queued_blocks] waiting.
 func push_block(raw: PackedByteArray) -> bool:
 	if _file == null or _error != OK:
 		return false
@@ -88,6 +79,7 @@ func close() -> void:
 	_file = null
 
 
+## True between [method open] and [method close].
 func is_open() -> bool:
 	return _file != null
 
@@ -97,12 +89,12 @@ func get_error() -> Error:
 	return _error
 
 
-## Blocks written so far, and the file's size. GDScript note: read from the main thread while the writer runs, so they may be a
-## block behind; that's fine for a readout.
+## Blocks written so far. Read from the main thread while the writer runs, so it may be a block behind.
 func get_blocks_written() -> int:
 	return _blocks_written
 
 
+## The file's size so far, header included (may be a block behind).
 func get_bytes_written() -> int:
 	return _bytes_written
 
@@ -123,8 +115,7 @@ func _run() -> void:
 			return
 
 
-# One block: raw size (u32), compressed size (u32), the compressed bytes (replay spec section 2). Flushed, so a crash keeps every
-# block before the one being written.
+# One block: raw size (u32), compressed size (u32), the compressed bytes (replay spec 2). Flushed, so a crash keeps every earlier block.
 func _write_block(raw: PackedByteArray) -> void:
 	if _error != OK:
 		return # after a failed write nothing more is written, so a broken file isn't made worse

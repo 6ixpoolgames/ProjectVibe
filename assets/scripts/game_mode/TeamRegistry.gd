@@ -1,13 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: game_mode/CHANGELOG.md.
 ## How many pawns are on each team, kept current as pawns enter and leave the tree and change team.
 ##
-## A module of GameMode, reached as GameMode.team_registry. AI sensing asks it whether there's anyone on another team at all, and skips
-## looking when there isn't (pawn spec 10.4). Team counts are a GameMode module's job, not the pawn's (the owner's call).
-## [br]
-## How it keeps count: every pawn joins Pawn.GROUP when it enters the tree, so the pawns already there are counted when this module
-## starts; after that, the tree's node_added and node_removed signals, and each pawn's team_changed signal.
-## [br]
-## Without this module (a game that leaves it out), nothing breaks: sensing just looks every time, as if someone might be there.
+## A module of GameMode (GameMode.team_registry). AI sensing asks it whether anyone is on another team at all, and skips looking when
+## nobody is (pawn spec 10.4). It counts the pawns in Pawn.GROUP when it starts, then follows the tree's node_added and node_removed
+## and each pawn's team_changed. Without this module nothing breaks: sensing just looks every time.
 class_name TeamRegistry
 extends GameModeModule
 
@@ -16,7 +12,7 @@ var _watched := {} # pawn instance id -> true, for pawns counted and connected
 
 
 func _init() -> void:
-	# GDScript note: this module does no work per frame; it works from signals.
+	# No per-frame work: it works from signals.
 	set_process(false)
 	set_physics_process(false)
 
