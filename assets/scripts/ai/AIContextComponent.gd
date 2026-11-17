@@ -51,6 +51,9 @@ var current_target: Node3D = null:
 	set(value):
 		current_target = value
 		refresh_shared_inputs() # the shared inputs depend on it
+		var manager := behaviour_manager
+		if manager and manager.cpp_row >= 0 and AIBehaviourManager.decision_module:
+			AIBehaviourManager.decision_module.target_changed(manager) # written through to the C++ decider
 
 ## The pawn's AI inputs, the numbers its behaviours' conditions read ([AIInputs]). Worked out at each decision; a game writes its
 ## own with [code]inputs.set_input(name, value)[/code].
@@ -241,6 +244,7 @@ func note_hit(hit: HitInfo) -> void:
 	last_hit_tick = hit.tick
 	last_attacker = hit.attacker
 	last_hit_from = hit.attacker.global_position if is_instance_valid(hit.attacker) else last_hit_from
+	_tell_decider()
 	request_decision()
 
 
@@ -258,6 +262,7 @@ func note_incoming_attack(attacker: Pawn, start_tick: int, hit_tick: int) -> voi
 	incoming_attacker = attacker
 	incoming_start_tick = start_tick
 	incoming_hit_tick = hit_tick
+	_tell_decider()
 	request_decision()
 
 
@@ -271,6 +276,7 @@ func clear_incoming_attack() -> void:
 	incoming_attacker = null
 	incoming_start_tick = -1
 	incoming_hit_tick = -1
+	_tell_decider()
 
 
 ## True if the pawn was hit within this many ticks, counted at 60 a second like every AI setting (converted to the match's rate).
@@ -301,6 +307,13 @@ func point_of_interest(within_ticks: int) -> Variant:
 	if index >= 0 and not memory.is_certain_at(index):
 		return memory.last_known_position_at(index)
 	return unknown_hit_point(within_ticks)
+
+
+# The C++ decider works the pawn's inputs out from these facts, so it hears when they change (scaling spec 6.2, step 5d).
+func _tell_decider() -> void:
+	var manager := behaviour_manager
+	if manager and manager.cpp_row >= 0 and AIBehaviourManager.decision_module:
+		AIBehaviourManager.decision_module.facts_changed(manager)
 
 
 ## True when there's a current target, picked by the target selector.

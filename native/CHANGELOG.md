@@ -18,6 +18,12 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Test hooks in `NavServer` | `debug_fail_tile_commits`, `debug_limit_path_corners` in `nav_server.h` (and `GroundDomain`) | Test code bound into the shipping class. A test-only build flag or subclass would keep them out | S |
 | `NavHooks` settings that do nothing | `send_estimates`, `send_link_hints` in `nav_hooks.h` | A designer sees two switches in the inspector that change nothing. Hide them until the coarse planner (estimates) or link hints exist | S |
 
+## 2026-11-18
+
+- **`AIBatchDecider` pawn rows hold the facts** (`set_body`, `set_state`, `set_target`, `set_can_press`, `set_input`, `set_group_point`, `get_facts`), written by GDScript when they change; `decide_pawn(row, tick, event_priority, event_normal)` decides from the row alone, reading the pawn's position from its body.
+- **`AIBatchDecider` works out the memory-based inputs** (`set_input_kinds`, `note_hit`, `note_incoming`, and `decide_pawn`'s `memory_store`, `position`, `target_id`) from the pawn's `AIMemoryStore` (`find_by_id`, new, for C++ readers), the same arithmetic as `AIInputs`.
+- **`AIBatchDecider.set_persistence_mask`**: a pawn's own fade multiplied with a behaviour's persistence fade (the owner's hook for later), and the pawn rows are what the game's decisions use now (`AIDecisionModule`).
+
 ## 2026-11-17
 
 - **Groundwork for C++ as the main decider** (scaling spec 6.2, step 5c; built and tested, not used by the game yet). `fade_math.h` (new): FadeProfile's maths in one place, moved out of `AIMemoryStore`, which now uses it, so the decider's persistence uses the same maths. `AIBatchDecider` keeps each pawn's decision state (`add_pawn`, `remove_pawn`, `set_pawn_state`, `get_pawn_state`, `stop_running`, `add_persistence_ticks`, `set_persistence_speed`, `set_score_jitter`, `set_interrupt_threshold`, `persistence_now`) and decides one pawn from it (`decide_pawn`, `was_kept`), applying the switch to its own state; both `decide()` and `decide_pawn()` run the same per-decision step (`decide_row`). Brains carry each behaviour's cooldown and persistence fade.

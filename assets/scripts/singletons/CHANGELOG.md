@@ -15,6 +15,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move the load ladder's rule to a GameMode module | `_note_tick_cost()`, the ladder's settings and `get_match_options()` in `TickDriver.gd` | A policy for shedding AI work, with its own tuning and match options, inside the universal tick driver. The owner wants autoloads to hold only what every game needs: the driver could report each tick's cost, and a module beside `AIActivationManager` own the rule | M |
 | One timing tool | `profile_enabled`, `profile`, `_profile_phase()` in `TickDriver.gd` | A second way of timing work beside diagnostics' `PerfScopes`, with its own names and its own switch | S |
 
+## 2026-11-18
+
+- **`GameMode.DEFAULT_MODULES` starts `AIDecisionModule`**, as the project's module list now does, so the AI decides in C++ (scaling spec 6.2, step 5c). The two lists still differ by `DiagnosticsManager` (the refactor row above).
+
 ## 2026-11-17
 
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup, and doc comments added to the signals and the undocumented public functions. Stale comments fixed: `tick_factor` said it would be "adjusted on clients once netcode exists" and rollback's rules said "the netcode will apply snapshots" (the netcode does both now); the header said nothing was networked yet.

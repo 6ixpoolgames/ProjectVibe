@@ -79,6 +79,10 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 @export var persistence := 0.0
 ## How persistence fades over ticks. Empty: no persistence.
 @export var persistence_fade: FadeProfile
+## This pawn's own mask over [member persistence_fade]: multiplied with it, so something can reshape one pawn's persistence without
+## changing the brain the others share. Null: none. Set through [method AIBehaviourManager.set_persistence_mask] so C++ hears of it.
+## A hook for now (the owner's call); nothing sets one yet.
+var persistence_mask: FadeProfile = null
 
 ## Set by the AIBehaviourManager.
 var manager: AIBehaviourManager = null
@@ -255,7 +259,17 @@ func effective_jitter() -> float:
 func persistence_now(at_tick: int) -> float:
 	if not _persistence_running or persistence == 0.0 or persistence_fade == null:
 		return 0.0
-	return persistence * persistence_fade.value_at(_persistence_ticks_along(at_tick))
+	var along := _persistence_ticks_along(at_tick)
+	var amount := persistence * persistence_fade.value_at(along)
+	if persistence_mask:
+		amount *= persistence_mask.value_at(along)
+	return amount
+
+
+## Its persistence as four numbers: started (1 or 0), ticks along the fade, the tick that was worked out at, and the speed. The
+## AIDecisionModule copies them into C++ when the pawn starts deciding there.
+func persistence_state() -> PackedFloat64Array:
+	return PackedFloat64Array([1.0 if _persistence_running else 0.0, _persistence_along, float(_persistence_changed_tick), _persistence_speed])
 
 
 ## Starts persistence from the beginning of its fade. The manager calls this when the behaviour is chosen.

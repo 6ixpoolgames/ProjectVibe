@@ -5,7 +5,10 @@
 ## Covers: the random numbers bit for bit; brains (the fixed order, states, the 64-behaviour limit); made-up brains that use every rule
 ## the real ones don't (jitter, persistence that fades, floors, cooldowns, targets, actions, states, min_run_ticks, interrupt
 ## thresholds, cannot_be_interrupted, random ties, a behaviour ending); that a planted mismatch is caught; and a real fight in the
-## faction arena; and live shadow mode (AIDecisionBatcher), which must agree on every decision and change none of GDScript's.
+## faction arena; and live shadow mode (AIDecisionModule.check_against_gdscript), which must agree on every decision and change none
+## of GDScript's. Claude 2026-11-18 (step 5c): the made-up brains' test behaviours have code of their own, so they're special minds
+## that stay in GDScript; shadow mode checks the real fight, whose built-in behaviours C++ reads, from C++'s own copy of each pawn's
+## state.
 ## Claude 2026-11-17 (step 5b): and in the real fight, that the AI's kept answer to "could this action start?" (AIInputs.action_ready,
 ## asked again only when AbilityManager.readiness_version moves on) matches asking AbilityManager.can_start at every decision.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
@@ -68,7 +71,8 @@ class ReadinessCheckingRecorder extends AIDecisionRecorder:
 
 
 var _recorder: AIDecisionRecorder = null
-var _batcher: AIDecisionBatcher = null # shadow mode, on from the made-up brains through the real fight
+var _module: AIDecisionModule = null # shadow mode, on from the made-up brains through the real fight
+var _added_module := false # whether this test added it (else the game's own, put back as it was)
 
 
 func _ready() -> void:
@@ -85,9 +89,11 @@ func _ready() -> void:
 	_test_made_up_brains()
 	await _test_real_fight()
 	_recorder.stop()
-	if _batcher:
-		GameMode.remove_module(_batcher)
-		_check(AIBehaviourManager.decision_batcher == null, "removing the module switches shadow mode off")
+	if _module:
+		_module.check_against_gdscript = false
+		if _added_module:
+			GameMode.remove_module(_module)
+			_check(AIBehaviourManager.decision_module == null, "removing the module leaves every pawn to GDScript")
 	_finish()
 
 
@@ -128,7 +134,7 @@ func _test_brains() -> void:
 func _test_made_up_brains() -> void:
 	_recorder.clear()
 	_recorder.start()
-	var choices := _play_made_up(null)
+	var choices := _play_made_up(false)
 	_recorder.stop()
 	# What the run covered, so a quiet run can't pass by accident.
 	var kept := 0
@@ -159,24 +165,26 @@ func _test_made_up_brains() -> void:
 	_check_equal(DecisionReplay.compare(data)["agreed"], result["decisions"] - 1, "a decision changed after recording is caught")
 	var decisions_made: int = result["decisions"]
 	_recorder.clear()
-	# Live shadow mode: the batcher gathers each decision from the live pawns and decides them in C++ at the end of each tick.
-	var batcher := AIDecisionBatcher.new()
-	GameMode.add_module(batcher)
-	batcher.mode = AIDecisionBatcher.Mode.SHADOW
-	_check(AIBehaviourManager.decision_batcher == batcher, "shadow mode hooks the batcher into every behaviour manager")
-	var shadow_choices := _play_made_up(batcher)
-	var counts := batcher.get_counts()
-	print("  live shadow, made-up brains: %s" % str(counts))
-	_check(counts["decisions"] == decisions_made and counts["agreed"] == counts["decisions"] and counts["unanswered"] == 0,
-			"live shadow: C++ agrees with every decision (%d of %d)" % [counts["agreed"], decisions_made])
+	# Live shadow mode, with the AI decision module: the made-up brains' behaviours have code of their own, so they're special minds
+	# that stay in GDScript, and nothing changes.
+	_module = GameMode.get_module(AIDecisionModule) as AIDecisionModule
+	if _module == null:
+		_module = AIDecisionModule.new()
+		GameMode.add_module(_module)
+		_added_module = true
+	_module.check_against_gdscript = true
+	_check(AIBehaviourManager.decision_module == _module, "the module hooks into every behaviour manager")
+	_module.reset_counts()
+	var shadow_choices := _play_made_up(true)
+	var counts := _module.get_counts()
+	print("  live shadow, made-up brains: %s (decisions %d)" % [str(counts), decisions_made])
+	_check(counts["checked"] == 0 and counts["cpp"] == 0, "the made-up brains are special minds: none decided in C++")
 	_check(shadow_choices == choices and not choices.is_empty(), "shadow mode changes nothing: GDScript makes the same %d changes of behaviour with it on" % choices.size())
-	batcher.reset_counts()
-	_batcher = batcher # kept on for the real fight
+	_module.reset_counts()
 
 
-# The made-up brains, decided 400 ticks by hand. Returns every change of behaviour, as "pawn:behaviour", in order. With a batcher,
-# its rows are decided at the end of each tick, as the TickDriver's after_tick would.
-func _play_made_up(batcher: AIDecisionBatcher) -> Array[String]:
+# The made-up brains, decided 400 ticks by hand. Returns every change of behaviour, as "pawn:behaviour", in order.
+func _play_made_up(_shadow: bool) -> Array[String]:
 	var choices: Array[String] = []
 	var note := func(_old: AIBehaviourBase, new: AIBehaviourBase, _reason: String, who: String) -> void:
 		choices.append("%s:%s" % [who, String(new.name) if new else ""])
@@ -235,8 +243,6 @@ func _play_made_up(batcher: AIDecisionBatcher) -> Array[String]:
 		juliet.finish_with = AIBehaviourBase.Status.SUCCEEDED if t % 40 == 20 else AIBehaviourBase.Status.RUNNING
 		_decide(three, tick, [0, 3, 5, 9][t % 4], t % 3 != 0)
 		three.ai_context.behaviour_manager.tick_running(tick)
-		if batcher:
-			batcher.decide_gathered()
 	for pawn: Pawn in [one, two, three]:
 		pawn.free()
 	return choices
@@ -265,11 +271,13 @@ func _test_real_fight() -> void:
 	var readiness := _recorder as ReadinessCheckingRecorder
 	_check(readiness.checked > 200 and readiness.mismatches.is_empty(),
 			"the kept 'could this action start' answers match AbilityManager.can_start (%d checked; %s)" % [readiness.checked, str(readiness.mismatches)])
-	if _batcher:
-		var counts := _batcher.get_counts()
+	if _module:
+		var counts := _module.get_counts()
 		print("  live shadow, faction arena: %s" % str(counts))
-		_check(counts["decisions"] > 500 and counts["agreed"] == counts["decisions"] and counts["unanswered"] == 0,
-				"live shadow in a real fight: C++ agrees with every decision (%d of %d), batched once a tick" % [counts["agreed"], counts["decisions"]])
+		_check(counts["checked"] > 500 and counts["agreed"] == counts["checked"],
+				"live shadow in a real fight: C++ agrees with every decision, from its own copy of each pawn's state (%d of %d)" % [counts["agreed"], counts["checked"]])
+		# Claude 2026-11-18: every fact C++ decides from was written through when it changed (state, target, readiness).
+		_check_equal(counts["stale_facts"], 0, "...and no written-through fact was out of date at any decision")
 	arena.queue_free()
 	await get_tree().physics_frame
 

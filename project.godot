@@ -124,8 +124,8 @@ jolt_physics_3d/queries/use_enhanced_internal_edge_removal=true
 
 [project_base]
 
-game_mode/modules=["res://assets/scripts/game_mode/PawnInitializer.gd", "res://assets/scripts/game_mode/PossessionCoordinator.gd", "res://assets/scripts/game_mode/AIActivationManager.gd", "res://assets/scripts/game_mode/SpawnManager.gd", "res://assets/scripts/replay/ReplayRecorder.gd", "res://assets/scripts/game_mode/TeamRegistry.gd", "res://assets/scripts/movement/CrowdMover.gd", "res://assets/scripts/diagnostics/DiagnosticsManager.gd"]
-game_mode/modules.release=["res://assets/scripts/game_mode/PawnInitializer.gd", "res://assets/scripts/game_mode/PossessionCoordinator.gd", "res://assets/scripts/game_mode/AIActivationManager.gd", "res://assets/scripts/game_mode/SpawnManager.gd", "res://assets/scripts/replay/ReplayRecorder.gd", "res://assets/scripts/game_mode/TeamRegistry.gd", "res://assets/scripts/movement/CrowdMover.gd", "res://assets/scripts/diagnostics/DiagnosticsManager.gd"]
+game_mode/modules=["res://assets/scripts/game_mode/PawnInitializer.gd", "res://assets/scripts/game_mode/PossessionCoordinator.gd", "res://assets/scripts/game_mode/AIActivationManager.gd", "res://assets/scripts/game_mode/SpawnManager.gd", "res://assets/scripts/replay/ReplayRecorder.gd", "res://assets/scripts/game_mode/TeamRegistry.gd", "res://assets/scripts/movement/CrowdMover.gd", "res://assets/scripts/diagnostics/DiagnosticsManager.gd", "res://assets/scripts/ai/AIDecisionModule.gd"]
+game_mode/modules.release=["res://assets/scripts/game_mode/PawnInitializer.gd", "res://assets/scripts/game_mode/PossessionCoordinator.gd", "res://assets/scripts/game_mode/AIActivationManager.gd", "res://assets/scripts/game_mode/SpawnManager.gd", "res://assets/scripts/replay/ReplayRecorder.gd", "res://assets/scripts/game_mode/TeamRegistry.gd", "res://assets/scripts/movement/CrowdMover.gd", "res://assets/scripts/diagnostics/DiagnosticsManager.gd", "res://assets/scripts/ai/AIDecisionModule.gd"]
 
 [rendering]
 

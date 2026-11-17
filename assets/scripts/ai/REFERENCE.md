@@ -7,7 +7,7 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 - [AIBehaviourBase](#aibehaviourbase)
 - [AIBehaviourManager](#aibehaviourmanager)
 - [AIContextComponent](#aicontextcomponent)
-- [AIDecisionBatcher](#aidecisionbatcher)
+- [AIDecisionModule](#aidecisionmodule)
 - [AIDecisionRecord](#aidecisionrecord)
 - [AIInputs](#aiinputs)
 - [AIMemory](#aimemory)
@@ -80,6 +80,7 @@ Settings worth knowing (pawn spec 10.7):
 - `tick_interval_ticks: int` = `1`: While it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after, and sooner when a wake-up it asked for happens. The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now and then, or to wake when a walk ends. 1: every tick. Pawns start behaviours on different ticks, so a crowd's ticks spread out by themselves. Count time in ticks with context.current_tick, not by counting tick() calls, so a behaviour behaves the same at any interval.
 - `persistence: float` = `0.0`: Added to its score from when it's chosen, times persistence_fade's value. +: tends to keep it chosen. -: prefers others for a while.
 - `persistence_fade: FadeProfile`: How persistence fades over ticks. Empty: no persistence.
+- `persistence_mask: FadeProfile` = `null`: This pawn's own mask over `persistence_fade`: multiplied with it, so something can reshape one pawn's persistence without changing the brain the others share. Null: none. Set through `AIBehaviourManager.set_persistence_mask()` so C++ hears of it. A hook for now (the owner's call); nothing sets one yet.
 - `manager: AIBehaviourManager` = `null`: Set by the AIBehaviourManager.
 - `pawn: Pawn` = `null`: The pawn this behaviour belongs to. Set by the AIBehaviourManager.
 - `name_hash: int` = `0`: Worked out once by the manager: a hash of the name, for random numbers.
@@ -128,6 +129,7 @@ Settings worth knowing (pawn spec 10.7):
 - `is_cooling_down(at_tick: int) -> bool`
 - `effective_jitter() -> float`: This behaviour's jitter amount: its own, or the manager's default when it's -1.
 - `persistence_now(at_tick: int) -> float`: What persistence adds to its score at this tick.
+- `persistence_state() -> PackedFloat64Array`: Its persistence as four numbers: started (1 or 0), ticks along the fade, the tick that was worked out at, and the speed. The AIDecisionModule copies them into C++ when the pawn starts deciding there.
 - `start_persistence(at_tick: int) -> void`: Starts persistence from the beginning of its fade. The manager calls this when the behaviour is chosen.
 - `add_persistence_ticks(ticks: float, at_tick: int) -> void`: Moves persistence back along its fade by this many ticks, so it lasts longer. Negative: forward, so it ends sooner.
 - `set_persistence_speed(speed: float, at_tick: int) -> void`: How fast persistence moves along its fade from now on: 1.0 normally, 0.5 for half speed.
@@ -174,7 +176,7 @@ pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say f
 
 Listen to `behaviour_changed` to follow its choices.
 
-The same decision is made in C++ by AIBatchDecider (native/src/ai_batch_decider.cpp, scaling spec 6.2), step for step: a change to `decide()` goes in both, and ai/tests/ai_batch_decider_selftest checks they agree.
+**C++ makes the decisions; this is the backup** (scaling spec 6.2, the owner's call). With the [`AIDecisionModule`](#aidecisionmodule) in the game, a pawn whose `decides_in` is C++ (the default) has each decision made by AIBatchDecider (native/src/ai_batch_decider.cpp) from plain data, and this manager only starts what it chose. The GDScript steps below run for a pawn set to GDScript, a "special mind" C++ can't read (a behaviour with its own is_available() or score() code), a game without the C++ library or the module, and in shadow mode, where C++ is checked against them. The two follow the same steps: a change to `decide()` goes in both, and ai/tests/ai_batch_decider_selftest and ai_conditions_selftest check they agree. C++ keeps its own copy of each pawn's decision state (running behaviour, cooldowns, persistence), kept in step by the events this manager passes on (a behaviour stopping, persistence and jitter changes).
 
 To see what each decision was made from, set `decision_listener` (the [`AIDecisionRecorder`](https://docs.godotengine.org/en/stable/classes/class_aidecisionrecorder.html) does). While it's empty, no record is made.
 
@@ -194,11 +196,13 @@ What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd)
 - `decision_listener: Callable` = `Callable()`: Called after every decision of every pawn, with an [`AIDecisionRecord`](#aidecisionrecord) of what it was made from and what it chose, and this manager: `func(record: AIDecisionRecord, manager: AIBehaviourManager)`. For diagnostics and for checking another decider against this one (scaling spec 6.2). Empty, the default: no record is made, which costs one check per decision.
   
   GDScript note: "static" means one for every manager, so one listener hears every pawn.
-- `decision_batcher: AIDecisionBatcher` = `null`: The [`AIDecisionBatcher`](#aidecisionbatcher) gathering decisions for the C++ decider, set by it while its mode isn't OFF; null otherwise, which costs one check per decision.
+- `decision_module: AIDecisionModule` = `null`: The [`AIDecisionModule`](#aidecisionmodule) running decisions in C++, set by it while it's in the game; null otherwise (every pawn decides here).
+- `decides_in: int` = `0`: Where this pawn's decisions are made: C++ (the default, with the [`AIDecisionModule`](#aidecisionmodule) in the game) or GDScript. The game mode can override it for every pawn (`AIDecisionModule.decider`).
 - `default_score_jitter: float` = `0.0`: The jitter for behaviours whose own score_jitter is -1. 0: no randomness.
 - `randomize_ties: bool` = `false`: On: results that tie are picked between at random (replayably). Off: the fixed order decides.
 - `tie_margin: float` = `0.0001`: Results closer than this count as a tie.
 - `pawn: Pawn` = `null`: The pawn this is a part of, or null.
+- `cpp_row: int` = `-1`: Its row in the C++ decider, set by the [`AIDecisionModule`](#aidecisionmodule); -1 while it decides in GDScript.
 
 ### Signals
 
@@ -206,21 +210,26 @@ What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd)
 
 ### Constants
 
+- `DecidesIn.CPP = 0`: by C++, the main path (the default)
+- `DecidesIn.GDSCRIPT = 1`: by this manager, the backup
 - `TIE_SALT = 28981`
 
 ### Functions
 
 - `get_running_behaviour() -> AIBehaviourBase`: The behaviour running now, or null.
 - `get_behaviours() -> AIBehaviourBase[]`: Every behaviour, in the fixed order.
+- `get_behaviour_list() -> AIBehaviourBase[]`: The same list without a copy, for code that reads it often (the AIDecisionModule). Don't change it.
 - `describe() -> Dictionary`: This brain as plain data: the manager's settings, the AI context's, and each behaviour's, in the fixed order. Everything a decision reads that doesn't change from one decision to the next. AIBatchDecider.add_brain() takes it, and AIDecisionRecorder saves it. The pawn's own fields are pawn_number, pawn, random_seed and decision_interval_ticks; the rest is the same for every pawn with the same behaviour set. Settings changed during play (set_score_jitter, set_interrupt_threshold) show in the next call.
 - `decide(tick: int, record: AIDecisionRecord = null) -> void`: `AIContextComponent.run_ai()` calls this when a decision is waiting (see `AIContextComponent.request_decision()`). Uses up the waiting decision. record: the [`AIDecisionRecord`](#aidecisionrecord) to fill in while `decision_listener` is set; run_ai passes one with the target and state updates in it. Null makes one here if something listens.
 - `tick_running(tick: int) -> void`: `AIContextComponent.run_ai()` calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 - `stop_running(reason: String) -> void`: Stops the running behaviour, if any; its exit() gets this reason. Called with "died" when the pawn dies.
 - `add_persistence_ticks(behaviour_name: StringName, ticks: float) -> void`: Moves a behaviour's persistence back along its fade by this many ticks, so it lasts longer. Negative: it ends sooner.
 - `set_persistence_speed(behaviour_name: StringName, speed: float) -> void`: How fast a behaviour's persistence fades from now on: 1.0 normally, 0.5 for half speed.
+- `set_persistence_mask(behaviour_name: StringName, mask: FadeProfile) -> void`: Gives this pawn's behaviour a persistence mask: a fade multiplied with its own persistence fade, for this pawn only, so something can reshape how one pawn's persistence fades without changing the brain every pawn shares (the owner's call: the hook now, its uses later). Null: no mask. Counted from when the behaviour starts, as the fade is.
 - `set_interrupt_threshold(behaviour_name: StringName, threshold: int) -> void`: Changes a behaviour's interrupt threshold, even while it runs.
-- `inputs_changed() -> void`: Called when a behaviour's conditions change (`AIBehaviourBase.rebuild_conditions()`), so the inputs worked out at each decision are listed again.
+- `inputs_changed() -> void`: Called when a behaviour's conditions change (`AIBehaviourBase.rebuild_conditions()`), so the inputs worked out at each decision are listed again, and C++ gets the new brain.
 - `set_score_jitter(behaviour_name: StringName, jitter: float) -> void`: Changes a behaviour's jitter. -1: back to default_score_jitter.
+- `worked_out_inputs() -> PackedInt32Array`: The slots of the worked-out inputs any behaviour's conditions or curves read, listed once (and again after inputs_changed()).
 
 ## AIContextComponent
 
@@ -313,42 +322,63 @@ context.random_unit(salt)       # a number from 0 up to 1, the same on every run
 - `pawn_number() -> int`: This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on every machine, or else a hash of its name.
 - `number_of(other: Pawn) -> int` *(static)*: Any pawn's number, as `pawn_number()` gives it, for a pawn that may have no AI of its own (a player's, say): its network id when it has one, or else a hash of its name. 0 for null.
 
-## AIDecisionBatcher
+## AIDecisionModule
 
-`res://assets/scripts/ai/AIDecisionBatcher.gd`, extends [`GameModeModule`](../game_mode/REFERENCE.md#gamemodemodule)
+`res://assets/scripts/ai/AIDecisionModule.gd`, extends [`GameModeModule`](../game_mode/REFERENCE.md#gamemodemodule)
 
-Gathers the AI's behaviour decisions into one batch a tick for the C++ decider (AIBatchDecider), and, in shadow mode, checks its answers against GDScript's without using them.
+Makes the AI's behaviour decisions in C++, the main path, and decides which pawns use GDScript's decider, the backup.
 
-A GameMode module (`GameMode.get_module(AIDecisionBatcher)`), off by default. Scaling spec 6.2: decisions made together in C++, later on the worker threads, instead of one pawn at a time in GDScript. C++ is to be the main path, with GDScript's decider a dormant backup (the owner's call); until the batch's answers are used (spec step 5e), it only checks them.
+A GameMode module (`GameMode.get_module(AIDecisionModule)`). Scaling spec 6.2, steps 5c and 5d. It holds the C++ decider (AIBatchDecider): one brain per behaviour set, shared by the pawns using it, and each pawn's row: its decision state (running behaviour, cooldowns, persistence) and the facts a decision is made from. A pawn deciding in C++ asks it for each decision (`decide_in_cpp()`); C++ decides from the row alone, and the behaviour manager starts the chosen behaviour. Without this module every pawn decides in GDScript, as before.
 
-Modes:
-- OFF: nothing happens, and the AI pays one check per decision.
-- SHADOW: every decision still runs in GDScript, unchanged. As each one starts, this module gathers the pawn's inputs from the live pawn into a row (its brain, state, target, running behaviour, the hard-rule bitmasks, persistence, and its AI inputs, [`AIInputs`](#aiinputs), which C++ checks the behaviours' conditions against), and notes GDScript's answer when it ends. At the end of the tick, one C++ call decides every row, and the answers are compared. Disagreements are counted and the first few logged as warnings (`get_counts()`). The game plays exactly as with OFF.
+**Facts are written through** (the owner's call): whatever owns a fact writes it into the pawn's row when it changes, so a decision gathers nothing. The state manager's state_changed, the context's current_target setter, its notes of hits and swings, a game's inputs (AIInputs.set_input), the nearest point of a group when the lookup finds another, and the actions that could start when the AbilityManager's readiness_version has moved on. The pawn's position and memory are read in C++ (its body, its AIMemoryStore). Shadow mode also checks that the written facts match the live ones (`stale_facts` in `get_counts()`).
 
-What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)): `ai.batch.gather` (building each row in GDScript), `ai.batch.build` (the tick's arrays), `ai.batch.decide` (the C++ call) and `ai.batch.compare`.
+Where each pawn decides (the owner's call: C++ is main, GDScript a dormant backup):
+- The pawn's own setting, `AIBehaviourManager.decides_in` (C++ by default), unless `decider` overrides it for every pawn.
+- GDScript regardless, with a warning naming why, for: a game without the C++ library, a pawn on the GDScript memory store, and a "special mind": a behaviour with its own is_available() or score() code, a persistence fade or mask whose script has its own value_at(), or a condition of a kind C++ doesn't know. C++ can't read code, so such a pawn keeps the GDScript decider; there should only be a few.
 
-A brain is described once per behaviour manager (`AIBehaviourManager.describe()`); pawns with the same behaviour set share one. A setting changed during play after that (set_score_jitter, say) isn't seen, and would show as disagreements.
+Nothing watches every tick: where a pawn decides is settled when it first decides, and again only when something changes it (its setting, `decider`, its behaviours' conditions).
 
-Behaviours judged by their conditions (every built-in one) cost C++ nothing more than the inputs. A behaviour with its own is_available() or score() code (`AIBehaviourBase.has_own_code()`) can't be read by C++, so it's asked in GDScript, for every such behaviour that passes the hard rules, before GDScript's own decision asks it at the same tick. That code must be safe to call more than once a tick, with no effect on the game.
+`check_against_gdscript` (shadow mode, for tests and finding faults): every pawn decides in GDScript, and each pawn that could decide in C++ also has C++ decide beside it, from C++'s own copy of its state; the answers are compared and counted (`get_counts()`), the first few disagreements logged, and C++'s copy put right after one.
+
+Keys (debug builds): F10 switches every pawn to GDScript and back, to tell whether a fault is in the C++ decider.
+
+What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)): `ai.decide.cpp`, one pawn's decision in C++ with its inputs gathered.
 
 ### Settings and properties
 
-- `mode: int` = `0`: What it does: OFF or SHADOW.
-- `warnings_kept: int` = `5`: How many disagreements are logged as warnings, with what each side chose. The rest are only counted.
+- `decider: int` = `0`: Where pawns decide. Changing it moves every pawn at once.
+- `check_against_gdscript: bool` = `false`: Shadow mode: every pawn decides in GDScript, and C++ decides beside it and is checked. For tests and finding faults.
+- `warnings_kept: int` = `5`: How many disagreements (shadow mode) are logged as warnings. The rest are only counted.
 
 ### Constants
 
-- `Mode.OFF = 0`: nothing
-- `Mode.SHADOW = 1`: decides beside GDScript and compares, without using its answers
+- `Decider.PAWN_SETTING = 0`: each pawn's own decides_in (C++ by default)
+- `Decider.ALL_CPP = 1`: every pawn in C++ (special minds and a missing library still use GDScript)
+- `Decider.ALL_GDSCRIPT = 2`: every pawn in GDScript, the backup
+- `KNOWN_CONDITION_KINDS = ["always", "compare", "chance", "any"]`
 
 ### Functions
 
 - `get_match_options() -> PackedStringArray`
-- `get_counts() -> Dictionary`: The counts so far: decisions (rows decided in C++), agreed, differs, unanswered (a row GDScript never finished, which shouldn't happen), batches (C++ calls), largest_batch (most rows in one), and examples (the disagreements logged).
+- `get_counts() -> Dictionary`: The counts so far: cpp (decisions made in C++), checked, agreed and differs (shadow mode), special_minds (pawns kept in GDScript because C++ can't read them).
 - `reset_counts() -> void`: Starts the counts afresh.
-- `gather(manager: AIBehaviourManager, behaviours: AIBehaviourBase[], running: AIBehaviourBase, tick: int, event_priority: int, event_is_normal: bool) -> int`: Gathers one decision's inputs from the live pawn, before GDScript decides. Returns the row, or -1 if the pawn can't be batched (its brain has more behaviours than the decider takes).
-- `note_answer(row: int, chosen: AIBehaviourBase) -> void`: Notes GDScript's answer for a row: what runs after the decision (null: nothing).
-- `decide_gathered() -> void`: Decides every row gathered so far in one C++ call, compares, and starts afresh. Runs at the end of each tick; a test calls it to settle decisions made by hand.
+- `get_decider() -> Object`: The C++ decider, or null without the library. For tests.
+- `place(manager: AIBehaviourManager) -> void`: Settles where this pawn decides: a C++ row (`AIBehaviourManager.cpp_row`), or -1 for GDScript. Called when it first decides and when something it depends on changes. A pawn moving into C++ brings its state from its behaviour nodes.
+- `state_changed(manager: AIBehaviourManager) -> void`: The pawn's state changed: its number goes into the row. The state manager's state_changed calls it.
+- `target_changed(manager: AIBehaviourManager) -> void`: The pawn's target changed (the context's current_target setter).
+- `input_set(manager: AIBehaviourManager, slot: int, value: float) -> void`: One of the pawn's own inputs changed (AIInputs.set_input).
+- `facts_changed(manager: AIBehaviourManager) -> void`: The facts C++ works the pawn's inputs out from (its last hit, the swing coming at it) changed: copies them over.
+- `forget(manager: AIBehaviourManager) -> void`: Forgets a pawn leaving the game.
+- `drives(manager: AIBehaviourManager) -> bool`: True while the pawn's decisions are made in C++ (not in shadow mode, where GDScript makes them).
+- `decide_in_cpp(manager: AIBehaviourManager, tick: int, event_priority: int, event_normal: bool) -> int`: One decision for this pawn in C++: gathers its facts and inputs, asks C++, and returns the chosen behaviour's slot (-1 nothing). C++ applies the switch to its own copy of the state; the manager starts the behaviour.
+- `was_kept() -> bool`: Whether the interrupt rule kept the running behaviour at the last C++ decision.
+- `compare(manager: AIBehaviourManager, cpp_choice: int, tick: int) -> void`: Shadow mode: compares C++'s answer with GDScript's (what runs now), counts it, and puts C++'s copy of the state right after a disagreement.
+- `stopped(manager: AIBehaviourManager, tick: int) -> void`: The running behaviour stopped without a decision (finished, died, removed).
+- `persistence_ticks_added(manager: AIBehaviourManager, slot: int, ticks: float, tick: int) -> void`
+- `persistence_speed_set(manager: AIBehaviourManager, slot: int, speed: float, tick: int) -> void`
+- `jitter_set(manager: AIBehaviourManager, slot: int, effective_jitter: float) -> void`
+- `threshold_set(manager: AIBehaviourManager, slot: int, threshold: int) -> void`
+- `mask_set(manager: AIBehaviourManager, behaviour: AIBehaviourBase) -> void`: A behaviour's per-pawn persistence mask changed (null: none). A mask with its own value_at() code makes the pawn a special mind.
 
 ## AIDecisionRecord
 
@@ -407,6 +437,7 @@ record.to_dict()                           # everything as plain values, for sav
 - `RULE_COOLDOWN = &"cooldown"`: Cooling down.
 - `RULE_NO_TARGET = &"no_target"`: Needs a target, and there's none.
 - `RULE_ACTION = &"action"`: Its action couldn't start (AbilityManager.can_start).
+- `RULE_NOT_WORKED_OUT = &"cpp"`: Passed the hard rules, but C++ made the decision, so GDScript's range, availability and score weren't worked out.
 
 ### Functions
 
@@ -481,6 +512,7 @@ AIInputs.slot_of(&"morale")                                       # its slot, fo
 - `Kind.GROUP_DISTANCE = 8`
 - `Kind.GROUP_FOUND = 9`
 - `Kind.ACTION_READY = 10`
+- `GROUP_LOOK_AGAIN_TICKS = 120`: How often a group's nearest node is looked for again, in ticks at 60 a second.
 
 ### Functions
 
@@ -488,11 +520,15 @@ AIInputs.slot_of(&"morale")                                       # its slot, fo
 - `input_count() -> int` *(static)*: How many input names have slots so far.
 - `name_of(slot: int) -> StringName` *(static)*: The name in a slot.
 - `is_worked_out(slot: int) -> bool` *(static)*: True if the slot's value is worked out at each decision, false for a kept input.
+- `kind_of(slot: int) -> int` *(static)*: A slot's `Kind`.
+- `parameter_of(slot: int) -> StringName` *(static)*: The name after a slot's prefix, such as the group of group_distance/rally_point; &"" for the others.
+- `kinds() -> PackedInt32Array` *(static)*: Every slot's `Kind`, for the C++ decider, which works out the memory-based ones itself (scaling spec 6.2, step 5d).
+- `cpp_works_out(slot: int) -> bool` *(static)*: True if the C++ decider works this slot's input out itself from the pawn's C++ memory and facts (the target distance, the most aware entry, the last hit, the swing coming). The rest (group distances, actions, a game's own) come from here.
 - `is_ticks(slot: int) -> bool` *(static)*: True if the slot's input is a time in ticks (its name begins with `TICKS_PREFIX`).
 - `suggested_names() -> PackedStringArray` *(static)*: The input names the inspector suggests for a condition: the built-ins, then every name given a slot so far.
 - `half_noticed_conditions(hit_memory_ticks: int) -> AICondition[]` *(static)*: The conditions for "something half-noticed" (`AIContextComponent.point_of_interest()`): the most aware entry isn't certain yet, or an attacker the AI doesn't remember hit it within hit_memory_ticks (at 60 a second). Either will do. Look Toward and Investigate both use it, so the two react to the same things.
 - `set_input(input_name: StringName, value: float) -> void`: Writes a kept input. Use it for a game's own inputs; the built-in ones are worked out at each decision and would be overwritten.
-- `set_slot(slot: int, value: float) -> void`: Writes a value by slot.
+- `set_slot(slot: int, value: float) -> void`: Writes a value by slot. A kept input also goes into the pawn's row in the C++ decider, when it decides there.
 - `value(slot: int) -> float`: The value in a slot: a kept one as last written (0 if never), a worked-out one worked out now if it hasn't been yet this decision.
 - `value_of(input_name: StringName) -> float`: The value of an input by name. See `value()`.
 - `begin_decision(tick: int) -> void`: Starts a decision at this tick: every worked-out input is worked out again the first time it's read. The behaviour manager calls it at the start of each decision.
@@ -572,6 +608,7 @@ Signals: `entity_became_certain`, `entity_forgotten`.
 - `add_threat(entity: Object, amount: float) -> void`: Adds threat to an entity's entry, if it's remembered; threat never goes below 0. Game mechanics call this, such as damage dealt.
 - `forget_old(tick: int) -> void`: Forgets entries whose fade has ended or whose entity is gone. The sensing manager calls this on each full pass.
 - `most_aware_index(tick: int) -> int`: The entry with the highest awareness now, or -1. Ties go to the nearer last known position, then the lower id.
+- `native_store() -> Object`: The C++ memory store (AIMemoryStore), or null when the GDScript one runs. The C++ decider reads it directly for the pawn's inputs.
 - `clear() -> void`: Forgets everything.
 - `announce_sight_results(results: Array) -> void`: SightSense calls this after a sight check: wakes a decision for a new entry, and sends entity_became_certain.
 
@@ -854,6 +891,7 @@ What happens in odd cases (checked in ai/tests/fade_profile_selftest.gd):
 
 ### Functions
 
+- `values_at_rate() -> Dictionary`: Its settings as plain data at the match's tick rate: mode, hold, fade, half_life (ticks) and curve. The C++ decider reads them for persistence (fade_math.h does the same maths as value_at()).
 - `value_at(ticks: float) -> float`: The value this many ticks after the fade started: 1.0 at the start, falling to 0.0. ticks can be fractional, so a fade can run slower or faster than one step per tick. ticks here are real ticks at the match's rate.
 - `ends_after() -> int`: Ticks from the start until the value is nothing. From then on, value_at() gives exactly 0.0.
 

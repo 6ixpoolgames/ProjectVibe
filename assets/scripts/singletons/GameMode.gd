@@ -50,6 +50,7 @@ const DEFAULT_MODULES: Array[String] = [
 	"res://assets/scripts/replay/ReplayRecorder.gd", # records nothing until the game starts a recording
 	"res://assets/scripts/game_mode/TeamRegistry.gd",
 	"res://assets/scripts/movement/CrowdMover.gd", # does nothing until an AI pawn walks
+	"res://assets/scripts/ai/AIDecisionModule.gd", # the AI decides in C++ (the main path)
 ]
 
 ## The module that switches AI pawns off, or null without one. Each module fills in its own line when it starts.

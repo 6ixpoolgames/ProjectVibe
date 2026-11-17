@@ -15,8 +15,9 @@
 ## Claude 2026-11-17 (scaling spec 6.2, shadow decider step 5a): --record-decisions=<file> records every AI decision with an
 ## AIDecisionRecorder and saves them as JSON lines (user:// or a full path), for checking a second decider against real fights. The
 ## recording adds its own cost to the AI's timings, so measure without it.
-## Claude 2026-11-17: --ai-shadow runs the C++ decider beside GDScript (AIDecisionBatcher's shadow mode) and prints how often they
-## agreed; with --scopes, its costs show as ai.batch.gather, .build, .decide and .compare.
+## Claude 2026-11-17: --ai-shadow has GDScript decide and the C++ decider check it (AIDecisionModule's check_against_gdscript), and
+## prints how often they agreed. Claude 2026-11-18: --ai-gdscript has every pawn decide in GDScript (the backup), to compare with
+## C++ (the main path, the default with the module in the game); with --scopes, a C++ decision shows as ai.decide.cpp.
 ## Claude 2026-11-17: --decision-interval=N sets every AI's decision_interval_ticks (15 by default, 4 decisions a second), to compare
 ## what deciding less often saves and how the fight goes (the dead column).
 extends Node
@@ -34,7 +35,8 @@ var _scopes := false # Claude 2026-11-16: --scopes prints every timed part each 
 var _decisions_path := "" # Claude 2026-11-17: --record-decisions=<file>
 var _decisions: AIDecisionRecorder = null
 var _shadow := false # Claude 2026-11-17: --ai-shadow
-var _batcher: AIDecisionBatcher = null
+var _module: AIDecisionModule = null
+var _gdscript_only := false # Claude 2026-11-18: --ai-gdscript
 var _decision_interval := -1 # Claude 2026-11-17: --decision-interval=N; -1 leaves the scenes' own
 
 
@@ -65,6 +67,8 @@ func _ready() -> void:
 			_decisions_path = argument.trim_prefix("--record-decisions=")
 		elif argument == "--ai-shadow": # Claude 2026-11-17
 			_shadow = true
+		elif argument == "--ai-gdscript": # Claude 2026-11-18
+			_gdscript_only = true
 		elif argument.begins_with("--decision-interval="): # Claude 2026-11-17
 			_decision_interval = int(argument.trim_prefix("--decision-interval="))
 	if not _visuals:
@@ -105,13 +109,19 @@ func _ready() -> void:
 		add_child(_decisions)
 		_decisions.start()
 		print("--- recording AI decisions to %s (adds to the AI's timings) ---" % _decisions_path)
-	if _shadow: # Claude 2026-11-17: the game's own batcher if it has one, else one added here
-		_batcher = GameMode.get_module(AIDecisionBatcher) as AIDecisionBatcher
-		if _batcher == null:
-			_batcher = AIDecisionBatcher.new()
-			GameMode.add_module(_batcher)
-		_batcher.mode = AIDecisionBatcher.Mode.SHADOW
-		print("--- the C++ decider runs beside GDScript (shadow mode) ---")
+	# Claude 2026-11-17, 2026-11-18: the game's own AI decision module, or one added here for shadow mode.
+	_module = GameMode.get_module(AIDecisionModule) as AIDecisionModule
+	if _module == null and _shadow:
+		_module = AIDecisionModule.new()
+		GameMode.add_module(_module)
+	if _module and _shadow:
+		_module.check_against_gdscript = true
+		print("--- GDScript decides and the C++ decider checks it (shadow mode) ---")
+	elif _module and _gdscript_only:
+		_module.decider = AIDecisionModule.Decider.ALL_GDSCRIPT
+		print("--- every pawn decides in GDScript (the backup) ---")
+	else:
+		print("--- AI decisions: %s ---" % ("C++ (the main path)" if _module else "GDScript (no AI decision module in the game)"))
 	# Claude 2026-11-16: in a window, the overview of the middle, where the fight is: the most there is to draw. Now the spectator at the
 	# overview point (V), keeping nothing loaded, as the old overhead camera did; the player's pawn stands where it started, under its AI.
 	if DisplayServer.get_name() != "headless":
@@ -174,11 +184,12 @@ func _ready() -> void:
 		recorder.stop_recording()
 		var size := FileAccess.get_file_as_bytes(recorder.get_recording_path()).size()
 		print("replay: %.2f MB for %d ticks, %.1f MB a minute, %s" % [size / 1048576.0, ticks, size / 1048576.0 / (ticks / 60.0 / 60.0) if ticks > 0 else 0.0, recorder.get_recording_path()])
-	if _batcher: # Claude 2026-11-17
-		var counts := _batcher.get_counts()
-		print("shadow decider: %d of %d decisions agree (%.3f%%), %d differ, %d unanswered, %d batches, largest %d" % [counts["agreed"],
-			counts["decisions"], 100.0 * counts["agreed"] / maxf(counts["decisions"], 1.0), counts["differs"], counts["unanswered"],
-			counts["batches"], counts["largest_batch"]])
+	if _module: # Claude 2026-11-17, 2026-11-18
+		var counts := _module.get_counts()
+		if _shadow:
+			print("shadow decider: %d of %d decisions agree (%.3f%%), %d differ" % [counts["agreed"], counts["checked"],
+				100.0 * counts["agreed"] / maxf(counts["checked"], 1.0), counts["differs"]])
+		print("AI decisions made in C++: %d; special minds kept in GDScript: %d" % [counts["cpp"], counts["special_minds"]])
 	# Claude 2026-11-17: the AI decisions, saved, with a summary
 	if _decisions:
 		_decisions.stop()

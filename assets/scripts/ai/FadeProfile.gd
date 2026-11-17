@@ -52,6 +52,13 @@ const HALVINGS_UNTIL_NOTHING := 7
 var _warned_no_curve := false
 
 
+## Its settings as plain data at the match's tick rate: mode, hold, fade, half_life (ticks) and curve. The C++ decider reads them
+## for persistence (fade_math.h does the same maths as value_at()).
+func values_at_rate() -> Dictionary:
+	return {"mode": mode, "hold": TickDriver.ticks_at_rate(hold_ticks), "fade": TickDriver.ticks_at_rate(fade_ticks),
+		"half_life": TickDriver.ticks_at_rate(half_life_ticks), "curve": curve}
+
+
 ## The value this many ticks after the fade started: 1.0 at the start, falling to 0.0. ticks can be fractional, so a fade can run
 ## slower or faster than one step per tick. ticks here are real ticks at the match's rate.
 func value_at(ticks: float) -> float:

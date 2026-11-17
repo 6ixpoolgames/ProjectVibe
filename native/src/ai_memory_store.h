@@ -64,6 +64,8 @@ public:
 	// Forgets entries whose fade has ended or whose entity is gone. Returns the ids of forgotten entities that still exist.
 	PackedInt64Array forget_old(int64_t tick);
 	int64_t most_aware_index(const Vector3 &from, int64_t tick) const;
+	// For C++ readers (AIBatchDecider's inputs): an entry by instance id, -1 if it isn't here. Not bound to GDScript.
+	int64_t find_by_id(uint64_t id) const { return find_id(id); }
 	void clear();
 
 	// Target scoring (AITargetSelector's formula). current_id is the current target's instance id (0: none), and current_bonus the

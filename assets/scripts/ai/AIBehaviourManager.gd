@@ -37,8 +37,14 @@
 ## [/codeblock]
 ## Listen to [signal behaviour_changed] to follow its choices.
 ## [br]
-## The same decision is made in C++ by AIBatchDecider (native/src/ai_batch_decider.cpp, scaling spec 6.2), step for step: a change
-## to [method decide] goes in both, and ai/tests/ai_batch_decider_selftest checks they agree.
+## [b]C++ makes the decisions; this is the backup[/b] (scaling spec 6.2, the owner's call). With the [AIDecisionModule] in the game,
+## a pawn whose [member decides_in] is C++ (the default) has each decision made by AIBatchDecider (native/src/ai_batch_decider.cpp)
+## from plain data, and this manager only starts what it chose. The GDScript steps below run for a pawn set to GDScript, a "special
+## mind" C++ can't read (a behaviour with its own is_available() or score() code), a game without the C++ library or the module, and
+## in shadow mode, where C++ is checked against them. The two follow the same steps: a change to [method decide] goes in both, and
+## ai/tests/ai_batch_decider_selftest and ai_conditions_selftest check they agree. C++ keeps its own copy of each pawn's decision state
+## (running behaviour, cooldowns, persistence), kept in step by the events this manager passes on (a behaviour stopping, persistence
+## and jitter changes).
 ## [br]
 ## To see what each decision was made from, set [member decision_listener] (the [AIDecisionRecorder] does). While it's empty, no
 ## record is made.
@@ -65,10 +71,22 @@ signal behaviour_changed(old_behaviour: AIBehaviourBase, new_behaviour: AIBehavi
 ## [br]
 ## GDScript note: "static" means one for every manager, so one listener hears every pawn.
 static var decision_listener := Callable()
-## The [AIDecisionBatcher] gathering decisions for the C++ decider, set by it while its mode isn't OFF; null otherwise, which costs
-## one check per decision.
-static var decision_batcher: AIDecisionBatcher = null
+## The [AIDecisionModule] running decisions in C++, set by it while it's in the game; null otherwise (every pawn decides here).
+static var decision_module: AIDecisionModule = null
 
+## Where this pawn's decisions are made.
+enum DecidesIn {
+	CPP, ## by C++, the main path (the default)
+	GDSCRIPT, ## by this manager, the backup
+}
+
+## Where this pawn's decisions are made: C++ (the default, with the [AIDecisionModule] in the game) or GDScript. The game mode can
+## override it for every pawn ([member AIDecisionModule.decider]).
+@export var decides_in := DecidesIn.CPP:
+	set(value):
+		decides_in = value
+		if _placed_by:
+			_placed_by.place(self)
 ## The jitter for behaviours whose own score_jitter is -1. 0: no randomness.
 @export var default_score_jitter := 0.0
 ## On: results that tie are picked between at random (replayably). Off: the fixed order decides.
@@ -78,6 +96,8 @@ static var decision_batcher: AIDecisionBatcher = null
 
 ## The pawn this is a part of, or null.
 var pawn: Pawn = null
+## Its row in the C++ decider, set by the [AIDecisionModule]; -1 while it decides in GDScript.
+var cpp_row := -1
 
 var _behaviours: Array[AIBehaviourBase] = [] # by name
 var _running: AIBehaviourBase = null
@@ -93,6 +113,7 @@ var _by_index := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 var _warned_states := {} # state name -> true, for "no behaviour is allowed in this state"
 var _input_slots := PackedInt32Array() # the worked-out inputs the behaviours' conditions read
 var _input_slots_known := false
+var _placed_by: AIDecisionModule = null # the module that settled where it decides
 
 const TIE_SALT := 0x7135 # what the tie-breaking random number is for, so it differs from every behaviour's jitter
 
@@ -125,6 +146,9 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if _running and pawn:
 		_stop_running("removed", pawn.ai_context.current_tick if pawn.ai_context else 0)
+	if _placed_by and is_instance_valid(_placed_by):
+		_placed_by.forget(self)
+	_placed_by = null
 
 
 ## The behaviour running now, or null.
@@ -135,6 +159,11 @@ func get_running_behaviour() -> AIBehaviourBase:
 ## Every behaviour, in the fixed order.
 func get_behaviours() -> Array[AIBehaviourBase]:
 	return _behaviours.duplicate()
+
+
+## The same list without a copy, for code that reads it often (the AIDecisionModule). Don't change it.
+func get_behaviour_list() -> Array[AIBehaviourBase]:
+	return _behaviours
 
 
 ## This brain as plain data: the manager's settings, the AI context's, and each behaviour's, in the fixed order. Everything a
@@ -152,11 +181,13 @@ func describe() -> Dictionary:
 			"name": String(behaviour.name), "name_hash": behaviour.name_hash, "allowed_states": states,
 			"max_score": behaviour.max_score, "min_score": behaviour.min_score if behaviour.min_score > -INF else null, # JSON has no infinity
 			"needs_target": behaviour.needs_target, "presses_action": String(behaviour.presses_action),
-			"cooldown_ticks": behaviour.cooldown_ticks, "min_run_ticks": behaviour.min_run_ticks,
+			"cooldown_ticks": behaviour.cooldown_ticks, "cooldown_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.cooldown_ticks),
+			"min_run_ticks": behaviour.min_run_ticks,
 			"min_run_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.min_run_ticks), # what the interrupt rule compares with
 			"interrupt_threshold": behaviour.interrupt_threshold, "cannot_be_interrupted": behaviour.cannot_be_interrupted,
 			"score_jitter": behaviour.score_jitter, "effective_jitter": behaviour.effective_jitter(),
 			"persistence": behaviour.persistence, "has_persistence_fade": behaviour.persistence_fade != null,
+			"persistence_fade": behaviour.persistence_fade.values_at_rate() if behaviour.persistence_fade else null,
 			"script": behaviour.get_script().resource_path.get_file() if behaviour.get_script() else "",
 			# How C++ judges it: from its conditions and curves, or by asking GDScript for a behaviour with its own code.
 			"scorer": "given" if behaviour.has_own_code() else "conditions",
@@ -183,23 +214,38 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	context.clear_decision()
 	if _behaviours.is_empty():
 		return
-	# The inputs the conditions read start afresh, each worked out when first read (scaling spec 6.2). The C++ decider's row and a
-	# record need all of them.
-	context.inputs.begin_decision(tick)
 	if record == null and decision_listener.is_valid():
 		record = AIDecisionRecord.new()
-	if record or decision_batcher:
-		context.inputs.fill(_worked_out_inputs())
-	# The batcher's row, gathered from the live pawn before anything is decided (shadow mode).
-	var batch_row := decision_batcher.gather(self, _behaviours, _running, tick, event_priority, event_is_normal) if decision_batcher else -1
+	# Where it decides is settled the first time, and again only when something changes it (no per-tick check).
+	var module := decision_module
+	if module and _placed_by != module:
+		_placed_by = module
+		module.place(self)
+	# The inputs the conditions read start afresh, each worked out when first read (scaling spec 6.2). A record needs them all.
+	context.inputs.begin_decision(tick)
+	# C++, the main path: it decides, from its own copy of the state and the facts written into it, and this starts what it chose.
+	if cpp_row >= 0 and not module.check_against_gdscript:
+		var slot := module.decide_in_cpp(self, tick, event_priority, event_is_normal)
+		var chosen: AIBehaviourBase = _behaviours[slot] if slot >= 0 and slot < _behaviours.size() else null
+		if record:
+			_fill_record(record, tick, event_priority, event_is_normal, module.was_kept(), false)
+			record.chosen = chosen.name if chosen else &""
+		_switch_to(chosen, event_is_normal, tick)
+		if record:
+			decision_listener.call(record, self)
+		return
+	# Shadow mode: C++ decides beside GDScript from its own copy of the state, and is checked once GDScript has decided.
+	var cpp_choice := module.decide_in_cpp(self, tick, event_priority, event_is_normal) if module and cpp_row >= 0 else -2
+	if record:
+		context.inputs.fill(worked_out_inputs())
 	# 0. Interrupts.
 	if _running and not _can_replace_running(event_priority, event_is_normal, tick):
 		if record:
 			_fill_record(record, tick, event_priority, event_is_normal, true)
 			record.chosen = _running.name
 			decision_listener.call(record, self)
-		if batch_row >= 0:
-			decision_batcher.note_answer(batch_row, _running)
+		if cpp_choice != -2:
+			module.compare(self, cpp_choice, tick)
 		return
 	# 1 and 2. Valid behaviours, and the hard rules.
 	var state_name := context.current_state_name()
@@ -272,20 +318,11 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		_fill_record(record, tick, event_priority, event_is_normal, false)
 		record.chosen = best.name if best else &""
 	# 7. Switching.
-	if best != _running:
-		var switch_started := PerfScopes.begin()
-		var reason := "decision" if event_is_normal else "interrupted"
-		if best == null:
-			_stop_running(reason, tick)
-			if context.controller:
-				context.controller.release_all() # nothing can run: stand still
-		else:
-			_start(best, reason, tick)
-		PerfScopes.end(&"ai.decide.switch", switch_started)
+	_switch_to(best, event_is_normal, tick)
 	if record:
 		decision_listener.call(record, self)
-	if batch_row >= 0:
-		decision_batcher.note_answer(batch_row, _running)
+	if cpp_choice != -2:
+		module.compare(self, cpp_choice, tick)
 
 
 ## [method AIContextComponent.run_ai] calls this every tick the AI runs, after any decision. Ticks the running behaviour.
@@ -330,6 +367,8 @@ func add_persistence_ticks(behaviour_name: StringName, ticks: float) -> void:
 	var behaviour := _find(behaviour_name)
 	if behaviour:
 		behaviour.add_persistence_ticks(ticks, _now())
+		if cpp_row >= 0:
+			decision_module.persistence_ticks_added(self, behaviour.decision_index, ticks, _now())
 
 
 ## How fast a behaviour's persistence fades from now on: 1.0 normally, 0.5 for half speed.
@@ -337,6 +376,19 @@ func set_persistence_speed(behaviour_name: StringName, speed: float) -> void:
 	var behaviour := _find(behaviour_name)
 	if behaviour:
 		behaviour.set_persistence_speed(speed, _now())
+		if cpp_row >= 0:
+			decision_module.persistence_speed_set(self, behaviour.decision_index, speed, _now())
+
+
+## Gives this pawn's behaviour a persistence mask: a fade multiplied with its own persistence fade, for this pawn only, so something
+## can reshape how one pawn's persistence fades without changing the brain every pawn shares (the owner's call: the hook now, its
+## uses later). Null: no mask. Counted from when the behaviour starts, as the fade is.
+func set_persistence_mask(behaviour_name: StringName, mask: FadeProfile) -> void:
+	var behaviour := _find(behaviour_name)
+	if behaviour:
+		behaviour.persistence_mask = mask
+		if cpp_row >= 0:
+			decision_module.mask_set(self, behaviour)
 
 
 ## Changes a behaviour's interrupt threshold, even while it runs.
@@ -344,12 +396,16 @@ func set_interrupt_threshold(behaviour_name: StringName, threshold: int) -> void
 	var behaviour := _find(behaviour_name)
 	if behaviour:
 		behaviour.interrupt_threshold = threshold
+		if cpp_row >= 0:
+			decision_module.threshold_set(self, behaviour.decision_index, threshold)
 
 
 ## Called when a behaviour's conditions change ([method AIBehaviourBase.rebuild_conditions]), so the inputs worked out at each
-## decision are listed again.
+## decision are listed again, and C++ gets the new brain.
 func inputs_changed() -> void:
 	_input_slots_known = false
+	if _placed_by:
+		_placed_by.place(self)
 
 
 ## Changes a behaviour's jitter. -1: back to default_score_jitter.
@@ -357,6 +413,8 @@ func set_score_jitter(behaviour_name: StringName, jitter: float) -> void:
 	var behaviour := _find(behaviour_name)
 	if behaviour:
 		behaviour.score_jitter = jitter
+		if cpp_row >= 0:
+			decision_module.jitter_set(self, behaviour.decision_index, behaviour.effective_jitter())
 
 
 # --- Internals ---
@@ -375,6 +433,23 @@ func _can_replace_running(event_priority: int, event_is_normal: bool, tick: int)
 	return true
 
 
+# Step 7: starts the chosen behaviour, or stops the running one if nothing was chosen. C++ has already applied the same switch to
+# its own copy of the state.
+func _switch_to(best: AIBehaviourBase, event_is_normal: bool, tick: int) -> void:
+	if best == _running:
+		return
+	var switch_started := PerfScopes.begin()
+	var reason := "decision" if event_is_normal else "interrupted"
+	if best == null:
+		_stop_running(reason, tick, false)
+		var hands := pawn.ai_context.controller if pawn and pawn.ai_context else null
+		if hands:
+			hands.release_all() # nothing can run: stand still
+	else:
+		_start(best, reason, tick)
+	PerfScopes.end(&"ai.decide.switch", switch_started)
+
+
 func _start(behaviour: AIBehaviourBase, reason: String, tick: int) -> void:
 	var old := _running
 	if old:
@@ -388,13 +463,17 @@ func _start(behaviour: AIBehaviourBase, reason: String, tick: int) -> void:
 	behaviour_changed.emit(old, behaviour, reason)
 
 
-func _stop_running(reason: String, tick: int) -> void:
+# tell_cpp: false when a decision stops it, since C++ made (or checks) that decision itself; true when it stops on its own
+# (finished, died, removed), so C++'s copy of the state follows.
+func _stop_running(reason: String, tick: int, tell_cpp := true) -> void:
 	if _running == null:
 		return
 	var old := _running
 	_running = null
 	old.exit(pawn.ai_context, reason)
 	old.ended_tick = tick
+	if tell_cpp and cpp_row >= 0 and decision_module:
+		decision_module.stopped(self, tick)
 	behaviour_changed.emit(old, null, reason)
 
 
@@ -411,7 +490,9 @@ func _is_available(behaviour: AIBehaviourBase, context: AIContextComponent) -> b
 # Writes what this decision was made from into record: the reasons, the running behaviour, and each behaviour's hard rule, range,
 # availability and score, in the fixed order. Called before switching, so the hard rules are asked again exactly as the decision
 # asked them (nothing between changes them). Only runs while decision_listener is set.
-func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, event_is_normal: bool, kept_by_interrupt: bool) -> void:
+# numbers: false for a decision C++ made, where GDScript's scratch values (ranges, availability, scores) weren't worked out.
+func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, event_is_normal: bool, kept_by_interrupt: bool,
+		numbers := true) -> void:
 	var context := pawn.ai_context
 	record.tick = tick
 	record.pawn_number = context.pawn_number()
@@ -440,7 +521,7 @@ func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, even
 			rule = AIDecisionRecord.RULE_NO_TARGET
 		elif behaviour.presses_action != &"" and behaviour != _running and not _could_press(behaviour.presses_action):
 			rule = AIDecisionRecord.RULE_ACTION
-		record.add_behaviour(behaviour, rule)
+		record.add_behaviour(behaviour, rule if numbers or rule != AIDecisionRecord.RULE_NONE else AIDecisionRecord.RULE_NOT_WORKED_OUT)
 
 
 # Whether pressing the action could start an ability: the action_ready input, asked of the AbilityManager again only after something
@@ -449,8 +530,8 @@ func _could_press(action: StringName) -> bool:
 	return pawn.ai_context.inputs.action_ready(action)
 
 
-# The slots of the worked-out inputs any behaviour's conditions or curves read, listed once (and again after inputs_changed()).
-func _worked_out_inputs() -> PackedInt32Array:
+## The slots of the worked-out inputs any behaviour's conditions or curves read, listed once (and again after inputs_changed()).
+func worked_out_inputs() -> PackedInt32Array:
 	if not _input_slots_known:
 		_input_slots_known = true
 		var slots := {}

@@ -227,14 +227,13 @@ func _set_text(key: Key, text: String) -> void:
 	label.text = text
 
 
-# The first line's "(debug builds only)" is out of date: the panels ship in release builds too (only F9's nav view is debug only).
-# Comments only in the docs pass, so the text stays until the next code change.
 func _help_text() -> String:
-	var lines := PackedStringArray(["F1 diagnostics keys (debug builds only)",
+	var lines := PackedStringArray(["F1 diagnostics keys",
 		"  F2 frame graph   F4 timings   F6 spikes",
 		"  F7 pawn inspector (Ctrl + click a pawn)   F8 log",
 		"  F12 capture (screenshot, history, spikes, log, replay tick)",
-		"  F9 nav view: nav mesh, links, markers",
+		"  F9 nav view: nav mesh, links, markers (debug builds)",
+		"  F10 AI decisions: all in GDScript, and back to C++ (debug builds)",
 		"log: %s" % manager.get_log_path().get_file()])
 	if _note != "":
 		lines.append(_note)

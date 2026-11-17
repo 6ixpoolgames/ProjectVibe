@@ -76,7 +76,8 @@ static var _in_ticks := PackedByteArray()
 static var _ready_slot_of := {} # action -> its action_ready/<action> slot, so a check doesn't build the name each time
 static var _group_nodes := {} # group -> [the tick it was asked for, the group's nodes then], shared by every pawn
 
-const _LOOK_AGAIN_TICKS := 120 # how often group_distance looks for the nearest node again, at 60 ticks a second
+## How often a group's nearest node is looked for again, in ticks at 60 a second.
+const GROUP_LOOK_AGAIN_TICKS := 120
 
 ## The values, one per slot. Slots no one has written or worked out yet are 0. May be shorter than [method input_count] until a new
 ## name's first use; [method value] reads 0 past the end.
@@ -149,6 +150,30 @@ static func is_worked_out(slot: int) -> bool:
 	return slot >= 0 and slot < _kinds.size() and _kinds[slot] != Kind.KEPT
 
 
+## A slot's [enum Kind].
+static func kind_of(slot: int) -> int:
+	return _kinds[slot] if slot >= 0 and slot < _kinds.size() else Kind.KEPT
+
+
+## The name after a slot's prefix, such as the group of group_distance/rally_point; &"" for the others.
+static func parameter_of(slot: int) -> StringName:
+	return _parameters[slot] if slot >= 0 and slot < _parameters.size() else &""
+
+
+## Every slot's [enum Kind], for the C++ decider, which works out the memory-based ones itself (scaling spec 6.2, step 5d).
+static func kinds() -> PackedInt32Array:
+	return _kinds.duplicate()
+
+
+## True if the C++ decider works this slot's input out itself from the pawn's C++ memory and facts (the target distance, the most
+## aware entry, the last hit, the swing coming). The rest (group distances, actions, a game's own) come from here.
+static func cpp_works_out(slot: int) -> bool:
+	if slot < 0 or slot >= _kinds.size():
+		return false
+	var kind := _kinds[slot]
+	return kind != Kind.KEPT and kind != Kind.GROUP_DISTANCE and kind != Kind.GROUP_FOUND and kind != Kind.ACTION_READY
+
+
 ## True if the slot's input is a time in ticks (its name begins with [constant TICKS_PREFIX]).
 static func is_ticks(slot: int) -> bool:
 	return slot >= 0 and slot < _in_ticks.size() and _in_ticks[slot] == 1
@@ -184,11 +209,14 @@ func set_input(input_name: StringName, value: float) -> void:
 	set_slot(slot_of(input_name), value)
 
 
-## Writes a value by slot.
+## Writes a value by slot. A kept input also goes into the pawn's row in the C++ decider, when it decides there.
 func set_slot(slot: int, value: float) -> void:
 	if values.size() <= slot:
 		_grow(slot + 1)
 	values[slot] = value
+	var manager := _context.behaviour_manager if _context else null
+	if manager and manager.cpp_row >= 0 and AIBehaviourManager.decision_module and _kinds[slot] == Kind.KEPT:
+		AIBehaviourManager.decision_module.input_set(manager, slot, value)
 
 
 ## The value in a slot: a kept one as last written (0 if never), a worked-out one worked out now if it hasn't been yet this decision.
@@ -272,7 +300,7 @@ func nearest_in_group(group: StringName, tick: int) -> Node3D:
 	var point: Node3D = _group_point.get(group)
 	var looked: int = _group_looked_tick.get(group, -1)
 	if point == null or not is_instance_valid(point) or not point.is_inside_tree() or looked < 0 \
-			or tick - looked >= TickDriver.ticks_at_rate(_LOOK_AGAIN_TICKS):
+			or tick - looked >= TickDriver.ticks_at_rate(GROUP_LOOK_AGAIN_TICKS):
 		point = _find_nearest(group, tick)
 		_group_point[group] = point
 		_group_looked_tick[group] = tick

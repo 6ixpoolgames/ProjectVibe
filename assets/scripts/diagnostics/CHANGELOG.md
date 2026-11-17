@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | The window title in shipped games | `DiagnosticsManager._update_title` | A debugging convenience (role and process id, to tell instances apart) that also renames a release build's window, since diagnostics ship. A setting, or debug builds only, keeps a game's own title | S |
 | "Late" and "very late" as settings | `DiagnosticsManager._summary`; the F4 panel's text; `replay/ReplayViewer`'s strip colours | Fixed at 20 and 34 ms (60 and 30 fps) in three places, while spikes follow the tick rate and `spike_over_budget`. A game aiming at another frame rate can't set them | S |
 
+## 2026-11-18
+
+- **F1 lists F10** (the AI decision module's key: every pawn's decisions in GDScript and back), and no longer says the panels are debug-only (they ship in release builds; F9 and F10 are debug-only).
+
 ## 2026-11-17
 
 - **Detail for timing scopes:** `PerfScopes.detailed` and `begin_detailed()`, for scopes that run very often (the AI's per state, per behaviour and per sense ones). They time only while detail is on, which the F4 timings panel switches on while it's open, and `mass_battle_measure --scopes` too. A scope costs about a microsecond; the AI's fine scopes measured about 0.2 ms a frame at 600 pawns, and they also inflate the numbers they sit inside (a check timed in three nested parts read nearly twice its real cost).

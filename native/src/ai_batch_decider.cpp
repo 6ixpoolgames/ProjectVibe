@@ -3,6 +3,7 @@
 // AIBehaviourManager.decide() (assets/scripts/ai/AIBehaviourManager.gd) exactly, in the same order with the same arithmetic, so the
 // two agree to the bit: a change to one goes in both, and ai_batch_decider_selftest compares them.
 #include "ai_batch_decider.h"
+#include "ai_memory_store.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/array.hpp>
@@ -10,6 +11,7 @@
 #include <godot_cpp/variant/packed_float64_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <algorithm>
@@ -608,6 +610,7 @@ int AIBatchDecider::add_pawn(int64_t id, int brain, int64_t pawn_number, int64_t
 	p.persistence_along.assign(count, 0.0);
 	p.persistence_changed.assign(count, 0);
 	p.persistence_speed.assign(count, 1.0);
+	p.persistence_mask.assign(count, fade_math::Fade());
 	p.jitter.resize(count);
 	p.interrupt_threshold.resize(count);
 	for (size_t i = 0; i < count; ++i) {
@@ -711,6 +714,18 @@ void AIBatchDecider::set_persistence_speed(int row, int slot, double speed, int6
 	p.persistence_speed[slot] = std::max(0.0, speed);
 }
 
+void AIBatchDecider::set_persistence_mask(int row, int slot, const Dictionary &fade_values) {
+	ERR_FAIL_COND(!row_ok(row));
+	PawnRow &p = _pawns[row];
+	ERR_FAIL_INDEX(slot, int(p.persistence_mask.size()));
+	if (fade_values.is_empty()) {
+		p.persistence_mask[slot] = fade_math::Fade();
+		return;
+	}
+	fade_math::read_values(p.persistence_mask[slot], int(fade_values.get("mode", 0)), int64_t(fade_values.get("hold", 0)),
+			int64_t(fade_values.get("fade", 60)), int64_t(fade_values.get("half_life", 30)), fade_values.get("curve", Variant()));
+}
+
 void AIBatchDecider::set_score_jitter(int row, int slot, double effective_jitter) {
 	ERR_FAIL_COND(!row_ok(row));
 	ERR_FAIL_INDEX(slot, int(_pawns[row].jitter.size()));
@@ -732,12 +747,184 @@ double AIBatchDecider::persistence_now(int row, int slot, int64_t tick) const {
 	if (!p.persistence_running[slot] || behaviour.persistence == 0.0 || !behaviour.has_persistence_fade) {
 		return 0.0;
 	}
-	return behaviour.persistence *
-			fade_math::value_at(behaviour.persistence_fade, ticks_along(p.persistence_along[slot], p.persistence_changed[slot], p.persistence_speed[slot], tick));
+	// AIBehaviourBase.persistence_now: the amount times the fade, times the pawn's own mask if it has one, in that order.
+	const double along = ticks_along(p.persistence_along[slot], p.persistence_changed[slot], p.persistence_speed[slot], tick);
+	double amount = behaviour.persistence * fade_math::value_at(behaviour.persistence_fade, along);
+	if (p.persistence_mask[slot].has_profile) {
+		amount *= fade_math::value_at(p.persistence_mask[slot], along);
+	}
+	return amount;
 }
 
-int AIBatchDecider::decide_pawn(int row, int64_t tick, int state, bool has_target, int64_t event_priority, bool event_normal,
-		int64_t can_press, const PackedFloat64Array &inputs) {
+void AIBatchDecider::set_input_kinds(const PackedInt32Array &kinds) {
+	_input_kinds.assign(kinds.ptr(), kinds.ptr() + kinds.size());
+}
+
+void AIBatchDecider::note_hit(int row, int64_t tick, int64_t attacker_id) {
+	ERR_FAIL_COND(!row_ok(row));
+	_pawns[row].last_hit_tick = tick;
+	_pawns[row].last_attacker_id = uint64_t(attacker_id);
+}
+
+void AIBatchDecider::note_incoming(int row, int64_t attacker_id, int64_t attacker_number, int64_t start_tick, int64_t hit_tick) {
+	ERR_FAIL_COND(!row_ok(row));
+	PawnRow &p = _pawns[row];
+	p.incoming_attacker_id = uint64_t(attacker_id);
+	p.incoming_attacker_number = attacker_number;
+	p.incoming_start_tick = start_tick;
+	p.incoming_hit_tick = hit_tick;
+}
+
+namespace {
+// AIInputs.Kind, in its order.
+enum InputKind : int32_t {
+	KEPT = 0,
+	TARGET_DISTANCE,
+	MOST_AWARE_CERTAIN,
+	MOST_AWARE_UNCERTAIN,
+	TICKS_SINCE_UNKNOWN_HIT,
+	INCOMING_ATTACK,
+	INCOMING_ATTACK_TICK,
+	INCOMING_ATTACKER,
+	GROUP_DISTANCE,
+	GROUP_FOUND,
+	ACTION_READY,
+};
+constexpr double FAR = 1.0e12; // AIInputs.FAR
+
+// AIInputs._flat_distance: the same Vector3 arithmetic, so the same float.
+double flat_distance(const Vector3 &point, const Vector3 &from) {
+	Vector3 offset = point - from;
+	offset.y = 0.0;
+	return double(offset.length());
+}
+
+// is_instance_valid(): the object with this instance id still exists.
+Object *alive(uint64_t id) {
+	return id != 0 ? ObjectDB::get_instance(id) : nullptr;
+}
+} // namespace
+
+const double *AIBatchDecider::work_out_inputs(const PawnRow &p, const Vector3 &position, int64_t tick, int64_t &count) {
+	count = std::max<int64_t>(int64_t(p.kept_inputs.size()), int64_t(_input_kinds.size()));
+	_inputs_scratch.assign(size_t(count), 0.0);
+	std::copy(p.kept_inputs.begin(), p.kept_inputs.end(), _inputs_scratch.begin());
+	AIMemoryStore *store = Object::cast_to<AIMemoryStore>(p.memory_store.ptr());
+	int64_t most_aware = -2; // not looked for yet
+	for (size_t slot = 0; store != nullptr && slot < _input_kinds.size(); ++slot) {
+		double &value = _inputs_scratch[slot];
+		switch (_input_kinds[slot]) {
+			case TARGET_DISTANCE: {
+				const int64_t index = alive(p.target_id) != nullptr ? store->find_by_id(p.target_id) : -1;
+				value = index >= 0 ? flat_distance(store->last_known_position_at(index), position) : FAR;
+				break;
+			}
+			case MOST_AWARE_CERTAIN:
+			case MOST_AWARE_UNCERTAIN: {
+				if (most_aware == -2) {
+					most_aware = store->most_aware_index(position, tick);
+				}
+				const bool certain = most_aware >= 0 && store->is_certain_at(most_aware);
+				const bool wanted = _input_kinds[slot] == MOST_AWARE_CERTAIN ? certain : (most_aware >= 0 && !certain);
+				value = wanted ? 1.0 : 0.0;
+				break;
+			}
+			case TICKS_SINCE_UNKNOWN_HIT: {
+				// An attacker it remembers is known; one that's gone, or never noticed, isn't.
+				const bool known = alive(p.last_attacker_id) != nullptr && store->find_by_id(p.last_attacker_id) >= 0;
+				value = (p.last_hit_tick >= 0 && !known) ? double(tick - p.last_hit_tick) : FAR;
+				break;
+			}
+			case INCOMING_ATTACK: {
+				// AIContextComponent.has_incoming_attack: not hit yet, and the attacker still there and alive.
+				Object *attacker = alive(p.incoming_attacker_id);
+				value = (p.incoming_hit_tick >= tick && attacker != nullptr && !bool(attacker->get("dead"))) ? 1.0 : 0.0;
+				break;
+			}
+			case INCOMING_ATTACK_TICK:
+				value = double(p.incoming_start_tick);
+				break;
+			case INCOMING_ATTACKER:
+				value = alive(p.incoming_attacker_id) != nullptr ? double(p.incoming_attacker_number) : -1.0;
+				break;
+			default:
+				break; // kept: a game's own, action_ready
+		}
+	}
+	// The group distances, from where the pawn is now.
+	for (const PawnRow::GroupPoint &group : p.groups) {
+		if (group.distance_slot >= 0 && group.distance_slot < count) {
+			_inputs_scratch[group.distance_slot] = group.found ? flat_distance(group.position, position) : FAR;
+		}
+		if (group.found_slot >= 0 && group.found_slot < count) {
+			_inputs_scratch[group.found_slot] = group.found ? 1.0 : 0.0;
+		}
+	}
+	return _inputs_scratch.data();
+}
+
+PackedFloat64Array AIBatchDecider::get_last_inputs() const {
+	PackedFloat64Array out;
+	for (double value : _inputs_scratch) {
+		out.push_back(value);
+	}
+	return out;
+}
+
+void AIBatchDecider::set_body(int row, int64_t body_id, Object *memory_store) {
+	ERR_FAIL_COND(!row_ok(row));
+	_pawns[row].body_id = uint64_t(body_id);
+	_pawns[row].memory_store = Ref<RefCounted>(Object::cast_to<RefCounted>(memory_store));
+}
+
+void AIBatchDecider::set_state(int row, int state) {
+	ERR_FAIL_COND(!row_ok(row));
+	_pawns[row].state = state;
+}
+
+void AIBatchDecider::set_target(int row, int64_t target_id) {
+	ERR_FAIL_COND(!row_ok(row));
+	_pawns[row].target_id = uint64_t(target_id);
+}
+
+void AIBatchDecider::set_can_press(int row, int64_t mask) {
+	ERR_FAIL_COND(!row_ok(row));
+	_pawns[row].can_press = uint64_t(mask);
+}
+
+void AIBatchDecider::set_input(int row, int slot, double value) {
+	ERR_FAIL_COND(!row_ok(row));
+	ERR_FAIL_COND(slot < 0);
+	std::vector<double> &kept = _pawns[row].kept_inputs;
+	if (kept.size() <= size_t(slot)) {
+		kept.resize(size_t(slot) + 1, 0.0);
+	}
+	kept[slot] = value;
+}
+
+void AIBatchDecider::set_group_point(int row, int distance_slot, int found_slot, bool found, const Vector3 &position) {
+	ERR_FAIL_COND(!row_ok(row));
+	for (PawnRow::GroupPoint &group : _pawns[row].groups) {
+		if (group.distance_slot == distance_slot && group.found_slot == found_slot) {
+			group.found = found;
+			group.position = position;
+			return;
+		}
+	}
+	_pawns[row].groups.push_back(PawnRow::GroupPoint{ distance_slot, found_slot, found, position });
+}
+
+Dictionary AIBatchDecider::get_facts(int row) const {
+	Dictionary facts;
+	ERR_FAIL_COND_V(!row_ok(row), facts);
+	const PawnRow &p = _pawns[row];
+	facts["state"] = p.state;
+	facts["target_id"] = int64_t(p.target_id);
+	facts["can_press"] = int64_t(p.can_press);
+	return facts;
+}
+
+int AIBatchDecider::decide_pawn(int row, int64_t tick, int64_t event_priority, bool event_normal) {
 	_last_kept = false;
 	ERR_FAIL_COND_V_MSG(!row_ok(row), -1, "AIBatchDecider.decide_pawn: no pawn in that row.");
 	PawnRow &p = _pawns[row];
@@ -753,20 +940,25 @@ int AIBatchDecider::decide_pawn(int row, int64_t tick, int state, bool has_targe
 		}
 		_persistence_scratch[slot] = persistence_now(row, slot, tick);
 	}
+	// Where the pawn is now, from its body.
+	Node3D *body = Object::cast_to<Node3D>(alive(p.body_id));
+	const Vector3 position = body ? body->get_global_position() : Vector3();
 	RowInput in;
 	in.running = p.running;
 	in.running_started = p.running_started;
 	in.now = tick;
 	in.event_priority = event_priority;
 	in.event_normal = event_normal;
-	in.state = state;
-	in.has_target = has_target;
+	in.state = p.state;
+	in.has_target = alive(p.target_id) != nullptr;
 	in.cooling = cooling;
-	in.can_press = uint64_t(can_press);
+	in.can_press = p.can_press;
 	in.persistence = _persistence_scratch.data();
 	in.jitter = p.jitter.data();
 	in.interrupt_threshold = p.interrupt_threshold.data();
-	in.view = RowView{ 0, 0, nullptr, inputs.ptr(), inputs.size(), p.random_seed, p.pawn_number, tick };
+	int64_t input_count = 0;
+	const double *input_values = work_out_inputs(p, position, tick, input_count);
+	in.view = RowView{ 0, 0, nullptr, input_values, input_count, p.random_seed, p.pawn_number, tick };
 	const RowResult out = decide_row(brain, in);
 	_last_kept = out.kept;
 	// The switch, as AIBehaviourManager._start and _stop_running apply it: the old one's end, the new one's start and persistence.
@@ -809,10 +1001,21 @@ void AIBatchDecider::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop_running", "row", "tick"), &AIBatchDecider::stop_running);
 	ClassDB::bind_method(D_METHOD("add_persistence_ticks", "row", "slot", "ticks", "tick"), &AIBatchDecider::add_persistence_ticks);
 	ClassDB::bind_method(D_METHOD("set_persistence_speed", "row", "slot", "speed", "tick"), &AIBatchDecider::set_persistence_speed);
+	ClassDB::bind_method(D_METHOD("set_persistence_mask", "row", "slot", "fade_values"), &AIBatchDecider::set_persistence_mask);
 	ClassDB::bind_method(D_METHOD("set_score_jitter", "row", "slot", "effective_jitter"), &AIBatchDecider::set_score_jitter);
 	ClassDB::bind_method(D_METHOD("set_interrupt_threshold", "row", "slot", "threshold"), &AIBatchDecider::set_interrupt_threshold);
 	ClassDB::bind_method(D_METHOD("persistence_now", "row", "slot", "tick"), &AIBatchDecider::persistence_now);
-	ClassDB::bind_method(D_METHOD("decide_pawn", "row", "tick", "state", "has_target", "event_priority", "event_normal", "can_press", "inputs"),
-			&AIBatchDecider::decide_pawn);
+	ClassDB::bind_method(D_METHOD("decide_pawn", "row", "tick", "event_priority", "event_normal"), &AIBatchDecider::decide_pawn);
+	ClassDB::bind_method(D_METHOD("set_body", "row", "body_id", "memory_store"), &AIBatchDecider::set_body);
+	ClassDB::bind_method(D_METHOD("set_state", "row", "state"), &AIBatchDecider::set_state);
+	ClassDB::bind_method(D_METHOD("set_target", "row", "target_id"), &AIBatchDecider::set_target);
+	ClassDB::bind_method(D_METHOD("set_can_press", "row", "mask"), &AIBatchDecider::set_can_press);
+	ClassDB::bind_method(D_METHOD("set_input", "row", "slot", "value"), &AIBatchDecider::set_input);
+	ClassDB::bind_method(D_METHOD("set_group_point", "row", "distance_slot", "found_slot", "found", "position"), &AIBatchDecider::set_group_point);
+	ClassDB::bind_method(D_METHOD("get_facts", "row"), &AIBatchDecider::get_facts);
+	ClassDB::bind_method(D_METHOD("set_input_kinds", "kinds"), &AIBatchDecider::set_input_kinds);
+	ClassDB::bind_method(D_METHOD("note_hit", "row", "tick", "attacker_id"), &AIBatchDecider::note_hit);
+	ClassDB::bind_method(D_METHOD("note_incoming", "row", "attacker_id", "attacker_number", "start_tick", "hit_tick"), &AIBatchDecider::note_incoming);
+	ClassDB::bind_method(D_METHOD("get_last_inputs"), &AIBatchDecider::get_last_inputs);
 	ClassDB::bind_method(D_METHOD("was_kept"), &AIBatchDecider::was_kept);
 }

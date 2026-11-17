@@ -42,6 +42,8 @@ const RULE_COOLDOWN := &"cooldown"
 const RULE_NO_TARGET := &"no_target"
 ## Its action couldn't start (AbilityManager.can_start).
 const RULE_ACTION := &"action"
+## Passed the hard rules, but C++ made the decision, so GDScript's range, availability and score weren't worked out.
+const RULE_NOT_WORKED_OUT := &"cpp"
 
 ## The tick of the decision.
 var tick := 0

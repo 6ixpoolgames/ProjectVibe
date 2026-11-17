@@ -40,6 +40,8 @@
 
 #include "fade_math.h"
 
+#include <godot_cpp/variant/vector3.hpp>
+
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -107,16 +109,43 @@ public:
 	// AIBehaviourBase.add_persistence_ticks and set_persistence_speed, for one behaviour of one pawn.
 	void add_persistence_ticks(int row, int slot, double ticks, int64_t tick);
 	void set_persistence_speed(int row, int slot, double speed, int64_t tick);
+	// A pawn's own persistence mask for a behaviour: a fade (FadeProfile.values_at_rate()) multiplied with the brain's persistence
+	// fade, for this pawn only. An empty Dictionary removes it. A hook for later uses (the owner's call).
+	void set_persistence_mask(int row, int slot, const Dictionary &fade_values);
 	// One pawn's own jitter (its effective_jitter) and interrupt threshold for a behaviour, changed during play.
 	void set_score_jitter(int row, int slot, double effective_jitter);
 	void set_interrupt_threshold(int row, int slot, int64_t threshold);
 	// What persistence adds to a behaviour's score now (AIBehaviourBase.persistence_now).
 	double persistence_now(int row, int slot, int64_t tick) const;
-	// One decision for one pawn: the state's number (find_state), whether there's a target, the reason's priority and whether it's an
-	// ordinary decision, the slots whose action could start (a mask), and the pawn's AI inputs by slot. Returns the chosen slot (-1
-	// nothing) and applies the switch to the pawn's state. was_kept() says whether the interrupt rule kept the running one.
-	int decide_pawn(int row, int64_t tick, int state, bool has_target, int64_t event_priority, bool event_normal, int64_t can_press,
-			const PackedFloat64Array &inputs);
+	// The kind of every input slot (AIInputs.Kind, by slot), so the decider can work out the built-in ones itself (step 5d).
+	void set_input_kinds(const PackedInt32Array &kinds);
+	// --- Facts: what a decision is made from, written into the pawn's row by whatever owns each one, when it changes (write-through,
+	// the owner's call), so a decision gathers nothing. ---
+	// The pawn's body (its instance id: its position is read from it) and its C++ memory store (AIMemoryStore).
+	void set_body(int row, int64_t body_id, Object *memory_store);
+	// Its state's number (find_state), from AIStateManager on a state change.
+	void set_state(int row, int state);
+	// Its target's instance id (0: none), from AIContextComponent's current_target. A target that's gone counts as none.
+	void set_target(int row, int64_t target_id);
+	// The behaviours whose action could start (a mask by slot), from the AbilityManager's readiness after it changed.
+	void set_can_press(int row, int64_t mask);
+	// One input it keeps (a game's own, or action_ready), from AIInputs.set_input.
+	void set_input(int row, int slot, double value);
+	// The nearest node of a group the pawn's conditions read (group_distance and group_found slots, -1 if not read), from AIInputs'
+	// lookup, which looks again every 2 seconds. The distance is worked out from the body at each decision.
+	void set_group_point(int row, int distance_slot, int found_slot, bool found, const Vector3 &position);
+	// The last hit's tick and attacker; the swing coming (attacker 0 when there's none), its attacker's pawn number, start and hit ticks.
+	void note_hit(int row, int64_t tick, int64_t attacker_id);
+	void note_incoming(int row, int64_t attacker_id, int64_t attacker_number, int64_t start_tick, int64_t hit_tick);
+	// The facts as written (state, target_id, can_press), for shadow mode's check that nothing was missed.
+	Dictionary get_facts(int row) const;
+	// One decision for one pawn, from its row: its state and facts, and the reason's priority and whether it's an ordinary decision.
+	// The memory-based inputs are worked out here from its memory store (as AIInputs does), the group distances from its body, the
+	// rest are the inputs it keeps. Returns the chosen slot (-1 nothing) and applies the switch to the pawn's state. was_kept() says
+	// whether the interrupt rule kept the running one.
+	int decide_pawn(int row, int64_t tick, int64_t event_priority, bool event_normal);
+	// The inputs the last decide_pawn used, as it worked them out, for tests.
+	PackedFloat64Array get_last_inputs() const;
 	bool was_kept() const;
 
 protected:
@@ -227,9 +256,32 @@ private:
 		std::vector<double> persistence_along;
 		std::vector<int64_t> persistence_changed;
 		std::vector<double> persistence_speed;
+		std::vector<fade_math::Fade> persistence_mask; // none unless set (has_profile false)
 		std::vector<double> jitter;
 		std::vector<int64_t> interrupt_threshold;
+		// Facts (write-through), written when they change.
+		uint64_t body_id = 0;
+		Ref<RefCounted> memory_store; // an AIMemoryStore
+		int state = 0;
+		uint64_t target_id = 0;
+		uint64_t can_press = 0;
+		std::vector<double> kept_inputs; // by slot: the inputs it keeps
+		struct GroupPoint {
+			int distance_slot = -1;
+			int found_slot = -1;
+			bool found = false;
+			Vector3 position;
+		};
+		std::vector<GroupPoint> groups;
+		int64_t last_hit_tick = -1;
+		uint64_t last_attacker_id = 0;
+		uint64_t incoming_attacker_id = 0;
+		int64_t incoming_attacker_number = -1;
+		int64_t incoming_start_tick = -1;
+		int64_t incoming_hit_tick = -1;
 	};
+	// The inputs worked out here into scratch, for one decision.
+	const double *work_out_inputs(const PawnRow &p, const Vector3 &position, int64_t tick, int64_t &count);
 
 	// Everything one decision is made from, whichever way it came in.
 	struct RowInput {
@@ -273,6 +325,8 @@ private:
 	std::vector<int> _free_rows;
 	std::unordered_map<int64_t, int> _row_of_id;
 	std::vector<double> _persistence_scratch; // decide_pawn's persistence values, reused
+	std::vector<int32_t> _input_kinds; // AIInputs.Kind by slot
+	std::vector<double> _inputs_scratch; // decide_pawn's worked-out inputs, reused
 	bool _last_kept = false;
 };
 

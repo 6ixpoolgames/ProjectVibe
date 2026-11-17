@@ -397,7 +397,17 @@ tick. Chase stays on its interval: following a moving target is regular work.
 | Memory: awareness, certain, last seen, last known position | `AIMemoryStore` (C++) | before |
 | Position, facing, team | the pawn table | before |
 | The brain: behaviours, their settings, conditions and curves | `AIBehaviourManager.describe()`, added once per brain | 5a, 5b |
-| Each pawn's decision state: running behaviour and since when, cooldowns, persistence | gathered per decision now; an `AIDecisionTable` in C++ in 5c | 5c |
+| Each pawn's decision state: running behaviour and since when, cooldowns, persistence, its own jitter, thresholds and persistence masks | `AIBatchDecider`'s pawn rows (C++), kept in step by events | 5c |
+
+**Built differently from the plan (2026-11-18):** C++ decides one pawn at a time, at the moment GDScript decided (`decide_pawn`), not in
+a batch applied the next tick. The C++ call costs a microsecond or two, the same-tick timing keeps decisions exactly as they were, and
+the comparison with GDScript stays exact. Batching onto the worker threads (5e) is worth it only for work that's heavy in C++; it's
+measured before it's built.
+
+**Per-pawn persistence masks** *(the owner, 2026-11-18: hooks now, uses later)*: a pawn's own fade multiplied with a behaviour's
+persistence fade (`AIBehaviourManager.set_persistence_mask`, `AIBatchDecider.set_persistence_mask`), so something can reshape one
+pawn's persistence without changing the brain the others share. A mask whose script has its own `value_at()` makes the pawn a special
+mind.
 
 **Determinism.** Results never depend on the number of threads or their timing. Pawns are decided in pawn-id order; each pawn's
 result depends only on the data from the end of the last tick. Random numbers are a hash of the pawn's seed and number, the tick
@@ -410,8 +420,8 @@ the attacker's pawn number (it was the attacker's instance id, which differs bet
 |---|---|---|---|
 | 5a | Timings per state, behaviour and sense; a recorder of decisions; `AIBatchDecider` choosing from given answers; shadow mode | The same choices as GDScript, at 150 and 600 pawns | **Built 2026-11-17**: 100% agreement, 0.2 to 0.4 µs a decision in C++ |
 | 5b | Inputs, conditions and score curves in GDScript and C++; the built-in behaviours as conditions; `action_ready` kept by events; event wake-ups | Shadow mode agrees with every decision; gathering a row costs less | **Built 2026-11-17**: every decision agreed (290 989 at 600 pawns, 72 461 at 150); a row 33 µs to gather (was 45); GDScript's own deciding about the same (50 µs a decision against 46); Go To Point's ticks a ninth as many |
-| 5c | Each pawn's decision state in C++ (`AIDecisionTable`), so gathering a row copies nothing per behaviour | Shadow agreement; gathering under 0.5 ms at 600 pawns | |
-| 5d | Inputs worked out in C++ from memory and the pawn table; target and state rules in C++ | The same targets and states as GDScript | |
+| 5c | Each pawn's decision state in C++; C++ makes the decisions (the main path), GDScript the backup: the pawn's `decides_in`, the game mode's override (`AIDecisionModule.decider`), special minds and a missing library to GDScript, F10 to switch | Shadow agreement from C++'s own state; C++ driving plays the same game as GDScript | **Built 2026-11-18**: every decision agreed (1 461 in a real fight); the same 1 164 changes of behaviour driving from C++ as from GDScript |
+| 5d | Inputs worked out in C++ from memory and the pawn table; target and state rules in C++ | The same targets and states as GDScript | **Part built 2026-11-18**: the memory-based inputs, and every fact written through when it changes (the owner's call), so a decision gathers nothing: choosing 1.15 ms a tick at 600 pawns (GDScript 2.67); target and state rules still to come |
 | 5e | The decision job on the workers, chained after sensing; the batch's answers used (opt-in), applied the next tick | Identical results with 0 to N workers; main-thread AI time down | |
 | 5f | Deferral by count when the tick runs out of time (rule 5): decisions wait their turn in pawn-id order | Graceful overload in the 600-pawn battle | |
 

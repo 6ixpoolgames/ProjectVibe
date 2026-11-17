@@ -2,6 +2,8 @@
 ## pawn's inputs (AIInputs), the condition kinds (AICompareCondition, AIChanceCondition, AIAnyCondition), score curves (AIScoreCurve),
 ## a behaviour's score with curves, has_own_code(), and the C++ decider (AIBatchDecider's "conditions" scorer) judging the same
 ## conditions and curves the same way: live shadow mode over made-up brains fed random inputs, which must agree on every decision.
+## Claude 2026-11-18 (step 5c): and C++ driving (the main path) plays the same game as GDScript driving, persistence, a per-pawn
+## persistence mask, jitter changes and behaviours finishing included; and where pawns decide (setting, override, special minds).
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_conditions_selftest.tscn"
 extends SelfTest
@@ -155,26 +157,79 @@ func _test_own_code() -> void:
 		behaviour.free()
 
 
-# Made-up brains judged by conditions and curves, fed random kept inputs, decided by GDScript with shadow mode on: C++ must agree on
-# every decision.
+# Made-up brains judged by conditions and curves, fed random kept inputs. First decided by GDScript with shadow mode on: C++ must
+# agree on every decision. Then the same game with C++ driving must make the same changes of behaviour.
 func _test_cpp_agrees() -> void:
 	if not ClassDB.class_exists(&"AIBatchDecider"):
 		_check(false, "the navcore library has AIBatchDecider (rebuild native/ with the editor closed)")
 		return
-	var batcher := AIDecisionBatcher.new()
-	GameMode.add_module(batcher)
-	batcher.mode = AIDecisionBatcher.Mode.SHADOW
+	var module := GameMode.get_module(AIDecisionModule) as AIDecisionModule
+	var added := module == null
+	if added:
+		module = AIDecisionModule.new()
+		GameMode.add_module(module)
+	module.decider = AIDecisionModule.Decider.PAWN_SETTING
+	module.check_against_gdscript = true
+	module.reset_counts()
+	var shadow_game := _play_conditions(module)
+	var counts := module.get_counts()
+	print("  conditions, live shadow: %s, chosen %s" % [str(counts), str(shadow_game["chosen"].keys())])
+	_check(counts["checked"] == TICKS * 3 and counts["agreed"] == counts["checked"],
+			"C++ judges conditions and curves the same as GDScript: %d of %d decisions agree" % [counts["agreed"], counts["checked"]])
+	_check_equal(counts["stale_facts"], 0, "no written-through fact was out of date at any decision")
+	_check(shadow_game["chosen"].size() >= 5, "and the made-up brains chose most of their behaviours (%d of 6)" % shadow_game["chosen"].size())
+	# The same game with C++ driving.
+	module.check_against_gdscript = false
+	module.reset_counts()
+	var cpp_game := _play_conditions(module)
+	counts = module.get_counts()
+	_check(counts["cpp"] == TICKS * 3, "C++ makes every decision when it drives (%d)" % counts["cpp"])
+	_check(cpp_game["changes"] == shadow_game["changes"] and not shadow_game["changes"].is_empty(),
+			"C++ driving plays the same game as GDScript driving: %d changes of behaviour, the same in order" % shadow_game["changes"].size())
+	# Where pawns decide.
+	var pawn := _make_pawn(_made_up_behaviours())
+	_decide(pawn, 1)
+	var manager := pawn.ai_context.behaviour_manager
+	_check(manager.cpp_row >= 0, "a pawn decides in C++ by default")
+	manager.decides_in = AIBehaviourManager.DecidesIn.GDSCRIPT
+	_check(manager.cpp_row == -1, "its own setting moves it to GDScript at once")
+	manager.decides_in = AIBehaviourManager.DecidesIn.CPP
+	module.decider = AIDecisionModule.Decider.ALL_GDSCRIPT
+	_check(manager.cpp_row == -1, "the game mode's override moves every pawn to GDScript")
+	module.decider = AIDecisionModule.Decider.PAWN_SETTING
+	_check(manager.cpp_row >= 0, "...and back")
+	pawn.free()
+	var own := OwnCodeBehaviour.new()
+	own.name = "OwnCode"
+	var special := _make_pawn([own])
+	_decide(special, 1)
+	_check(special.ai_context.behaviour_manager.cpp_row == -1, "a special mind (a behaviour with code of its own) decides in GDScript")
+	special.free()
+	if added:
+		GameMode.remove_module(module)
+
+
+# One game of the made-up brains: 3 pawns, TICKS ticks of random inputs, with persistence changes along the way. Returns the
+# changes of behaviour in order and which behaviours were chosen.
+func _play_conditions(_module: AIDecisionModule) -> Dictionary:
 	var pawns: Array[Pawn] = []
 	var chosen := {}
+	var changes: Array[String] = []
 	for n in 3:
 		var pawn := _make_pawn(_made_up_behaviours())
 		pawn.name = "Conditions%d" % n
 		pawn.ai_context.random_seed = 1000 + n
 		pawn.ai_context.behaviour_manager.default_score_jitter = 0.05 * n
-		pawn.ai_context.behaviour_manager.behaviour_changed.connect(func(_old: AIBehaviourBase, new: AIBehaviourBase, _reason: String) -> void:
+		pawn.ai_context.behaviour_manager.behaviour_changed.connect(func(_old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
+			changes.append("%d:%s:%s" % [n, String(new.name) if new else "", reason])
 			if new:
 				chosen[String(new.name)] = true)
 		pawns.append(pawn)
+	# Pawn 2's Ant carries a persistence mask: a per-pawn shape over its fade (the hook).
+	var mask := FadeProfile.new()
+	mask.mode = FadeProfile.Mode.HALF_LIFE
+	mask.half_life_ticks = 7
+	pawns[2].ai_context.behaviour_manager.set_persistence_mask(&"Ant", mask)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 31337
 	for t in TICKS:
@@ -186,25 +241,34 @@ func _test_cpp_agrees() -> void:
 			inputs.set_input(&"test_key", float(t / 10))
 			inputs.set_input(&"ticks_test_since", float(rng.randi_range(0, 60)))
 			_decide(pawn, tick)
-		batcher.decide_gathered()
-	var counts := batcher.get_counts()
-	print("  conditions, live shadow: %s, chosen %s" % [str(counts), str(chosen.keys())])
-	_check(counts["decisions"] == TICKS * pawns.size() and counts["agreed"] == counts["decisions"] and counts["unanswered"] == 0,
-			"C++ judges conditions and curves the same as GDScript: %d of %d decisions agree" % [counts["agreed"], counts["decisions"]])
-	_check(chosen.size() >= 5, "and the made-up brains chose most of their behaviours (%d of 6)" % chosen.size())
+			var manager := pawn.ai_context.behaviour_manager
+			# Events C++'s copy of the state must follow: persistence changes, jitter, a behaviour finishing on its own.
+			if t % 37 == 5:
+				manager.add_persistence_ticks(&"Ant", 9.0)
+			if t % 53 == 11:
+				manager.set_persistence_speed(&"Cat", 0.5 + 0.25 * (t % 3))
+			if t % 71 == 3:
+				manager.set_score_jitter(&"Bee", 0.02 * (t % 4))
+			if t % 29 == 17 and manager.get_running_behaviour():
+				manager.stop_running("finished")
 	for pawn in pawns:
 		pawn.free()
-	GameMode.remove_module(batcher)
+	return {"chosen": chosen, "changes": changes}
 
 
 func _made_up_behaviours() -> Array:
 	var ant := _behaviour("Ant", 0.6, 0.1)
+	ant.persistence = 0.2
+	ant.persistence_fade = _fade(FadeProfile.Mode.LINEAR, 10, 40)
 	ant.conditions = [AICompareCondition.make(&"test_x", Comparison.AT_MOST, 0.5)]
 	ant.score_curves = [AIScoreCurve.make(&"test_y", 0.0, 1.0)]
 	var bee := _behaviour("Bee", 0.55, 0.55)
 	var either: Array[AICondition] = [AICompareCondition.make(&"test_x", Comparison.MORE_THAN, 0.7), AIChanceCondition.make(0.4, 3)]
 	bee.conditions = [AIAnyCondition.make(either)]
 	var cat := _behaviour("Cat", 0.7, 0.0)
+	cat.persistence = -0.15
+	cat.persistence_fade = _fade(FadeProfile.Mode.HALF_LIFE, 5, 0, 12)
+	cat.cooldown_ticks = 9
 	cat.conditions = [AICompareCondition.make(&"test_y", Comparison.AT_LEAST, 0.0, &"test_x")] # y >= x
 	cat.score_curves = [AIScoreCurve.make(&"test_x", 1.0, 0.0), AIScoreCurve.make(&"test_y", 0.0, 1.0)]
 	var dog := _behaviour("Dog", 0.5, 0.5)
@@ -216,6 +280,15 @@ func _made_up_behaviours() -> Array:
 
 
 # --- Helpers ---
+
+
+func _fade(mode: FadeProfile.Mode, hold: int, fade: int, half_life := 30) -> FadeProfile:
+	var profile := FadeProfile.new()
+	profile.mode = mode
+	profile.hold_ticks = hold
+	profile.fade_ticks = fade
+	profile.half_life_ticks = half_life
+	return profile
 
 
 func _behaviour(behaviour_name: String, max_score: float, min_score: float) -> AIBehaviourBase:

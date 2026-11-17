@@ -209,6 +209,11 @@ func most_aware_index(tick: int) -> int:
 	return _store.most_aware_index(pawn.global_position if pawn else Vector3.ZERO, tick)
 
 
+## The C++ memory store (AIMemoryStore), or null when the GDScript one runs. The C++ decider reads it directly for the pawn's inputs.
+func native_store() -> Object:
+	return _store if _native else null
+
+
 ## Forgets everything.
 func clear() -> void:
 	_store.clear()
