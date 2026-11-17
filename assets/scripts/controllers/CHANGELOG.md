@@ -16,6 +16,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-17
 
+- **`AIController.look_at_node(node, offset)`** (scaling spec 6.2's wake-ups): keeps looking at a node, worked out again at every input until `stop_looking()` or another look, so a behaviour sleeping through a swing (Attack) still aims every tick. A freed node ends it and keeps the last aim.
 - **`possessable` moved here** from Pawn, with the rest of possession (the owner's call). A pawn scene whose ControllerManager comes from the defaults adds `parts/ControllerManager.tscn` itself to untick it.
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup. Stale comments fixed: `ControllerBase` said only PlayerController extended it; `AIController` said a script or test drives it until step 8 (the AI's behaviours do); `InputCommand` and `AIController` said the pawn copies the command (the ControllerManager does); `ControllerManager` said the pawn calls `take_input_command()` (it calls `tick_input()`).
 

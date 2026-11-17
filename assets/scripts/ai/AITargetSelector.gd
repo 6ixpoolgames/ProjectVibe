@@ -87,13 +87,8 @@ func _ready() -> void:
 		current_target_fade.mode = FadeProfile.Mode.LINEAR
 		current_target_fade.hold_ticks = 60
 		current_target_fade.fade_ticks = 60
-	# GDScript note: a script's method list includes inherited methods, and an overridden one appears once per script that defines
-	# it, so more than one target_priority means something overrode it.
-	var definitions := 0
-	for method in get_script().get_script_method_list():
-		if method.name == "target_priority":
-			definitions += 1
-	_custom_priority = definitions > 1
+	# Whether a game scores targets its own way: a script below this one overrides target_priority() (ScriptOverrides).
+	_custom_priority = ScriptOverrides.overrides(get_script(), &"target_priority")
 
 
 ## The current target, or null.

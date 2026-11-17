@@ -7,9 +7,9 @@
 ## ([method AIContextComponent.note_incoming_attack]), which notes it and asks for a decision at once. Ordinary decisions come every
 ## 15 ticks, longer than a swing's windup, so without that the parry would usually come too late.
 ## [br]
-## When it's available: a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up. The roll is made from the
-## swing's start tick and the attacker, so each swing is rolled once, however many decisions happen during its windup, and a replay
-## rolls the same.
+## When it's available: a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up: two conditions. The roll
+## is made from the swing's start tick and the attacker's pawn number, so each swing is rolled once, however many decisions happen
+## during its windup, and a replay rolls the same.
 ## [br]
 ## What it does: looks at the attacker and presses parry (presses_action, so it's skipped while the parry is cooling down or locked
 ## out, for example mid-swing). It finishes two ticks later, and forgets the swing. ParryAbility does the rest.
@@ -28,15 +28,16 @@ func _init() -> void:
 	max_score = 0.97
 	min_score = 0.97
 	presses_action = &"parry"
+	tick_interval_ticks = 60 # the safety net: it wakes two ticks after the press (wake_at)
 
 
-func is_available(context: AIContextComponent) -> bool:
-	if not context.has_incoming_attack():
-		return false
-	# One roll per swing: from the tick it started and who swung. GDScript note: get_instance_id() differs between machines, but the
-	# AI only runs on the server, so that's fine; the entity id would be needed if clients ran it.
-	var salt := ROLL_SALT ^ (context.incoming_attacker.get_instance_id() & 0xFFFF)
-	return context.random_unit_at(context.incoming_start_tick, salt) < parry_chance
+## A swing is coming, and its roll came up: once per swing, from its start tick and its attacker's number.
+func own_conditions() -> Array[AICondition]:
+	var list: Array[AICondition] = [
+		AICompareCondition.make(AIInputs.INCOMING_ATTACK, AICompareCondition.Comparison.EQUAL, 1.0),
+		AIChanceCondition.make(parry_chance, ROLL_SALT, AIInputs.INCOMING_ATTACK_TICK, AIInputs.INCOMING_ATTACKER),
+	]
+	return list
 
 
 var _started_tick := -1
@@ -44,6 +45,7 @@ var _started_tick := -1
 
 func enter(context: AIContextComponent) -> void:
 	_started_tick = context.current_tick
+	wake_at(_started_tick + 2) # its one tick that matters (see tick())
 	var hands := context.controller
 	if hands == null or not is_instance_valid(context.incoming_attacker):
 		return
@@ -56,6 +58,7 @@ func tick(context: AIContextComponent) -> Status:
 	# As AIAttackBehaviour: the press reaches the ability on the next input, so give it two ticks before finishing. tick() also runs
 	# on the tick it starts.
 	if context.current_tick - _started_tick < 2:
+		wake_at(_started_tick + 2)
 		return Status.RUNNING
 	context.clear_incoming_attack()
 	return Status.SUCCEEDED

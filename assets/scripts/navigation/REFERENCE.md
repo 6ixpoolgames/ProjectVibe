@@ -147,6 +147,7 @@ Not yet (from the old guide's section 8): finding a new path when nav tiles chan
 ### Signals
 
 - `arrived()`: Sent once when the end of a path is reached.
+- `path_ended(reached: bool)`: Sent once when a path ends, whichever way: reached is true when it arrived (after `arrived`), false when it gave up (no way there after all, waited too long for nav, or a link that couldn't be crossed). Not sent for `stop()`. The AI's behaviours wait for it instead of checking every few ticks (AIBehaviourBase.wake_on_path_end).
 
 ### Constants
 

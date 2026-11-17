@@ -6,6 +6,7 @@
 ## own checks, score and actions.
 ## [br]
 ## At each decision (pawn spec 10.8):
+## [br]First, the pawn's inputs ([AIInputs]) start afresh: each is worked out the first time a condition reads it this decision.
 ## [br]0. Interrupts: if the running behaviour can't be replaced by this decision's reason, it keeps running and that's all.
 ## [br]1. Valid: the behaviours the current state allows.
 ## [br]2. Hard rules, with no behaviour code run: drop any on cooldown, needing a target when there's none, or whose action can't
@@ -22,8 +23,9 @@
 ## [br]7. Switching: if the winner isn't the running one, the old one's exit() runs, then the new one's enter(), and its persistence
 ##   starts.
 ## [br]
-## Between decisions only the running behaviour's tick() runs, every tick_interval_ticks. When it returns SUCCEEDED or FAILED, the
-## manager decides at once. When the pawn dies, the running behaviour stops (reason "died").
+## Between decisions only the running behaviour's tick() runs, every tick_interval_ticks, or sooner when a wake-up it asked for
+## happens (a walk ending, an ability on its action ending, a tick it named; [method AIBehaviourBase.wake_at]). When it returns
+## SUCCEEDED or FAILED, the manager decides at once. When the pawn dies, the running behaviour stops (reason "died").
 ## [br]
 ## How to use it (outside code only talks to the manager):
 ## [codeblock]
@@ -89,6 +91,8 @@ var _by_floor := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 var _by_index := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 	return a.decision_index < b.decision_index
 var _warned_states := {} # state name -> true, for "no behaviour is allowed in this state"
+var _input_slots := PackedInt32Array() # the worked-out inputs the behaviours' conditions read
+var _input_slots_known := false
 
 const TIE_SALT := 0x7135 # what the tie-breaking random number is for, so it differs from every behaviour's jitter
 
@@ -110,6 +114,12 @@ func _ready() -> void:
 	var abilities := _sibling_ability_manager()
 	if abilities:
 		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: stop_running("died"))
+		# Wake-ups: the running behaviour's tick() runs at its next AI step after an event it waits for.
+		abilities.ability_finished.connect(_on_ability_ended)
+		abilities.ability_cancelled.connect(func(ability: AbilityBase, _by: AbilityBase) -> void: _on_ability_ended(ability))
+	var navigation := _sibling_navigation_manager()
+	if navigation:
+		navigation.path_ended.connect(_on_path_ended)
 
 
 func _exit_tree() -> void:
@@ -148,6 +158,9 @@ func describe() -> Dictionary:
 			"score_jitter": behaviour.score_jitter, "effective_jitter": behaviour.effective_jitter(),
 			"persistence": behaviour.persistence, "has_persistence_fade": behaviour.persistence_fade != null,
 			"script": behaviour.get_script().resource_path.get_file() if behaviour.get_script() else "",
+			# How C++ judges it: from its conditions and curves, or by asking GDScript for a behaviour with its own code.
+			"scorer": "given" if behaviour.has_own_code() else "conditions",
+			"conditions": _describe_conditions(behaviour), "score_curves": _describe_curves(behaviour),
 		})
 	return {
 		"pawn_number": context.pawn_number() if context else 0, "pawn": String(pawn.name) if pawn else "",
@@ -170,8 +183,13 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	context.clear_decision()
 	if _behaviours.is_empty():
 		return
+	# The inputs the conditions read start afresh, each worked out when first read (scaling spec 6.2). The C++ decider's row and a
+	# record need all of them.
+	context.inputs.begin_decision(tick)
 	if record == null and decision_listener.is_valid():
 		record = AIDecisionRecord.new()
+	if record or decision_batcher:
+		context.inputs.fill(_worked_out_inputs())
 	# The batcher's row, gathered from the live pawn before anything is decided (shadow mode).
 	var batch_row := decision_batcher.gather(self, _behaviours, _running, tick, event_priority, event_is_normal) if decision_batcher else -1
 	# 0. Interrupts.
@@ -274,13 +292,19 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 func tick_running(tick: int) -> void:
 	if _running == null or pawn == null:
 		return
-	# Only every tick_interval_ticks, counted from when it started: ticking every tick costs a crowd far more (ai_stress).
+	# Only when woken by an event it waits for, at the tick it asked for, or every tick_interval_ticks counted from when it started:
+	# ticking every tick costs a crowd far more (ai_stress).
+	var woken := _running.woken or (_running.wake_tick >= 0 and tick >= _running.wake_tick)
 	var interval := TickDriver.ticks_at_rate(_running.tick_interval_ticks)
 	# Or one skipped since its pawn's last run, for a pawn running every Nth tick (pawn spec 8.21).
-	if interval > 1 and not pawn.fired_since_last_run(tick, -_running.started_tick, interval):
+	if not woken and interval > 1 and not pawn.fired_since_last_run(tick, -_running.started_tick, interval):
 		return
+	# Used up before tick(), so tick() can ask again.
+	_running.woken = false
+	if _running.wake_tick >= 0 and tick >= _running.wake_tick:
+		_running.wake_tick = -1
 	var context := pawn.ai_context
-	var tick_started := PerfScopes.begin() # each behaviour's tick timed on its own (PerfScopes)
+	var tick_started := PerfScopes.begin_detailed() # each behaviour's tick timed on its own, in detail (PerfScopes)
 	var status := _running.tick(context)
 	PerfScopes.end(_running.perf_tick_name, tick_started)
 	if status == AIBehaviourBase.Status.RUNNING:
@@ -322,6 +346,12 @@ func set_interrupt_threshold(behaviour_name: StringName, threshold: int) -> void
 		behaviour.interrupt_threshold = threshold
 
 
+## Called when a behaviour's conditions change ([method AIBehaviourBase.rebuild_conditions]), so the inputs worked out at each
+## decision are listed again.
+func inputs_changed() -> void:
+	_input_slots_known = false
+
+
 ## Changes a behaviour's jitter. -1: back to default_score_jitter.
 func set_score_jitter(behaviour_name: StringName, jitter: float) -> void:
 	var behaviour := _find(behaviour_name)
@@ -353,6 +383,7 @@ func _start(behaviour: AIBehaviourBase, reason: String, tick: int) -> void:
 	_running = behaviour
 	behaviour.started_tick = tick
 	behaviour.start_persistence(tick)
+	behaviour.clear_wake_ups()
 	behaviour.enter(pawn.ai_context)
 	behaviour_changed.emit(old, behaviour, reason)
 
@@ -371,7 +402,7 @@ func _stop_running(reason: String, tick: int) -> void:
 func _is_available(behaviour: AIBehaviourBase, context: AIContextComponent) -> bool:
 	if not behaviour.availability_checked:
 		behaviour.availability_checked = true
-		var started := PerfScopes.begin() # each behaviour's check timed on its own (PerfScopes)
+		var started := PerfScopes.begin_detailed() # each behaviour's check timed on its own, in detail (PerfScopes)
 		behaviour.decision_available = behaviour.is_available(context)
 		PerfScopes.end(behaviour.perf_available_name, started)
 	return behaviour.decision_available
@@ -392,6 +423,7 @@ func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, even
 	record.running_before = _running.name if _running else &""
 	record.running_started_tick = _running.started_tick if _running else -1
 	record.kept_by_interrupt = kept_by_interrupt
+	record.inputs = context.inputs.values.duplicate()
 	if record.cause != AIDecisionRecord.CAUSE_AI_STEP: # no target or state update ran, so before and after are what they are now
 		record.note_target_before(context.current_target)
 		record.state_before = record.state
@@ -411,8 +443,40 @@ func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, even
 		record.add_behaviour(behaviour, rule)
 
 
+# Whether pressing the action could start an ability: the action_ready input, asked of the AbilityManager again only after something
+# that affects it changed (AIInputs.action_ready).
 func _could_press(action: StringName) -> bool:
-	return pawn.ability_manager != null and pawn.ability_manager.can_start(action)
+	return pawn.ai_context.inputs.action_ready(action)
+
+
+# The slots of the worked-out inputs any behaviour's conditions or curves read, listed once (and again after inputs_changed()).
+func _worked_out_inputs() -> PackedInt32Array:
+	if not _input_slots_known:
+		_input_slots_known = true
+		var slots := {}
+		for behaviour in _behaviours:
+			behaviour.add_input_slots(slots)
+		_input_slots.clear()
+		for slot: int in slots:
+			if AIInputs.is_worked_out(slot):
+				_input_slots.append(slot)
+		_input_slots.sort() # a fixed order, so the inputs are worked out the same way every run
+	return _input_slots
+
+
+func _describe_conditions(behaviour: AIBehaviourBase) -> Array:
+	var list: Array = []
+	for condition in behaviour.all_conditions():
+		list.append(condition.describe())
+	return list
+
+
+func _describe_curves(behaviour: AIBehaviourBase) -> Array:
+	var list: Array = []
+	for curve in behaviour.score_curves:
+		if curve:
+			list.append(curve.describe())
+	return list
 
 
 func _check_score_range(behaviour: AIBehaviourBase, raw: float) -> void:
@@ -452,6 +516,28 @@ func _collect_behaviours() -> void:
 	_behaviours.sort_custom(func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool: return String(a.name) < String(b.name))
 	for i in _behaviours.size():
 		_behaviours[i].decision_index = i
+
+# The wake-ups' events: a walk ending, and an ability ending. Only the running behaviour, and only if it asked.
+func _on_path_ended(_reached: bool) -> void:
+	if _running and _running.wakes_on_path_end:
+		_running.woken = true
+
+
+func _on_ability_ended(ability: AbilityBase) -> void:
+	if _running and _running.wakes_on_action != &"" and ability.trigger_action == _running.wakes_on_action:
+		_running.woken = true
+
+
+# The pawn's NavigationManager, a sibling, found at _ready, or null.
+# REFACTOR: the same lookup as _sibling_ability_manager below (reusable). See CHANGELOG.md.
+func _sibling_navigation_manager() -> NavigationManager:
+	if pawn == null:
+		return null
+	for child in pawn.get_children():
+		if child is NavigationManager:
+			return child
+	return null
+
 
 # The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
 # REFACTOR: the same lookup as AIContextComponent's (reusable). See CHANGELOG.md.

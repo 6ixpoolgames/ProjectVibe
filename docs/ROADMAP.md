@@ -57,6 +57,8 @@ Owner's decisions, 2026-11-16:
    - a late frame triggers catch-up ticks that make the next frame late too
    - irregular stalls in "rest" (drawing, waiting for the screen, deferred frees), where the frame's other parts are normal
    - **Recording on worker threads first** *(the owner's call, 2026-11-16)*: replay packing, snapshot encoding and the rollback record, from the pawn table, sent off without waiting for a result. It's the easiest fit for workers.
+   - **AI decisions in C++** *(agreed 2026-11-17, scaling spec 6.2, steps 5a to 5f)*: conditions as data over per-pawn inputs, no behaviour written in C++, events where they apply; C++ is the main path and GDScript a dormant backup (the owner's call). 5a and 5b built 2026-11-17.
+   - **A significance manager** *(the owner's idea, 2026-11-17; scaling spec 6.3, later)*: one place that works out how much each pawn matters and how much time the tick has, which every system reads its level from (tick step, decision interval made dynamic, movement, visual and replay detail), instead of each scaling its own work.
    - **More work on worker threads** *(the owner's question, 2026-11-16)*. Today only nav (tile building and path searches), AI sensing (search and visibility) and replay writing run off the main thread. At 153 pawns on the main thread:
      - `move_and_slide`: about 3.6 ms a frame. It can't run on workers as it is; it would need a C++ mover for AI pawns.
      - the AI's decisions and behaviours: about 1 ms. This is scaling step 5, set aside 2026-11-09.

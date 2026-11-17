@@ -100,7 +100,7 @@ func update_state(tick: int) -> void:
 			return
 	var context := pawn.ai_context
 	for state in _states:
-		var started := PerfScopes.begin() # each state's check timed on its own (PerfScopes)
+		var started := PerfScopes.begin_detailed() # each state's check timed on its own, in detail (PerfScopes)
 		var fits := state.prerequisites_met(context)
 		PerfScopes.end(state.perf_name, started)
 		if fits:

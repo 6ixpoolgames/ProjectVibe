@@ -48,6 +48,10 @@ extends Node
 
 ## Sent once when the end of a path is reached.
 signal arrived
+## Sent once when a path ends, whichever way: reached is true when it arrived (after [signal arrived]), false when it gave up (no
+## way there after all, waited too long for nav, or a link that couldn't be crossed). Not sent for [method stop]. The AI's behaviours
+## wait for it instead of checking every few ticks (AIBehaviourBase.wake_on_path_end).
+signal path_ended(reached: bool)
 
 ## Where the last move_to stands. Read it with [method get_path_state].
 enum PathState {
@@ -160,6 +164,7 @@ func get_move_direction() -> Vector3:
 		if _pending_ticks >= TickDriver.ticks_at_rate(pending_give_up_ticks):
 			stop() # which also cancels a queued search
 			_state = PathState.UNREACHABLE
+			path_ended.emit(false)
 			return Vector3.ZERO
 		if _path_request != 0:
 			# A queued path comes as a dictionary once it's found.
@@ -171,6 +176,8 @@ func get_move_direction() -> Vector3:
 		elif _pending_ticks % maxi(1, TickDriver.ticks_at_rate(pending_retry_ticks)) < elapsed:
 			_state = _find_path(_goal)
 		if _state != PathState.FOLLOWING:
+			if _state == PathState.UNREACHABLE:
+				path_ended.emit(false) # found there's no way after all; not asked again, since it's no longer under way
 			return Vector3.ZERO # still waiting, or found there's no way after all
 	if _corners.is_empty():
 		return Vector3.ZERO
@@ -182,6 +189,7 @@ func get_move_direction() -> Vector3:
 			if _new_paths_left <= 0:
 				stop()
 				_state = PathState.UNREACHABLE
+				path_ended.emit(false)
 				return Vector3.ZERO # gave up: not following, not arrived
 			var left := _new_paths_left - 1
 			move_to(_goal)
@@ -206,6 +214,7 @@ func get_move_direction() -> Vector3:
 	_ticks_on_link = -1
 	_state = PathState.ARRIVED # _partial stays, so whatever asked can tell how close it got
 	arrived.emit()
+	path_ended.emit(true)
 	return Vector3.ZERO
 
 

@@ -17,6 +17,8 @@
 ## recording adds its own cost to the AI's timings, so measure without it.
 ## Claude 2026-11-17: --ai-shadow runs the C++ decider beside GDScript (AIDecisionBatcher's shadow mode) and prints how often they
 ## agreed; with --scopes, its costs show as ai.batch.gather, .build, .decide and .compare.
+## Claude 2026-11-17: --decision-interval=N sets every AI's decision_interval_ticks (15 by default, 4 decisions a second), to compare
+## what deciding less often saves and how the fight goes (the dead column).
 extends Node
 
 var _size := 50
@@ -33,6 +35,7 @@ var _decisions_path := "" # Claude 2026-11-17: --record-decisions=<file>
 var _decisions: AIDecisionRecorder = null
 var _shadow := false # Claude 2026-11-17: --ai-shadow
 var _batcher: AIDecisionBatcher = null
+var _decision_interval := -1 # Claude 2026-11-17: --decision-interval=N; -1 leaves the scenes' own
 
 
 func _ready() -> void:
@@ -57,10 +60,13 @@ func _ready() -> void:
 			_steps = false
 		elif argument == "--scopes": # Claude 2026-11-16
 			_scopes = true
+			PerfScopes.detailed = true # Claude 2026-11-17: and the fine-grained ones (one per state, behaviour and sense)
 		elif argument.begins_with("--record-decisions="): # Claude 2026-11-17
 			_decisions_path = argument.trim_prefix("--record-decisions=")
 		elif argument == "--ai-shadow": # Claude 2026-11-17
 			_shadow = true
+		elif argument.begins_with("--decision-interval="): # Claude 2026-11-17
+			_decision_interval = int(argument.trim_prefix("--decision-interval="))
 	if not _visuals:
 		get_tree().node_added.connect(_on_node_added)
 	# Claude 2026-11-16 (movement experiments): each pawn's movement settings, set as it enters the tree.
@@ -73,6 +79,10 @@ func _ready() -> void:
 		if not _pawn_collision:
 			pawn.collision_mask &= ~2 # pawns are on layer 2 (pawn.tscn); the ground stays on 1
 		pawn.skip_move_when_still = _skip_still_moves)
+	if _decision_interval > 0: # Claude 2026-11-17: every AI context as it enters the tree
+		get_tree().node_added.connect(func(node: Node) -> void:
+			if node is AIContextComponent:
+				(node as AIContextComponent).decision_interval_ticks = _decision_interval)
 	if not _record and GameMode.replay_recorder:
 		GameMode.replay_recorder.enabled = false
 	var arena: Node = load("res://assets/scenes/samples/mass_battle_sample.tscn").instantiate()

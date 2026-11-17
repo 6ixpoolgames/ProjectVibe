@@ -17,6 +17,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-17
 
+- **The AbilityManager hears when effects change** (scaling spec 6.2, step 5b): working out the held totals again calls `AbilityManager.readiness_changed()`, since a priority boost can change what may start, which the AI keeps rather than asking at every decision.
 - **`ON_INTERCEPT`** (pawn spec 8.23): `EffectApplier`'s parry trigger became the hit interceptors' trigger, keeping its saved number (2) so saved scenes work. Under a `HitInterceptor`, TARGET effects go to the attacker in a hit of their own, SELF effects on the pawn that stopped the hit.
 - `EffectManager.take_hit` reads Health through its own `_health()`, which answers 0 for a pawn without stats; threat goes through the AI's core (`pawn.ai_context.memory`).
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup. Stale comments fixed: dying and death (`AbilityManager.health_ran_out` and `died`, no longer `Pawn`'s), `EffectApplier`'s triggers (three, and on-hit comes from a `MeleeSweepStep`), and `KnockbackPart`'s note on Dash (a knockback cancels a Dash once its invulnerability is over: its threshold is 25).

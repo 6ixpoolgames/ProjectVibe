@@ -394,6 +394,8 @@ func _refresh() -> void:
 			if part and part.is_held():
 				part.add_held(totals, stacks)
 	_ability_bonuses = totals.ability_bonuses
+	if pawn and pawn.ability_manager:
+		pawn.ability_manager.readiness_changed() # priority boosts can change what may start (AIInputs.action_ready)
 	_resistance_bits = totals.resistance_bits
 	_stat_changes = totals.stat_changes
 	_apply_stat_changes()

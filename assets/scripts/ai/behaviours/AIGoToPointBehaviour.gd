@@ -5,7 +5,8 @@
 ## spawner. Like Unreal's target points: the point is a node in a Godot group ([member point_group]), placed in the level, so pawns
 ## spawned at any time find it.
 ## [br]
-## When it's available: there's a node in point_group, and the pawn is further than [member arrive_radius] from it. Allowed in Idle,
+## When it's available: there's a node in point_group, and the pawn is further than [member arrive_radius] from it (one condition on
+## the input group_distance/<point_group>; the nearest node is looked for again every 2 seconds, [method AIInputs.nearest_in_group]). Allowed in Idle,
 ## the same as Wander, with a score just above Wander's (0.15 against 0.1), so an idle pawn marches, anything it notices on the way
 ## (Alert, Combat) takes over, and once it's there, Wander takes over and it mills about.
 ## [br]
@@ -30,7 +31,6 @@ extends AIBehaviourBase
 
 const SIDE_SALT := 0x60A1
 
-var _point: Node3D = null
 var _shorten := 0.0 # metres taken off the next leg after one that couldn't be walked
 
 
@@ -39,33 +39,32 @@ func _init() -> void:
 	allowed_states = [&"Idle"]
 	max_score = 0.15
 	min_score = 0.15
-	tick_interval_ticks = 5 # it only needs to notice when a leg ends
+	tick_interval_ticks = 60 # the safety net: it wakes when a leg ends (wake_on_path_end)
 
 
-## How long a point found is kept before looking for the nearest again, in ticks at 60 a second.
-const LOOK_AGAIN_TICKS := 120
-var _looked_tick := -1000000
-
-func is_available(context: AIContextComponent) -> bool:
-	# The point is kept while it's still there, and looked for again every 2 seconds in case a nearer one has appeared, rather than
-	# asking the tree for the whole group on every decision of every marching pawn.
-	if not is_instance_valid(_point) or not _point.is_inside_tree() or context.current_tick - _looked_tick >= TickDriver.ticks_at_rate(LOOK_AGAIN_TICKS):
-		_point = _nearest_point()
-		_looked_tick = context.current_tick
-	return _point != null and _flat_distance(_point.global_position) > arrive_radius
+## There's a node in point_group, and the pawn is further than arrive_radius from the nearest one: two conditions.
+func own_conditions() -> Array[AICondition]:
+	var list: Array[AICondition] = [
+		AICompareCondition.make(StringName(AIInputs.GROUP_FOUND + String(point_group)), AICompareCondition.Comparison.EQUAL, 1.0),
+		AICompareCondition.make(StringName(AIInputs.GROUP_DISTANCE + String(point_group)), AICompareCondition.Comparison.MORE_THAN,
+			arrive_radius),
+	]
+	return list
 
 
 func enter(_context: AIContextComponent) -> void:
 	_shorten = 0.0
+	wake_on_path_end()
 
 
 func tick(context: AIContextComponent) -> Status:
 	var hands := context.controller
-	if hands == null or pawn == null or not is_instance_valid(_point):
+	var point := context.inputs.nearest_in_group(point_group, context.current_tick) if pawn else null
+	if hands == null or point == null:
 		return Status.FAILED
 	if hands.is_following_order():
 		return Status.RUNNING
-	var to := _point.global_position - pawn.global_position
+	var to := point.global_position - pawn.global_position
 	to.y = 0.0
 	var distance := to.length()
 	if distance <= arrive_radius:
@@ -80,6 +79,7 @@ func tick(context: AIContextComponent) -> Status:
 		_shorten = 0.0
 	else:
 		_shorten = minf(_shorten + 5.0, leg_metres - 2.0) # shorter next time, toward ground nav has built
+		wake_at(context.current_tick + TickDriver.ticks_at_rate(5)) # and soon: no walk is under way to wake it
 	return Status.RUNNING
 
 
@@ -87,22 +87,3 @@ func exit(context: AIContextComponent, _reason: String) -> void:
 	if context and context.controller:
 		context.controller.stop()
 
-
-func _nearest_point() -> Node3D:
-	if pawn == null or not pawn.is_inside_tree():
-		return null
-	var best: Node3D = null
-	var best_distance := INF
-	for node in pawn.get_tree().get_nodes_in_group(point_group):
-		var point := node as Node3D
-		if point == null:
-			continue
-		var distance := _flat_distance(point.global_position)
-		if distance < best_distance:
-			best = point
-			best_distance = distance
-	return best
-
-
-func _flat_distance(point: Vector3) -> float:
-	return Vector2(point.x - pawn.global_position.x, point.z - pawn.global_position.z).length()

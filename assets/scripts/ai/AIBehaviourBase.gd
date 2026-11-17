@@ -7,11 +7,24 @@
 ## abilities or the body directly (pawn spec section 3, rule 4).
 ## [br]
 ## How to make one: extend this, set the settings below in the inspector or in _init(), and override any of:
-## [br]- [method is_available]: its own yes or no, after the manager's cheap checks
-## [br]- [method score]: how much it wants to run now, from [member min_score] to [member max_score]
+## [br]- [method own_conditions]: when it may run, as conditions built from its settings (scaling spec 6.2)
 ## [br]- [method enter]: once, when it starts
-## [br]- [method tick]: every tick while it runs. Return SUCCEEDED or FAILED to finish
+## [br]- [method tick]: while it runs, every [member tick_interval_ticks], or sooner when woken (below). Return SUCCEEDED or FAILED
+##   to finish
 ## [br]- [method exit]: once, when it stops, whatever the reason. Clean up here, such as [code]context.controller.stop()[/code]
+## [br]
+## [b]Wake-ups[/b] (scaling spec 6.2): a behaviour that's waiting for something can say so, and its tick() runs when it happens instead
+## of checking every few ticks: [method wake_on_path_end] (a walk it started ends, arrived or given up), [method wake_on_action_end]
+## (an ability on that action finishes or is cancelled) and [method wake_at] (a tick, such as the end of a pause). The navigation
+## and ability managers already watch these, so telling the behaviour costs one signal per event. [member tick_interval_ticks] is
+## then the longest it sleeps, a safety net. Wake-ups are cleared when it starts; set them in [method enter] and again in tick() as
+## needed (wake_at is used up when it fires).
+## [br]
+## [b]When it may run[/b] is plain data: conditions ([AICondition]) over the pawn's inputs ([AIInputs]), all of which must pass.
+## Its own come from [method own_conditions] (Attack: the target within its swing's reach); a designer adds more in
+## [member conditions], and shapes its score with [member score_curves], without code. Because they're data, the same decision
+## can be made in C++ for a crowd (AIBatchDecider). Overriding [method is_available] or [method score] with code still works, but
+## the C++ decider then has to ask GDScript for that behaviour's answers ([method has_own_code]).
 ## [br]
 ## The behaviour's name is its node name, such as Wander. The fixed order and the random numbers read it, so give it a real name.
 ## [br]
@@ -40,6 +53,11 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 @export var needs_target := false
 ## A named action it presses, such as &"primary". Skipped while that action couldn't start.
 @export var presses_action: StringName = &""
+## More conditions it needs, on top of its own ([method own_conditions]). All must pass. Made in the inspector: compare an input
+## with a number, a random chance, or "any of".
+@export var conditions: Array[AICondition] = []
+## Optional: inputs that scale its score between min_score (or 0) and max_score, multiplied together. Empty: always max_score.
+@export var score_curves: Array[AIScoreCurve] = []
 ## Ticks after it ends before it can be chosen again. A hard rule, checked before any scoring.
 @export_range(0, 36000, 1, "or_greater") var cooldown_ticks := 0
 ## Once chosen, ordinary decisions can't replace it for this many ticks. State changes and forces still can, if strong enough.
@@ -51,8 +69,9 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 @export var cannot_be_interrupted := false
 ## ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
 @export var score_jitter := -1.0
-## While it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after.
-## The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now and then. 1: every tick.
+## While it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after, and sooner when a
+## wake-up it asked for happens. The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now
+## and then, or to wake when a walk ends. 1: every tick.
 ## Pawns start behaviours on different ticks, so a crowd's ticks spread out by themselves. Count time in ticks with
 ## context.current_tick, not by counting tick() calls, so a behaviour behaves the same at any interval.
 @export_range(1, 600, 1, "or_greater") var tick_interval_ticks := 1
@@ -88,6 +107,15 @@ var decision_scored := false
 var decision_index := 0 # place in the fixed order
 var warned_score_range := false
 
+## Wake-ups, read by the manager (see the class description). Cleared when it starts.
+var wake_tick := -1 # wake_at's tick; -1: none
+var wakes_on_path_end := false
+var wakes_on_action: StringName = &""
+var woken := false # an event it waits for happened since its last tick()
+
+var _all_conditions: Array[AICondition] = []
+var _conditions_built := false
+
 # Persistence, as three numbers: how far along the fade it was at the last change, that change's tick, and how fast it moves along.
 # The amount now is worked out from these and the current tick, so nothing runs every tick.
 var _persistence_running := false
@@ -101,14 +129,90 @@ func _init() -> void:
 	set_physics_process(false)
 
 
-## Its own yes or no, after the manager's checks. The default: yes.
-func is_available(_context: AIContextComponent) -> bool:
+## Its own yes or no, after the manager's checks: every condition passes ([method all_conditions]). The inputs they read were worked
+## out for this decision by the behaviour manager. Overriding this with code works, but see [method has_own_code].
+func is_available(context: AIContextComponent) -> bool:
+	var inputs := context.inputs
+	for condition in all_conditions():
+		if not condition.passes(inputs, context, name_hash):
+			return false
 	return true
 
 
-## How much it wants to run now. Keep it between min_score and max_score. The default: max_score.
-func score(_context: AIContextComponent) -> float:
-	return max_score
+## How much it wants to run now, between min_score and max_score: max_score, scaled by [member score_curves] if it has any.
+func score(context: AIContextComponent) -> float:
+	if score_curves.is_empty():
+		return max_score
+	var amount := 1.0
+	for curve in score_curves:
+		if curve:
+			amount *= curve.amount(context.inputs)
+	var low := min_score if min_score > -INF else 0.0
+	return low + (max_score - low) * amount
+
+
+## The conditions it builds from its own settings, such as Attack's reach. Override in a behaviour script; the default: none. Called
+## once, the first time they're needed, and again after [method rebuild_conditions].
+func own_conditions() -> Array[AICondition]:
+	return []
+
+
+## Its own conditions, then the ones in [member conditions]: everything [method is_available] checks by default.
+func all_conditions() -> Array[AICondition]:
+	if not _conditions_built:
+		_conditions_built = true
+		_all_conditions = own_conditions()
+		for condition in conditions:
+			if condition:
+				_all_conditions.append(condition)
+	return _all_conditions
+
+
+## Builds the conditions again at the next decision, after a setting they come from changed (such as a swing's reach).
+func rebuild_conditions() -> void:
+	_conditions_built = false
+	if manager:
+		manager.inputs_changed()
+
+
+## Adds the slots of every input its conditions and curves read to slots (as keys).
+func add_input_slots(slots: Dictionary) -> void:
+	for condition in all_conditions():
+		condition.add_input_slots(slots)
+	for curve in score_curves:
+		if curve:
+			curve.add_input_slots(slots)
+
+
+## True if its script overrides [method is_available] or [method score] with code of its own. Such a behaviour works everywhere,
+## but the C++ decider can't read code, so it asks GDScript for that behaviour's answers. Worked out once per script
+## ([ScriptOverrides]).
+func has_own_code() -> bool:
+	return ScriptOverrides.overrides(get_script(), &"is_available") or ScriptOverrides.overrides(get_script(), &"score")
+
+
+## Runs tick() at this tick (or the pawn's first run after it), if nothing wakes it sooner. Used up when it fires; an earlier tick
+## than one already set wins.
+func wake_at(at_tick: int) -> void:
+	wake_tick = at_tick if wake_tick < 0 else mini(wake_tick, at_tick)
+
+
+## Runs tick() when a walk it started ends, arrived or given up (NavigationManager.path_ended).
+func wake_on_path_end() -> void:
+	wakes_on_path_end = true
+
+
+## Runs tick() when an ability on this action finishes or is cancelled (AbilityManager.ability_finished, ability_cancelled).
+func wake_on_action_end(action: StringName) -> void:
+	wakes_on_action = action
+
+
+## Forgets every wake-up. The manager calls it when the behaviour starts.
+func clear_wake_ups() -> void:
+	wake_tick = -1
+	wakes_on_path_end = false
+	wakes_on_action = &""
+	woken = false
 
 
 ## Once, when it starts.

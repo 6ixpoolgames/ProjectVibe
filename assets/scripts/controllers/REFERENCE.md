@@ -42,7 +42,8 @@ Everything it's told stays until changed, except press(), which lasts one tick. 
 - `move_in_direction(direction: Vector3) -> void`: Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
 - `stop() -> void`: Stands still. Held actions stay held.
 - `look_at_point(point: Vector3) -> void`: Looks at a point in the world. Does nothing without a pawn, since there's nowhere to look from.
-- `stop_looking() -> void`: Stops looking at anything in particular, and keeps whatever look the pawn already has.
+- `look_at_node(node: Node3D, offset: Vector3 = Vector3(0, 0, 0)) -> void`: Stops looking at anything in particular, and keeps whatever look the pawn already has. Keeps looking at a node, at offset from its origin (such as Vector3(0, 1, 0) for a pawn's chest), worked out again at every input, until `stop_looking()` or another look. For a behaviour that sleeps between events (Attack, during its swing): the aim follows the node every tick without the behaviour having to run. A freed node ends it.
+- `stop_looking() -> void`
 - `is_looking_at_point() -> bool`: True while it's looking at a point it was given. AI sight faces this way then (SightSense).
 - `press(action: StringName) -> void`: Holds this action for the next tick only, so the pawn sees one press.
 - `hold(action: StringName, held: bool = true) -> void`: Holds or lets go of this action, until changed.

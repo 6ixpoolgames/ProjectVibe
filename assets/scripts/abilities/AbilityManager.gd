@@ -112,6 +112,8 @@ var _locked_mask := 0 # categories locked right now, as bits
 var _tick_rate := 60.0
 # Gates and channels (pawn spec 15.2): only what has a reason to run this tick runs.
 var _timed: Array[AbilityBase] = [] # abilities with a timer running (a run, a cooldown or a buffered press)
+var _by_action := {} # trigger action -> Array[AbilityBase] answering to it, in run order, so can_start() looks only at those
+const _NONE: Array[AbilityBase] = [] # what _by_action gives for an action nothing answers to
 
 # The combo counter, shared by every ability with combo_positions (pawn spec 8.20, the owner's design). Both roll back. A combo
 # ability starting takes the next position if the window is open and it fits there, else 1; the window closes as it starts, and its
@@ -120,10 +122,16 @@ var _timed: Array[AbilityBase] = [] # abilities with a timer running (a run, a c
 var combo_position := 0
 ## Ticks left in the combo window: while above 0, a follow-up whose positions include combo_position + 1 can start.
 var combo_window_ticks_left := 0
+## Goes up by one whenever something changes that can change what [method can_start] answers: an ability starting, finishing or
+## being cancelled, a step starting or ending (its cancel window), a cooldown or the combo window running out, the abilities being
+## collected again, or the pawn's effects changing (their priority boosts). The AI asks can_start again only after it moves on
+## (AIInputs.action_ready, scaling spec 6.2), the event-based way, instead of at every decision. Never goes down.
+var readiness_version := 0
 var _timers_dirty := true # a timer started or reached 0, so _timed is rebuilt before it's next used
 var _locks_dirty := true # an action started or stopped, so the locks are worked out again before they're next used
 var _every_tick_abilities: Array[AbilityBase] = [] # abilities whose script overrides every_tick()
 var _action_bits := 0 # the input bits of every action's trigger_action: the presses anything here answers to
+var _follows_body := {} # trigger action -> true when an ability on it has its own can_start(), such as Jump needing the ground
 # Script -> whether it overrides every_tick(), worked out once per script. GDScript note: a static var is shared by every manager.
 static var _overrides_every_tick := {}
 
@@ -162,12 +170,16 @@ func tick_abilities(dt: float) -> void:
 	for ability in _timed:
 		if ability.cooldown_ticks_left > 0:
 			ability.cooldown_ticks_left = maxi(ability.cooldown_ticks_left - elapsed, 0)
+			if ability.cooldown_ticks_left == 0:
+				readiness_version += 1 # it could start again
 		if ability.buffer_ticks_left > 0:
 			ability.buffer_ticks_left = maxi(ability.buffer_ticks_left - elapsed, 0)
 	for ability in _every_tick_abilities:
 		ability.every_tick(dt)
 	if combo_window_ticks_left > 0:
 		combo_window_ticks_left = maxi(combo_window_ticks_left - elapsed, 0)
+		if combo_window_ticks_left == 0:
+			readiness_version += 1 # the follow-ups can't start now
 	_run_locomotion(dt)
 	if _actions_have_work():
 		_run_actions(dt)
@@ -177,6 +189,19 @@ func tick_abilities(dt: float) -> void:
 func timers_changed() -> void:
 	_timers_dirty = true
 	_locks_dirty = true
+	readiness_version += 1
+
+
+## Moves [member readiness_version] on, for a change made outside the abilities that can change what can start: the EffectManager
+## calls it when the pawn's effects change.
+func readiness_changed() -> void:
+	readiness_version += 1
+
+
+## True if an ability on this action has a can_start() of its own, which can change its answer without telling the manager (Jump
+## needs the ground). Such an action is asked again at every decision, whatever [member readiness_version] says.
+func ready_follows_body(action: StringName) -> bool:
+	return _follows_body.has(action)
 
 
 ## True if the pawn can sleep as far as its abilities go (pawn spec 15.3): no timer running (unless its ability says it can wait), no
@@ -198,9 +223,10 @@ func can_sleep() -> bool:
 
 
 ## True if pressing this action now would start something, counting abilities it would cancel. Asking changes nothing.
+## Only the abilities on that action are looked at (the AI asks this at every decision, for each behaviour that presses one).
 func can_start(action: StringName) -> bool:
-	for ability in _abilities:
-		if ability.trigger_action == action and not ability.is_running_timed() and _is_ready(ability):
+	for ability: AbilityBase in _by_action.get(action, _NONE):
+		if not ability.is_running_timed() and _is_ready(ability):
 			return true
 	return false
 
@@ -500,6 +526,7 @@ func _is_ready(ability: AbilityBase) -> bool:
 ## Opens the combo window for this many ticks. An OpenComboStep calls it after its ability's hit.
 func open_combo_window(ticks: int) -> void:
 	combo_window_ticks_left = maxi(ticks, 0)
+	readiness_version += 1
 
 
 ## The combo position this ability would take if it started now: the next one, if the window is open and it fits there; else 1, if
@@ -524,8 +551,10 @@ func _conflicts(a: AbilityBase, b: AbilityBase) -> bool:
 
 
 # True if every running ability that conflicts with this one would let it through (_lets_through).
+# Only abilities with a timer can be running, so while _timed is up to date only those are looked at. It's never rebuilt here:
+# _run_actions loops over _timed while it asks this. Out of date, every ability is looked at, which gives the same answer.
 func _conflicts_allow(ability: AbilityBase) -> bool:
-	for other in _abilities:
+	for other in (_abilities if _timers_dirty else _timed):
 		if other != ability and other.is_running_timed() and not _lets_through(ability, other):
 			return false
 	return true
@@ -635,21 +664,8 @@ func _actions_have_work() -> bool:
 	return false
 
 
-# Whether this script overrides every_tick(). Godot's method list includes the base scripts' methods too, so an override shows as a
-# second every_tick (AbilityBase has one). Worked out once per script.
-static func _script_overrides_every_tick(script: Script) -> bool:
-	if script == null:
-		return false
-	if not _overrides_every_tick.has(script):
-		var count := 0
-		for method in script.get_script_method_list():
-			if method["name"] == "every_tick":
-				count += 1
-		_overrides_every_tick[script] = count > 1
-	return _overrides_every_tick[script]
-
-
 func _start(ability: AbilityBase) -> void:
+	readiness_version += 1
 	ability.buffer_ticks_left = 0
 	ability.pawns_hit_this_run.clear()
 	# A combo ability takes its position, and the window closes until its OpenComboStep opens it again.
@@ -673,6 +689,7 @@ func _start(ability: AbilityBase) -> void:
 
 
 func _finish(ability: AbilityBase) -> void:
+	readiness_version += 1
 	ability.end_steps("cancelled") # steps still running when it ends early; none when they finished
 	ability.ticks_left = 0
 	ability.cooldown_ticks_left = ticks_for(ability.cooldown)
@@ -841,10 +858,21 @@ func _collect_abilities() -> void:
 		else:
 			_actions.append(ability)
 			_action_bits |= ability.trigger_bit # the input channel
-		if _script_overrides_every_tick(ability.get_script()):
+		if ScriptOverrides.overrides(ability.get_script(), &"every_tick"):
 			_every_tick_abilities.append(ability)
+	_by_action.clear()
+	_follows_body.clear()
+	for ability in _abilities:
+		if ability.trigger_action != &"":
+			if not _by_action.has(ability.trigger_action):
+				var list: Array[AbilityBase] = []
+				_by_action[ability.trigger_action] = list
+			_by_action[ability.trigger_action].append(ability)
+			if ScriptOverrides.overrides(ability.get_script(), &"can_start"):
+				_follows_body[ability.trigger_action] = true
 	_timers_dirty = true
 	_locks_dirty = true
+	readiness_version += 1
 
 
 # The ability's EffectApplier children, into its three effect lists (pawn spec 8.11). Each effect is registered, so an over-time one

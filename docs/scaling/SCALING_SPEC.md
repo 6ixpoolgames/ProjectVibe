@@ -314,7 +314,7 @@ Today the AI is about a third of a fighting pawn's cost.
 
 ---
 
-### 6.2 Step 5 revisited: AI decisions in C++ on the workers *(draft for the owner, Claude 2026-11-17)*
+### 6.2 Step 5 revisited: AI decisions in C++ on the workers *(agreed with the owner, Claude 2026-11-17)*
 
 **Why now.** Step 5 was set aside (v0.9) when decisions cost about 0.7 ms a tick at 200 pawns. Measured on 2026-11-17 with the mass
 battle at 600 fighting pawns (headless, after the C++ bundle), the AI is the largest cost in the tick: 7.4 of 23.2 ms. Deciding
@@ -334,70 +334,94 @@ abilities and paths, so it stays GDScript on the main thread.
                                              behaviour scores and the pick                    then the running behaviour acts
 ```
 
-- **Deciding in C++** (one job per tick, chained after the sensing job, in chunks of about 64 pawns so the workers share it
-  evenly): the target (`AITargetSelector`'s rules), the state (`AIStateManager`'s prerequisites and priorities, forces included),
-  and the behaviour (`AIBehaviourManager.decide`: cooldowns, allowed states, interrupts, persistence fades, jitter, then each
-  behaviour's availability and score). It writes one small result per pawn; nothing is shared between pawns while it runs.
-- **Acting stays GDScript:** `enter`, `tick` and `exit` of the chosen behaviour, which press inputs and ask for paths through the
-  controller, exactly as today. They run every few ticks and cost little each (1.14 ms at 600 pawns).
-- **Decisions apply one tick later.** Already agreed (open question 3, v0.3).
-- **Sensing's main-thread part moves too.** Recording what was seen into memory waited for this step (6.1): with the decision job
-  reading memory in the same chain, the sensing job writes it, and anything that reads memory between ticks (readouts, debug
-  tools) waits for the chain through the readers' guard (`ChangeGuard`, built in the C++ bundle).
+**The owner's calls (2026-11-17):**
+- Decisions only: target, state and behaviour pick. Behaviours keep acting in GDScript. Decisions apply one tick later (open
+  question 3).
+- **Each pawn decides for itself** (safer for more kinds of game than group or squad decisions), whichever language makes the
+  decision.
+- **C++ is the main path; GDScript is a dormant backup** *(the owner, 2026-11-17: "GD script is there as a backup and should be
+  dormant unless things are broken. C++ is main")*. Once the batch's answers are used (5e), every pawn's decision is made in C++ and
+  GDScript's decider doesn't run at all; it takes over only without the C++ library, or when switched to by hand to find a fault.
+  Until then the batcher (`AIDecisionBatcher`) runs in shadow mode, checking C++ against GDScript.
+- **Data in, data out.** C++ never calls GDScript while deciding: it reads a small set of per-pawn columns and writes its answers
+  to an array. No behaviour is written in C++.
+- Shadow tests first, at normal size (does it work) and at stress (where it breaks).
+- The GDScript decider stays as the backup: the fallback without the C++ library, and the reference the tests compare with. Its
+  cost matters only when it runs, so speed work goes into the C++ path.
 
-**The data it reads**, all of it plain and most of it in C++ already:
+**Measured on the way (2026-11-17, 600 pawns):**
+- Choosing between behaviours in C++ costs 0.2 to 0.4 µs a decision; GDScript about 50 µs. Nearly all of GDScript's cost is
+  collecting what the choice needs: availability checks, `AbilityManager.can_start`, state checks, and reading settings from each
+  behaviour node.
+- A pawn decides every `decision_interval_ticks` (15, four times a second) and at events (state changes, hits, swings coming,
+  behaviours finishing). About 54 decisions a tick at 600 pawns. Deciding twice a second (30) saved only about 20% (3.3 to 2.6 ms
+  a tick), because events drive about 40% of decisions in a fight. The fight went about the same. The interval stays 15 for now;
+  it becomes one of the settings a significance manager scales with load and distance (section 6.3).
+- Behaviours' ticks cost about 1.3 ms a tick, most of it Chase re-aiming and Go To Point checking whether it has arrived.
 
-| What | Where it lives | New? |
+**Conditions: availability as data** *(the owner: "data as IO for C++ looks like the winning move")*. Utility AI's usual answer
+(the Infinite Axis Utility System's "considerations"): a behaviour says when it may run with a list of small checks over named
+inputs, and C++ knows only the kinds of check, never the behaviours.
+- **Inputs** (`AIInputs`, one per pawn, `context.inputs`): named numbers with a slot each, the same slots for every pawn, so a
+  crowd's inputs are one table. Built-in ones are worked out once per decision from what the AI already knows (target distance,
+  the most aware memory entry, an unknown attacker's hit, a swing coming, the distance to the nearest node in a group, whether an
+  action could start). A game adds its own by writing them when they change (`set_input(&"morale", 0.4)`). Names starting
+  `ticks_` are times, converted to the match's rate like every AI setting.
+- **Conditions** (`ai/conditions/`, Resources made in the inspector): `AICompareCondition` (an input against a number or another
+  input), `AIChanceCondition` (a replayable roll, optionally once per event, such as once per swing), `AIAnyCondition` (any one of
+  a list). All of a behaviour's conditions must pass.
+- **Score curves** (`AIScoreCurve`): an input mapped onto 0 to 1, which scales the score between `min_score` (or 0) and
+  `max_score`. None of the built-in behaviours needs one yet; they're there for designers.
+- **Each built-in behaviour builds its own conditions from its settings** (Attack: target within its swing's reach minus
+  `approach_margin`; Parry: a swing coming and a roll under `parry_chance`), and a designer adds more in the inspector
+  (`conditions`, `score_curves`) without code. Nothing about a particular behaviour is in C++.
+- **Behaviours with their own code** (a game's behaviour that overrides `is_available` or `score`) still work everywhere. The
+  batch asks GDScript for their answers, as shadow mode does today. A mixed brain costs a little more; that's for a later pass.
+- **"Could this action start?"** is the input `action_ready/<action>`, kept up to date by events *(the owner: "event based seems to
+  be better overall where applicable")*: the AbilityManager counts every change that can affect it (`readiness_version`: an
+  ability starting, finishing or being cancelled, a cooldown or combo window running out), and the input is asked again only
+  after one. An ability whose readiness follows the body (Jump needs the ground) says so (`ready_follows_body`) and is always asked.
+
+**Event wake-ups for behaviours.** A running behaviour sleeps until something it waits for happens, the observer pattern Unreal's
+ability tasks and behaviour-tree "wait" nodes use, instead of checking every few ticks: arriving at the end of a path, an ability
+on its action finishing or being cancelled, or a tick it asked to be woken at (the end of a pause). `tick_interval_ticks` stays as
+the longest it sleeps, a safety net. The one doing the watching already watches (the navigation manager follows the path; the
+ability manager runs the swing's timer), so telling the behaviour costs one signal per event, rather than one check per pawn per
+tick. Chase stays on its interval: following a moving target is regular work.
+
+**The data the batch reads**, all of it plain:
+
+| What | Where it lives | Built |
 |---|---|---|
-| Memory: awareness, certain, last seen, last known position, threat | `AIMemoryStore` (C++) | no |
-| Position, facing, velocity, team, grounded | the pawn table | no |
-| Health ratio, incoming attack, last hit by, which actions could start now | pushed pawn-table columns (the stat columns built in the C++ bundle) | columns |
-| The brain: states, behaviours and their settings | an `AIBrainDef` built once per brain scene and shared by every pawn using it | yes |
-| Each pawn's decision state: state, target, running behaviour and since when, cooldowns, persistence, queued forces | an `AIDecisionTable` in C++, owned by the batch | yes |
+| Each pawn's inputs | `AIInputs` (GDScript now; worked out in C++ from memory and the pawn table in 5d) | 5b |
+| Memory: awareness, certain, last seen, last known position | `AIMemoryStore` (C++) | before |
+| Position, facing, team | the pawn table | before |
+| The brain: behaviours, their settings, conditions and curves | `AIBehaviourManager.describe()`, added once per brain | 5a, 5b |
+| Each pawn's decision state: running behaviour and since when, cooldowns, persistence | gathered per decision now; an `AIDecisionTable` in C++ in 5c | 5c |
 
-**Scores: one small C++ function per built-in behaviour** (Wander, Go To Point, Look Toward, Investigate, Search, Chase, Attack,
-Parry), each a copy of its GDScript `is_available` and `score`, reading its settings from the brain definition. The built-ins
-score with fixed numbers, not curves (the reason step 5 was set aside), so a function each is simpler than the general
-"considerations as data" system (6) and does the same job. That system stays possible later, if designers want new scoring
-without code.
+**Determinism.** Results never depend on the number of threads or their timing. Pawns are decided in pawn-id order; each pawn's
+result depends only on the data from the end of the last tick. Random numbers are a hash of the pawn's seed and number, the tick
+and what they're for, worked out the same in C++ and GDScript. Parry's roll is once per swing, keyed by the swing's start tick and
+the attacker's pawn number (it was the attacker's instance id, which differs between runs).
 
-**Custom behaviours.** A behaviour written in GDScript (a game's or a modder's own) has no C++ function. Suggested for the first
-version: a brain with any such behaviour keeps the whole GDScript path (it still works exactly as today, just on the main thread),
-and diagnostics says which brains do. A mixed path, the batch scoring the built-ins and handing the custom ones back to the main
-thread, can come later if games need it.
+**Build order** (replaces step 5's row in section 10):
 
-**Determinism.** The same rules as the sensing job: results never depend on the number of threads or their timing. Pawns are
-decided in pawn-id order; each pawn's result depends only on the data from the end of the last tick. The random jitter on scores
-(pawn spec 10.7) comes from a hash of the pawn's seed, the tick and the behaviour's name, which C++ and GDScript work out the same,
-rather than from a GDScript random number stream. That changes which way close calls go, once, compared with today.
+| # | Step | Must show | Status |
+|---|---|---|---|
+| 5a | Timings per state, behaviour and sense; a recorder of decisions; `AIBatchDecider` choosing from given answers; shadow mode | The same choices as GDScript, at 150 and 600 pawns | **Built 2026-11-17**: 100% agreement, 0.2 to 0.4 µs a decision in C++ |
+| 5b | Inputs, conditions and score curves in GDScript and C++; the built-in behaviours as conditions; `action_ready` kept by events; event wake-ups | Shadow mode agrees with every decision; gathering a row costs less | **Built 2026-11-17**: every decision agreed (290 989 at 600 pawns, 72 461 at 150); a row 33 µs to gather (was 45); GDScript's own deciding about the same (50 µs a decision against 46); Go To Point's ticks a ninth as many |
+| 5c | Each pawn's decision state in C++ (`AIDecisionTable`), so gathering a row copies nothing per behaviour | Shadow agreement; gathering under 0.5 ms at 600 pawns | |
+| 5d | Inputs worked out in C++ from memory and the pawn table; target and state rules in C++ | The same targets and states as GDScript | |
+| 5e | The decision job on the workers, chained after sensing; the batch's answers used (opt-in), applied the next tick | Identical results with 0 to N workers; main-thread AI time down | |
+| 5f | Deferral by count when the tick runs out of time (rule 5): decisions wait their turn in pawn-id order | Graceful overload in the 600-pawn battle | |
 
-**Making the workers count.** A small chain of jobs per tick (sensing, then deciding), each split into chunks, rather than one job
-per system; the main thread runs simulate and record meanwhile and only waits, if at all, when it applies the results. The same
-machinery suits the other per-pawn batches the 2026-11-17 measurements point at: recording state (5.8 ms at 600 pawns, most of it
-now skipped where nothing replays) and gathering replay values (2.15 ms).
+### 6.3 Later: one place for scaling work to load *(the owner's idea, 2026-11-17; not built)*
 
-**What it should give** (guess, 600 fighting pawns): the AI's main-thread cost from 7.4 ms to about 1.5 to 2 (applying results and
-behaviours acting), with about 4 to 5 ms of work on the workers, in parallel. With three workers on the target machine (section 0),
-a large part of the way to 500 fighting units on a dedicated server.
-
-**Build order** (replaces step 5's row in section 10 once agreed):
-
-| # | Step | Must show |
-|---|---|---|
-| 5a | Timings per state, behaviour and sense; a recorder of decision inputs and GDScript's answers, for comparing | Where the 7.4 ms goes, by part |
-| 5b | `AIBrainDef` and `AIDecisionTable`; target and state rules in C++ | The same targets and states as GDScript on recorded fights |
-| 5c | The eight behaviours' score functions in C++, jitter from the hash | The same picks as GDScript (with the hash jitter on both) |
-| 5d | The decision job on the workers, chained after sensing; results applied the next tick; memory written in the job | Identical results with 0, 1, 2, 3 and N workers; main-thread AI time down |
-| 5e | Deferral by count when the tick runs out of time (rule 5): decisions wait their turn in pawn-id order | Graceful overload in the 600-pawn battle |
-
-**Questions for the owner:**
-1. A C++ function per built-in behaviour now, rather than the general "considerations as data"? *Suggested: yes; considerations
-   later if designers ask for scoring without code.*
-2. Brains with custom GDScript behaviours stay fully GDScript in the first version? *Suggested: yes, with diagnostics naming them.*
-3. Jitter from a hash, the same in C++ and GDScript, changing close calls once? *Suggested: yes.*
-4. Keep the GDScript decision path as the fallback without the C++ library, and as the reference the comparison tests check
-   against? The native changelog lists GDScript twins as a refactor candidate (every change made twice). *Suggested: keep it frozen
-   as the reference for now; decide when the library ships on every platform.*
+Today several systems each scale their own work: the AIActivationManager's tick steps by distance, TickDriver's load ladder, the
+crowd mover's choices, the decision interval. The standard pattern is a **significance manager** (Unreal has one by that name): one
+place works out how much each pawn matters (distance to players, on screen, in a fight) and how much time the tick has to spare,
+and each system reads its level from it: tick step, decision interval, movement, visual detail, replay detail. A dynamic decision
+interval belongs there rather than in the AI. To design when the per-system rules have settled.
 
 ## 7. The tick rate, chosen per match *(v0.4)*
 
@@ -478,7 +502,7 @@ Each step ends with tests passing on Windows and Linux, and the measurement it n
 | 2 | **Job system and scheduler** in `navcore`: batches, due ticks, cost estimates, the main thread's budget, late-job counting, sizing to the machine (4, 4.1). One job kind to start: the sight checks. `pawn_stress` and `net_stress` get the slower-CPU stretch and worker cap (section 0). **Built 2026-11-09 (4.2), with the table's columns (3.2); the budget moves to step 5** | The same results with 0, 1, 2, 3 and N worker threads, compared exactly; `ai_stress` main-thread time down. *Measured: identical with every worker count and in a whole fight; the AI's main-thread time 7 to 9% less (`ai_stress`); the rays, most of what's left, go in step 4* |
 | 3 | **Contract exceptions tidied** (5). **Built 2026-11-09 (5.1)** | `ai_stealth_selftest`, taunt tests unchanged. *Unchanged, and a new check of forces asked for during a tick* |
 | 4 | **Line of sight in C++, against the heightmap and props** (6). **Built 2026-11-09 (6.1), against the terrain's own triangles** | Agrees with physics rays on a map with props, in a comparison test; sensing fully off the main thread. *Agrees on 100% of 20,000 rays; the AI's main-thread time about a fifth less; recording what's seen is still on the main thread, for step 5* |
-| 5 | **Considerations as data** for the built-in behaviours (6), and the main thread's budget with deferral by count (4, 4.1; moved from step 2 in v0.6). **Set aside for now (v0.9, the owner's call).** *Revisited 2026-11-17: AI decisions in C++ on the workers, a draft with its own steps 5a to 5e (6.2)* | Scores equal to the GDScript ones on recorded situations; decisions off the main thread; ~235 → ~350 fighting pawns (guess) |
+| 5 | **Considerations as data** for the built-in behaviours (6), and the main thread's budget with deferral by count (4, 4.1; moved from step 2 in v0.6). **Set aside for now (v0.9, the owner's call).** *Revisited 2026-11-17 and agreed: AI decisions in C++ on the workers, in steps 5a to 5f (6.2); 5a and 5b built* | Scores equal to the GDScript ones on recorded situations; decisions off the main thread; ~235 → ~350 fighting pawns (guess) |
 | 6 | **Tick rate chosen per match** (7): the reference-rate conversion for the 38 tick settings, history sized in time, the rate in the handshake. **Built 2026-11-09 (7.2)** | Every suite and network test passes at 60 and at 30; converted settings last the same time at both |
 | 7 | **Interest management and per-client snapshots on workers** (9) | Bandwidth per client and server snapshot time in `net_stress` |
 | 8 | **Client batch placement** (9) | Client cost per remote pawn in `net_profile` |

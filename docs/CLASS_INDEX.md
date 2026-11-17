@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 143 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 150 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -11,22 +11,28 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [AbilityPriorityPart](../assets/scripts/effects/REFERENCE.md#abilityprioritypart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes one of a group of abilities' priority numbers while its effect lasts. A held part ([EffectPart]). |
 | [AbilityStep](../assets/scripts/abilities/REFERENCE.md#abilitystep) | [abilities](../assets/scripts/abilities/README.md) | Node | One step of an ability, such as a windup, a turn or a swing: a child node of the ability. |
 | [AIActivationManager](../assets/scripts/game_mode/REFERENCE.md#aiactivationmanager) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Switches AI pawns off when the ground around them isn't loaded, and back on when it is; and sets how often the rest run. |
+| [AIAnyCondition](../assets/scripts/ai/REFERENCE.md#aianycondition) | [ai](../assets/scripts/ai/README.md) | AICondition | A condition that passes if any one of its conditions passes: "this, or that". |
 | [AIAttackBehaviour](../assets/scripts/ai/REFERENCE.md#aiattackbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Swings at the current target once it's close enough. |
 | [AIAwarenessState](../assets/scripts/ai/REFERENCE.md#aiawarenessstate) | [ai](../assets/scripts/ai/README.md) | AIStateBase | One tunable state for every "how aware am I of an enemy" situation, such as Alert and Combat. |
 | [AIBehaviourBase](../assets/scripts/ai/REFERENCE.md#aibehaviourbase) | [ai](../assets/scripts/ai/README.md) | Node | The base for one AI behaviour, such as Wander or Chase: one concrete thing to do. |
 | [AIBehaviourManager](../assets/scripts/ai/REFERENCE.md#aibehaviourmanager) | [ai](../assets/scripts/ai/README.md) | Node | Picks and runs the pawn's AI behaviour, judging between its behaviours by score. |
+| [AIChanceCondition](../assets/scripts/ai/REFERENCE.md#aichancecondition) | [ai](../assets/scripts/ai/README.md) | AICondition | A condition that passes on a random roll, with a chance from 0 to 1, the same roll on every run. |
 | [AIChaseBehaviour](../assets/scripts/ai/REFERENCE.md#aichasebehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Runs after the current target, and stops within reach for Attack to take over. |
+| [AICompareCondition](../assets/scripts/ai/REFERENCE.md#aicomparecondition) | [ai](../assets/scripts/ai/README.md) | AICondition | A condition that compares one input with a number, or with another input plus a number. |
+| [AICondition](../assets/scripts/ai/REFERENCE.md#aicondition) | [ai](../assets/scripts/ai/README.md) | Resource | The base for a condition: one check a behaviour needs to pass before it may run, made of plain data. |
 | [AIContextComponent](../assets/scripts/ai/REFERENCE.md#aicontextcomponent) | [ai](../assets/scripts/ai/README.md) | Node | Shared data and settings for one pawn's AI, and the step that runs the AI parts in order. |
 | [AIController](../assets/scripts/controllers/REFERENCE.md#aicontroller) | [controllers](../assets/scripts/controllers/README.md) | ControllerBase | The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick. |
 | [AIDecisionBatcher](../assets/scripts/ai/REFERENCE.md#aidecisionbatcher) | [ai](../assets/scripts/ai/README.md) | GameModeModule | Gathers the AI's behaviour decisions into one batch a tick for the C++ decider (AIBatchDecider), and, in shadow mode, checks its answers against GDScript's without using them. |
 | [AIDecisionRecord](../assets/scripts/ai/REFERENCE.md#aidecisionrecord) | [ai](../assets/scripts/ai/README.md) | RefCounted | What one AI decision was made from, and what it chose: a plain record for diagnostics and for checking another decider against this one. |
 | [AIGoToPointBehaviour](../assets/scripts/ai/REFERENCE.md#aigotopointbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Walks to a meeting point: the nearest node in a Godot group, "rally_point" by default. |
 | [AIIdleState](../assets/scripts/ai/REFERENCE.md#aiidlestate) | [ai](../assets/scripts/ai/README.md) | AIStateBase | The state for when nothing else fits: its prerequisites always hold. |
+| [AIInputs](../assets/scripts/ai/REFERENCE.md#aiinputs) | [ai](../assets/scripts/ai/README.md) | RefCounted | One pawn's AI inputs: the numbers its behaviours' conditions read, such as the distance to its target. |
 | [AIInvestigateBehaviour](../assets/scripts/ai/REFERENCE.md#aiinvestigatebehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Walks over to see what something half-noticed was. |
 | [AILookTowardBehaviour](../assets/scripts/ai/REFERENCE.md#ailooktowardbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Stops and looks toward something half-noticed: the first reaction to a glimpse. |
 | [AIMemory](../assets/scripts/ai/REFERENCE.md#aimemory) | [ai](../assets/scripts/ai/README.md) | Node | What a pawn's AI has sensed, and how aware of each thing it is: awareness that rises when seen and fades when not. |
 | [AIMemoryStoreGD](../assets/scripts/ai/REFERENCE.md#aimemorystoregd) | [ai](../assets/scripts/ai/README.md) | RefCounted | One pawn's AI memory in GDScript, plus the loops that read and write it: the sight check, the most aware entry, target scoring. |
 | [AIParryBehaviour](../assets/scripts/ai/REFERENCE.md#aiparrybehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Parries a swing coming at the pawn, some of the time ([member parry_chance]). |
+| [AIScoreCurve](../assets/scripts/ai/REFERENCE.md#aiscorecurve) | [ai](../assets/scripts/ai/README.md) | Resource | Turns one input into an amount from 0 to 1 that scales a behaviour's score: the "how much" to a condition's "whether". |
 | [AISearchBehaviour](../assets/scripts/ai/REFERENCE.md#aisearchbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Hunts around where an enemy it became certain of was last seen: "I know you were here". |
 | [AISenseBase](../assets/scripts/ai/REFERENCE.md#aisensebase) | [ai](../assets/scripts/ai/README.md) | Node | The base for one AI sense, such as sight: notices other pawns and writes what it found into memory. |
 | [AISensingManager](../assets/scripts/ai/REFERENCE.md#aisensingmanager) | [ai](../assets/scripts/ai/README.md) | Node | Runs a pawn's AI senses on their turn, and finds the other-team pawns they may notice. |
@@ -118,6 +124,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [ReplayWriter](../assets/scripts/replay/REFERENCE.md#replaywriter) | [replay](../assets/scripts/replay/README.md) | RefCounted | Writes a replay file on a thread of its own (replay spec sections 1 and 2). |
 | [ResistancePart](../assets/scripts/effects/REFERENCE.md#resistancepart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Adds to the pawn's resistance to a kind of effect while its effect lasts. A held part ([EffectPart]). |
 | [RunEnvironment](../assets/scripts/platform/REFERENCE.md#runenvironment) | [platform](../assets/scripts/platform/README.md) | RefCounted | Facts about where this run of the game is, asked in one place. So far: whether it has a display. |
+| [ScriptOverrides](../assets/scripts/platform/REFERENCE.md#scriptoverrides) | [platform](../assets/scripts/platform/README.md) | RefCounted | Whether a script overrides a function of the script it extends: one place for a question several systems ask. |
 | [SightGeometryFeeder](../assets/scripts/ai/REFERENCE.md#sightgeometryfeeder) | [ai](../assets/scripts/ai/README.md) | RefCounted | Keeps the shared SightGeometry (line of sight in C++) fed with the solid things in the scene. |
 | [SightSense](../assets/scripts/ai/REFERENCE.md#sightsense) | [ai](../assets/scripts/ai/README.md) | AISenseBase | Sight, for basic stealth: fills awareness of other-team pawns it can see, faster when they're close and in front. |
 | [SpawnManager](../assets/scripts/game_mode/REFERENCE.md#spawnmanager) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Puts pawns into the world at SpawnPoints, and brings players back after they die. |

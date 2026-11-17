@@ -155,6 +155,8 @@ func toggle(key: Key) -> void:
 	if _panels.has(key):
 		_panels[key][0].visible = not _panels[key][0].visible
 		_refresh_left = 0.0
+		if key == KEY_F4:
+			PerfScopes.detailed = _panels[key][0].visible # the fine-grained scopes only while the timings are on screen
 
 
 ## The pawn the inspector shows.

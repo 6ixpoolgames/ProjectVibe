@@ -34,13 +34,13 @@ func _init() -> void:
 	allowed_states = [&"Alert"]
 	max_score = 0.7
 	min_score = max_score # a fixed score, so it can help skip others
-	tick_interval_ticks = 5 # it only needs to notice when a walk or a pause ends
+	tick_interval_ticks = 60 # the safety net: it wakes when a walk ends (wake_on_path_end) and when a pause ends (wake_at)
 
 
-# Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is always max_score.
-func is_available(context: AIContextComponent) -> bool:
-	var index := context.most_aware_index()
-	return index >= 0 and context.memory.is_certain_at(index)
+## Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is always max_score.
+func own_conditions() -> Array[AICondition]:
+	var list: Array[AICondition] = [AICompareCondition.make(AIInputs.MOST_AWARE_CERTAIN, AICompareCondition.Comparison.EQUAL, 1.0)]
+	return list
 
 
 func enter(context: AIContextComponent) -> void:
@@ -50,7 +50,9 @@ func enter(context: AIContextComponent) -> void:
 	_points_left = search_points
 	_pause_until = -1
 	context.controller.hold(&"sprint", sprint_to_last_known)
-	context.controller.move_to(_centre)
+	wake_on_path_end()
+	if not context.controller.move_to(_centre):
+		wake_at(context.current_tick + 1) # no walk to wake it: on to the next step
 
 
 func tick(context: AIContextComponent) -> Status:
@@ -58,6 +60,7 @@ func tick(context: AIContextComponent) -> Status:
 	# Pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
 	if _pause_until >= 0:
 		if context.current_tick < _pause_until:
+			wake_at(_pause_until)
 			return Status.RUNNING
 		_pause_until = -1
 		if _points_left <= 0:
@@ -66,7 +69,8 @@ func tick(context: AIContextComponent) -> Status:
 		# GDScript note: sqrt spreads the points evenly over the circle rather than bunching them in the middle.
 		var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
 		var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * search_radius
-		hands.move_to(_centre + Vector3(cos(angle), 0.0, sin(angle)) * distance)
+		if not hands.move_to(_centre + Vector3(cos(angle), 0.0, sin(angle)) * distance):
+			wake_at(context.current_tick + 1) # no walk to wake it: pause here and go on
 		return Status.RUNNING
 	if hands.is_following_order():
 		return Status.RUNNING
@@ -75,6 +79,7 @@ func tick(context: AIContextComponent) -> Status:
 		_going_to_centre = false
 		hands.hold(&"sprint", false)
 	_pause_until = context.current_tick + maxi(TickDriver.ticks_at_rate(pause_ticks), 1) # pause_ticks are at 60 a second
+	wake_at(_pause_until)
 	return Status.RUNNING
 
 

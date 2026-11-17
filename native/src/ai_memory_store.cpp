@@ -36,8 +36,6 @@ uint32_t layer_of(Node3D *node) {
 	return body ? body->get_collision_layer() : 0;
 }
 
-// FadeProfile.HALVINGS_UNTIL_NOTHING: 0.5^7 is about 0.8%, the first step below 1%.
-constexpr int64_t HALVINGS_UNTIL_NOTHING = 7;
 constexpr double EPSILON = 0.000001;
 
 Object *instance_of(uint64_t id) {
@@ -51,73 +49,14 @@ AIMemoryStore::AIMemoryStore() {
 
 // --- Fades ---
 
-// round(ticks × rate ÷ 60), at least 1 above 0, as TickDriver.ticks_at_rate.
-int64_t AIMemoryStore::at_rate(int64_t reference_ticks) const {
-	if (reference_ticks <= 0 || _tick_rate == 60) {
-		return reference_ticks;
-	}
-	return std::max<int64_t>(1, std::llround(double(reference_ticks) * double(_tick_rate) / 60.0));
-}
-
 void AIMemoryStore::set_tick_rate(int64_t rate) {
 	_tick_rate = std::max<int64_t>(rate, 1);
 }
 
-void AIMemoryStore::read_fade(Fade &into, const Ref<Resource> &profile, int64_t delay, bool custom) const {
-	into = Fade();
-	into.delay = delay;
-	into.profile = profile;
-	if (profile.is_null()) {
-		return;
-	}
-	if (custom) {
-		into.custom = profile;
-		return;
-	}
-	into.mode = int(profile->get("mode"));
-	into.hold = at_rate(int64_t(profile->get("hold_ticks"))); // at the match's rate
-	into.fade = at_rate(int64_t(profile->get("fade_ticks")));
-	into.half_life = at_rate(int64_t(profile->get("half_life_ticks")));
-	into.curve = profile->get("curve");
-}
-
-int64_t AIMemoryStore::ends_after(const Fade &fade) {
-	if (fade.custom.is_valid()) {
-		return int64_t(fade.custom->call("ends_after"));
-	}
-	if (fade.mode == 1) {
-		return fade.hold + fade.half_life * HALVINGS_UNTIL_NOTHING;
-	}
-	return fade.hold + fade.fade;
-}
-
-double AIMemoryStore::value_at(const Fade &fade, double ticks) {
-	if (fade.custom.is_valid()) {
-		return double(fade.custom->call("value_at", ticks));
-	}
-	if (fade.profile.is_null()) {
-		return 1.0;
-	}
-	if (ticks < double(fade.hold)) {
-		return 1.0;
-	}
-	if (ticks >= double(ends_after(fade))) {
-		return 0.0;
-	}
-	const double into_fade = ticks - double(fade.hold);
-	if (fade.mode == 1) {
-		return std::pow(0.5, into_fade / double(fade.half_life));
-	}
-	if (fade.mode == 2 && fade.curve.is_valid()) {
-		return std::clamp(double(fade.curve->sample_baked(float(into_fade / double(fade.fade)))), 0.0, 1.0);
-	}
-	return 1.0 - into_fade / double(fade.fade);
-}
-
 void AIMemoryStore::configure_fades(const Ref<Resource> &uncertain, int64_t uncertain_delay, bool uncertain_custom,
 		const Ref<Resource> &certain, int64_t certain_delay, bool certain_custom, int64_t continuous_sighting_ticks) {
-	read_fade(_uncertain, uncertain, uncertain_delay, uncertain_custom);
-	read_fade(_certain_fade, certain, certain_delay, certain_custom);
+	fade_math::read(_uncertain, uncertain, uncertain_delay, uncertain_custom, _tick_rate);
+	fade_math::read(_certain_fade, certain, certain_delay, certain_custom, _tick_rate);
 	_continuous_ticks = continuous_sighting_ticks;
 }
 
@@ -129,8 +68,8 @@ double AIMemoryStore::awareness_of(size_t i, int64_t tick) const {
 	if (in_view(i, tick)) {
 		return _awareness_when_seen[i];
 	}
-	const Fade &fade = _certain[i] ? _certain_fade : _uncertain;
-	return _awareness_when_seen[i] * value_at(fade, double(tick - _last_seen[i] - fade.delay));
+	const fade_math::Fade &fade = _certain[i] ? _certain_fade : _uncertain;
+	return _awareness_when_seen[i] * fade_math::value_at(fade, double(tick - _last_seen[i] - fade.delay));
 }
 
 // The last check saw it, and not too long ago.
@@ -262,10 +201,10 @@ void AIMemoryStore::remove(size_t i) {
 PackedInt64Array AIMemoryStore::forget_old(int64_t tick) {
 	PackedInt64Array forgotten;
 	for (int64_t i = int64_t(_ids.size()) - 1; i >= 0; --i) { // backwards, so removing one doesn't move the ones still to check
-		const Fade &fade = _certain[size_t(i)] ? _certain_fade : _uncertain;
+		const fade_math::Fade &fade = _certain[size_t(i)] ? _certain_fade : _uncertain;
 		Object *entity = instance_of(_ids[size_t(i)]);
 		// Never while it's held in view, even with a fade shorter than continuous_sighting_ticks.
-		const bool faded = !in_view(size_t(i), tick) && tick - _last_seen[size_t(i)] >= fade.delay + ends_after(fade);
+		const bool faded = !in_view(size_t(i), tick) && tick - _last_seen[size_t(i)] >= fade.delay + fade_math::ends_after(fade);
 		if (entity == nullptr || is_dead(entity) || faded) {
 			if (entity != nullptr) {
 				forgotten.push_back(int64_t(_ids[size_t(i)]));

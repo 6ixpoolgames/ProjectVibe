@@ -181,6 +181,7 @@ What happens in odd cases (all checked in tests/ability_selftest.gd):
 - `pawn: Pawn` = `null`
 - `combo_position: int` = `0`: The combo position the last combo ability took (0: none yet).
 - `combo_window_ticks_left: int` = `0`: Ticks left in the combo window: while above 0, a follow-up whose positions include combo_position + 1 can start.
+- `readiness_version: int` = `0`: Goes up by one whenever something changes that can change what `can_start()` answers: an ability starting, finishing or being cancelled, a step starting or ending (its cancel window), a cooldown or the combo window running out, the abilities being collected again, or the pawn's effects changing (their priority boosts). The AI asks can_start again only after it moves on (AIInputs.action_ready, scaling spec 6.2), the event-based way, instead of at every decision. Never goes down.
 
 ### Signals
 
@@ -198,8 +199,10 @@ What happens in odd cases (all checked in tests/ability_selftest.gd):
 
 - `tick_abilities(dt: float) -> void`: The pawn calls this once per tick. dt is the fixed tick length. See the class description for the order.
 - `timers_changed() -> void`: The abilities' timers call this when one starts or reaches 0 (pawn spec 15.2).
+- `readiness_changed() -> void`: Moves `readiness_version` on, for a change made outside the abilities that can change what can start: the EffectManager calls it when the pawn's effects change.
+- `ready_follows_body(action: StringName) -> bool`: True if an ability on this action has a can_start() of its own, which can change its answer without telling the manager (Jump needs the ground). Such an action is asked again at every decision, whatever `readiness_version` says.
 - `can_sleep() -> bool`: True if the pawn can sleep as far as its abilities go (pawn spec 15.3): no timer running (unless its ability says it can wait), no combo window open, and every ability with every_tick() agrees.
-- `can_start(action: StringName) -> bool`: True if pressing this action now would start something, counting abilities it would cancel. Asking changes nothing.
+- `can_start(action: StringName) -> bool`: True if pressing this action now would start something, counting abilities it would cancel. Asking changes nothing. Only the abilities on that action are looked at (the AI asks this at every decision, for each behaviour that presses one).
 - `action_for_tag(tag: StringName) -> StringName`: The action to press to start an ability in this group (its category or one of its extra_categories, such as &"movement.advanced"), picking the highest-priority one that could start right now, boosts included; &"" if none could. For the AI, so a behaviour asks for a kind of ability instead of naming one: a pawn with a grappling hook instead of a dash closes in the same way. It answers with an action, not an ability, because everything a pawn does goes through its input, which rolls back. Asking changes nothing. The press goes through the usual rules, so if another ability shares that action and wins it, that one starts.
 - `start_ability(ability: AbilityBase) -> bool`: Starts an ability by the same rules as a press: its cooldown, can_start(), and cancelling what it conflicts with. For abilities with no trigger action, started by code, such as Knockback from a hit. One already running starts again from the beginning. Returns false if it couldn't start.
 - `intercept_hit(hit: HitInfo) -> HitInterceptor`: The first active TURN_AWAY HitInterceptor that stops this hit, or null (pawn spec 8.23). It has already sent its response (HitInterceptor.respond) and `hit_intercepted` has gone out. A reply to an interception isn't turned away.

@@ -193,15 +193,19 @@ var frame := PerfScopes.take_frame()  # name -> [microseconds, count] since the 
 
 Main thread only: the totals aren't guarded for threads. Work on worker threads is timed by whoever waits for it.
 
+Detail: a scope that runs very often, such as one per behaviour per pawn per tick, starts with `begin_detailed()` instead. It only times while `detailed` is on as well, because a scope costs about a microsecond, and thousands a frame would change the numbers they're meant to show. The F4 timings panel switches it on while it's open, and `mass_battle_measure --scopes` does too.
+
 GDScript note: everything here is static, so it's used as PerfScopes.begin() with no object made, like TickJobs.
 
 ### Settings and properties
 
 - `enabled: bool` = `false`: On while a tool is listening. Off, begin() returns 0 and end() does nothing.
+- `detailed: bool` = `false`: On while a tool wants the fine-grained scopes too (`begin_detailed()`). Off by default.
 
 ### Functions
 
 - `begin() -> int` *(static)*: The time now, in microseconds, to hand to end(); or 0 when nothing is listening.
+- `begin_detailed() -> int` *(static)*: begin() for a scope that runs very often: the time now only while both `enabled` and `detailed` are on, else 0. end() it as usual.
 - `end(name: StringName, started: int) -> void` *(static)*: Adds the time since started (from begin()) to name's total for this frame. Does nothing if started is 0.
 - `add(name: StringName, microseconds: int, count: int = 1) -> void` *(static)*: Adds a time measured some other way, in microseconds, such as one a C++ class reports.
 - `take_frame() -> Dictionary` *(static)*: Everything timed since the last call, as name -> [microseconds, count], and starts afresh.

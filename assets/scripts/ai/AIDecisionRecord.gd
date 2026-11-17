@@ -77,6 +77,8 @@ var running_started_tick := -1
 var kept_by_interrupt := false
 ## One Dictionary per behaviour, in the manager's fixed order. Empty when [member kept_by_interrupt]. See [method add_behaviour].
 var behaviours: Array[Dictionary] = []
+## The pawn's AI inputs as this decision worked them out ([member AIInputs.values]), by slot: what the behaviours' conditions read.
+var inputs := PackedFloat64Array()
 ## What runs after the decision: a behaviour's name, or &"" for nothing.
 var chosen: StringName = &""
 
@@ -142,4 +144,5 @@ func to_dict() -> Dictionary:
 		"state": String(state), "has_target": has_target,
 		"running_before": String(running_before), "running_started_tick": running_started_tick,
 		"kept_by_interrupt": kept_by_interrupt, "behaviours": entries, "chosen": String(chosen),
+		"inputs": Array(inputs),
 	}

@@ -31,6 +31,8 @@ var _move := Vector3.ZERO
 var _look_yaw := 0.0
 var _look_pitch := 0.0
 var _look_set := false # false: keep the pawn's own look
+var _look_node: Node3D = null # look_at_node's node, followed at every input; null: none
+var _look_offset := Vector3.ZERO
 var _held := 0 # bits from InputActions
 var _pressed_once := 0 # bits held for the next command only
 # One command, reused every tick, so a crowd of AI pawns doesn't make thousands of new objects a second. The ControllerManager copies
@@ -84,6 +86,7 @@ func look_at_point(point: Vector3) -> void:
 	if pawn == null:
 		return
 	var offset := point - pawn.global_position
+	_look_node = null # a point replaces a node being followed
 	if offset.length_squared() < 0.000001:
 		return
 	# Godot's forward is -Z, so a point straight ahead has yaw 0.
@@ -93,8 +96,20 @@ func look_at_point(point: Vector3) -> void:
 
 
 ## Stops looking at anything in particular, and keeps whatever look the pawn already has.
+## Keeps looking at a node, at offset from its origin (such as Vector3(0, 1, 0) for a pawn's chest), worked out again at every
+## input, until [method stop_looking] or another look. For a behaviour that sleeps between events (Attack, during its swing): the aim
+## follows the node every tick without the behaviour having to run. A freed node ends it.
+func look_at_node(node: Node3D, offset := Vector3.ZERO) -> void:
+	_look_node = node
+	_look_offset = offset
+	if is_instance_valid(node):
+		look_at_point(node.global_position + offset)
+		_look_node = node # look_at_point clears it
+
+
 func stop_looking() -> void:
 	_look_set = false
+	_look_node = null
 
 
 ## True while it's looking at a point it was given. AI sight faces this way then (SightSense).
@@ -142,6 +157,15 @@ func take_input_command(_tick: int) -> InputCommand:
 			link_press = InputActions.mask_of(action)
 	else:
 		_command.move = _move
+	if _look_node != null:
+		if is_instance_valid(_look_node):
+			var node := _look_node
+			var offset := _look_offset
+			look_at_point(node.global_position + offset)
+			_look_node = node # look_at_point clears it
+			_look_offset = offset
+		else:
+			_look_node = null # it's gone: keep the last aim
 	if _look_set or pawn == null:
 		_command.look_yaw = _look_yaw
 		_command.look_pitch = _look_pitch

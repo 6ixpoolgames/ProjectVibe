@@ -9,6 +9,7 @@
 ## [br]- the decision waiting to happen this tick, if any, and how strong its reason is (the "event", pawn spec 10.7)
 ## [br]- random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
 ## [br]- the current target, and shared inputs behaviours read ([method current_target_index], [method most_aware_index])
+## [br]- the pawn's AI inputs ([member inputs]): the named numbers behaviours' conditions read (scaling spec 6.2)
 ## [br]- the last hit the pawn took and the latest swing coming at it, for states and behaviours
 ## [br]
 ## The pawn calls [method run_ai] from its own tick, which runs the AI parts in a fixed order. Nothing here ticks on its own.
@@ -51,6 +52,10 @@ var current_target: Node3D = null:
 		current_target = value
 		refresh_shared_inputs() # the shared inputs depend on it
 
+## The pawn's AI inputs, the numbers its behaviours' conditions read ([AIInputs]). Worked out at each decision; a game writes its
+## own with [code]inputs.set_input(name, value)[/code].
+var inputs: AIInputs = null
+
 var _decision_waiting := false
 var _event_priority := 0 # the strongest reason for the waiting decision (pawn spec 10.7)
 var _event_is_normal := true # true when every reason was an ordinary decision tick
@@ -60,6 +65,7 @@ func _init() -> void:
 	# GDScript note: nothing here runs per frame. The pawn calls into the AI parts on its tick.
 	set_process(false)
 	set_physics_process(false)
+	inputs = AIInputs.new(self)
 
 
 func _enter_tree() -> void:
@@ -286,6 +292,17 @@ func unknown_hit_point(within_ticks: int) -> Variant:
 	return null
 
 
+## Something half-noticed to look at or go and see: the most aware memory entry's last known position while that entry isn't
+## certain yet, or else where an attacker the AI doesn't remember hit from, if that was within this many ticks (at 60 a second);
+## null when there's neither. Look Toward and Investigate head there. Their conditions check the same two facts through the inputs
+## ([method AIInputs.half_noticed_conditions]), which the C++ decider can read.
+func point_of_interest(within_ticks: int) -> Variant:
+	var index := most_aware_index()
+	if index >= 0 and not memory.is_certain_at(index):
+		return memory.last_known_position_at(index)
+	return unknown_hit_point(within_ticks)
+
+
 ## True when there's a current target, picked by the target selector.
 func has_target() -> bool:
 	return is_instance_valid(current_target)
@@ -456,6 +473,17 @@ func pawn_number() -> int:
 		_number_name = pawn.name
 		_name_number = String(pawn.name).hash() & 0x7FFFFFFF
 	return _name_number
+
+
+## Any pawn's number, as [method pawn_number] gives it, for a pawn that may have no AI of its own (a player's, say): its network id
+## when it has one, or else a hash of its name. 0 for null.
+static func number_of(other: Pawn) -> int:
+	if other == null:
+		return 0
+	var entity := other.get_network_entity()
+	if entity and entity.entity_id >= 0:
+		return entity.entity_id
+	return String(other.name).hash() & 0x7FFFFFFF
 
 # The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
 # REFACTOR: the same lookup is in AIBehaviourManager. One shared way to find a sibling part before the pawn's own _ready (on Pawn,

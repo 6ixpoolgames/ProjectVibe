@@ -2,6 +2,8 @@
 ## AIContextComponent and the pawn's AI step. Checks the decision steps of pawn spec 10.8 one by one (hard rules, ranges, early stop,
 ## jitter, ties, the fixed order), persistence, interrupts, finishing, Wander, what runs while a player has the pawn, that a client
 ## never runs the AI, that a rollback doesn't run it again, and the odd cases at the top of AIBehaviourManager.gd.
+## Claude 2026-11-17 (scaling spec 6.2): and wake-ups: wake_at, a walk ending and an ability on the action ending wake a sleeping
+## behaviour, used up when they fire, cleared when it starts again.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_behaviour_manager_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
@@ -72,6 +74,7 @@ func _ready() -> void:
 	_test_interrupts()
 	await _test_finishing()
 	_test_tick_interval()
+	_test_wake_ups()
 	_test_odd_cases()
 	await _test_wander()
 	await _test_while_possessed()
@@ -382,6 +385,53 @@ func _test_tick_interval() -> void:
 	for t in range(111, 116):
 		pawn.ai_context.behaviour_manager.tick_running(t)
 	_check(slow.ticks == 8, "1: every tick")
+	pawn.free()
+
+
+# Claude 2026-11-17: a behaviour sleeping on a long interval, woken by each kind of wake-up.
+func _test_wake_ups() -> void:
+	var sleeper := _b("Sleeper", 0.5)
+	sleeper.tick_interval_ticks = 600
+	var pawn := _make_pawn([sleeper])
+	var manager := pawn.ai_context.behaviour_manager
+	_decide(pawn, 100)
+	manager.tick_running(100) # the tick it starts
+	for t in range(101, 110):
+		manager.tick_running(t)
+	_check_equal(sleeper.ticks, 1, "a 600-tick interval: ticked only when it started")
+	sleeper.wake_at(105) # in the past: fires at the next run
+	sleeper.wake_at(120)
+	manager.tick_running(110)
+	_check_equal(sleeper.ticks, 2, "wake_at: the earlier of two wins, and fires at the pawn's first run at or after it")
+	manager.tick_running(111)
+	_check_equal(sleeper.ticks, 2, "...and is used up when it fires")
+	manager._on_path_ended(true)
+	manager.tick_running(112)
+	_check_equal(sleeper.ticks, 2, "a walk ending doesn't wake a behaviour that didn't ask")
+	sleeper.wake_on_path_end()
+	manager._on_path_ended(false)
+	manager.tick_running(113)
+	_check_equal(sleeper.ticks, 3, "wake_on_path_end: a walk ending (here given up) wakes it")
+	var swing := AbilityBase.new()
+	swing.trigger_action = &"primary"
+	var other := AbilityBase.new()
+	other.trigger_action = &"secondary"
+	sleeper.wake_on_action_end(&"primary")
+	manager._on_ability_ended(other)
+	manager.tick_running(114)
+	_check_equal(sleeper.ticks, 3, "an ability on another action ending doesn't wake it")
+	manager._on_ability_ended(swing)
+	manager.tick_running(115)
+	_check_equal(sleeper.ticks, 4, "wake_on_action_end: an ability on its action ending wakes it")
+	sleeper.wake_at(500)
+	sleeper.available = false
+	_decide(pawn, 116) # nothing left: it stops
+	sleeper.available = true
+	_decide(pawn, 117) # and starts again
+	_check(sleeper.wake_tick == -1 and not sleeper.wakes_on_path_end and sleeper.wakes_on_action == &"",
+			"starting again clears every wake-up")
+	swing.free()
+	other.free()
 	pawn.free()
 
 

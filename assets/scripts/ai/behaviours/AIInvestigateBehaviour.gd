@@ -9,8 +9,6 @@
 ## It's only available while something uncertain is remembered (Search handles enemies it became certain of), or while an unknown
 ## attacker hit the pawn within [member hit_memory_ticks]: then it walks to where the hit came from, with no memory entry (no damage
 ## sense, the owner's call).
-# REFACTOR: _point_of_interest() is the same function as AILookTowardBehaviour's. One copy, on the context say, keeps the two
-# reacting to the same things (reusable). See CHANGELOG.md.
 class_name AIInvestigateBehaviour
 extends AIBehaviourBase
 
@@ -29,25 +27,25 @@ func _init() -> void:
 	allowed_states = [&"Alert"]
 	max_score = 0.5
 	min_score = max_score # a fixed score, so it can help skip others
-	cooldown_ticks = 120
+	cooldown_ticks = 120 # after it finishes, Look Toward gets its turn again, even while Look Toward's own persistence holds it back
 	tick_interval_ticks = 5 # it only needs to notice arriving, or the position moving
 
 
-# Only for something half-noticed: an uncertain most aware entry, or a recent hit from an unknown attacker. Its score is always
-# max_score, so it doesn't need a score() of its own.
-func is_available(context: AIContextComponent) -> bool:
-	return _point_of_interest(context) != null
+## Only for something half-noticed: an uncertain most aware entry, or a hit within [member hit_memory_ticks] from an attacker it
+## doesn't remember. Two conditions, either of which will do. Its score is always max_score.
+func own_conditions() -> Array[AICondition]:
+	return AIInputs.half_noticed_conditions(hit_memory_ticks)
 
 
 func enter(context: AIContextComponent) -> void:
 	context.controller.hold(&"sprint", false)
-	var point: Variant = _point_of_interest(context)
+	var point: Variant = context.point_of_interest(hit_memory_ticks)
 	if point != null:
 		_go(context, point)
 
 
 func tick(context: AIContextComponent) -> Status:
-	var point: Variant = _point_of_interest(context)
+	var point: Variant = context.point_of_interest(hit_memory_ticks)
 	if point == null:
 		return Status.FAILED # forgotten
 	if point.distance_to(_goal) > repath_distance:
@@ -67,11 +65,3 @@ func exit(context: AIContextComponent, _reason: String) -> void:
 func _go(context: AIContextComponent, point: Vector3) -> void:
 	_goal = point
 	context.controller.move_to(point)
-
-
-# The uncertain most aware entry's last known position, or else where an unknown attacker hit from; null when there's neither.
-func _point_of_interest(context: AIContextComponent) -> Variant:
-	var index := context.most_aware_index()
-	if index >= 0 and not context.memory.is_certain_at(index):
-		return context.memory.last_known_position_at(index)
-	return context.unknown_hit_point(hit_memory_ticks)

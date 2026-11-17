@@ -36,7 +36,7 @@ func _init() -> void:
 	# A low, fixed score: Wander is what a pawn does when nothing more interesting can run.
 	max_score = 0.1
 	min_score = 0.1
-	tick_interval_ticks = 5 # it only needs to notice when a walk or a pause ends
+	tick_interval_ticks = 60 # the safety net: it wakes when a walk ends (wake_on_path_end) and when a pause ends (wake_at)
 
 
 func enter(_context: AIContextComponent) -> void:
@@ -45,6 +45,7 @@ func enter(_context: AIContextComponent) -> void:
 		_has_home = true
 	_walking = false
 	_pause_until = -1
+	wake_on_path_end()
 
 
 func tick(context: AIContextComponent) -> Status:
@@ -54,6 +55,7 @@ func tick(context: AIContextComponent) -> Status:
 	# Pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
 	if _pause_until >= 0:
 		if context.current_tick < _pause_until:
+			wake_at(_pause_until)
 			return Status.RUNNING
 		_pause_until = -1
 	if hands.is_following_order():
@@ -65,6 +67,7 @@ func tick(context: AIContextComponent) -> Status:
 		var shortest := TickDriver.ticks_at_rate(min_pause_ticks)
 		var longest := TickDriver.ticks_at_rate(max_pause_ticks)
 		_pause_until = context.current_tick + shortest + int(context.random_unit(PAUSE_SALT) * (maxi(longest - shortest, 0) + 1))
+		wake_at(_pause_until)
 		return Status.RUNNING
 	# GDScript note: sqrt makes points spread evenly over the circle; without it they'd bunch up near the middle.
 	var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
@@ -72,6 +75,8 @@ func tick(context: AIContextComponent) -> Status:
 	var point := _home + Vector3(cos(angle), 0.0, sin(angle)) * distance
 	if hands.move_to(point):
 		_walking = true
+	else:
+		wake_at(context.current_tick + TickDriver.ticks_at_rate(5)) # no walk to wake it: try another point soon
 	return Status.RUNNING
 
 

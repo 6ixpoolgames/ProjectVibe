@@ -46,7 +46,16 @@ bool scorer_by_name(const String &name, uint8_t &scorer) {
 		scorer = 0; // Scorer::GIVEN
 		return true;
 	}
+	if (name == "conditions") {
+		scorer = 1; // Scorer::CONDITIONS
+		return true;
+	}
 	return false;
+}
+
+// An input's value in a row, or 0 past the row's end, as AIInputs.value() reads 0 for a slot never written.
+inline double input_at(const double *inputs, int64_t count, int slot) {
+	return (inputs && slot >= 0 && slot < count) ? inputs[slot] : 0.0;
 }
 } // namespace
 
@@ -97,6 +106,30 @@ int AIBatchDecider::add_brain(const Dictionary &description) {
 			return -1;
 		}
 		behaviour.scorer = Scorer(scorer);
+		behaviour.cooldown_ticks = int64_t(entry.get("cooldown_ticks_at_rate", entry.get("cooldown_ticks", 0)));
+		behaviour.persistence = double(entry.get("persistence", 0.0));
+		const Variant fade = entry.get("persistence_fade", Variant());
+		if (fade.get_type() == Variant::DICTIONARY) {
+			// Already at the match's rate (AIBehaviourManager.describe()).
+			const Dictionary f = fade;
+			fade_math::read_values(behaviour.persistence_fade, int(f.get("mode", 0)), int64_t(f.get("hold", 0)), int64_t(f.get("fade", 60)),
+					int64_t(f.get("half_life", 30)), f.get("curve", Variant()));
+			behaviour.has_persistence_fade = true;
+		}
+		if (!add_conditions(entry.get("conditions", Array()), brain, behaviour.first_condition, behaviour.condition_count)) {
+			return -1;
+		}
+		const Array curves = entry.get("score_curves", Array());
+		behaviour.first_curve = int(brain.curves.size());
+		behaviour.curve_count = int(curves.size());
+		for (int64_t c = 0; c < curves.size(); ++c) {
+			const Dictionary described = curves[c];
+			Curve curve;
+			curve.input_slot = int(described.get("input_slot", -1));
+			curve.from = double(described.get("from", 0.0));
+			curve.to = double(described.get("to", 1.0));
+			brain.curves.push_back(curve);
+		}
 		brain.behaviours.push_back(behaviour);
 		allowed.push_back(entry.get("allowed_states", Array()));
 	}
@@ -150,6 +183,91 @@ int AIBatchDecider::add_brain(const Dictionary &description) {
 	_brains.push_back(brain);
 	_stride = std::max(_stride, int(brain.behaviours.size()));
 	return int(_brains.size()) - 1;
+}
+
+bool AIBatchDecider::add_conditions(const Array &list, Brain &brain, int &first, int &count) {
+	// Children first (an "any" condition's own list goes in before it), then this list's conditions next to each other.
+	std::vector<Condition> these;
+	for (int64_t i = 0; i < list.size(); ++i) {
+		const Dictionary described = list[i];
+		const String kind = described.get("kind", "always");
+		Condition condition;
+		if (kind == "always") {
+			condition.kind = ConditionKind::ALWAYS;
+		} else if (kind == "compare") {
+			condition.kind = ConditionKind::COMPARE;
+			condition.input_slot = int(described.get("input_slot", -1));
+			condition.comparison = int(described.get("comparison", 0));
+			condition.value = double(described.get("value", 0.0));
+			condition.other_slot = int(described.get("other_slot", -1));
+		} else if (kind == "chance") {
+			condition.kind = ConditionKind::CHANCE;
+			condition.chance = double(described.get("chance", 0.0));
+			condition.salt = int64_t(described.get("salt", 0));
+			condition.key_slot = int(described.get("key_slot", -1));
+			condition.salt_slot = int(described.get("salt_slot", -1));
+		} else if (kind == "any") {
+			condition.kind = ConditionKind::ANY;
+			if (!add_conditions(described.get("conditions", Array()), brain, condition.first_child, condition.child_count)) {
+				return false;
+			}
+		} else {
+			UtilityFunctions::push_error("AIBatchDecider.add_brain: no condition kind called \"" + kind + "\".");
+			return false;
+		}
+		these.push_back(condition);
+	}
+	first = int(brain.conditions.size());
+	count = int(these.size());
+	brain.conditions.insert(brain.conditions.end(), these.begin(), these.end());
+	return true;
+}
+
+bool AIBatchDecider::passes(const Brain &brain, const Condition &condition, const RowView &row, int64_t behaviour_salt) const {
+	switch (condition.kind) {
+		case ConditionKind::ALWAYS:
+			return true;
+		case ConditionKind::COMPARE: {
+			// AICompareCondition.passes, the same arithmetic.
+			const double left = input_at(row.inputs, row.input_count, condition.input_slot);
+			double right = condition.value;
+			if (condition.other_slot >= 0) {
+				right += input_at(row.inputs, row.input_count, condition.other_slot);
+			}
+			switch (condition.comparison) {
+				case 0:
+					return left <= right;
+				case 1:
+					return left < right;
+				case 2:
+					return left >= right;
+				case 3:
+					return left > right;
+				case 4:
+					return left == right;
+				default:
+					return left != right;
+			}
+		}
+		case ConditionKind::CHANCE: {
+			// AIChanceCondition: roll_tick and roll_salt, then the context's random_unit_at. A double to int64 truncates toward 0,
+			// as GDScript's int() does.
+			const int64_t roll_tick = condition.key_slot >= 0 ? int64_t(input_at(row.inputs, row.input_count, condition.key_slot)) : row.tick;
+			int64_t salt = condition.salt ^ behaviour_salt;
+			if (condition.salt_slot >= 0) {
+				salt ^= int64_t(input_at(row.inputs, row.input_count, condition.salt_slot)) & 0xFFFF;
+			}
+			return random_unit_at(row.random_seed, row.pawn_number, roll_tick, salt) < condition.chance;
+		}
+		case ConditionKind::ANY:
+			for (int i = 0; i < condition.child_count; ++i) {
+				if (passes(brain, brain.conditions[condition.first_child + i], row, behaviour_salt)) {
+					return true;
+				}
+			}
+			return false;
+	}
+	return true;
 }
 
 int AIBatchDecider::get_brain_count() const {
@@ -208,6 +326,18 @@ bool AIBatchDecider::is_available(const Brain &brain, int slot, const RowView &r
 				unknown |= bit; // GDScript never answered for this one: counted as not available, and reported
 			}
 			break;
+		case Scorer::CONDITIONS: {
+			// AIBehaviourBase.is_available(): every condition passes, checked in order, stopping at the first that doesn't.
+			const Behaviour &behaviour = brain.behaviours[slot];
+			available = true;
+			for (int i = 0; i < behaviour.condition_count; ++i) {
+				if (!passes(brain, brain.conditions[behaviour.first_condition + i], row, behaviour.name_hash)) {
+					available = false;
+					break;
+				}
+			}
+			break;
+		}
 	}
 	if (available) {
 		answers |= bit;
@@ -222,6 +352,27 @@ double AIBatchDecider::score(const Brain &brain, int slot, const RowView &row) c
 				return row.scores[slot];
 			}
 			break;
+		case Scorer::CONDITIONS: {
+			// AIBehaviourBase.score(): max_score, scaled by the curves, in the same order with the same arithmetic.
+			const Behaviour &behaviour = brain.behaviours[slot];
+			if (behaviour.curve_count == 0) {
+				break;
+			}
+			double amount = 1.0;
+			for (int i = 0; i < behaviour.curve_count; ++i) {
+				const Curve &curve = brain.curves[behaviour.first_curve + i];
+				const double value = input_at(row.inputs, row.input_count, curve.input_slot);
+				double part;
+				if (curve.to == curve.from) {
+					part = value >= curve.to ? 1.0 : 0.0;
+				} else {
+					part = std::clamp((value - curve.from) / (curve.to - curve.from), 0.0, 1.0);
+				}
+				amount *= part;
+			}
+			const double low = behaviour.has_min_score ? behaviour.min_score : 0.0;
+			return low + (behaviour.max_score - low) * amount;
+		}
 	}
 	return brain.behaviours[slot].max_score; // AIBehaviourBase.score()'s default
 }
@@ -256,6 +407,13 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	const auto *available = column(columns, "available", Variant::PACKED_INT64_ARRAY, rows, avail_h);
 	const auto *persistence = column(columns, "persistence", Variant::PACKED_FLOAT64_ARRAY, flat, persistence_h);
 	const auto *scores = column(columns, "score", Variant::PACKED_FLOAT64_ARRAY, flat, score_h, false);
+	// The AI inputs, optional: rows * input_stride values.
+	const int64_t input_stride = int64_t(columns.get("input_stride", 0));
+	PackedFloat64Array inputs_h;
+	const auto *inputs = input_stride > 0 ? column(columns, "inputs", Variant::PACKED_FLOAT64_ARRAY, rows * input_stride, inputs_h) : nullptr;
+	if (input_stride > 0 && !inputs) {
+		return result; // column() said why
+	}
 	if (!pawn || !seed || !tick || !state || !has_target || !normal || !priority || !running || !started || !cooling || !can_press ||
 			!known || !available || !persistence) {
 		return result;
@@ -274,6 +432,7 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	const int32_t *brain_of = brains_holder.ptr();
 	const double *persistence_of = persistence->ptr();
 	const double *score_of = scores ? scores->ptr() : nullptr;
+	const double *inputs_of = inputs ? inputs->ptr() : nullptr;
 
 	for (int64_t r = 0; r < rows; ++r) {
 		chosen_out.set(r, -1);
@@ -285,122 +444,350 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 			UtilityFunctions::push_error(vformat("AIBatchDecider.decide: row %d names brain %d, which doesn't exist.", r, b));
 			continue;
 		}
-		const Brain &brain = _brains[b];
-		const int count = int(brain.behaviours.size());
-		const int run = (*running)[r];
-		const int64_t now = (*tick)[r];
-		const int64_t event_priority = (*priority)[r];
-		const bool event_is_normal = (*normal)[r] != 0;
-		if (count == 0) {
-			chosen_out.set(r, run); // the manager does nothing with no behaviours
-			continue;
-		}
-		const uint64_t run_bit = (run >= 0 && run < count) ? (uint64_t(1) << run) : 0;
-		// 0. Interrupts (AIBehaviourManager._can_replace_running).
-		if (run_bit) {
-			const Behaviour &running_one = brain.behaviours[run];
-			const bool keep = running_one.cannot_be_interrupted || event_priority < running_one.interrupt_threshold ||
-					(event_is_normal && running_one.min_run_ticks > 0 && now - (*started)[r] < running_one.min_run_ticks);
-			if (keep) {
-				chosen_out.set(r, run);
-				kept_out.set(r, 1);
-				continue;
-			}
-		}
-		// 1 and 2. Valid behaviours and the hard rules, as masks: allowed in the state; not cooling down (the running one excepted);
-		// a target if it needs one; its action can start (the running one excepted, having pressed it already).
-		const int state_number = (*state)[r];
-		const uint64_t allowed = (state_number >= 0 && state_number < int(brain.state_masks.size())) ? uint64_t(brain.state_masks[state_number])
-																									 : uint64_t(brain.state_masks[0]);
-		uint64_t candidates = allowed;
-		candidates &= ~(uint64_t((*cooling)[r]) & ~run_bit);
-		if ((*has_target)[r] == 0) {
-			candidates &= ~brain.needs_target_mask;
-		}
-		candidates &= ~(brain.presses_action_mask & ~uint64_t((*can_press)[r]) & ~run_bit);
-		// 3. Each candidate's range, in the fixed order.
-		const RowView view{ (*known)[r], (*available)[r], score_of ? score_of + r * _stride : nullptr };
-		const int64_t pawn_number = (*pawn)[r];
-		const int64_t random_seed = (*seed)[r];
-		_candidates.clear();
-		for (int slot = 0; slot < count; ++slot) {
-			if (!(candidates & (uint64_t(1) << slot))) {
-				continue;
-			}
-			const Behaviour &behaviour = brain.behaviours[slot];
-			Candidate c;
-			c.slot = slot;
-			c.persistence = persistence_of[r * _stride + slot];
-			c.jitter = behaviour.jitter > 0.0 ? behaviour.jitter * (random_unit_at(random_seed, pawn_number, now, behaviour.name_hash) * 2.0 - 1.0) : 0.0;
-			c.ceiling = behaviour.max_score + c.persistence + behaviour.jitter;
-			c.has_floor = behaviour.has_min_score;
-			c.floor = c.has_floor ? behaviour.min_score + c.persistence - behaviour.jitter : NEG_INF;
-			_candidates.push_back(c);
-		}
-		uint64_t asked = 0;
-		uint64_t answers = 0;
-		uint64_t unknown = 0;
-		// 3, continued. The highest floor, from the first available behaviour, highest floor first.
-		double highest_floor = NEG_INF;
-		std::sort(_candidates.begin(), _candidates.end(), [](const Candidate &a, const Candidate &b) {
-			return a.floor > b.floor || (a.floor == b.floor && a.slot < b.slot);
-		});
-		for (const Candidate &c : _candidates) {
-			if (c.floor == NEG_INF) {
-				break;
-			}
-			if (is_available(brain, c.slot, view, asked, answers, unknown)) {
-				highest_floor = c.floor;
-				break;
-			}
-		}
-		// 4. Scoring, highest ceiling first, with the early stop.
-		std::sort(_candidates.begin(), _candidates.end(), [](const Candidate &a, const Candidate &b) {
-			return a.ceiling > b.ceiling || (a.ceiling == b.ceiling && a.slot < b.slot);
-		});
-		int best = -1;
-		double best_result = NEG_INF;
-		_ties.clear();
-		for (const Candidate &c : _candidates) {
-			if (c.ceiling < highest_floor) {
-				continue;
-			}
-			if (best >= 0 && c.ceiling < best_result - brain.tie_margin) {
-				break;
-			}
-			if (!is_available(brain, c.slot, view, asked, answers, unknown)) {
-				continue;
-			}
-			const double result_now = score(brain, c.slot, view) + c.persistence + c.jitter;
-			if (best < 0 || result_now > best_result + brain.tie_margin) {
-				best = c.slot;
-				best_result = result_now;
-				_ties.clear();
-				_ties.push_back(c.slot);
-			} else if (result_now >= best_result - brain.tie_margin) {
-				_ties.push_back(c.slot);
-			}
-		}
-		// 6. Ties: the fixed order, or a replayable random pick.
-		if (_ties.size() > 1) {
-			std::sort(_ties.begin(), _ties.end());
-			if (brain.randomize_ties) {
-				const int size = int(_ties.size());
-				const int pick = std::min(int(random_unit_at(random_seed, pawn_number, now, brain.tie_salt) * size), size - 1);
-				best = _ties[pick];
-			} else {
-				best = _ties[0];
-			}
-		}
-		chosen_out.set(r, best);
-		asked_out.set(r, int64_t(asked));
-		unknown_out.set(r, int64_t(unknown));
+		RowInput in;
+		in.running = (*running)[r];
+		in.running_started = (*started)[r];
+		in.now = (*tick)[r];
+		in.event_priority = (*priority)[r];
+		in.event_normal = (*normal)[r] != 0;
+		in.state = (*state)[r];
+		in.has_target = (*has_target)[r] != 0;
+		in.cooling = uint64_t((*cooling)[r]);
+		in.can_press = uint64_t((*can_press)[r]);
+		in.persistence = persistence_of + r * _stride;
+		in.view = RowView{ (*known)[r], (*available)[r], score_of ? score_of + r * _stride : nullptr,
+			inputs_of ? inputs_of + r * input_stride : nullptr, input_stride, (*seed)[r], (*pawn)[r], in.now };
+		const RowResult out = decide_row(_brains[b], in);
+		chosen_out.set(r, out.chosen);
+		kept_out.set(r, out.kept ? 1 : 0);
+		asked_out.set(r, int64_t(out.asked));
+		unknown_out.set(r, int64_t(out.unknown));
 	}
 	result["chosen"] = chosen_out;
 	result["kept"] = kept_out;
 	result["asked"] = asked_out;
 	result["unknown"] = unknown_out;
 	return result;
+}
+
+AIBatchDecider::RowResult AIBatchDecider::decide_row(const Brain &brain, const RowInput &in) {
+	RowResult out;
+	const int count = int(brain.behaviours.size());
+	const int run = in.running;
+	const int64_t now = in.now;
+	if (count == 0) {
+		out.chosen = run; // the manager does nothing with no behaviours
+		return out;
+	}
+	const uint64_t run_bit = (run >= 0 && run < count) ? (uint64_t(1) << run) : 0;
+	// 0. Interrupts (AIBehaviourManager._can_replace_running).
+	if (run_bit) {
+		const Behaviour &running_one = brain.behaviours[run];
+		const int64_t threshold = in.interrupt_threshold ? in.interrupt_threshold[run] : running_one.interrupt_threshold;
+		const bool keep = running_one.cannot_be_interrupted || in.event_priority < threshold ||
+				(in.event_normal && running_one.min_run_ticks > 0 && now - in.running_started < running_one.min_run_ticks);
+		if (keep) {
+			out.chosen = run;
+			out.kept = true;
+			return out;
+		}
+	}
+	// 1 and 2. Valid behaviours and the hard rules, as masks: allowed in the state; not cooling down (the running one excepted);
+	// a target if it needs one; its action can start (the running one excepted, having pressed it already).
+	const uint64_t allowed = (in.state >= 0 && in.state < int(brain.state_masks.size())) ? uint64_t(brain.state_masks[in.state])
+																						  : uint64_t(brain.state_masks[0]);
+	uint64_t candidates = allowed;
+	candidates &= ~(in.cooling & ~run_bit);
+	if (!in.has_target) {
+		candidates &= ~brain.needs_target_mask;
+	}
+	candidates &= ~(brain.presses_action_mask & ~in.can_press & ~run_bit);
+	// 3. Each candidate's range, in the fixed order.
+	const RowView &view = in.view;
+	_candidates.clear();
+	for (int slot = 0; slot < count; ++slot) {
+		if (!(candidates & (uint64_t(1) << slot))) {
+			continue;
+		}
+		const Behaviour &behaviour = brain.behaviours[slot];
+		const double jitter = in.jitter ? in.jitter[slot] : behaviour.jitter;
+		Candidate c;
+		c.slot = slot;
+		c.persistence = in.persistence[slot];
+		c.jitter = jitter > 0.0 ? jitter * (random_unit_at(view.random_seed, view.pawn_number, now, behaviour.name_hash) * 2.0 - 1.0) : 0.0;
+		c.ceiling = behaviour.max_score + c.persistence + jitter;
+		c.has_floor = behaviour.has_min_score;
+		c.floor = c.has_floor ? behaviour.min_score + c.persistence - jitter : NEG_INF;
+		_candidates.push_back(c);
+	}
+	uint64_t answers = 0;
+	// 3, continued. The highest floor, from the first available behaviour, highest floor first.
+	double highest_floor = NEG_INF;
+	std::sort(_candidates.begin(), _candidates.end(), [](const Candidate &a, const Candidate &b) {
+		return a.floor > b.floor || (a.floor == b.floor && a.slot < b.slot);
+	});
+	for (const Candidate &c : _candidates) {
+		if (c.floor == NEG_INF) {
+			break;
+		}
+		if (is_available(brain, c.slot, view, out.asked, answers, out.unknown)) {
+			highest_floor = c.floor;
+			break;
+		}
+	}
+	// 4. Scoring, highest ceiling first, with the early stop.
+	std::sort(_candidates.begin(), _candidates.end(), [](const Candidate &a, const Candidate &b) {
+		return a.ceiling > b.ceiling || (a.ceiling == b.ceiling && a.slot < b.slot);
+	});
+	int best = -1;
+	double best_result = NEG_INF;
+	_ties.clear();
+	for (const Candidate &c : _candidates) {
+		if (c.ceiling < highest_floor) {
+			continue;
+		}
+		if (best >= 0 && c.ceiling < best_result - brain.tie_margin) {
+			break;
+		}
+		if (!is_available(brain, c.slot, view, out.asked, answers, out.unknown)) {
+			continue;
+		}
+		const double result_now = score(brain, c.slot, view) + c.persistence + c.jitter;
+		if (best < 0 || result_now > best_result + brain.tie_margin) {
+			best = c.slot;
+			best_result = result_now;
+			_ties.clear();
+			_ties.push_back(c.slot);
+		} else if (result_now >= best_result - brain.tie_margin) {
+			_ties.push_back(c.slot);
+		}
+	}
+	// 6. Ties: the fixed order, or a replayable random pick.
+	if (_ties.size() > 1) {
+		std::sort(_ties.begin(), _ties.end());
+		if (brain.randomize_ties) {
+			const int size = int(_ties.size());
+			const int pick = std::min(int(random_unit_at(view.random_seed, view.pawn_number, now, brain.tie_salt) * size), size - 1);
+			best = _ties[pick];
+		} else {
+			best = _ties[0];
+		}
+	}
+	out.chosen = best;
+	return out;
+}
+
+// --- Pawns ---
+
+int AIBatchDecider::add_pawn(int64_t id, int brain, int64_t pawn_number, int64_t random_seed) {
+	if (brain < 0 || brain >= int(_brains.size())) {
+		UtilityFunctions::push_error(vformat("AIBatchDecider.add_pawn: brain %d doesn't exist.", brain));
+		return -1;
+	}
+	int row = find_pawn(id);
+	if (row < 0) {
+		if (!_free_rows.empty()) {
+			row = _free_rows.back();
+			_free_rows.pop_back();
+		} else {
+			row = int(_pawns.size());
+			_pawns.emplace_back();
+		}
+		_row_of_id[id] = row;
+	}
+	const Brain &b = _brains[brain];
+	const size_t count = b.behaviours.size();
+	PawnRow &p = _pawns[row];
+	p = PawnRow();
+	p.id = id;
+	p.brain = brain;
+	p.pawn_number = pawn_number;
+	p.random_seed = random_seed;
+	p.ended.assign(count, -1);
+	p.persistence_running.assign(count, 0);
+	p.persistence_along.assign(count, 0.0);
+	p.persistence_changed.assign(count, 0);
+	p.persistence_speed.assign(count, 1.0);
+	p.jitter.resize(count);
+	p.interrupt_threshold.resize(count);
+	for (size_t i = 0; i < count; ++i) {
+		p.jitter[i] = b.behaviours[i].jitter;
+		p.interrupt_threshold[i] = b.behaviours[i].interrupt_threshold;
+	}
+	return row;
+}
+
+void AIBatchDecider::remove_pawn(int64_t id) {
+	const auto found = _row_of_id.find(id);
+	if (found == _row_of_id.end()) {
+		return;
+	}
+	_pawns[found->second] = PawnRow(); // brain -1: free
+	_free_rows.push_back(found->second);
+	_row_of_id.erase(found);
+}
+
+int AIBatchDecider::find_pawn(int64_t id) const {
+	const auto found = _row_of_id.find(id);
+	return found == _row_of_id.end() ? -1 : found->second;
+}
+
+int AIBatchDecider::get_pawn_count() const {
+	return int(_row_of_id.size());
+}
+
+bool AIBatchDecider::row_ok(int row) const {
+	return row >= 0 && row < int(_pawns.size()) && _pawns[row].brain >= 0;
+}
+
+void AIBatchDecider::set_pawn_state(int row, int running, int64_t running_started, const PackedInt64Array &ended_ticks,
+		const PackedFloat64Array &persistence) {
+	ERR_FAIL_COND_MSG(!row_ok(row), "AIBatchDecider.set_pawn_state: no pawn in that row.");
+	PawnRow &p = _pawns[row];
+	const int64_t count = int64_t(p.ended.size());
+	ERR_FAIL_COND_MSG(ended_ticks.size() != count || persistence.size() != count * 4, "AIBatchDecider.set_pawn_state: wrong lengths for the brain.");
+	p.running = running;
+	p.running_started = running_started;
+	for (int64_t i = 0; i < count; ++i) {
+		p.ended[i] = ended_ticks[i];
+		p.persistence_running[i] = persistence[i * 4] != 0.0 ? 1 : 0;
+		p.persistence_along[i] = persistence[i * 4 + 1];
+		p.persistence_changed[i] = int64_t(persistence[i * 4 + 2]);
+		p.persistence_speed[i] = persistence[i * 4 + 3];
+	}
+}
+
+Dictionary AIBatchDecider::get_pawn_state(int row) const {
+	Dictionary state;
+	ERR_FAIL_COND_V_MSG(!row_ok(row), state, "AIBatchDecider.get_pawn_state: no pawn in that row.");
+	const PawnRow &p = _pawns[row];
+	PackedInt64Array ended;
+	PackedFloat64Array persistence;
+	for (size_t i = 0; i < p.ended.size(); ++i) {
+		ended.push_back(p.ended[i]);
+		persistence.push_back(p.persistence_running[i] ? 1.0 : 0.0);
+		persistence.push_back(p.persistence_along[i]);
+		persistence.push_back(double(p.persistence_changed[i]));
+		persistence.push_back(p.persistence_speed[i]);
+	}
+	state["running"] = p.running;
+	state["running_started"] = p.running_started;
+	state["ended"] = ended;
+	state["persistence"] = persistence;
+	return state;
+}
+
+void AIBatchDecider::stop_running(int row, int64_t tick) {
+	ERR_FAIL_COND(!row_ok(row));
+	PawnRow &p = _pawns[row];
+	if (p.running >= 0) {
+		p.ended[p.running] = tick;
+		p.running = -1;
+	}
+}
+
+// AIBehaviourBase._persistence_ticks_along: how far along its fade, from the three numbers.
+static double ticks_along(double along, int64_t changed, double speed, int64_t tick) {
+	return along + double(tick - changed) * speed;
+}
+
+void AIBatchDecider::add_persistence_ticks(int row, int slot, double ticks, int64_t tick) {
+	ERR_FAIL_COND(!row_ok(row));
+	PawnRow &p = _pawns[row];
+	ERR_FAIL_INDEX(slot, int(p.ended.size()));
+	if (!p.persistence_running[slot]) {
+		return;
+	}
+	p.persistence_along[slot] = std::max(0.0, ticks_along(p.persistence_along[slot], p.persistence_changed[slot], p.persistence_speed[slot], tick) - ticks);
+	p.persistence_changed[slot] = tick;
+}
+
+void AIBatchDecider::set_persistence_speed(int row, int slot, double speed, int64_t tick) {
+	ERR_FAIL_COND(!row_ok(row));
+	PawnRow &p = _pawns[row];
+	ERR_FAIL_INDEX(slot, int(p.ended.size()));
+	p.persistence_along[slot] = ticks_along(p.persistence_along[slot], p.persistence_changed[slot], p.persistence_speed[slot], tick);
+	p.persistence_changed[slot] = tick;
+	p.persistence_speed[slot] = std::max(0.0, speed);
+}
+
+void AIBatchDecider::set_score_jitter(int row, int slot, double effective_jitter) {
+	ERR_FAIL_COND(!row_ok(row));
+	ERR_FAIL_INDEX(slot, int(_pawns[row].jitter.size()));
+	_pawns[row].jitter[slot] = effective_jitter;
+}
+
+void AIBatchDecider::set_interrupt_threshold(int row, int slot, int64_t threshold) {
+	ERR_FAIL_COND(!row_ok(row));
+	ERR_FAIL_INDEX(slot, int(_pawns[row].interrupt_threshold.size()));
+	_pawns[row].interrupt_threshold[slot] = threshold;
+}
+
+double AIBatchDecider::persistence_now(int row, int slot, int64_t tick) const {
+	ERR_FAIL_COND_V(!row_ok(row), 0.0);
+	const PawnRow &p = _pawns[row];
+	ERR_FAIL_INDEX_V(slot, int(p.ended.size()), 0.0);
+	const Behaviour &behaviour = _brains[p.brain].behaviours[slot];
+	// AIBehaviourBase.persistence_now: nothing unless it started, has an amount, and has a fade.
+	if (!p.persistence_running[slot] || behaviour.persistence == 0.0 || !behaviour.has_persistence_fade) {
+		return 0.0;
+	}
+	return behaviour.persistence *
+			fade_math::value_at(behaviour.persistence_fade, ticks_along(p.persistence_along[slot], p.persistence_changed[slot], p.persistence_speed[slot], tick));
+}
+
+int AIBatchDecider::decide_pawn(int row, int64_t tick, int state, bool has_target, int64_t event_priority, bool event_normal,
+		int64_t can_press, const PackedFloat64Array &inputs) {
+	_last_kept = false;
+	ERR_FAIL_COND_V_MSG(!row_ok(row), -1, "AIBatchDecider.decide_pawn: no pawn in that row.");
+	PawnRow &p = _pawns[row];
+	const Brain &brain = _brains[p.brain];
+	const int count = int(brain.behaviours.size());
+	// The hard rule's cooldowns (AIBehaviourBase.is_cooling_down) and each behaviour's persistence now.
+	uint64_t cooling = 0;
+	_persistence_scratch.resize(size_t(count));
+	for (int slot = 0; slot < count; ++slot) {
+		const int64_t cooldown = brain.behaviours[slot].cooldown_ticks;
+		if (cooldown > 0 && p.ended[slot] >= 0 && tick - p.ended[slot] < cooldown) {
+			cooling |= uint64_t(1) << slot;
+		}
+		_persistence_scratch[slot] = persistence_now(row, slot, tick);
+	}
+	RowInput in;
+	in.running = p.running;
+	in.running_started = p.running_started;
+	in.now = tick;
+	in.event_priority = event_priority;
+	in.event_normal = event_normal;
+	in.state = state;
+	in.has_target = has_target;
+	in.cooling = cooling;
+	in.can_press = uint64_t(can_press);
+	in.persistence = _persistence_scratch.data();
+	in.jitter = p.jitter.data();
+	in.interrupt_threshold = p.interrupt_threshold.data();
+	in.view = RowView{ 0, 0, nullptr, inputs.ptr(), inputs.size(), p.random_seed, p.pawn_number, tick };
+	const RowResult out = decide_row(brain, in);
+	_last_kept = out.kept;
+	// The switch, as AIBehaviourManager._start and _stop_running apply it: the old one's end, the new one's start and persistence.
+	if (out.chosen != p.running) {
+		if (p.running >= 0) {
+			p.ended[p.running] = tick;
+		}
+		p.running = out.chosen;
+		if (out.chosen >= 0) {
+			p.running_started = tick;
+			p.persistence_running[out.chosen] = 1;
+			p.persistence_along[out.chosen] = 0.0;
+			p.persistence_changed[out.chosen] = tick;
+			p.persistence_speed[out.chosen] = 1.0;
+		}
+	}
+	return out.chosen;
+}
+
+bool AIBatchDecider::was_kept() const {
+	return _last_kept;
 }
 
 void AIBatchDecider::_bind_methods() {
@@ -413,4 +800,19 @@ void AIBatchDecider::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stride"), &AIBatchDecider::get_stride);
 	ClassDB::bind_method(D_METHOD("decide", "columns"), &AIBatchDecider::decide);
 	ClassDB::bind_method(D_METHOD("random_unit", "seed", "pawn_number", "tick", "salt"), &AIBatchDecider::random_unit);
+	ClassDB::bind_method(D_METHOD("add_pawn", "id", "brain", "pawn_number", "random_seed"), &AIBatchDecider::add_pawn);
+	ClassDB::bind_method(D_METHOD("remove_pawn", "id"), &AIBatchDecider::remove_pawn);
+	ClassDB::bind_method(D_METHOD("find_pawn", "id"), &AIBatchDecider::find_pawn);
+	ClassDB::bind_method(D_METHOD("get_pawn_count"), &AIBatchDecider::get_pawn_count);
+	ClassDB::bind_method(D_METHOD("set_pawn_state", "row", "running", "running_started", "ended_ticks", "persistence"), &AIBatchDecider::set_pawn_state);
+	ClassDB::bind_method(D_METHOD("get_pawn_state", "row"), &AIBatchDecider::get_pawn_state);
+	ClassDB::bind_method(D_METHOD("stop_running", "row", "tick"), &AIBatchDecider::stop_running);
+	ClassDB::bind_method(D_METHOD("add_persistence_ticks", "row", "slot", "ticks", "tick"), &AIBatchDecider::add_persistence_ticks);
+	ClassDB::bind_method(D_METHOD("set_persistence_speed", "row", "slot", "speed", "tick"), &AIBatchDecider::set_persistence_speed);
+	ClassDB::bind_method(D_METHOD("set_score_jitter", "row", "slot", "effective_jitter"), &AIBatchDecider::set_score_jitter);
+	ClassDB::bind_method(D_METHOD("set_interrupt_threshold", "row", "slot", "threshold"), &AIBatchDecider::set_interrupt_threshold);
+	ClassDB::bind_method(D_METHOD("persistence_now", "row", "slot", "tick"), &AIBatchDecider::persistence_now);
+	ClassDB::bind_method(D_METHOD("decide_pawn", "row", "tick", "state", "has_target", "event_priority", "event_normal", "can_press", "inputs"),
+			&AIBatchDecider::decide_pawn);
+	ClassDB::bind_method(D_METHOD("was_kept"), &AIBatchDecider::was_kept);
 }

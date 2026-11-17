@@ -19,6 +19,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-17
 
+- **Detail for timing scopes:** `PerfScopes.detailed` and `begin_detailed()`, for scopes that run very often (the AI's per state, per behaviour and per sense ones). They time only while detail is on, which the F4 timings panel switches on while it's open, and `mass_battle_measure --scopes` too. A scope costs about a microsecond; the AI's fine scopes measured about 0.2 ms a frame at 600 pawns, and they also inflate the numbers they sit inside (a check timed in three nested parts read nearly twice its real cost).
 - **F9, the nav view.** `NavDebugView` draws the nav mesh, nav links and nav markers around the camera, made the first time F9 is pressed (debug builds only). Its history is in navigation's changelog.
 - **Health in the pawn inspector** reads `stat_manager.get_health()` only when the pawn has a StatManager.
 - **Comments cleaned up** for the documentation pass: dated notes moved here, doc comments in Godot's markup. Fixed on the way: `PerfScopes` said nothing listens in a release build (the manager ships in release now); `get_summary`'s key list lacked `load_step` and `step_counts`; `get_last_summary` said the editor's monitors read it (nothing in the base does); the F4 and F6 panel descriptions ("every scope", "the slowest frames") now match what they show. The F1 panel's first line still says "debug builds only", which is out of date; it's text in code, so it waits for the next code change.

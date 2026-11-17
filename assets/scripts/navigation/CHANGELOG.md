@@ -19,6 +19,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-17
 
+- **`NavigationManager.path_ended(reached)`** (scaling spec 6.2's wake-ups): sent once when a path ends, arrived (after `arrived`) or given up (no way after all, waited too long for nav, a link that couldn't be crossed); not for `stop()`. The AI's behaviours wait for it instead of checking every few ticks whether a walk is still under way.
 - **Navmesh walking on by default.** Nav's default pawn radius (`agent_radius`, tier 0) is 0.4 m, the default pawn's (was 0.3), so `CrowdMover`'s C++ batch walks pawns along the nav mesh and slides them along walls. A pawn crossing a link (`is_crossing_link()`) is moved by physics until it's across: walking along the mesh stopped it at a ledge's edge.
 - **Walls in nav.** `world/BodyNavFeeder`: a child of a StaticBody3D feeds its box shapes to nav (one shared input layer, a mesh per body), so paths go around walls.
 - **Debug view.** F9 shows the nav mesh, links and markers (`diagnostics/NavDebugView`).

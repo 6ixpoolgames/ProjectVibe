@@ -24,7 +24,7 @@ Measures how every frame went and what it cost, keeps session logs and captures 
                                                               └─► DiagnosticsPanels (F1...F12) ─► NavDebugView (F9)
 ```
 
-- **`PerfScopes`** marks work: `begin()` and `end(name, started)`. With nothing listening it costs one true-or-false check, so the marks stay in shipping code.
+- **`PerfScopes`** marks work: `begin()` and `end(name, started)`. With nothing listening it costs one true-or-false check, so the marks stay in shipping code. Scopes that run very often (one per behaviour per pawn per tick, say) use `begin_detailed()`, which only times while `PerfScopes.detailed` is on as well: F4 switches it on while it's open.
 - **`DiagnosticsManager`** is a GameMode module, listed by the project setting `project_base/game_mode/modules` and its `.release` override; the base never names it. Every frame it measures physics, scripts and the rest, adds TickDriver's phases and every scope, keeps 30 s of history and the spikes, writes the session log, feeds the replay and the editor's monitors, and starts a replay when play starts if nothing else did.
 - **`DiagnosticsLogger`** catches the engine's warnings and errors from any thread, for the log and the replay.
 - **`DiagnosticsPanels`** are the on-screen panels. **`NavDebugView`** draws navigation in the world (its history is in [navigation's changelog](../navigation/CHANGELOG.md)).

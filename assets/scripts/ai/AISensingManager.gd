@@ -108,7 +108,7 @@ func tick_sensing(tick: int) -> void:
 		full_pass(tick)
 	elif pawn.fired_since_last_run(tick, offset, TickDriver.ticks_at_rate(refresh_interval_ticks)):
 		for sense in _senses:
-			var started := PerfScopes.begin() # each sense timed on its own (PerfScopes)
+			var started := PerfScopes.begin_detailed() # each sense timed on its own, in detail (PerfScopes)
 			sense.refresh(tick)
 			PerfScopes.end(sense.perf_refresh_name, started)
 	# If its next run (Pawn.next_run_tick) will do a full pass, ask the sensing job for it at the end of the tick before that run, so
@@ -142,7 +142,7 @@ func full_pass(tick: int) -> void:
 		if _senses.size() > 1:
 			_candidates.assign(_job.get_candidates(pawn, tick))
 		for sense in _senses:
-			var started := PerfScopes.begin() # each sense timed on its own (PerfScopes)
+			var started := PerfScopes.begin_detailed() # each sense timed on its own, in detail (PerfScopes)
 			if sense == _sight:
 				_sight.full_pass_prepared(_job, tick)
 			else:
@@ -150,11 +150,11 @@ func full_pass(tick: int) -> void:
 			PerfScopes.end(sense.perf_full_name, started)
 		_forget_old(tick)
 		return
-	var search_started := PerfScopes.begin()
+	var search_started := PerfScopes.begin_detailed()
 	_find_candidates(tick)
 	PerfScopes.end(&"ai.sense.search", search_started)
 	for sense in _senses:
-		var started := PerfScopes.begin()
+		var started := PerfScopes.begin_detailed()
 		sense.full_pass(_candidates, tick)
 		PerfScopes.end(sense.perf_full_name, started)
 	_forget_old(tick)
@@ -162,7 +162,7 @@ func full_pass(tick: int) -> void:
 
 # Memory drops what has faded away, after each full pass; timed as "ai.memory.forget".
 func _forget_old(tick: int) -> void:
-	var started := PerfScopes.begin()
+	var started := PerfScopes.begin_detailed()
 	pawn.ai_context.memory.forget_old(tick)
 	PerfScopes.end(&"ai.memory.forget", started)
 

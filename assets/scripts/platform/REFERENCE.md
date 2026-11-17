@@ -5,6 +5,7 @@
 Every class in `assets/scripts/platform/`, from its doc comments. The overview is in [README.md](README.md).
 
 - [RunEnvironment](#runenvironment)
+- [ScriptOverrides](#scriptoverrides)
 
 ## RunEnvironment
 
@@ -29,3 +30,21 @@ A test that checks visual parts while running headless turns `visuals_without_di
 
 - `is_headless() -> bool` *(static)*: True when nothing is drawn: Godot was started headless, as tests and dedicated servers are.
 - `runs_visuals() -> bool` *(static)*: True if visual-only parts should run: there's a display, or visuals_without_display is on.
+
+## ScriptOverrides
+
+`res://assets/scripts/platform/ScriptOverrides.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Whether a script overrides a function of the script it extends: one place for a question several systems ask.
+
+The AbilityManager asks it to run only the abilities that have an every_tick() of their own, and to know which actions' readiness follows the body (can_start()); a behaviour asks it to know whether the C++ decider can judge it (is_available(), score()); the target selector asks it whether a game scores targets its own way (target_priority()). The answer is worked out once per script and function, and kept.
+
+GDScript note: a script's method list (`Script.get_script_method_list()`) includes the methods of the scripts it extends, and a function overridden lower down appears once for every script that defines it. So two or more entries with the name mean something overrode the base's own.
+
+```gdscript
+ScriptOverrides.overrides(ability.get_script(), &"every_tick")   # true for Dash, false for Walk
+```
+
+### Functions
+
+- `overrides(script: Script, function_name: StringName) -> bool` *(static)*: True if script, or a script between it and its base, overrides function_name. False for a null script, or a function only the base defines.

@@ -6,6 +6,8 @@
 ## the real ones don't (jitter, persistence that fades, floors, cooldowns, targets, actions, states, min_run_ticks, interrupt
 ## thresholds, cannot_be_interrupted, random ties, a behaviour ending); that a planted mismatch is caught; and a real fight in the
 ## faction arena; and live shadow mode (AIDecisionBatcher), which must agree on every decision and change none of GDScript's.
+## Claude 2026-11-17 (step 5b): and in the real fight, that the AI's kept answer to "could this action start?" (AIInputs.action_ready,
+## asked again only when AbilityManager.readiness_version moves on) matches asking AbilityManager.can_start at every decision.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_batch_decider_selftest.tscn"
 extends SelfTest
@@ -41,6 +43,30 @@ class SwitchState extends AIStateBase:
 		return fits
 
 
+## A recorder that also checks, at each decision, every action the decision's hard rule looked at: the kept answer it used (the
+## record's rule) against AbilityManager.can_start asked now. Claude 2026-11-17.
+class ReadinessCheckingRecorder extends AIDecisionRecorder:
+	var checked := 0
+	var mismatches: Array[String] = []
+
+	func _on_decision(record: AIDecisionRecord, manager: AIBehaviourManager) -> void:
+		super(record, manager)
+		var abilities := manager.pawn.ability_manager if manager.pawn else null
+		if abilities == null or record.kept_by_interrupt:
+			return
+		for behaviour in manager.get_behaviours():
+			if behaviour.presses_action == &"" or behaviour.name == record.running_before:
+				continue
+			var entry := record.entry_for(behaviour.name)
+			var rule: StringName = entry.get("rule", &"state")
+			if rule != AIDecisionRecord.RULE_ACTION and rule != AIDecisionRecord.RULE_NONE:
+				continue # ruled out before the action was looked at
+			checked += 1
+			var kept_answer := rule == AIDecisionRecord.RULE_NONE
+			if kept_answer != abilities.can_start(behaviour.presses_action) and mismatches.size() < 5:
+				mismatches.append("tick %d, %s, %s: kept %s" % [record.tick, record.pawn_name, behaviour.presses_action, kept_answer])
+
+
 var _recorder: AIDecisionRecorder = null
 var _batcher: AIDecisionBatcher = null # shadow mode, on from the made-up brains through the real fight
 
@@ -52,7 +78,7 @@ func _ready() -> void:
 		_check(false, "the navcore library has AIBatchDecider (rebuild native/ with the editor closed)")
 		_finish()
 		return
-	_recorder = AIDecisionRecorder.new()
+	_recorder = ReadinessCheckingRecorder.new()
 	add_child(_recorder)
 	_test_random_numbers()
 	_test_brains()
@@ -236,6 +262,9 @@ func _test_real_fight() -> void:
 		print("    " + example)
 	_check(result["agreed"] == result["decisions"], "C++ makes every decision of a real fight the same way")
 	_check_equal(result["asked_unknown"], 0, "...and never asks for an answer GDScript didn't give")
+	var readiness := _recorder as ReadinessCheckingRecorder
+	_check(readiness.checked > 200 and readiness.mismatches.is_empty(),
+			"the kept 'could this action start' answers match AbilityManager.can_start (%d checked; %s)" % [readiness.checked, str(readiness.mismatches)])
 	if _batcher:
 		var counts := _batcher.get_counts()
 		print("  live shadow, faction arena: %s" % str(counts))

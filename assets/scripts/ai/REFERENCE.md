@@ -9,6 +9,7 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 - [AIContextComponent](#aicontextcomponent)
 - [AIDecisionBatcher](#aidecisionbatcher)
 - [AIDecisionRecord](#aidecisionrecord)
+- [AIInputs](#aiinputs)
 - [AIMemory](#aimemory)
 - [AIMemoryStoreGD](#aimemorystoregd)
 - [AISenseBase](#aisensebase)
@@ -25,6 +26,11 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 - [AIParryBehaviour](#aiparrybehaviour)
 - [AISearchBehaviour](#aisearchbehaviour)
 - [AIWanderBehaviour](#aiwanderbehaviour)
+- [AIAnyCondition](#aianycondition)
+- [AIChanceCondition](#aichancecondition)
+- [AICompareCondition](#aicomparecondition)
+- [AICondition](#aicondition)
+- [AIScoreCurve](#aiscorecurve)
 - [SightGeometryFeeder](#sightgeometryfeeder)
 - [SightSense](#sightsense)
 - [AIAwarenessState](#aiawarenessstate)
@@ -39,11 +45,14 @@ The base for one AI behaviour, such as Wander or Chase: one concrete thing to do
 A child of the pawn's AIBehaviourManager. Pawn spec section 10.7. Each behaviour holds its own checks, score and actions; the behaviour manager only judges between them (pawn spec 10.8). It acts only through the AI controller, the pawn's hands: `context.controller.move_to()`, `press()`, `hold()`, `look_at_point()`. It never touches abilities or the body directly (pawn spec section 3, rule 4).
 
 How to make one: extend this, set the settings below in the inspector or in _init(), and override any of:
-- `is_available()`: its own yes or no, after the manager's cheap checks
-- `score()`: how much it wants to run now, from `min_score` to `max_score`
+- `own_conditions()`: when it may run, as conditions built from its settings (scaling spec 6.2)
 - `enter()`: once, when it starts
-- `tick()`: every tick while it runs. Return SUCCEEDED or FAILED to finish
+- `tick()`: while it runs, every `tick_interval_ticks`, or sooner when woken (below). Return SUCCEEDED or FAILED to finish
 - `exit()`: once, when it stops, whatever the reason. Clean up here, such as `context.controller.stop()`
+
+**Wake-ups** (scaling spec 6.2): a behaviour that's waiting for something can say so, and its tick() runs when it happens instead of checking every few ticks: `wake_on_path_end()` (a walk it started ends, arrived or given up), `wake_on_action_end()` (an ability on that action finishes or is cancelled) and `wake_at()` (a tick, such as the end of a pause). The navigation and ability managers already watch these, so telling the behaviour costs one signal per event. `tick_interval_ticks` is then the longest it sleeps, a safety net. Wake-ups are cleared when it starts; set them in `enter()` and again in tick() as needed (wake_at is used up when it fires).
+
+**When it may run** is plain data: conditions ([`AICondition`](#aicondition)) over the pawn's inputs ([`AIInputs`](#aiinputs)), all of which must pass. Its own come from `own_conditions()` (Attack: the target within its swing's reach); a designer adds more in `conditions`, and shapes its score with `score_curves`, without code. Because they're data, the same decision can be made in C++ for a crowd (AIBatchDecider). Overriding `is_available()` or `score()` with code still works, but the C++ decider then has to ask GDScript for that behaviour's answers (`has_own_code()`).
 
 The behaviour's name is its node name, such as Wander. The fixed order and the random numbers read it, so give it a real name.
 
@@ -61,12 +70,14 @@ Settings worth knowing (pawn spec 10.7):
 - `min_score: float` = `inf_neg`: Optional: the lowest score() can return. Left at -inf it can't help skip others, but it's never wrong.
 - `needs_target: bool` = `false`: Skipped while the AI has no current target.
 - `presses_action: StringName` = `&""`: A named action it presses, such as &"primary". Skipped while that action couldn't start.
+- `conditions: AICondition[]` = `[]`: More conditions it needs, on top of its own (`own_conditions()`). All must pass. Made in the inspector: compare an input with a number, a random chance, or "any of".
+- `score_curves: AIScoreCurve[]` = `[]`: Optional: inputs that scale its score between min_score (or 0) and max_score, multiplied together. Empty: always max_score.
 - `cooldown_ticks: int` = `0`: Ticks after it ends before it can be chosen again. A hard rule, checked before any scoring.
 - `min_run_ticks: int` = `0`: Once chosen, ordinary decisions can't replace it for this many ticks. State changes and forces still can, if strong enough.
 - `interrupt_threshold: int` = `0`: While it runs, only events of this priority or higher can replace it: 0 for an ordinary decision, a state's priority for a state change, a force's priority for a forced state. 0: anything can.
 - `cannot_be_interrupted: bool` = `false`: Runs until it returns SUCCEEDED or FAILED, whatever happens, even if its state no longer allows it. Use sparingly.
 - `score_jitter: float` = `-1.0`: ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
-- `tick_interval_ticks: int` = `1`: While it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after. The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now and then. 1: every tick. Pawns start behaviours on different ticks, so a crowd's ticks spread out by themselves. Count time in ticks with context.current_tick, not by counting tick() calls, so a behaviour behaves the same at any interval.
+- `tick_interval_ticks: int` = `1`: While it runs, its tick() is called once every this many ticks: on the tick it starts, then every N after, and sooner when a wake-up it asked for happens. The AI controller follows any path every tick on its own, so most behaviours only need to re-aim now and then, or to wake when a walk ends. 1: every tick. Pawns start behaviours on different ticks, so a crowd's ticks spread out by themselves. Count time in ticks with context.current_tick, not by counting tick() calls, so a behaviour behaves the same at any interval.
 - `persistence: float` = `0.0`: Added to its score from when it's chosen, times persistence_fade's value. +: tends to keep it chosen. -: prefers others for a while.
 - `persistence_fade: FadeProfile`: How persistence fades over ticks. Empty: no persistence.
 - `manager: AIBehaviourManager` = `null`: Set by the AIBehaviourManager.
@@ -86,6 +97,10 @@ Settings worth knowing (pawn spec 10.7):
 - `decision_scored: bool` = `false`
 - `decision_index: int` = `0`
 - `warned_score_range: bool` = `false`
+- `wake_tick: int` = `-1`: Wake-ups, read by the manager (see the class description). Cleared when it starts.
+- `wakes_on_path_end: bool` = `false`
+- `wakes_on_action: StringName` = `&""`
+- `woken: bool` = `false`
 
 ### Constants
 
@@ -95,8 +110,17 @@ Settings worth knowing (pawn spec 10.7):
 
 ### Functions
 
-- `is_available(_context: AIContextComponent) -> bool`: Its own yes or no, after the manager's checks. The default: yes.
-- `score(_context: AIContextComponent) -> float`: How much it wants to run now. Keep it between min_score and max_score. The default: max_score.
+- `is_available(context: AIContextComponent) -> bool`: Its own yes or no, after the manager's checks: every condition passes (`all_conditions()`). The inputs they read were worked out for this decision by the behaviour manager. Overriding this with code works, but see `has_own_code()`.
+- `score(context: AIContextComponent) -> float`: How much it wants to run now, between min_score and max_score: max_score, scaled by `score_curves` if it has any.
+- `own_conditions() -> AICondition[]`: The conditions it builds from its own settings, such as Attack's reach. Override in a behaviour script; the default: none. Called once, the first time they're needed, and again after `rebuild_conditions()`.
+- `all_conditions() -> AICondition[]`: Its own conditions, then the ones in `conditions`: everything `is_available()` checks by default.
+- `rebuild_conditions() -> void`: Builds the conditions again at the next decision, after a setting they come from changed (such as a swing's reach).
+- `add_input_slots(slots: Dictionary) -> void`: Adds the slots of every input its conditions and curves read to slots (as keys).
+- `has_own_code() -> bool`: True if its script overrides `is_available()` or `score()` with code of its own. Such a behaviour works everywhere, but the C++ decider can't read code, so it asks GDScript for that behaviour's answers. Worked out once per script ([`ScriptOverrides`](../platform/REFERENCE.md#scriptoverrides)).
+- `wake_at(at_tick: int) -> void`: Runs tick() at this tick (or the pawn's first run after it), if nothing wakes it sooner. Used up when it fires; an earlier tick than one already set wins.
+- `wake_on_path_end() -> void`: Runs tick() when a walk it started ends, arrived or given up (NavigationManager.path_ended).
+- `wake_on_action_end(action: StringName) -> void`: Runs tick() when an ability on this action finishes or is cancelled (AbilityManager.ability_finished, ability_cancelled).
+- `clear_wake_ups() -> void`: Forgets every wake-up. The manager calls it when the behaviour starts.
 - `enter(_context: AIContextComponent) -> void`: Once, when it starts.
 - `tick(_context: AIContextComponent) -> int`: Every tick while it runs. The default runs forever.
 - `exit(_context: AIContextComponent, _reason: String) -> void`: Once, when it stops. reason says why, such as "decision", "interrupted", "succeeded", "failed" or "removed".
@@ -118,6 +142,8 @@ A part on the pawn, added by PawnInitializer (or the game's AI brain, `PawnDefau
 
 At each decision (pawn spec 10.8):
 
+First, the pawn's inputs ([`AIInputs`](#aiinputs)) start afresh: each is worked out the first time a condition reads it this decision.
+
 0. Interrupts: if the running behaviour can't be replaced by this decision's reason, it keeps running and that's all.
 
 1. Valid: the behaviours the current state allows.
@@ -134,7 +160,7 @@ At each decision (pawn spec 10.8):
 
 7. Switching: if the winner isn't the running one, the old one's exit() runs, then the new one's enter(), and its persistence starts.
 
-Between decisions only the running behaviour's tick() runs, every tick_interval_ticks. When it returns SUCCEEDED or FAILED, the manager decides at once. When the pawn dies, the running behaviour stops (reason "died").
+Between decisions only the running behaviour's tick() runs, every tick_interval_ticks, or sooner when a wake-up it asked for happens (a walk ending, an ability on its action ending, a tick it named; `AIBehaviourBase.wake_at()`). When it returns SUCCEEDED or FAILED, the manager decides at once. When the pawn dies, the running behaviour stops (reason "died").
 
 How to use it (outside code only talks to the manager):
 
@@ -193,6 +219,7 @@ What happens in odd cases (checked in ai/tests/ai_behaviour_manager_selftest.gd)
 - `add_persistence_ticks(behaviour_name: StringName, ticks: float) -> void`: Moves a behaviour's persistence back along its fade by this many ticks, so it lasts longer. Negative: it ends sooner.
 - `set_persistence_speed(behaviour_name: StringName, speed: float) -> void`: How fast a behaviour's persistence fades from now on: 1.0 normally, 0.5 for half speed.
 - `set_interrupt_threshold(behaviour_name: StringName, threshold: int) -> void`: Changes a behaviour's interrupt threshold, even while it runs.
+- `inputs_changed() -> void`: Called when a behaviour's conditions change (`AIBehaviourBase.rebuild_conditions()`), so the inputs worked out at each decision are listed again.
 - `set_score_jitter(behaviour_name: StringName, jitter: float) -> void`: Changes a behaviour's jitter. -1: back to default_score_jitter.
 
 ## AIContextComponent
@@ -207,6 +234,7 @@ A part on the pawn, added by PawnInitializer. Pawn spec section 10. It makes no 
 - the decision waiting to happen this tick, if any, and how strong its reason is (the "event", pawn spec 10.7)
 - random numbers that depend only on (seed, pawn, tick, what they're for), so a replay makes the same choices
 - the current target, and shared inputs behaviours read (`current_target_index()`, `most_aware_index()`)
+- the pawn's AI inputs (`inputs`): the named numbers behaviours' conditions read (scaling spec 6.2)
 - the last hit the pawn took and the latest swing coming at it, for states and behaviours
 
 The pawn calls `run_ai()` from its own tick, which runs the AI parts in a fixed order. Nothing here ticks on its own.
@@ -229,6 +257,7 @@ context.random_unit(salt)       # a number from 0 up to 1, the same on every run
 - `pawn: Pawn` = `null`: The pawn this AI belongs to, or null if its parent isn't one.
 - `current_tick: int` = `0`: The tick the AI is running now. Set by the pawn at the start of each AI step.
 - `current_target: Node3D` = `null`: What the AI is focused on, picked by the target selector. Null when there's none.
+- `inputs: AIInputs` = `null`: The pawn's AI inputs, the numbers its behaviours' conditions read ([`AIInputs`](#aiinputs)). Worked out at each decision; a game writes its own with `inputs.set_input(name, value)`.
 - `controller: AIController`: The AI's hands, or null if the pawn has no AI controller.
 - `state_manager: AIStateManager`: The pawn's state manager, or null.
 - `behaviour_manager: AIBehaviourManager`: The pawn's behaviour manager, or null.
@@ -261,6 +290,7 @@ context.random_unit(salt)       # a number from 0 up to 1, the same on every run
 - `was_hit_within(ticks: int) -> bool`: True if the pawn was hit within this many ticks, counted at 60 a second like every AI setting (converted to the match's rate).
 - `last_attacker_is_known() -> bool`: True if the last attacker is in memory.
 - `unknown_hit_point(within_ticks: int) -> Variant`: Where an unknown attacker hit from, if that was within this many ticks; null otherwise. Look Toward and Investigate head there when nothing else is half-noticed.
+- `point_of_interest(within_ticks: int) -> Variant`: Something half-noticed to look at or go and see: the most aware memory entry's last known position while that entry isn't certain yet, or else where an attacker the AI doesn't remember hit from, if that was within this many ticks (at 60 a second); null when there's neither. Look Toward and Investigate head there. Their conditions check the same two facts through the inputs (`AIInputs.half_noticed_conditions()`), which the C++ decider can read.
 - `has_target() -> bool`: True when there's a current target, picked by the target selector.
 - `run_ai(tick: int) -> void`: The AI's step, in a fixed order (pawn spec sections 4 and 10.9). The pawn calls it in its input phase; the AI's core part runs the AI, and the pawn only calls this. Runs only where the AI runs (offline or the server), never while a rollback replays ticks, and, while a player has the pawn, only as far as `while_possessed` allows. Order:
   
@@ -281,6 +311,7 @@ context.random_unit(salt)       # a number from 0 up to 1, the same on every run
 - `random_unit_at(tick: int, salt: int) -> float`: random_unit() for a given tick.
 - `random_signed(salt: int) -> float`: A number from -1 to 1. See random_unit().
 - `pawn_number() -> int`: This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on every machine, or else a hash of its name.
+- `number_of(other: Pawn) -> int` *(static)*: Any pawn's number, as `pawn_number()` gives it, for a pawn that may have no AI of its own (a player's, say): its network id when it has one, or else a hash of its name. 0 for null.
 
 ## AIDecisionBatcher
 
@@ -288,17 +319,17 @@ context.random_unit(salt)       # a number from 0 up to 1, the same on every run
 
 Gathers the AI's behaviour decisions into one batch a tick for the C++ decider (AIBatchDecider), and, in shadow mode, checks its answers against GDScript's without using them.
 
-A GameMode module (`GameMode.get_module(AIDecisionBatcher)`), off by default. Scaling spec 6.2: decisions made together in C++, later on the worker threads, instead of one pawn at a time in GDScript. Each pawn deciding on its own stays the default (the owner's call); a game opts in.
+A GameMode module (`GameMode.get_module(AIDecisionBatcher)`), off by default. Scaling spec 6.2: decisions made together in C++, later on the worker threads, instead of one pawn at a time in GDScript. C++ is to be the main path, with GDScript's decider a dormant backup (the owner's call); until the batch's answers are used (spec step 5e), it only checks them.
 
 Modes:
 - OFF: nothing happens, and the AI pays one check per decision.
-- SHADOW: every decision still runs in GDScript, unchanged. As each one starts, this module gathers the pawn's inputs from the live pawn into a row (its brain, state, target, running behaviour, the hard-rule bitmasks, persistence, and the availability and score of every behaviour that passed the hard rules), and notes GDScript's answer when it ends. At the end of the tick, one C++ call decides every row, and the answers are compared. Disagreements are counted and the first few logged as warnings (`get_counts()`). The game plays exactly as with OFF.
+- SHADOW: every decision still runs in GDScript, unchanged. As each one starts, this module gathers the pawn's inputs from the live pawn into a row (its brain, state, target, running behaviour, the hard-rule bitmasks, persistence, and its AI inputs, [`AIInputs`](#aiinputs), which C++ checks the behaviours' conditions against), and notes GDScript's answer when it ends. At the end of the tick, one C++ call decides every row, and the answers are compared. Disagreements are counted and the first few logged as warnings (`get_counts()`). The game plays exactly as with OFF.
 
 What it costs is timed ([`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)): `ai.batch.gather` (building each row in GDScript), `ai.batch.build` (the tick's arrays), `ai.batch.decide` (the C++ call) and `ai.batch.compare`.
 
 A brain is described once per behaviour manager (`AIBehaviourManager.describe()`); pawns with the same behaviour set share one. A setting changed during play after that (set_score_jitter, say) isn't seen, and would show as disagreements.
 
-Behaviours' is_available() and score() are asked for every behaviour that passes the hard rules, not only the ones GDScript's early stop reaches, and before GDScript asks them itself, at the same tick. Batched deciding needs both to be safe to call more than once a tick, with no effect on the game. Every t0 behaviour's are (Go To Point's keeps its point for 2 s, so a second call gives the same answer).
+Behaviours judged by their conditions (every built-in one) cost C++ nothing more than the inputs. A behaviour with its own is_available() or score() code (`AIBehaviourBase.has_own_code()`) can't be read by C++, so it's asked in GDScript, for every such behaviour that passes the hard rules, before GDScript's own decision asks it at the same tick. That code must be safe to call more than once a tick, with no effect on the game.
 
 ### Settings and properties
 
@@ -363,6 +394,7 @@ record.to_dict()                           # everything as plain values, for sav
 - `running_started_tick: int` = `-1`
 - `kept_by_interrupt: bool` = `false`: True when the running behaviour couldn't be replaced for this reason (step 0), so no behaviour was looked at.
 - `behaviours: Dictionary[]` = `[]`: One Dictionary per behaviour, in the manager's fixed order. Empty when `kept_by_interrupt`. See `add_behaviour()`.
+- `inputs: PackedFloat64Array` = `PackedFloat64Array()`: The pawn's AI inputs as this decision worked them out (`AIInputs.values`), by slot: what the behaviours' conditions read.
 - `chosen: StringName` = `&""`: What runs after the decision: a behaviour's name, or &"" for nothing.
 
 ### Constants
@@ -386,6 +418,87 @@ record.to_dict()                           # everything as plain values, for sav
   - for a candidate (no rule): `persistence`, `jitter`, `ceiling`, `floor` (null for no floor), `available` (1 yes, 0 no, -1 never asked), `score` (null when not scored)
 - `entry_for(behaviour_name: StringName) -> Dictionary`: The entry for this behaviour, or an empty Dictionary.
 - `to_dict() -> Dictionary`: Everything as plain values (text, numbers, arrays, dictionaries), ready for JSON.
+
+## AIInputs
+
+`res://assets/scripts/ai/AIInputs.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+One pawn's AI inputs: the numbers its behaviours' conditions read, such as the distance to its target.
+
+Scaling spec 6.2. A behaviour says when it may run with conditions ([`AICondition`](#aicondition)): plain data such as "target_distance at most 2.5". Conditions never call into game code; they read numbers from here. That's what lets the same decision be made in C++ (AIBatchDecider) from a table of these numbers, without calling back into GDScript for every behaviour.
+
+Every input has a name and a slot. The slot is its place in `values`, the same for every pawn in the match, so a whole crowd's inputs line up as one table. Slots are given out the first time a name is asked for (`slot_of()`).
+
+Two kinds of input:
+- **Worked out** at most once per decision, from what the AI already knows: the built-in names below. Each is worked out the first time a condition reads it in a decision (`begin_decision()`, `value()`), so a decision pays only for the inputs the behaviours it actually judges read, as the early stop allows. The C++ decider and decision records need them all, so for those every input the brain reads is worked out (`fill()`).
+- **Kept**: any other name. Whatever knows the value writes it when it changes (`set_input()`), and it stays until written again. This is how a game adds its own, such as a morale value its game mode keeps up to date.
+
+Names that begin with `ticks_` are times in ticks. A condition's value for them is written for 60 ticks a second and converted to the match's rate, like every AI setting counted in ticks.
+
+The built-in inputs:
+- `target_distance`: flat distance (ignoring height) to where the AI last knew its target to be. `FAR` with no target.
+- `most_aware_certain`: 1 if the entry it's most aware of in memory is certain, else 0.
+- `most_aware_uncertain`: 1 if there's such an entry and it isn't certain yet, else 0.
+- `ticks_since_unknown_hit`: ticks since an attacker it doesn't remember hit it. `FAR` if that never happened, or the attacker is remembered.
+- `incoming_attack`: 1 while a swing it was warned of hasn't hit yet. `incoming_attack_tick`: the tick that swing started. `incoming_attacker`: the swinging pawn's number.
+- `group_distance/<group>`: flat distance to the nearest node in that group, such as `group_distance/rally_point`. The nearest node is looked for again every 2 seconds. `FAR` if there's none, so pair a "further than" check with `group_found/<group>`, 1 while the group has a node.
+- `action_ready/<action>`: 1 while pressing that action could start an ability (`AbilityManager.can_start()`). Worked out again only when the AbilityManager says something that affects it changed (`AbilityManager.readiness_version`).
+
+How to use it:
+
+```gdscript
+pawn.ai_context.inputs.set_input(&"morale", 0.4)                  # a game's own input, kept until written again
+pawn.ai_context.inputs.value_of(AIInputs.TARGET_DISTANCE)         # read one (worked out at the last decision)
+AIInputs.slot_of(&"morale")                                       # its slot, for reading values directly
+```
+
+### Settings and properties
+
+- `values: PackedFloat64Array` = `PackedFloat64Array()`: The values, one per slot. Slots no one has written or worked out yet are 0. May be shorter than `input_count()` until a new name's first use; `value()` reads 0 past the end.
+
+### Constants
+
+- `TARGET_DISTANCE = &"target_distance"`: The built-in inputs' names. Code uses these constants, never the text, so a typo fails to compile.
+- `MOST_AWARE_CERTAIN = &"most_aware_certain"`
+- `MOST_AWARE_UNCERTAIN = &"most_aware_uncertain"`
+- `TICKS_SINCE_UNKNOWN_HIT = &"ticks_since_unknown_hit"`
+- `INCOMING_ATTACK = &"incoming_attack"`
+- `INCOMING_ATTACK_TICK = &"incoming_attack_tick"`
+- `INCOMING_ATTACKER = &"incoming_attacker"`
+- `GROUP_DISTANCE = "group_distance/"`: The start of the inputs that take a name after them.
+- `GROUP_FOUND = "group_found/"`
+- `ACTION_READY = "action_ready/"`
+- `TICKS_PREFIX = "ticks_"`: Names that begin with this are times in ticks (see the class description).
+- `FAR = 1000000000000.0`: What an input is when there's nothing to measure: no target, never hit. Bigger than any real distance or time, so "at most" conditions fail and "at least" ones pass. Not INF, so records of decisions stay valid JSON.
+- `Kind.KEPT = 0`
+- `Kind.TARGET_DISTANCE = 1`
+- `Kind.MOST_AWARE_CERTAIN = 2`
+- `Kind.MOST_AWARE_UNCERTAIN = 3`
+- `Kind.TICKS_SINCE_UNKNOWN_HIT = 4`
+- `Kind.INCOMING_ATTACK = 5`
+- `Kind.INCOMING_ATTACK_TICK = 6`
+- `Kind.INCOMING_ATTACKER = 7`
+- `Kind.GROUP_DISTANCE = 8`
+- `Kind.GROUP_FOUND = 9`
+- `Kind.ACTION_READY = 10`
+
+### Functions
+
+- `slot_of(input_name: StringName) -> int` *(static)*: The slot for an input name, given out the first time the name is asked for. Built-in names and the two prefixes are worked out at decisions; any other name is a kept input.
+- `input_count() -> int` *(static)*: How many input names have slots so far.
+- `name_of(slot: int) -> StringName` *(static)*: The name in a slot.
+- `is_worked_out(slot: int) -> bool` *(static)*: True if the slot's value is worked out at each decision, false for a kept input.
+- `is_ticks(slot: int) -> bool` *(static)*: True if the slot's input is a time in ticks (its name begins with `TICKS_PREFIX`).
+- `suggested_names() -> PackedStringArray` *(static)*: The input names the inspector suggests for a condition: the built-ins, then every name given a slot so far.
+- `half_noticed_conditions(hit_memory_ticks: int) -> AICondition[]` *(static)*: The conditions for "something half-noticed" (`AIContextComponent.point_of_interest()`): the most aware entry isn't certain yet, or an attacker the AI doesn't remember hit it within hit_memory_ticks (at 60 a second). Either will do. Look Toward and Investigate both use it, so the two react to the same things.
+- `set_input(input_name: StringName, value: float) -> void`: Writes a kept input. Use it for a game's own inputs; the built-in ones are worked out at each decision and would be overwritten.
+- `set_slot(slot: int, value: float) -> void`: Writes a value by slot.
+- `value(slot: int) -> float`: The value in a slot: a kept one as last written (0 if never), a worked-out one worked out now if it hasn't been yet this decision.
+- `value_of(input_name: StringName) -> float`: The value of an input by name. See `value()`.
+- `begin_decision(tick: int) -> void`: Starts a decision at this tick: every worked-out input is worked out again the first time it's read. The behaviour manager calls it at the start of each decision.
+- `fill(slots: PackedInt32Array) -> void`: Works out every listed slot now (the kept ones are left alone), for something that needs them all: the C++ decider's row, or a decision record. The behaviour manager calls it with the slots its behaviours' conditions read.
+- `nearest_in_group(group: StringName, tick: int) -> Node3D`: The nearest node in a group, kept while it's still there and looked for again every 2 seconds in case a nearer one has appeared, rather than asking the tree for the whole group at every decision. Null if the group is empty. Go To Point walks to it. The group's list is asked of the tree once a tick and shared by every pawn looking that tick.
+- `action_ready(action: StringName) -> bool`: True if pressing this action could start an ability now. Asks the AbilityManager again only when its `AbilityManager.readiness_version` has moved on, or when an ability on the action can change its mind without telling it (`AbilityBase.ready_follows_body`, such as Jump needing the ground).
 
 ## AIMemory
 
@@ -752,7 +865,7 @@ Swings at the current target once it's close enough.
 
 Pawn spec section 10.7, step 9. Allowed in Combat by default. It's available when the current target's last known position is within the pawn's MeleeAttack attack_range minus `approach_margin`: the AI steps a little closer than the attack's real reach, so the swing is more likely to land (the owner's call). Changing the attack's range changes both. Chase brings the pawn in; this scores higher (0.9 against 0.8), so it takes over at that distance.
 
-It faces the target, holds the attack's action (`AIBehaviourBase.presses_action`) through the swing, and finishes when the swing is over. The first tick held is the press, which is a request: the ability manager picks what it starts (the normal swing, or the next swing of a combo), and this waits for whichever runs on that action. Holding keeps the swing turning toward its target (TurnToFaceStep, pawn spec 8.20). A second Attack behaviour with presses_action set to another action, and a higher score, uses a special attack whenever it's ready (faction_arena_sample's goblins). Its interrupt_threshold (15) keeps an ordinary decision from cutting it off mid-swing; the swing itself follows the ability rules (pawn spec 8.6).
+It faces the target, holds the attack's action (`AIBehaviourBase.presses_action`) through the swing, and finishes when the swing is over. It sleeps through the swing (scaling spec 6.2's wake-ups): it wakes for the press, two ticks later to see that the swing started, and when an ability on its action ends; meanwhile the AI controller keeps the aim on the target every tick (`AIController.look_at_node()`). The aim follows the target itself, which sensing keeps close to its last known position while it's in view (it was the last known position, re-aimed every tick). The first tick held is the press, which is a request: the ability manager picks what it starts (the normal swing, or the next swing of a combo), and this waits for whichever runs on that action. Holding keeps the swing turning toward its target (TurnToFaceStep, pawn spec 8.20). A second Attack behaviour with presses_action set to another action, and a higher score, uses a special attack whenever it's ready (faction_arena_sample's goblins). Its interrupt_threshold (15) keeps an ordinary decision from cutting it off mid-swing; the swing itself follows the ability rules (pawn spec 8.6).
 
 ### Settings and properties
 
@@ -760,7 +873,7 @@ It faces the target, holds the attack's action (`AIBehaviourBase.presses_action`
 
 ### Functions
 
-- `is_available(context: AIContextComponent) -> bool`: Close enough: the target's last known position is within attack_range − `approach_margin`.
+- `own_conditions() -> AICondition[]`: Close enough: the target's last known position is within attack_range − `approach_margin`, one condition built from those settings. With no MeleeAttack on presses_action, nothing is close enough (a reach of -1 m), so it never runs. If the attack's range changes during play, call `AIBehaviourBase.rebuild_conditions()`.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -800,7 +913,7 @@ Walks to a meeting point: the nearest node in a Godot group, "rally_point" by de
 
 The owner's request: in the mass battle, every faction marches to the middle and fights there, instead of wandering near its spawner. Like Unreal's target points: the point is a node in a Godot group (`point_group`), placed in the level, so pawns spawned at any time find it.
 
-When it's available: there's a node in point_group, and the pawn is further than `arrive_radius` from it. Allowed in Idle, the same as Wander, with a score just above Wander's (0.15 against 0.1), so an idle pawn marches, anything it notices on the way (Alert, Combat) takes over, and once it's there, Wander takes over and it mills about.
+When it's available: there's a node in point_group, and the pawn is further than `arrive_radius` from it (one condition on the input group_distance/<point_group>; the nearest node is looked for again every 2 seconds, `AIInputs.nearest_in_group()`). Allowed in Idle, the same as Wander, with a score just above Wander's (0.15 against 0.1), so an idle pawn marches, anything it notices on the way (Alert, Combat) takes over, and once it's there, Wander takes over and it mills about.
 
 How it walks: in legs of at most `leg_metres` toward the point, each one a move_to, so each path stays short. Nav is only built near streaming sources (StreamingSource.nav_distance), so one path all the way across a big level might not exist yet, while a short leg does. Each pawn walks a little to one side of the straight line (up to `spread_metres`, its own offset from its random numbers), so a crowd marches as a band, not in single file. A leg that can't be walked is tried again a few metres shorter on its next tick.
 
@@ -816,11 +929,10 @@ It never finishes on its own: it returns RUNNING, and stops being available once
 ### Constants
 
 - `SIDE_SALT = 24737`
-- `LOOK_AGAIN_TICKS = 120`: How long a point found is kept before looking for the nearest again, in ticks at 60 a second.
 
 ### Functions
 
-- `is_available(context: AIContextComponent) -> bool`
+- `own_conditions() -> AICondition[]`: There's a node in point_group, and the pawn is further than arrive_radius from the nearest one: two conditions.
 - `enter(_context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -843,7 +955,7 @@ It's only available while something uncertain is remembered (Search handles enem
 
 ### Functions
 
-- `is_available(context: AIContextComponent) -> bool`
+- `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a hit within `hit_memory_ticks` from an attacker it doesn't remember. Two conditions, either of which will do. Its score is always max_score.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -854,7 +966,9 @@ It's only available while something uncertain is remembered (Search handles enem
 
 Stops and looks toward something half-noticed: the first reaction to a glimpse.
 
-Pawn spec section 10.7. Allowed in Alert by default. "Huh, what was that?": it scores high while the most aware entry in memory isn't certain yet, stops the pawn, and looks at that entry's last known position for `look_ticks`. Looking turns the AI's eyes (SightSense sees where the AI looks), so a target that stays in view keeps filling awareness. Then it finishes, and its cooldown lets Investigate take over.
+Pawn spec section 10.7. Allowed in Alert by default. "Huh, what was that?": it scores high while the most aware entry in memory isn't certain yet, stops the pawn, and looks at that entry's last known position for `look_ticks`. Looking turns the AI's eyes (SightSense sees where the AI looks), so a target that stays in view keeps filling awareness.
+
+Look first, then go and see (the owner's call): it scores above Investigate (0.6 against 0.5), because turning to look is the cheaper way to become certain. Once it has looked, its persistence is negative (-0.3, held about 10 s, then fading over 5 s), so Investigate (0.5) wins over it (0.3) and it doesn't catch again while Investigate walks over. It runs again only when Investigate can't: Investigate's cooldown after it finishes without finding anything, when Look Toward is the only thing left to do in Alert. `min_run_ticks` is its look, so the penalty that starts with it doesn't cut the look short.
 
 It's only available while something uncertain is remembered, so it never runs for an enemy it's already certain of, or while an unknown attacker hit the pawn within `hit_memory_ticks`: then it looks where the hit came from. There's no memory entry for that attacker (no damage sense, the owner's call), only the context's note of the hit.
 
@@ -865,7 +979,7 @@ It's only available while something uncertain is remembered, so it never runs fo
 
 ### Functions
 
-- `is_available(context: AIContextComponent) -> bool`
+- `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a hit within `hit_memory_ticks` from an attacker it doesn't remember. Two conditions, either of which will do. Its score is always max_score.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -880,7 +994,7 @@ The owner's request: AI pawns parry too, about 30% of swings, so a mass fight ha
 
 How it hears about a swing: an enemy's MeleeAttackAbility, when it starts on the server, tells the AI of each pawn it may reach (`AIContextComponent.note_incoming_attack()`), which notes it and asks for a decision at once. Ordinary decisions come every 15 ticks, longer than a swing's windup, so without that the parry would usually come too late.
 
-When it's available: a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up. The roll is made from the swing's start tick and the attacker, so each swing is rolled once, however many decisions happen during its windup, and a replay rolls the same.
+When it's available: a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up: two conditions. The roll is made from the swing's start tick and the attacker's pawn number, so each swing is rolled once, however many decisions happen during its windup, and a replay rolls the same.
 
 What it does: looks at the attacker and presses parry (presses_action, so it's skipped while the parry is cooling down or locked out, for example mid-swing). It finishes two ticks later, and forgets the swing. ParryAbility does the rest.
 
@@ -894,7 +1008,7 @@ What it does: looks at the attacker and presses parry (presses_action, so it's s
 
 ### Functions
 
-- `is_available(context: AIContextComponent) -> bool`
+- `own_conditions() -> AICondition[]`: A swing is coming, and its roll came up: once per swing, from its start tick and its attacker's number.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -923,7 +1037,7 @@ It's only available when the most aware entry became certain: Look Toward and In
 
 ### Functions
 
-- `is_available(context: AIContextComponent) -> bool`
+- `own_conditions() -> AICondition[]`: Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is always max_score.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -957,6 +1071,144 @@ It never finishes on its own (it returns RUNNING), so it runs until something be
 - `enter(_context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
+
+## AIAnyCondition
+
+`res://assets/scripts/ai/conditions/AIAnyCondition.gd`, extends [`AICondition`](#aicondition)
+
+A condition that passes if any one of its conditions passes: "this, or that".
+
+Scaling spec 6.2. A behaviour's own list of conditions needs all of them ("this and that"); this is how to say "or". Look Toward, for example, runs while something half-noticed is in memory, or an unknown attacker hit the pawn lately. With an empty list it never passes (none of nothing passes). The conditions are checked in order and it stops at the first that passes.
+
+### Settings and properties
+
+- `conditions: AICondition[]` = `[]`: Passes if any one of these does.
+
+### Functions
+
+- `make(list: AICondition[]) -> AIAnyCondition` *(static)*: Makes an "any of" condition in code.
+- `passes(inputs: AIInputs, context: AIContextComponent, behaviour_salt: int) -> bool`
+- `describe() -> Dictionary`
+- `add_input_slots(slots: Dictionary) -> void`
+
+## AIChanceCondition
+
+`res://assets/scripts/ai/conditions/AIChanceCondition.gd`, extends [`AICondition`](#aicondition)
+
+A condition that passes on a random roll, with a chance from 0 to 1, the same roll on every run.
+
+Scaling spec 6.2. The roll comes from the AI's replayable random numbers (`AIContextComponent.random_unit_at()`): the pawn, a tick and a salt. By default it's rolled again at every decision. With `once_per_input` set, the input's value takes the tick's place, so the roll stays the same until that input changes: Parry rolls once per swing, with incoming_attack_tick.
+
+```gdscript
+chance 0.3, once_per_input incoming_attack_tick, salt_input incoming_attacker   # 30%, once per swing
+```
+
+### Settings and properties
+
+- `chance: float` = `0.5`: How likely it is to pass, from 0 (never) to 1 (always).
+- `salt: int` = `0`: What the roll is for. Two chance conditions on one behaviour need different salts, or they'd roll the same number.
+- `once_per_input: String` = `""`: Optional: roll once per value of this input instead of once per decision, such as incoming_attack_tick for once per swing.
+- `salt_input: String` = `""`: Optional: an input mixed into the salt, such as incoming_attacker, so two swings that start on the same tick roll differently.
+
+### Functions
+
+- `make(passing_chance: float, roll_salt: int, once_per: StringName = &"", mixed_in: StringName = &"") -> AIChanceCondition` *(static)*: Makes a chance condition in code.
+- `passes(inputs: AIInputs, context: AIContextComponent, behaviour_salt: int) -> bool`
+- `roll_tick(inputs: AIInputs, now: int) -> int`: The tick the roll is made for: the decision's, or `once_per_input`'s value.
+- `roll_salt(inputs: AIInputs, behaviour_salt: int) -> int`: The salt the roll is made with: `salt`, the behaviour's own number and `salt_input`'s value (its low 16 bits).
+- `describe() -> Dictionary`
+- `add_input_slots(slots: Dictionary) -> void`
+
+## AICompareCondition
+
+`res://assets/scripts/ai/conditions/AICompareCondition.gd`, extends [`AICondition`](#aicondition)
+
+A condition that compares one input with a number, or with another input plus a number.
+
+Scaling spec 6.2. Examples:
+
+```gdscript
+target_distance  AT_MOST  2.5                           # the target is within 2.5 m
+most_aware_certain  EQUAL  1                            # the AI is certain about what it's most aware of
+ticks_since_unknown_hit  AT_MOST  300                   # hit by someone unknown within 5 s (ticks at 60 a second)
+target_distance  AT_MOST  -0.5, other_input "reach"     # within the "reach" input minus half a metre
+```
+
+Inputs that are yes or no are 1 or 0, so compare them with EQUAL 1 or EQUAL 0.
+
+### Settings and properties
+
+- `input: String` = `""`: The input to check, such as target_distance. See [`AIInputs`](#aiinputs) for the built-in ones.
+- `comparison: int` = `0`: How it's compared.
+- `value: float` = `0.0`: The number it's compared with. For an input that's a time in ticks (its name starts with ticks_), written for 60 ticks a second. With `other_input` set, it's added to that input's value instead.
+- `other_input: String` = `""`: Optional: compare with this input's value plus `value`, instead of with value alone.
+
+### Constants
+
+- `Comparison.AT_MOST = 0`: input <= value
+- `Comparison.LESS_THAN = 1`: input < value
+- `Comparison.AT_LEAST = 2`: input >= value
+- `Comparison.MORE_THAN = 3`: input > value
+- `Comparison.EQUAL = 4`: input == value
+- `Comparison.NOT_EQUAL = 5`: input != value
+
+### Functions
+
+- `make(input_name: StringName, how: int, number: float, other_name: StringName = &"") -> AICompareCondition` *(static)*: Makes a compare condition in code: AICompareCondition.make(AIInputs.TARGET_DISTANCE, AICompareCondition.Comparison.AT_MOST, 2.5).
+- `passes(inputs: AIInputs, _context: AIContextComponent, _behaviour_salt: int) -> bool`
+- `describe() -> Dictionary`
+- `add_input_slots(slots: Dictionary) -> void`
+
+## AICondition
+
+`res://assets/scripts/ai/conditions/AICondition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+The base for a condition: one check a behaviour needs to pass before it may run, made of plain data.
+
+Scaling spec 6.2. A behaviour runs only while all of its conditions pass (`AIBehaviourBase.all_conditions()`). A condition reads named numbers from the pawn's [`AIInputs`](#aiinputs), never game objects, so the same check can be made in C++ for a whole crowd at once (AIBatchDecider). Utility AI calls these "considerations".
+
+The kinds, each a Resource made in the inspector:
+- [`AICompareCondition`](#aicomparecondition): an input against a number, or against another input
+- [`AIChanceCondition`](#aichancecondition): a random roll that replays the same
+- [`AIAnyCondition`](#aianycondition): passes if any one of its conditions does
+
+A new kind needs the same check in C++ too (native/src/ai_batch_decider.cpp), and `describe()` giving what C++ reads. Most needs are met by an input instead: a game writes its own input (`AIInputs.set_input()`), and a compare condition reads it.
+
+### Constants
+
+- `INPUT_SUGGESTIONS = "target_distance,most_aware_certain,most_aware_uncertain,ticks_since_unknown_hit,incoming_attack,incoming_attack_tick,incoming_attacker,group_distance/rally_point,group_found/rally_point,action_ready/primary"`: The input names the inspector suggests. Any other name works too: it's a kept input that game code writes.
+
+### Functions
+
+- `passes(_inputs: AIInputs, _context: AIContextComponent, _behaviour_salt: int) -> bool`: True if the condition passes for this pawn now. inputs holds the values worked out for this decision; behaviour_salt is the behaviour's own number for random rolls, so two behaviours' rolls differ.
+- `describe() -> Dictionary`: The condition as plain data, for the C++ decider: "kind" and its numbers, with input slots (`AIInputs.slot_of()`) rather than names, and times already converted to the match's tick rate.
+- `add_input_slots(_slots: Dictionary) -> void`: Adds the slots of every input this condition reads to slots (as keys), so the behaviour manager works out only those.
+- `at_rate_for(slot: int, number: float) -> float` *(static)*: A value written for 60 ticks a second, at the match's rate, if the input is a time in ticks; otherwise the value as it is.
+
+## AIScoreCurve
+
+`res://assets/scripts/ai/conditions/AIScoreCurve.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+Turns one input into an amount from 0 to 1 that scales a behaviour's score: the "how much" to a condition's "whether".
+
+Scaling spec 6.2. A straight line: `from_value` gives 0, `to_value` gives 1, with 0 below and 1 above. Set to_value below from_value to turn it round (more input, less score). A behaviour's score is `low + (max_score - low) × every curve's amount multiplied together`, where low is min_score, or 0 when min_score isn't set (`AIBehaviourBase.score()`). With no curves the score is max_score, as before.
+
+```gdscript
+target_distance, from 20 to 2     # 0 at 20 m or further, 1 at 2 m or closer: the nearer, the keener
+```
+
+### Settings and properties
+
+- `input: String` = `""`: The input it reads, such as target_distance. See [`AIInputs`](#aiinputs).
+- `from_value: float` = `0.0`: The input value that gives 0. For a time in ticks, written for 60 ticks a second.
+- `to_value: float` = `1.0`: The input value that gives 1.
+
+### Functions
+
+- `make(input_name: StringName, zero_at: float, one_at: float) -> AIScoreCurve` *(static)*: Makes a curve in code.
+- `amount(inputs: AIInputs) -> float`: The amount from 0 to 1 for this pawn's inputs now.
+- `describe() -> Dictionary`: The curve as plain data, for the C++ decider, with times converted to the match's rate.
+- `add_input_slots(slots: Dictionary) -> void`: Adds the slot of the input it reads to slots (as a key).
 
 ## SightGeometryFeeder
 

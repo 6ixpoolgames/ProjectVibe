@@ -3,14 +3,14 @@
 ## answers against GDScript's without using them.
 ##
 ## A GameMode module ([code]GameMode.get_module(AIDecisionBatcher)[/code]), off by default. Scaling spec 6.2: decisions made
-## together in C++, later on the worker threads, instead of one pawn at a time in GDScript. Each pawn deciding on its own stays the
-## default (the owner's call); a game opts in.
+## together in C++, later on the worker threads, instead of one pawn at a time in GDScript. C++ is to be the main path, with
+## GDScript's decider a dormant backup (the owner's call); until the batch's answers are used (spec step 5e), it only checks them.
 ## [br]
 ## Modes:
 ## [br]- OFF: nothing happens, and the AI pays one check per decision.
 ## [br]- SHADOW: every decision still runs in GDScript, unchanged. As each one starts, this module gathers the pawn's inputs from the
-##   live pawn into a row (its brain, state, target, running behaviour, the hard-rule bitmasks, persistence, and the availability and
-##   score of every behaviour that passed the hard rules), and notes GDScript's answer when it ends. At the end of the tick, one C++
+##   live pawn into a row (its brain, state, target, running behaviour, the hard-rule bitmasks, persistence, and its AI inputs,
+##   [AIInputs], which C++ checks the behaviours' conditions against), and notes GDScript's answer when it ends. At the end of the tick, one C++
 ##   call decides every row, and the answers are compared. Disagreements are counted and the first few logged as warnings
 ##   ([method get_counts]). The game plays exactly as with OFF.
 ## [br]
@@ -20,10 +20,10 @@
 ## A brain is described once per behaviour manager ([method AIBehaviourManager.describe]); pawns with the same behaviour set share one.
 ## A setting changed during play after that (set_score_jitter, say) isn't seen, and would show as disagreements.
 ## [br]
-## Behaviours' is_available() and score() are asked for every behaviour that passes the hard rules, not only the ones GDScript's
-## early stop reaches, and before GDScript asks them itself, at the same tick. Batched deciding needs both to be safe to call more
-## than once a tick, with no effect on the game. Every t0 behaviour's are (Go To Point's keeps its point for 2 s, so a second call
-## gives the same answer).
+## Behaviours judged by their conditions (every built-in one) cost C++ nothing more than the inputs. A behaviour with its own
+## is_available() or score() code ([method AIBehaviourBase.has_own_code]) can't be read by C++, so it's asked in GDScript, for every
+## such behaviour that passes the hard rules, before GDScript's own decision asks it at the same tick. That code must be safe to call
+## more than once a tick, with no effect on the game.
 class_name AIDecisionBatcher
 extends GameModeModule
 
@@ -64,6 +64,7 @@ var _known := PackedInt64Array()
 var _available := PackedInt64Array()
 var _persistence_rows: Array[PackedFloat64Array] = [] # per row, one value per behaviour; flattened at the end of the tick
 var _score_rows: Array[PackedFloat64Array] = []
+var _input_rows: Array[PackedFloat64Array] = [] # per row, the pawn's AI inputs; flattened at the end of the tick
 var _answers := PackedInt32Array() # GDScript's choice per row: a slot, -1 for nothing, -2 not noted yet
 var _names: Array[StringName] = [] # each row's pawn, for warnings
 
@@ -123,6 +124,9 @@ func gather(manager: AIBehaviourManager, behaviours: Array[AIBehaviourBase], run
 	persistence.resize(behaviours.size())
 	scores.resize(behaviours.size())
 	# The hard rules, as AIBehaviourManager.decide() applies them, then each remaining behaviour's own answers.
+	# REFACTOR: this loop repeats the manager's own rule loop for every behaviour (allowed state, cooldown, target, action,
+	# persistence), most of a row's cost. Each pawn's decision state kept in C++ (scaling spec 6.2, step 5c) removes it (efficient).
+	# See CHANGELOG.md.
 	for slot in behaviours.size():
 		var behaviour := behaviours[slot]
 		var bit := 1 << slot
@@ -135,9 +139,11 @@ func gather(manager: AIBehaviourManager, behaviours: Array[AIBehaviourBase], run
 			continue
 		if behaviour.needs_target and not has_target:
 			continue
-		if behaviour.presses_action != &"" and behaviour != running and not (abilities != null and abilities.can_start(behaviour.presses_action)):
+		if behaviour.presses_action != &"" and behaviour != running and not (abilities != null and context.inputs.action_ready(behaviour.presses_action)):
 			can_press &= ~bit
 			continue
+		if not behaviour.has_own_code():
+			continue # C++ checks its conditions against the inputs itself
 		known |= bit
 		if behaviour.is_available(context):
 			available |= bit
@@ -159,6 +165,9 @@ func gather(manager: AIBehaviourManager, behaviours: Array[AIBehaviourBase], run
 	_available.append(available)
 	_persistence_rows.append(persistence)
 	_score_rows.append(scores)
+	# A copy: GDScript note: the pawn's own array is written in place at its next decision, and a packed array put in an Array without
+	# duplicate() can still share its storage.
+	_input_rows.append(context.inputs.values.duplicate())
 	_answers.append(-2)
 	_names.append(manager.pawn.name)
 	PerfScopes.end(&"ai.batch.gather", started)
@@ -190,10 +199,21 @@ func decide_gathered() -> void:
 		for slot in row_persistence.size():
 			persistence[r * stride + slot] = row_persistence[slot]
 			scores[r * stride + slot] = row_scores[slot]
+	# The inputs, with one stride: the most slots any row has (a name first used during the tick makes later rows longer).
+	var input_stride := 0
+	for row_inputs in _input_rows:
+		input_stride = maxi(input_stride, row_inputs.size())
+	var inputs := PackedFloat64Array()
+	inputs.resize(rows * input_stride)
+	inputs.fill(0.0)
+	for r in rows:
+		var row_inputs := _input_rows[r]
+		for i in row_inputs.size():
+			inputs[r * input_stride + i] = row_inputs[i]
 	var columns := {"brain": _brain, "pawn_number": _pawn, "random_seed": _seed, "tick": _tick, "state": _state,
 		"has_target": _has_target, "event_normal": _normal, "event_priority": _priority, "running": _running,
 		"running_started": _started, "cooling": _cooling, "can_press": _can_press, "available_known": _known,
-		"available": _available, "persistence": persistence, "score": scores}
+		"available": _available, "persistence": persistence, "score": scores, "inputs": inputs, "input_stride": input_stride}
 	PerfScopes.end(&"ai.batch.build", build_started)
 	var decide_started := PerfScopes.begin()
 	var answer: Dictionary = _decider.decide(columns)
@@ -291,4 +311,5 @@ func _clear_rows() -> void:
 	_answers.clear()
 	_persistence_rows.clear()
 	_score_rows.clear()
+	_input_rows.clear()
 	_names.clear()

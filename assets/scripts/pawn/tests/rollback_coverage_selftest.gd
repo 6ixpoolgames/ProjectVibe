@@ -20,6 +20,9 @@ const NOT_ROLLED_BACK := {
 	# Worked out from the abilities' timers, which roll back: a timer starting or stopping, including a rollback loading it through
 	# its setter, marks these to be worked out again before they're next used.
 	"AbilityManager:_locked_mask": "worked out from the timers",
+	# Claude 2026-11-17: a count of changes for the AI's kept answers (AIInputs.action_ready); it only goes up, and the AI never runs
+	# while a rollback replays ticks, so going back would only hide a change.
+	"AbilityManager:readiness_version": "a change counter for the AI",
 	"AbilityManager:_locks_dirty": "worked out from the timers",
 	"AbilityManager:_timed": "worked out from the timers",
 	"AbilityManager:_timers_dirty": "worked out from the timers",

@@ -25,6 +25,7 @@ func _ready() -> void:
 	floor_body.add_child(shape)
 	add_child(floor_body)
 	await _test_walkthrough()
+	await _test_look_before_investigating()
 	await _test_never_alerted()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -80,6 +81,34 @@ func _test_walkthrough() -> void:
 	_check(ticks >= 0, "the memory fades: Idle again")
 	await _ticks(2)
 	_check(_running(goblin) == &"Wander", "and wandering")
+	goblin.free()
+	intruder.free()
+
+
+# Claude 2026-11-17, the owner's call: Look Toward goes first (it can make the goblin certain more cheaply), then Investigate, and
+# Look Toward's negative persistence keeps it from taking over while Investigate walks; it only gets a turn when Investigate can't run
+# (its cooldown after finishing).
+func _test_look_before_investigating() -> void:
+	var goblin := _make_goblin(Vector3(-60, 0, 0))
+	var intruder := _make_pawn(0, FAR_AWAY)
+	var switches: Array[String] = []
+	goblin.ai_context.behaviour_manager.behaviour_changed.connect(func(old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
+		switches.append("%s>%s:%s" % [String(old.name) if old else "", String(new.name) if new else "", reason]))
+	await _ticks(30)
+	var ticks := await _until(func() -> bool:
+		_put_in_front(intruder, goblin, 22.0)
+		return _state(goblin) == &"Alert", 600)
+	_check(ticks >= 0 and _running(goblin) == &"LookToward", "a glimpse: Look Toward first, above Investigate")
+	intruder.global_position = FAR_AWAY
+	ticks = await _until(func() -> bool: return _running(goblin) == &"Investigate", 120)
+	_check(ticks >= 0, "after looking, Investigate (%d ticks later)" % ticks)
+	var look := goblin.ai_context.behaviour_manager.get_behaviours().filter(func(b: AIBehaviourBase) -> bool: return b.name == &"LookToward")[0] as AIBehaviourBase
+	_check(look.persistence_now(goblin.ai_context.current_tick) < -0.1, "Look Toward is held back by its persistence (%.2f)" % look.persistence_now(goblin.ai_context.current_tick))
+	# Long enough for the old 3 s cooldown to have run out and Look Toward to have cut in.
+	switches.clear()
+	await _until(func() -> bool: return _running(goblin) != &"Investigate", 300)
+	_check(not switches.any(func(s: String) -> bool: return s.begins_with("Investigate>LookToward")),
+			"Look Toward never replaces a running Investigate (%s)" % str(switches))
 	goblin.free()
 	intruder.free()
 

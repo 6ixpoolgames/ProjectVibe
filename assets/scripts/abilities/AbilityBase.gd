@@ -243,6 +243,7 @@ func start_step(step: AbilityStep) -> void:
 	step.step_ticks = 0
 	step.enter()
 	if manager:
+		manager.readiness_version += 1 # a step's cancel window can change what may start
 		manager.step_started.emit(self, step)
 
 
@@ -253,6 +254,7 @@ func stop_step(step: AbilityStep, reason := "cancelled") -> void:
 	step.running = false
 	step.exit(reason)
 	if manager:
+		manager.readiness_version += 1
 		manager.step_finished.emit(self, step, reason)
 
 

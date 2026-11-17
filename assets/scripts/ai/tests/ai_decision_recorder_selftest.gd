@@ -220,6 +220,7 @@ func _test_save() -> void:
 
 func _test_timings() -> void:
 	var was_enabled := PerfScopes.enabled
+	var was_detailed := PerfScopes.detailed
 	PerfScopes.enabled = true
 	var alarm := SwitchState.new()
 	alarm.name = "Alarm"
@@ -227,11 +228,22 @@ func _test_timings() -> void:
 	quick.finish_with = AIBehaviourBase.Status.SUCCEEDED
 	var pawn := _make_pawn([quick, _b("Slow", 0.5)], [alarm])
 	pawn.ai_context.decision_interval_ticks = 1
+	# Claude 2026-11-17: without detail, only the coarse scopes; the fine ones (one per state, behaviour and sense) cost too much to
+	# run always.
+	PerfScopes.detailed = false
 	PerfScopes.take_frame() # start afresh; everything below runs before any other code can take a frame
+	pawn.ai_context.run_ai(299)
+	pawn.ai_context.sensing_manager.full_pass(299)
+	var coarse := PerfScopes.take_frame()
+	_check(coarse.has(&"ai.decide.behaviour") and not coarse.has(&"ai.state.Idle") and not coarse.has(&"ai.behaviour.Quick")
+			and not coarse.has(&"ai.sense.Sight.full"), "detail off: the coarse scopes only, none per state, behaviour or sense")
+	PerfScopes.detailed = true
+	PerfScopes.take_frame()
 	pawn.ai_context.run_ai(300)
 	pawn.ai_context.sensing_manager.full_pass(300)
 	var scopes := PerfScopes.take_frame()
 	PerfScopes.enabled = was_enabled
+	PerfScopes.detailed = was_detailed
 	for scope: StringName in [&"ai.decide", &"ai.decide.target", &"ai.decide.state", &"ai.decide.behaviour", &"ai.decide.switch",
 			&"ai.state.Alarm", &"ai.state.Idle", &"ai.available.Quick", &"ai.behaviour.Quick", &"ai.sense.Sight.full",
 			&"ai.memory.forget"]:

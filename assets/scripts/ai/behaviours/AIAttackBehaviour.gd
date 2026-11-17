@@ -7,7 +7,10 @@
 ## in; this scores higher (0.9 against 0.8), so it takes over at that distance.
 ## [br]
 ## It faces the target, holds the attack's action ([member AIBehaviourBase.presses_action]) through the swing, and finishes when the
-## swing is over. The first tick held is the press, which is a request: the ability manager picks what it starts (the normal swing,
+## swing is over. It sleeps through the swing (scaling spec 6.2's wake-ups): it wakes for the press, two ticks later to see that the
+## swing started, and when an ability on its action ends; meanwhile the AI controller keeps the aim on the target every tick
+## ([method AIController.look_at_node]). The aim follows the target itself, which sensing keeps close to its last known position
+## while it's in view (it was the last known position, re-aimed every tick). The first tick held is the press, which is a request: the ability manager picks what it starts (the normal swing,
 ## or the next swing of a combo), and this waits for whichever runs on that action. Holding keeps the swing turning toward its
 ## target (TurnToFaceStep, pawn spec 8.20). A second Attack behaviour with presses_action set to another action, and a higher score,
 ## uses a special attack whenever it's ready (faction_arena_sample's goblins). Its interrupt_threshold (15) keeps an ordinary
@@ -35,46 +38,54 @@ func _init() -> void:
 	max_score = 0.9
 	min_score = 0.9
 	interrupt_threshold = 15
+	tick_interval_ticks = 60 # the safety net: it wakes for the press and when the swing ends
 
 
-## Close enough: the target's last known position is within attack_range − [member approach_margin].
-func is_available(context: AIContextComponent) -> bool:
+## Close enough: the target's last known position is within attack_range − [member approach_margin], one condition built from those
+## settings. With no MeleeAttack on presses_action, nothing is close enough (a reach of -1 m), so it never runs. If the attack's range
+## changes during play, call [method AIBehaviourBase.rebuild_conditions].
+func own_conditions() -> Array[AICondition]:
 	var melee := _find_melee()
-	var index := context.current_target_index()
-	if melee == null or index < 0:
-		return false
-	var offset := context.memory.last_known_position_at(index) - pawn.global_position
-	offset.y = 0.0
-	return offset.length() <= melee.attack_range - approach_margin
+	var reach := melee.attack_range - approach_margin if melee else -1.0
+	var list: Array[AICondition] = [AICompareCondition.make(AIInputs.TARGET_DISTANCE, AICompareCondition.Comparison.AT_MOST, reach)]
+	return list
 
 
 func enter(context: AIContextComponent) -> void:
 	var hands := context.controller
 	hands.stop()
-	_look_at_target(context)
+	if context.has_target():
+		hands.look_at_node(context.current_target, Vector3(0.0, 1.0, 0.0)) # followed at every input while it sleeps
+	else:
+		_look_at_target(context)
+	wake_on_action_end(presses_action)
 	# Held, not pressed once: a swing keeps turning toward its target only while its action is held (TurnToFaceStep, pawn spec 8.20). The first tick held is the press, so if the pawn's last input still had it held (the swing before ended this
 	# very tick), it's let go for one tick first: held twice in a row is no press, and the swing would never start.
 	_started_tick = context.current_tick
 	if pawn.controller_manager and pawn.controller_manager.held_actions & InputActions.mask_of(presses_action) != 0:
 		hands.hold(presses_action, false)
 		_hold_from_tick = context.current_tick + 1
+		wake_at(_hold_from_tick)
 	else:
 		hands.hold(presses_action, true)
 		_hold_from_tick = -1
+		wake_at(_started_tick + 2)
 
 
 func tick(context: AIContextComponent) -> Status:
-	_look_at_target(context)
 	# The press that had to wait a tick (see enter()).
 	if _hold_from_tick >= 0:
 		if context.current_tick < _hold_from_tick:
+			wake_at(_hold_from_tick)
 			return Status.RUNNING
 		context.controller.hold(presses_action, true)
 		_hold_from_tick = -1
 		_started_tick = context.current_tick
+		wake_at(_started_tick + 2)
 		return Status.RUNNING
 	# The press reaches the ability on the next input; give it two ticks to start before checking whether it's over.
 	if context.current_tick - _started_tick < 2:
+		wake_at(_started_tick + 2)
 		return Status.RUNNING
 	# Any swing on the action, since the manager may have picked another, such as the next swing of a combo. Asked of the manager,
 	# which looks at its running abilities only.

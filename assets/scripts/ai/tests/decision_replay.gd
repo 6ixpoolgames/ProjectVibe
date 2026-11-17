@@ -128,11 +128,22 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 	score.fill(NAN)
 	var expected_chosen := PackedInt32Array()
 	var expected_asked := PackedInt64Array()
+	# Claude 2026-11-17 (scaling spec 6.2, step 5b): each decision's AI inputs, for behaviours judged by their conditions, flattened
+	# with one stride (the most inputs any decision had; older records without inputs read 0).
+	var input_stride := 0
+	for d: Dictionary in decisions:
+		input_stride = maxi(input_stride, (d.get("inputs", []) as Array).size())
+	var inputs := PackedFloat64Array()
+	inputs.resize(rows * input_stride)
+	inputs.fill(0.0)
 	for r in rows:
 		var d: Dictionary = decisions[r]
 		var pawn_number := int(d["pawn_number"])
 		var b: int = brain_of_pawn[pawn_number]
 		var names: Dictionary = slots[b]
+		var row_inputs: Array = d.get("inputs", [])
+		for i in row_inputs.size():
+			inputs[r * input_stride + i] = float(row_inputs[i])
 		brain.append(b)
 		pawn.append(pawn_number)
 		random_seed.append(seed_of_pawn[pawn_number])
@@ -177,7 +188,7 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 	var columns := {"brain": brain, "pawn_number": pawn, "random_seed": random_seed, "tick": tick, "state": state,
 		"has_target": has_target, "event_normal": normal, "event_priority": priority, "running": running, "running_started": started,
 		"cooling": cooling, "can_press": can_press, "available_known": known, "available": available, "persistence": persistence,
-		"score": score}
+		"score": score, "inputs": inputs, "input_stride": input_stride}
 	var started_usec := Time.get_ticks_usec()
 	var answer: Dictionary = decider.decide(columns)
 	result["decide_usec"] += Time.get_ticks_usec() - started_usec

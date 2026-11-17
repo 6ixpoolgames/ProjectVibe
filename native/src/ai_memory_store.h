@@ -12,10 +12,11 @@
 // GDScript, mostly many small steps per entry. Here they're plain loops over arrays.
 //
 // Fades: a FadeProfile's settings (mode, hold, fade, half-life, curve) are read once when it's configured, and the maths is done
-// here. A profile whose script overrides value_at() (a "custom" profile) is called instead, so a designer's own fade still works.
+// in fade_math.h. A profile whose script overrides value_at() (a "custom" profile) is called instead, so a designer's own fade still works.
 #pragma once
 
 #include "ai_sight_rules.h" // the visibility rule, shared with AISensingJob
+#include "fade_math.h" // FadeProfile's maths, shared with AIBatchDecider
 #include "sight_geometry.h" // line of sight in C++
 
 #include <godot_cpp/classes/curve.hpp>
@@ -92,21 +93,6 @@ protected:
 	static void _bind_methods();
 
 private:
-	struct Fade {
-		int mode = 0; // 0 LINEAR, 1 HALF_LIFE, 2 CURVE (the order of FadeProfile.Mode)
-		int64_t hold = 0;
-		int64_t fade = 60;
-		int64_t half_life = 30;
-		int64_t delay = 0;
-		Ref<Curve> curve;
-		Ref<Resource> custom; // set when the profile's own value_at() must be called
-		Ref<Resource> profile;
-	};
-
-	void read_fade(Fade &into, const Ref<Resource> &profile, int64_t delay, bool custom) const;
-	int64_t at_rate(int64_t reference_ticks) const; // as TickDriver.ticks_at_rate
-	static double value_at(const Fade &fade, double ticks);
-	static int64_t ends_after(const Fade &fade);
 	double awareness_of(size_t i, int64_t tick) const;
 	bool in_view(size_t i, int64_t tick) const; // held, not fading: the last check saw it, recently
 	// By instance id, which the sensing job already has, so the sight checks don't ask the engine for each candidate's id two or
@@ -131,8 +117,8 @@ private:
 	std::vector<double> _threat;
 	std::unordered_map<uint64_t, size_t> _index_of;
 
-	Fade _uncertain;
-	Fade _certain_fade;
+	fade_math::Fade _uncertain;
+	fade_math::Fade _certain_fade;
 	int64_t _continuous_ticks = 30;
 
 	// SightSense's settings, in the struct the sensing job shares (ai_sight_rules.h).
