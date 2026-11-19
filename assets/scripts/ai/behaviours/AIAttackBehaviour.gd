@@ -1,22 +1,24 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
-## Swings at the current target once it's close enough.
+## Attacks the current target once it's close enough: a swing, a shot, any attack on its action.
 ##
-## Allowed in Combat. Available when the target's last known position is within the MeleeAttack's attack_range minus
-## [member approach_margin]: the AI steps a little closer than the real reach so the swing lands. Chase brings the pawn in (score 0.8);
-## this scores 0.9 and takes over at that distance. It faces the target, holds the attack's action ([member AIBehaviourBase.presses_action])
-## through the swing, sleeps until it ends, then finishes. Its interrupt_threshold (15) stops an ordinary decision cutting a swing off.
-## A second Attack with another action and a higher score gives a special attack (faction_arena_sample's goblins).
-## Design: pawn spec 10.7 (step 9), 8.6 and 8.20; scaling spec 6.2.
-# REFACTOR: it finds its reach only on a MeleeAttackAbility, so a ranged or other attack can't use this behaviour. Asking the ability
-# for its reach through AbilityBase would let one Attack behaviour drive any attack (extensible). See CHANGELOG.md.
+## Allowed in Combat. Available when the target's last known position is within the attack's reach ([method AbilityBase.attack_reach]
+## of the ability on [member AIBehaviourBase.presses_action]) minus [member approach_margin]: the AI steps a little closer than the real
+## reach so the attack lands. Chase brings the pawn in (score 0.8); this scores 0.9 and takes over at that distance. It faces the target,
+## holds the attack's action through the attack, sleeps until it ends, then finishes. Its interrupt_threshold (15) stops an ordinary
+## decision cutting an attack off. A second Attack with another action and a higher score gives a special or ranged attack (the sample
+## goblins' HeavyAttack and Shoot). A [member min_distance] keeps a ranged one from firing at point blank, so the melee attacks take over
+## there ([AIKeepDistanceBehaviour] hangs back between shots). Design: pawn spec 10.7 (step 9), 8.6, 8.20 and 8.24; scaling spec 6.2.
 class_name AIAttackBehaviour
 extends AIBehaviourBase
 
-## How much closer than the attack's range the AI steps before swinging, in metres.
+## How much closer than the attack's range the AI steps before attacking, in metres.
 @export_range(0.0, 5.0, 0.05, "or_greater") var approach_margin := 0.3
-# presses_action (AIBehaviourBase) is the action that starts the swing; the behaviour manager also reads it to skip an attack it couldn't press.
+## The nearest the target may be for this attack, in metres; 0: no limit. For a ranged attack, set it to the Keep Distance behaviour's
+## melee_distance, so a target that close is met with melee instead.
+@export_range(0.0, 50.0, 0.1, "or_greater") var min_distance := 0.0
+# presses_action (AIBehaviourBase) is the action that starts the attack; the behaviour manager also reads it to skip an attack it couldn't press.
 
-var _melee: MeleeAttackAbility = null
+var _attack: AbilityBase = null
 var _started_tick := 0
 var _hold_from_tick := -1 # the tick to start holding on, when a press had to wait a tick; -1: none waiting
 
@@ -32,12 +34,14 @@ func _init() -> void:
 	tick_interval_ticks = 60 # the safety net: it wakes for the press and when the swing ends
 
 
-## Close enough: the target is within attack_range âˆ’ [member approach_margin], one condition. With no MeleeAttack on presses_action
-## nothing is close enough, so it never runs. If the attack's range changes during play, call [method AIBehaviourBase.rebuild_conditions].
+## Close enough: the target is within the attack's reach - [member approach_margin], and no nearer than [member min_distance] if
+## that's set. With no attack on presses_action nothing is close enough, so it never runs. If the attack's range changes during play, call [method AIBehaviourBase.rebuild_conditions].
 func own_conditions() -> Array[AICondition]:
-	var melee := _find_melee()
-	var reach := melee.attack_range - approach_margin if melee else -1.0
+	var attack := _find_attack()
+	var reach := attack.attack_reach() - approach_margin if attack else -1.0
 	var list: Array[AICondition] = [AICompareCondition.make(AIInputs.TARGET_DISTANCE, AICompareCondition.Comparison.AT_MOST, reach)]
+	if min_distance > 0.0:
+		list.append(AICompareCondition.make(AIInputs.TARGET_DISTANCE, AICompareCondition.Comparison.AT_LEAST, min_distance))
 	return list
 
 
@@ -97,11 +101,11 @@ func _look_at_target(context: AIContextComponent) -> void:
 		context.controller.look_at_point(context.memory.last_known_position_at(index) + Vector3(0.0, 1.0, 0.0))
 
 
-# The pawn's MeleeAttackAbility on presses_action, found once.
-func _find_melee() -> MeleeAttackAbility:
-	if _melee == null and pawn and pawn.ability_manager:
+# The pawn's attack on presses_action (an ability with a reach), found once.
+func _find_attack() -> AbilityBase:
+	if _attack == null and pawn and pawn.ability_manager:
 		for ability in pawn.ability_manager.get_abilities():
-			if ability is MeleeAttackAbility and ability.trigger_action == presses_action:
-				_melee = ability
+			if ability.trigger_action == presses_action and ability.attack_reach() > 0.0:
+				_attack = ability
 				break
-	return _melee
+	return _attack

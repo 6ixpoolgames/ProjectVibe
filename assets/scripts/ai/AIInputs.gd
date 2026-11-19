@@ -176,18 +176,18 @@ static func half_noticed_conditions(hit_memory_ticks: int) -> Array[AICondition]
 
 
 ## Writes a game's own input; it stays until written again.
-func set_input(input_name: StringName, value: float) -> void:
-	set_slot(slot_of(input_name), value)
+func set_input(input_name: StringName, amount: float) -> void:
+	set_slot(slot_of(input_name), amount)
 
 
 ## Writes a value by slot. A kept input also goes to the pawn's C++ row.
-func set_slot(slot: int, value: float) -> void:
+func set_slot(slot: int, amount: float) -> void:
 	if values.size() <= slot:
 		_grow(slot + 1)
-	values[slot] = value
+	values[slot] = amount
 	var manager := _context.behaviour_manager if _context else null
 	if manager and manager.cpp_row >= 0 and AIBehaviourManager.decision_module and _kinds[slot] == Kind.KEPT:
-		AIBehaviourManager.decision_module.input_set(manager, slot, value)
+		AIBehaviourManager.decision_module.input_set(manager, slot, amount)
 
 
 ## The value in a slot, working out a built-in one if it hasn't been yet this decision.

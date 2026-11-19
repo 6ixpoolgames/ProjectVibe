@@ -16,6 +16,10 @@
 class_name AIController
 extends ControllerBase
 
+## Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired
+## along the look meets the point looked at.
+var look_from_height := 1.3
+
 var _move := Vector3.ZERO
 var _look_yaw := 0.0
 var _look_pitch := 0.0
@@ -78,7 +82,7 @@ func look_at_point(point: Vector3) -> void:
 		return
 	# Godot's forward is -Z, so a point straight ahead has yaw 0.
 	_look_yaw = atan2(-offset.x, -offset.z)
-	_look_pitch = atan2(offset.y, Vector2(offset.x, offset.z).length())
+	_look_pitch = atan2(offset.y - look_from_height, Vector2(offset.x, offset.z).length())
 	_look_set = true
 
 

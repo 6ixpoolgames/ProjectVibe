@@ -260,8 +260,9 @@ func _test_real_fight() -> void:
 	_recorder.stop()
 	var summary := _recorder.summary()
 	var chosen: Dictionary = summary["chosen"]
-	_check(summary["decisions"] > 500 and chosen.has("Attack") and chosen.has("Chase"),
-			"a real fight: %d decisions by %d pawns, with attacks and chases (%s)" % [summary["decisions"], summary["pawns"], str(chosen)])
+	# Claude 2026-11-18 (Keep Distance): the faction pawns now mostly hang back and shoot, so either kind of attack and of closing in counts.
+	_check(summary["decisions"] > 500 and (chosen.has("Attack") or chosen.has("Shoot")) and (chosen.has("Chase") or chosen.has("KeepDistance")),
+			"a real fight: %d decisions by %d pawns, with attacks and closing in (%s)" % [summary["decisions"], summary["pawns"], str(chosen)])
 	var result := DecisionReplay.compare(DecisionReplay.from_recorder(_recorder))
 	print("  faction arena: " + DecisionReplay.describe(result))
 	for example: String in result["examples"]:

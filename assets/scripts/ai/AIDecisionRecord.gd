@@ -102,9 +102,13 @@ func add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void:
 		entry["persistence"] = behaviour.decision_persistence
 		entry["jitter"] = behaviour.decision_jitter
 		entry["ceiling"] = behaviour.decision_ceiling
-		entry["floor"] = behaviour.decision_floor if behaviour.decision_floor > -INF else null # JSON has no infinity
+		entry["floor"] = null # JSON has no infinity
+		if behaviour.decision_floor > -INF:
+			entry["floor"] = behaviour.decision_floor
 		entry["available"] = (1 if behaviour.decision_available else 0) if behaviour.availability_checked else -1
-		entry["score"] = behaviour.decision_score if behaviour.decision_scored else null
+		entry["score"] = null
+		if behaviour.decision_scored:
+			entry["score"] = behaviour.decision_score
 	behaviours.append(entry)
 
 

@@ -1061,6 +1061,39 @@ The sweep and ray together are about 2.5 microseconds in any of these; the rest 
 
 **Test:** `abilities/tests/hit_interceptor_selftest`, with the parry, dash and invulnerable-step checks in `parry_selftest`, `attack_feel_selftest`, `ability_steps_selftest` and `effect_selftest` unchanged.
 
+### 8.24 Projectiles and the ranged attack *(Claude 2026-11-18, the owner's call: "a projectile ... an entity that will test the netcode"; v0 built)*
+
+**Why.** A projectile is the first thing besides a pawn that's spawned and despawned mid-match, flies on its own and lands a hit later than the action that made it, so it exercises entity spawning, snapshots and hit rollback in ways a swing doesn't.
+
+**What it is (v0).**
+
+| Part | What it does |
+|---|---|
+| `Projectile` (`abilities/projectiles/`) | A networked entity, one per projectile: a scene with a `TickStateComponent` (position, velocity) and a `NetworkEntity`. On the server, or offline, it moves each tick (velocity, optional `gravity`) after the pawns (TickDriver order 10), sweeps its path against pawns (`Pawn.get_grid().find_touching`, spheres every half radius, or physics without the C++ grid) and the world (a ray on `world_mask`), and hits the first one. Clients draw it from snapshots. It despawns on a hit, on the world, or past `max_range` or `max_lifetime`. |
+| `FireProjectileStep` (`abilities/steps/`) | Spawns one on its first tick, server or offline only and never in a replay, from a muzzle point (`muzzle_height`, `muzzle_forward`) along the pawn's look (yaw and pitch). It can warn the first enemy on the straight path (`note_incoming_attack`), as a swing does, so the AI can parry. |
+| `RangedAttackAbility` | Windup (with TurnToFace) → Fire → Recovery, made from its settings when it has no steps of its own, as MeleeAttack does. `attack_range` is the AI's reach. A hit carries its EffectApplier children's on-hit effects, copied at launch, so a hit still lands after the shooter is gone. |
+| `AbilityBase.attack_reach()` | How far away a target may be for the AI to use an ability as an attack; 0 for anything that isn't one. MeleeAttack and RangedAttack return their `attack_range`. `AIAttackBehaviour` reads it from whatever ability is on its `presses_action`, so one behaviour drives any attack. |
+
+**Decisions (agreed with the owner):**
+
+- An entity per projectile, through `NetworkSession.spawn` and `despawn`; the interface stays open for a data-only path (many projectiles in one C++ batch) later.
+- No client prediction of shots in v0: a client sees the server's projectile arrive. Predicted shots are the follow-up.
+- Hits are decided on the server against where pawns are now, with no rewind: a projectile is slow enough for this to be fair.
+- Straight bolts first, with a `gravity` setting for arcs.
+- Friendly fire off (`hits_own_team`); an invulnerable pawn (a dash) is flown through; a parry from the front turns a bolt away like a swing.
+- Every machine registers the projectile scene as a network type at startup (`Projectile.register_scene`): the list of types is part of the join check, so registering one mid-match would stop new players joining.
+- The AI's look pitch is measured from `AIController.look_from_height` (1.3 m, the muzzle's default) rather than the feet, so a shot fired along the look meets what the AI looks at.
+
+**In the samples (the owner's call: no new pawn for now).** The faction ability set (`faction_abilities.tscn`, so the faction goblins, soldiers, players and mass-battle heroes) has a `RangedAttack` on `ability_3` firing `bolt.tscn` (`bolt_hit.tres`: 15 damage, a small push). Their brains have a `Shoot` behaviour (an `AIAttackBehaviour` on `ability_3`, score 0.97, above the heavy attack's 0.95), so they shoot whenever a target is within 14 m (and at least 4 m away) and the shot is ready. Between shots they hang back with a `KeepDistance` behaviour (below). G shoots in the faction samples. The plain arena goblins are unchanged.
+
+**Measured.** See the abilities changelog (2026-11-18): bolts fired, in flight and their flight cost in the mass battle at 25, 50 and 100 a faction (`mass_battle_measure`, which has `--no-ranged` and `--melee-off` to compare).
+
+**Keep Distance** *(the owner's call: the default way a pawn with a ranged attack moves in a fight, unless it's in melee)*. `AIKeepDistanceBehaviour` (Combat, 0.85, above Chase's 0.8) is available to a pawn with an ability in the `combat.ranged` tag group that has a reach, while the target is at least `melee_distance` (4 m) away. It walks to 0.7 of the ranged attack's reach from the target (closing in or backing off) and stands there facing it; Shoot fires whenever the shot is ready. Once the target is within 4 m, Keep Distance and Shoot (`AIAttackBehaviour.min_distance` 4) aren't available, so Chase and the melee attacks take over. Melee and ranged attacks are told apart by their category tags, `combat.melee` and `combat.ranged`. Walking faces the way it walks, so the pawn backs off with its back turned and turns to shoot; facing the target while backing off needs a strafing walk.
+
+**Not yet:** predicted shots (the client spawns its own at once and the server's replaces it); lag-compensated hits for fast projectiles; many projectiles as data in one C++ batch; a dedicated archer pawn (agreed, set aside for this batch of testing); a projectile that pierces or bounces.
+
+**Tests:** `abilities/tests/projectile_selftest` (offline: a hit lands once, a miss flies its range, a wall stops it, own team flown through, a parry turns it away, a dash flies through, gravity, a bolt outliving its shooter, an AI goblin with its melee behaviours removed shooting its target, and a whole AI goblin keeping its distance, backing off and switching to melee within 4 m), and `abilities/tests/net_projectile_selftest` (a server, two clients and three shooters, clean, with 80 ms lag and jitter, and with 5% loss: bolts arrive and despawn on every machine, hits land once and only on the server, Health agrees, and a hit's knockback, a surprise to the client's prediction, is rolled back so the client's pawn is where the server has it again within 40 ticks).
+
 ## 9. Stats (built 2026-11-07, step 5)
 
 - `StatManager` holds `Stat` nodes, in `assets/scripts/stats/`. One node per stat, named after it: MoveSpeed, JumpVelocity and so on.

@@ -27,6 +27,10 @@ ai.hold(&"sprint", true)                 # held until hold(&"sprint", false)
 
 While a player has the pawn but the AI keeps deciding, `move_to()` only remembers the point (and returns true), so it can't overwrite the player's path; the walk starts when the AI is in charge again. Design: pawn spec 6.3, 10.3.
 
+### Settings and properties
+
+- `look_from_height: float` = `1.3`: Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired along the look meets the point looked at.
+
 ### Functions
 
 - `move_to(point: Vector3) -> bool`: Walks to this point along a nav path, and stands still once there. Returns false (and stands still) if there's no way there. While not in charge it only remembers the point and returns true.

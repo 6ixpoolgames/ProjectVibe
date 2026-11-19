@@ -16,6 +16,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-18
 
+- **`AIController.look_from_height`** (1.3 m; pawn spec 8.24): the AI's look pitch is measured from this height above the feet, not from the feet, so a shot fired along the look (a ranged attack's muzzle is 1.3 m up by default) meets the point looked at. Nothing read the pitch before the ranged attack. `controller_manager_selftest` measures its two pitch checks from it.
+
 - **Comments rewritten to the reference style** (the documentation pass): the class comments of `ControllerManager`, `AIController` and `InputActions` shortened (the AI-not-in-charge rule, the rollback note and the odd cases moved to the README's "How it works"). Stale comment fixed: the `look_at_node` doc sat on `stop_looking`, and `stop_looking` had none. `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.
 
 ## 2026-11-17

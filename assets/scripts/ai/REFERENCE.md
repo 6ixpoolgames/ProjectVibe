@@ -22,6 +22,7 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 - [AIChaseBehaviour](#aichasebehaviour)
 - [AIGoToPointBehaviour](#aigotopointbehaviour)
 - [AIInvestigateBehaviour](#aiinvestigatebehaviour)
+- [AIKeepDistanceBehaviour](#aikeepdistancebehaviour)
 - [AILookTowardBehaviour](#ailooktowardbehaviour)
 - [AIParryBehaviour](#aiparrybehaviour)
 - [AISearchBehaviour](#aisearchbehaviour)
@@ -688,17 +689,26 @@ Design: pawn spec 10.2.
 
 `res://assets/scripts/ai/behaviours/AIAttackBehaviour.gd`, extends [`AIBehaviourBase`](#aibehaviourbase)
 
-Swings at the current target once it's close enough.
+Attacks the current target once it's close enough: a swing, a shot, any attack on its action.
 
-Allowed in Combat. Available when the target's last known position is within the MeleeAttack's attack_range minus `approach_margin`: the AI steps a little closer than the real reach so the swing lands. Chase brings the pawn in (score 0.8); this scores 0.9 and takes over at that distance. It faces the target, holds the attack's action (`AIBehaviourBase.presses_action`) through the swing, sleeps until it ends, then finishes. Its interrupt_threshold (15) stops an ordinary decision cutting a swing off. A second Attack with another action and a higher score gives a special attack (faction_arena_sample's goblins). Design: pawn spec 10.7 (step 9), 8.6 and 8.20; scaling spec 6.2.
+Allowed in Combat. Available when the target's last known position is within the attack's reach (`AbilityBase.attack_reach()`
+of the ability on `AIBehaviourBase.presses_action`) minus `approach_margin`: the AI steps a little closer than the real
+reach so the attack lands. Chase brings the pawn in (score 0.8); this scores 0.9 and takes over at that distance. It faces the target,
+holds the attack's action through the attack, sleeps until it ends, then finishes. Its interrupt_threshold (15) stops an ordinary
+decision cutting an attack off. A second Attack with another action and a higher score gives a special or ranged attack (the sample
+goblins' HeavyAttack and Shoot). A `min_distance` keeps a ranged one from firing at point blank, so the melee attacks take over
+there ([`AIKeepDistanceBehaviour`](#aikeepdistancebehaviour) hangs back between shots). Design: pawn spec 10.7 (step 9), 8.6, 8.20 and 8.24; scaling spec 6.2.
 
 ### Settings and properties
 
-- `approach_margin: float` = `0.3`: How much closer than the attack's range the AI steps before swinging, in metres.
+- `approach_margin: float` = `0.3`: How much closer than the attack's range the AI steps before attacking, in metres.
+- `min_distance: float` = `0.0`: The nearest the target may be for this attack, in metres; 0: no limit. For a ranged attack, set it to the Keep Distance behaviour's
+  melee_distance, so a target that close is met with melee instead.
 
 ### Functions
 
-- `own_conditions() -> AICondition[]`: Close enough: the target is within attack_range âˆ’ `approach_margin`, one condition. With no MeleeAttack on presses_action nothing is close enough, so it never runs. If the attack's range changes during play, call `AIBehaviourBase.rebuild_conditions()`.
+- `own_conditions() -> AICondition[]`: Close enough: the target is within the attack's reach - `approach_margin`, and no nearer than `min_distance` if
+  that's set. With no attack on presses_action nothing is close enough, so it never runs. If the attack's range changes during play, call `AIBehaviourBase.rebuild_conditions()`.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`
@@ -771,6 +781,40 @@ Allowed in Alert. Available while the most aware memory entry isn't certain yet 
 ### Functions
 
 - `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a recent hit from an attacker it doesn't remember. Either will do.
+- `enter(context: AIContextComponent) -> void`
+- `tick(context: AIContextComponent) -> int`
+- `exit(context: AIContextComponent, _reason: String) -> void`
+
+## AIKeepDistanceBehaviour
+
+`res://assets/scripts/ai/behaviours/AIKeepDistanceBehaviour.gd`, extends [`AIBehaviourBase`](#aibehaviourbase)
+
+Hangs back at shooting distance from the current target: a ranged pawn's way of moving in a fight, in place of Chase.
+
+Allowed in Combat. Available only to a pawn with a ranged attack (an ability in `ranged_tag`'s group with a reach,
+`AbilityBase.attack_reach()`), and only while the target is at least `melee_distance` away. It walks to
+`reach_fraction` of that attack's reach from the target's last known position, closing in when too far and backing away when too
+close, then stands facing it. Scored 0.85, above Chase (0.8), so a ranged pawn hangs back instead of running in; the Shoot behaviour
+(an [`AIAttackBehaviour`](#aiattackbehaviour) on the ranged attack's action, scored higher) fires whenever the shot is ready. Once the target closes within
+melee_distance it isn't available, so Chase and the melee attacks take over; give Shoot the same distance as its
+`AIAttackBehaviour.min_distance` so the pawn melees rather than shooting at point blank. Design: pawn spec 8.24.
+
+### Settings and properties
+
+- `ranged_tag: StringName` = `&"combat.ranged"`: The group of ability it keeps distance for: any ability tagged with it that has a reach. Ranged combat by default.
+- `reach_fraction: float` = `0.7`: Where it stands, as a fraction of the ranged attack's reach from the target: 0.7 of a 14 m bolt is 9.8 m.
+- `band: float` = `1.5`: How far, in metres, from that distance it may drift before it walks again. It walks until within half of this.
+- `melee_distance: float` = `4.0`: Closer than this, in metres, it gives up keeping distance and the melee behaviours take over.
+- `sprint_to_close: bool` = `true`: On: it sprints while the target is beyond the ranged attack's reach. Sprint's own cooldown decides when it actually sprints.
+- `repath_ticks: int` = `20`: Ticks between new paths while it walks.
+- `repath_distance: float` = `1.5`: How far, in metres, the spot it walks to must move before a new path is found early.
+
+### Functions
+
+- `own_conditions() -> AICondition[]`: Has a ranged attack, and the target is at least `melee_distance` away: one condition. With no ranged attack the condition can
+  never pass. If its abilities change during play, call `AIBehaviourBase.rebuild_conditions()`.
+- `preferred_distance() -> float`: The metres from the target it stands at: `reach_fraction` of its ranged attack's reach; 0 without one.
+- `find_ranged_attack() -> AbilityBase`: The pawn's ranged attack: the first ability in `ranged_tag`'s group with a reach, found once. Null if it has none.
 - `enter(context: AIContextComponent) -> void`
 - `tick(context: AIContextComponent) -> int`
 - `exit(context: AIContextComponent, _reason: String) -> void`

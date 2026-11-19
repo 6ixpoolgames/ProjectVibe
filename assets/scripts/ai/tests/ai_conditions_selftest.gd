@@ -154,9 +154,10 @@ func _test_own_code() -> void:
 	var attack := AIAttackBehaviour.new()
 	var parry := AIParryBehaviour.new()
 	var wander := AIWanderBehaviour.new()
+	var keep_distance := AIKeepDistanceBehaviour.new()
 	_check(own.has_own_code() and not plain.has_own_code() and not attack.has_own_code() and not parry.has_own_code()
-			and not wander.has_own_code(), "has_own_code: true only for a behaviour overriding is_available or score; no built-in one does")
-	for behaviour: Node in [own, plain, attack, parry, wander]:
+			and not wander.has_own_code() and not keep_distance.has_own_code(), "has_own_code: true only for a behaviour overriding is_available or score; no built-in one does")
+	for behaviour: Node in [own, plain, attack, parry, wander, keep_distance]:
 		behaviour.free()
 
 

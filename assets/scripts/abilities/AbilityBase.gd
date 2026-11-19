@@ -342,6 +342,12 @@ func look_yaw() -> float:
 	return pawn.controller_manager.look_yaw if pawn and pawn.controller_manager else (pawn.yaw if pawn else 0.0)
 
 
+## How far away a target may be for the AI to use this as an attack, in metres; 0 means it isn't an attack. The AI's Attack behaviour
+## reads it, so any attack (melee, ranged, a game's own) can be driven by one behaviour.
+func attack_reach() -> float:
+	return 0.0
+
+
 ## How many ticks behind its own the controller drew other pawns, for lag compensation.
 func view_ticks_behind() -> float:
 	return pawn.controller_manager.view_ticks_behind if pawn and pawn.controller_manager else 0.0

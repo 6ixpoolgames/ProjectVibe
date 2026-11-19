@@ -1,4 +1,4 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/arena_goblin.tscn" id="1_goblin"]
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_abilities.tscn" id="2_abilities"]
@@ -9,6 +9,7 @@
 [ext_resource type="PackedScene" path="res://assets/3d/miniCharacters/Models/GLB format/weapon-sword.glb" id="7_sword_model"]
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIParryBehaviour.gd" id="8_parry"]
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIGoToPointBehaviour.gd" id="9_go_to_point"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIKeepDistanceBehaviour.gd" id="10_keep_distance"]
 
 [node name="FactionGoblin" instance=ExtResource("1_goblin")]
 
@@ -40,3 +41,13 @@ stand_color = Color(0.82, 0.2, 0.17, 1)
 [node name="FloatingSword" type="Node3D" parent="Visual"]
 script = ExtResource("6_sword")
 sword_scene = ExtResource("7_sword_model")
+
+[node name="Shoot" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("3_attack")
+presses_action = &"ability_3"
+max_score = 0.97
+min_score = 0.97
+min_distance = 4.0
+
+[node name="KeepDistance" type="Node" parent="AIBehaviourManager"]
+script = ExtResource("10_keep_distance")

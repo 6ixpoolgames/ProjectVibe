@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 150 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 154 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -12,7 +12,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [AbilityStep](../assets/scripts/abilities/REFERENCE.md#abilitystep) | [abilities](../assets/scripts/abilities/README.md) | Node | One step of an ability, such as a windup, a turn or a swing: a child node of the ability. |
 | [AIActivationManager](../assets/scripts/game_mode/REFERENCE.md#aiactivationmanager) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Switches AI pawns off when the ground around them isn't loaded, back on when it is, and sets how often the rest run. |
 | [AIAnyCondition](../assets/scripts/ai/REFERENCE.md#aianycondition) | [ai](../assets/scripts/ai/README.md) | AICondition | A condition that passes if any one of its conditions passes: "this, or that". |
-| [AIAttackBehaviour](../assets/scripts/ai/REFERENCE.md#aiattackbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Swings at the current target once it's close enough. |
+| [AIAttackBehaviour](../assets/scripts/ai/REFERENCE.md#aiattackbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Attacks the current target once it's close enough: a swing, a shot, any attack on its action. |
 | [AIAwarenessState](../assets/scripts/ai/REFERENCE.md#aiawarenessstate) | [ai](../assets/scripts/ai/README.md) | AIStateBase | One tunable state for every "how aware am I of an enemy" situation, such as Alert and Combat. |
 | [AIBehaviourBase](../assets/scripts/ai/REFERENCE.md#aibehaviourbase) | [ai](../assets/scripts/ai/README.md) | Node | The base for one AI behaviour, such as Wander or Chase: one concrete thing to do. |
 | [AIBehaviourManager](../assets/scripts/ai/REFERENCE.md#aibehaviourmanager) | [ai](../assets/scripts/ai/README.md) | Node | Picks and runs the pawn's AI behaviour, judging between its behaviours by score. |
@@ -28,6 +28,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [AIIdleState](../assets/scripts/ai/REFERENCE.md#aiidlestate) | [ai](../assets/scripts/ai/README.md) | AIStateBase | The state for when nothing else fits: its prerequisites always hold. |
 | [AIInputs](../assets/scripts/ai/REFERENCE.md#aiinputs) | [ai](../assets/scripts/ai/README.md) | RefCounted | One pawn's AI inputs: the named numbers its behaviours' conditions read. |
 | [AIInvestigateBehaviour](../assets/scripts/ai/REFERENCE.md#aiinvestigatebehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Walks over to see what something half-noticed was. |
+| [AIKeepDistanceBehaviour](../assets/scripts/ai/REFERENCE.md#aikeepdistancebehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Hangs back at shooting distance from the current target: a ranged pawn's way of moving in a fight, in place of Chase. |
 | [AILookTowardBehaviour](../assets/scripts/ai/REFERENCE.md#ailooktowardbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Stops and looks toward something half-noticed: the first reaction to a glimpse. |
 | [AIMemory](../assets/scripts/ai/REFERENCE.md#aimemory) | [ai](../assets/scripts/ai/README.md) | Node | What a pawn's AI has sensed, and how aware of each thing it is: awareness that rises when seen and fades when not. |
 | [AIMemoryStoreGD](../assets/scripts/ai/REFERENCE.md#aimemorystoregd) | [ai](../assets/scripts/ai/README.md) | RefCounted | One pawn's AI memory in GDScript, plus the loops that read and write it: the sight check, the most aware entry, target scoring. |
@@ -62,6 +63,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [EffectPart](../assets/scripts/effects/REFERENCE.md#effectpart) | [effects](../assets/scripts/effects/README.md) | Resource | One thing an [Effect] does: the base for the parts in an Effect's parts list. |
 | [EffectTags](../assets/scripts/effects/REFERENCE.md#effecttags) | [effects](../assets/scripts/effects/README.md) | RefCounted | Effect type tags, such as damage.elemental.fire, turned into bits. |
 | [FadeProfile](../assets/scripts/ai/REFERENCE.md#fadeprofile) | [ai](../assets/scripts/ai/README.md) | Resource | How a value fades over ticks, from full to nothing, as a Resource designers tune in the inspector. |
+| [FireProjectileStep](../assets/scripts/abilities/REFERENCE.md#fireprojectilestep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | Fires a projectile on its first tick, from the pawn's muzzle point toward where it looks. |
 | [FloatingSword](../assets/scripts/visuals/REFERENCE.md#floatingsword) | [visuals](../assets/scripts/visuals/README.md) | Node3D | A sword that floats beside the pawn and swings through each attack, exactly where the hit is checked. |
 | [FreeFlyCamera](../assets/scripts/camera/REFERENCE.md#freeflycamera) | [camera](../assets/scripts/camera/README.md) | Node3D | A camera that flies freely, for a player with no pawn: the spectator. |
 | [GameModeModule](../assets/scripts/game_mode/REFERENCE.md#gamemodemodule) | [game_mode](../assets/scripts/game_mode/README.md) | Node | The base for one optional piece of a game's rules, added to GameMode. |
@@ -109,6 +111,8 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [PlayerCamera](../assets/scripts/camera/REFERENCE.md#playercamera) | [camera](../assets/scripts/camera/README.md) | Camera3D | The one real camera, which follows a VirtualCamera. PlayerController owns it. |
 | [PlayerController](../assets/scripts/player/REFERENCE.md#playercontroller) | [player](../assets/scripts/player/README.md) | ControllerBase | One player's controls: reads their devices, aims their camera, and gives their pawn input. |
 | [PossessionCoordinator](../assets/scripts/game_mode/REFERENCE.md#possessioncoordinator) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Who controls which pawn: players possess and let go of pawns through here. |
+| [Projectile](../assets/scripts/abilities/REFERENCE.md#projectile) | [abilities](../assets/scripts/abilities/README.md) | Node3D | A projectile in flight: a networked entity that moves each tick and hits the first pawn (or the ground) in its path. |
+| [RangedAttackAbility](../assets/scripts/abilities/REFERENCE.md#rangedattackability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | A ranged attack: an action bound to &"primary" that fires a projectile, built from steps. |
 | [ReplayChannel](../assets/scripts/replay/REFERENCE.md#replaychannel) | [replay](../assets/scripts/replay/README.md) | RefCounted | The base for one kind of data in a replay file (replay spec section 3). |
 | [ReplayDiagnosticsChannel](../assets/scripts/replay/REFERENCE.md#replaydiagnosticschannel) | [replay](../assets/scripts/replay/README.md) | ReplayEventChannel | Replay channel 6, "diagnostics": how each frame went, recorded alongside the game. |
 | [ReplayEntityChannel](../assets/scripts/replay/REFERENCE.md#replayentitychannel) | [replay](../assets/scripts/replay/README.md) | ReplayChannel | A replay channel with one record per pawn (replay spec section 3). |

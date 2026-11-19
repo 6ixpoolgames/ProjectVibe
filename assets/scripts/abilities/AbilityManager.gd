@@ -83,8 +83,6 @@ var _locks_dirty := true # an action started or stopped, so the locks are worked
 var _every_tick_abilities: Array[AbilityBase] = [] # abilities whose script overrides every_tick()
 var _action_bits := 0 # the input bits of every action's trigger_action: the presses anything here answers to
 var _follows_body := {} # trigger action -> true when an ability on it has its own can_start(), such as Jump needing the ground
-# Script -> whether it overrides every_tick(), worked out once per script. Static: shared by every manager.
-static var _overrides_every_tick := {}
 
 
 func _init() -> void:

@@ -19,18 +19,22 @@ Everything a pawn does, from walking to a three-hit combo: abilities started by 
  player keys / AI ─► ControllerManager (held actions, move, look)
                               │ read every tick
                               ▼
- AbilityManager ──► abilities (its children): Walk, Sprint, Jump, Dash, MeleeAttack, Parry, Knockback, Death
+ AbilityManager ──► abilities (its children): Walk, Sprint, Jump, Dash, MeleeAttack, RangedAttack, Parry, Knockback, Death
                         │
                         ├─► steps (children of an ability): Windup ─► TurnToFace, Sweep ─► OpenCombo, Recovery
+                        │                                    or Windup ─► TurnToFace, Fire ─► Recovery
                         └─► HitInterceptors (under an ability or a step): Invulnerability, Parry
 
- a Sweep step's hit ─► HitInfo ─► target's AbilityManager.receive_hit ─► its interceptors ─► its EffectManager (effects/)
+ a Sweep step's hit ─┐
+ a Fire step ─► Projectile (a networked entity, flown by the server) ─┴─► HitInfo ─► target's AbilityManager.receive_hit
+                                                                           ─► its interceptors ─► its EffectManager (effects/)
 ```
 
 - **`AbilityManager`** is a part on every pawn, with the abilities as its children. Each tick it runs one locomotion ability, then the actions: a press starts the ready ability on that action with the highest priority. It owns the cancelling rules, the combo counter, and the hit path (`receive_hit`), including death.
 - **`AbilityBase`** is one thing a pawn can do. LOCOMOTION moves the pawn every tick (Walk by default, Sprint while held); ACTION starts on a press, at once (Jump) or for a while (Dash, a swing). Its timers roll back.
-- **The t0 abilities:** `WalkAbility`, `SprintAbility`, `JumpAbility`, `DashAbility`, `MeleeAttackAbility`, `ParryAbility`, and two with no key: `KnockbackAbility` (on the pawn being hit) and `DeathAbility` (runs while Health is 0).
+- **The t0 abilities:** `WalkAbility`, `SprintAbility`, `JumpAbility`, `DashAbility`, `MeleeAttackAbility`, `RangedAttackAbility`, `ParryAbility`, and two with no key: `KnockbackAbility` (on the pawn being hit) and `DeathAbility` (runs while Health is 0).
 - **Steps** (`steps/`): an ability can be built from `AbilityStep` children that start each other and run side by side. A swing is Windup (which starts TurnToFace), then Sweep (the hit window), then OpenCombo and Recovery. MeleeAttack makes these from its settings if it has none.
+- **Projectiles** (`projectiles/`): a `Projectile` is a networked entity, one per shot, spawned by a `FireProjectileStep`. The server (or the offline game) moves it each tick and hits the first pawn or wall in its path; clients draw it from snapshots. Its hit carries the firing ability's on-hit effects. Design: pawn spec 8.24.
 - **Hit interceptors** (`interceptors/`): a `HitInterceptor` under an ability or a step can stop hits while it runs. MISS: the hit never arrives (`InvulnerabilityInterceptor`, a dash's first 0.18 s). TURN_AWAY: the hit arrives, then is stopped (`ParryInterceptor`, hits from the front).
 - **`HitInfo`** is one hit: attacker, target, direction, and the effects it carries. What a hit does is the effects system's job ([effects/README.md](../effects/README.md)).
 - Tags (`tags/TagRegistry`, `Tags` constants) name ability categories; `controllers/InputActions` turns action names into bits. `abilities/debug/AbilityDebugDraw` draws swing spheres and dash trails for samples and tests.
@@ -38,6 +42,8 @@ Everything a pawn does, from walking to a three-hit combo: abilities started by 
 ## How to use it
 
 **Make a new attack from steps.** Add a `MeleeAttackAbility` (or any `AbilityBase`) under the pawn's AbilityManager, set its `trigger_action`, and give it step children: a `WindupStep` (set `turn_step` to a `TurnToFaceStep` and `starts_when_finished` to the sweep), one or more `MeleeSweepStep`s (start and end angle, height and reach), then a `WaitStep` for recovery. Several sweeps in a row make a zig-zag or a spin. Steps with `starts_first` start with the ability; the ability ends when no step is left running. Put an `EffectApplier` (ON_HIT, TARGET) under the ability with the effects a hit applies, such as `resources/effects/swing_hit.tres`.
+
+**Make a ranged attack.** Add a `RangedAttackAbility` under the AbilityManager, set its `trigger_action` and `projectile_scene` (such as `scenes/projectiles/bolt.tscn`: a `Projectile` with a `TickStateComponent` recording position and velocity, and a `NetworkEntity`), and put an `EffectApplier` (ON_HIT, TARGET) under it, such as `resources/effects/bolt_hit.tres`. Register the projectile scene on every machine at startup, before hosting or joining: `Projectile.register_scene(scene)` (the type list is part of the join check). For the AI, give its brain an `AIAttackBehaviour` with `presses_action` set to the same action; it shoots from within the ability's `attack_range`. A volley is several `FireProjectileStep`s in a row.
 
 **Give a step its own rules.** A step's `interrupt_threshold` makes a cancel window (low during recovery, say); `ends_when_released` ends it when the key is let go. An `ApplyEffectStep` applies effects to the pawn at a moment in the ability.
 
@@ -99,4 +105,4 @@ pawn.ability_manager.receive_hit(hit)
 
 ## Tests
 
-`abilities/tests/`: `ability_selftest` (the manager's rules, Walk, Sprint, Jump, rollback), `ability_steps_selftest` (steps in order and side by side, failing, the safety limit, cancel windows, step rollback), `combat_selftest` (Dash, MeleeAttack, Knockback, the interrupt rules, hits on the server), `fight_selftest` (Health, damage, Death, revive), `attack_request_selftest` (presses as requests, jitter, combos), `attack_feel_selftest` (sweeps, turning, the hop, invulnerability), `hit_interceptor_selftest` (interceptor rules), `parry_selftest` (the parry and the AI's parry). Run them with `bash tools/run_tests.sh <name>`.
+`abilities/tests/`: `ability_selftest` (the manager's rules, Walk, Sprint, Jump, rollback), `ability_steps_selftest` (steps in order and side by side, failing, the safety limit, cancel windows, step rollback), `combat_selftest` (Dash, MeleeAttack, Knockback, the interrupt rules, hits on the server), `fight_selftest` (Health, damage, Death, revive), `attack_request_selftest` (presses as requests, jitter, combos), `attack_feel_selftest` (sweeps, turning, the hop, invulnerability), `hit_interceptor_selftest` (interceptor rules), `parry_selftest` (the parry and the AI's parry), `projectile_selftest` (bolts offline: hits, misses, walls, teams, parry, dash, gravity, an AI shooting, an AI keeping its distance and switching to melee up close), and `net_projectile_selftest` (bolts between processes at several network conditions, hits once on the server, hit rollback; about a minute, run by name or with `full net`). Run them with `bash tools/run_tests.sh <name>`.

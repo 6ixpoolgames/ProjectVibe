@@ -20,7 +20,8 @@ static func first_port() -> int:
 
 ## Starts every machine in machines ({name: {setting: value}}), waits for them all to finish, and returns {name: result}.
 ## A machine that didn't finish in time is stopped, and has "timed_out" in its result. owner is any node in the tree.
-static func run(owner: Node, run_name: String, machines: Dictionary, port: int) -> Dictionary:
+## Claude 2026-11-18: node_scene is the scene each machine runs (net_test_node by default; the projectile test has its own).
+static func run(owner: Node, run_name: String, machines: Dictionary, port: int, node_scene := NODE_SCENE) -> Dictionary:
 	# Claude 2026-11-05: each run of a test keeps its own folder, because two copies of the project share one user data folder.
 	var folder := ProjectSettings.globalize_path("user://net_test/%d/%s" % [OS.get_process_id(), run_name])
 	DirAccess.make_dir_recursive_absolute(folder)
@@ -36,7 +37,7 @@ static func run(owner: Node, run_name: String, machines: Dictionary, port: int) 
 		# this process, so script errors in a client or server went unseen.
 		var log_path := "%s/%s.log" % [folder, machine_name]
 		DirAccess.remove_absolute(log_path)
-		var arguments := PackedStringArray(["--headless", "--log-file", log_path, "--path", ProjectSettings.globalize_path("res://"), NODE_SCENE, "--"])
+		var arguments := PackedStringArray(["--headless", "--log-file", log_path, "--path", ProjectSettings.globalize_path("res://"), node_scene, "--"])
 		arguments.append("--name=%s" % machine_name)
 		arguments.append("--port=%d" % port)
 		arguments.append("--out=%s" % out_path)

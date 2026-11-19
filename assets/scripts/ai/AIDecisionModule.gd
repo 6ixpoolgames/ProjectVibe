@@ -236,8 +236,8 @@ func decide_in_cpp(manager: AIBehaviourManager, tick: int, event_priority: int, 
 		if _decisions_since_check >= _check_every:
 			_decisions_since_check = 0
 			_check_facts(manager)
-			var load := TickDriver.load_average
-			_check_every = FACT_CHECK_EVERY_IDLE if load < 0.5 else (FACT_CHECK_EVERY if load < 0.9 else FACT_CHECK_EVERY_BUSY)
+			var busy := TickDriver.load_average
+			_check_every = FACT_CHECK_EVERY_IDLE if busy < 0.5 else (FACT_CHECK_EVERY if busy < 0.9 else FACT_CHECK_EVERY_BUSY)
 	var chosen: int = _decider.decide_pawn(row, tick, event_priority, event_normal)
 	if check_against_gdscript:
 		_check_inputs(manager)

@@ -26,10 +26,10 @@ var _resolved := false
 
 
 ## Makes a chance condition in code.
-static func make(passing_chance: float, roll_salt: int, once_per: StringName = &"", mixed_in: StringName = &"") -> AIChanceCondition:
+static func make(passing_chance: float, salt_number: int, once_per: StringName = &"", mixed_in: StringName = &"") -> AIChanceCondition:
 	var condition := AIChanceCondition.new()
 	condition.chance = passing_chance
-	condition.salt = roll_salt
+	condition.salt = salt_number
 	condition.once_per_input = once_per
 	condition.salt_input = mixed_in
 	return condition

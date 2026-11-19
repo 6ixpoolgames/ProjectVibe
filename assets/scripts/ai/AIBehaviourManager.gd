@@ -125,9 +125,15 @@ func describe() -> Dictionary:
 		var states: Array = []
 		for state in behaviour.allowed_states:
 			states.append(String(state))
+		var lowest: Variant = null # JSON has no infinity
+		if behaviour.min_score > -INF:
+			lowest = behaviour.min_score
+		var fade: Variant = null
+		if behaviour.persistence_fade:
+			fade = behaviour.persistence_fade.values_at_rate()
 		behaviours.append({
 			"name": String(behaviour.name), "name_hash": behaviour.name_hash, "allowed_states": states,
-			"max_score": behaviour.max_score, "min_score": behaviour.min_score if behaviour.min_score > -INF else null, # JSON has no infinity
+			"max_score": behaviour.max_score, "min_score": lowest,
 			"needs_target": behaviour.needs_target, "presses_action": String(behaviour.presses_action),
 			"cooldown_ticks": behaviour.cooldown_ticks, "cooldown_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.cooldown_ticks),
 			"min_run_ticks": behaviour.min_run_ticks,
@@ -135,7 +141,7 @@ func describe() -> Dictionary:
 			"interrupt_threshold": behaviour.interrupt_threshold, "cannot_be_interrupted": behaviour.cannot_be_interrupted,
 			"score_jitter": behaviour.score_jitter, "effective_jitter": behaviour.effective_jitter(),
 			"persistence": behaviour.persistence, "has_persistence_fade": behaviour.persistence_fade != null,
-			"persistence_fade": behaviour.persistence_fade.values_at_rate() if behaviour.persistence_fade else null,
+			"persistence_fade": fade,
 			"script": behaviour.get_script().resource_path.get_file() if behaviour.get_script() else "",
 			# How C++ judges it: from its conditions and curves, or by asking GDScript for a behaviour with its own code.
 			"scorer": "given" if behaviour.has_own_code() else "conditions",

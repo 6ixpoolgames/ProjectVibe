@@ -72,6 +72,11 @@ func _init() -> void:
 # or tick of its own.
 
 
+## Its attack_range: the AI swings from within it.
+func attack_reach() -> float:
+	return attack_range
+
+
 ## Finds its steps, after making the default ones from its settings if it has none of its own.
 func collect_steps() -> void:
 	var has_own := false

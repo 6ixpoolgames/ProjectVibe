@@ -159,10 +159,10 @@ func _test_look_at_point() -> void:
 	pawn.controller_manager.look_pitch = -0.2
 	var kept := ai.take_input_command(0)
 	_check(is_equal_approx(kept.look_yaw, 0.7) and is_equal_approx(kept.look_pitch, -0.2), "not told where to look: it keeps the pawn's own look")
-	ai.look_at_point(pawn.global_position + Vector3(0, 0, -5))
+	ai.look_at_point(pawn.global_position + Vector3(0, ai.look_from_height, -5)) # pitch is measured from look_from_height (Claude 2026-11-18)
 	var straight := ai.take_input_command(0)
 	_check(is_zero_approx(straight.look_yaw) and is_zero_approx(straight.look_pitch), "look_at_point: straight ahead is yaw 0")
-	ai.look_at_point(pawn.global_position + Vector3(-5, 5, 0))
+	ai.look_at_point(pawn.global_position + Vector3(-5, 5 + ai.look_from_height, 0))
 	var left_up := ai.take_input_command(0)
 	_check(is_equal_approx(left_up.look_yaw, PI / 2) and is_equal_approx(left_up.look_pitch, PI / 4), "and to the left and up is a quarter turn, 45 degrees up")
 	ai.stop_looking()

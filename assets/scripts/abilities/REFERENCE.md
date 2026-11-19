@@ -13,13 +13,16 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [KnockbackAbility](#knockbackability)
 - [MeleeAttackAbility](#meleeattackability)
 - [ParryAbility](#parryability)
+- [RangedAttackAbility](#rangedattackability)
 - [SprintAbility](#sprintability)
 - [WalkAbility](#walkability)
 - [HitInterceptor](#hitinterceptor)
 - [InvulnerabilityInterceptor](#invulnerabilityinterceptor)
 - [ParryInterceptor](#parryinterceptor)
+- [Projectile](#projectile)
 - [AbilityStep](#abilitystep)
 - [ApplyEffectStep](#applyeffectstep)
+- [FireProjectileStep](#fireprojectilestep)
 - [MeleeSweepStep](#meleesweepstep)
 - [OpenComboStep](#opencombostep)
 - [TurnToFaceStep](#turntofacestep)
@@ -100,6 +103,7 @@ Rollback: whatever an ability keeps between ticks must be named in `get_rollback
 - `end_steps(reason: String = "cancelled") -> void`: Stops every running step with this reason. The manager calls it when the ability finishes or is cancelled.
 - `move_input() -> Vector3`: The direction the pawn is told to go, in world space, up to length 1.
 - `look_yaw() -> float`: Where the pawn is told to look, around the vertical, in radians.
+- `attack_reach() -> float`: How far away a target may be for the AI to use this as an attack, in metres; 0 means it isn't an attack. The AI's Attack behaviour reads it, so any attack (melee, ranged, a game's own) can be driven by one behaviour.
 - `view_ticks_behind() -> float`: How many ticks behind its own the controller drew other pawns, for lag compensation.
 - `held_actions() -> int`: The held actions this tick, as InputActions bits.
 - `previous_held_actions() -> int`: The held actions last tick, as InputActions bits, so a press can be told from a hold.
@@ -331,6 +335,7 @@ A swing is a [`WindupStep`](#windupstep) (which starts a [`TurnToFaceStep`](#tur
 
 ### Functions
 
+- `attack_reach() -> float`: Its attack_range: the AI swings from within it.
 - `collect_steps() -> void`: Finds its steps, after making the default ones from its settings if it has none of its own.
 - `start() -> void`
 - `swing_phase() -> Dictionary`: Where the swing is, for visuals: "windup", "hit" or "recovery" with progress 0 to 1 (smooth between ticks), or "none".
@@ -358,6 +363,36 @@ This ability is the stance: it runs for duration (0.35 s, then a 1.5 s cooldown)
 - `tick(dt: float) -> void`
 - `guard() -> ParryInterceptor`: Its [`ParryInterceptor`](#parryinterceptor), or null. The debug drawing reads the front's width from it.
 - `make_default_interceptors() -> void`: With no interceptor of its own, a ParryInterceptor with the default front (120 degrees).
+
+## RangedAttackAbility
+
+`res://assets/scripts/abilities/RangedAttackAbility.gd`, extends [`AbilityBase`](#abilitybase)
+
+A ranged attack: an action bound to &"primary" that fires a projectile, built from steps.
+
+A shot is a [`WindupStep`](#windupstep) (which starts a [`TurnToFaceStep`](#turntofacestep)), a [`FireProjectileStep`](#fireprojectilestep), then a [`WaitStep`](#waitstep) for recovery. With no [`AbilityStep`](#abilitystep) children of its own it makes those from the settings below; place steps of your own for another pattern (a volley is several fire steps). It locks out movement and other combat while it runs; Dash cancels it. What a hit does comes from its EffectApplier children, carried by the projectile. Design: pawn spec 8.24.
+
+```gdscript
+# in a pawn's AbilityManager: a RangedAttack with projectile_scene set, and an EffectApplier child (on hit)
+pawn.ability_manager.can_start(&"primary")
+```
+
+### Settings and properties
+
+- `projectile_scene: PackedScene`: The projectile it fires.
+- `windup_ticks: int` = `12`: Ticks of aiming before the shot, at 60 a second.
+- `recovery_ticks: int` = `18`: Ticks after the shot before it's over, at 60 a second.
+- `attack_range: float` = `14.0`: How far away a target may be for the AI to shoot, in metres (the AI's reach; the projectile's own range can be longer).
+- `muzzle_height: float` = `1.3`: Where the projectile leaves from: metres above the feet and in front of the pawn.
+- `muzzle_forward: float` = `0.5`
+- `windup_turn_degrees_per_second: float` = `-1.0`: How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnSpeed stat.
+- `warns_targets: bool` = `true`: On: the first enemy on the projectile's path hears it's coming, so its AI can parry.
+
+### Functions
+
+- `attack_reach() -> float`: Its attack_range: the AI shoots from within it.
+- `collect_steps() -> void`: Finds its steps, after making the default ones from its settings if it has none of its own.
+- `start() -> void`
 
 ## SprintAbility
 
@@ -445,6 +480,40 @@ A TURN_AWAY [`HitInterceptor`](#hitinterceptor) (pawn spec 8.23): the hit arrive
 - `front_degrees_now() -> float`: The front's width now. One place to read it, so it can come from a stat later.
 - `faces(point: Vector3) -> bool`: True if a point is in front of the pawn, within the front. A point right on top of the pawn counts as in front.
 
+## Projectile
+
+`res://assets/scripts/abilities/projectiles/Projectile.gd`, extends [`Node3D`](https://docs.godotengine.org/en/stable/classes/class_node3d.html)
+
+A projectile in flight: a networked entity that moves each tick and hits the first pawn (or the ground) in its path.
+
+Fired by a [`FireProjectileStep`](#fireprojectilestep) through `spawn_from()`, which spawns it with `NetworkSession.spawn()` (offline too) as a type named after its scene. The server, or the offline game, moves it and decides hits: each tick it sweeps its path against pawns and the world. Clients draw it from snapshots. A hit goes to the target's AbilityManager like a swing's, carrying the firing ability's on-hit effects, so damage, knockback, parries and dash invulnerability work as for melee. It despawns on a hit, on the world, or past its range or lifetime. Design: pawn spec 8.24.
+
+```gdscript
+Projectile.spawn_from(preload("res://assets/scenes/projectiles/bolt.tscn"), ability, origin, direction)
+```
+
+### Settings and properties
+
+- `speed: float` = `30.0`: Metres a second at launch.
+- `gravity: float` = `0.0`: Metres a second squared downward; 0 flies straight.
+- `radius: float` = `0.15`: Radius of the hit sphere swept along its path, in metres.
+- `max_range: float` = `40.0`: Metres it can fly before it's gone.
+- `max_lifetime: float` = `3.0`: Seconds it can fly before it's gone.
+- `hits_world: bool` = `true`: On: the level's solid geometry (world_mask) stops it.
+- `world_mask: int` = `1`: The physics layers that stop it (the ground and walls).
+- `velocity: Vector3` = `Vector3(0, 0, 0)`: Its velocity in metres a second; recorded with its position, so clients can face it along its flight.
+- `shooter: Pawn` = `null`: Who fired it, on the server; null on clients or once the shooter is gone.
+- `team: int` = `0`: The firing pawn's team, which it doesn't hit unless hits_own_team.
+- `hits_own_team: bool` = `false`: On: it can hit its own team.
+
+### Functions
+
+- `type_name_for(scene: PackedScene) -> String` *(static)*: The network type name for a projectile scene.
+- `register_scene(scene: PackedScene) -> void` *(static)*: Registers a projectile scene as a network type, once. Every machine does it at startup, before hosting or joining: the list of types is part of the join check, so one registered later stops new players joining (the faction samples register the bolt).
+- `spawn_from(scene: PackedScene, from_ability: AbilityBase, origin: Vector3, direction: Vector3) -> Projectile` *(static)*: Server or offline: fires a projectile from this ability's pawn at origin along direction. Null on a client, or if it couldn't spawn.
+- `launch(from_ability: AbilityBase, direction: Vector3) -> void`: Sets it off from its ability: shooter, team, effects and velocity. spawn_from calls it.
+- `is_done() -> bool`: True once it has hit something or flown its course, on the machine that decides it.
+
 ## AbilityStep
 
 `res://assets/scripts/abilities/steps/AbilityStep.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
@@ -509,6 +578,28 @@ For effects that belong to a moment in an ability, such as after its hit, rather
 - `setup() -> void`
 - `enter() -> void`
 - `tick(_dt: float) -> int`
+
+## FireProjectileStep
+
+`res://assets/scripts/abilities/steps/FireProjectileStep.gd`, extends [`AbilityStep`](#abilitystep)
+
+Fires a projectile on its first tick, from the pawn's muzzle point toward where it looks.
+
+Server or offline only, and never in a rollback replay: a client doesn't spawn anything, it sees the server's projectile arrive. Aim is the pawn's look (yaw and pitch, so an AI looking at a target's chest aims at it). If `warns_targets`, the first enemy on the straight line ahead is told a hit is coming, so its AI can parry or dodge. Design: pawn spec 8.24.
+
+### Settings and properties
+
+- `projectile_scene: PackedScene`: The projectile scene to fire: a [`Projectile`](#projectile) with a TickStateComponent and a NetworkEntity. Register it at startup (`Projectile.register_scene()`) on every machine.
+- `muzzle_height: float` = `1.3`: Where it leaves from: metres above the pawn's feet.
+- `muzzle_forward: float` = `0.5`: Where it leaves from: metres in front of the pawn.
+- `warns_targets: bool` = `true`: On: the first enemy on the straight path ahead hears a hit is coming (AIContextComponent.note_incoming_attack).
+- `fired: Projectile` = `null`: The projectile fired on this run, on the server; null on clients.
+
+### Functions
+
+- `tick(_dt: float) -> int`
+- `muzzle_point() -> Vector3`: The point it fires from, in the world.
+- `aim_direction() -> Vector3`: The direction it fires in: the look yaw and pitch.
 
 ## MeleeSweepStep
 

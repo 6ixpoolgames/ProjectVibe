@@ -20,6 +20,8 @@
 ## C++ (the main path, the default with the module in the game); with --scopes, a C++ decision shows as ai.decide.cpp.
 ## Claude 2026-11-17: --decision-interval=N sets every AI's decision_interval_ticks (15 by default, 4 decisions a second), to compare
 ## what deciding less often saves and how the fight goes (the dead column).
+## Claude 2026-11-18 (ranged attack, pawn spec 8.24): every pawn has a RangedAttack and a Shoot behaviour now, and each row has a bolts
+## line. --no-ranged switches the AI's shooting off and --melee-off its melee, to compare; projectiles suit smaller sizes (25 to 100).
 extends Node
 
 var _size := 50
@@ -38,6 +40,11 @@ var _shadow := false # Claude 2026-11-17: --ai-shadow
 var _module: AIDecisionModule = null
 var _gdscript_only := false # Claude 2026-11-18: --ai-gdscript
 var _decision_interval := -1 # Claude 2026-11-17: --decision-interval=N; -1 leaves the scenes' own
+var _no_ranged := false # Claude 2026-11-18: --no-ranged: the AI never shoots (the Shoot behaviours find no attack)
+var _melee_off := false # Claude 2026-11-18: --melee-off: the AI only shoots (the melee Attack behaviours find no attack)
+var _bolts_fired := 0 # Claude 2026-11-18: projectiles spawned since the last row
+var _bolts_in_flight := {}
+var _bolts_most := 0
 
 
 func _ready() -> void:
@@ -71,6 +78,10 @@ func _ready() -> void:
 			_gdscript_only = true
 		elif argument.begins_with("--decision-interval="): # Claude 2026-11-17
 			_decision_interval = int(argument.trim_prefix("--decision-interval="))
+		elif argument == "--no-ranged": # Claude 2026-11-18
+			_no_ranged = true
+		elif argument == "--melee-off":
+			_melee_off = true
 	if not _visuals:
 		get_tree().node_added.connect(_on_node_added)
 	# Claude 2026-11-16 (movement experiments): each pawn's movement settings, set as it enters the tree.
@@ -87,6 +98,22 @@ func _ready() -> void:
 		get_tree().node_added.connect(func(node: Node) -> void:
 			if node is AIContextComponent:
 				(node as AIContextComponent).decision_interval_ticks = _decision_interval)
+	# Claude 2026-11-18: the ranged attack. An Attack behaviour whose action has no attack is never available, so pointing it at an
+	# action nothing is bound to switches it off without removing it.
+	if _no_ranged or _melee_off:
+		get_tree().node_added.connect(func(node: Node) -> void:
+			var attack := node as AIAttackBehaviour
+			if attack == null:
+				return
+			var ranged := attack.presses_action == &"ability_3"
+			if (ranged and _no_ranged) or (not ranged and _melee_off):
+				attack.presses_action = &"switched_off")
+	NetworkSession.entity_spawned.connect(func(entity: NetworkEntity) -> void:
+		if entity.get_parent() is Projectile:
+			_bolts_fired += 1
+			_bolts_in_flight[entity.entity_id] = true
+			_bolts_most = maxi(_bolts_most, _bolts_in_flight.size()))
+	NetworkSession.entity_despawned.connect(func(entity_id: int) -> void: _bolts_in_flight.erase(entity_id))
 	if not _record and GameMode.replay_recorder:
 		GameMode.replay_recorder.enabled = false
 	var arena: Node = load("res://assets/scenes/samples/mass_battle_sample.tscn").instantiate()
@@ -156,6 +183,11 @@ func _ready() -> void:
 		@warning_ignore("integer_division") # whole seconds on purpose
 		print("%4ds   %5d %6d %4d   %8.2f  %8.2f  %6.2f  %5.2f   %7.2f  %6d%%  %15.1f (%6.1f)  %13.1f  %9.1f" % [i / TickDriver.get_tick_rate(), n["pawns"], n["frozen"], n["dead"], n["input_ms"], n["simulate_ms"], n["record_ms"], n["other_ms"], n["tick_ms"], int(100.0 * n["tick_ms"] / n["budget_ms"]), n["physics_ms"], n["physics_worst_ms"], n["outside_ticks_ms"], n["dropped_per_second"]])
 		print("        load step %d   AI pawns at every tick/2nd/4th %s" % [s.get("load_step", 1), DiagnosticsManager.steps_text(s.get("step_counts", {}))]) # Claude 2026-11-16
+		var flight: Array = s.scopes.get(&"projectile.flight", [0.0, 0.0]) # Claude 2026-11-18
+		print("        bolts: %.1f fired a second, %d in flight now (most %d), flight %.2f ms a frame, %.1f us each" % [_bolts_fired / 10.0,
+			_bolts_in_flight.size(), _bolts_most, flight[0], 1000.0 * flight[0] / maxf(flight[1], 1.0)])
+		_bolts_fired = 0
+		_bolts_most = _bolts_in_flight.size()
 		# Claude 2026-11-16 (movement experiments): movement: move_and_slide's cost and calls a frame, and skipped moves.
 		var moves: Array = s.scopes.get(&"pawn.move_and_slide", [0.0, 0.0])
 		var skipped: Array = s.scopes.get(&"pawn.move_skipped", [0.0, 0.0])

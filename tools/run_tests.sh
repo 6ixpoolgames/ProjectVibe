@@ -10,7 +10,7 @@
 #
 # Use, from Git Bash, anywhere:
 #   bash tools/run_tests.sh full                 every local suite (before a commit or push)
-#   bash tools/run_tests.sh full net             the same, plus the two shorter network suites (net_pawn, net_streaming)
+#   bash tools/run_tests.sh full net             the same, plus the shorter network suites (net_pawn, net_streaming, net_projectile)
 #   bash tools/run_tests.sh <name> [<name>...]   only suites whose file name contains one of these, e.g. replay kill_floor
 #                                                (a slow suite such as net_selftest runs when it's named like this)
 # Godot is looked for beside the project folder. To use another one:  GODOT="/path/to/godot" bash tools/run_tests.sh full
@@ -24,8 +24,8 @@ if [ ! -x "$GODOT" ] && ! command -v "$GODOT" > /dev/null; then
 fi
 
 # Suites "full" leaves out: slow ones (run by name, or with "net"), and scenes that are helpers or print numbers, not tests.
-SLOW='net_selftest|net_streaming_selftest|net_pawn_selftest'
-NET_SUITES="assets/scripts/pawn/tests/net_pawn_selftest.tscn assets/scripts/streaming/tests/net_streaming_selftest.tscn"
+SLOW='net_selftest|net_streaming_selftest|net_pawn_selftest|net_projectile_selftest'
+NET_SUITES="assets/scripts/pawn/tests/net_pawn_selftest.tscn assets/scripts/streaming/tests/net_streaming_selftest.tscn assets/scripts/abilities/tests/net_projectile_selftest.tscn"
 
 failed_suites=()
 ran=0
