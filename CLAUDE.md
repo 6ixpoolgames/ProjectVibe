@@ -31,7 +31,7 @@ A Godot 4.7 base for real-time 3D games (GDScript, with hot paths in a C++ GDExt
 
 ## Map
 
-Each system's README has the detail. Specs are in `docs/` (pawn, netcode, navigation, scaling, streaming, replay, diagnostics, world, wiki); the plan is `docs/ROADMAP.md`; every class is listed in `docs/CLASS_INDEX.md`.
+Each system's README has the detail. Specs are in `docs/` (pawn, netcode, navigation, scaling, streaming, replay, diagnostics, world, wiki, and the ability and state store drafts that the coming refactor follows); the plan is `docs/ROADMAP.md`; how the modules connect, today and after the refactor, is `docs/ARCHITECTURE.md`; every class is listed in `docs/CLASS_INDEX.md`.
 
 | Folder (`assets/scripts/`) | What it is |
 |---|---|
