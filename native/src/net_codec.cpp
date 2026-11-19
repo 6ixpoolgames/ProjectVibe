@@ -35,7 +35,7 @@ enum Tag : uint8_t {
 };
 
 // The encoding numbers and the rounding steps (MM, CM, PI_VALUE, TAU_VALUE, U16_STEP and BYTE_STEP) come from state_encoding.h,
-// shared with TickStateRecorder.
+// shared with StateStore.
 using namespace state_encoding;
 
 const int64_t PROTOCOL_VERSION = 5; // the same as NetPackets.PROTOCOL_VERSION: bump both when the format changes

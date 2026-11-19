@@ -136,24 +136,15 @@ func _apply_role_to_state() -> void:
 	refresh_input_saving()
 
 
-## Works out what the TickStateComponent saves and rounds: a server saves only snapshot ticks (and inputs only if a client predicts it);
-## offline saves nothing unless [member keep_history_offline]; a client saves every tick, for replays.
-## [br]An entity NetworkSession never configured (made directly, as tests do) saves and rounds everything.
+## Works out which inputs the TickStateComponent saves: a server only those a client predicting it needs; offline none unless
+## [member keep_history_offline]; a client every tick, for replays. State is recorded every tick everywhere, in the state store.
+## [br]An entity NetworkSession never configured (made directly, as tests do) saves everything.
 func refresh_input_saving() -> void:
 	if state == null:
 		return
 	var offline: bool = session != null and not session.is_server() and not session.is_client()
 	var on_server: bool = role == Role.AUTHORITY and session != null and session.is_server()
 	state.skip_input_capture = (on_server and not (is_predicted or session.default_predicted)) or (offline and not keep_history_offline)
-	# A client re-runs the entities it predicts: its own (owned by it, so not by this server or nobody) and any marked predicted.
-	var a_client_predicts: bool = session == null or is_predicted or session.default_predicted or (owner_peer != 0 and not is_local)
-	state.rounds_every_tick = not ((on_server and not a_client_predicts) or (offline and not keep_history_offline))
-	if on_server:
-		state.history_interval_ticks = session.get_snapshot_interval()
-	elif offline and not keep_history_offline:
-		state.history_interval_ticks = 0
-	else:
-		state.history_interval_ticks = 1
 
 
 ## Stops every tick this entity causes (its parent's, its TickState's, its own), or starts them again; state stays as it is.
@@ -174,6 +165,8 @@ func is_paused() -> bool:
 func _apply_role_to_driver() -> void:
 	if _driver == null or _root == null or not is_inside_tree():
 		return
+	if state:
+		state.set_recording(not _paused)
 	if _paused:
 		_driver.unregister(_root)
 		_driver.unregister(self)

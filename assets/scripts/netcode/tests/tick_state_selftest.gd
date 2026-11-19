@@ -230,10 +230,9 @@ func _ready() -> void:
 	print("--- Tick state and rollback self-test ---")
 	nt = get_node("/root/TickDriver")
 	nt.active = false # the plain tests drive ticks by hand
-	# Claude 2026-11-09: -- --gdscript-record runs every test here on the GDScript recording path instead of C++.
-	if OS.get_cmdline_user_args().has("--gdscript-record"):
-		TickStateComponent.use_native = false
-		print("        (recording in GDScript)")
+	# Claude 2026-11-19: -- --gdscript-store runs every test here on the GDScript store instead of C++ (TickDriver reads it).
+	if not TickDriver.use_native_store:
+		print("        (recording in the GDScript store)")
 	_test_encodings()
 	_test_native_recording() # Claude 2026-11-09
 	_test_declarations()
@@ -291,15 +290,14 @@ func _test_encodings() -> void:
 	_check(slow_cm == 0.0, "1 cm would stall it completely")
 
 
-## Claude 2026-11-09: the C++ recorder (TickStateRecorder) against GDScript. First the rounding on its own, value by value, then whole
-## recordings of the same entity both ways, then the history interval (every Nth tick, or never) on both paths.
+## Claude 2026-11-09, reworked 2026-11-19 for the state store: the C++ store (StateStore) against its GDScript twin (StateStoreGD).
+## First the rounding on its own, value by value, then whole recordings of the same entity through each store.
 func _test_native_recording() -> void:
-	if not ClassDB.class_exists(&"TickStateRecorder"):
-		print("        no C++ library here: only the GDScript path is tested")
+	if not ClassDB.class_exists(&"StateStore"):
+		print("        no C++ library here: only the GDScript store is tested")
 		return
-	var default_native := TickStateComponent.use_native
 	# Rounding: thousands of values, with the awkward ones on purpose: half steps, the wrap at PI, negatives, wrong types.
-	var recorder: Object = ClassDB.instantiate(&"TickStateRecorder")
+	var cpp_store: Object = ClassDB.instantiate(&"StateStore")
 	var pick := RandomNumberGenerator.new()
 	pick.seed = 2026
 	var values: Array = [PI, -PI, PI + 0.000001, -PI - 0.000001, TAU, 0.0, -0.0, 5, true, "text", Vector3.ZERO, null]
@@ -319,7 +317,7 @@ func _test_native_recording() -> void:
 	for value in values:
 		for encoding in encodings:
 			var by_gdscript: Variant = StateEncoding.quantize(value, encoding)
-			var by_cpp: Variant = recorder.quantize(value, encoding)
+			var by_cpp: Variant = cpp_store.quantize(value, encoding)
 			compared += 1
 			# typeof catches a value that comes back as another type, which == alone might let through (5 == 5.0).
 			if typeof(by_cpp) != typeof(by_gdscript) or by_cpp != by_gdscript:
@@ -327,43 +325,32 @@ func _test_native_recording() -> void:
 					different.append("%s %s: %s vs %s" % [encoding, value, by_gdscript, by_cpp])
 	_check(different.is_empty(), "C++ rounding gives exactly GDScript's values, %d values and encodings compared %s" % [compared, str(different)])
 
-	# Whole recordings: the same entity, recorded by each path, saves exactly the same states and ends up exactly the same.
-	var native := _record_thing(true, 1)
-	var gdscript := _record_thing(false, 1)
-	_check(native["fast"] and not gdscript["fast"], "the C++ path really recorded the first run, and GDScript the second")
+	# Whole recordings: the same entity, recorded through each store, saves exactly the same states and ends up exactly the same.
+	var native := _record_thing(true)
+	var gdscript := _record_thing(false)
+	_check(native["bound"] and gdscript["bound"], "both stores read the entity themselves once its entries are matched")
 	_check(native["saved"] == gdscript["saved"] and native["saved"].size() == 40, "C++ and GDScript save exactly the same state, tick by tick (%d ticks, %d entries each)" % [native["saved"].size(), native["saved"][0].size()])
 	_check(native["final"] == gdscript["final"], "and leave the entity exactly the same")
 	var first_tick: Dictionary = native["saved"][0]
 	_check(first_tick["trail"] == [[1]] and native["saved"][2]["trail"] == [[1], [2], [3]], "containers are copied, so each tick keeps its own (%s, %s)" % [first_tick["trail"], native["saved"][2]["trail"]])
 
-	# The history interval: every 2nd tick saved, or none; values are rounded every tick either way. Both paths.
-	for use_cpp in [true, false]:
-		var path := "C++" if use_cpp else "GDScript"
-		var every_second := _record_thing(use_cpp, 2)
-		_check(every_second["kept_ticks_ok"], "%s: history every 2nd tick: only ticks that are multiples of 2 are saved" % path)
-		_check(every_second["final"] == native["final"], "%s: and the entity ends up exactly as when every tick is saved" % path)
-		var never := _record_thing(use_cpp, 0)
-		_check(never["saved_count"] == 0 and never["final"] == native["final"], "%s: history never: nothing is saved, and values are still rounded every tick (the same end state)" % path)
-
-	# A node that goes away mid-run: the C++ path hands over to GDScript, which skips that entry, with no error.
-	TickStateComponent.use_native = true
-	var thing := _make_recorded_thing(1)
+	# A node that goes away mid-run: the store hands the entity back to its component, which saves the rest and skips that entry.
+	var thing := _make_recorded_thing()
 	var state: TickStateComponent = thing.get_node("TickState")
 	for i in 3:
 		nt.step()
-	var was_fast: bool = state._recorder_ready
+	var was_bound: bool = nt.store.is_bound(state.get_store_handle())
 	var part := thing.get_node("Part")
 	thing.remove_child(part)
 	part.free()
 	nt.step()
 	var saved_after := state.get_state(nt.tick)
-	_check(was_fast and not state._recorder_ready and saved_after.has("pos") and not saved_after.has("Part:level"), "a freed node: C++ hands over to GDScript, which saves the rest and skips that entry")
+	_check(was_bound and not nt.store.is_bound(state.get_store_handle()) and saved_after.has("pos") and not saved_after.has("Part:level"), "a freed node: the store hands over to GDScript, which saves the rest and skips that entry")
 	thing.free()
-	TickStateComponent.use_native = default_native
 
 
 # Claude 2026-11-09: a RecordedThing with its Part and a TickStateComponent listing every kind of entry.
-func _make_recorded_thing(interval: int) -> RecordedThing:
+func _make_recorded_thing() -> RecordedThing:
 	var thing := RecordedThing.new()
 	thing.name = "RecordedThing"
 	var part := Node.new()
@@ -377,40 +364,30 @@ func _make_recorded_thing(interval: int) -> RecordedThing:
 	var state := TickStateComponent.new()
 	state.name = "TickState"
 	state.state_properties = ["pos", "near @vector3_cm", "heading @angle_u16", "dir @angle_byte", "speed", "count", "flag", "trail", "flat", ":rotation:y @angle_u16", "Part:level"]
-	state.history_interval_ticks = interval
 	thing.add_child(state)
 	add_child(thing)
 	nt.register(thing) # so its _tick_simulate runs
 	return thing
 
 
-# Claude 2026-11-09: records a RecordedThing for 40 ticks on one path, and returns what it saved (by its own tick count), how it ended,
-# and whether the C++ path held the list.
-func _record_thing(use_cpp: bool, interval: int) -> Dictionary:
-	var default_native := TickStateComponent.use_native
-	TickStateComponent.use_native = use_cpp
-	var thing := _make_recorded_thing(interval)
+# Claude 2026-11-09, 2026-11-19: records a RecordedThing for 40 ticks through one store, and returns what it saved, how it ended, and
+# whether the store read it by itself.
+func _record_thing(use_cpp: bool) -> Dictionary:
+	nt.replace_store(ClassDB.instantiate(&"StateStore") if use_cpp else StateStoreGD.new())
+	var thing := _make_recorded_thing()
 	var state: TickStateComponent = thing.get_node("TickState")
 	var saved: Array = []
-	var saved_count := 0
-	var kept_ticks_ok := true
 	for i in 40:
 		nt.step()
-		var kept := state.has_state(nt.tick)
-		if kept:
-			saved_count += 1
+		if state.has_state(nt.tick):
 			saved.append(state.get_state(nt.tick))
-		if interval > 0 and kept != (nt.tick % interval == 0):
-			kept_ticks_ok = false
 	var result := {
 		"saved": saved,
-		"saved_count": saved_count,
-		"kept_ticks_ok": kept_ticks_ok,
-		"fast": state._recorder_ready,
+		"bound": nt.store.is_bound(state.get_store_handle()),
 		"final": [thing.pos, thing.near, thing.heading, thing.dir, thing.speed, thing.count, thing.flag, thing.trail, thing.flat, thing.rotation.y, thing.get_node("Part").get("level")],
 	}
 	thing.free()
-	TickStateComponent.use_native = default_native
+	nt.replace_store(null)
 	return result
 
 

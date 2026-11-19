@@ -12,11 +12,16 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| C++ classes with a GDScript twin | `ai_memory_store.cpp` / `AIMemoryStoreGD.gd`, `net_codec.h` / `NetPackets.gd`, `tick_state_recorder.h` / `TickStateComponent.gd`, `replay_motion_packer.h` / `ReplayMotionChannel.gd`, `crowd_batch.h` / `CrowdMover._move_batch` | The same rules written twice, so every change is made and tested twice, and a third game system wanting the same speed-up adds a third copy. Kept on purpose while the library might be missing on a platform; once it ships everywhere, the GDScript copies could go. The owner's call | L |
+| C++ classes with a GDScript twin | `ai_memory_store.cpp` / `AIMemoryStoreGD.gd`, `net_codec.h` / `NetPackets.gd`, `state_store.h` / `StateStoreGD.gd`, `replay_motion_packer.h` / `ReplayMotionChannel.gd`, `crowd_batch.h` / `CrowdMover._move_batch` | The same rules written twice, so every change is made and tested twice, and a third game system wanting the same speed-up adds a third copy. Kept on purpose while the library might be missing on a platform; once it ships everywhere, the GDScript copies could go. The owner's call | L |
 | One thread pool | `worker_pool.h` (nav's `WorkerPool`) and `JobScheduler` | Two sets of worker threads in one library compete on a 4-core server. Nav's tile builds could be a job kind on `JobScheduler` | M |
 | Rename `SightGeometry` | `sight_geometry.h`, with `ai/senses/SightGeometryFeeder.gd` | It's the library's thread-safe copy of the level's collision, and the crowd mover uses it for the ground; the name says sight. `WorldGeometry`, with its feeder outside `ai/`, says what it does | S |
 | Test hooks in `NavServer` | `debug_fail_tile_commits`, `debug_limit_path_corners` in `nav_server.h` (and `GroundDomain`) | Test code bound into the shipping class. A test-only build flag or subclass would keep them out | S |
 | `NavHooks` settings that do nothing | `send_estimates`, `send_link_hints` in `nav_hooks.h` | A designer sees two switches in the inspector that change nothing. Hide them until the coarse planner (estimates) or link hints exist | S |
+
+## 2026-11-19
+
+- **`StateStore`** (new): the central record of every gameplay entity's state, tick by tick (state store spec; refactor step 1). Layouts, generational handles, a rotating buffer of frames, the commit (read, round, write back, copy), partial commits, `load_row`, `get_column`, `frame_checksum`, `verify_nodes`. Its twin is `assets/scripts/state_store/StateStoreGD.gd`; details in [its changelog](../assets/scripts/state_store/CHANGELOG.md).
+- **`TickStateRecorder` removed**: `StateStore` does its reading and rounding (the same engine functions, so values match `StateEncoding.quantize` exactly).
 
 ## 2026-11-18
 

@@ -649,6 +649,8 @@ All of this ran in the editor build of Godot with a debug C++ library, because n
 
 Result: saving state went from about 47 to about 4.5 µs per pawn per tick, and a tick at 100 standing pawns from 8.4 to 3.9 ms. Most of what's left is reading and rounding, which every tick needs, so saving less adds little on top.
 
+*Superseded 2026-11-19 (state store refactor, step 1):* the state store (`StateStore`, [STATE_STORE_SPEC.md](../state_store/STATE_STORE_SPEC.md)) replaced `TickStateRecorder` and the per-component history, and every machine records every tick, so `history_interval_ticks` is gone.
+
 ---
 
 ## 15. Defaults and escape clauses

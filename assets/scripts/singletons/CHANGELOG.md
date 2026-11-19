@@ -15,6 +15,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move the load ladder's rule to a GameMode module | `_note_tick_cost()`, the ladder's settings and `get_match_options()` in `TickDriver.gd` | A policy for shedding AI work, with its own tuning and match options, inside the universal tick driver. The owner wants autoloads to hold only what every game needs: the driver could report each tick's cost, and a module beside `AIActivationManager` own the rule | M |
 | One timing tool | `profile_enabled`, `profile`, `_profile_phase()` in `TickDriver.gd` | A second way of timing work beside diagnostics' `PerfScopes`, with its own names and its own switch | S |
 
+## 2026-11-19
+
+- **The commit phase and the state store** (state store spec 4 and 9, refactor step 1): `store` (the C++ `StateStore`, or `StateStoreGD` with `-- --gdscript-store`), `history_depth` (64), `replace_store()`. After the record phase, `_commit()` writes every active entity's row in one pass and hands the ones the store couldn't read to their owner's `_store_gather()`. A rollback's re-run rewrites the loaded entities' rows (`get_store_handle()`, `commit_entities`). `verify_store_each_tick` (off) is the tripwire: at the start of a tick, nodes must hold what the last commit recorded; mismatches are counted in `store_mismatches` and warned about. `profile` has a `commit` phase.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): all four autoloads. The tick driver's rules (registering, time, the load ladder, rollback), the session's tick order, rules, time dilation, snapshot rules and packet formats, and the nav marker manager's storage and search notes moved to the README ("How it works"). Stale comment fixed: the session's `disconnected` signal comment said it came "after" `connection_ended` gives the reason; the code sends `connection_ended` first, and the comment now says so. `GameMode`'s class text no longer lists the modules, which its member comments and `DEFAULT_MODULES` already do.

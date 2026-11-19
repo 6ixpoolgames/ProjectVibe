@@ -331,7 +331,7 @@ func _summary(seconds: float) -> Dictionary:
 	# The animation category: every "animation." scope added up, ms a frame (animation runs once a frame, in the scripts part).
 	out["animation_ms"] = _animation_usec(scope_sums) / 1000.0 / frames
 	var ticks := maxf(sums.ticks, 1.0)
-	for part in ["input", "capture", "simulate", "record", "before_tick", "after_tick"]:
+	for part in ["input", "capture", "simulate", "record", "commit", "before_tick", "after_tick"]:
 		var entry: Variant = scope_sums.get(StringName("tick." + part))
 		tick_total += (entry[0] if entry != null else 0.0)
 	out["tick_ms"] = tick_total / 1000.0 / ticks

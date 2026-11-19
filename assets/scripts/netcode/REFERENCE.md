@@ -124,7 +124,9 @@ Twin: NetCodec in C++ (`native/src/net_codec.cpp`) writes and reads inputs and s
 
 Makes an entity exist across the network (netcode spec sections 7, 10, 13).
 
-Add it as a child of the entity, after its TickStateComponent. NetworkSession gives it an id (the same on every machine, and what anything referring to another entity over the network uses), an owner and a role. Offline it is AUTHORITY and local, nothing is sent, and the entity plays as single player. The parent may define optional hooks (see the README, "Hooks on the parent").
+Add it as a child of the entity, after its TickStateComponent. NetworkSession gives it an id (the same on every machine, and what
+anything referring to another entity over the network uses), an owner and a role. Offline it is AUTHORITY and local, nothing is
+sent, and the entity plays as single player. The parent may define optional hooks (see the README, "Hooks on the parent").
 
 ```gdscript
 # in the entity's scene: TickStateComponent first, then NetworkEntity
@@ -164,9 +166,10 @@ Design: netcode spec 7, 10, 13.
 - `follows_snapshots() -> bool`: True if this entity is placed from snapshots rather than simulated here.
 - `change_owner(new_owner: int, local: bool, new_role: int) -> void`: Changes who owns this entity while running (swapping pawns). Input queued from the old owner is dropped, and the parent hears its role again.
 - `set_role(new_role: int) -> void`: Changes role while running, when a feature switch changes (NetworkSession.refresh_entities). History starts again from here.
-- `refresh_input_saving() -> void`: Works out what the TickStateComponent saves and rounds: a server saves only snapshot ticks (and inputs only if a client predicts it); offline saves nothing unless `keep_history_offline`; a client saves every tick, for replays.
+- `refresh_input_saving() -> void`: Works out which inputs the TickStateComponent saves: a server only those a client predicting it needs; offline none unless
+  `keep_history_offline`; a client every tick, for replays. State is recorded every tick everywhere, in the state store.
   
-  An entity NetworkSession never configured (made directly, as tests do) saves and rounds everything.
+  An entity NetworkSession never configured (made directly, as tests do) saves everything.
 - `set_paused(paused: bool) -> void`: Stops every tick this entity causes (its parent's, its TickState's, its own), or starts them again; state stays as it is.
   
   While paused it records nothing, so snapshots leave it out. Only for the machine that decides, such as a far-off server AI pawn.
@@ -222,7 +225,11 @@ Twin: the C++ recorder and codec round the same way (`native/src/state_encoding.
 
 Makes an entity rollback-ready without writing code (netcode spec sections 5 and 6).
 
-Add it as a child of the entity and list property names in the inspector: `input_properties` (what the entity wants each tick), `state_properties` (everything that affects the next tick) and `sync_properties` (server-only values). It rounds them every tick, keeps recent history, and can put the entity back to any recent tick and replay it.
+Add it as a child of the entity and list property names in the inspector: `input_properties` (what the entity wants each
+tick), `state_properties` (everything that affects the next tick) and `sync_properties` (server-only values). Its
+state is recorded in the tick driver's state store at the end of every tick (rounded, and written back where rounding changed it),
+and it can put the entity back to any recent tick and replay it. This part is the entity's holder for the store: it matches entries
+to nodes and settles their encodings, and gathers the row itself until every entry has a live node.
 
 ```gdscript
 "velocity"                 # a property on the parent
@@ -230,7 +237,7 @@ Add it as a child of the entity and list property names in the inspector: `input
 ":rotation:y @angle_u16"   # part of a property on the parent, with an encoding from StateEncoding
 ```
 
-Twin: recording runs in C++ (`TickStateRecorder`) with exactly the same values as the GDScript path; a change to what is recorded or how it rounds goes in both. Design: netcode spec 5, 6.
+Design: state store spec 6, netcode spec 5, 6.
 
 ### Settings and properties
 
@@ -239,24 +246,23 @@ Twin: recording runs in C++ (`TickStateRecorder`) with exactly the same values a
 - `sync_properties: String[]` = `[]`: Server-only values (health, team). Not rolled back; sent in every snapshot, and clients show the latest.
 - `custom_state_nodes: NodePath[]` = `[]`: Extra nodes with save_state() / load_state(). The parent is included automatically if it has them.
 - `quantize_each_tick: bool` = `true`: Round values to their encodings every tick. Turn off only to compare behaviour; online it must stay on.
-- `history_size: int` = `64`: Ticks of history kept.
-- `rollback_mode: int` = `0`: RESIMULATE for what this machine predicts, FOLLOW_SERVER for what it draws from snapshots. NetworkEntity sets it from its role.
-- `extrapolation_cap_seconds: float` = `0.2`: How far past the newest server state a FOLLOW_SERVER entity keeps moving on its velocity, before it holds. 0 = just hold. 0.2 measured best of those tried: longer gets worse on long replays, shorter worse on short ones (netcode spec section 6.5).
+- `history_size: int` = `64`: Ticks of history kept, at most the tick driver's `TickDriverSingleton.history_depth`.
+- `rollback_mode: int` = `0`: RESIMULATE for what this machine predicts, FOLLOW_SERVER for what it draws from snapshots (not recorded: the server's data is its
+  record). NetworkEntity sets it from its role.
+- `extrapolation_cap_seconds: float` = `0.2`: How far past the newest server state a FOLLOW_SERVER entity keeps moving on its velocity, before it holds. 0 = just hold.
+  0.2 measured best of those tried: longer gets worse on long replays, shorter worse on short ones (netcode spec section 6.5).
 - `extrapolate_vertical: bool` = `false`: Also move it up and down on its velocity. Off by default: with no gravity in the estimate, a falling pawn would sink.
 - `follow_refresh_seconds: float` = `0.5`: How often a FOLLOW_SERVER entity rewrites every value, not only the changed ones; 0 never. It bounds how long something else writing a property (a script, an animation) can leave it wrong.
 - `follows_during_rollback: bool` = `false`: During a rollback, stand on server data and extrapolate, instead of staying where it's drawn. Off by default: no clear difference over real connections (spec 6.5).
 - `follow_server_radius: float` = `10.0`: With `follows_during_rollback` on, it only joins a rollback within this distance of something being resimulated; 0 is no limit. A guess to tune.
 - `keep_input_history: bool` = `false`: Keep input history in FOLLOW_SERVER mode too, for your own pawn with prediction off. NetworkEntity sets it for entities this machine controls.
 - `skip_input_capture: bool` = `false`: Server: don't record each tick's input (it never replays), unless clients predicting this entity need it. Client inputs still queue. NetworkEntity sets it.
-- `history_interval_ticks: int` = `1`: Which ticks' state is saved (pawn spec 12.1); NetworkEntity sets it. 1: every tick (clients, which replay); N: multiples of N (a server, its snapshot ticks); 0: none (offline).
-- `rounds_every_tick: bool` = `true`: Round every tick, or only the saved ticks. Every tick lets a machine that replays this entity land on the server's exact values; NetworkEntity turns it off where nothing replays it (offline; a server entity no client predicts). Saved ticks are rounded either way. Possession sets it again.
-- `use_native: bool` = `true`: Record in C++ (`TickStateRecorder`) when the library is there. Off: GDScript for every component, for comparing (tests take `-- --gdscript-record`).
 
 ### Constants
 
 - `RollbackMode.RESIMULATE = 0`
 - `RollbackMode.FOLLOW_SERVER = 1`
-- `MISSING = &"__tick_state_missing__"`: Stored in a history slot for a property that didn't exist that tick.
+- `MISSING = &"__tick_state_missing__"`: Stored for a property that didn't exist that tick (the store's `StateStoreGD.MISSING`).
 - `UNWRITTEN = &"__tick_state_unwritten__"`: In the follow cache, a value this component hasn't written, or can't be sure of any more.
 
 ### Functions
@@ -266,11 +272,13 @@ Twin: recording runs in C++ (`TickStateRecorder`) with exactly the same values a
   Only before the first tick is recorded. Every machine must add the same entries in the same order; they aren't in `get_schema()`, so the handshake doesn't check them.
 - `round_position(value: Vector3) -> Vector3`: A position rounded the way the recording rounds the "position" entry, for code that sets position itself (CrowdMover, pawn spec 8.22) so a still pawn stays still.
   
-  Returned as is with no position entry, an unsettled encoding, or no per-tick rounding.
+  Returned as is with no position entry, an unsettled encoding, or rounding off.
 - `_tick_capture_input(tick: int) -> void`: After every entity's input phase, before anything simulates.
-- `_tick_record(tick: int) -> void`: After simulating. Stores what state the entity ended this tick in.
-- `_record_natively(values: Variant) -> bool`: Records the state list through the C++ recorder into values (null: only round). False if it can't right now; the caller then does it in GDScript.
-- `_round_in_place(props: TickStateComponent.Prop[]) -> void`: Rounds each property and writes back the changed ones, saving nothing (the GDScript path for an unsaved tick).
+- `_tick_record(tick: int) -> void`: After simulating: saves custom state (save_state). Everything else is recorded by the store's commit, which runs next.
+- `_store_gather(handle: int, tick: int) -> void`: Called by the tick driver for a tick the store couldn't read by itself (an entry not matched yet, or a node gone): gathers the row in
+  GDScript, with MISSING for what isn't there, then tries to hand the reading back to the store.
+- `get_store_handle() -> int`: This entity's handle in the state store, or -1. The tick driver uses it to commit a rollback's re-run.
+- `set_recording(on: bool) -> void`: Off stops recording (a paused entity: NetworkEntity.set_paused); rows already recorded stay. On by default.
 - `_rollback_load(tick: int) -> bool`: Rollback step 1: put the entity back to how it ended this tick. False if nothing is saved for it; it then sits the replay out.
 - `_rollback_after_load(tick: int) -> void`: Rollback step 1b, once everything is loaded and in the collision world.
 - `_rollback_input(tick: int) -> void`: Rollback step 2, per replayed tick: put back what the entity wanted that tick.
@@ -298,7 +306,7 @@ Twin: recording runs in C++ (`TickStateRecorder`) with exactly the same values a
 - `_blends(a: Variant, b: Variant) -> bool` *(static)*: True if a value differs between the two snapshots in a way blend() moves smoothly (same-type vectors and floats).
 - `_forget_follow() -> void`: Something else wrote the properties, so the next placement writes everything.
 - `_find_authoritative(from_tick: int, step: int) -> int`: The nearest tick with server data, starting at from_tick and looking one way (step is 1 or -1). -1 if there's none near.
-- `get_state_values(tick: int) -> Array`: The saved state for a tick as a plain list, or empty if it's gone.
+- `get_state_values(tick: int) -> Array`: The saved state for a tick as a plain list (a copy), or empty if it's gone.
 - `get_input_values(tick: int) -> Array`: The saved input for a tick as a plain list, or empty if it's gone.
 - `get_sync_values() -> Array`: The current server-only values, as a plain list.
 - `get_state_encodings() -> Array`: The state list's encodings, in declared order. The same list each time until it changes, so don't change what you're given.
@@ -313,23 +321,35 @@ Twin: recording runs in C++ (`TickStateRecorder`) with exactly the same values a
 - `apply_input(tick: int) -> bool`: Server: puts this tick's input on the entity. False if none has arrived for this tick.
 - `hold_input_from(tick: int, values: Dictionary) -> void`: Client, for a remote entity it predicts: from this tick on, assume it kept doing what the server last said.
 - `has_state(tick: int) -> bool`: True if the history holds this tick's state.
-- `get_state(tick: int) -> Dictionary`: The state saved for a tick as {entry: value}, or empty if it's gone. Custom state appears under the node's name. The values are copies; changing them doesn't change the history.
+- `get_state(tick: int) -> Dictionary`: The state saved for a tick as {entry: value}, or empty if it's gone. Custom state appears under the node's name.
+  The values are copies; changing them doesn't change the history.
 - `get_input(tick: int) -> Dictionary`: The input saved for a tick as {entry: value}, or empty if it's gone.
-- `get_custom_values(tick: int) -> Array`: What save_state returned on this tick, one entry per custom state node, for sending in snapshots. Empty if this entity has none.
+- `get_custom_values(tick: int) -> Array`: What save_state returned on this tick, one entry per custom state node, for sending in snapshots. Empty if
+  this entity has none.
 - `matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool`: True if these values match what's saved for that tick, within tolerance: "was my prediction right?" Compares only entries given and saved.
   
   custom is the authority's save_state result (`get_custom_values()`); it compares exactly.
 - `correct_state(tick: int, values: Dictionary, custom: Array = []) -> bool`: Overwrites saved entries for a tick with what the authority says was true; follow with `TickDriver.rollback(tick)`. True if the history took it.
   
   A tick already out of the history can't replay: the entity snaps to the values, with a warning, and it returns false (spec 15).
-- `get_schema() -> PackedStringArray`: Every declared entry with its kind and encoding, in order. Same code on two machines gives the same list; the handshake's content hash includes it (NetworkSession.content_hash, netcode spec section 5.4).
-- `_capture(props: TickStateComponent.Prop[], reuse: Variant) -> Array`: Reads each property, rounds it, writes it back if rounding changed it. Reuses the slot's array, so a tick doesn't allocate once the ring is full (Arrays and Dictionaries in the list are the exception: they're copied).
+- `get_schema() -> PackedStringArray`: Every declared entry with its kind and encoding, in order. Same code on two machines gives the same list; the handshake's content
+  hash includes it (NetworkSession.content_hash, netcode spec section 5.4).
+- `_capture(props: TickStateComponent.Prop[], reuse: Variant) -> Array`: Reads each property, rounds it, writes it back if rounding changed it. Reuses the given array if there is one (the input ring's
+  slot), so a tick doesn't allocate once the ring is full (Arrays and Dictionaries in the list are the exception: they're copied).
 - `_settle_encoding(p: TickStateComponent.Prop, value: Variant) -> void`: Auto encodings are picked from the first real value, since a property may still be null before its owner's _ready.
-- `_slot_has_anything(slot: int) -> bool`: True if this tick saved at least one property or custom state.
-- `_begin_following(tick: int) -> bool`: Replay step 1 when following the server. Remembers what the entity has now and finds the server state to start from. False, so it sits the replay out, if the server hasn't sent anything.
+- `_tick_has_anything(tick: int) -> bool`: True if this tick saved at least one property or custom state.
+- `_begin_following(tick: int) -> bool`: Replay step 1 when following the server. Remembers what the entity has now and finds the server state to start from. False, so it
+  sits the replay out, if the server hasn't sent anything.
 - `_follow_tick(tick: int) -> void`: Stands the entity where the server says for this tick, or estimates from the last state it sent.
-- `_extrapolate(ticks: float) -> void`: Velocity-only prediction: moves on from the server's position, up to the cap. No steering, gravity or collisions, so it costs almost nothing.
+- `_extrapolate(ticks: float) -> void`: Velocity-only prediction: moves on from the server's position, up to the cap. No steering, gravity
+  or collisions, so it costs almost nothing.
 - `_is_usable_input(p: TickStateComponent.Prop, value: Variant) -> bool`: True if a value from the network fits the property it's meant for, and has no not-a-number or infinity in it.
+- `_restore_tick(tick: int) -> void`: Puts the entity back to how it ended this tick: the store writes the nodes when it reads them itself, else GDScript does.
+- `_join_store() -> void`: Joins the tick driver's store (again, if the list changed): one layout per state list, so entities with the same list share a
+  table. An entity with nothing to record stays out. Entries keep their declared encodings in the layout ("auto" included); each
+  entity's binding gives the settled ones.
+- `_bind_in_store() -> void`: Hands the reading to the store once every entry has a live node and a settled encoding. Quietly does nothing until then.
+- `_refresh_store_active() -> void`: Recorded only in the tree, while recording, and when this machine simulates the entity (not FOLLOW_SERVER).
 - `_bind_custom(i: int) -> Variant`: The custom state node at this index, or null. Looked for again each time, like list entries.
 - `_parse_entry(entry: String) -> TickStateComponent.Prop`: Reads one entry's text. Doesn't look at nodes yet; _bind does that once ticks are running.
 - `_bind(p: TickStateComponent.Prop) -> bool`: Makes sure the entry points at a live node with that property. False if it can't right now.

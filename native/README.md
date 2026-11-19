@@ -40,10 +40,10 @@ Registered in `src/register_types.cpp`.
 | `AIBatchDecider` | AI behaviour decisions for many pawns in one call, the same as `AIBehaviourManager.decide()` (scaling spec 6.2; not used by the game yet) | `ai/tests/decision_replay.gd` (the shadow comparison) |
 | `CrowdBatch` | The crowd mover's batch on the workers, walking pawns along the nav mesh | `CrowdMover` (`use_cpp_batch`; fallback `_move_batch`) |
 | `NetCodec` | Snapshot encoding and delta snapshots' change check | `NetworkSession`, `NetPackets` (fallback `NetPackets`) |
-| `TickStateRecorder` | The steady-state part of rollback recording | `TickStateComponent` (fallback: its own GDScript) |
+| `StateStore` | The central record of every entity's state, tick by tick: layouts, frames, the commit at the end of a tick | `TickDriver` (twin: `StateStoreGD`) |
 | `ReplayMotionPacker` | The replay's motion channel packing, byte for byte as GDScript | `ReplayMotionChannel` (fallback: its own GDScript) |
 
-Inside only, not seen by GDScript: the nav pipeline (`InputStore`, `TileManager`, `GroundBuilder`, `GroundDomain`, `PathQueue`, `SpanField`, `providers`, nav's own `WorkerPool`), and two shared headers: `state_encoding.h` (the rounding rules `NetCodec` and `TickStateRecorder` share with `StateEncoding.gd`) and `change_guard.h` (see below).
+Inside only, not seen by GDScript: the nav pipeline (`InputStore`, `TileManager`, `GroundBuilder`, `GroundDomain`, `PathQueue`, `SpanField`, `providers`, nav's own `WorkerPool`), and two shared headers: `state_encoding.h` (the rounding rules `NetCodec` and `StateStore` share with `StateEncoding.gd`) and `change_guard.h` (see below).
 
 ## Threads
 

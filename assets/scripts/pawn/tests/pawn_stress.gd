@@ -13,9 +13,7 @@
 ##   godot --headless --path . "res://assets/scripts/pawn/tests/pawn_stress.tscn"
 ## Add "-- --sizes=100,200" to choose the crowd sizes.
 ## Claude 2026-11-09, for the rollback recording work (pawn spec 12.1):
-##   --history=every|snapshots|never   which ticks each pawn saves: every (a client's own pawn, and the old default everywhere),
-##                                     snapshots (every 2nd, as a server does at 30 snapshots a second), never (offline)
-##   --gdscript-record                 record in GDScript instead of C++
+##   --gdscript-store                  record in the GDScript store instead of C++ (Claude 2026-11-19; was --gdscript-record)
 ##   --breakdown                       also splits simulate per pawn into the abilities (locomotion, actions, counters) and the
 ##                                     rest, which is mostly move_and_slide, through the test-only TimedAbilityManager
 ## Claude 2026-11-09, for tier 1 step 2 (scaling spec section 0):
@@ -34,7 +32,6 @@ const MEASURED_TICKS := 240
 const AI_PARTS: Array[StringName] = [&"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 
 var _sizes: Array[int] = [100, 200, 400, 800]
-var _history_interval := 1 # Claude 2026-11-09: --history=
 var _breakdown := false # Claude 2026-11-09: --breakdown, simulate split into abilities and the rest (TimedAbilityManager)
 var _stretch := 1.0 # Claude 2026-11-09: --stretch
 var _tick_started_usec := 0
@@ -47,10 +44,6 @@ func _ready() -> void:
 			for part in arg.trim_prefix("--sizes=").split(","):
 				_sizes.append(int(part))
 		# Claude 2026-11-09
-		elif arg.begins_with("--history="):
-			_history_interval = {"every": 1, "snapshots": 2, "never": 0}.get(arg.trim_prefix("--history="), 1)
-		elif arg == "--gdscript-record":
-			TickStateComponent.use_native = false
 		elif arg == "--breakdown":
 			_breakdown = true
 		# Claude 2026-11-09 (step 2)
@@ -73,10 +66,9 @@ func _ready() -> void:
 	shape.position.y = -0.5
 	floor_body.add_child(shape)
 	add_child(floor_body)
-	print("--- Pawn stress: ms per tick (memory store: %s; recording: %s, history %s) ---" % [
+	print("--- Pawn stress: ms per tick (memory store: %s; state store: %s, every tick) ---" % [
 		"C++" if ClassDB.class_exists(&"AIMemoryStore") else "GDScript",
-		"C++" if TickStateComponent.use_native and ClassDB.class_exists(&"TickStateRecorder") else "GDScript", # Claude 2026-11-09
-		["never", "every tick", "every 2nd tick"][_history_interval]])
+		"GDScript" if TickDriver.store is StateStoreGD else "C++"]) # Claude 2026-11-09, 2026-11-19
 	# Claude 2026-11-09 (step 2)
 	var scheduler: Object = TickJobs.get_scheduler()
 	print("line of sight: %s" % ("C++ (SightGeometry)" if SightGeometryFeeder.get_geometry() != null else "physics rays")) # Claude 2026-11-09 (step 4)
@@ -107,7 +99,6 @@ func _measure(scene: String, count: int) -> Dictionary:
 		var pawn: Pawn = load(PAWN_SCENE).instantiate()
 		pawn.name = "P%d" % i
 		pawn.position = Vector3((i % per_row) * 4.0 - per_row * 2.0, 0.1, (i / per_row) * 4.0 - per_row * 2.0)
-		(pawn.get_node("TickState") as TickStateComponent).history_interval_ticks = _history_interval # Claude 2026-11-09
 		match scene:
 			"standing":
 				pawn.skip_default_parts = AI_PARTS.duplicate()

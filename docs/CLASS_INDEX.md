@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 154 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 155 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -137,6 +137,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [Stat](../assets/scripts/stats/REFERENCE.md#stat) | [stats](../assets/scripts/stats/README.md) | Node | One number about a pawn, such as how fast it walks. A child of the pawn's StatManager. |
 | [StatChangePart](../assets/scripts/effects/REFERENCE.md#statchangepart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes how much of a stat a pawn has, once: Health -20 is damage, Health +15 a heal. A do-once part ([EffectPart]). |
 | [StateEncoding](../assets/scripts/netcode/REFERENCE.md#stateencoding) | [netcode](../assets/scripts/netcode/README.md) | RefCounted | How precisely networked values are stored (netcode spec section 5.3). |
+| [StateStoreGD](../assets/scripts/state_store/REFERENCE.md#statestoregd) | [state_store](../assets/scripts/state_store/README.md) | RefCounted | The GDScript twin of the C++ [code]StateStore[/code]: the central record of every gameplay entity's state, tick by tick. |
 | [StatManager](../assets/scripts/stats/REFERENCE.md#statmanager) | [stats](../assets/scripts/stats/README.md) | Node | Holds a pawn's stats, one [Stat] node each, and finds them by name. |
 | [StatModifierPart](../assets/scripts/effects/REFERENCE.md#statmodifierpart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes a stat's value while its effect lasts, such as MoveSpeed x0.7 for a slow. A held part ([EffectPart]). |
 | [StreamingSource](../assets/scripts/streaming/REFERENCE.md#streamingsource) | [streaming](../assets/scripts/streaming/README.md) | Node3D | Marks something as keeping the world loaded around it. |

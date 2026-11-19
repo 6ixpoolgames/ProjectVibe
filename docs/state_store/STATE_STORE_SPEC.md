@@ -1,4 +1,4 @@
-# State Store Spec v0.2 (agreed direction, nothing built)
+# State Store Spec v0.3 (agreed direction; step 1 built)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
@@ -465,6 +465,20 @@ Today's `TickDriver.rollback` was used to re-run the whole game from its saved s
 **What it means:** **physics re-runs exactly on the same machine**: Jolt and `move_and_slide` gave identical results over 30 re-run ticks. The fighting run's differences come from gaps in today's rollback, built for a client predicting its own pawn, not from physics: it doesn't run the crowd mover's batch while re-running, doesn't deliver hits (`after_simulate` isn't sent), and can't bring back projectiles that despawned. Those are exactly what the store's re-run covers (10), so **drift correction should rarely have anything to correct**, and deterministic physics of our own isn't needed for same-machine re-runs. The drift test is run again on the new core with fighting, crowds and projectiles.
 
 Re-running costs about 8.8 ms a tick for 153 pawns (263 ms for 30 ticks), so a branch from a keyframe a second back takes about half a second at that size.
+
+### 13.4 Step 1 built: the store and the commit *(Claude, 2026-11-19, branch `refactor/tick-core`)*
+
+What step 1 is: the C++ `StateStore` and its twin `StateStoreGD` (`assets/scripts/state_store/`), the tick driver's commit phase, rollback rewriting rows through the store, and `TickStateComponent` as the holder that feeds it. Today's pawns record into it unchanged. Every machine records and rounds every tick (the saving switches are gone). All 68 suites pass; the twins give the same handles, rows and checksums.
+
+| Measured (300-pawn march, headless) | Result |
+|---|---|
+| Commit, ms a tick | **2.0**: about 6.2 µs per pawn for its whole state list, the same as the old recorder |
+| What that adds | Offline didn't record or round before, so this is new cost there (the price of replay offline); a server now keeps every tick, not only snapshot ticks |
+| Drift after a rewind (marching, `--no-crowd`) | 0 of 153 pawns differ for 1, 10 and 30 ticks |
+| Re-run cost | 5.5 to 10 ms a tick for 153 pawns, as before |
+| Tripwire (`verify_store_each_tick`, 90 pawns, 40 s) | One entry written between ticks: the pawn's `tick_step`, set by `AIActivationManager`. A director, as section 10 expects: it moves onto a fixed tick as a recorded input in step 7 |
+
+Step 1 isn't meant to be faster: the gains come from pushed columns replacing most per-tick reads (step 2 on), the duplicate gathers reading the store instead (pawn table, lag compensation, replay motion), and worker jobs reading frames.
 
 ## 14. Open
 

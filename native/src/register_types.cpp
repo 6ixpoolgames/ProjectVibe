@@ -6,7 +6,7 @@
 #include "nav_hooks.h"
 #include "nav_server.h"
 #include "net_codec.h" // snapshot encoding in C++, NetworkSession's fast path
-#include "tick_state_recorder.h" // rollback recording in C++, pawn spec 12.1
+#include "state_store.h" // the central record of every entity's state, tick by tick
 #include "pawn_table.h" // the shared table of plain pawn data, scaling spec step 1
 #include "job_scheduler.h" // worker threads for plain-data jobs, scaling spec step 2
 #include "ai_sensing_job.h" // sensing's search on the workers, step 2
@@ -38,7 +38,7 @@ static void initialize_navcore(ModuleInitializationLevel level) {
 	GDREGISTER_CLASS(SightGeometry); // before the job and the store, which use it
 	GDREGISTER_CLASS(JobScheduler);
 	GDREGISTER_CLASS(AISensingJob); // after the grid and the scheduler it uses
-	GDREGISTER_CLASS(TickStateRecorder);
+	GDREGISTER_CLASS(StateStore);
 	GDREGISTER_CLASS(ReplayMotionPacker);
 	GDREGISTER_CLASS(CrowdBatch); // after the scheduler and the geometry it uses
 	GDREGISTER_CLASS(AIBatchDecider);

@@ -11,7 +11,7 @@ A Godot 4.7 base for real-time 3D games (GDScript, with hot paths in a C++ GDExt
 5. **Never modify legacy files** (`assets/legacy/`, `docs/legacy/`), stubs included. Build new systems beside them under new names.
 6. **Keep test code out of shipping code.** Test hooks go in `tests/` or `samples/` (see `docs/TEST_AND_DEBUG_CODE.md`). Samples are test beds: what they do for convenience isn't a rule of the base.
 7. **Few autoloads:** only truly universal services (`singletons/`). Game rules and per-game defaults are GameMode modules.
-8. **Twins stay in step:** where C++ and GDScript do the same job (the AI decider, packet encoding, state recording, `StateEncoding.quantize`, the crowd mover), a change goes in both and the comparison tests must pass. C++ is the main path; GDScript is the backup.
+8. **Twins stay in step:** where C++ and GDScript do the same job (the AI decider, packet encoding, the state store, `StateEncoding.quantize`, the crowd mover), a change goes in both and the comparison tests must pass. C++ is the main path; GDScript is the backup.
 9. **Sign changes, keep history out of code:**
    - A new script starts with `# Written by Claude (<model id>), <date>. History: <system>/CHANGELOG.md.`
    - Comments describe the code as it is now, with no dates. What changed and why goes in the system's `CHANGELOG.md` (newest first), in the same change. Tests, samples and tools may keep dated notes.
@@ -31,7 +31,7 @@ A Godot 4.7 base for real-time 3D games (GDScript, with hot paths in a C++ GDExt
 
 ## Map
 
-Each system's README has the detail. Specs are in `docs/` (pawn, netcode, navigation, scaling, streaming, replay, diagnostics, world, wiki, and the ability and state store drafts that the coming refactor follows); the plan is `docs/ROADMAP.md`; how the modules connect, today and after the refactor, is `docs/ARCHITECTURE.md`; every class is listed in `docs/CLASS_INDEX.md`.
+Each system's README has the detail. Specs are in `docs/` (pawn, netcode, navigation, scaling, streaming, replay, diagnostics, world, wiki, and the ability and state store specs the refactor follows, on the `refactor/tick-core` branch); the plan is `docs/ROADMAP.md`; how the modules connect, today and after the refactor, is `docs/ARCHITECTURE.md`; every class is listed in `docs/CLASS_INDEX.md`.
 
 | Folder (`assets/scripts/`) | What it is |
 |---|---|
@@ -45,6 +45,7 @@ Each system's README has the detail. Specs are in `docs/` (pawn, netcode, naviga
 | `ai/` | Sensing, memory, target, states, behaviours; decisions in C++ (`AIDecisionModule`) |
 | `movement/` | The crowd mover: AI pawns moved together once a tick |
 | `navigation/` | The pawn's nav part, nav markers and links |
+| `state_store/` | The central record of every entity's state, tick by tick (`StateStoreGD`, twin of C++ `StateStore`); `TickDriver.store` |
 | `netcode/` | Rollback state, entities, packets, prediction, lag compensation |
 | `replay/` | Records every pawn every tick; the viewer |
 | `diagnostics/` | Frame timings, session logs, spikes, panels (F1) |
@@ -52,7 +53,7 @@ Each system's README has the detail. Specs are in `docs/` (pawn, netcode, naviga
 | `terrain/`, `streaming/`, `world/` | Chunked low-poly terrain, chunk streaming, putting a level together |
 | `jobs/`, `platform/`, `tags/`, `resources/`, `ui/`, `visuals/` | Worker threads, run environment, tag bits, designer resources, menus, toy visuals |
 
-Samples (`assets/scenes/samples/`, scripts in `assets/scripts/samples/`): `pawn_sample` (the main scene), `arena_sample`, `faction_arena_sample`, `mass_battle_sample`, `net_sample`, and one per system. Native classes (`native/src/`): `NavServer`, `AIMemoryStore`, `AIPawnGrid`, `AISensingJob`, `AIBatchDecider`, `SightGeometry`, `PawnTable`, `JobScheduler`, `TickStateRecorder`, `NetCodec`, `CrowdBatch`, `ReplayMotionPacker`.
+Samples (`assets/scenes/samples/`, scripts in `assets/scripts/samples/`): `pawn_sample` (the main scene), `arena_sample`, `faction_arena_sample`, `mass_battle_sample`, `net_sample`, and one per system. Native classes (`native/src/`): `NavServer`, `AIMemoryStore`, `AIPawnGrid`, `AISensingJob`, `AIBatchDecider`, `SightGeometry`, `PawnTable`, `JobScheduler`, `StateStore`, `NetCodec`, `CrowdBatch`, `ReplayMotionPacker`.
 
 ## Legacy
 

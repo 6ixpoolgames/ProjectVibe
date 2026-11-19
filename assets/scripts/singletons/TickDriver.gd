@@ -7,9 +7,10 @@
 ## TickDriver.register(self)   # then write any of _tick_input(dt, tick), _tick_capture_input(tick),
 ##                             # _tick_simulate(dt, tick), _tick_record(tick); each is optional
 ## [/codeblock]
-## One tick: [signal before_tick], input, capture input, simulate, [signal after_simulate], record, [signal after_tick]. Within a phase,
-## lower [code]order[/code] runs first, then registration order. Rollback and the load ladder are in the README.
-## Design: netcode spec 3 (rollback 3.5), scaling spec 7, pawn spec 8.21 (load ladder).
+## One tick: [signal before_tick], input, capture input, simulate, [signal after_simulate], record, commit, [signal after_tick]. Within a
+## phase, lower [code]order[/code] runs first, then registration order. The commit writes every entity's state into [member store], the
+## record of play at tick boundaries. Rollback and the load ladder are in the README.
+## Design: state store spec 4 and 9, netcode spec 3 (rollback 3.5), scaling spec 7, pawn spec 8.21 (load ladder).
 extends Node
 class_name TickDriverSingleton
 
@@ -53,6 +54,24 @@ const REFERENCE_RATE := 60
 @export var physics_follows_tick_rate := true
 ## False pauses ticking.
 @export var active: bool = true
+## Ticks of history [member store] keeps: the deepest any reader needs (rollback, lag compensation, snapshot baselines). Applies while
+## the store is empty, so set it before entities arrive.
+@export_range(8, 1024, 1) var history_depth: int = 64:
+	set(value):
+		history_depth = value
+		if store:
+			store.set_depth(value)
+## On, the start of each tick checks every bound entity's nodes still hold what the last commit recorded, and warns about the ones that
+## don't: something wrote around the store (state store spec 4). Costs a read of every gathered value; for finding such writes.
+@export var verify_store_each_tick := false
+
+## The central record of play ([code]StateStore[/code] in C++, or its twin [StateStoreGD]): every entity's state at the end of each
+## tick. Untyped because it's one of two classes with the same calls.
+var store: Object = null
+## Use the C++ store when the library is there. Off: the GDScript twin, for comparing (tests take [code]-- --gdscript-store[/code]).
+static var use_native_store: bool = true
+## Entities the tripwire ([member verify_store_each_tick]) has caught, added up.
+var store_mismatches: int = 0
 
 ## Current tick number: the last tick that ran, 0 before any. Change it only with [method set_tick].
 var tick: int = 0
@@ -147,6 +166,9 @@ func _ready() -> void:
 func _init() -> void:
 	process_priority = -100 # tick before other nodes' own processing
 	process_physics_priority = -100
+	if OS.get_cmdline_user_args().has("--gdscript-store"):
+		use_native_store = false
+	replace_store(null)
 	# A dedicated server can set its rate at start-up ("-- --tick-rate=30"); it wins over the project setting. Clients take the server's.
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--tick-rate="):
@@ -193,6 +215,15 @@ func register(participant: Object, order: int = 0) -> void:
 		at -= 1
 	_entries.insert(at, entry)
 	_dirty = true
+
+
+## Swaps in a new, empty store (null: a fresh one of the kind [member use_native_store] picks), for tests comparing the two. Entities
+## already recorded stay in the old one, so call it before they arrive.
+func replace_store(new_store: Object) -> void:
+	if new_store == null:
+		new_store = ClassDB.instantiate(&"StateStore") if use_native_store and ClassDB.class_exists(&"StateStore") else StateStoreGD.new()
+	new_store.set_depth(history_depth)
+	store = new_store
 
 
 ## Removes a participant. During a tick its calls stop at once (a pawn despawned mid-tick isn't simulated or recorded). Freed ones are dropped by themselves.
@@ -383,6 +414,13 @@ func rollback(from_tick: int) -> bool:
 		if is_instance_valid(p) and p.has_method(&"_rollback_after_load"):
 			p._rollback_after_load(from_tick)
 	rollback_state_loaded.emit(from_tick)
+	# The re-run rewrites these entities' rows in the store, tick by tick.
+	var handles := PackedInt64Array()
+	for p in loaded:
+		if is_instance_valid(p) and p.has_method(&"get_store_handle"):
+			var handle: int = p.get_store_handle()
+			if handle >= 0:
+				handles.append(handle)
 	var dt := get_tick_dt()
 	for t in range(from_tick + 1, last_finished + 1):
 		tick = t
@@ -395,6 +433,7 @@ func rollback(from_tick: int) -> bool:
 		for p in loaded:
 			if is_instance_valid(p):
 				p._tick_record(t)
+		_commit_entities(t, handles)
 		for p in to_sync:
 			if is_instance_valid(p):
 				p._sync_collision()
@@ -440,6 +479,37 @@ func _load_for_rollback(from_tick: int) -> Array:
 	return joined + loaded
 
 
+## The commit: every active entity's row for this tick into the store, in one pass. Entities the store can't read by itself (still
+## being matched, or a node gone) are handed to their owner's [code]_store_gather(handle, tick)[/code].
+func _commit(t: int) -> void:
+	_gather_unfinished(store.commit(t), t)
+
+
+func _commit_entities(t: int, handles: PackedInt64Array) -> void:
+	if not handles.is_empty():
+		_gather_unfinished(store.commit_entities(t, handles), t)
+
+
+func _gather_unfinished(unfinished: PackedInt64Array, t: int) -> void:
+	for handle in unfinished:
+		var owner: Object = store.get_owner(handle)
+		if owner and owner.has_method(&"_store_gather"):
+			owner._store_gather(handle, t)
+
+
+# The tripwire: the nodes at the start of a tick must hold what the last tick committed.
+func _verify_store(last_tick: int) -> void:
+	var differ: PackedInt64Array = store.verify_nodes(last_tick)
+	if differ.is_empty():
+		return
+	store_mismatches += differ.size()
+	var names: Array = []
+	for handle in differ.slice(0, 5):
+		var owner: Object = store.get_owner(handle)
+		names.append(str(owner.get_parent().name) if owner is Node and owner.get_parent() else str(owner))
+	push_warning("[TickDriver] %d entities changed outside a tick since tick %d (something wrote around the store): %s" % [differ.size(), last_tick, ", ".join(names)])
+
+
 ## Brings every body's collision up to date between two ticks of one frame. One body alone never collides with itself, so this only
 ## matters for two or more.
 func _sync_collision_world() -> void:
@@ -455,7 +525,7 @@ func _sync_collision_world() -> void:
 
 ## Empties the timing record. See [member profile_enabled].
 func reset_profile() -> void:
-	profile = {"ticks": 0, "before_tick": 0, "input": 0, "capture": 0, "simulate": 0, "record": 0, "after_tick": 0, "rollback": 0, "rollbacks": 0, "rollback_ticks": 0}
+	profile = {"ticks": 0, "before_tick": 0, "input": 0, "capture": 0, "simulate": 0, "record": 0, "commit": 0, "after_tick": 0, "rollback": 0, "rollbacks": 0, "rollback_ticks": 0}
 
 
 ## True where gameplay outcomes are decided. Offline: always. Online: the server.
@@ -473,6 +543,8 @@ func _run_tick(dt: float) -> void:
 	var tick_started := Time.get_ticks_usec() # for the load ladder
 	if _dirty:
 		_rebuild_phases()
+	if verify_store_each_tick:
+		_verify_store(tick)
 	tick += 1
 	_in_tick = true
 	var mark := Time.get_ticks_usec() if profile_enabled else 0
@@ -507,6 +579,8 @@ func _run_tick(dt: float) -> void:
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_record(tick)
 	mark = _profile_phase(&"record", mark)
+	_commit(tick)
+	mark = _profile_phase(&"commit", mark)
 	# Cleared before after_tick, so the finished tick counts as finished for a rollback from that signal
 	_in_phases = false
 	_in_tick = false

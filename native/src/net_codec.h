@@ -85,7 +85,7 @@ private:
 
 	// Godot's interned names, made once here because they can't exist before the engine has started.
 	StringName m_missing;
-	// The encoding names, shared with TickStateRecorder (state_encoding.h).
+	// The encoding names, shared with StateStore (state_encoding.h).
 	state_encoding::EncodingNames m_encoding_names;
 };
 

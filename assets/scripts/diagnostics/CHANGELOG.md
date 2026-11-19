@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | The window title in shipped games | `DiagnosticsManager._update_title` | A debugging convenience (role and process id, to tell instances apart) that also renames a release build's window, since diagnostics ship. A setting, or debug builds only, keeps a game's own title | S |
 | "Late" and "very late" as settings | `DiagnosticsManager._summary`; the F4 panel's text; `replay/ReplayViewer`'s strip colours | Fixed at 20 and 34 ms (60 and 30 fps) in three places, while spikes follow the tick rate and `spike_over_budget`. A game aiming at another frame rate can't set them | S |
 
+## 2026-11-19
+
+- **The tick total counts the tick driver's new commit phase** (`tick.commit`, the state store's end-of-tick pass), so a tick's cost includes it.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): class and member comments shortened, `GDScript note:` and "the owner's call" wording removed (the measuring method, PerfScopes' cost note and release-build behaviour kept). The frame-measuring explanation, the panels' contents and the `get_summary` keys moved to a new "How it works" section of the README. No stale comments found.

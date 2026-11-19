@@ -94,12 +94,11 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 		var id := pawn.get_instance_id()
 		_count(state._states, id, _changes, _seen, _last, true)
 		_count(state._inputs, id, _input_changes, _input_seen, _last_input, false)
-		# The C++ recorder reading and rounding this pawn's whole state list, as the store's gather would.
-		var values: Array = []
-		var started := Time.get_ticks_usec()
-		if state._record_natively(values):
-			_record_usec += Time.get_ticks_usec() - started
-			_record_pawns += 1
+	# The store's commit, which read and rounded every bound entity's whole state list this tick (Claude 2026-11-19: was a timed call
+	# of the old C++ recorder per pawn).
+	var stats: Dictionary = TickDriver.store.get_stats()
+	_record_usec += int(stats["commit_usec"])
+	_record_pawns += int(stats["bound"])
 
 
 func _count(props: Array, id: int, changes: Dictionary, seen: Dictionary, last: Dictionary, note_types: bool) -> void:
@@ -133,7 +132,7 @@ func _print_inventory() -> void:
 	var input_entries: Array = _input_seen.keys()
 	for entry in input_entries:
 		print("[inventory] input %-46s %33d %8.1f%%" % [entry, _input_seen[entry], 100.0 * _input_changes.get(entry, 0) / _input_seen[entry]])
-	print("[inventory] C++ recorder, reading and rounding one pawn's state list: %.2f us (over %d pawn-ticks)" % [float(_record_usec) / maxi(_record_pawns, 1), _record_pawns])
+	print("[inventory] the store's commit, reading and rounding one entity's state list: %.2f us (over %d entity-ticks)" % [float(_record_usec) / maxi(_record_pawns, 1), _record_pawns])
 
 
 func _measure_drift() -> void:

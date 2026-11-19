@@ -2,15 +2,16 @@
 ## Makes an entity rollback-ready without writing code (netcode spec sections 5 and 6).
 ##
 ## Add it as a child of the entity and list property names in the inspector: [member input_properties] (what the entity wants each
-## tick), [member state_properties] (everything that affects the next tick) and [member sync_properties] (server-only values). It rounds
-## them every tick, keeps recent history, and can put the entity back to any recent tick and replay it.
+## tick), [member state_properties] (everything that affects the next tick) and [member sync_properties] (server-only values). Its
+## state is recorded in the tick driver's state store at the end of every tick (rounded, and written back where rounding changed it),
+## and it can put the entity back to any recent tick and replay it. This part is the entity's holder for the store: it matches entries
+## to nodes and settles their encodings, and gathers the row itself until every entry has a live node.
 ## [codeblock]
 ## "velocity"                 # a property on the parent
 ## "Walk:phase"               # a property on a node below the parent
 ## ":rotation:y @angle_u16"   # part of a property on the parent, with an encoding from StateEncoding
 ## [/codeblock]
-## Twin: recording runs in C++ ([code]TickStateRecorder[/code]) with exactly the same values as the GDScript path; a change to what is
-## recorded or how it rounds goes in both. Design: netcode spec 5, 6.
+## Design: state store spec 6, netcode spec 5, 6.
 extends Node
 class_name TickStateComponent
 # REFACTOR: two jobs in one class: recording and replaying this machine's own state, and placing an entity it follows from server
@@ -27,14 +28,18 @@ class_name TickStateComponent
 @export var custom_state_nodes: Array[NodePath] = []
 ## Round values to their encodings every tick. Turn off only to compare behaviour; online it must stay on.
 @export var quantize_each_tick: bool = true
-## Ticks of history kept.
+## Ticks of history kept, at most the tick driver's [member TickDriverSingleton.history_depth].
 @export var history_size: int = 64
 
 ## What a rollback does with this entity: RESIMULATE puts it back and runs its [code]_tick_simulate[/code] again (what this machine predicts);
 ## FOLLOW_SERVER draws it from server data (what it doesn't; netcode spec 6.5).
 enum RollbackMode { RESIMULATE, FOLLOW_SERVER }
-## RESIMULATE for what this machine predicts, FOLLOW_SERVER for what it draws from snapshots. NetworkEntity sets it from its role.
-@export var rollback_mode: RollbackMode = RollbackMode.RESIMULATE
+## RESIMULATE for what this machine predicts, FOLLOW_SERVER for what it draws from snapshots (not recorded: the server's data is its
+## record). NetworkEntity sets it from its role.
+@export var rollback_mode: RollbackMode = RollbackMode.RESIMULATE:
+	set(value):
+		rollback_mode = value
+		_refresh_store_active()
 @export_group("Follow server")
 ## How far past the newest server state a FOLLOW_SERVER entity keeps moving on its velocity, before it holds. 0 = just hold.
 ## 0.2 measured best of those tried: longer gets worse on long replays, shorter worse on short ones (netcode spec section 6.5).
@@ -51,15 +56,8 @@ enum RollbackMode { RESIMULATE, FOLLOW_SERVER }
 var keep_input_history: bool = false
 ## Server: don't record each tick's input (it never replays), unless clients predicting this entity need it. Client inputs still queue. NetworkEntity sets it.
 var skip_input_capture: bool = false
-## Which ticks' state is saved (pawn spec 12.1); NetworkEntity sets it. 1: every tick (clients, which replay); N: multiples of N (a server, its snapshot ticks); 0: none (offline).
-var history_interval_ticks: int = 1
-## Round every tick, or only the saved ticks. Every tick lets a machine that replays this entity land on the server's exact values; NetworkEntity turns it off
-## where nothing replays it (offline; a server entity no client predicts). Saved ticks are rounded either way. Possession sets it again.
-var rounds_every_tick: bool = true
-## Record in C++ ([code]TickStateRecorder[/code]) when the library is there. Off: GDScript for every component, for comparing (tests take [code]-- --gdscript-record[/code]).
-static var use_native: bool = true
 
-## Stored in a history slot for a property that didn't exist that tick.
+## Stored for a property that didn't exist that tick (the store's [constant StateStoreGD.MISSING]).
 const MISSING := &"__tick_state_missing__"
 ## In the follow cache, a value this component hasn't written, or can't be sure of any more.
 const UNWRITTEN := &"__tick_state_unwritten__"
@@ -90,7 +88,6 @@ var _syncs: Array[Prop] = []
 var _custom_paths: Array[NodePath] = []
 var _custom_nodes: Array = []    # matches _custom_paths; entries may be null or freed
 var _warned: Dictionary = {}
-var _newest_state_tick := -1
 var _live_values: Array = []     # following: what the entity had before the replay began, to give back when it ends
 var _authoritative_ticks := PackedInt64Array() # following: ring buffer of what the server said, one slot per tick
 var _authoritative_values: Array = []
@@ -113,27 +110,35 @@ var _replay_base_tick := -1      # following: the server tick the replay is curr
 var _position_index := -1        # following: where "position" and "velocity" are in the state list; -1 is not listed
 var _velocity_index := -1
 
-# Ring buffers, one slot per tick (tick % history_size). A slot only counts if its stored tick matches.
-var _state_ticks := PackedInt64Array()
-var _state_values: Array = []
+# The state store this entity is recorded in, and its handle there (-1: not in it). The store reads the nodes itself once every entry
+# is bound (_bind_in_store); until then, and whenever a node goes away, _store_gather writes the row from GDScript.
+var _store: Object = null
+var _handle := -1
+var _recording := true # false while paused (set_recording)
+# Ring buffers, one slot per tick (tick % history_size). A slot only counts if its stored tick matches. Custom state stays here, beside
+# the store (state store spec 6.4); inputs fold into the store with the netcode.
+var _custom_ticks := PackedInt64Array()
 var _state_custom: Array = []
 var _input_ticks := PackedInt64Array()
 var _input_values: Array = []
-# The C++ recorder (a TickStateRecorder), and whether it holds the current list. It's filled once every state entry
-# has a live node and a settled encoding; until then, and whenever a node goes away, the GDScript path records instead.
-var _recorder: Object = null
-var _recorder_ready := false
 
 
 func _enter_tree() -> void:
 	_driver = get_node_or_null("/root/TickDriver")
 	if _driver:
 		_driver.register(self)
+	_refresh_store_active()
 
 
 func _exit_tree() -> void:
 	if _driver:
 		_driver.unregister(self)
+	_refresh_store_active()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_PREDELETE:
+		_leave_store()
 
 
 func _ready() -> void:
@@ -149,9 +154,8 @@ func _ready() -> void:
 	_syncs = _parse_list(sync_properties)
 	_encodings_cache.clear()
 	_build_state_list() # add_state_properties() uses it too
-	_state_ticks.resize(history_size)
-	_state_ticks.fill(-1)
-	_state_values.resize(history_size)
+	_custom_ticks.resize(history_size)
+	_custom_ticks.fill(-1)
 	_state_custom.resize(history_size)
 	_input_ticks.resize(history_size)
 	_input_ticks.fill(-1)
@@ -159,12 +163,13 @@ func _ready() -> void:
 	_authoritative_ticks.resize(history_size)
 	_authoritative_ticks.fill(-1)
 	_authoritative_values.resize(history_size)
+	_join_store()
 
 
 ## Adds state entries for parts that arrive after the scene was made (abilities from PawnInitializer), written as in [member state_properties]. False if refused.
 ## [br]Only before the first tick is recorded. Every machine must add the same entries in the same order; they aren't in [method get_schema], so the handshake doesn't check them.
 func add_state_properties(entries: Array[String]) -> bool:
-	if _newest_state_tick >= 0:
+	if _newest_tick() >= 0:
 		push_warning("[TickStateComponent] %s: state entries can only be added before the first tick is recorded, so %s won't roll back." % [_root.name if _root else name, str(entries)])
 		return false
 	var added: Array[String] = state_properties.duplicate() # a new array, so instances of one scene don't share a list
@@ -174,6 +179,7 @@ func add_state_properties(entries: Array[String]) -> bool:
 	state_properties = added
 	if is_node_ready():
 		_build_state_list()
+		_join_store() # a new list is a new layout
 	return true
 
 
@@ -189,7 +195,6 @@ func _build_state_list() -> void:
 			listed.append("velocity")
 	_states = _parse_list(listed)
 	_encodings_cache.clear()
-	_recorder_ready = false # the list changed, so the C++ recorder is filled again
 	_position_index = -1
 	_velocity_index = -1
 	# Matched by the property's name, so a velocity kept on a part like the motor still counts.
@@ -204,9 +209,9 @@ func _build_state_list() -> void:
 
 
 ## A position rounded the way the recording rounds the "position" entry, for code that sets position itself (CrowdMover, pawn spec 8.22) so a still pawn stays still.
-## [br]Returned as is with no position entry, an unsettled encoding, or no per-tick rounding.
+## [br]Returned as is with no position entry, an unsettled encoding, or rounding off.
 func round_position(value: Vector3) -> Vector3:
-	if not quantize_each_tick or not rounds_every_tick or _position_index < 0:
+	if not quantize_each_tick or _position_index < 0:
 		return value
 	var encoding := _states[_position_index].encoding
 	if encoding == StateEncoding.AUTO:
@@ -225,67 +230,33 @@ func _tick_capture_input(tick: int) -> void:
 	_input_values[slot] = _capture(_inputs, _input_values[slot])
 
 
-## After simulating. Stores what state the entity ended this tick in.
+## After simulating: saves custom state (save_state). Everything else is recorded by the store's commit, which runs next.
 func _tick_record(tick: int) -> void:
-	# Sync properties count too: an entity with only sync properties (a score or a status, say) records its ticks with an empty state
-	# list, so has_state is true and it goes into snapshots, with its sync values riding along as for any other entity.
-	if _states.is_empty() and _custom_paths.is_empty() and _syncs.is_empty():
-		return
-	# Following uses the server's data, not its own, so it has nothing to save.
-	if rollback_mode == RollbackMode.FOLLOW_SERVER:
-		return
-	# A tick whose state nobody will read is only rounded, not saved (history_interval_ticks), and only where some machine replays this
-	# entity (rounds_every_tick).
-	if history_interval_ticks <= 0 or tick % history_interval_ticks != 0:
-		if quantize_each_tick and rounds_every_tick and not _states.is_empty() and not _record_natively(null):
-			_round_in_place(_states)
+	if _custom_paths.is_empty() or rollback_mode == RollbackMode.FOLLOW_SERVER or not _recording:
 		return
 	var slot := tick % history_size
-	_state_ticks[slot] = tick
-	_newest_state_tick = maxi(_newest_state_tick, tick)
-	# C++ when it can, else GDScript; the same values either way.
-	var values: Array = _state_values[slot] if _state_values[slot] is Array else []
-	if _record_natively(values):
-		_state_values[slot] = values
-	else:
-		_state_values[slot] = _capture(_states, _state_values[slot])
-	if not _custom_paths.is_empty():
-		_state_custom[slot] = _save_customs()
+	_custom_ticks[slot] = tick
+	_state_custom[slot] = _save_customs()
 
 
-## Records the state list through the C++ recorder into values (null: only round). False if it can't right now; the caller then does it in GDScript.
-func _record_natively(values: Variant) -> bool:
-	if not _recorder_ready:
-		if not use_native or _states.is_empty() or not ClassDB.class_exists(&"TickStateRecorder"):
-			return false
-		for p in _states:
-			if not is_instance_valid(p.node) or p.encoding == StateEncoding.AUTO:
-				return false # the GDScript path matches it and settles its encoding first
-		if _recorder == null:
-			# Made by name, so this script still runs where the C++ library isn't available.
-			_recorder = ClassDB.instantiate(&"TickStateRecorder")
-		_recorder.clear()
-		for p in _states:
-			if not _recorder.add(p.node, p.property, p.encoding):
-				return false
-		_recorder_ready = true
-	var store := values != null
-	if _recorder.capture(values if store else [], quantize_each_tick, store):
-		return true
-	_recorder_ready = false # a node went away: the GDScript path takes this tick and matches entries again
-	return false
+## Called by the tick driver for a tick the store couldn't read by itself (an entry not matched yet, or a node gone): gathers the row in
+## GDScript, with MISSING for what isn't there, then tries to hand the reading back to the store.
+func _store_gather(handle: int, tick: int) -> void:
+	if handle != _handle:
+		return
+	_store.write_row(_handle, tick, _capture(_states, null))
+	_bind_in_store()
 
 
-## Rounds each property and writes back the changed ones, saving nothing (the GDScript path for an unsaved tick).
-func _round_in_place(props: Array[Prop]) -> void:
-	for p in props:
-		if not _bind(p):
-			continue
-		var v: Variant = p.read()
-		_settle_encoding(p, v)
-		var q: Variant = StateEncoding.quantize(v, p.encoding)
-		if q != v:
-			p.write(q)
+## This entity's handle in the state store, or -1. The tick driver uses it to commit a rollback's re-run.
+func get_store_handle() -> int:
+	return _handle
+
+
+## Off stops recording (a paused entity: NetworkEntity.set_paused); rows already recorded stay. On by default.
+func set_recording(on: bool) -> void:
+	_recording = on
+	_refresh_store_active()
 
 
 ## Rollback step 1: put the entity back to how it ended this tick. False if nothing is saved for it; it then sits the replay out.
@@ -293,13 +264,12 @@ func _rollback_load(tick: int) -> bool:
 	if rollback_mode == RollbackMode.FOLLOW_SERVER:
 		return _begin_following(tick)
 	if not has_state(tick):
-		if _newest_state_tick >= 0:
+		if _newest_tick() >= 0:
 			_warn_once("load_expired", "[TickStateComponent] %s: asked to go back to tick %d, which is no longer in the history (%d ticks kept); keeping current state" % [_root.name, tick, history_size])
 		return false
-	var slot := tick % history_size
-	if not _slot_has_anything(slot):
+	if not _tick_has_anything(tick):
 		return false
-	_restore_slot(slot)
+	_restore_tick(tick)
 	return true
 
 
@@ -543,9 +513,9 @@ func _find_authoritative(from_tick: int, step: int) -> int:
 # What NetworkSession reads and writes. Lists are in declared order, which the handshake's hash guarantees
 # is the same on every machine.
 
-## The saved state for a tick as a plain list, or empty if it's gone.
+## The saved state for a tick as a plain list (a copy), or empty if it's gone.
 func get_state_values(tick: int) -> Array:
-	return _state_values[tick % history_size] if has_state(tick) else []
+	return _store.get_row(_handle, tick) if has_state(tick) else []
 
 
 ## The saved input for a tick as a plain list, or empty if it's gone.
@@ -645,7 +615,7 @@ func hold_input_from(tick: int, values: Dictionary) -> void:
 
 ## True if the history holds this tick's state.
 func has_state(tick: int) -> bool:
-	return tick >= 0 and _state_ticks.size() > 0 and _state_ticks[tick % history_size] == tick
+	return _handle >= 0 and _store.has_row(_handle, tick)
 
 
 ## The state saved for a tick as {entry: value}, or empty if it's gone. Custom state appears under the node's name.
@@ -653,9 +623,8 @@ func has_state(tick: int) -> bool:
 func get_state(tick: int) -> Dictionary:
 	if not has_state(tick):
 		return {}
-	var slot := tick % history_size
-	var out := _to_dictionary(_states, _state_values[slot])
-	var saved = _state_custom[slot]
+	var out := _to_dictionary(_states, _store.get_row(_handle, tick))
+	var saved: Variant = _customs_at(tick)
 	if saved is Array:
 		for i in _custom_paths.size():
 			if saved[i] is Dictionary and is_instance_valid(_custom_nodes[i]):
@@ -676,7 +645,7 @@ func get_input(tick: int) -> Dictionary:
 func get_custom_values(tick: int) -> Array:
 	if _custom_paths.is_empty() or not has_state(tick):
 		return []
-	var saved: Variant = _state_custom[tick % history_size]
+	var saved: Variant = _customs_at(tick)
 	return saved if saved is Array else []
 
 
@@ -685,14 +654,14 @@ func get_custom_values(tick: int) -> Array:
 func matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 	if not has_state(tick):
 		return false
-	var saved: Array = _state_values[tick % history_size]
+	var saved: Array = _store.get_row(_handle, tick)
 	for i in _states.size():
 		var p := _states[i]
 		if values.has(p.key) and not is_same(saved[i], MISSING):
 			if not StateEncoding.nearly_equal(saved[i], values[p.key], p.encoding):
 				return false
 	if custom.size() == _custom_paths.size():
-		var saved_custom: Variant = _state_custom[tick % history_size]
+		var saved_custom: Variant = _customs_at(tick)
 		for i in custom.size():
 			if saved_custom is Array and saved_custom[i] is Dictionary and custom[i] is Dictionary and saved_custom[i] != custom[i]:
 				return false
@@ -704,15 +673,15 @@ func matches_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 func correct_state(tick: int, values: Dictionary, custom: Array = []) -> bool:
 	var custom_usable := custom.size() == _custom_paths.size() and not custom.is_empty()
 	if has_state(tick):
-		var saved: Array = _state_values[tick % history_size]
 		for i in _states.size():
 			var p := _states[i]
 			if values.has(p.key):
-				saved[i] = _rounded_copy(p, values[p.key])
+				_store.set_value(_handle, i, tick, _rounded_copy(p, values[p.key]))
 		if custom_usable:
+			_custom_ticks[tick % history_size] = tick
 			_state_custom[tick % history_size] = custom
 		return true
-	if tick < 0 or tick > _newest_state_tick:
+	if tick < 0 or tick > _newest_tick():
 		return false
 	_warn_once("correct_expired", "[TickStateComponent] %s: correction for tick %d is older than the history (%d ticks kept); snapping without a replay" % [_root.name, tick, history_size])
 	_forget_follow()
@@ -743,8 +712,8 @@ func get_schema() -> PackedStringArray:
 
 # --- Internals -----------------------------------------------------------------------------------
 
-## Reads each property, rounds it, writes it back if rounding changed it. Reuses the slot's array, so a tick
-## doesn't allocate once the ring is full (Arrays and Dictionaries in the list are the exception: they're copied).
+## Reads each property, rounds it, writes it back if rounding changed it. Reuses the given array if there is one (the input ring's
+## slot), so a tick doesn't allocate once the ring is full (Arrays and Dictionaries in the list are the exception: they're copied).
 func _capture(props: Array[Prop], reuse: Variant) -> Array:
 	var values: Array = reuse if reuse is Array else []
 	values.resize(props.size())
@@ -794,11 +763,11 @@ func _settle_encoding(p: Prop, value: Variant) -> void:
 
 
 ## True if this tick saved at least one property or custom state.
-func _slot_has_anything(slot: int) -> bool:
-	for v in _state_values[slot]:
+func _tick_has_anything(tick: int) -> bool:
+	for v in _store.get_row(_handle, tick):
 		if not is_same(v, MISSING):
 			return true
-	var saved = _state_custom[slot]
+	var saved: Variant = _customs_at(tick)
 	if saved is Array:
 		for s in saved:
 			if s is Dictionary:
@@ -889,10 +858,81 @@ func _cached_encodings(list_name: StringName, props: Array[Prop]) -> Array:
 	return _encodings_cache[list_name]
 
 
-func _restore_slot(slot: int) -> void:
-	_apply(_states, _state_values[slot])
+## Puts the entity back to how it ended this tick: the store writes the nodes when it reads them itself, else GDScript does.
+func _restore_tick(tick: int) -> void:
+	if not _store.load_row(_handle, tick):
+		_apply(_states, _store.get_row(_handle, tick))
 	_forget_follow() # see _rollback_finished
-	_load_customs(_state_custom[slot])
+	_load_customs(_customs_at(tick))
+
+
+# --- The state store -------------------------------------------------------------------------------
+
+## Joins the tick driver's store (again, if the list changed): one layout per state list, so entities with the same list share a
+## table. An entity with nothing to record stays out. Entries keep their declared encodings in the layout ("auto" included); each
+## entity's binding gives the settled ones.
+func _join_store() -> void:
+	_leave_store()
+	if _driver == null or (_states.is_empty() and _custom_paths.is_empty() and _syncs.is_empty()):
+		return
+	_store = _driver.store
+	var names := PackedStringArray()
+	var encodings: Array = []
+	for p in _states:
+		names.append(p.key)
+		encodings.append(_declared_encoding(p))
+	var layout: int = _store.define_layout(names, encodings)
+	_handle = _store.add_entity(layout, self) if layout >= 0 else -1
+	if _handle < 0:
+		return
+	_store.set_entity_depth(_handle, history_size)
+	_refresh_store_active()
+	_bind_in_store()
+
+
+func _leave_store() -> void:
+	if _handle >= 0 and _store:
+		_store.remove_entity(_handle)
+	_handle = -1
+
+
+## Hands the reading to the store once every entry has a live node and a settled encoding. Quietly does nothing until then.
+func _bind_in_store() -> void:
+	if _handle < 0:
+		return
+	var nodes: Array = []
+	var paths: Array = []
+	var encodings: Array = []
+	for p in _states:
+		if not is_instance_valid(p.node) or p.encoding == StateEncoding.AUTO:
+			return
+		nodes.append(p.node)
+		paths.append(p.property)
+		encodings.append(p.encoding)
+	_store.bind(_handle, nodes, paths, encodings, quantize_each_tick)
+
+
+## Recorded only in the tree, while recording, and when this machine simulates the entity (not FOLLOW_SERVER).
+func _refresh_store_active() -> void:
+	if _handle >= 0 and _store:
+		_store.set_active(_handle, is_inside_tree() and _recording and rollback_mode == RollbackMode.RESIMULATE)
+
+
+func _newest_tick() -> int:
+	return _store.newest_tick(_handle) if _handle >= 0 else -1
+
+
+# The encoding an entry was declared with: what it names after "@", or auto.
+func _declared_encoding(p: Prop) -> StringName:
+	var parts := p.entry.split("@", false, 1)
+	if parts.size() > 1 and StateEncoding.is_known(StringName(parts[1].strip_edges())):
+		return StringName(parts[1].strip_edges())
+	return StateEncoding.AUTO
+
+
+func _customs_at(tick: int) -> Variant:
+	var slot := tick % history_size
+	return _state_custom[slot] if tick >= 0 and _custom_ticks.size() > 0 and _custom_ticks[slot] == tick else null
 
 
 func _notify_loaded(tick: int) -> void:

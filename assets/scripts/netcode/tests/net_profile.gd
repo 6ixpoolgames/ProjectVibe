@@ -91,7 +91,7 @@ func _micro_timings() -> void:
 		body._tick_simulate(1.0 / 60.0, tick)))
 	_report("save input for a tick (_tick_capture_input)", _time_calls(5000, func() -> void: state._tick_capture_input(tick)))
 	_report("save state for a tick (_tick_record)", _time_calls(5000, func() -> void: state._tick_record(tick)))
-	_report("load state for a rollback, without the engine floor refresh", _time_calls(5000, func() -> void: state._restore_slot(tick % state.history_size)))
+	_report("load state for a rollback, without the engine floor refresh", _time_calls(5000, func() -> void: state._restore_tick(tick)))
 	_report("load hook: refresh the engine's floor state", _time_calls(1000, func() -> void: body._on_state_loaded(tick)))
 	_report("collision sync (static flip)", _time_calls(5000, func() -> void: state._sync_collision()))
 	var values := state.get_state_values(tick)
