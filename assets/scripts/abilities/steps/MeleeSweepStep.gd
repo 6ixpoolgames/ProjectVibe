@@ -103,8 +103,8 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 			var other := found.get_parent() as Pawn
 			if other:
 				targets.append(other)
-	elif Pawn.get_grid() != null and pawn.is_inside_tree():
-		for found: Object in Pawn.get_grid().find_touching(PackedVector3Array(centres), hit_radius, pawn, on_tick):
+	elif SharedPawnTable.get_grid() != null and pawn.is_inside_tree():
+		for found: Object in SharedPawnTable.get_grid().find_touching(PackedVector3Array(centres), hit_radius, pawn, on_tick):
 			if found is Pawn:
 				targets.append(found)
 	else:

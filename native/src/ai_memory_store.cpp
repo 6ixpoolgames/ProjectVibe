@@ -23,6 +23,17 @@
 using namespace godot;
 
 namespace {
+
+// How easy a target is to see: its Detectability stat's value, 1 without one, as StatManager.detectability_of does in GDScript.
+double detectability_of(Object *target) {
+	Object *manager = Object::cast_to<Object>(target->get("stat_manager").operator Object *());
+	if (manager == nullptr) {
+		return 1.0;
+	}
+	Object *stat = manager->call("get_stat", StringName("Detectability")).operator Object *();
+	return stat ? double(stat->get("value")) : 1.0;
+}
+
 // Dead pawns aren't seen, and are forgotten. Reads Pawn.dead, which the Death ability keeps equal to Pawn.is_dead(), instead of
 // calling is_dead() through GDScript, which costs about a third of sensing. Anything without a dead property (not a pawn) is alive.
 bool is_dead(Object *entity) {
@@ -316,7 +327,7 @@ Array AIMemoryStore::sight_check(Object *observer_object, double eye_yaw, const 
 		const Vector3 target_position = target->get_global_position();
 		const Vector3 aim = target_position + Vector3(0.0, _sight.target_height, 0.0);
 		// Visibility: distance × angle × detectability, as SightSense.visibility_of.
-		const double visibility = sight_rules::visibility(_sight, eye, facing, aim, double(target->get("detectability")));
+		const double visibility = sight_rules::visibility(_sight, eye, facing, aim, detectability_of(target));
 		check_one(observer, observer_layer, target, target->get_instance_id(), eye, aim, target_position, visibility, tick, -1, space, added,
 				became_certain);
 	}

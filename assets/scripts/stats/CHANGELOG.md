@@ -16,6 +16,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 |---|---|---|---|
 | One place for the "current stays between 0 and value" rule | `Stat.current`; written directly by `abilities/AbilityManager.revive`, `effects/EffectManager`, `samples/ArenaSample` | Refilling and capping a current value is done by hand in several places. A refill and a cap on `Stat` or `StatManager`, beside `change_current`, would keep the rule in one place | S |
 
+## 2026-11-19
+
+- **A stat's `current` is pushed to the state store** when it changes (its setter), instead of being read every tick: the StatManager lists it as a pushed entry and tells each stat where it's recorded.
+- **`StatManager.detectability_of()` and `set_detectability()`** (new, static): the Detectability stat, for callers that used `Pawn.detectability`.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): the `StatManager` class comment shortened (odd cases and the Health note moved to the README's "How it works"). `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.

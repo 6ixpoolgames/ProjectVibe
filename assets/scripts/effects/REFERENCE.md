@@ -122,7 +122,9 @@ The pawn's [`EffectManager`](#effectmanager) makes one whenever its list of effe
 
 Applies effects to its pawn and keeps the over-time ones.
 
-A part on the pawn, added by PawnInitializer. Whatever hits a pawn hands it effects, and the pawn applies them to itself, with its own resistances. Instant effects run at once; over-time ones go in a rolled-back active list, count down in `tick_effects()` and all end when the pawn dies. Do-once parts run on the authority only; held parts work on every machine.
+A part on the pawn, added by PawnInitializer. Whatever hits a pawn hands it effects, and the pawn applies them to itself, with its own
+resistances. Instant effects run at once; over-time ones go in a rolled-back active list, count down in `tick_effects()` and
+all end when the pawn dies. Do-once parts run on the authority only; held parts work on every machine.
 
 ```gdscript
 pawn.effect_manager.apply_effect(effect, source)   # source: who applied it (for memory, lifesteal), or null
@@ -157,9 +159,11 @@ Design: pawn spec 8.11.
 
 ### Functions
 
-- `apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> bool`: Applies an effect to this pawn. source is who applied it, or null; source_ability and hit are handed to its parts. Returns false if refused: dead, invulnerable, immune, the list full, or IGNORE stacking.
+- `apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> bool`: Applies an effect to this pawn. source is who applied it, or null; source_ability and hit are handed to its parts. Returns false if
+  refused: dead, invulnerable, immune, the list full, or IGNORE stacking.
 - `apply_effects(effects: Effect[], source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> void`: Applies several, in order, stopping if the pawn dies.
-- `take_hit(hit: HitInfo) -> void`: Called by the AbilityManager when a hit lands, on the authority: the hit's effects, from its attacker. Fills in hit.damage_dealt.
+- `take_hit(hit: HitInfo) -> void`: Called by the AbilityManager when a hit lands, on the authority: the hit's effects, from its attacker. Fills in
+  hit.damage_dealt.
 - `tick_effects() -> void`: The pawn calls this once per tick, before its abilities run, while the list has something in it: counts down, runs periods, ends effects.
 - `can_sleep() -> bool`: True if the pawn can sleep (pawn spec 15.3): nothing in the list to count down, and nothing waiting to be worked out.
 - `has_effect(effect: Effect) -> bool`: True while this over-time effect is on the pawn.

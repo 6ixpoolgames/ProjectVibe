@@ -35,7 +35,7 @@ PawnTable::PawnTable() :
 	built_in("yaw", Variant::FLOAT, 0.0);
 	built_in("grounded", Variant::BOOL, false);
 	built_in("detectability", Variant::FLOAT, 1.0);
-	// Detectability is a stat (Pawn.detectability, StatManager.DETECTABILITY), pushed here when it changes instead of read from
+	// Detectability is a stat (StatManager.DETECTABILITY), pushed here when it changes instead of read from
 	// every pawn at every refresh.
 	_columns.back().pushed = true;
 }
@@ -85,6 +85,13 @@ void PawnTable::remove(Object *pawn) {
 	before_change();
 	erase_slot(found->second);
 	rebuild_slot_map();
+	// A pawn that left has nothing waiting any more.
+	const uint64_t id = pawn->get_instance_id();
+	for (size_t i = _waiting.size(); i-- > 0;) {
+		if (_waiting[i].id == id) {
+			_waiting.erase(_waiting.begin() + int64_t(i));
+		}
+	}
 }
 
 int64_t PawnTable::get_count() const {
@@ -128,16 +135,32 @@ bool PawnTable::refresh(int64_t tick) {
 	} else {
 		++_version;
 	}
-	// The pushes since the last refresh, oldest first, so the newest wins.
-	for (const Push &push : _pushes) {
+	// Pushes still waiting from earlier refreshes first, then the ones since the last refresh, oldest first, so the newest wins. One
+	// that can't land yet (its column off, or its pawn not joined) waits, replacing an older wait for the same pawn and column.
+	std::vector<Push> pending;
+	pending.swap(_waiting);
+	pending.insert(pending.end(), _pushes.begin(), _pushes.end());
+	_pushes.clear();
+	for (const Push &push : pending) {
 		auto found = _slot_of.find(push.id);
 		Column &column = _columns[size_t(push.column)];
 		if (found != _slot_of.end() && column.on()) {
 			write_column(column, found->second, push.value);
 			column.unread[found->second] = 0; // pushed: newer than its property's first read
+			continue;
+		}
+		bool replaced = false;
+		for (Push &waiting : _waiting) {
+			if (waiting.id == push.id && waiting.column == push.column) {
+				waiting.value = push.value;
+				replaced = true;
+				break;
+			}
+		}
+		if (!replaced) {
+			_waiting.push_back(push);
 		}
 	}
-	_pushes.clear();
 	_refreshed_tick = tick;
 	_stale = false;
 	return true;

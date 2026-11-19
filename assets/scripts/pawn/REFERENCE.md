@@ -5,6 +5,8 @@
 Every class in `assets/scripts/pawn/`, from its doc comments. The overview is in [README.md](README.md).
 
 - [Pawn](#pawn)
+- [SharedPawnTable](#sharedpawntable)
+- [VisualSmoother](#visualsmoother)
 
 ## Pawn
 
@@ -12,37 +14,67 @@ Every class in `assets/scripts/pawn/`, from its doc comments. The overview is in
 
 A body something can possess, which runs its parts in a fixed order each tick.
 
-Its parts (managers, abilities, AI) are child nodes that PawnInitializer adds from the game's defaults (`fill_in_default_parts`, `skip_default_parts`); the pawn keeps the body, the tick order, references to its parts and a few general flags. Use pawn.tscn as it is, or inherit from it. A controller writes its input each tick through its ControllerManager, and its abilities turn that into movement. Optional scene children: AbilityManager, TickStateComponent and NetworkEntity (rollback and multiplayer; the last two stay in the scene) and a Node3D called Visual.
+Its parts (managers, abilities, AI) are child nodes that PawnInitializer adds from the game's defaults (`fill_in_default_parts`,
+`skip_default_parts`); the pawn keeps the body, the tick order, references to its parts and a few general flags. Use
+pawn.tscn as it is, or inherit from it. A controller writes its input each tick through its ControllerManager, and its abilities
+turn that into movement. Optional scene children: AbilityManager, TickStateComponent and NetworkEntity (rollback and multiplayer;
+the last two stay in the scene) and a Node3D called Visual.
 
-Each tick: **input** (the AI runs, then the ControllerManager asks the controller in charge, where input is decided here), **simulate** (effects count down, abilities steer, gravity, one move_and_slide or the CrowdMover), then state is recorded for rollback. Hits resolve after every pawn has simulated. The body's rotation is never written (it slowly changed its scale and made replays collide differently; see TickSamplePawn): facing is `yaw` and only the model turns. Visual follows the body smoothly per frame and fades corrections out. Design: pawn spec 4, 15.1.
+Each tick: **input** (the AI runs, then the ControllerManager asks the controller in charge, where input is decided here),
+**simulate** (effects count down, abilities steer by writing `velocity`, gravity, then one move: its `mover`'s if
+it takes it, else the pawn's own move_and_slide), then the state store records it. Hits resolve after every pawn has simulated. The
+body's rotation is never written (it slowly changed its scale and made replays collide differently; see TickSamplePawn): facing is
+`yaw` and only the model turns. A child called Visual is drawn smoothly between ticks by a VisualSmoother. It also works
+without the tick driver (it ticks itself) and without a mover. Design: pawn spec 4, 15.1; state store spec 12.8.
 
 ### Settings and properties
 
-- `keeps_world_loaded: bool` = `false`: On: this pawn keeps the world loaded around it even without a player (a hero, say). Off, it's frozen where nothing else keeps the ground loaded (a horde). Only a flag, read whenever `counts_on_this_machine()` is asked; setting it also updates the sources' group. How far it loads is `load_distance`.
-- `load_distance: float`: How far this pawn keeps the world loaded when it does, in metres: the game's setting (PawnDefaultsRes), 320 without one. Read-only; named as a StreamingSource's is, so the chunk streamer reads both the same way.
+- `keeps_world_loaded: bool` = `false`: On: this pawn keeps the world loaded around it even without a player (a hero, say). Off, it's frozen where nothing else keeps the
+  ground loaded (a horde). Only a flag, read whenever `counts_on_this_machine()` is asked; setting it also updates the
+  sources' group. How far it loads is `load_distance`.
+- `load_distance: float`: How far this pawn keeps the world loaded when it does, in metres: the game's setting (PawnDefaultsRes), 320 without one.
+  Read-only; named as a StreamingSource's is, so the chunk streamer reads both the same way.
 - `nav_distance: float`: How far nav is built around it, in metres: the game's setting, 128 without one. Read-only.
-- `fill_in_default_parts: bool` = `true`: On, GameMode's PawnInitializer adds every default part this pawn's scene doesn't already have. Off, the pawn gets only what its scene has.
-- `gravity: float` = `-1.0`: How strongly it falls, in metres per second per second. Below 0, the project's gravity setting. The pawn adds gravity; abilities only steer.
+- `fill_in_default_parts: bool` = `true`: On, GameMode's PawnInitializer adds every default part this pawn's scene doesn't already have. Off, the pawn gets only what its
+  scene has.
+- `gravity: float` = `-1.0`: How strongly it falls, in metres per second per second. Below 0, the project's gravity setting. The pawn adds gravity; abilities
+  only steer.
 - `skip_default_parts: StringName[]` = `[]`: Default parts to leave out, by name, such as &"AbilityManager". A part with that name in the scene is kept either way.
-- `team: int` = `0`: Which side this pawn is on. AI sensing only notices pawns of other teams (pawn spec 10.4). A player who possesses a pawn plays for its team.
-- `detectability: float`: How easy this pawn is for AI to see: 1 is normal, lower is harder, 0 is invisible (pawn spec 10.4). Reads and writes the Detectability stat in its StatManager, so effects can change it; set the base value on the stat in the scene. A pawn without the stat keeps its own number. Game rules for stealth belong in a GameMode module.
-- `sleep_when_idle: bool` = `true`: On: a pawn standing still with nothing to do sleeps, skipping its abilities, gravity and move_and_slide until something wakes it (pawn spec 15.3). Off: it simulates fully every tick.
-- `sleep_check_ticks: int` = `15`: A sleeping pawn still runs a full tick this often, staggered by entity id, so ground that went away under it is noticed. 15 ticks is a quarter of a second at 60 ticks a second.
-- `skip_move_when_still: bool` = `true`: On (the default): a pawn awake only for its timers, grounded and not moving, skips move_and_slide, but still moves on its check ticks (`sleep_check_ticks`) so ground taken from under it is noticed. Off: it always moves. Counted in diagnostics as pawn.move_skipped.
-- `crowd_movement: bool` = `true`: On (the default): while an AI drives this pawn on the server or offline and it walks on the ground, the CrowdMover moves it with the crowd instead of move_and_slide (pawn spec 8.22). Players, pawns in the air, clients and abilities with needs_full_movement always move by physics.
-- `rebuild_floor_on_rollback: bool` = `true`: On (the default): after a rollback restores this pawn, a zero-length move_and_slide rebuilds Godot's own "on the floor" flag, which the first replayed tick's floor snap reads. Off: it's left as it was, which saves a physics solve per restored pawn but can make that first replayed tick differ. Only clients roll back, and by default only their own pawn.
-- `is_sleeping: bool` = `false`: Whether this pawn slept on its last tick, for readouts and tests. Worked out again every tick from its state, so it isn't rollback state. Setting it changes nothing.
+- `team: int` = `0`: Which side this pawn is on. AI sensing only notices pawns of other teams (pawn spec 10.4). A player who possesses a pawn plays for
+  its team. Recorded in the state store, pushed when it changes.
+- `sleep_when_idle: bool` = `true`: On: a pawn standing still with nothing to do sleeps, skipping its abilities, gravity and move_and_slide until something wakes it
+  (pawn spec 15.3). Off: it simulates fully every tick.
+- `sleep_check_ticks: int` = `15`: A sleeping pawn still runs a full tick this often, staggered by entity id, so ground that went away under it is noticed. 15 ticks
+  is a quarter of a second at 60 ticks a second.
+- `skip_move_when_still: bool` = `true`: On (the default): a pawn awake only for its timers, grounded and not moving, skips move_and_slide, but still moves on its check
+  ticks (`sleep_check_ticks`) so ground taken from under it is noticed. Off: it always moves. Counted in diagnostics as
+  pawn.move_skipped.
+- `crowd_movement: bool` = `true`: On (the default): its `mover` may take its moves (the CrowdMover moves AI pawns walking on the ground with the crowd, pawn
+  spec 8.22). Off: it always moves itself, with move_and_slide.
+- `mover: Object` = `null`: What moves this pawn instead of its own move_and_slide, on the ticks it takes the move (`take_move(pawn, was_grounded, seconds)`,
+  then `finish_move()` or `move_by_physics_now()`): the game's CrowdMover, set by the PawnInitializer, or null, and the
+  pawn moves itself every tick.
+- `rebuild_floor_on_rollback: bool` = `true`: On (the default): after a rollback restores this pawn, a zero-length move_and_slide rebuilds Godot's own "on the floor" flag, which
+  the first replayed tick's floor snap reads. Off: it's left as it was, which saves a physics solve per restored pawn but can make
+  that first replayed tick differ. Only clients roll back, and by default only their own pawn.
+- `is_sleeping: bool` = `false`: Whether this pawn slept on its last tick, for readouts and tests. Worked out again every tick from its state, so it isn't rollback
+  state. Setting it changes nothing.
 - `yaw: float` = `0.0`: Which way the pawn faces, in radians. The body never turns; only the model does.
 - `grounded: bool` = `false`: Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
 - `ability_manager: AbilityManager` = `null`: Runs this pawn's abilities, which steer it. Null if it has none.
 - `stat_manager: StatManager` = `null`: This pawn's stats, which abilities read. Null if it has none, and then abilities use their fallbacks.
-- `effect_manager: EffectManager` = `null`: Applies effects to this pawn and keeps the over-time ones (pawn spec 8.11). Null if it has none, and then hits and effects do nothing to it.
+- `effect_manager: EffectManager` = `null`: Applies effects to this pawn and keeps the over-time ones (pawn spec 8.11). Null if it has none, and then hits and effects do
+  nothing to it.
 - `controller_manager: ControllerManager` = `null`: Picks whose input this pawn follows, and holds that input. Null if the pawn has none, and then nothing writes its input for it.
 - `navigation_manager: NavigationManager` = `null`: Finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
 - `ai_context: AIContextComponent` = `null`: Shared data and settings for this pawn's AI (pawn spec 10), and the AI's core. Null if the pawn has no AI.
-- `dead: bool` = `false`: True while the Death ability runs, the same as is_dead(). Kept current by DeathAbility (through its timer, so a rollback updates it too), and read directly by C++, which is much cheaper than calling is_dead(). Read it; don't set it.
-- `tick_step: int` = `1`: How often this pawn simulates: every tick (1), 2nd (2) or 4th (4), spread by its own number. Rolls back. AIActivationManager raises it for far-away AI pawns; a player's pawn always runs every tick. Each run does N ticks' worth (`ticks_elapsed`). Pawn spec 8.21.
-- `ticks_elapsed: int` = `1`: The ticks since this pawn last ran, 1 to `MAX_TICK_STEP`. Its parts advance their timers by it (cooldowns, effects, AI schedules) and its simulate step is this many ticks long. Read it; don't set it.
+- `dead: bool` = `false`: True while the Death ability runs, the same as is_dead(). Kept current by DeathAbility (through its timer, so a rollback updates
+  it too), and read directly by C++, which is much cheaper than calling is_dead(). Read it; don't set it.
+- `tick_step: int` = `1`: How often this pawn simulates: every tick (1), 2nd (2) or 4th (4), spread by its own number. Rolls back (pushed to the state
+  store when it changes). AIActivationManager raises it for far-away AI pawns; a player's pawn always runs every tick. Each run does N
+  ticks' worth (`ticks_elapsed`). Pawn spec 8.21.
+- `ticks_elapsed: int` = `1`: The ticks since this pawn last ran, 1 to `MAX_TICK_STEP`. Its parts advance their timers by it (cooldowns, effects, AI
+  schedules) and its simulate step is this many ticks long. Read it; don't set it.
 
 ### Signals
 
@@ -50,38 +82,95 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 
 ### Constants
 
-- `TABLE_KEYS_WITHOUT_ID = 1099511627776`
 - `MAX_TICK_STEP = 4`: The longest step, and so the most ticks one run can cover. A pawn frozen for a while comes back with at most this.
-- `GROUP = &"pawns"`: The Godot group every pawn is in while it's in the tree: the one list of "all pawns" (crowd mover, kill floor, team registry, diagnostics, replay).
+- `GROUP = &"pawns"`: The Godot group every pawn is in while it's in the tree: the one list of "all pawns" (crowd mover, kill floor, team registry,
+  diagnostics, replay).
 
 ### Functions
 
-- `is_keeping_world_loaded() -> bool`: True while this pawn keeps the world loaded around it: a player has it or `keeps_world_loaded` is on, and it's simulated on this machine (another player's pawn on a client doesn't count there). The same as `counts_on_this_machine()`, under a name that says what it means outside streaming.
-- `_update_source_group() -> void`: Keeps this pawn in the streaming sources' group (StreamingSource.GROUP) exactly while it might keep the world loaded, so the chunk streamer, nav feeder and replay look through the few pawns that count, not the whole army. Called when either input changes.
-- `counts_on_this_machine() -> bool`: The source contract (StreamingSource.gd): whether this pawn loads the world around it on this machine now. The chunk streamer, the nav feeder and the AI switch-off ask this every time they look.
-- `distance_moved_since_last_check() -> float`: The source contract: how far this pawn has moved since the streamer last asked, so it can judge how soon a chunk edge comes. 0 the first time, because arriving somewhere isn't moving.
+- `is_keeping_world_loaded() -> bool`: True while this pawn keeps the world loaded around it: a player has it or `keeps_world_loaded` is on, and it's simulated
+  on this machine (another player's pawn on a client doesn't count there). The same as `counts_on_this_machine()`, under a name
+  that says what it means outside streaming.
+- `_update_source_group() -> void`: Keeps this pawn in the streaming sources' group (StreamingSource.GROUP) exactly while it might keep the world loaded, so the
+  chunk streamer, nav feeder and replay look through the few pawns that count, not the whole army. Called when either input changes.
+- `counts_on_this_machine() -> bool`: The source contract (StreamingSource.gd): whether this pawn loads the world around it on this machine now. The chunk streamer, the
+  nav feeder and the AI switch-off ask this every time they look.
+- `distance_moved_since_last_check() -> float`: The source contract: how far this pawn has moved since the streamer last asked, so it can judge how soon a chunk edge comes. 0 the
+  first time, because arriving somewhere isn't moving.
 - `get_visual() -> Node3D`: The node that follows the body smoothly, for hanging things from. With no Visual, it's the body.
 - `set_frozen(frozen: bool) -> void`
 - `is_frozen() -> bool`: True while frozen.
 - `runs_ai_here() -> bool`: True where this pawn's AI runs: offline, or on the server. The AI never runs on a client (pawn spec 10.2).
 - `is_authority() -> bool`: True where this pawn's state is decided: offline, or on the server. Hits are decided here.
-- `is_dead() -> bool`: True while this pawn's Death ability runs: from Health reaching 0 until it's revived (AbilityManager.revive). A pawn with no Death ability never dies. Returns `dead`, which the Death ability keeps current.
-- `get_table() -> Object` *(static)*: The shared table of plain pawn data (scaling spec section 3), or null without the C++ library. Read-only for anyone but Pawn: pawns join and leave it themselves. Its rows are read from the pawns once a tick, at the first refresh(tick).
-- `get_grid() -> Object` *(static)*: The shared grid of pawns (AIPawnGrid), built from the table on first use, or null without the C++ library. AI sensing and the swing hit checks (MeleeSweepStep) both use it, so it lives beside the table.
+- `is_dead() -> bool`: True while this pawn's Death ability runs: from Health reaching 0 until it's revived (AbilityManager.revive). A pawn with no
+  Death ability never dies. Returns `dead`, which the Death ability keeps current.
+- `mark_state_changed() -> void`: Something changed this pawn between its own runs (an effect landed on it), so the state store reads it at the next commit
+  instead of copying its last row forward. Its runs mark it themselves.
 - `get_network_entity() -> NetworkEntity`: This pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
-- `_tick_input(_dt: float, tick: int) -> void`: The input phase: runs the AI, then asks the controller in charge for this tick's input, where this pawn's input is decided here. A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
-- `finish_crowd_move(at: Vector3, seconds: float) -> void`: The CrowdMover moved this pawn to at, over seconds: it stands there on the ground, its velocity is what it really moved (as move_and_slide leaves it), and its tick finishes (pawn spec 8.22). The position is rounded as the rollback recording will round it (TickStateComponent.round_position), so the recording changes nothing afterwards and a still pawn is exactly still, and sleeps.
-- `finish_move_by_physics() -> void`: The CrowdMover couldn't move this pawn (a wall, an edge, no ground under where it was going), so it moves by physics now, in the same tick, which handles those, and finishes its tick. Its velocity is still this run's.
-- `get_body_radius() -> float`: How wide this pawn's body is: its collision capsule's (or sphere's, or cylinder's) radius, scaled, in metres. 0.4 without one. Found once.
-- `get_body_shape() -> CollisionShape3D`: This pawn's collision shape node (its first CollisionShape3D child with a shape), or null. The CrowdMover sweeps it along a move to find walls. Found once.
-- `_can_sleep(tick: int) -> bool`: True if this pawn sleeps this tick (pawn spec 15.3); not the same as frozen or paused. A rule of its state and the tick number only, so nothing extra rolls back and server and client sleep on the same ticks. It sleeps when sleep_when_idle is on, it's grounded and still, nothing moved it, it isn't a check tick, and no effect or ability timer is running.
-- `fired_since_last_run(tick: int, offset: int, interval: int) -> bool`: True if a rule that fires every interval ticks, on the ticks where (tick + offset) is a multiple of interval, fired on this tick or on one this pawn skipped since its last run. For the AI's schedules and the like, so a pawn that runs every Nth tick keeps them (pawn spec 8.21). With ticks_elapsed 1, it's (tick + offset) % interval == 0.
-- `fires_in_run(run_tick: int, run_length: int, offset: int, interval: int) -> bool` *(static)*: The same rule for any run: true if a rule that fires every interval ticks (where (tick + offset) is a multiple of interval) fires on run_tick or on one of the run_length - 1 ticks before it. AISensingManager asks it about a pawn's next run, before that run happens, so both use one rule.
-- `next_run_tick(tick: int) -> int`: The tick this pawn will next run after tick, if its step doesn't change before then. The same rule as _prepare_run, looking ahead from a tick it ran on: the first later tick that lines up with its step, or a whole step on. AISensingManager uses it to ask the worker-thread sensing job in time for a stepping pawn's next run.
+- `_tick_input(_dt: float, tick: int) -> void`: The input phase: runs the AI, then asks the controller in charge for this tick's input, where this pawn's input is decided here.
+  A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
+- `finish_move(at: Vector3, seconds: float) -> void`: Its mover moved this pawn to at, over seconds: it stands there on the ground, its velocity is what it really moved (as
+  move_and_slide leaves it), and its tick finishes (pawn spec 8.22). The position is rounded as the state store will round it
+  (TickStateComponent.round_position), so the commit changes nothing afterwards and a still pawn is exactly still, and sleeps.
+- `move_by_physics_now() -> void`: Its mover couldn't move this pawn (a wall, an edge, no ground under where it was going), so it moves by physics now, in the same
+  tick, which handles those, and finishes its tick. Its velocity is still this run's.
+- `get_body_radius() -> float`: How wide this pawn's body is: its collision capsule's (or sphere's, or cylinder's) radius, scaled, in metres. 0.4 without one.
+  Found once.
+- `get_body_shape() -> CollisionShape3D`: This pawn's collision shape node (its first CollisionShape3D child with a shape), or null. The CrowdMover sweeps it along a move
+  to find walls. Found once.
+- `_can_sleep(tick: int) -> bool`: True if this pawn sleeps this tick (pawn spec 15.3); not the same as frozen or paused. A rule of its state and the tick number
+  only, so nothing extra rolls back and server and client sleep on the same ticks. It sleeps when sleep_when_idle is on, it's grounded
+  and still, nothing moved it, it isn't a check tick, and no effect or ability timer is running.
+- `fired_since_last_run(tick: int, offset: int, interval: int) -> bool`: True if a rule that fires every interval ticks, on the ticks where (tick + offset) is a multiple of interval, fired on this tick
+  or on one this pawn skipped since its last run. For the AI's schedules and the like, so a pawn that runs every Nth tick keeps them
+  (pawn spec 8.21). With ticks_elapsed 1, it's (tick + offset) % interval == 0.
+- `fires_in_run(run_tick: int, run_length: int, offset: int, interval: int) -> bool` *(static)*: The same rule for any run: true if a rule that fires every interval ticks (where (tick + offset) is a multiple of interval) fires
+  on run_tick or on one of the run_length - 1 ticks before it. AISensingManager asks it about a pawn's next run, before that run
+  happens, so both use one rule.
+- `next_run_tick(tick: int) -> int`: The tick this pawn will next run after tick, if its step doesn't change before then. The same rule as _prepare_run, looking ahead
+  from a tick it ran on: the first later tick that lines up with its step, or a whole step on. AISensingManager uses it to ask the
+  worker-thread sensing job in time for a stepping pawn's next run.
 - `runs_every_tick() -> bool`: True while it runs every tick: tick_step 1, or a player has it.
-- `_on_state_loaded(_tick: int) -> void`: TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is doing now. Nothing can set it directly, so this makes the engine work it out again, then puts things back.
+- `_on_state_loaded(_tick: int) -> void`: TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is
+  doing now. Nothing can set it directly, so this makes the engine work it out again, then puts things back.
 - `_on_network_role(entity: NetworkEntity) -> void`: Works for a role that changes while running, as swapping pawns does.
 - `_on_network_interpolated() -> void`: On a client, for a pawn someone else controls: it was just moved between snapshots, so Visual follows.
 - `_on_network_corrected(jump: Variant) -> void`: On a client: a correction moved our body by this much.
 - `_gravity_strength() -> float`: Gravity in metres per second per second, from the gravity setting or else the project's.
-- `is_simulated_here() -> bool`: False for a pawn on a client that belongs to someone else. Whose input this is, is the ControllerManager's question (ControllerManager.decides_own_input).
+- `is_simulated_here() -> bool`: False for a pawn on a client that belongs to someone else. Whose input this is, is the ControllerManager's question
+  (ControllerManager.decides_own_input).
+
+## SharedPawnTable
+
+`res://assets/scripts/pawn/SharedPawnTable.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+The one shared table of plain pawn data (the C++ PawnTable) and the grid built on it (AIPawnGrid), for AI sensing and swing hits.
+
+Every pawn in the tree has a row, keyed by its entity id. Pawns NetworkSession never configured, as in most tests, have no entity id; they get keys from `KEYS_WITHOUT_ID` up, after every networked pawn, in the order they joined. Both are null without the navcore library. Pawns join and leave it themselves (`join()`, `leave()`); everyone else only reads it. The state store takes over this job when AI sensing moves onto it (state store spec 12.7). Design: scaling spec section 3.
+
+### Constants
+
+- `KEYS_WITHOUT_ID = 1099511627776`: The first key handed to a pawn with no entity id.
+
+### Functions
+
+- `get_table() -> Object` *(static)*: The shared table, or null without the C++ library. Its rows are read from the pawns once a tick, at the first refresh(tick).
+- `get_grid() -> Object` *(static)*: The shared grid of pawns, built from the table on first use, or null without the C++ library. AI sensing and the swing hit checks (MeleeSweepStep) both use it.
+- `join(pawn: Node) -> void` *(static)*: Adds a pawn, making the table on first use. The key is its NetworkEntity's entity id (NetworkSession sets it before the pawn enters the tree), else the next key from `KEYS_WITHOUT_ID`.
+- `leave(pawn: Node) -> void` *(static)*: Takes a pawn out.
+
+## VisualSmoother
+
+`res://assets/scripts/pawn/VisualSmoother.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
+
+Draws a pawn's Visual smoothly between ticks: it glides between where the body was after its last two runs, turns the model the same way, and fades network corrections out.
+
+The pawn makes one when it has a child called Visual, and tells it after every run (`note_run()`), after a rollback puts it back (`snap()`), and from the network hooks (`note_moved()`, `add_correction()`). It only ever reads game state. A pawn running every Nth tick moves once per run, so its Visual glides across the whole run (pawn spec 8.21); a correction fades over about 100 ms, a quick slide rather than a jump (netcode spec 6.2).
+
+### Functions
+
+- `setup(pawn: Pawn, visual: Node3D) -> void`: Starts smoothing this Visual of this pawn. The Visual is placed by this part, between ticks, not by the body.
+- `note_run(span: int, tick: int) -> void`: A run just ended on this tick, covering span ticks: the Visual glides from where the last one left the body to where it is now.
+- `snap() -> void`: The body was put somewhere without moving there (a rollback, a spawn): the Visual goes straight there.
+- `note_moved() -> void`: On a client, for a pawn someone else controls: it was just moved between snapshots, so the Visual glides after it.
+- `add_correction(jump: Vector3) -> void`: On a client: a correction moved the body by this much. The Visual keeps where it was and catches up over about 100 ms.

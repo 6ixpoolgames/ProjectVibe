@@ -187,7 +187,7 @@ func _test_rollback() -> void:
 	await _ticks(30)
 	await get_tree().physics_frame
 	var listed: Array[String] = (pawn.get_node("TickState") as TickStateComponent).state_properties
-	_check(listed.has("tick_step") and listed.has("_last_run_tick"), "how often a pawn runs, and when it last did, roll back")
+	_check(listed.has("tick_step pushed") and listed.has("_last_run_tick"), "how often a pawn runs, and when it last did, roll back")
 	var real := [pawn.global_position, pawn._last_run_tick, pawn.tick_step]
 	var went_back: bool = TickDriver.rollback(TickDriver.tick - 9)
 	var after := [pawn.global_position, pawn._last_run_tick, pawn.tick_step]

@@ -1,8 +1,8 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: movement/CHANGELOG.md.
 ## Moves AI pawns walking on the ground all together once a tick, instead of each one calling Godot's move_and_slide.
 ##
-## A GameMode module (GameMode.crowd_mover), pawn spec 8.22. A pawn the AI drives hands its move for the tick to
-## [method try_take_move] and waits; once every pawn has simulated (this runs last in TickDriver's simulate phase) it moves them all
+## A GameMode module (GameMode.crowd_mover), pawn spec 8.22. It's the [member Pawn.mover] of the pawns the PawnInitializer gives
+## it (and of those already there when it's added). A pawn the AI drives hands its move for the tick to [method take_move] and waits; once every pawn has simulated (this runs last in TickDriver's simulate phase) it moves them all
 ## (flat, pushed apart where they overlap, checked for walls and stood on the ground), then each pawn finishes its tick or, where a
 ## check failed, moves by physics. With the navcore library the batch runs in C++ ([member use_cpp_batch]: CrowdBatch, on worker
 ## threads, walls from the nav mesh); without it a GDScript twin uses physics sweeps and rays, and must give the same answer. A player's
@@ -72,6 +72,10 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 	_driver = get_node_or_null(^"/root/TickDriver")
 	if _driver:
 		_driver.register(self, TICK_ORDER)
+	if game_mode.is_inside_tree():
+		for pawn in game_mode.get_tree().get_nodes_in_group(Pawn.GROUP):
+			if pawn is Pawn and pawn.mover == null:
+				pawn.mover = self
 
 
 func _on_module_removed(game_mode: GameModeSingleton) -> void:
@@ -82,12 +86,16 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	if _driver:
 		_driver.unregister(self)
 	_finish_queued_unmoved()
+	if game_mode.is_inside_tree():
+		for pawn in game_mode.get_tree().get_nodes_in_group(Pawn.GROUP):
+			if pawn is Pawn and pawn.mover == self:
+				pawn.mover = null
 
 
-## Takes this tick's move of a pawn, if it moves that pawn, and returns true; the pawn then waits for finish_crowd_move or
-## finish_move_by_physics. False: the pawn moves by physics itself (see the class description for which pawns it moves). seconds is
-## the pawn's run length.
-func try_take_move(pawn: Pawn, was_grounded: bool, seconds: float) -> bool:
+## Takes this tick's move of a pawn, if it moves that pawn, and returns true; the pawn then waits for [method Pawn.finish_move] or
+## [method Pawn.move_by_physics_now]. False: the pawn moves by physics itself (see the class description for which pawns it moves).
+## seconds is the pawn's run length.
+func take_move(pawn: Pawn, was_grounded: bool, seconds: float) -> bool:
 	if not enabled or not pawn.crowd_movement or not was_grounded or pawn.velocity.y > 0.0:
 		return false
 	if _driver == null or not _driver.is_in_simulate():
@@ -106,7 +114,7 @@ func get_match_options() -> PackedStringArray:
 
 
 ## Queues a pawn's move for this tick: motion is its velocity times the seconds this run covers. It's moved, and told
-## (Pawn.finish_crowd_move), once every pawn has simulated. try_take_move calls this; a test may too.
+## (Pawn.finish_move), once every pawn has simulated. take_move calls this; a test may too.
 func queue_move(pawn: Pawn, motion: Vector3, seconds: float) -> void:
 	_queued.append(pawn)
 	_motions.append(motion)
@@ -165,10 +173,10 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 		moved = _move_batch(positions, motions, radii, seconds, slopes, floor_normals, shapes, shape_offsets, _obstacles(pawns), space, moved_ok)
 	for i in count:
 		if moved_ok[i] == 1:
-			pawns[i].finish_crowd_move(moved[i], seconds[i])
+			pawns[i].finish_move(moved[i], seconds[i])
 		else:
 			fallbacks_last_tick += 1
-			pawns[i].finish_move_by_physics()
+			pawns[i].move_by_physics_now()
 	PerfScopes.end(&"movement.crowd", started)
 	if fallbacks_last_tick > 0:
 		PerfScopes.add(&"movement.crowd_fallbacks", 0, fallbacks_last_tick)
@@ -292,7 +300,7 @@ func _walls_and_ground(from: Vector3, to: Vector3, slope: float, floor_normal: f
 		return null # too steep to walk on
 	var at: Vector3 = ground["position"]
 	# (A ray's answer differs from the floor by a hair, 3e-8 m on flat ground. The pawn rounds where it ends up as its rollback
-	# recording does, Pawn.finish_crowd_move, so a still pawn still lands exactly where it was.)
+	# recording does, Pawn.finish_move, so a still pawn still lands exactly where it was.)
 	return Vector3(to.x, at.y, to.z)
 
 
@@ -362,7 +370,7 @@ func _add_to_grid(grid: Dictionary, at: Vector3, index: int) -> void:
 func _finish_queued_unmoved() -> void:
 	for i in _queued.size():
 		if is_instance_valid(_queued[i]):
-			_queued[i].finish_crowd_move(_queued[i].global_position, _seconds[i])
+			_queued[i].finish_move(_queued[i].global_position, _seconds[i])
 	_queued.clear()
 	_motions.clear()
 	_seconds.clear()

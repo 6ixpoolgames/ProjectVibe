@@ -4,7 +4,7 @@
 
 The body every character is: something a player or the AI can drive. It runs its parts (input, AI, abilities, effects) in a fixed order each tick, then moves.
 
-**Status:** built, tier 0; being slimmed down. Not yet: the VisualSmoother (pawn slimming M6, with animation v0), and a home for the streaming source contract.
+**Status:** built, tier 0; being slimmed down for the state store refactor (state store spec 12.8). Smoothing is in `VisualSmoother` and the shared table in `SharedPawnTable`. Not yet: the tick stepping in the tick driver, part-finding in the `PawnInitializer`, and a home for the streaming source contract.
 
 | File | What it's for |
 |---|---|
@@ -24,10 +24,10 @@ The body every character is: something a player or the AI can drive. It runs its
  ├─ AbilityManager ─ Walk, Jump, Sprint  steer the pawn; hits and death                           (abilities/)
  ├─ AIContextComponent and the AI parts  decide what the AI's hands do                            (ai/)
  ├─ TickStateComponent, NetworkEntity    rollback and multiplayer (in the scene)                  (netcode/)
- └─ Visual ─ Model, CameraMount          follows the body smoothly each frame                     (visuals/, camera/)
+ └─ Visual ─ Model, CameraMount          placed smoothly each frame by the VisualSmoother part        (visuals/, camera/)
 ```
 
-Each tick, in the **input phase**: the AI runs, then the ControllerManager asks whoever is in charge for input. In the **simulate phase**: effects count down, abilities write velocity and facing, gravity is added, and the pawn moves with one `move_and_slide`, or hands the move to the `CrowdMover` (`movement/`). Each rendered frame, Visual is placed between the last two ticks.
+Each tick, in the **input phase**: the AI runs, then the ControllerManager asks whoever is in charge for input. In the **simulate phase**: effects count down, abilities write velocity and facing, gravity is added, and the pawn moves with one `move_and_slide`, or hands the move to its `mover` (the `CrowdMover`, `movement/`, set by the `PawnInitializer`), which then finishes it (`finish_move`, or `move_by_physics_now` where the crowd can't). The state store records it at the tick's end: a pawn on a load step is copied forward on ticks it skips, and its team, tick step and stats' current values are pushed when they change. Each rendered frame, the `VisualSmoother` places Visual between the last two runs.
 
 `PawnInitializer` (`game_mode/`) adds every default part the scene doesn't have, from `resources/pawn_defaults.tres`. The pawn itself holds only the body, its tick order, its part references and general flags: `dead`, frozen, sleeping, `tick_step`.
 

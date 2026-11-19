@@ -9,6 +9,10 @@ Movement is this folder: `CrowdMover`, a GameMode module, and its C++ batch `Cro
 
 None found in the documentation pass. The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as the fallback where the C++ library isn't loaded.
 
+## 2026-11-19
+
+- **The crowd mover is the pawn's `mover`** (state store spec 12.8): `try_take_move` is now `take_move`, and it calls the pawn's `finish_move` and `move_by_physics_now`. It adopts the pawns already in the tree when it's added and lets them go when removed; the PawnInitializer gives it new ones.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): moved to the README's new "How it works" section: the batch's steps, separation, the C++ and physics wall and ground checks and who `CrowdMover` moves. "The owner's call" wording removed; `_move_batch` now says it is a twin of the C++ `CrowdBatch`. No stale comments found.

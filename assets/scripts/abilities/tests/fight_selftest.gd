@@ -33,7 +33,7 @@ func _test_health_and_death() -> void:
 	await _ticks(10)
 	_check(is_equal_approx(victim.stat_manager.get_health(), 100.0), "Health is a stat that starts full (100)")
 	var listed: Array[String] = (victim.get_node("TickState") as TickStateComponent).state_properties
-	_check(listed.has("StatManager/Health:current") and listed.has("AbilityManager/Death:ticks_left"), "Health's current value and the Death ability roll back")
+	_check(listed.has("StatManager/Health:current pushed") and listed.has("AbilityManager/Death:ticks_left"), "Health's current value and the Death ability roll back")
 	var deaths := []
 	victim.ability_manager.died.connect(func(who, hit): deaths.append([who, hit]))
 	for i in 4:

@@ -42,10 +42,21 @@ var value := 0.0:
 ## On, this stat also has a [member current] value that goes up and down during play, such as Health. [member value] is then its
 ## most.
 @export var changes_during_play := false
-## With [member changes_during_play], how much there is now, from 0 to [member value]. Starts full. Rolls back.
+## With [member changes_during_play], how much there is now, from 0 to [member value]. Starts full. Rolls back: pushed to the state
+## store when it changes.
 # REFACTOR: other code writes current directly to refill or cap it (AbilityManager.revive, EffectManager, ArenaSample), so the
 # "0 to value" rule lives in several places. A refill and cap on Stat or StatManager would keep it in one (reusable).
-var current := 0.0
+var current := 0.0:
+	set(new_value):
+		if current == new_value:
+			return
+		current = new_value
+		if _tick_state:
+			_tick_state.push_value(_state_key, new_value)
+
+# Where current is recorded: the pawn's TickStateComponent and this stat's entry there. Set by the StatManager.
+var _tick_state: TickStateComponent = null
+var _state_key := ""
 
 
 # What effects add to and multiply this stat by right now (set_modifiers). Kept here so a new base_value keeps them.
@@ -76,6 +87,6 @@ func _ready() -> void:
 # table) or outside a pawn.
 func _push_to_table() -> void:
 	var manager := get_parent() as StatManager
-	var table := Pawn.get_table()
+	var table := SharedPawnTable.get_table()
 	if manager and manager.pawn and table:
 		table.set_value(manager.pawn, table_column, value)

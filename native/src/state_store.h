@@ -63,15 +63,21 @@ public:
 	void set_entity_depth(int64_t handle, int64_t depth);
 	Object *get_owner(int64_t handle) const;
 
-	// The compiled accessors for an entity's gathered columns: one node, one property path and one encoding per column, in column
-	// order (pushed columns' entries are ignored). An encoding must be settled (never "auto") and match the layout's unless the
-	// layout's is "auto". round_values: round to each encoding and write back what changed. False, binding nothing, otherwise.
+	// The compiled accessors for an entity's columns: one node, one property path and one encoding per column, in column order. An
+	// encoding must be settled (never "auto") and match the layout's unless the layout's is "auto". A pushed column may have a node
+	// too (or null): its value is read from it now, written back to it by load_row, and checked by verify_nodes, but never read by a
+	// commit. round_values: round to each encoding and write back what changed. False, binding nothing, otherwise.
 	bool bind(int64_t handle, const Array &nodes, const Array &properties, const Array &encodings, bool round_values);
 	void unbind(int64_t handle);
 	bool is_bound(int64_t handle) const;
 
 	// Sets a pushed column's value; every commit from now on records it, until the next push.
 	void push(int64_t handle, int64_t column, const Variant &value);
+	// On: a commit copies this entity's previous row forward, reading no node, unless it was marked changed since the last commit
+	// (an entity that only changes when it runs, such as a pawn on a load step). Pushed columns take their pushed values either way.
+	void set_carry_forward(int64_t handle, bool on);
+	// Something changed this entity since the last commit, so the next one reads its nodes.
+	void mark_changed(int64_t handle);
 
 	// The end of a tick: every active entity's row for this tick. Returns the handles the store couldn't gather (unbound, or a node
 	// gone, which unbinds it); their owners write them with write_row.
@@ -102,7 +108,7 @@ public:
 
 	// StateEncoding.quantize, the same rounding the commit does.
 	Variant quantize(const Variant &value, const StringName &encoding) const;
-	// {layouts, entities, active, bound, rows_per_frame, cells, commit_usec}.
+	// {layouts, entities, active, bound, cells_per_frame, depth, commit_usec, rows_read, rows_carried} (the last three: the last commit).
 	Dictionary get_stats() const;
 
 protected:
@@ -122,6 +128,8 @@ private:
 		bool active = true;
 		bool bound = false;
 		bool round_values = true;
+		bool carry_forward = false;
+		bool changed = true; // a carry-forward entity is read at the next commit
 		int64_t freed_tick = -1;
 		uint64_t owner_id = 0;
 		int64_t depth = 0;
@@ -148,7 +156,7 @@ private:
 	Entity *entity_of(int64_t handle) const;
 	int64_t frame_of(int64_t tick) const;
 	bool row_held(const Layout &layout, int64_t slot, uint32_t generation, int64_t depth, int64_t tick) const;
-	bool commit_one(Layout &layout, int64_t layout_index, int64_t slot, int64_t tick);
+	bool commit_one(Layout &layout, int64_t slot, int64_t tick, bool may_carry);
 	int encoding_id(const StringName &name) const;
 	Variant quantize_by_id(const Variant &value, int encoding) const;
 	static Variant copy_value(const Variant &value);
@@ -156,6 +164,8 @@ private:
 	int64_t m_depth = 64;
 	int64_t m_now = -1; // the newest tick committed: freed slots wait until it has moved past the history
 	int64_t m_commit_usec = 0;
+	int64_t m_rows_read = 0;
+	int64_t m_rows_carried = 0;
 	std::vector<Layout> m_layouts;
 	std::vector<Object *> m_nodes; // scratch, one per column while gathering
 	std::vector<Variant> m_values; // scratch

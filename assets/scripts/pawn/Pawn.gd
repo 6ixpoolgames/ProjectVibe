@@ -8,10 +8,11 @@
 ## the last two stay in the scene) and a Node3D called Visual.
 ## [br]
 ## Each tick: [b]input[/b] (the AI runs, then the ControllerManager asks the controller in charge, where input is decided here),
-## [b]simulate[/b] (effects count down, abilities steer, gravity, one move_and_slide or the CrowdMover), then state is recorded for
-## rollback. Hits resolve after every pawn has simulated. The body's rotation is never written (it slowly changed its scale and made
-## replays collide differently; see TickSamplePawn): facing is [member yaw] and only the model turns. Visual follows the body smoothly
-## per frame and fades corrections out. Design: pawn spec 4, 15.1.
+## [b]simulate[/b] (effects count down, abilities steer by writing [member velocity], gravity, then one move: its [member mover]'s if
+## it takes it, else the pawn's own move_and_slide), then the state store records it. Hits resolve after every pawn has simulated. The
+## body's rotation is never written (it slowly changed its scale and made replays collide differently; see TickSamplePawn): facing is
+## [member yaw] and only the model turns. A child called Visual is drawn smoothly between ticks by a VisualSmoother. It also works
+## without the tick driver (it ticks itself) and without a mover. Design: pawn spec 4, 15.1; state store spec 12.8.
 class_name Pawn
 extends CharacterBody3D
 
@@ -48,33 +49,16 @@ var nav_distance: float:
 ## Default parts to leave out, by name, such as &"AbilityManager". A part with that name in the scene is kept either way.
 @export var skip_default_parts: Array[StringName] = []
 ## Which side this pawn is on. AI sensing only notices pawns of other teams (pawn spec 10.4). A player who possesses a pawn plays for
-## its team.
+## its team. Recorded in the state store, pushed when it changes.
 @export var team := 0:
 	set(value):
 		if team == value:
 			return
 		var old_team := team
 		team = value
+		if _tick_state:
+			_tick_state.push_value("team", value)
 		team_changed.emit(self, old_team, value) # the TeamRegistry module keeps the counts
-# REFACTOR: detectability is a pass-through to a stat, kept for pawns without one (pawn slimming M6). Callers could read the stat,
-# and the pawn table could take a default, so this leaves the pawn. See CHANGELOG.md.
-## How easy this pawn is for AI to see: 1 is normal, lower is harder, 0 is invisible (pawn spec 10.4). Reads and writes the
-## Detectability stat in its StatManager, so effects can change it; set the base value on the stat in the scene. A pawn without the
-## stat keeps its own number. Game rules for stealth belong in a GameMode module.
-var detectability: float:
-	get:
-		var stat := _detectability_stat()
-		return stat.value if stat else _own_detectability
-	set(new_value):
-		var stat := _detectability_stat()
-		if stat:
-			stat.base_value = new_value # the stat copies it into the pawn table itself
-		else:
-			_own_detectability = new_value
-			var table := get_table()
-			if table and is_inside_tree():
-				table.set_value(self, &"detectability", new_value)
-var _own_detectability := 1.0 # detectability, for a pawn without the stat
 ## On: a pawn standing still with nothing to do sleeps, skipping its abilities, gravity and move_and_slide until something wakes it
 ## (pawn spec 15.3). Off: it simulates fully every tick.
 @export var sleep_when_idle := true
@@ -85,10 +69,13 @@ var _own_detectability := 1.0 # detectability, for a pawn without the stat
 ## ticks ([member sleep_check_ticks]) so ground taken from under it is noticed. Off: it always moves. Counted in diagnostics as
 ## pawn.move_skipped.
 @export var skip_move_when_still := true
-## On (the default): while an AI drives this pawn on the server or offline and it walks on the ground, the CrowdMover moves it with
-## the crowd instead of move_and_slide (pawn spec 8.22). Players, pawns in the air, clients and abilities with needs_full_movement
-## always move by physics.
+## On (the default): its [member mover] may take its moves (the CrowdMover moves AI pawns walking on the ground with the crowd, pawn
+## spec 8.22). Off: it always moves itself, with move_and_slide.
 @export var crowd_movement := true
+## What moves this pawn instead of its own move_and_slide, on the ticks it takes the move ([code]take_move(pawn, was_grounded, seconds)[/code],
+## then [method finish_move] or [method move_by_physics_now]): the game's CrowdMover, set by the PawnInitializer, or null, and the
+## pawn moves itself every tick.
+var mover: Object = null
 ## On (the default): after a rollback restores this pawn, a zero-length move_and_slide rebuilds Godot's own "on the floor" flag, which
 ## the first replayed tick's floor snap reads. Off: it's left as it was, which saves a physics solve per restored pawn but can make
 ## that first replayed tick differ. Only clients roll back, and by default only their own pawn.
@@ -97,23 +84,13 @@ var _own_detectability := 1.0 # detectability, for a pawn without the stat
 ## state. Setting it changes nothing.
 var is_sleeping := false
 
-# The shared table of plain pawn data (a PawnTable from the navcore C++ library, scaling spec section 3), or null without the
-# library. Every pawn in the tree has a row, in entity-id order. Pawns NetworkSession never configured, as in most tests, have no
-# entity id; they get keys from TABLE_KEYS_WITHOUT_ID up, after every networked pawn, in the order they joined.
-# REFACTOR: the shared table and grid (get_table, get_grid, _join_table) are static state on the pawn class; a small holder class
-# would give them a name of their own and slim the pawn (names say what things do). See CHANGELOG.md.
-static var _table: Object = null
-static var _grid: Object = null # see get_grid()
-const TABLE_KEYS_WITHOUT_ID := 1 << 40
-static var _next_table_key := TABLE_KEYS_WITHOUT_ID
-
 ## Which way the pawn faces, in radians. The body never turns; only the model does.
 var yaw := 0.0
 ## Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
 var grounded := false
 var _body_radius := -1.0 # the capsule's radius, found once (get_body_radius)
 var _body_shape: CollisionShape3D = null # the collision shape, found once (get_body_shape)
-var _tick_state: TickStateComponent = null # its rollback state, if it has one, for rounding crowd moves
+var _tick_state: TickStateComponent = null # its part in the state store, if it has one: pushes, marks, rounding crowd moves
 
 ## Runs this pawn's abilities, which steer it. Null if it has none.
 var ability_manager: AbilityManager = null
@@ -136,9 +113,16 @@ var _driver: Node = null
 ## True while the Death ability runs, the same as is_dead(). Kept current by DeathAbility (through its timer, so a rollback updates
 ## it too), and read directly by C++, which is much cheaper than calling is_dead(). Read it; don't set it.
 var dead := false
-## How often this pawn simulates: every tick (1), 2nd (2) or 4th (4), spread by its own number. Rolls back. AIActivationManager raises
-## it for far-away AI pawns; a player's pawn always runs every tick. Each run does N ticks' worth ([member ticks_elapsed]). Pawn spec 8.21.
-var tick_step := 1
+## How often this pawn simulates: every tick (1), 2nd (2) or 4th (4), spread by its own number. Rolls back (pushed to the state
+## store when it changes). AIActivationManager raises it for far-away AI pawns; a player's pawn always runs every tick. Each run does N
+## ticks' worth ([member ticks_elapsed]). Pawn spec 8.21.
+var tick_step := 1:
+	set(value):
+		if tick_step == value:
+			return
+		tick_step = value
+		if _tick_state:
+			_tick_state.push_value("tick_step", value)
 ## The ticks since this pawn last ran, 1 to [constant MAX_TICK_STEP]. Its parts advance their timers by it (cooldowns, effects, AI
 ## schedules) and its simulate step is this many ticks long. Read it; don't set it.
 var ticks_elapsed := 1
@@ -150,20 +134,13 @@ const GROUP := &"pawns"
 var _last_run_tick := -1 # the tick this pawn last simulated; rolls back. -1: not yet
 var _prepared_tick := -1 # the tick _runs_this_tick and ticks_elapsed were worked out for
 var _runs_this_tick := true
-var _last_run_span := 1 # ticks_elapsed of the last run, for smoothing Visual across it
 var _entity: NetworkEntity = null
 var _game_mode: Node = null # found when entering the tree, for the distances
 var _last_streamed_position := Vector3.ZERO # for distance_moved_since_last_check
 var _streamed_before := false
-# REFACTOR: smoothing Visual (these fields, _process, _on_network_interpolated, _on_network_corrected) belongs in its own part, the
-# VisualSmoother planned for animation v0 (pawn slimming M6). See CHANGELOG.md.
 var _visual: Node3D = null
-var _model: Node3D = null
-var _previous_position := Vector3.ZERO # the body before and after the last tick, for smoothing Visual
-var _current_position := Vector3.ZERO
-var _previous_yaw := 0.0
-var _current_yaw := 0.0
-var _correction_offset := Vector3.ZERO # what's left of a correction, fading to nothing
+var _smoother: VisualSmoother = null # draws Visual between ticks; null without a Visual
+var _position_after_run := Vector3.ZERO # where its last run left the body: "nothing moved it since" for sleeping and still moves
 var _fallback_tick := 0
 var _frozen := false
 
@@ -179,7 +156,7 @@ func _init() -> void:
 func _enter_tree() -> void:
 	add_to_group(GROUP) # the list of all pawns
 	add_to_group(TerrainBodyLifter.GROUP)
-	_join_table() # the shared table of plain pawn data, which AI sensing's grid reads (C++ only; scaling spec step 1)
+	SharedPawnTable.join(self) # the shared table of plain pawn data, which AI sensing's grid reads (C++ only; scaling spec step 1)
 	# Default parts first, so they're children before anything below or any _ready looks for them. A node may add children to itself
 	# here: Godot enters them right after.
 	var game_mode: Node = get_node_or_null("/root/GameMode")
@@ -200,8 +177,7 @@ func _enter_tree() -> void:
 
 
 func _exit_tree() -> void:
-	if _table: # leaves the shared table (scaling spec step 1)
-		_table.remove(self)
+	SharedPawnTable.leave(self)
 	# This first, because leaving the list can switch the pawn back on, which would register it again.
 	var ai := _ai_activation_manager()
 	if ai:
@@ -232,17 +208,19 @@ func _ready() -> void:
 
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
-		_visual.top_level = true # it's placed by _process, between ticks, not by the body
-		_model = _visual.get_node_or_null(^"Model")
-	_previous_position = global_position
-	_current_position = global_position
-	_previous_yaw = yaw
-	_current_yaw = yaw
-	# How often it runs, and when it last did, roll back, so a replay runs on the same ticks (pawn spec 8.21).
+		_smoother = VisualSmoother.new()
+		_smoother.name = "VisualSmoother"
+		add_child(_smoother)
+		_smoother.setup(self, _visual)
+	_position_after_run = global_position
+	# How often it runs and when it last did roll back, so a replay runs on the same ticks (pawn spec 8.21); its team and step are
+	# pushed when they change. It's recorded only when it runs or something marks it (mark_state_changed), so a pawn on a load step
+	# costs the store almost nothing on the ticks it skips.
 	for child in get_children():
 		if child is TickStateComponent:
-			var entries: Array[String] = ["tick_step", "_last_run_tick"]
+			var entries: Array[String] = ["tick_step pushed", "team pushed", "_last_run_tick"]
 			child.add_state_properties(entries)
+			child.record_only_when_changed = true
 			_tick_state = child
 			break
 	# Every pawn is watched by the AI switch-off, which leaves alone those that keep the world loaded, checking each time.
@@ -339,42 +317,11 @@ func is_dead() -> bool:
 	return dead
 
 
-## The shared table of plain pawn data (scaling spec section 3), or null without the C++ library. Read-only for anyone but Pawn:
-## pawns join and leave it themselves. Its rows are read from the pawns once a tick, at the first refresh(tick).
-static func get_table() -> Object:
-	return _table
-
-
-# The Detectability stat, or null without one (or before the StatManager is found).
-func _detectability_stat() -> Stat:
-	return stat_manager.get_stat(StatManager.DETECTABILITY) if stat_manager else null
-
-
-## The shared grid of pawns (AIPawnGrid), built from the table on first use, or null without the C++ library. AI sensing and the
-## swing hit checks (MeleeSweepStep) both use it, so it lives beside the table.
-static func get_grid() -> Object:
-	if _grid == null and _table != null and ClassDB.class_exists(&"AIPawnGrid"):
-		_grid = ClassDB.instantiate(&"AIPawnGrid")
-		_grid.set_table(_table)
-	return _grid
-
-
-# Joins the shared table, making it on first use. The key is the entity id, which the NetworkEntity already has: NetworkSession
-# configures it before the pawn enters the tree. _entity isn't found until _ready, so the child is looked for here.
-func _join_table() -> void:
-	if _table == null:
-		if not ClassDB.class_exists(&"PawnTable"):
-			return
-		# Made by name, so this script still runs where the C++ library isn't available.
-		_table = ClassDB.instantiate(&"PawnTable")
-	var key := -1
-	for child in get_children():
-		if child is NetworkEntity and child.entity_id >= 0:
-			key = child.entity_id
-	if key < 0:
-		key = _next_table_key
-		_next_table_key += 1
-	_table.add(self, key)
+## Something changed this pawn between its own runs (an effect landed on it), so the state store reads it at the next commit
+## instead of copying its last row forward. Its runs mark it themselves.
+func mark_state_changed() -> void:
+	if _tick_state:
+		_tick_state.mark_changed()
 
 
 ## This pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
@@ -416,14 +363,10 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	if not _runs_this_tick:
 		return
 	dt *= ticks_elapsed
-	_last_run_span = ticks_elapsed
 	_last_run_tick = tick
-	# Sleeping (pawn spec 15.3). Checked before _current_position is overwritten, because "nothing moved it since its last tick"
-	# compares against it. A sleeping pawn only does the bookkeeping at the end.
+	# Sleeping (pawn spec 15.3). A sleeping pawn only does the bookkeeping at the end.
 	var sleeping := _can_sleep(tick)
 	is_sleeping = sleeping
-	_previous_position = _current_position
-	_previous_yaw = _current_yaw
 	if sleeping:
 		_finish_tick()
 		return
@@ -441,15 +384,15 @@ func _tick_simulate(dt: float, tick: int) -> void:
 		velocity.y -= _gravity_strength() * dt
 	# move_and_slide uses Godot's physics delta. This scales it so that one tick moves velocity * tick dt.
 	# Standing still with nothing to move it: skip the solve (see skip_move_when_still).
-	if skip_move_when_still and was_grounded and velocity == Vector3.ZERO and global_position == _current_position and not _is_check_tick(tick):
+	if skip_move_when_still and was_grounded and velocity == Vector3.ZERO and global_position == _position_after_run and not _is_check_tick(tick):
 		PerfScopes.add(&"pawn.move_skipped", 0)
 		_finish_tick()
 		return
-	# The CrowdMover takes the move of an AI pawn walking on the ground (its rule, try_take_move), moves the whole crowd once every
-	# pawn has simulated, then finishes this tick for it (finish_crowd_move). dt is this run's length (pawn spec 8.22).
-	if CrowdMover.current and CrowdMover.current.try_take_move(self, was_grounded, dt):
+	# Its mover (the CrowdMover) may take this move: it moves the whole crowd once every pawn has simulated, then finishes this tick
+	# for it (finish_move or move_by_physics_now). dt is this run's length (pawn spec 8.22).
+	if mover and crowd_movement and mover.take_move(self, was_grounded, dt):
 		return
-	_move_with_physics() # the CrowdMover's fallback runs it too
+	_move_with_physics() # a mover's fallback runs it too
 	_finish_tick() # a sleeping tick runs it too
 
 
@@ -465,10 +408,10 @@ func _move_with_physics() -> void:
 	grounded = is_on_floor()
 
 
-## The CrowdMover moved this pawn to at, over seconds: it stands there on the ground, its velocity is what it really moved (as
-## move_and_slide leaves it), and its tick finishes (pawn spec 8.22). The position is rounded as the rollback recording will round it
-## (TickStateComponent.round_position), so the recording changes nothing afterwards and a still pawn is exactly still, and sleeps.
-func finish_crowd_move(at: Vector3, seconds: float) -> void: # public, since the CrowdMover calls it
+## Its mover moved this pawn to at, over seconds: it stands there on the ground, its velocity is what it really moved (as
+## move_and_slide leaves it), and its tick finishes (pawn spec 8.22). The position is rounded as the state store will round it
+## (TickStateComponent.round_position), so the commit changes nothing afterwards and a still pawn is exactly still, and sleeps.
+func finish_move(at: Vector3, seconds: float) -> void: # public, since its mover calls it
 	# The velocity from the real move, before rounding, as move_and_slide leaves it: from the rounded one it would wobble by up to a
 	# millimetre a tick, 0.06 m/s at 60 ticks a second.
 	var moved := at - global_position
@@ -480,9 +423,9 @@ func finish_crowd_move(at: Vector3, seconds: float) -> void: # public, since the
 	_finish_tick()
 
 
-## The CrowdMover couldn't move this pawn (a wall, an edge, no ground under where it was going), so it moves by physics now, in the
-## same tick, which handles those, and finishes its tick. Its velocity is still this run's.
-func finish_move_by_physics() -> void: # public, since the CrowdMover calls it
+## Its mover couldn't move this pawn (a wall, an edge, no ground under where it was going), so it moves by physics now, in the same
+## tick, which handles those, and finishes its tick. Its velocity is still this run's.
+func move_by_physics_now() -> void: # public, since its mover calls it
 	_move_with_physics()
 	_finish_tick()
 
@@ -511,11 +454,11 @@ func get_body_shape() -> CollisionShape3D:
 	return _body_shape
 
 
-# The end of every tick, sleeping or not: where the body is now, for smoothing Visual and for the sleeping check, and the input
-# bookkeeping.
+# The end of every run, sleeping or not: where the body is now, for the sleeping check and the smoother, and the input bookkeeping.
 func _finish_tick() -> void:
-	_current_position = global_position
-	_current_yaw = yaw
+	_position_after_run = global_position
+	if _smoother:
+		_smoother.note_run(ticks_elapsed, _last_run_tick)
 	# The input bookkeeping, on the ControllerManager: what was held this tick, so the next tick can tell a press from a hold, and a
 	# tick with real input ends a run of missing ones.
 	if controller_manager:
@@ -530,7 +473,7 @@ func _can_sleep(tick: int) -> bool:
 		return false
 	if controller_manager and (controller_manager.move_input != Vector3.ZERO or controller_manager.held_actions != 0):
 		return false
-	if global_position != _current_position:
+	if global_position != _position_after_run:
 		return false
 	if _is_check_tick(tick): # shared with skip_move_when_still
 		return false
@@ -605,6 +548,7 @@ func _prepare_run(tick: int) -> void:
 		_runs_this_tick = since >= step or (since > 0 and posmod(tick + _stagger(), step) == 0)
 	if _runs_this_tick: # on ticks it skips, ticks_elapsed keeps its last run's value
 		ticks_elapsed = clampi(tick - _last_run_tick, 1, MAX_TICK_STEP) if _last_run_tick >= 0 else 1
+		mark_state_changed() # a run changes it, so the store reads it this tick
 
 
 ## TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is
@@ -626,35 +570,15 @@ func _on_state_loaded(_tick: int) -> void:
 			apply_floor_snap()
 	position = saved_position
 	velocity = saved_velocity
-	_previous_position = global_position
-	_current_position = global_position
-	_previous_yaw = yaw
-	_current_yaw = yaw
+	_position_after_run = global_position
+	if _smoother:
+		_smoother.snap()
 
 
 func _physics_process(delta: float) -> void:
 	_fallback_tick += 1
 	_tick_input(delta, _fallback_tick)
 	_tick_simulate(delta, _fallback_tick)
-
-
-# --- Per rendered frame: only ever reads game state ---
-
-
-func _process(delta: float) -> void:
-	if _visual == null:
-		return
-	var started := PerfScopes.begin() # timed for diagnostics, in its animation category
-	# Fades over about 100 ms, so the player sees a quick slide rather than a jump (netcode spec section 6.2).
-	_correction_offset = _correction_offset.lerp(Vector3.ZERO, 1.0 - exp(-delta / 0.04))
-	var fraction: float = _driver.get_interpolation_fraction() if _driver else 1.0
-	# A pawn running every Nth tick moves once per run, so Visual glides across the whole run (pawn spec 8.21).
-	if _last_run_span > 1 and _driver and is_simulated_here():
-		fraction = clampf((float(_driver.tick - _last_run_tick) + fraction) / float(_last_run_span), 0.0, 1.0)
-	_visual.global_position = _previous_position.lerp(_current_position, fraction) + _correction_offset
-	if _model:
-		_model.rotation.y = lerp_angle(_previous_yaw, _current_yaw, fraction)
-	PerfScopes.end(&"animation.smoothing", started)
 
 
 # --- Multiplayer: optional hooks from NetworkEntity ---
@@ -672,16 +596,14 @@ func _on_network_role(entity: NetworkEntity) -> void:
 
 ## On a client, for a pawn someone else controls: it was just moved between snapshots, so Visual follows.
 func _on_network_interpolated() -> void:
-	_previous_position = _current_position
-	_current_position = global_position
-	_previous_yaw = _current_yaw
-	_current_yaw = yaw
+	if _smoother:
+		_smoother.note_moved()
 
 
 ## On a client: a correction moved our body by this much.
 func _on_network_corrected(jump: Variant) -> void:
-	if jump is Vector3:
-		_correction_offset += jump
+	if jump is Vector3 and _smoother:
+		_smoother.add_correction(jump)
 
 
 # --- Helpers ---

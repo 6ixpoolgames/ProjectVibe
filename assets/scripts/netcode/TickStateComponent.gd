@@ -10,6 +10,7 @@
 ## "velocity"                 # a property on the parent
 ## "Walk:phase"               # a property on a node below the parent
 ## ":rotation:y @angle_u16"   # part of a property on the parent, with an encoding from StateEncoding
+## "team pushed"              # read once, then recorded from push_value() when it changes (its setter calls it)
 ## [/codeblock]
 ## Design: state store spec 6, netcode spec 5, 6.
 extends Node
@@ -56,6 +57,13 @@ enum RollbackMode { RESIMULATE, FOLLOW_SERVER }
 var keep_input_history: bool = false
 ## Server: don't record each tick's input (it never replays), unless clients predicting this entity need it. Client inputs still queue. NetworkEntity sets it.
 var skip_input_capture: bool = false
+## On: the store copies this entity's last row forward on ticks nothing marked it changed ([method mark_changed]), reading none of its
+## nodes. For an entity that only changes when it runs: a pawn marks itself on its runs and is marked by what reaches it between them.
+var record_only_when_changed := false:
+	set(value):
+		record_only_when_changed = value
+		if _handle >= 0:
+			_store.set_carry_forward(_handle, value)
 
 ## Stored for a property that didn't exist that tick (the store's [constant StateStoreGD.MISSING]).
 const MISSING := &"__tick_state_missing__"
@@ -71,6 +79,8 @@ class Prop:
 	var property: NodePath       # the property, as Node.get_indexed() wants it
 	var base_name: String        # the first part of property, to check the node has it
 	var encoding: StringName
+	var declared: StringName     # the encoding as written ("auto" until a value settles encoding)
+	var pushed := false          # recorded from push_value(), not read every tick
 	var node = null              # untyped, because it can be freed while we hold it
 
 	func read() -> Variant:
@@ -115,6 +125,7 @@ var _velocity_index := -1
 var _store: Object = null
 var _handle := -1
 var _recording := true # false while paused (set_recording)
+var _state_index := {}  # an entry's key -> its index in the state list, for push_value
 # Ring buffers, one slot per tick (tick % history_size). A slot only counts if its stored tick matches. Custom state stays here, beside
 # the store (state store spec 6.4); inputs fold into the store with the netcode.
 var _custom_ticks := PackedInt64Array()
@@ -197,6 +208,9 @@ func _build_state_list() -> void:
 	_encodings_cache.clear()
 	_position_index = -1
 	_velocity_index = -1
+	_state_index.clear()
+	for i in _states.size():
+		_state_index[_states[i].key] = i
 	# Matched by the property's name, so a velocity kept on a part like the motor still counts.
 	for i in _states.size():
 		var p := _states[i]
@@ -251,6 +265,25 @@ func _store_gather(handle: int, tick: int) -> void:
 ## This entity's handle in the state store, or -1. The tick driver uses it to commit a rollback's re-run.
 func get_store_handle() -> int:
 	return _handle
+
+
+## A pushed entry's new value (see the class description), recorded from this tick's commit on. The owner's setter calls it. Rounded
+## to the entry's encoding, and written back to the property if rounding changed it, as a commit would. Unknown keys are ignored.
+func push_value(key: String, value: Variant) -> void:
+	var i: int = _state_index.get(key, -1)
+	if i < 0 or _handle < 0:
+		return
+	var p := _states[i]
+	var rounded: Variant = _rounded_copy(p, value) if quantize_each_tick else StateEncoding.copy_value(value)
+	if quantize_each_tick and rounded != value and _bind(p):
+		p.write(rounded)
+	_store.push(_handle, i, rounded)
+
+
+## Something changed this entity since the last commit (see [member record_only_when_changed]), so the next commit reads its nodes.
+func mark_changed() -> void:
+	if _handle >= 0:
+		_store.mark_changed(_handle)
 
 
 ## Off stops recording (a paused entity: NetworkEntity.set_paused); rows already recorded stay. On by default.
@@ -878,14 +911,17 @@ func _join_store() -> void:
 	_store = _driver.store
 	var names := PackedStringArray()
 	var encodings: Array = []
+	var pushed := PackedByteArray()
 	for p in _states:
 		names.append(p.key)
-		encodings.append(_declared_encoding(p))
-	var layout: int = _store.define_layout(names, encodings)
+		encodings.append(p.declared)
+		pushed.append(1 if p.pushed else 0)
+	var layout: int = _store.define_layout(names, encodings, pushed)
 	_handle = _store.add_entity(layout, self) if layout >= 0 else -1
 	if _handle < 0:
 		return
 	_store.set_entity_depth(_handle, history_size)
+	_store.set_carry_forward(_handle, record_only_when_changed)
 	_refresh_store_active()
 	_bind_in_store()
 
@@ -920,14 +956,6 @@ func _refresh_store_active() -> void:
 
 func _newest_tick() -> int:
 	return _store.newest_tick(_handle) if _handle >= 0 else -1
-
-
-# The encoding an entry was declared with: what it names after "@", or auto.
-func _declared_encoding(p: Prop) -> StringName:
-	var parts := p.entry.split("@", false, 1)
-	if parts.size() > 1 and StateEncoding.is_known(StringName(parts[1].strip_edges())):
-		return StringName(parts[1].strip_edges())
-	return StateEncoding.AUTO
 
 
 func _customs_at(tick: int) -> Variant:
@@ -981,7 +1009,11 @@ func _parse_list(entries: Array[String]) -> Array[Prop]:
 
 ## Reads one entry's text. Doesn't look at nodes yet; _bind does that once ticks are running.
 func _parse_entry(entry: String) -> Prop:
-	var parts := entry.split("@", false, 1)
+	var text := entry.strip_edges()
+	var pushed := text.ends_with(" pushed")
+	if pushed:
+		text = text.trim_suffix(" pushed")
+	var parts := text.split("@", false, 1)
 	var key := parts[0].strip_edges() if parts.size() > 0 else ""
 	if key == "":
 		_warn_once(entry, "[TickStateComponent] %s: empty entry '%s' skipped" % [_root.name, entry])
@@ -989,6 +1021,7 @@ func _parse_entry(entry: String) -> Prop:
 	var p := Prop.new()
 	p.entry = entry
 	p.key = key
+	p.pushed = pushed
 	p.encoding = StateEncoding.AUTO
 	if parts.size() > 1:
 		var named := StringName(parts[1].strip_edges())
@@ -1003,6 +1036,7 @@ func _parse_entry(entry: String) -> Prop:
 		property = key.substr(colon + 1)
 	p.property = NodePath(property)
 	p.base_name = property.split(":")[0]
+	p.declared = p.encoding
 	return p
 
 

@@ -156,8 +156,8 @@ func _first_pawn_between(start: Vector3, end: Vector3, tick: int) -> Pawn:
 	for i in spots + 1:
 		centres.append(start.lerp(end, float(i) / spots))
 	var touched: Array = []
-	if Pawn.get_grid() != null:
-		touched = Pawn.get_grid().find_touching(centres, radius, shooter, tick)
+	if SharedPawnTable.get_grid() != null:
+		touched = SharedPawnTable.get_grid().find_touching(centres, radius, shooter, tick)
 	else:
 		touched = _plain_spheres(centres)
 	var best: Pawn = null

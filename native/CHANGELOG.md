@@ -20,6 +20,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-19
 
+- **`PawnTable` keeps pushes that can't land yet** (the column off, or the pawn not joined), the newest per pawn and column, and applies them once they can. It dropped them before, which the pawn's `detectability` property hid: a column switched on later read it from the pawn. With the property gone (state store step 2), a Detectability stat set before the sensing job switched its column on would have been lost.
+- **`AIMemoryStore.sight_check` reads detectability from the pawn's Detectability stat** (1 without one), as `StatManager.detectability_of` does, since `Pawn.detectability` is gone.
+- **`StateStore`: carrying rows forward and pushed columns bound to a node** (refactor step 2); see the [state store changelog](../assets/scripts/state_store/CHANGELOG.md).
+
 - **`StateStore`** (new): the central record of every gameplay entity's state, tick by tick (state store spec; refactor step 1). Layouts, generational handles, a rotating buffer of frames, the commit (read, round, write back, copy), partial commits, `load_row`, `get_column`, `frame_checksum`, `verify_nodes`. Its twin is `assets/scripts/state_store/StateStoreGD.gd`; details in [its changelog](../assets/scripts/state_store/CHANGELOG.md).
 - **`TickStateRecorder` removed**: `StateStore` does its reading and rounding (the same engine functions, so values match `StateEncoding.quantize` exactly).
 

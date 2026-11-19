@@ -235,6 +235,7 @@ to nodes and settles their encodings, and gathers the row itself until every ent
 "velocity"                 # a property on the parent
 "Walk:phase"               # a property on a node below the parent
 ":rotation:y @angle_u16"   # part of a property on the parent, with an encoding from StateEncoding
+"team pushed"              # read once, then recorded from push_value() when it changes (its setter calls it)
 ```
 
 Design: state store spec 6, netcode spec 5, 6.
@@ -257,6 +258,8 @@ Design: state store spec 6, netcode spec 5, 6.
 - `follow_server_radius: float` = `10.0`: With `follows_during_rollback` on, it only joins a rollback within this distance of something being resimulated; 0 is no limit. A guess to tune.
 - `keep_input_history: bool` = `false`: Keep input history in FOLLOW_SERVER mode too, for your own pawn with prediction off. NetworkEntity sets it for entities this machine controls.
 - `skip_input_capture: bool` = `false`: Server: don't record each tick's input (it never replays), unless clients predicting this entity need it. Client inputs still queue. NetworkEntity sets it.
+- `record_only_when_changed: bool` = `false`: On: the store copies this entity's last row forward on ticks nothing marked it changed (`mark_changed()`), reading none of its
+  nodes. For an entity that only changes when it runs: a pawn marks itself on its runs and is marked by what reaches it between them.
 
 ### Constants
 
@@ -278,6 +281,9 @@ Design: state store spec 6, netcode spec 5, 6.
 - `_store_gather(handle: int, tick: int) -> void`: Called by the tick driver for a tick the store couldn't read by itself (an entry not matched yet, or a node gone): gathers the row in
   GDScript, with MISSING for what isn't there, then tries to hand the reading back to the store.
 - `get_store_handle() -> int`: This entity's handle in the state store, or -1. The tick driver uses it to commit a rollback's re-run.
+- `push_value(key: String, value: Variant) -> void`: A pushed entry's new value (see the class description), recorded from this tick's commit on. The owner's setter calls it. Rounded
+  to the entry's encoding, and written back to the property if rounding changed it, as a commit would. Unknown keys are ignored.
+- `mark_changed() -> void`: Something changed this entity since the last commit (see `record_only_when_changed`), so the next commit reads its nodes.
 - `set_recording(on: bool) -> void`: Off stops recording (a paused entity: NetworkEntity.set_paused); rows already recorded stay. On by default.
 - `_rollback_load(tick: int) -> bool`: Rollback step 1: put the entity back to how it ended this tick. False if nothing is saved for it; it then sits the replay out.
 - `_rollback_after_load(tick: int) -> void`: Rollback step 1b, once everything is loaded and in the collision world.

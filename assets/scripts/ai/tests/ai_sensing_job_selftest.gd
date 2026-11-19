@@ -57,14 +57,14 @@ func _test_same_answers() -> void:
 		var pawn: Pawn = load(PAWN_SCENE).instantiate()
 		pawn.skip_default_parts = NO_AI # bodies only: this test calls the checks itself
 		pawn.team = i % 3
-		pawn.detectability = [1.0, 0.5, 0.0, 1.0][i % 4]
 		pawn.position = Vector3(pick.randf_range(-22, 22), 0.1, pick.randf_range(-22, 22))
 		add_child(pawn)
+		StatManager.set_detectability(pawn, [1.0, 0.5, 0.0, 1.0][i % 4]) # Claude 2026-11-19: through the stat, once the pawn has its parts
 		pawns.append(pawn)
 	for i in 3:
 		await get_tree().physics_frame # the walls and pawns join the physics world
 	var grid: Object = ClassDB.instantiate(&"AIPawnGrid")
-	grid.set_table(Pawn.get_table())
+	grid.set_table(SharedPawnTable.get_table())
 	var settings := PackedFloat64Array([1.0 / 30.0, 8.0, 25.0, cos(deg_to_rad(45.0)), cos(deg_to_rad(80.0)), 0.3, 30, 1.6, 1.0, 1, 10])
 	var reach := 25.0
 	var max_candidates := 32

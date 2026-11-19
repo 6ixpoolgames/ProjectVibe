@@ -24,6 +24,8 @@ class _Entity:
 	var active := true
 	var bound := false
 	var round_values := true
+	var carry_forward := false
+	var changed := true             # a carry-forward entity is read at the next commit
 	var freed_tick := -1
 	var owner_id := 0
 	var depth := 0
@@ -52,6 +54,8 @@ class _Layout:
 var _depth := 64
 var _now := -1
 var _commit_usec := 0
+var _rows_read := 0
+var _rows_carried := 0
 var _layouts: Array[_Layout] = []
 
 
@@ -210,9 +214,10 @@ func get_owner(handle: int) -> Object:
 	return instance_from_id(entity.owner_id) if entity and entity.owner_id else null
 
 
-## The accessors for an entity's gathered columns: one node, one property path and one encoding per column, in column order (pushed
-## columns' entries are ignored). An encoding must be settled (never "auto") and match the layout's unless the layout's is "auto".
-## round_values: round to each encoding and write back what changed. False, binding nothing, otherwise.
+## The accessors for an entity's columns: one node, one property path and one encoding per column, in column order. An encoding must
+## be settled (never "auto") and match the layout's unless the layout's is "auto". A pushed column may have a node too (or null): its
+## value is read from it now, written back to it by [method load_row], and checked by [method verify_nodes], but never read by a
+## commit. round_values: round to each encoding and write back what changed. False, binding nothing, otherwise.
 func bind(handle: int, nodes: Array, properties: Array, encodings: Array, round_values: bool) -> bool:
 	var layout := _layout_of(handle)
 	if layout == null or nodes.size() != layout.width or properties.size() != layout.width or encodings.size() != layout.width:
@@ -224,9 +229,9 @@ func bind(handle: int, nodes: Array, properties: Array, encodings: Array, round_
 	var settled: Array[StringName] = []
 	settled.resize(layout.width)
 	for c in layout.width:
-		if layout.pushed[c]:
-			continue
 		var node: Object = nodes[c]
+		if layout.pushed[c] and node == null:
+			continue # pushed only: nothing to read or write back
 		var encoding := StringName(encodings[c])
 		if node == null or not StateEncoding.is_known(encoding) or encoding == StateEncoding.AUTO \
 				or (layout.encodings[c] != StateEncoding.AUTO and layout.encodings[c] != encoding):
@@ -240,6 +245,13 @@ func bind(handle: int, nodes: Array, properties: Array, encodings: Array, round_
 	entity.encodings = settled
 	entity.round_values = round_values
 	entity.bound = true
+	entity.changed = true
+	# A pushed column bound to a node starts from the node's value, rounded.
+	for c in layout.width:
+		if not layout.pushed[c] or ids[c] == 0:
+			continue
+		var value: Variant = instance_from_id(ids[c]).get_indexed(paths[c])
+		entity.pushed[c] = StateEncoding.copy_value(StateEncoding.quantize(value, settled[c]) if round_values else value)
 	return true
 
 
@@ -264,11 +276,29 @@ func push(handle: int, column: int, value: Variant) -> void:
 	layout.slots[handle & _SLOT_MASK].pushed[column] = StateEncoding.copy_value(value)
 
 
+## On: a commit copies this entity's previous row forward, reading no node, unless it was marked changed since the last commit (an
+## entity that only changes when it runs, such as a pawn on a load step). Pushed columns take their pushed values either way.
+func set_carry_forward(handle: int, on: bool) -> void:
+	var entity := _entity_of(handle)
+	if entity:
+		entity.carry_forward = on
+		entity.changed = true
+
+
+## Something changed this entity since the last commit, so the next one reads its nodes.
+func mark_changed(handle: int) -> void:
+	var entity := _entity_of(handle)
+	if entity:
+		entity.changed = true
+
+
 ## The end of a tick: every active entity's row for this tick. Returns the handles the store couldn't gather (unbound, or a node gone,
 ## which unbinds it); their owners write them with [method write_row].
 func commit(tick: int) -> PackedInt64Array:
 	var started := Time.get_ticks_usec()
 	_now = tick
+	_rows_read = 0
+	_rows_carried = 0
 	var unfinished := PackedInt64Array()
 	for l in _layouts.size():
 		var layout := _layouts[l]
@@ -276,7 +306,7 @@ func commit(tick: int) -> PackedInt64Array:
 			var entity := layout.slots[slot]
 			if not entity.alive or not entity.active:
 				continue
-			if not _commit_one(layout, slot, tick):
+			if not _commit_one(layout, slot, tick, true):
 				unfinished.append(_make_handle(entity.generation, l, slot))
 	_commit_usec = Time.get_ticks_usec() - started
 	return unfinished
@@ -289,7 +319,7 @@ func commit_entities(tick: int, handles: PackedInt64Array) -> PackedInt64Array:
 		var layout := _layout_of(handle)
 		if layout == null or not layout.slots[handle & _SLOT_MASK].active:
 			continue
-		if not _commit_one(layout, handle & _SLOT_MASK, tick):
+		if not _commit_one(layout, handle & _SLOT_MASK, tick, false):
 			unfinished.append(handle)
 	return unfinished
 
@@ -362,15 +392,15 @@ func load_row(handle: int, tick: int) -> bool:
 	if layout == null or not layout.slots[handle & _SLOT_MASK].bound or not has_row(handle, tick):
 		return false
 	var entity := layout.slots[handle & _SLOT_MASK]
+	entity.changed = true
 	var base := ((handle & _SLOT_MASK) * _depth + _frame_of(tick)) * layout.width
 	for c in layout.width:
 		var value: Variant = layout.cells[base + c]
 		if layout.pushed[c]:
 			entity.pushed[c] = StateEncoding.copy_value(value)
-			continue
 		if value is StringName and value == MISSING:
 			continue
-		var node := instance_from_id(entity.node_ids[c])
+		var node := instance_from_id(entity.node_ids[c]) if entity.node_ids[c] != 0 else null
 		if node:
 			node.set_indexed(entity.paths[c], StateEncoding.copy_value(value))
 	return true
@@ -430,9 +460,7 @@ func verify_nodes(tick: int) -> PackedInt64Array:
 				continue
 			var base := (slot * _depth + _frame_of(tick)) * layout.width
 			for c in layout.width:
-				if layout.pushed[c]:
-					continue
-				var node := instance_from_id(entity.node_ids[c])
+				var node := instance_from_id(entity.node_ids[c]) if entity.node_ids[c] != 0 else null
 				if node == null:
 					continue
 				var value: Variant = node.get_indexed(entity.paths[c])
@@ -449,7 +477,7 @@ func quantize(value: Variant, encoding: StringName) -> Variant:
 	return StateEncoding.quantize(value, encoding) if StateEncoding.is_known(encoding) and encoding != StateEncoding.AUTO else value
 
 
-## {layouts, entities, active, bound, cells_per_frame, depth, commit_usec}.
+## {layouts, entities, active, bound, cells_per_frame, depth, commit_usec, rows_read, rows_carried} (the last three: the last commit).
 func get_stats() -> Dictionary:
 	var entities := 0
 	var active := 0
@@ -463,16 +491,29 @@ func get_stats() -> Dictionary:
 			active += 1 if entity.active else 0
 			bound += 1 if entity.bound else 0
 			cells += layout.width if entity.active else 0
-	return {"layouts": _layouts.size(), "entities": entities, "active": active, "bound": bound, "cells_per_frame": cells, "depth": _depth, "commit_usec": _commit_usec}
+	return {"layouts": _layouts.size(), "entities": entities, "active": active, "bound": bound, "cells_per_frame": cells, "depth": _depth,
+			"commit_usec": _commit_usec, "rows_read": _rows_read, "rows_carried": _rows_carried}
 
 
 # --- Internals ---------------------------------------------------------------------------------
 
-# One entity's row for a tick, gathered from its nodes. False (writing nothing) if it isn't bound or a node is gone, which unbinds it.
-func _commit_one(layout: _Layout, slot: int, tick: int) -> bool:
+# One entity's row for a tick: copied forward from the tick before when it may be and nothing changed it, else gathered from its nodes.
+# False (writing nothing) if it isn't bound or a node is gone, which unbinds it.
+func _commit_one(layout: _Layout, slot: int, tick: int, may_carry: bool) -> bool:
 	var entity := layout.slots[slot]
 	if not entity.bound:
 		return false
+	if may_carry and entity.carry_forward and not entity.changed and _row_held(layout, slot, entity.generation, entity.depth, tick - 1):
+		var row_now := slot * _depth + _frame_of(tick)
+		var base_now := row_now * layout.width
+		var base_before := (slot * _depth + _frame_of(tick - 1)) * layout.width
+		for c in layout.width:
+			layout.cells[base_now + c] = StateEncoding.copy_value(entity.pushed[c] if layout.pushed[c] else layout.cells[base_before + c])
+		layout.row_tick[row_now] = tick
+		layout.row_generation[row_now] = entity.generation
+		entity.newest = maxi(entity.newest, tick)
+		_rows_carried += 1
+		return true
 	var nodes: Array = []
 	nodes.resize(layout.width)
 	for c in layout.width:
@@ -502,6 +543,8 @@ func _commit_one(layout: _Layout, slot: int, tick: int) -> bool:
 	layout.row_tick[row] = tick
 	layout.row_generation[row] = entity.generation
 	entity.newest = maxi(entity.newest, tick)
+	entity.changed = false
+	_rows_read += 1
 	return true
 
 

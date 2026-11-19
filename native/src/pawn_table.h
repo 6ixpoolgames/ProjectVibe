@@ -155,6 +155,9 @@ private:
 		Variant value;
 	};
 	std::vector<Push> _pushes;
+	// Pushes that couldn't land yet (the column was off, or the pawn hadn't joined), newest only, applied once they can: a stat set
+	// before a job switches its column on still reaches the table.
+	std::vector<Push> _waiting;
 	void switched(Column &column, bool was_on);
 	Column *find_column(const StringName &name, const char *asked_by);
 

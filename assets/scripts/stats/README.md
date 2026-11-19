@@ -25,7 +25,7 @@ The numbers about a pawn, such as how fast it walks or how much Health it has, k
 
 - **`StatManager`** is a default pawn part (`assets/scenes/pawn/parts/StatManager.tscn`, added by `game_mode/PawnInitializer`). It holds one `Stat` child per stat, finds them by name, and raises its `version` whenever a value changes, so abilities that keep stat values know to read them again.
 - **`Stat`** is one number. Its `value` is its `base_value` plus what held effects add, times what they multiply (`effects/EffectManager` calls `set_modifiers`). A stat with `changes_during_play`, such as Health, also has a `current` amount from 0 to its value, which rolls back through the pawn's `TickStateComponent` and reaches clients in snapshots.
-- Health has one name, `StatManager.HEALTH`, read by Death, hits (`abilities/AbilityManager`), the kill floor and the readouts. `Pawn.detectability` is the Detectability stat (`StatManager.DETECTABILITY`), copied into the pawn table's `detectability` column for the AI's sensing job.
+- Health has one name, `StatManager.HEALTH`, read by Death, hits (`abilities/AbilityManager`), the kill floor and the readouts. Detectability is a stat (`StatManager.DETECTABILITY`, read with `StatManager.detectability_of(pawn)`), copied into the pawn table's `detectability` column for the AI's sensing job.
 
 ## How to use it
 

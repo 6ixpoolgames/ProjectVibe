@@ -40,7 +40,13 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 
 ## Adds each default part this pawn doesn't have yet. The pawn calls this from its _enter_tree.
 func initialize(pawn: Pawn) -> void:
-	if pawn == null or defaults == null or not pawn.fill_in_default_parts:
+	if pawn == null:
+		return
+	# The game's crowd mover moves it, if the game has one and nothing set another.
+	var game_mode := get_parent() as GameModeSingleton
+	if pawn.mover == null and game_mode and game_mode.crowd_mover:
+		pawn.mover = game_mode.crowd_mover
+	if defaults == null or not pawn.fill_in_default_parts:
 		return
 	# The game's AI brain, if it sets one, goes in place of the part of the same name (PawnDefaultsRes.ai_brain). Its name is read
 	# once here, not for every part.

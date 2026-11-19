@@ -204,10 +204,10 @@ bool StateStore::bind(int64_t handle, const Array &nodes, const Array &propertie
 	}
 	std::vector<Accessor> accessors(size_t(layout->width));
 	for (int64_t c = 0; c < layout->width; c++) {
-		if (layout->pushed[c]) {
-			continue;
-		}
 		Object *node = nodes[c];
+		if (layout->pushed[c] && node == nullptr) {
+			continue; // pushed only: nothing to read or write back
+		}
 		const int encoding = encoding_id(StringName(encodings[c]));
 		if (node == nullptr || encoding == ENC_UNKNOWN || (layout->encodings[c] != ENC_AUTO && layout->encodings[c] != encoding)) {
 			return false;
@@ -227,6 +227,17 @@ bool StateStore::bind(int64_t handle, const Array &nodes, const Array &propertie
 	entity.accessors = accessors;
 	entity.round_values = round_values;
 	entity.bound = true;
+	entity.changed = true;
+	// A pushed column bound to a node starts from the node's value, rounded.
+	for (int64_t c = 0; c < layout->width; c++) {
+		const Accessor &accessor = accessors[c];
+		if (!layout->pushed[c] || accessor.node_id == 0) {
+			continue;
+		}
+		Object *node = ObjectDB::get_instance(accessor.node_id);
+		const Variant value = accessor.indexed ? node->get_indexed(accessor.path) : node->get(accessor.name);
+		entity.pushed[c] = copy_value(round_values ? quantize_by_id(value, accessor.encoding) : value);
+	}
 	return true;
 }
 
@@ -251,9 +262,24 @@ void StateStore::push(int64_t handle, int64_t column, const Variant &value) {
 	layout->slots[slot].pushed[column] = copy_value(value);
 }
 
+void StateStore::set_carry_forward(int64_t handle, bool on) {
+	if (Entity *entity = entity_of(handle)) {
+		entity->carry_forward = on;
+		entity->changed = true;
+	}
+}
+
+void StateStore::mark_changed(int64_t handle) {
+	if (Entity *entity = entity_of(handle)) {
+		entity->changed = true;
+	}
+}
+
 PackedInt64Array StateStore::commit(int64_t tick) {
 	const uint64_t started = Time::get_singleton()->get_ticks_usec();
 	m_now = tick;
+	m_rows_read = 0;
+	m_rows_carried = 0;
 	PackedInt64Array unfinished;
 	for (size_t l = 0; l < m_layouts.size(); l++) {
 		Layout &layout = m_layouts[l];
@@ -262,7 +288,7 @@ PackedInt64Array StateStore::commit(int64_t tick) {
 			if (!entity.alive || !entity.active) {
 				continue;
 			}
-			if (!commit_one(layout, (int64_t)l, slot, tick)) {
+			if (!commit_one(layout, slot, tick, true)) {
 				unfinished.push_back(make_handle(entity.generation, (int64_t)l, slot));
 			}
 		}
@@ -279,20 +305,35 @@ PackedInt64Array StateStore::commit_entities(int64_t tick, const PackedInt64Arra
 		if (layout == nullptr || !layout->slots[slot].active) {
 			continue;
 		}
-		if (!commit_one(*layout, (handles[i] >> SLOT_BITS) & LAYOUT_MASK, slot, tick)) {
+		if (!commit_one(*layout, slot, tick, false)) {
 			unfinished.push_back(handles[i]);
 		}
 	}
 	return unfinished;
 }
 
-// One entity's row for a tick, gathered from its nodes. False (writing nothing) if it isn't bound or a node is gone, which unbinds it.
-bool StateStore::commit_one(Layout &layout, int64_t layout_index, int64_t slot, int64_t tick) {
+// One entity's row for a tick: copied forward from the tick before when it may be and nothing changed it, else gathered from its nodes.
+// False (writing nothing) if it isn't bound or a node is gone, which unbinds it.
+bool StateStore::commit_one(Layout &layout, int64_t slot, int64_t tick, bool may_carry) {
 	Entity &entity = layout.slots[slot];
 	if (!entity.bound) {
 		return false;
 	}
 	const int64_t width = layout.width;
+	const int64_t frame = frame_of(tick);
+	const int64_t row = slot * m_depth + frame;
+	if (may_carry && entity.carry_forward && !entity.changed && row_held(layout, slot, entity.generation, entity.depth, tick - 1)) {
+		const Variant *before = layout.cells.data() + size_t((slot * m_depth + frame_of(tick - 1)) * width);
+		Variant *cells = layout.cells.data() + size_t(row * width);
+		for (int64_t c = 0; c < width; c++) {
+			cells[c] = layout.pushed[c] ? copy_value(entity.pushed[c]) : copy_value(before[c]);
+		}
+		layout.row_tick[row] = tick;
+		layout.row_generation[row] = entity.generation;
+		entity.newest = tick > entity.newest ? tick : entity.newest;
+		m_rows_carried++;
+		return true;
+	}
 	// First every node, so a freed one stops it before anything is read or written.
 	m_nodes.resize(size_t(width));
 	for (int64_t c = 0; c < width; c++) {
@@ -308,8 +349,6 @@ bool StateStore::commit_one(Layout &layout, int64_t layout_index, int64_t slot, 
 		}
 		m_nodes[c] = node;
 	}
-	const int64_t frame = frame_of(tick);
-	const int64_t row = slot * m_depth + frame;
 	Variant *cells = layout.cells.data() + size_t(row * width);
 	for (int64_t c = 0; c < width; c++) {
 		if (layout.pushed[c]) {
@@ -338,7 +377,8 @@ bool StateStore::commit_one(Layout &layout, int64_t layout_index, int64_t slot, 
 	if (tick > entity.newest) {
 		entity.newest = tick;
 	}
-	(void)layout_index;
+	entity.changed = false;
+	m_rows_read++;
 	return true;
 }
 
@@ -432,17 +472,17 @@ bool StateStore::load_row(int64_t handle, int64_t tick) {
 		return false;
 	}
 	Entity &entity = layout->slots[slot];
+	entity.changed = true;
 	const Variant *cells = layout->cells.data() + size_t((slot * m_depth + frame_of(tick)) * layout->width);
 	for (int64_t c = 0; c < layout->width; c++) {
 		if (layout->pushed[c]) {
 			entity.pushed[c] = copy_value(cells[c]);
-			continue;
 		}
 		if (cells[c].get_type() == Variant::STRING_NAME && StringName(cells[c]) == m_missing) {
 			continue;
 		}
 		const Accessor &accessor = entity.accessors[c];
-		Object *node = ObjectDB::get_instance(accessor.node_id);
+		Object *node = accessor.node_id ? ObjectDB::get_instance(accessor.node_id) : nullptr;
 		if (node == nullptr) {
 			continue;
 		}
@@ -518,11 +558,8 @@ PackedInt64Array StateStore::verify_nodes(int64_t tick) {
 			}
 			const Variant *cells = layout.cells.data() + size_t((slot * m_depth + frame_of(tick)) * layout.width);
 			for (int64_t c = 0; c < layout.width; c++) {
-				if (layout.pushed[c]) {
-					continue;
-				}
 				const Accessor &accessor = entity.accessors[c];
-				Object *node = ObjectDB::get_instance(accessor.node_id);
+				Object *node = accessor.node_id ? ObjectDB::get_instance(accessor.node_id) : nullptr;
 				if (node == nullptr) {
 					continue;
 				}
@@ -569,6 +606,8 @@ Dictionary StateStore::get_stats() const {
 	out["cells_per_frame"] = cells_per_frame;
 	out["depth"] = m_depth;
 	out["commit_usec"] = m_commit_usec;
+	out["rows_read"] = m_rows_read;
+	out["rows_carried"] = m_rows_carried;
 	return out;
 }
 
@@ -672,6 +711,8 @@ void StateStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("unbind", "handle"), &StateStore::unbind);
 	ClassDB::bind_method(D_METHOD("is_bound", "handle"), &StateStore::is_bound);
 	ClassDB::bind_method(D_METHOD("push", "handle", "column", "value"), &StateStore::push);
+	ClassDB::bind_method(D_METHOD("set_carry_forward", "handle", "on"), &StateStore::set_carry_forward);
+	ClassDB::bind_method(D_METHOD("mark_changed", "handle"), &StateStore::mark_changed);
 	ClassDB::bind_method(D_METHOD("commit", "tick"), &StateStore::commit);
 	ClassDB::bind_method(D_METHOD("commit_entities", "tick", "handles"), &StateStore::commit_entities);
 	ClassDB::bind_method(D_METHOD("write_row", "handle", "tick", "values"), &StateStore::write_row);

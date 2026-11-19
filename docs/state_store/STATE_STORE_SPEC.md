@@ -1,4 +1,4 @@
-# State Store Spec v0.3 (agreed direction; step 1 built)
+# State Store Spec v0.4 (agreed direction; steps 1 and 2 built)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
@@ -403,6 +403,13 @@ What stays is the body, the general flags (dead, frozen, team), the references t
 
 **The crowd mover** (`CrowdMover.gd`, C++ `CrowdBatch`) gathers each AI pawn's position, motion and radius into lists in GDScript every tick, runs the batch (C++ on workers), then calls each pawn back (`finish_crowd_move`). Measured: 2.46 ms a rendered frame (0.82 ms a tick) at 300 pawns. With the store it reads positions from the frame being built and writes results straight into position columns, with one pass writing node transforms; the per-pawn GDScript gathering and calling back goes. Its walls come from the nav mesh, so it's one of the places nav commits reach the core (12.4).
 
+**Step 2's design** *(agreed with the owner 2026-11-19)*:
+- **Team on the pawn**, as a pushed column: a property of the unit, which keeps its team whoever possesses it.
+- **Pushed entries** in a `TickStateComponent` list (an entry ending in `pushed`): the store reads them once when binding, then takes what the holder pushes when the value changes; a rollback writes them back to the node, and the tripwire checks them. The pawn's team and tick step and stats' current values (Health) are pushed.
+- **Recording only what changed:** a pawn that didn't run this tick (its load step) and that nothing touched is recorded by copying its previous row forward, with no node reads. The pawn marks itself changed when it runs; anything that changes it between its runs (an effect landing) marks it too. The tripwire catches a write that forgot to.
+- **The pawn's own move stays** (gravity and `move_and_slide`), for games with few pawns and scenes without the tick driver or the crowd mover. **The crowd mover leaves the pawn:** a pawn has a `mover` (set by the `PawnInitializer` from the game's crowd mover, or none); the pawn asks it to take each tick's move and otherwise moves itself, and never names the crowd mover. Abilities keep steering by writing the pawn's velocity, which the one move per tick applies; a named motion call (`add_impulse`) comes with abilities v2.
+- **Slimming:** smoothing the visual moves to its own part (`VisualSmoother`), the shared pawn table and grid to a holder class (`SharedPawnTable`), and detectability is read from the stat by its callers.
+
 ## 12.9 Player, camera, UI, jobs, tags and platform: a light pass *(Claude, 2026-11-19)*
 
 - **Player and camera** are this machine's presentation: input is read each frame and turned into one command a tick (presses latched between), and the camera follows the drawn pawn. Standard, and outside the core. Their REFACTOR rows: the `InputMap` names written into `PlayerController`, and path following written twice (player and AI controllers; the controllers review).
@@ -479,6 +486,19 @@ What step 1 is: the C++ `StateStore` and its twin `StateStoreGD` (`assets/script
 | Tripwire (`verify_store_each_tick`, 90 pawns, 40 s) | One entry written between ticks: the pawn's `tick_step`, set by `AIActivationManager`. A director, as section 10 expects: it moves onto a fixed tick as a recorded input in step 7 |
 
 Step 1 isn't meant to be faster: the gains come from pushed columns replacing most per-tick reads (step 2 on), the duplicate gathers reading the store instead (pawn table, lag compensation, replay motion), and worker jobs reading frames.
+
+### 13.5 Step 2 built: the pawn as holder, rows carried forward *(Claude, 2026-11-19)*
+
+The design is in 12.8 ("Step 2's design"). Built: rows carried forward for entities nothing marked (`set_carry_forward`, `mark_changed`), pushed `TickStateComponent` entries bound to a node (team, tick step, stats' current values), the pawn's `mover` (the crowd mover no longer named by the pawn), `VisualSmoother`, `SharedPawnTable`, and detectability read from the stat. The pawn is 638 lines (from 716). All 68 suites pass.
+
+| Measured (300-pawn march, headless; step 1 in brackets) | Result |
+|---|---|
+| Commit, ms a tick | **1.2** (2.0) |
+| Whole tick, ms | 9.3 (10.0) |
+| Drift after a rewind, marching | 0 of 153 for 1 and 30 ticks |
+| Tripwire, marching (90 pawns, 90 s) and fighting (153 pawns) | Only `tick_step`, the director write from 13.4: no change between runs went unmarked |
+
+Found on the way: `PawnTable` dropped a push for a column that was off, and the pawn's `detectability` property had hidden it (fixed: such pushes now wait), and `ai_sensing_job_selftest` had never really varied detectability.
 
 ## 14. Open
 

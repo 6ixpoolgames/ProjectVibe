@@ -40,12 +40,16 @@ Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
 - `is_active(handle: int) -> bool`
 - `set_entity_depth(handle: int, depth: int) -> void`: How many ticks back this entity's rows count, at most the store's depth.
 - `get_owner(handle: int) -> Object`
-- `bind(handle: int, nodes: Array, properties: Array, encodings: Array, round_values: bool) -> bool`: The accessors for an entity's gathered columns: one node, one property path and one encoding per column, in column order (pushed
-  columns' entries are ignored). An encoding must be settled (never "auto") and match the layout's unless the layout's is "auto".
-  round_values: round to each encoding and write back what changed. False, binding nothing, otherwise.
+- `bind(handle: int, nodes: Array, properties: Array, encodings: Array, round_values: bool) -> bool`: The accessors for an entity's columns: one node, one property path and one encoding per column, in column order. An encoding must
+  be settled (never "auto") and match the layout's unless the layout's is "auto". A pushed column may have a node too (or null): its
+  value is read from it now, written back to it by `load_row()`, and checked by `verify_nodes()`, but never read by a
+  commit. round_values: round to each encoding and write back what changed. False, binding nothing, otherwise.
 - `unbind(handle: int) -> void`
 - `is_bound(handle: int) -> bool`
 - `push(handle: int, column: int, value: Variant) -> void`: Sets a pushed column's value; every commit from now on records it, until the next push.
+- `set_carry_forward(handle: int, on: bool) -> void`: On: a commit copies this entity's previous row forward, reading no node, unless it was marked changed since the last commit (an
+  entity that only changes when it runs, such as a pawn on a load step). Pushed columns take their pushed values either way.
+- `mark_changed(handle: int) -> void`: Something changed this entity since the last commit, so the next one reads its nodes.
 - `commit(tick: int) -> PackedInt64Array`: The end of a tick: every active entity's row for this tick. Returns the handles the store couldn't gather (unbound, or a node gone,
   which unbinds it); their owners write them with `write_row()`.
 - `commit_entities(tick: int, handles: PackedInt64Array) -> PackedInt64Array`: The same for some entities only (a rollback's re-run rewriting past frames).
@@ -61,4 +65,4 @@ Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
 - `verify_nodes(tick: int) -> PackedInt64Array`: The determinism tripwire: handles of bound, active entities whose nodes no longer hold (once rounded) what their row for that tick
   says. Empty when nothing wrote around the store.
 - `quantize(value: Variant, encoding: StringName) -> Variant`: StateEncoding.quantize, the same rounding the commit does.
-- `get_stats() -> Dictionary`: {layouts, entities, active, bound, cells_per_frame, depth, commit_usec}.
+- `get_stats() -> Dictionary`: {layouts, entities, active, bound, cells_per_frame, depth, commit_usec, rows_read, rows_carried} (the last three: the last commit).

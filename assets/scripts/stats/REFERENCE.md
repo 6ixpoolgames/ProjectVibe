@@ -13,25 +13,34 @@ Every class in `assets/scripts/stats/`, from its doc comments. The overview is i
 
 One number about a pawn, such as how fast it walks. A child of the pawn's StatManager.
 
-Pawn spec section 9. The stat's name is this node's name, such as MoveSpeed or JumpVelocity. Abilities and behaviours ask the StatManager for a stat by that name, and use a fallback of their own if there's none, so a missing stat is never a crash.
+Pawn spec section 9. The stat's name is this node's name, such as MoveSpeed or JumpVelocity. Abilities and behaviours ask the
+StatManager for a stat by that name, and use a fallback of their own if there's none, so a missing stat is never a crash.
 
-Its `value` is `base_value` plus what held effects add, times what they multiply (`set_modifiers()`, from the EffectManager).
+Its `value` is `base_value` plus what held effects add, times what they multiply (`set_modifiers()`, from the
+EffectManager).
 
-A stat that changes during play, such as Health, has `changes_during_play` on. Then it also has a `current` value, from 0 up to its value, which starts full, rolls back (the StatManager lists it with the pawn's TickStateComponent) and reaches clients in snapshots. Only the server changes it: `StatManager.change_current()`.
+A stat that changes during play, such as Health, has `changes_during_play` on. Then it also has a `current` value,
+from 0 up to its value, which starts full, rolls back (the StatManager lists it with the pawn's TickStateComponent) and reaches
+clients in snapshots. Only the server changes it: `StatManager.change_current()`.
 
 With a `table_column`, the value is also copied into that column of the pawn table, for C++ to read.
 
 ### Settings and properties
 
 - `base_value: float` = `0.0`: The value it starts with. Setting it works `value` out again, keeping what effects add.
-- `value: float` = `0.0`: The value right now: `base_value` with effects. A change tells the StatManager (its `StatManager.version` goes up), so abilities that keep stat values read them again, and copies it into `table_column` if there is one.
-- `table_column: StringName` = `&""`: The name of a pawn table column to copy this stat's value into whenever it changes, so C++ (the sensing job, say) reads it from the table instead of asking the pawn. Empty: not copied. The column must be a pushed one (`PawnTable.add_pushed_column`), as the built-in "detectability" is, which the default Detectability stat fills. The table takes the new value at its next tick.
-- `changes_during_play: bool` = `false`: On, this stat also has a `current` value that goes up and down during play, such as Health. `value` is then its most.
+- `value: float` = `0.0`: The value right now: `base_value` with effects. A change tells the StatManager (its `StatManager.version` goes up),
+  so abilities that keep stat values read them again, and copies it into `table_column` if there is one.
+- `table_column: StringName` = `&""`: The name of a pawn table column to copy this stat's value into whenever it changes, so C++ (the sensing job, say) reads it from
+  the table instead of asking the pawn. Empty: not copied. The column must be a pushed one (`PawnTable.add_pushed_column`),
+  as the built-in "detectability" is, which the default Detectability stat fills. The table takes the new value at its next tick.
+- `changes_during_play: bool` = `false`: On, this stat also has a `current` value that goes up and down during play, such as Health. `value` is then its
+  most.
 - `current: float` = `0.0`
 
 ### Functions
 
-- `set_modifiers(added: float, multiplied: float) -> void`: The effects on this stat, all together: `value` becomes (base_value + added) x multiplied. 0 and 1 mean none. The pawn's EffectManager calls this whenever its held effects change.
+- `set_modifiers(added: float, multiplied: float) -> void`: The effects on this stat, all together: `value` becomes (base_value + added) x multiplied. 0 and 1 mean none. The pawn's
+  EffectManager calls this whenever its held effects change.
 
 ## StatManager
 
@@ -39,7 +48,9 @@ With a `table_column`, the value is also copied into that column of the pawn tab
 
 Holds a pawn's stats, one [`Stat`](#stat) node each, and finds them by name.
 
-A part on the pawn, added by PawnInitializer (pawn spec 9). A Stat's name is its node's name; stats can be added and removed while running. A missing stat is never an error: `get_value()` gives the fallback and `get_stat()` gives null. A stat that changes during play is filled and listed for rollback when the manager is ready, so one added later starts at 0 and doesn't roll back.
+A part on the pawn, added by PawnInitializer (pawn spec 9). A Stat's name is its node's name; stats can be added and removed while
+running. A missing stat is never an error: `get_value()` gives the fallback and `get_stat()` gives null. A stat that
+changes during play is filled and listed for rollback when the manager is ready, so one added later starts at 0 and doesn't roll back.
 
 ```gdscript
 pawn.stat_manager.get_value(&"MoveSpeed", 5.0)   # the value, or the fallback if there's no such stat
@@ -52,18 +63,24 @@ Everything that means "the pawn's health" reads `HEALTH`.
 ### Settings and properties
 
 - `pawn: Pawn` = `null`
-- `version: int` = `1`: Goes up by one whenever a stat's value changes, or a stat is added or removed (not when a current value such as Health changes). An ability that keeps stat values reads them again only when this has changed (pawn spec 15.2).
+- `version: int` = `1`: Goes up by one whenever a stat's value changes, or a stat is added or removed (not when a current value such as Health changes).
+  An ability that keeps stat values reads them again only when this has changed (pawn spec 15.2).
 
 ### Constants
 
 - `HEALTH = &"Health"`: The name of the Health stat. A pawn without a stat of this name can't be hurt or die from damage.
-- `DETECTABILITY = &"Detectability"`: The name of the Detectability stat: how easy the pawn is for AI to see (1 normal, 0 invisible). `Pawn.detectability` reads and writes it, and it's copied into the pawn table for the sensing job (`Stat.table_column`).
+- `DETECTABILITY = &"Detectability"`: The name of the Detectability stat: how easy the pawn is for AI to see (1 normal, 0 invisible). `detectability_of()` reads
+  it, and it's copied into the pawn table for the sensing job (`Stat.table_column`).
 
 ### Functions
 
+- `detectability_of(pawn: Node) -> float` *(static)*: How easy this pawn is for AI to see: its Detectability stat's value, 1 without one (pawn spec 10.4). Effects change it through the
+  stat; game rules for stealth belong in a GameMode module.
+- `set_detectability(pawn: Node, value: float) -> void` *(static)*: Sets this pawn's Detectability stat's base value (what effects build on). Does nothing for a pawn without the stat.
 - `get_health() -> float`: How much Health the pawn has now, or 0 without a Health stat.
 - `get_current(stat_name: StringName, fallback: float = 0.0) -> float`: How much a stat that changes during play has now, or the fallback if there's no such stat.
-- `change_current(stat_name: StringName, amount: float) -> float`: Adds to a stat that changes during play (negative takes away), kept between 0 and its value. Returns the new amount, or 0 if there's no such stat. Only the server should change it: clients get it in snapshots.
+- `change_current(stat_name: StringName, amount: float) -> float`: Adds to a stat that changes during play (negative takes away), kept between 0 and its value. Returns the new amount, or 0 if
+  there's no such stat. Only the server should change it: clients get it in snapshots.
 - `get_value(stat_name: StringName, fallback: float = 0.0) -> float`: The stat's value right now, or fallback if this pawn has no such stat.
 - `get_stat(stat_name: StringName) -> Stat`: The Stat node, or null if there's none with that name.
 - `has_stat(stat_name: StringName) -> bool`: True if this pawn has a stat with that name.

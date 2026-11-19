@@ -4,7 +4,7 @@
 ## A child of the pawn's [AISensingManager]. For each other-team pawn it checks, on a full pass or a refresh:
 ## [codeblock]
 ## if there's no line of sight: no gain
-## gain = fill_rate Ã— ticks_since_last_check Ã— distance_factor Ã— angle_factor Ã— target.detectability
+## gain = fill_rate × ticks_since_last_check × distance_factor × angle_factor × the target's detectability (its stat)
 ## [/codeblock]
 ## Ticks since the last check (capped at [member max_gain_ticks]) make the checking rate not matter; the distance factor is 1 inside
 ## [member near_range] and falls to 0 at [member sight_range]; the angle factor is 1 in the central cone, [member periphery_multiplier]
@@ -178,7 +178,7 @@ func _visibility(target: Pawn) -> float:
 			return 0.0
 		if cosine < _cos_central:
 			angle_factor = periphery_multiplier
-	return distance_factor * angle_factor * target.detectability
+	return distance_factor * angle_factor * StatManager.detectability_of(target)
 
 
 # Hands the checks to memory's store, then lets memory wake a decision and send its signals.

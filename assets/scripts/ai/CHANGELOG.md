@@ -20,6 +20,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Decision records as a replay channel | `ai/debug/AIDecisionRecorder.gd` | A second recording mechanism with its own storage and file format, beside `ReplayRecorder`, the one place that records everything. An "AI decisions" channel (off by default; 31 MB of JSON for 40 s at 150 pawns) would put them in the replay file, and the shadow comparison could read it live or from a file (the owner's call, 2026-11-17: logged, not now) | M |
 | The sprint action's name as a setting | `&"sprint"` in `AIChaseBehaviour`, `AISearchBehaviour`, `AIInvestigateBehaviour`, `AIKeepDistanceBehaviour` | Written into the code, so a game that names its sprint action differently has to edit four behaviours. A setting, or a tag as Chase's `close_in_tag` is, would need no code | S |
 
+## 2026-11-19
+
+- **`ai_sensing_job_selftest` sets each pawn's detectability through its stat, after it has its parts.** Before, it set `Pawn.detectability` before the pawn had its stats, so every pawn counted as 1 and the test never compared different values.
+- **Detectability is read from the stat** (`StatManager.detectability_of`) by `SightSense` and `AIMemoryStoreGD`; `Pawn.detectability` is gone.
+
 ## 2026-11-18
 
 - **GDScript warnings cleared** (the editor listed them when running a sample): `AIDecisionModule`'s local `load` (a built-in's name) is `busy`; `AIInputs.set_input`/`set_slot` take `amount`, not `value` (the name of a method); `AIChanceCondition.make` takes `salt_number`, not `roll_salt` (a method); `AIBehaviourManager.describe` and `AIDecisionRecord` no longer mix a number and `null` in one ternary (JSON's stand-in for infinity) but set the value in an `if`. No change in behaviour.

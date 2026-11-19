@@ -24,6 +24,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-19
 
+- **Pushed entries and recording only when changed** (state store step 2): an entry ending in `pushed` is read once, then recorded from `push_value()`, which its owner's setter calls; `record_only_when_changed` has the store copy the last row forward on ticks nothing called `mark_changed()`.
 - **`TickStateComponent` records into the state store** (refactor step 1). It joins `TickDriver.store` when ready (one layout per state list), matches entries to nodes and settles encodings as before, and binds them so the store's commit reads them; until then, or when a node goes away, `_store_gather()` writes the row from GDScript. Its own state ring and the C++ `TickStateRecorder` are gone; custom state (`save_state`) keeps its ring beside the store (quarantined, spec 6.4), and inputs keep theirs until the netcode step. `get_store_handle()` and `set_recording()` are new; `NetworkEntity.set_paused` calls the latter.
 - **State is recorded and rounded every tick on every machine** (state store spec 9, deterministic replay needs it offline too). `history_interval_ticks`, `rounds_every_tick` and `use_native` are removed, and `NetworkEntity.refresh_input_saving` now only decides which inputs are saved. A server now keeps every tick, not only snapshot ticks; offline rounds every tick, as online always did.
 

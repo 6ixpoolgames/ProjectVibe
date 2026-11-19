@@ -16,10 +16,10 @@ Moves crowds cheaply: AI pawns walking on the ground are moved together once a t
 ## The pieces
 
 ```
- each AI pawn's simulate ─► CrowdMover.try_take_move ─► queued
+ each AI pawn's simulate ─► CrowdMover.take_move ─► queued
  after every pawn:  CrowdMover ─► CrowdBatch (C++, worker threads): move, separate, walk the nav mesh
                                └► physics sweep and ray for pawns it hands back
-                    ─► Pawn.finish_crowd_move   or   Pawn.finish_move_by_physics
+                    ─► Pawn.finish_move   or   Pawn.move_by_physics_now
 ```
 
 - **`CrowdMover`**: a GameMode module (`GameMode.crowd_mover`, also `CrowdMover.current`). It decides which pawns it moves, runs the batch last in the simulate phase, and finishes each pawn's tick.
@@ -29,7 +29,7 @@ Who it moves: an AI pawn, on the server or offline, on the ground, not jumping, 
 
 ## How it works
 
-A pawn the AI drives still runs its abilities and gravity (Walk and Sprint set its velocity from the AI's input). Then, instead of `move_and_slide` (about 24 microseconds a pawn, one of a tick's biggest costs in the mass battle), it hands its move to `try_take_move` and waits. `CrowdMover` runs last in `TickDriver`'s simulate phase (`TICK_ORDER`), after every pawn: it moves each by its velocity for the tick, flat; pushes pawns apart where they overlap (separation, from a grid of cells built once a tick); then checks walls and stands each on the ground. Each pawn then finishes its tick (`Pawn.finish_crowd_move`) or, where a check failed, moves by physics at once (`Pawn.finish_move_by_physics`), which handles the edge, the wall or the fall properly.
+A pawn the AI drives still runs its abilities and gravity (Walk and Sprint set its velocity from the AI's input). Then, instead of `move_and_slide` (about 24 microseconds a pawn, one of a tick's biggest costs in the mass battle), it hands its move to `take_move` and waits. `CrowdMover` runs last in `TickDriver`'s simulate phase (`TICK_ORDER`), after every pawn: it moves each by its velocity for the tick, flat; pushes pawns apart where they overlap (separation, from a grid of cells built once a tick); then checks walls and stands each on the ground. Each pawn then finishes its tick (`Pawn.finish_move`) or, where a check failed, moves by physics at once (`Pawn.move_by_physics_now`), which handles the edge, the wall or the fall properly.
 
 **Separation.** AI pawns don't collide with each other physically. Two crowd pawns each take half the push; a pawn moving by physics (a player's, one in the air) doesn't move, so a crowd pawn takes all of it.
 
@@ -37,7 +37,7 @@ A pawn the AI drives still runs its abilities and gravity (Walk and Sprint set i
 
 **Walls and ground by physics** (the GDScript batch, `_move_batch`, used without the library and for the pawns the C++ batch hands back; it must give the same answer as `CrowdBatch`): the pawn's collision shape is swept along the move, lifted by the step it may climb, against the level (not pawns), then one ray goes down where it ends up. Anything taller than the step blocks the sweep; anything lower is a step the ray stands it on. No ground, a step or slope too steep, a wall, or no collision shape: it moves by physics instead.
 
-**Who it moves** (`try_take_move`): an AI pawn, on the server or offline, on the ground, with no ability running that wants full movement (`AbilityBase.needs_full_movement`: Dash and Knockback), and its own `crowd_movement` on. A player's pawn, anything on a client and anything in the air always moves by physics, so prediction and rollback, which only clients do and only for their own pawn, never meet this. A rollback replay, or a test calling a pawn's `_tick_simulate` itself, also moves by physics, since the mover wouldn't run until the next tick.
+**Who it moves** (`take_move`): an AI pawn, on the server or offline, on the ground, with no ability running that wants full movement (`AbilityBase.needs_full_movement`: Dash and Knockback), and its own `crowd_movement` on. A player's pawn, anything on a client and anything in the air always moves by physics, so prediction and rollback, which only clients do and only for their own pawn, never meet this. A rollback replay, or a test calling a pawn's `_tick_simulate` itself, also moves by physics, since the mover wouldn't run until the next tick.
 
 ## How to use it
 

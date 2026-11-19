@@ -12,20 +12,34 @@ Every class in `assets/scripts/movement/`, from its doc comments. The overview i
 
 Moves AI pawns walking on the ground all together once a tick, instead of each one calling Godot's move_and_slide.
 
-A GameMode module (GameMode.crowd_mover), pawn spec 8.22. A pawn the AI drives hands its move for the tick to `try_take_move()` and waits; once every pawn has simulated (this runs last in TickDriver's simulate phase) it moves them all (flat, pushed apart where they overlap, checked for walls and stood on the ground), then each pawn finishes its tick or, where a check failed, moves by physics. With the navcore library the batch runs in C++ (`use_cpp_batch`: CrowdBatch, on worker threads, walls from the nav mesh); without it a GDScript twin uses physics sweeps and rays, and must give the same answer. A player's pawn, anything on a client and anything in the air always moves by physics. `enabled` and `separation_strength` are in the start menu's match options. Diagnostics: "movement.crowd", "movement.crowd_queries" and "movement.crowd_fallbacks" (F4).
+A GameMode module (GameMode.crowd_mover), pawn spec 8.22. It's the `Pawn.mover` of the pawns the PawnInitializer gives
+it (and of those already there when it's added). A pawn the AI drives hands its move for the tick to `take_move()` and waits; once every pawn has simulated (this runs last in TickDriver's simulate phase) it moves them all
+(flat, pushed apart where they overlap, checked for walls and stood on the ground), then each pawn finishes its tick or, where a
+check failed, moves by physics. With the navcore library the batch runs in C++ (`use_cpp_batch`: CrowdBatch, on worker
+threads, walls from the nav mesh); without it a GDScript twin uses physics sweeps and rays, and must give the same answer. A player's
+pawn, anything on a client and anything in the air always moves by physics. `enabled` and `separation_strength` are in
+the start menu's match options. Diagnostics: "movement.crowd", "movement.crowd_queries" and "movement.crowd_fallbacks" (F4).
 
 ### Settings and properties
 
-- `current: CrowdMover` = `null`: The CrowdMover in the game, or null if the game has none. Pawns ask this each tick, so it's a static: cheaper than finding the module through GameMode.
+- `current: CrowdMover` = `null`: The CrowdMover in the game, or null if the game has none. Pawns ask this each tick, so it's a static: cheaper than finding the
+  module through GameMode.
 - `enabled: bool` = `true`: Off: every pawn moves by physics, as before this module.
-- `separation_strength: float` = `1.0`: How much of an overlap between two pawns is pushed apart each tick: 1 all of it (each of two crowd pawns moves half, the standard way crowds are kept apart), less to let them squeeze, 0 none (they walk through each other). Below about 1, two pawns walking straight at each other pass through.
+- `separation_strength: float` = `1.0`: How much of an overlap between two pawns is pushed apart each tick: 1 all of it (each of two crowd pawns moves half, the standard
+  way crowds are kept apart), less to let them squeeze, 0 none (they walk through each other). Below about 1, two pawns walking
+  straight at each other pass through.
 - `separation_margin: float` = `0.1`: The gap kept between pawns' capsules, in metres.
-- `max_push_speed: float` = `10.0`: The fastest a push may move a pawn, in metres a second, so a pawn pressed in from all sides doesn't shoot out. Above a sprint, so a pawn walking into another is held back.
-- `max_step: float` = `0.4`: How far up or down a pawn may step in one move, in metres, on top of what its slope allows (the pawn's floor_max_angle over the distance moved). Beyond it, physics takes over for that pawn. The wall sweep is lifted by the same amount, so whatever is taller counts as a wall.
+- `max_push_speed: float` = `10.0`: The fastest a push may move a pawn, in metres a second, so a pawn pressed in from all sides doesn't shoot out. Above a sprint, so
+  a pawn walking into another is held back.
+- `max_step: float` = `0.4`: How far up or down a pawn may step in one move, in metres, on top of what its slope allows (the pawn's floor_max_angle over the
+  distance moved). Beyond it, physics takes over for that pawn. The wall sweep is lifted by the same amount, so whatever is taller
+  counts as a wall.
 - `ground_layers: int` = `1`: The physics layers that count as ground and walls (the terrain and level geometry; pawns are on layer 2).
 - `cell_size: float` = `2.0`: The grid's cell size for finding neighbours, in metres. About twice the widest pawn.
-- `use_cpp_batch: bool` = `true`: On: the batch in C++ (CrowdBatch: worker threads, walls from the nav mesh) when the navcore library is there. Off: the GDScript batch, with walls from physics sweeps.
-- `moved_last_tick: int` = `0`: How many pawns it was given on its last tick, and how many of those it handed back to physics (a wall, an edge, no ground, too steep, no shape). For tests and diagnostics.
+- `use_cpp_batch: bool` = `true`: On: the batch in C++ (CrowdBatch: worker threads, walls from the nav mesh) when the navcore library is there. Off: the GDScript
+  batch, with walls from physics sweeps.
+- `moved_last_tick: int` = `0`: How many pawns it was given on its last tick, and how many of those it handed back to physics (a wall, an edge, no ground, too
+  steep, no shape). For tests and diagnostics.
 - `fallbacks_last_tick: int` = `0`
 
 ### Constants
@@ -38,11 +52,19 @@ A GameMode module (GameMode.crowd_mover), pawn spec 8.22. A pawn the AI drives h
 
 ### Functions
 
-- `try_take_move(pawn: Pawn, was_grounded: bool, seconds: float) -> bool`: Takes this tick's move of a pawn, if it moves that pawn, and returns true; the pawn then waits for finish_crowd_move or finish_move_by_physics. False: the pawn moves by physics itself (see the class description for which pawns it moves). seconds is the pawn's run length.
+- `take_move(pawn: Pawn, was_grounded: bool, seconds: float) -> bool`: Takes this tick's move of a pawn, if it moves that pawn, and returns true; the pawn then waits for `Pawn.finish_move()` or
+  `Pawn.move_by_physics_now()`. False: the pawn moves by physics itself (see the class description for which pawns it moves).
+  seconds is the pawn's run length.
 - `get_match_options() -> PackedStringArray`: The settings a start menu may offer (GameModeModule.get_match_options).
-- `queue_move(pawn: Pawn, motion: Vector3, seconds: float) -> void`: Queues a pawn's move for this tick: motion is its velocity times the seconds this run covers. It's moved, and told (Pawn.finish_crowd_move), once every pawn has simulated. try_take_move calls this; a test may too.
+- `queue_move(pawn: Pawn, motion: Vector3, seconds: float) -> void`: Queues a pawn's move for this tick: motion is its velocity times the seconds this run covers. It's moved, and told
+  (Pawn.finish_move), once every pawn has simulated. take_move calls this; a test may too.
 - `_tick_simulate(_dt: float, tick: int) -> void`: TickDriver's simulate phase, after every pawn: moves everything queued this tick.
 - `_obstacles(movers: Pawn[]) -> Array`: Every other living pawn, which the crowd keeps clear of without moving it: [positions, radii].
-- `_walls_and_ground(from: Vector3, to: Vector3, slope: float, floor_normal: float, shape: Shape3D, shape_offset: Vector3, space: PhysicsDirectSpaceState3D, sweep: bool) -> Variant`: One pawn's wall and ground checks by physics: where it lands going from `from` to `to`, or null if physics must move it instead. With sweep off, only the ground is checked (the C++ batch walked it along the nav mesh already, but couldn't tell the ground there).
-- `_get_cpp_batch() -> Object`: The C++ batch, made on first use, or null without the library or with use_cpp_batch off. It's given the job scheduler (null: no worker threads), the sight geometry for the ground (null: the ground by physics rays) and the NavServer for the walls (null: the walls by physics sweeps).
-- `_move_batch_cpp(cpp_batch: Object, pawns: Pawn[], positions: PackedVector3Array, motions: PackedVector3Array, radii: PackedFloat32Array, seconds: PackedFloat32Array, slopes: PackedFloat32Array, floor_normals: PackedFloat32Array, shapes: Shape3D[], shape_offsets: PackedVector3Array, space: PhysicsDirectSpaceState3D, moved_ok: PackedByteArray, tick: int) -> PackedVector3Array`: The batch through CrowdBatch (statuses in crowd_batch.h), with physics for the pawns it hands back. Fills moved_ok as _move_batch does, and returns where each pawn ends up.
+- `_walls_and_ground(from: Vector3, to: Vector3, slope: float, floor_normal: float, shape: Shape3D, shape_offset: Vector3, space: PhysicsDirectSpaceState3D, sweep: bool) -> Variant`: One pawn's wall and ground checks by physics: where it lands going from `from` to `to`, or null if physics
+  must move it instead. With sweep off, only the ground is checked (the C++ batch walked it along the nav mesh already, but couldn't
+  tell the ground there).
+- `_get_cpp_batch() -> Object`: The C++ batch, made on first use, or null without the library or with use_cpp_batch off.
+  It's given the job scheduler (null: no worker threads), the sight geometry for the ground (null: the ground by physics rays) and
+  the NavServer for the walls (null: the walls by physics sweeps).
+- `_move_batch_cpp(cpp_batch: Object, pawns: Pawn[], positions: PackedVector3Array, motions: PackedVector3Array, radii: PackedFloat32Array, seconds: PackedFloat32Array, slopes: PackedFloat32Array, floor_normals: PackedFloat32Array, shapes: Shape3D[], shape_offsets: PackedVector3Array, space: PhysicsDirectSpaceState3D, moved_ok: PackedByteArray, tick: int) -> PackedVector3Array`: The batch through CrowdBatch (statuses in crowd_batch.h), with physics for the pawns it hands back. Fills moved_ok as _move_batch
+  does, and returns where each pawn ends up.

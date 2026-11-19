@@ -28,14 +28,14 @@ func _ready() -> void:
 func _test_keys_and_order() -> void:
 	var table: Object = null
 	var plain_a := _make_pawn(Vector3(0, 0, 0))
-	table = Pawn.get_table()
+	table = SharedPawnTable.get_table()
 	var networked_9 := _make_pawn(Vector3(1, 0, 0), 9)
 	var plain_b := _make_pawn(Vector3(2, 0, 0))
 	var networked_4 := _make_pawn(Vector3(3, 0, 0), 4)
 	var keys: PackedInt64Array = table.get_keys()
 	var slots := [table.get_slot(networked_4), table.get_slot(networked_9), table.get_slot(plain_a), table.get_slot(plain_b)]
 	_check(table != null and slots == [0, 1, 2, 3], "slots in key order: entity ids 4 and 9 first, then pawns with no id in the order they joined (%s)" % str(slots))
-	_check(keys[0] == 4 and keys[1] == 9 and keys[2] >= Pawn.TABLE_KEYS_WITHOUT_ID and keys[3] > keys[2], "keys: entity ids, then numbers past every id (%s)" % str(keys))
+	_check(keys[0] == 4 and keys[1] == 9 and keys[2] >= SharedPawnTable.KEYS_WITHOUT_ID and keys[3] > keys[2], "keys: entity ids, then numbers past every id (%s)" % str(keys))
 	for pawn in [plain_a, networked_9, plain_b, networked_4]:
 		pawn.free()
 	_check(table.get_count() == 0, "every pawn that left is gone from the table")
@@ -46,7 +46,7 @@ func _test_keys_and_order() -> void:
 func _test_columns() -> void:
 	var pawn := _make_pawn(Vector3(1, 0, 2))
 	pawn.velocity = Vector3(3, 0, 4)
-	var table: Object = Pawn.get_table()
+	var table: Object = SharedPawnTable.get_table()
 	table.refresh(50)
 	var row: Dictionary = table.get_row(table.get_slot(pawn))
 	_check(not table.is_column_on(&"velocity") and not row.has("velocity") and row.has("position") and row.has("team"), "optional columns start off; key, position and team are always there (%s)" % str(row.keys()))
@@ -69,14 +69,14 @@ func _test_columns() -> void:
 ## effect's modifiers), and taken at the next tick's refresh; a game's own pushed column works the same through set_value.
 func _test_stat_columns() -> void:
 	var pawn := _make_pawn(Vector3(2, 0, 2))
-	var table: Object = Pawn.get_table()
+	var table: Object = SharedPawnTable.get_table()
 	table.enable_column(&"detectability")
 	table.refresh(200)
 	var stat: Stat = pawn.stat_manager.get_stat(StatManager.DETECTABILITY) if pawn.stat_manager else null
 	_check(stat != null and stat.table_column == &"detectability", "the default stats have Detectability, mirrored into the table's detectability column")
 	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 1.0), "it starts at 1")
-	pawn.detectability = 0.5
-	_check(is_equal_approx(stat.value, 0.5) and is_equal_approx(pawn.detectability, 0.5), "Pawn.detectability writes and reads the stat")
+	StatManager.set_detectability(pawn, 0.5)
+	_check(is_equal_approx(stat.value, 0.5) and is_equal_approx(StatManager.detectability_of(pawn), 0.5), "StatManager.set_detectability writes the stat, and detectability_of reads it")
 	table.refresh(200)
 	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 1.0), "the table takes the change at its next tick, not mid-tick")
 	table.refresh(201)
@@ -85,7 +85,7 @@ func _test_stat_columns() -> void:
 	table.refresh(202)
 	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 0.25), "an effect on the stat reaches the table too (%.2f)" % table.get_row(table.get_slot(pawn))["detectability"])
 	stat.set_modifiers(0.0, 1.0)
-	pawn.detectability = 1.0
+	StatManager.set_detectability(pawn, 1.0)
 	_check(table.add_pushed_column(&"armour", TYPE_FLOAT, &"no_such_property", 0.0) and table.enable_column(&"armour"), "a game's own pushed column")
 	_check(table.set_value(pawn, &"armour", 3.0), "takes a value")
 	table.refresh(203)
@@ -101,8 +101,8 @@ func _test_once_a_tick() -> void:
 	pawn.team = 3
 	pawn.velocity = Vector3(1, 0, 2)
 	pawn.yaw = 0.5
-	pawn.detectability = 0.25
-	var table: Object = Pawn.get_table()
+	StatManager.set_detectability(pawn, 0.25)
+	var table: Object = SharedPawnTable.get_table()
 	for column in [&"velocity", &"yaw", &"detectability"]: # Claude 2026-11-09 (step 2): optional columns are off until switched on
 		table.enable_column(column)
 	_check(table.refresh(100), "the first refresh of a tick reads")
@@ -119,7 +119,7 @@ func _test_leaving() -> void:
 	var pawns: Array[Pawn] = []
 	for i in 5:
 		pawns.append(_make_pawn(Vector3(i * 2, 0, 0), 20 + i))
-	var table: Object = Pawn.get_table()
+	var table: Object = SharedPawnTable.get_table()
 	remove_child(pawns[1])
 	var keys: PackedInt64Array = table.get_keys()
 	_check(Array(keys) == [20, 22, 23, 24], "a pawn leaving the tree leaves the table, and the rest keep their order (%s)" % str(keys))
@@ -146,7 +146,7 @@ func _test_grid_matches_brute_force() -> void:
 		pawns[-1].team = 1
 		id += 1
 	var grid: Object = ClassDB.instantiate(&"AIPawnGrid")
-	grid.set_table(Pawn.get_table())
+	grid.set_table(SharedPawnTable.get_table())
 	var mismatches := 0
 	var asked := 0
 	for tick in range(200, 230):
@@ -159,7 +159,7 @@ func _test_grid_matches_brute_force() -> void:
 				mismatches += 1
 	_check(mismatches == 0, "the grid matches a brute-force search, nearest first, ties by entity id (%d queries, %d differ)" % [asked, mismatches])
 	# What one refresh costs per pawn: the step's budget is at most 1 µs per pawn extra (scaling spec section 10, step 1).
-	var table: Object = Pawn.get_table()
+	var table: Object = SharedPawnTable.get_table()
 	var started := Time.get_ticks_usec()
 	for tick in range(1000, 1200):
 		table.refresh(tick)

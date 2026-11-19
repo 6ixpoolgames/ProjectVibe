@@ -28,10 +28,8 @@ const NOT_ROLLED_BACK := {
 	"AbilityManager:_timers_dirty": "worked out from the timers",
 	# For drawing: the body's place and facing at the last two ticks, so Visual moves smoothly between them. Never read by the
 	# simulation, except that a stale one only stops a pawn sleeping for a tick (Pawn._can_sleep), which is safe.
-	"Pawn:_current_position": "drawing",
-	"Pawn:_current_yaw": "drawing",
-	"Pawn:_previous_position": "drawing",
-	"Pawn:_previous_yaw": "drawing",
+	# Claude 2026-11-19: smoothing moved to VisualSmoother (drawing only); what's left on the pawn is where its last run left it.
+	"Pawn:_position_after_run": "where its last run left the body: set from the position after a load (_on_state_loaded), and a pawn doesn't move between its runs",
 	# Worked out fresh every tick from rolled-back state (Pawn._can_sleep: "nothing remembered"); kept for readouts.
 	"Pawn:is_sleeping": "worked out each tick",
 	# Walk's and Sprint's copies of their stats, read again whenever the StatManager's version changes (pawn spec 15.2). Sprint fills
@@ -78,7 +76,6 @@ const NOT_ROLLED_BACK := {
 	"Pawn:_prepared_tick": "worked out each tick from _last_run_tick, which rolls back",
 	"Pawn:_runs_this_tick": "worked out each tick from _last_run_tick, which rolls back",
 	"Pawn:ticks_elapsed": "worked out each tick from _last_run_tick, which rolls back",
-	"Pawn:_last_run_span": "drawing only: how long the last run was, for smoothing Visual",
 	# The safeguard's count of step starts this tick: reset from the tick's own number, so a replay counts the same way.
 	"MeleeAttackAbility:_starts_tick": "counted per tick from the tick number",
 	"MeleeAttackAbility:_starts_this_tick": "counted per tick from the tick number",

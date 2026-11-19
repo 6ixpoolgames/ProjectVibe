@@ -69,9 +69,15 @@ Extend it, and override what's useful. A module with no per-frame work should sw
 
 Gives every pawn the parts it needs to work, from one list per game.
 
-A module of GameMode (GameMode.pawn_initializer). A Pawn calls `initialize()` from its _enter_tree; for each part in the defaults file, in order, it adds the part unless the pawn already has a child of that name. So a designer overrides a default by putting their own part with that name in the scene, and every machine gets the same names in the same order. The defaults are resources/pawn_defaults.tres (a [`PawnDefaultsRes`](../resources/REFERENCE.md#pawndefaultsres)) or the file named by the project setting `project_base/game_mode/pawn_defaults`. It never adds TickStateComponent or NetworkEntity: NetworkSession reads them before the pawn joins the tree, so they stay in the scene.
+A module of GameMode (GameMode.pawn_initializer). A Pawn calls `initialize()` from its _enter_tree; for each part in the
+defaults file, in order, it adds the part unless the pawn already has a child of that name. So a designer overrides a default by
+putting their own part with that name in the scene, and every machine gets the same names in the same order. The defaults are
+resources/pawn_defaults.tres (a [`PawnDefaultsRes`](../resources/REFERENCE.md#pawndefaultsres)) or the file named by the project setting
+`project_base/game_mode/pawn_defaults`. It never adds TickStateComponent or NetworkEntity: NetworkSession reads them
+before the pawn joins the tree, so they stay in the scene.
 
-To opt out: Pawn.fill_in_default_parts off (one pawn, every default), Pawn.skip_default_parts (some), or leave this module out of GameMode (the whole game). Design: pawn spec 11.
+To opt out: Pawn.fill_in_default_parts off (one pawn, every default), Pawn.skip_default_parts (some), or leave this module out of
+GameMode (the whole game). Design: pawn spec 11.
 
 ### Settings and properties
 

@@ -15,9 +15,25 @@ extends Node
 
 ## The name of the Health stat. A pawn without a stat of this name can't be hurt or die from damage.
 const HEALTH := &"Health"
-## The name of the Detectability stat: how easy the pawn is for AI to see (1 normal, 0 invisible). [code]Pawn.detectability[/code]
-## reads and writes it, and it's copied into the pawn table for the sensing job ([member Stat.table_column]).
+## The name of the Detectability stat: how easy the pawn is for AI to see (1 normal, 0 invisible). [method detectability_of] reads
+## it, and it's copied into the pawn table for the sensing job ([member Stat.table_column]).
 const DETECTABILITY := &"Detectability"
+
+
+## How easy this pawn is for AI to see: its Detectability stat's value, 1 without one (pawn spec 10.4). Effects change it through the
+## stat; game rules for stealth belong in a GameMode module.
+static func detectability_of(pawn: Node) -> float:
+	var manager: StatManager = pawn.get(&"stat_manager") if pawn else null
+	var stat: Stat = manager.get_stat(DETECTABILITY) if manager else null
+	return stat.value if stat else 1.0
+
+
+## Sets this pawn's Detectability stat's base value (what effects build on). Does nothing for a pawn without the stat.
+static func set_detectability(pawn: Node, value: float) -> void:
+	var manager: StatManager = pawn.get(&"stat_manager") if pawn else null
+	var stat: Stat = manager.get_stat(DETECTABILITY) if manager else null
+	if stat:
+		stat.base_value = value
 
 var _stats := {} # StringName -> Stat
 var pawn: Pawn = null # the pawn this is a part of, or null outside a pawn
@@ -41,15 +57,22 @@ func _enter_tree() -> void:
 # Stats that change during play start full, and their current values roll back. Runs before the first tick.
 func _ready() -> void:
 	var entries: Array[String] = []
+	var recorded: Array[Stat] = []
 	for stat_name: StringName in _stats:
 		var stat: Stat = _stats[stat_name]
 		if stat.changes_during_play:
 			stat.current = stat.value
-			entries.append("%s:current" % String(pawn.get_path_to(stat)) if pawn else "")
+			if pawn:
+				entries.append("%s:current pushed" % String(pawn.get_path_to(stat)))
+				recorded.append(stat)
 	if pawn and not entries.is_empty():
 		for child in pawn.get_children():
 			if child is TickStateComponent:
 				child.add_state_properties(entries)
+				# Each stat pushes its current value when it changes, instead of the store reading it every tick.
+				for stat in recorded:
+					stat._tick_state = child
+					stat._state_key = "%s:current" % String(pawn.get_path_to(stat))
 				break
 
 

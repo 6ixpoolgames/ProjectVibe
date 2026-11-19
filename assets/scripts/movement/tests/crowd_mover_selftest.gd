@@ -140,7 +140,7 @@ func _test_physics_cases() -> void:
 	var ground := _make_box(Vector3(0, -0.5, 0), Vector3(400, 1, 400))
 	var pawn := _make_pawn(Vector3(0, 0.05, 0))
 	await _ticks(20)
-	_check(_mover.try_take_move(pawn, true, 1.0 / 60.0) == false, "(asked outside a tick, it doesn't take the move: it wouldn't run in time)")
+	_check(_mover.take_move(pawn, true, 1.0 / 60.0) == false, "(asked outside a tick, it doesn't take the move: it wouldn't run in time)")
 	var jumped := false
 	var crowd_while_up := false
 	_ai(pawn).press(&"jump")

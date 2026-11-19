@@ -26,6 +26,8 @@ func _ready() -> void:
 		_test_pushed_and_partial(kind[1].call())
 		_test_gone_nodes(kind[1].call())
 		_test_tripwire(kind[1].call())
+		_test_carry_forward(kind[1].call())
+		_test_pushed_with_node(kind[1].call())
 	if kinds.size() == 2:
 		_test_twins()
 	_finish()
@@ -181,6 +183,55 @@ func _test_tripwire(store: Object) -> void:
 	_check(store.verify_nodes(1).is_empty(), "the tripwire is quiet while nodes hold what was committed")
 	thing.count += 1
 	_check(store.verify_nodes(1) == PackedInt64Array([handle]), "and names an entity something changed outside a tick")
+	thing.free()
+
+
+func _test_carry_forward(store: Object) -> void:
+	var thing := _thing()
+	var handle: int = store.add_entity(_layout(store), thing)
+	_bind(store, handle, thing)
+	store.set_carry_forward(handle, true)
+	thing.count = 1
+	store.commit(1)
+	_check(store.get_stats()["rows_read"] == 1, "a carry-forward entity is read at its first commit")
+	thing.count = 2 # changed without saying so
+	store.commit(2)
+	_check(store.get_value(handle, 2, 2) == 1 and store.get_stats()["rows_carried"] == 1, "then its row is copied forward while nothing marks it, reading no node")
+	_check(store.verify_nodes(2) == PackedInt64Array([handle]), "the tripwire catches a change nobody marked")
+	store.mark_changed(handle)
+	store.commit(3)
+	_check(store.get_value(handle, 2, 3) == 2 and store.get_stats()["rows_read"] == 1, "marked changed, the next commit reads it")
+	store.commit(5) # tick 4 never committed: nothing to copy from
+	_check(store.get_value(handle, 2, 5) == 2 and store.get_stats()["rows_read"] == 1, "with no row for the tick before, it reads")
+	thing.count = 9
+	store.load_row(handle, 3)
+	store.commit(6)
+	_check(thing.count == 2 and store.get_stats()["rows_read"] == 1, "loading a row counts as a change")
+	thing.count = 7
+	store.commit_entities(6, PackedInt64Array([handle]))
+	_check(store.get_value(handle, 2, 6) == 7, "a rollback's re-run always reads")
+	thing.free()
+
+
+func _test_pushed_with_node(store: Object) -> void:
+	var thing := _thing()
+	thing.count = 4
+	var layout: int = store.define_layout(PackedStringArray(["position", "count"]), [&"vector3_mm", &"raw"], PackedByteArray([0, 1]))
+	var handle: int = store.add_entity(layout, thing)
+	_check(store.bind(handle, [thing, thing], [^"position", ^"count"], [&"vector3_mm", &"raw"], true), "a pushed column may be bound to a node")
+	store.commit(1)
+	_check(store.get_value(handle, 1, 1) == 4, "its value is read once, when bound")
+	thing.count = 5
+	store.commit(2)
+	_check(store.get_value(handle, 1, 2) == 4 and store.verify_nodes(2) == PackedInt64Array([handle]), "a commit never reads it, and the tripwire catches a missed push")
+	store.push(handle, 1, 5)
+	store.commit(3)
+	_check(store.get_value(handle, 1, 3) == 5 and store.verify_nodes(3).is_empty(), "a push is recorded")
+	thing.count = 8
+	store.load_row(handle, 1)
+	_check(thing.count == 4, "load_row writes a pushed value back to its node")
+	store.commit(4)
+	_check(store.get_value(handle, 1, 4) == 4, "and the store's pushed value goes back with it")
 	thing.free()
 
 

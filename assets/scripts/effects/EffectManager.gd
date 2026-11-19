@@ -87,6 +87,8 @@ func _ready() -> void:
 ## Applies an effect to this pawn. source is who applied it, or null; source_ability and hit are handed to its parts. Returns false if
 ## refused: dead, invulnerable, immune, the list full, or IGNORE stacking.
 func apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> bool:
+	if pawn:
+		pawn.mark_state_changed() # it may land between the pawn's own runs, so the state store reads it this tick
 	if effect == null or pawn == null or pawn.is_dead():
 		return false
 	var resistance := 0.0

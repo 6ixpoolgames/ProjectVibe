@@ -13,11 +13,17 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| Smoothing Visual in its own part | `_process`, `_on_network_interpolated`, `_on_network_corrected`, the `_previous_*` and `_current_*` fields | Pawn slimming M6: the VisualSmoother, planned with animation v0's visuals manager | M |
 | The streaming source contract off the pawn | `load_distance`, `nav_distance`, `distance_moved_since_last_check`, `_update_source_group`, `counts_on_this_machine`, `is_keeping_world_loaded` | Pawn slimming (source). M2 kept a flag on the pawn plus the contract; a small part or the streamer's own bookkeeping would slim the pawn. **The owner's call** (the home was left open) | S–M |
-| The pawn table and grid in a class of their own | `_table`, `_grid`, `get_table()`, `get_grid()`, `_join_table()` | Static shared state on the pawn class; a small holder class says what it is and slims the pawn | S |
-| `detectability` off the pawn | `detectability`, `_own_detectability`, `_detectability_stat()` | A pass-through to the Detectability stat (M6), kept for pawns without one. Callers could read the stat and the table take a default | S |
 | Input clearing on a role change | `_on_network_role()` | Input is the ControllerManager's (M4); it could watch the role change itself | S |
+
+## 2026-11-19
+
+- **Pawn slimming for the state store's step 2** (state store spec 12.8): 716 lines to 638.
+  - **`VisualSmoother`** (new): smoothing Visual between ticks and fading corrections moved out of the pawn, which makes one when it has a Visual and tells it after each run, after a rollback load and from the network hooks. The pawn has no `_process` any more.
+  - **`SharedPawnTable`** (new): the shared pawn table and grid, out of the pawn's static state. `Pawn.get_table()` and `Pawn.get_grid()` became `SharedPawnTable.get_table()` and `get_grid()`.
+  - **`detectability` removed:** callers read the Detectability stat through `StatManager.detectability_of()` (and set it with `set_detectability()`); a pawn without the stat counts as 1.
+- **`mover`**: what moves the pawn instead of its own `move_and_slide`, on the ticks it takes the move (the CrowdMover, set by the PawnInitializer; null, it moves itself). The pawn no longer names `CrowdMover`. `finish_crowd_move` and `finish_move_by_physics` are now `finish_move` and `move_by_physics_now`.
+- **Recorded only when it changes:** its `TickStateComponent` copies its last row forward on ticks it doesn't run, unless something marks it (`mark_state_changed()`, which an effect landing calls); its runs mark it. `team` and `tick_step` are pushed entries (their setters push), so team is recorded now.
 
 ## 2026-11-18
 

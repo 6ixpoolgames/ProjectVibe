@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 155 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 157 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -129,6 +129,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [ResistancePart](../assets/scripts/effects/REFERENCE.md#resistancepart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Adds to the pawn's resistance to a kind of effect while its effect lasts. A held part ([EffectPart]). |
 | [RunEnvironment](../assets/scripts/platform/REFERENCE.md#runenvironment) | [platform](../assets/scripts/platform/README.md) | RefCounted | Facts about where this run of the game is, asked in one place. So far: whether it has a display. |
 | [ScriptOverrides](../assets/scripts/platform/REFERENCE.md#scriptoverrides) | [platform](../assets/scripts/platform/README.md) | RefCounted | Whether a script overrides a function of the script it extends: one place for a question several systems ask. |
+| [SharedPawnTable](../assets/scripts/pawn/REFERENCE.md#sharedpawntable) | [pawn](../assets/scripts/pawn/README.md) | RefCounted | The one shared table of plain pawn data (the C++ PawnTable) and the grid built on it (AIPawnGrid), for AI sensing and swing hits. |
 | [SightGeometryFeeder](../assets/scripts/ai/REFERENCE.md#sightgeometryfeeder) | [ai](../assets/scripts/ai/README.md) | RefCounted | Keeps the shared SightGeometry (line of sight in C++) fed with the solid things in the scene. |
 | [SightSense](../assets/scripts/ai/REFERENCE.md#sightsense) | [ai](../assets/scripts/ai/README.md) | AISenseBase | Sight, for basic stealth: fills awareness of other-team pawns it can see, faster when they're close and in front. |
 | [SpawnManager](../assets/scripts/game_mode/REFERENCE.md#spawnmanager) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Puts pawns into the world at SpawnPoints, and brings players back after they die. |
@@ -156,6 +157,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [ToyWaddle](../assets/scripts/visuals/REFERENCE.md#toywaddle) | [visuals](../assets/scripts/visuals/README.md) | Node3D | Makes a pawn's model move like a toy being played with: rocking, hopping, leaning into a dash and falling over when it dies. |
 | [TurnToFaceStep](../assets/scripts/abilities/REFERENCE.md#turntofacestep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | Turns the pawn toward where it looks, following the look as it moves, at the pawn's TurnRate stat. |
 | [VirtualCamera](../assets/scripts/camera/REFERENCE.md#virtualcamera) | [camera](../assets/scripts/camera/README.md) | Node3D | A place for the real camera to be. |
+| [VisualSmoother](../assets/scripts/pawn/REFERENCE.md#visualsmoother) | [pawn](../assets/scripts/pawn/README.md) | Node | Draws a pawn's Visual smoothly between ticks: it glides between where the body was after its last two runs, turns the model the same way, and fades network corrections out. |
 | [WaitStep](../assets/scripts/abilities/REFERENCE.md#waitstep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | A timed pause, such as an attack's recovery: it does nothing but take its length_ticks. |
 | [WalkAbility](../assets/scripts/abilities/REFERENCE.md#walkability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | Walking on the ground: accelerating, slowing, steering in the air and turning to face where it's going. The default locomotion. |
 | [WindupStep](../assets/scripts/abilities/REFERENCE.md#windupstep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | The wait before an attack's hit, turning toward the look first if it needs to. |

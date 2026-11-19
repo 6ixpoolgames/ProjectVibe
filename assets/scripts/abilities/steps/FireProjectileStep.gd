@@ -55,7 +55,7 @@ func _fire() -> void:
 
 # Tells the first enemy on the straight path, within range, that a hit is coming and when.
 func _warn_first_on_path(origin: Vector3, direction: Vector3) -> void:
-	if Pawn.get_grid() == null:
+	if SharedPawnTable.get_grid() == null:
 		return
 	var reach := fired.max_range
 	var centres := PackedVector3Array()
@@ -65,7 +65,7 @@ func _warn_first_on_path(origin: Vector3, direction: Vector3) -> void:
 	var now: int = TickDriver.tick
 	var best: Pawn = null
 	var best_along := INF
-	for found: Object in Pawn.get_grid().find_touching(centres, fired.radius + 0.5, pawn, now):
+	for found: Object in SharedPawnTable.get_grid().find_touching(centres, fired.radius + 0.5, pawn, now):
 		var other := found as Pawn
 		if other == null or other.team == pawn.team or other.is_dead():
 			continue

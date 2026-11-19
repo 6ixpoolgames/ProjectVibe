@@ -188,7 +188,7 @@ func get_range() -> float:
 # The shared grid, from Pawn (which the swing hit checks share), or null without the C++ library. Pawns join its table themselves.
 static func _shared_grid() -> Object:
 	if _grid == null:
-		_grid = Pawn.get_grid()
+		_grid = SharedPawnTable.get_grid()
 	return _grid
 
 
