@@ -185,7 +185,7 @@ func _update_nav_interests() -> void:
 		return
 	var still_active := {}
 	for node in get_tree().get_nodes_in_group(StreamingSource.GROUP):
-		var source := node as Node3D # a StreamingSource or a Pawn, through the source contract (StreamingSource.gd)
+		var source := node as Node3D # a StreamingSource, through the source contract (StreamingSource.gd)
 		if source == null or not source.counts_on_this_machine() or source.nav_distance <= 0.0:
 			continue
 		var id := source.get_instance_id()

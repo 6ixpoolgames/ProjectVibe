@@ -19,6 +19,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-19
 
+- **`AIActivationManager` reads the pawn's streaming source:** `Pawn.is_keeping_world_loaded()` for leaving a pawn on, and `PawnStreamingSource.pawn` for players' positions in the sources' group.
+
 - **The PawnInitializer gives each pawn the game's crowd mover** as its `mover`, if it has none, before filling in default parts (and even when a pawn takes no default parts).
 
 ## 2026-11-18

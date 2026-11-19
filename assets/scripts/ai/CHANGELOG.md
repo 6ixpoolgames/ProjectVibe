@@ -22,6 +22,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-19
 
+- **Tells its pawn it's there** (state store step 3): its `_enter_tree` sets the pawn's reference to it, if the pawn has none yet, instead of the pawn looking through its children in `_ready`. The reference is there before any part's `_ready`.
+
 - **`ai_sensing_job_selftest` sets each pawn's detectability through its stat, after it has its parts.** Before, it set `Pawn.detectability` before the pawn had its stats, so every pawn counted as 1 and the test never compared different values.
 - **Detectability is read from the stat** (`StatManager.detectability_of`) by `SightSense` and `AIMemoryStoreGD`; `Pawn.detectability` is gone.
 

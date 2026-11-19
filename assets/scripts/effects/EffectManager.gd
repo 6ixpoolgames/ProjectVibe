@@ -62,6 +62,9 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	pawn = get_parent() as Pawn
+	# It tells its pawn it's here, before any part's _ready; the first EffectManager a pawn has is the one it uses.
+	if pawn and not is_instance_valid(pawn.effect_manager):
+		pawn.effect_manager = self
 	if pawn == null:
 		push_warning("EffectManager: its parent isn't a Pawn, so it does nothing.")
 

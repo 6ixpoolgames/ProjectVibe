@@ -26,7 +26,7 @@ const FLAG_DEAD := 2
 const FLAG_FROZEN := 4
 ## Sleeping: idle, so it skipped its physics this tick, but still ticks its input and AI and wakes at once (Pawn.is_sleeping).
 const FLAG_SLEEPING := 8
-## Keeps the world loaded around it: it has a chunk source of its own (Pawn.is_keeping_world_loaded()).
+## Keeps the world loaded around it: its streaming source counts (Pawn.is_keeping_world_loaded()).
 const FLAG_HAS_SOURCE := 16
 ## A player controls it (ControllerManager.has_player()).
 const FLAG_HAS_PLAYER := 32

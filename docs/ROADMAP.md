@@ -23,7 +23,7 @@ Owner's decisions, 2026-11-16:
    - hit interceptors replacing the parry and dash special cases (pawn spec 14, "Shortcuts to redo") *(built 2026-11-17, pawn spec 8.23; state tags wait for the stats and mechanics pass)*
 2. **Slimming the pawn** (M1 to M6). The pawn keeps the body and its tick order, its part references and its general flags:
    - **M1** *(built 2026-11-16)*: a TeamRegistry module; the sleeping and frozen renames; the AI's ordered step moved into AIContextComponent. Each part cleaning up on `died` itself moved to M3, which moves the signal
-   - **M2** *(built 2026-11-16)*: a `keeps_world_loaded` flag on the pawn, with distances from the GameMode (`PawnDefaultsRes`), and the chunk streamer, nav feeder and replay reading pawns through the source contract
+   - **M2** *(built 2026-11-16)*: a `keeps_world_loaded` flag on the pawn, with distances from the GameMode (`PawnDefaultsRes`), and the chunk streamer, nav feeder and replay reading pawns through the source contract *(2026-11-19: replaced by a `PawnStreamingSource` part, state store step 3)*
    - **M3** *(built 2026-11-16)*: hits, death and their signals on the AbilityManager, each part cleaning up on `died` itself (pawn spec 8.16). Parry and dash as hit interceptors stay with the ability-steps work
    - **M4** *(built 2026-11-16)*: input and possession on the ControllerManager, which stays optional and is added by default; abilities read input through helpers (pawn spec 8.17)
    - **M5** *(built 2026-11-16)*: one camera per player, on the PlayerController, attaching to a CameraMount on the pawn (pawn spec 8.18)

@@ -121,7 +121,7 @@ func _build_ground_under_sources() -> void:
 	if not is_instance_valid(terrain) or not terrain.is_inside_tree() or not terrain.is_node_ready():
 		return
 	for node in get_tree().get_nodes_in_group(StreamingSource.GROUP):
-		# Any source: a StreamingSource or a Pawn, read through the source contract (StreamingSource.gd).
+		# Any source, read through the source contract (StreamingSource.gd).
 		var source := node as Node3D
 		if source == null or not source.counts_on_this_machine():
 			continue

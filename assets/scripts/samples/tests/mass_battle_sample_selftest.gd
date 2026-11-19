@@ -67,7 +67,7 @@ func _test_filling() -> void:
 	_check(heroes.size() == 3 and heroes.all(func(h: Pawn) -> bool: return h.is_keeping_world_loaded() and h.stat_manager.get_health() == 1000.0), "three heroes, each a chunk source, with 1000 Health")
 	# Claude 2026-11-16 (pawn M2): sources are flags on pawns now, with the level's distance as the game's setting.
 	var player: Pawn = GameMode.possession_coordinator.get_pawn_of()
-	_check(player.is_keeping_world_loaded() and is_equal_approx(player.load_distance, 160.0) and player.global_position.x > 270.0, "the player starts at the players' spawner, loading 160 m like the rest")
+	_check(player.is_keeping_world_loaded() and is_equal_approx(player.streaming_source.load_distance, 160.0) and player.global_position.x > 270.0, "the player starts at the players' spawner, loading 160 m like the rest")
 
 
 func _test_march() -> void:
@@ -125,7 +125,6 @@ func _test_centre_switch() -> void:
 # out from the middle between the red and blue spawners, where nothing else loads ground.
 func _test_outrunning() -> void:
 	var runner: Pawn = load(ALLY_SCENE).instantiate()
-	runner.keeps_world_loaded = true # Claude 2026-11-16 (pawn M2): was ai_loads_chunks, with its own 160 m; 160 is the level's setting now
 	var behaviours := runner.get_node("AIBehaviourManager")
 	for child in behaviours.get_children():
 		behaviours.remove_child(child)
@@ -133,6 +132,9 @@ func _test_outrunning() -> void:
 	var terrain: TerrainGenerator = _arena.get_node("World/Terrain")
 	runner.position = Vector3(0, terrain.height_at(0, 0) + 0.5, 0)
 	_arena.get_node("Entities").add_child(runner)
+	# Claude 2026-11-16 (pawn M2): was ai_loads_chunks, with its own 160 m; 160 is the level's setting now. Claude 2026-11-19 (state
+	# store step 3): set once it's in the tree, where it has its streaming source part.
+	runner.streaming_source.keeps_world_loaded = true
 	await _ticks(10)
 	var hands := runner.controller_manager.ai_controller as AIController
 	hands.move_in_direction(Vector3(-1, 0, 0))
@@ -168,11 +170,11 @@ func _test_overview() -> void:
 			"facing the way it does, down at the middle (pitch %.0f°)" % rad_to_deg(coordinator.controller.look_pitch))
 	_check(not spectator.streaming_source.counts_on_this_machine(), "keeping nothing loaded, as the old overhead camera")
 	# Claude 2026-11-16: the pawn let go of follows the heroes' switch.
-	_check(own.counts_on_this_machine(), "the pawn let go of keeps the world loaded while the heroes' sources are on")
+	_check(own.is_keeping_world_loaded(), "the pawn let go of keeps the world loaded while the heroes' sources are on")
 	_arena.set_hero_sources(false)
-	_check(not own.counts_on_this_machine(), "and not once H turns them off")
+	_check(not own.is_keeping_world_loaded(), "and not once H turns them off")
 	_arena.set_hero_sources(true)
-	_check(own.counts_on_this_machine(), "and again when H turns them back on")
+	_check(own.is_keeping_world_loaded(), "and again when H turns them back on")
 	spectator.teleport(Vector3(50, 60, 50))
 	_arena._go_to_overview()
 	_check(coordinator.is_spectating() and coordinator.get_pawn_of() == null and spectator.global_position.is_equal_approx(point.global_position),

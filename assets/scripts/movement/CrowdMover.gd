@@ -128,6 +128,7 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 	if _queued.is_empty():
 		return
 	var started := PerfScopes.begin()
+	var gather_started := started # gathering from the pawns, timed apart from the batch and the finishing (diagnostics)
 	# Only pawns still here: one freed during the tick, after handing its move over, is dropped.
 	var pawns: Array[Pawn] = []
 	var motions := PackedVector3Array()
@@ -160,6 +161,7 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 		shapes.append(body.shape if body else null)
 		shape_offsets.append(body.position if body else Vector3.ZERO)
 	var space := pawns[0].get_world_3d().direct_space_state
+	PerfScopes.end(&"movement.crowd_gather", gather_started)
 	var moved_ok := PackedByteArray() # 1 for each pawn the batch moved, 0 for one it hands back to physics
 	moved_ok.resize(count)
 	moved_ok.fill(0)
@@ -171,12 +173,14 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 				moved_ok, tick)
 	else:
 		moved = _move_batch(positions, motions, radii, seconds, slopes, floor_normals, shapes, shape_offsets, _obstacles(pawns), space, moved_ok)
+	var finish_started := PerfScopes.begin()
 	for i in count:
 		if moved_ok[i] == 1:
 			pawns[i].finish_move(moved[i], seconds[i])
 		else:
 			fallbacks_last_tick += 1
 			pawns[i].move_by_physics_now()
+	PerfScopes.end(&"movement.crowd_finish", finish_started)
 	PerfScopes.end(&"movement.crowd", started)
 	if fallbacks_last_tick > 0:
 		PerfScopes.add(&"movement.crowd_fallbacks", 0, fallbacks_last_tick)
@@ -323,6 +327,7 @@ func _move_batch_cpp(cpp_batch: Object, pawns: Array[Pawn], positions: PackedVec
 		radii: PackedFloat32Array, seconds: PackedFloat32Array, slopes: PackedFloat32Array, floor_normals: PackedFloat32Array,
 		shapes: Array[Shape3D], shape_offsets: PackedVector3Array, space: PhysicsDirectSpaceState3D, moved_ok: PackedByteArray,
 		tick: int) -> PackedVector3Array:
+	var others_started := PerfScopes.begin() # the nav tiers and every other pawn, gathered in GDScript (diagnostics)
 	var tiers := PackedInt32Array()
 	for pawn in pawns:
 		var navigation := pawn.navigation_manager
@@ -333,6 +338,7 @@ func _move_batch_cpp(cpp_batch: Object, pawns: Array[Pawn], positions: PackedVec
 		else:
 			tiers.append(navigation.nav_tier if navigation else 0)
 	var obstacles := _obstacles(pawns)
+	PerfScopes.end(&"movement.crowd_others", others_started)
 	cpp_batch.set_settings(separation_strength, separation_margin, max_push_speed, max_step, ground_layers, cell_size)
 	var result: PackedVector3Array = cpp_batch.move(positions, motions, radii, seconds, slopes, floor_normals, tiers, obstacles[0],
 			obstacles[1], tick)

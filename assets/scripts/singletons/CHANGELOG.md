@@ -17,6 +17,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-19
 
+- **Pawns grouped by step** (state store spec 9, step 3): a participant with a `due_tick` property (a pawn) isn't called in input or simulate before that tick. At 300 pawns, most on every 4th tick: about 0.3 ms a tick less in input and commit.
+
 - **The commit phase and the state store** (state store spec 4 and 9, refactor step 1): `store` (the C++ `StateStore`, or `StateStoreGD` with `-- --gdscript-store`), `history_depth` (64), `replace_store()`. After the record phase, `_commit()` writes every active entity's row in one pass and hands the ones the store couldn't read to their owner's `_store_gather()`. A rollback's re-run rewrites the loaded entities' rows (`get_store_handle()`, `commit_entities`). `verify_store_each_tick` (off) is the tripwire: at the start of a tick, nodes must hold what the last commit recorded; mismatches are counted in `store_mismatches` and warned about. `profile` has a `commit` phase.
 
 ## 2026-11-18

@@ -126,9 +126,9 @@ func _scene_and_run() -> void:
 	# here is everywhere but its one chunk. So the standing and falling pawns keep the world loaded themselves, and stay running; the
 	# leaving one doesn't, and freezes, which is recorded too.
 	var standing := _pawn(Vector3(0, 0.1, 0), "Standing")
-	standing.keeps_world_loaded = true
+	standing.streaming_source.keeps_world_loaded = true
 	var falling := _pawn(Vector3(40, 0.1, 0), "Falling")
-	falling.keeps_world_loaded = true
+	falling.streaming_source.keeps_world_loaded = true
 	var leaving := _pawn(Vector3(2, 0.1, 2), "Leaving")
 	await _ticks(2)
 

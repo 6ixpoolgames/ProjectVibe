@@ -59,7 +59,7 @@ flowchart LR
     BD[AIBatchDecider]
     SENSE[AISensingJob]
     CB[CrowdBatch]
-    TSR[TickStateRecorder]
+    TSR[StateStore]
     CODEC[NetCodec]
     NAVS[NavServer]
     JS[JobScheduler]
@@ -71,7 +71,8 @@ flowchart LR
   AICTX --> MEM
   SENSE --> PT
   CROWD --> CB
-  TSC --> TSR
+  TD -->|commits each tick| TSR
+  TSC -->|declares columns| TSR
   NS --> CODEC
   NS --> TSC
   NAV --> NAVS

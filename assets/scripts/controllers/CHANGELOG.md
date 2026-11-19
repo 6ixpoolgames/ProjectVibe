@@ -14,6 +14,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move the test hooks out of `InputActions` | `reset()`, `use_list()` in `InputActions.gd` | Test hooks in a shipping class; the owner's rule keeps test code in `tests/` | S |
 | Share the missing-input defaults | `_network_input_missing()` in `ControllerManager.gd` | 3 and 6 copy `NetworkSession`'s defaults by hand, so the two can drift apart | S |
 
+## 2026-11-19
+
+- **Tells its pawn it's there** (state store step 3): its `_enter_tree` sets the pawn's reference to it, if the pawn has none yet, instead of the pawn looking through its children in `_ready`. The reference is there before any part's `_ready`.
+- **Drops the last owner's input on a role change itself** (`_on_network_role_changed`, from `NetworkEntity.role_changed`): the server running the pawn with no player owning it clears its input. The pawn did this before.
+
 ## 2026-11-18
 
 - **`AIController.look_from_height`** (1.3 m; pawn spec 8.24): the AI's look pitch is measured from this height above the feet, not from the feet, so a shot fired along the look (a ranged attack's muzzle is 1.3 m up by default) meets the point looked at. Nothing read the pitch before the ranged attack. `controller_manager_selftest` measures its two pitch checks from it.

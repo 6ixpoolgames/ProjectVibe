@@ -12,6 +12,10 @@
 extends Node
 class_name NetworkEntity
 
+## Sent when its role or owner changes while running (swapping pawns), after its parent hears _on_network_role. A pawn's
+## ControllerManager listens, to drop the last owner's input.
+signal role_changed(entity: NetworkEntity)
+
 ## What this machine does with the entity: AUTHORITY (server or offline), LOCAL_PREDICTED (your pawn, simulated ahead), REMOTE_FOLLOWING
 ## (drawn between snapshots), REMOTE_PREDICTED (simulated ahead on its last input) or LOCAL_UNPREDICTED (your pawn, MOBA-style). See the README.
 enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED, LOCAL_UNPREDICTED }
@@ -116,6 +120,7 @@ func change_owner(new_owner: int, local: bool, new_role: Role) -> void:
 	_apply_role_to_driver()
 	if _root and _root.has_method(&"_on_network_role"):
 		_root._on_network_role(self)
+	role_changed.emit(self)
 
 
 ## Changes role while running, when a feature switch changes (NetworkSession.refresh_entities). History starts again from here.

@@ -330,21 +330,25 @@ func _test_bad_input() -> void:
 
 
 func _test_source_rules() -> void:
-	# Claude 2026-11-16 (pawn M2): a flag, read through the source contract: the pawn makes no StreamingSource node any more.
+	# Claude 2026-11-19 (state store step 3): the pawn's PawnStreamingSource part, a default part, after the flag on the pawn (2026-11-16).
 	var pawn := _make_pawn(Vector3.ZERO)
 	# Claude 2026-11-16 (wider audit): and it's in the sources' group only while it might count, so the streamer's list stays short.
 	_check(pawn.is_in_group(Pawn.GROUP), "every pawn is in the pawns group")
-	_check(not pawn.counts_on_this_machine() and not pawn.is_in_group(StreamingSource.GROUP), "an AI pawn doesn't keep the world loaded by default, and isn't among the sources")
-	pawn.keeps_world_loaded = true
-	_check(pawn.counts_on_this_machine() and pawn.is_keeping_world_loaded() and pawn.is_in_group(StreamingSource.GROUP), "with keeps_world_loaded on, it does, and joins the sources")
-	pawn.keeps_world_loaded = false
-	_check(not pawn.counts_on_this_machine(), "and stops when it goes off")
+	var source := pawn.streaming_source
+	_check(source != null and source.pawn == pawn and source.get_parent() == pawn, "the pawn has its streaming source part, which knows its pawn")
+	_check(not pawn.is_keeping_world_loaded() and not source.is_in_group(StreamingSource.GROUP), "an AI pawn doesn't keep the world loaded by default, and its source isn't among the sources")
+	source.keeps_world_loaded = true
+	_check(pawn.is_keeping_world_loaded() and source.counts_on_this_machine() and source.is_in_group(StreamingSource.GROUP), "with keeps_world_loaded on, it does, and joins the sources")
+	source.keeps_world_loaded = false
+	_check(not pawn.is_keeping_world_loaded() and not source.is_in_group(StreamingSource.GROUP), "and stops when it goes off")
 	pawn.controller_manager.set_has_player(true)
-	_check(pawn.counts_on_this_machine() and pawn.is_in_group(StreamingSource.GROUP), "a pawn with a player does, and is among the sources")
+	_check(pawn.is_keeping_world_loaded() and source.is_in_group(StreamingSource.GROUP), "a pawn with a player does, and is among the sources")
 	pawn.controller_manager.set_has_player(false)
-	_check(not pawn.counts_on_this_machine() and not pawn.is_in_group(StreamingSource.GROUP), "until the player leaves")
-	_check(pawn.get_node_or_null("StreamingSource") == null and pawn.load_distance == 320.0 and pawn.nav_distance == 128.0,
-		"with no StreamingSource node, and the game's distances (%.0f, %.0f)" % [pawn.load_distance, pawn.nav_distance])
+	_check(not pawn.is_keeping_world_loaded() and not source.is_in_group(StreamingSource.GROUP), "until the player leaves")
+	_check(source.load_distance == 320.0 and source.nav_distance == 128.0 and source.global_position == pawn.global_position,
+		"at the pawn, with the game's distances (%.0f, %.0f)" % [source.load_distance, source.nav_distance])
+	source.load_distance = 5.0
+	_check(source.load_distance == 320.0, "its own distance setting is ignored for the game's")
 	pawn.free()
 
 

@@ -2,7 +2,7 @@
 ## Switches AI pawns off when the ground around them isn't loaded, back on when it is, and sets how often the rest run.
 ##
 ## A module of GameMode (GameMode.ai_activation_manager), server or offline only. An AI pawn runs only while every chunk within
-## [member edge_margin] of it is built; a pawn that keeps the world loaded ([method Pawn.counts_on_this_machine]) is always left on,
+## [member edge_margin] of it is built; a pawn that keeps the world loaded ([method Pawn.is_keeping_world_loaded]) is always left on,
 ## and a possession is checked at once. A pawn that's off stops its NetworkEntity and TickState and is left out of snapshots. Pawns
 ## register with [method add_pawn] and [method remove_pawn] (Pawn does both) and need a [code]set_frozen(frozen)[/code].
 ## [br]
@@ -159,7 +159,7 @@ func _check_pawn(pawn: Node3D) -> void:
 	if not pawn.is_inside_tree():
 		return
 	# A pawn that keeps the world loaded always has ground.
-	var keeps_loaded: bool = pawn.has_method(&"counts_on_this_machine") and pawn.counts_on_this_machine()
+	var keeps_loaded: bool = pawn is Pawn and (pawn as Pawn).is_keeping_world_loaded()
 	var has_ground := keeps_loaded or _has_ground_around(pawn.global_position)
 	if has_ground and _inactive.has(pawn):
 		_inactive.erase(pawn)
@@ -209,9 +209,10 @@ func _find_viewers() -> void:
 		if is_instance_valid(terrain):
 			_chunk_size = terrain.chunk_size
 			break
-	# A pawn with a player is among the streaming sources (Pawn._update_source_group), so only those few are looked at.
+	# A pawn with a player has its streaming source in the sources' group (PawnStreamingSource), so only those few are looked at.
 	for node in get_tree().get_nodes_in_group(StreamingSource.GROUP):
-		var pawn := node as Pawn
+		var source := node as PawnStreamingSource
+		var pawn := source.pawn if source else null
 		if pawn and pawn.controller_manager and pawn.controller_manager.has_player():
 			_viewers.append(pawn.global_position)
 	var game_mode: Node = get_node_or_null(^"/root/GameMode")

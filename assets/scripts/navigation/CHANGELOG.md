@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move `TerrainSettings` out of navigation | `TerrainSettings.gd` | It describes a terrain (where it is, its chunk size), so it belongs in `terrain/` or `world/`; names and folders should say what things are | S |
 | Move `NavMarkerDebugModule` to `diagnostics/` | `modules/NavMarkerDebugModule.gd` | A debug tool in a production folder. `diagnostics/NavDebugView` already uses it; the two sample scenes that place it would follow | S |
 
+## 2026-11-19
+
+- **Tells its pawn it's there** (state store step 3): its `_enter_tree` sets the pawn's reference to it, if the pawn has none yet, instead of the pawn looking through its children in `_ready`. The reference is there before any part's `_ready`.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): moved to the README's new "How a move works" section: `NavigationManager`'s odd cases (no nav, nav still building, unreachable and partial paths, links, paths at scale). Class comments shortened for `NavTags`, `NavMarkerModule`, `NavLinkModule`, `NavMarkerNode`, the markers and the debug module; `GDScript note:` comments removed. No stale comments found.

@@ -1,4 +1,4 @@
-# State Store Spec v0.4 (agreed direction; steps 1 and 2 built)
+# State Store Spec v0.5 (agreed direction; steps 1 to 3 built)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
@@ -499,6 +499,20 @@ The design is in 12.8 ("Step 2's design"). Built: rows carried forward for entit
 | Tripwire, marching (90 pawns, 90 s) and fighting (153 pawns) | Only `tick_step`, the director write from 13.4: no change between runs went unmarked |
 
 Found on the way: `PawnTable` dropped a push for a column that was off, and the pawn's `detectability` property had hidden it (fixed: such pushes now wait), and `ai_sensing_job_selftest` had never really varied detectability.
+
+### 13.6 Step 3 built: the pawn's parts, its source and its step *(Claude, 2026-11-19)*
+
+Built: each pawn part sets its reference on the pawn as it enters the tree, instead of the pawn looking through its children (so it works with or without the GameMode); the streaming source is a part, `PawnStreamingSource` (a default part, the game's distances, in the sources' group only while it might count); clearing input on a role change is the `ControllerManager`'s (`NetworkEntity.role_changed`); and the tick driver doesn't call a pawn before its `due_tick`. The pawn is 577 lines (313 code), from 638.
+
+| Measured (300-pawn march, headless, `--size=100`; step 2 run beside it from its own checkout, the same day) | Step 2 | Step 3 |
+|---|---|---|
+| Input, ms a tick | 3.9 | 3.7 |
+| Simulate, ms a tick | 2.5 | 2.5 |
+| Commit, ms a tick | 1.45 | 1.3 |
+
+Step 2's own figures in 13.5 (commit 1.2, tick 9.3) were from a faster run of the machine; the comparison above ran both steps back to back. Most pawns were on every 4th tick (the load ladder at step 2), so the saving is the calls on skipped ticks, about 0.3 ms a tick, as 13.1's call cost predicts.
+
+**The crowd mover: measured, not changed yet.** Of its 1.1 ms a tick at 300 pawns, GDScript around the batch is most: gathering the moving pawns 0.18 ms, their nav tiers and every other pawn as obstacles 0.25, and calling each pawn back 0.45 (about 4.5 µs a pawn: its velocity, position, rounding and the end of its run: `_position_after_run`, the `VisualSmoother`, the `ControllerManager`'s input bookkeeping). The C++ batch and its physics queries are about 0.25. Reading positions from the store would save part of the gathering, but the store's newest frame is the last tick's, one tick behind pawns that moved by physics this tick, and the calling back stays until the per-pawn end-of-run work moves into batched passes (smoothing into the "place what's drawn" pass, 12.5). Writing results straight into the store needs the frame being built to be writable during the tick, with one pass placing nodes from it. That's a design to agree, not a quick change.
 
 ## 14. Open
 

@@ -13,10 +13,14 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| The streaming source contract off the pawn | `load_distance`, `nav_distance`, `distance_moved_since_last_check`, `_update_source_group`, `counts_on_this_machine`, `is_keeping_world_loaded` | Pawn slimming (source). M2 kept a flag on the pawn plus the contract; a small part or the streamer's own bookkeeping would slim the pawn. **The owner's call** (the home was left open) | S–M |
-| Input clearing on a role change | `_on_network_role()` | Input is the ControllerManager's (M4); it could watch the role change itself | S |
 
 ## 2026-11-19
+
+- **Pawn slimming for the state store's step 3** (state store spec 12.8): 638 lines to 577 (313 code).
+  - **Parts tell the pawn they're there:** each pawn part (AbilityManager, StatManager, EffectManager, ControllerManager, NavigationManager, AIContextComponent, PawnStreamingSource) sets its reference on the pawn as it enters the tree; the pawn finds only its two general parts (NetworkEntity, TickStateComponent), in `_enter_tree`. Works with or without the GameMode.
+  - **The streaming source is a part** (`PawnStreamingSource`, a default part): `keeps_world_loaded`, `load_distance`, `nav_distance`, `counts_on_this_machine()` and `distance_moved_since_last_check()` left the pawn. `pawn.keeps_world_loaded` is now `pawn.streaming_source.keeps_world_loaded`; `is_keeping_world_loaded()` stays, asking the part.
+  - **The role hook** only notes its NetworkEntity: clearing input on a role change is the ControllerManager's.
+- **`due_tick`**: the first tick it may run on, worked out after each run (reset by its step changing, a player taking it, or a rollback load), so the tick driver doesn't call a pawn on a load step on the ticks it skips.
 
 - **Pawn slimming for the state store's step 2** (state store spec 12.8): 716 lines to 638.
   - **`VisualSmoother`** (new): smoothing Visual between ticks and fading corrections moved out of the pawn, which makes one when it has a Visual and tells it after each run, after a rollback load and from the network hooks. The pawn has no `_process` any more.

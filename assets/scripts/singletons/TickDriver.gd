@@ -9,7 +9,8 @@
 ## [/codeblock]
 ## One tick: [signal before_tick], input, capture input, simulate, [signal after_simulate], record, commit, [signal after_tick]. Within a
 ## phase, lower [code]order[/code] runs first, then registration order. The commit writes every entity's state into [member store], the
-## record of play at tick boundaries. Rollback and the load ladder are in the README.
+## record of play at tick boundaries. A participant with a [code]due_tick[/code] property (a pawn) isn't called in input or simulate
+## before that tick, so a pawn on a load step costs nothing on the ticks it skips. Rollback and the load ladder are in the README.
 ## Design: state store spec 4 and 9, netcode spec 3 (rollback 3.5), scaling spec 7, pawn spec 8.21 (load ladder).
 extends Node
 class_name TickDriverSingleton
@@ -149,9 +150,12 @@ const _PHASE_PREDICTED := 4
 const _PHASE_SYNCING := 8
 const _PHASE_SIMULATE := 16
 const _PHASE_RECORD := 32
+const _PHASE_DUE := 64 # it has a due_tick, and isn't called in input or simulate before that tick
 var _input: Array = []        # participants per phase, rebuilt when the registry changes
 var _capture: Array = []
 var _simulate: Array = []
+var _input_due := PackedByteArray()    # 1 where the participant at the same index in _input has a due_tick
+var _simulate_due := PackedByteArray() # the same for _simulate
 var _record: Array = []
 var _predicted: Array = []    # participants that can be rolled back
 var _syncing: Array = []      # participants that can update the collision world straight away
@@ -264,6 +268,8 @@ func _phases_of(o: Object) -> int:
 		phases |= _PHASE_SIMULATE
 	if o.has_method(&"_tick_record"):
 		phases |= _PHASE_RECORD
+	if &"due_tick" in o:
+		phases |= _PHASE_DUE
 	return phases
 
 
@@ -551,9 +557,13 @@ func _run_tick(dt: float) -> void:
 	before_tick.emit(dt, tick)
 	mark = _profile_phase(&"before_tick", mark)
 	_in_phases = true # rollback is refused from here until the phases end
-	for p in _input:
+	# A participant with a due_tick (a pawn on a load step) isn't called before it: pawns grouped by step (state store spec 9).
+	for i in _input.size():
+		var p = _input[i] # untyped: a freed one can't go in an Object variable, and is dropped below
 		if not is_instance_valid(p):
 			_dirty = true
+		elif _input_due[i] == 1 and p.due_tick > tick:
+			continue
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_input(dt, tick)
 	mark = _profile_phase(&"input", mark)
@@ -565,9 +575,12 @@ func _run_tick(dt: float) -> void:
 			p._tick_capture_input(tick)
 	mark = _profile_phase(&"capture", mark)
 	_in_simulate = true
-	for p in _simulate:
+	for i in _simulate.size():
+		var p = _simulate[i]
 		if not is_instance_valid(p):
 			_dirty = true
+		elif _simulate_due[i] == 1 and p.due_tick > tick:
+			continue
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_simulate(dt, tick)
 	_in_simulate = false
@@ -676,14 +689,18 @@ func _rebuild_phases() -> void:
 	_input.clear()
 	_capture.clear()
 	_simulate.clear()
+	_input_due.clear()
+	_simulate_due.clear()
 	_record.clear()
 	_predicted.clear()
 	_syncing.clear()
 	for e in _entries:
 		var o: Object = e.object
 		var phases: int = e.phases
+		var due := 1 if phases & _PHASE_DUE else 0
 		if phases & _PHASE_INPUT:
 			_input.append(o)
+			_input_due.append(due)
 		if phases & _PHASE_CAPTURE:
 			_capture.append(o)
 		if phases & _PHASE_PREDICTED:
@@ -692,6 +709,7 @@ func _rebuild_phases() -> void:
 			_syncing.append(o)
 		if phases & _PHASE_SIMULATE:
 			_simulate.append(o)
+			_simulate_due.append(due)
 		if phases & _PHASE_RECORD:
 			_record.append(o)
 

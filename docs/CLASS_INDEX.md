@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 157 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 158 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -107,6 +107,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [PawnDefaultsRes](../assets/scripts/resources/REFERENCE.md#pawndefaultsres) | [resources](../assets/scripts/resources/README.md) | Resource | The parts every pawn gets unless its own scene already has one of the same name, and other game-wide pawn settings. |
 | [PawnInitializer](../assets/scripts/game_mode/REFERENCE.md#pawninitializer) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Gives every pawn the parts it needs to work, from one list per game. |
 | [PawnSpawner](../assets/scripts/spawning/REFERENCE.md#pawnspawner) | [spawning](../assets/scripts/spawning/README.md) | Node3D | Keeps a number of pawns of one type alive, replacing each that dies after a delay. |
+| [PawnStreamingSource](../assets/scripts/streaming/REFERENCE.md#pawnstreamingsource) | [streaming](../assets/scripts/streaming/README.md) | StreamingSource | A pawn's streaming source: keeps the world loaded around its pawn while a player has it, or always with [member keeps_world_loaded] on (a hero). |
 | [PerfScopes](../assets/scripts/diagnostics/REFERENCE.md#perfscopes) | [diagnostics](../assets/scripts/diagnostics/README.md) | RefCounted | Timing scopes: systems mark the work they do, and a diagnostics tool reads how long each took, frame by frame. |
 | [PlayerCamera](../assets/scripts/camera/REFERENCE.md#playercamera) | [camera](../assets/scripts/camera/README.md) | Camera3D | The one real camera, which follows a VirtualCamera. PlayerController owns it. |
 | [PlayerController](../assets/scripts/player/REFERENCE.md#playercontroller) | [player](../assets/scripts/player/README.md) | ControllerBase | One player's controls: reads their devices, aims their camera, and gives their pawn input. |

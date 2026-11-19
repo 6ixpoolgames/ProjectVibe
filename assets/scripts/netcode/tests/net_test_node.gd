@@ -319,7 +319,7 @@ func _set_up_real_pawn(entity: NetworkEntity) -> void:
 	var earlier_pawns: int = _real_pawns_by_owner.get(entity.owner_peer, 0)
 	_real_pawns_by_owner[entity.owner_peer] = earlier_pawns + 1
 	if (entity.owner_peer == 0 and settings.has("ai-loads")) or (entity.owner_peer != 0 and earlier_pawns > 0):
-		pawn.keeps_world_loaded = true # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
+		pawn.streaming_source.keeps_world_loaded = true # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
 	if entity.owner_peer == 0 and settings.has("ai-not-possessable"):
 		pawn.controller_manager.possessable = false # Claude 2026-11-07
 	if settings.has("no-server-brain") and session.is_server():
@@ -686,7 +686,8 @@ func _update_summaries() -> void:
 			# Claude 2026-11-07: through _stat, because the real pawn and its brain don't have all of these.
 			"id": entity.entity_id, "owner": entity.owner_peer, "role": entity.role, "x": body.position.x, "y": body.position.y, "z": body.position.z,
 			"health": _stat(body, "health", 0), "shots": _stat(body, "shots_fired", 0), "hits": _stat(body, "hits_landed", 0), "missed_inputs": entity.missed_inputs,
-			"last_input_tick": entity.last_input_tick, "offset": body._correction_offset.length(), "corrections_seen": _stat(body, "corrections_seen", 0),
+			"last_input_tick": entity.last_input_tick, "offset": _correction_offset_of(body), # Claude 2026-11-19: a Pawn's is on its VisualSmoother (state store step 2)
+			 "corrections_seen": _stat(body, "corrections_seen", 0),
 			"paths": _stat(body, "paths_found", 0), "path_failures": _stat(body, "path_failures", 0), "stuck": _stat(body, "times_stuck", 0), "walked": _stat(body, "distance_walked", 0.0),
 			"missing_stretches": _stat(body, "missing_stretches", []), "bonus": body.get("bonus"), "total": body.get("total"), "tick": driver.tick,
 			"no_ground": _stat(body, "ticks_without_ground", 0), "look_yaw": body.controller_manager.look_yaw if body is Pawn and body.controller_manager else _stat(body, "look_yaw", 0.0), # Claude 2026-11-16 (pawn M4)
@@ -822,3 +823,10 @@ func _box(size: Vector3, at: Vector3) -> StaticBody3D:
 	body.add_child(shape)
 	body.position = at
 	return body
+
+
+# Claude 2026-11-19: what's left of a correction on the drawn model: a Pawn's VisualSmoother, or the sample pawn's own.
+func _correction_offset_of(body: Node) -> float:
+	if body is Pawn:
+		return body._smoother._correction_offset.length() if body._smoother else 0.0
+	return body._correction_offset.length() if "_correction_offset" in body else 0.0

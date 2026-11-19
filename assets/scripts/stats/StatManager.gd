@@ -52,6 +52,9 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	pawn = get_parent() as Pawn
+	# It tells its pawn it's here, before any part's _ready; the first StatManager a pawn has is the one it uses.
+	if pawn and not is_instance_valid(pawn.stat_manager):
+		pawn.stat_manager = self
 
 
 # Stats that change during play start full, and their current values roll back. Runs before the first tick.

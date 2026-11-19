@@ -16,7 +16,7 @@
 ##     300 m out) meets the middle's (160 m out), so the whole way is loaded. With it off there's a gap in the middle, and the AI
 ##     switch-off (AIActivationManager) freezes every AI pawn there, unless a hero or a player is near enough to keep the ground loaded.
 ##   - Heroes (hero_red.tscn, hero_blue.tscn, hero_ally.tscn): a bigger figure on a 1.5 times bigger capsule, 1000 Health, 15% slower,
-##     hitting 1.5 times as hard with a little more reach, and keeps the world loaded itself (keeps_world_loaded). H switches every hero's
+##     hitting 1.5 times as hard with a little more reach, and keeps the world loaded itself (its PawnStreamingSource's keeps_world_loaded). H switches every hero's
 ##     source on and off, apart from the centre's.
 ##   - The player starts at the players' spawner, 285 m from the middle, so they can watch the march or walk in.
 ##
@@ -140,11 +140,11 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 			pawn.global_position = $RallyPoint.global_position + Vector3(0, 3, 30)
 		# Claude 2026-11-16: follows H. While a player has it, it keeps the world loaded whatever this says.
 		_player_pawns.append(pawn)
-		pawn.keeps_world_loaded = _hero_sources_on
+		pawn.streaming_source.keeps_world_loaded = _hero_sources_on
 	elif _is_hero(pawn):
 		_heroes.append(pawn)
 		if not _hero_sources_on:
-			pawn.keeps_world_loaded = false # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
+			pawn.streaming_source.keeps_world_loaded = false # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
 
 
 func _unhandled_key_input(event: InputEvent) -> void:
@@ -206,11 +206,11 @@ func set_centre_source(on: bool) -> void:
 func set_hero_sources(on: bool) -> void:
 	_hero_sources_on = on
 	for hero in get_heroes():
-		hero.keeps_world_loaded = on # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
+		hero.streaming_source.keeps_world_loaded = on # Claude 2026-11-16 (pawn M2): was ai_loads_chunks
 	# Claude 2026-11-16: and players' pawns, which counts once nobody plays them (U or V).
 	for i in range(_player_pawns.size() - 1, -1, -1):
 		if is_instance_valid(_player_pawns[i]):
-			_player_pawns[i].keeps_world_loaded = on
+			_player_pawns[i].streaming_source.keeps_world_loaded = on
 		else:
 			_player_pawns.remove_at(i)
 
@@ -219,7 +219,7 @@ func set_hero_sources(on: bool) -> void:
 func _on_pawn_released(_peer: int, pawn: Pawn) -> void:
 	if NetworkSession.is_client() or not is_instance_valid(pawn) or _is_npc(pawn):
 		return
-	pawn.keeps_world_loaded = _hero_sources_on
+	pawn.streaming_source.keeps_world_loaded = _hero_sources_on
 
 
 ## The heroes alive in the level right now.

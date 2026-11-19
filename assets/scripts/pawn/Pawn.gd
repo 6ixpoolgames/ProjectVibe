@@ -1,8 +1,9 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: pawn/CHANGELOG.md.
 ## A body something can possess, which runs its parts in a fixed order each tick.
 ##
-## Its parts (managers, abilities, AI) are child nodes that PawnInitializer adds from the game's defaults ([member fill_in_default_parts],
-## [member skip_default_parts]); the pawn keeps the body, the tick order, references to its parts and a few general flags. Use
+## Its parts (managers, abilities, AI, its streaming source) are child nodes that PawnInitializer adds from the game's defaults
+## ([member fill_in_default_parts], [member skip_default_parts]), and each tells the pawn it's there; the pawn keeps the body, the
+## tick order, references to its parts and a few general flags. Use
 ## pawn.tscn as it is, or inherit from it. A controller writes its input each tick through its ControllerManager, and its abilities
 ## turn that into movement. Optional scene children: AbilityManager, TickStateComponent and NetworkEntity (rollback and multiplayer;
 ## the last two stay in the scene) and a Node3D called Visual.
@@ -19,27 +20,6 @@ extends CharacterBody3D
 ## Sent when this pawn's team changes, for the TeamRegistry (GameMode.team_registry), which keeps the counts.
 signal team_changed(pawn: Pawn, old_team: int, new_team: int)
 
-## On: this pawn keeps the world loaded around it even without a player (a hero, say). Off, it's frozen where nothing else keeps the
-## ground loaded (a horde). Only a flag, read whenever [method counts_on_this_machine] is asked; setting it also updates the
-## sources' group. How far it loads is [member load_distance].
-@export var keeps_world_loaded := false:
-	set(value):
-		keeps_world_loaded = value
-		_update_source_group()
-# REFACTOR: the streaming source contract (load_distance, nav_distance, distance_moved_since_last_check, the sources' group) is
-# streaming's business kept on the pawn (pawn slimming: source); a small part or the streamer's own bookkeeping would slim it. See
-# CHANGELOG.md.
-## How far this pawn keeps the world loaded when it does, in metres: the game's setting (PawnDefaultsRes), 320 without one.
-## Read-only; named as a StreamingSource's is, so the chunk streamer reads both the same way.
-var load_distance: float:
-	get:
-		var defaults: PawnDefaultsRes = _pawn_defaults()
-		return defaults.world_load_distance if defaults else 320.0
-## How far nav is built around it, in metres: the game's setting, 128 without one. Read-only.
-var nav_distance: float:
-	get:
-		var defaults: PawnDefaultsRes = _pawn_defaults()
-		return defaults.world_nav_distance if defaults else 128.0
 ## On, GameMode's PawnInitializer adds every default part this pawn's scene doesn't already have. Off, the pawn gets only what its
 ## scene has.
 @export var fill_in_default_parts := true
@@ -105,8 +85,12 @@ var controller_manager: ControllerManager = null
 var navigation_manager: NavigationManager = null
 ## Shared data and settings for this pawn's AI (pawn spec 10), and the AI's core. Null if the pawn has no AI.
 var ai_context: AIContextComponent = null
-# The other AI parts (state manager, behaviour manager, sensing, memory, target selector) are found by the AI's core, ai_context,
-# not by the pawn: pawn.ai_context.memory and so on. The pawn knows only that it has an AI.
+## Keeps the world loaded around this pawn while a player has it (or always, with its keeps_world_loaded on). Null if it has none,
+## and then it never does.
+var streaming_source: PawnStreamingSource = null
+# Each of these parts sets its reference when it enters the tree, so on a pawn that's been made but not yet added they're all null
+# (and default parts don't exist yet): set things on its parts after add_child. The other AI parts (state manager, behaviour manager, sensing,
+# memory, target selector) are found by the AI's core, ai_context, not by the pawn: pawn.ai_context.memory and so on.
 
 
 var _driver: Node = null
@@ -123,9 +107,14 @@ var tick_step := 1:
 		tick_step = value
 		if _tick_state:
 			_tick_state.push_value("tick_step", value)
+		due_tick = 0 # when it next runs changes
 ## The ticks since this pawn last ran, 1 to [constant MAX_TICK_STEP]. Its parts advance their timers by it (cooldowns, effects, AI
 ## schedules) and its simulate step is this many ticks long. Read it; don't set it.
 var ticks_elapsed := 1
+## The first tick this pawn may run on: the tick driver doesn't call it before then, so a pawn on every 4th tick isn't called on the
+## three it skips. Worked out after each run; whatever changes when it runs (its step, a player taking it, a rollback) sets it to 0,
+## which means "ask it every tick". Read it; don't set it.
+var due_tick := 0
 ## The longest step, and so the most ticks one run can cover. A pawn frozen for a while comes back with at most this.
 const MAX_TICK_STEP := 4
 ## The Godot group every pawn is in while it's in the tree: the one list of "all pawns" (crowd mover, kill floor, team registry,
@@ -134,10 +123,8 @@ const GROUP := &"pawns"
 var _last_run_tick := -1 # the tick this pawn last simulated; rolls back. -1: not yet
 var _prepared_tick := -1 # the tick _runs_this_tick and ticks_elapsed were worked out for
 var _runs_this_tick := true
+var _next_due_tick := 0 # when this tick's run is followed by the next, for due_tick
 var _entity: NetworkEntity = null
-var _game_mode: Node = null # found when entering the tree, for the distances
-var _last_streamed_position := Vector3.ZERO # for distance_moved_since_last_check
-var _streamed_before := false
 var _visual: Node3D = null
 var _smoother: VisualSmoother = null # draws Visual between ticks; null without a Visual
 var _position_after_run := Vector3.ZERO # where its last run left the body: "nothing moved it since" for sleeping and still moves
@@ -157,10 +144,15 @@ func _enter_tree() -> void:
 	add_to_group(GROUP) # the list of all pawns
 	add_to_group(TerrainBodyLifter.GROUP)
 	SharedPawnTable.join(self) # the shared table of plain pawn data, which AI sensing's grid reads (C++ only; scaling spec step 1)
-	# Default parts first, so they're children before anything below or any _ready looks for them. A node may add children to itself
-	# here: Godot enters them right after.
+	# Its two general parts, which any entity may have, so they don't know about pawns: found here, before its other parts enter.
+	for child in get_children():
+		if child is NetworkEntity:
+			_entity = child
+		elif child is TickStateComponent and _tick_state == null:
+			_tick_state = child
+	# Default parts next, so they're children before anything below or any _ready looks for them. A node may add children to itself
+	# here: Godot enters them right after, and each pawn part sets its reference on the pawn as it enters.
 	var game_mode: Node = get_node_or_null("/root/GameMode")
-	_game_mode = game_mode
 	if game_mode and game_mode.pawn_initializer:
 		game_mode.pawn_initializer.initialize(self)
 	_driver = get_node_or_null("/root/TickDriver")
@@ -173,7 +165,6 @@ func _enter_tree() -> void:
 		var ai := _ai_activation_manager()
 		if ai:
 			ai.add_pawn(self)
-		_update_source_group()
 
 
 func _exit_tree() -> void:
@@ -190,22 +181,6 @@ func _ready() -> void:
 	set_physics_process(_driver == null) # the driver calls us. Godot turns this on at ready for any script that defines it
 	yaw = rotation.y # whatever the scene placed it at. From here on, the body itself stays unrotated
 	rotation = Vector3.ZERO
-	for child in get_children():
-		if child is AbilityManager and ability_manager == null:
-			ability_manager = child
-		elif child is StatManager and stat_manager == null:
-			stat_manager = child
-		elif child is EffectManager and effect_manager == null:
-			effect_manager = child
-		elif child is NetworkEntity:
-			_entity = child
-		elif child is ControllerManager and controller_manager == null:
-			controller_manager = child
-		elif child is NavigationManager and navigation_manager == null:
-			navigation_manager = child
-		elif child is AIContextComponent and ai_context == null: # the AI's core; it finds the other AI parts
-			ai_context = child
-
 	_visual = get_node_or_null(^"Visual")
 	if _visual:
 		_smoother = VisualSmoother.new()
@@ -216,62 +191,26 @@ func _ready() -> void:
 	# How often it runs and when it last did roll back, so a replay runs on the same ticks (pawn spec 8.21); its team and step are
 	# pushed when they change. It's recorded only when it runs or something marks it (mark_state_changed), so a pawn on a load step
 	# costs the store almost nothing on the ticks it skips.
-	for child in get_children():
-		if child is TickStateComponent:
-			var entries: Array[String] = ["tick_step pushed", "team pushed", "_last_run_tick"]
-			child.add_state_properties(entries)
-			child.record_only_when_changed = true
-			_tick_state = child
-			break
+	if _tick_state:
+		var entries: Array[String] = ["tick_step pushed", "team pushed", "_last_run_tick"]
+		_tick_state.add_state_properties(entries)
+		_tick_state.record_only_when_changed = true
 	# Every pawn is watched by the AI switch-off, which leaves alone those that keep the world loaded, checking each time.
 	var ai := _ai_activation_manager()
 	if ai:
 		ai.add_pawn(self)
-	# In the sources' group only while it might keep the world loaded; a player taking or leaving it changes that.
-	# unbind(2) drops the signal's two arguments, which _update_source_group doesn't take.
+	# A player's pawn runs every tick, so a player taking it changes when it next runs. unbind(2) drops the signal's arguments.
 	if controller_manager:
-		controller_manager.possession_changed.connect(_update_source_group.unbind(2))
-	_update_source_group()
+		controller_manager.possession_changed.connect(_forget_due_tick.unbind(2))
 
 
 # --- Things other scripts can call ---
 
 
-## True while this pawn keeps the world loaded around it: a player has it or [member keeps_world_loaded] is on, and it's simulated
-## on this machine (another player's pawn on a client doesn't count there). The same as [method counts_on_this_machine], under a name
-## that says what it means outside streaming.
+## True while this pawn keeps the world loaded around it on this machine: its [member streaming_source] counts (a player has it, or
+## its keeps_world_loaded is on, and it's simulated here). The AI switch-off leaves such a pawn on.
 func is_keeping_world_loaded() -> bool:
-	return counts_on_this_machine()
-
-
-## Keeps this pawn in the streaming sources' group (StreamingSource.GROUP) exactly while it might keep the world loaded, so the
-## chunk streamer, nav feeder and replay look through the few pawns that count, not the whole army. Called when either input changes.
-func _update_source_group() -> void:
-	if not is_inside_tree():
-		return
-	var wanted := keeps_world_loaded or _has_a_player()
-	if wanted == is_in_group(StreamingSource.GROUP):
-		return
-	if wanted:
-		add_to_group(StreamingSource.GROUP)
-	else:
-		remove_from_group(StreamingSource.GROUP)
-
-
-## The source contract (StreamingSource.gd): whether this pawn loads the world around it on this machine now. The chunk streamer, the
-## nav feeder and the AI switch-off ask this every time they look.
-func counts_on_this_machine() -> bool:
-	return (keeps_world_loaded or _has_a_player()) and is_inside_tree() and is_simulated_here()
-
-
-## The source contract: how far this pawn has moved since the streamer last asked, so it can judge how soon a chunk edge comes. 0 the
-## first time, because arriving somewhere isn't moving.
-func distance_moved_since_last_check() -> float:
-	var at := global_position
-	var moved := at.distance_to(_last_streamed_position) if _streamed_before else 0.0
-	_last_streamed_position = at
-	_streamed_before = true
-	return moved
+	return streaming_source != null and streaming_source.counts_on_this_machine()
 
 
 ## The node that follows the body smoothly, for hanging things from. With no Visual, it's the body.
@@ -364,6 +303,9 @@ func _tick_simulate(dt: float, tick: int) -> void:
 		return
 	dt *= ticks_elapsed
 	_last_run_tick = tick
+	# The driver needn't call it again before its next run (worked out in _prepare_run). Set here in simulate, not in _prepare_run:
+	# input runs _prepare_run first, and a due_tick set there would make the driver skip this same tick's simulate.
+	due_tick = _next_due_tick
 	# Sleeping (pawn spec 15.3). A sleeping pawn only does the bookkeeping at the end.
 	var sleeping := _can_sleep(tick)
 	is_sleeping = sleeping
@@ -549,12 +491,20 @@ func _prepare_run(tick: int) -> void:
 	if _runs_this_tick: # on ticks it skips, ticks_elapsed keeps its last run's value
 		ticks_elapsed = clampi(tick - _last_run_tick, 1, MAX_TICK_STEP) if _last_run_tick >= 0 else 1
 		mark_state_changed() # a run changes it, so the store reads it this tick
+		# next_run_tick's rule, from what's at hand: the next tick that lines up with its step, or a whole step on.
+		_next_due_tick = tick + 1 if step <= 1 else tick + step - posmod(tick + _stagger(), step)
+
+
+# Something that decides when it runs changed (a player took it or let go), so the driver asks it every tick until its next run.
+func _forget_due_tick() -> void:
+	due_tick = 0
 
 
 ## TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is
 ## doing now. Nothing can set it directly, so this makes the engine work it out again, then puts things back.
 func _on_state_loaded(_tick: int) -> void:
 	_prepared_tick = -1 # worked out again from the loaded _last_run_tick
+	due_tick = 0
 	# The ControllerManager's previous_held_actions is restored by the TickState itself, as rollback state.
 	var saved_position := position
 	var saved_velocity := velocity
@@ -587,11 +537,6 @@ func _physics_process(delta: float) -> void:
 ## Works for a role that changes while running, as swapping pawns does.
 func _on_network_role(entity: NetworkEntity) -> void:
 	_entity = entity
-	# The server runs it now: it stops doing what the last player's final input said.
-	# REFACTOR: clearing input is the ControllerManager's job (pawn slimming M4); it could watch the role change itself. See
-	# CHANGELOG.md.
-	if entity.role == NetworkEntity.Role.AUTHORITY and entity.owner_peer == 0 and controller_manager:
-		controller_manager.clear_input()
 
 
 ## On a client, for a pawn someone else controls: it was just moved between snapshots, so Visual follows.
@@ -607,12 +552,6 @@ func _on_network_corrected(jump: Variant) -> void:
 
 
 # --- Helpers ---
-
-
-# The game's pawn defaults, for the distances, or null without a PawnInitializer.
-func _pawn_defaults() -> PawnDefaultsRes:
-	var initializer: PawnInitializer = _game_mode.pawn_initializer if _game_mode else null
-	return initializer.defaults if initializer else null
 
 
 ## Gravity in metres per second per second, from the gravity setting or else the project's.

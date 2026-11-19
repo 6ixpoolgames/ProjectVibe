@@ -18,12 +18,13 @@ Loads the ground in chunks around the things that need it (players, cameras, spa
 ```
  streaming sources (the group "streaming_sources")
    StreamingSource node  ─┐
-   Pawn that keeps the   ─┼─► ChunkStreamer ──► TerrainGenerator.build_chunk_step / unload_chunk
-   world loaded           │        (budgeted per frame; the chunk under a source built at once)
+   PawnStreamingSource   ─┼─► ChunkStreamer ──► TerrainGenerator.build_chunk_step / unload_chunk
+   (a pawn's part)        │        (budgeted per frame; the chunk under a source built at once)
                           └─► also read by world/TerrainNavFeeder (nav), AIActivationManager, the replay
 ```
 
-- **`StreamingSource`** marks something as keeping the world loaded: add it as a child of a camera, a spawner, anything. A `Pawn` doesn't need one: it's a source itself while a player has it or its `keeps_world_loaded` is on, with distances from the game's `PawnDefaultsRes`. Anything that has the **source contract** (`global_position`, `load_distance`, `nav_distance`, `counts_on_this_machine()`, `distance_moved_since_last_check()`) and is in the group counts.
+- **`StreamingSource`** marks something as keeping the world loaded: add it as a child of a camera, a spawner, anything.
+- **`PawnStreamingSource`** is a pawn's, one of the game's default parts: it counts while a player has the pawn, or always with its `keeps_world_loaded` on (a hero), and uses the game's distances from `PawnDefaultsRes`. It's in the group only while it might count, so the streamer looks through a few nodes, not the whole army. Readers use the **source contract** (`global_position`, `load_distance`, `nav_distance`, `counts_on_this_machine()`, `distance_moved_since_last_check()`).
 - **`ChunkStreamer`** scores the chunks near every source, builds the nearest first in small steps within `max_ms_per_frame`, and unloads chunks past `load_distance + unload_margin`. Before each tick it builds any missing chunk a source is over or about to step onto, ignoring the budget, so the ground is always there.
 
 In multiplayer each machine streams for itself: the server around every player, a client around its own pawn. Terrain isn't sent: the same settings make the same ground everywhere.
@@ -40,7 +41,7 @@ A chunk loads within a source's `load_distance` but only unloads past `load_dist
 
 ## How to use it
 
-**Load the world around the player.** Under a `WorldCoordinator`, add a `ChunkStreamer` beside the `TerrainGenerator`; the coordinator connects them and turns off the terrain's `build_on_start`. A player's pawn is a source by itself. Open `streaming_sample.tscn` to see it.
+**Load the world around the player.** Under a `WorldCoordinator`, add a `ChunkStreamer` beside the `TerrainGenerator`; the coordinator connects them and turns off the terrain's `build_on_start`. A player's pawn is a source through its `PawnStreamingSource` part. Open `streaming_sample.tscn` to see it.
 
 **Keep the world loaded around something else.** Add a `StreamingSource` child to it (an RTS camera, a spawner, a point the AI fights over). Turn `active` off when it shouldn't count.
 

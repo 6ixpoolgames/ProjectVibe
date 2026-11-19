@@ -19,6 +19,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, and nothing parry-specific is left in the manager or the base: `ParryAbility` is a plain timed ability that makes a default `ParryInterceptor`, and `guard()` is only read by the debug drawing and tests.
 
+## 2026-11-19
+
+- **Tells its pawn it's there** (state store step 3): its `_enter_tree` sets the pawn's reference to it, if the pawn has none yet, instead of the pawn looking through its children in `_ready`. The reference is there before any part's `_ready`.
+
 ## 2026-11-18
 
 - **An unused static removed**: `AbilityManager._overrides_every_tick`, left from before `_every_tick_abilities`; the editor warned of it.

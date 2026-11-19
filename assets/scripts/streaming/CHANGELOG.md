@@ -15,6 +15,11 @@ None in this folder yet. Serving one terrain only is a "not yet" (streaming spec
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-19
+
+- **`PawnStreamingSource`** (new, a default pawn part): a pawn's streaming source, counting while a player has the pawn or with `keeps_world_loaded` on, with the game's distances (`PawnDefaultsRes`). It replaces the source contract the pawn held itself (pawn slimming: source), so every source is a `StreamingSource` node now.
+- **`StreamingSource`**: in the group only while it might count (`_might_count`, always for a plain source); `active` has a setter; `load_distance` and `nav_distance` read through `_distance_in_use`, which a subclass may override.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): moved to the README: `ChunkStreamer`'s unload margin, the ground-under-sources budget rule and its odd cases (no terrain, no sources, over the limit, no `TickDriver`, no streamer). The source contract stays in `StreamingSource`, shortened. No stale comments found.

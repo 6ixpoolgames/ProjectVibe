@@ -1839,6 +1839,7 @@ Things to know:
 A pawn can be sleeping and later frozen, but never both on the same tick: a frozen pawn doesn't tick, so it doesn't decide whether to sleep.
 
 **Keeping the world loaded** *(Claude 2026-11-16, pawn M2, the owner's call: a flag on the pawn, with the streaming code in the streamer)*:
+- *(2026-11-19, state store step 3: superseded. The source is a part again, `PawnStreamingSource`, a default part that counts while a player has the pawn or with its `keeps_world_loaded` on, with the game's distances; the pawn keeps `is_keeping_world_loaded()`. State store spec 12.8.)*
 - **What a pawn holds:** `keeps_world_loaded`, a flag that replaced `ai_loads_chunks`. A player's pawn always keeps the world loaded; this flag is for AI pawns that should too, such as heroes.
 - **The source contract:** a pawn is a chunk source itself, in `StreamingSource.GROUP`, and makes no `StreamingSource` node. The chunk streamer, the nav feeder and the replay read any member of the group through five things: `global_position`, `load_distance`, `nav_distance`, `counts_on_this_machine()` and `distance_moved_since_last_check()`. That's what a `StreamingSource` node has too.
 - **The distances** are the game's setting, `PawnDefaultsRes.world_load_distance` (320 m) and `world_nav_distance` (128 m), not each pawn's.

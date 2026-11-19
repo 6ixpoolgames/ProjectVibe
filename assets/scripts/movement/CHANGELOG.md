@@ -11,6 +11,8 @@ None found in the documentation pass. The GDScript batch (`_move_batch`) repeats
 
 ## 2026-11-19
 
+- **Finer timings** (diagnostics): `movement.crowd_gather` (reading the moving pawns), `movement.crowd_others` (their nav tiers and every other pawn) and `movement.crowd_finish` (calling each pawn back). At 300 pawns, of 1.1 ms a tick: gathering 0.18, the others 0.25, finishing 0.45, the C++ batch and queries about 0.25 (state store spec 13.6).
+
 - **The crowd mover is the pawn's `mover`** (state store spec 12.8): `try_take_move` is now `take_move`, and it calls the pawn's `finish_move` and `move_by_physics_now`. It adopts the pawns already in the tree when it's added and lets them go when removed; the PawnInitializer gives it new ones.
 
 ## 2026-11-18

@@ -314,7 +314,8 @@ TickDriver.register(self)   # then write any of _tick_input(dt, tick), _tick_cap
 
 One tick: `before_tick`, input, capture input, simulate, `after_simulate`, record, commit, `after_tick`. Within a
 phase, lower `order` runs first, then registration order. The commit writes every entity's state into `store`, the
-record of play at tick boundaries. Rollback and the load ladder are in the README.
+record of play at tick boundaries. A participant with a `due_tick` property (a pawn) isn't called in input or simulate
+before that tick, so a pawn on a load step costs nothing on the ticks it skips. Rollback and the load ladder are in the README.
 Design: state store spec 4 and 9, netcode spec 3 (rollback 3.5), scaling spec 7, pawn spec 8.21 (load ladder).
 
 ### Settings and properties

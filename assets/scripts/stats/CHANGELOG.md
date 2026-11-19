@@ -18,6 +18,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-19
 
+- **Tells its pawn it's there** (state store step 3): its `_enter_tree` sets the pawn's reference to it, if the pawn has none yet, instead of the pawn looking through its children in `_ready`. The reference is there before any part's `_ready`.
+
 - **A stat's `current` is pushed to the state store** when it changes (its setter), instead of being read every tick: the StatManager lists it as a pushed entry and tells each stat where it's recorded.
 - **`StatManager.detectability_of()` and `set_detectability()`** (new, static): the Detectability stat, for callers that used `Pawn.detectability`.
 

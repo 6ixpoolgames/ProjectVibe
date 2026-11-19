@@ -17,7 +17,7 @@ Every class in `assets/scripts/game_mode/`, from its doc comments. The overview 
 
 Switches AI pawns off when the ground around them isn't loaded, back on when it is, and sets how often the rest run.
 
-A module of GameMode (GameMode.ai_activation_manager), server or offline only. An AI pawn runs only while every chunk within `edge_margin` of it is built; a pawn that keeps the world loaded (`Pawn.counts_on_this_machine()`) is always left on, and a possession is checked at once. A pawn that's off stops its NetworkEntity and TickState and is left out of snapshots. Pawns register with `add_pawn()` and `remove_pawn()` (Pawn does both) and need a `set_frozen(frozen)`.
+A module of GameMode (GameMode.ai_activation_manager), server or offline only. An AI pawn runs only while every chunk within `edge_margin` of it is built; a pawn that keeps the world loaded (`Pawn.is_keeping_world_loaded()`) is always left on, and a possession is checked at once. A pawn that's off stops its NetworkEntity and TickState and is left out of snapshots. Pawns register with `add_pawn()` and `remove_pawn()` (Pawn does both) and need a `set_frozen(frozen)`.
 
 It also sets `Pawn.tick_step` for each running AI pawn: every tick within `full_rate_within_chunks` chunks of the nearest viewer (pawns a player has, and this machine's player's camera), every 2nd up to `every_4th_tick_beyond_chunks`, every 4th beyond, and never less often than TickDriver.load_step. Distance is in whole chunk rings, not metres, so pawns in one chunk share a rate. A pawn a player has always runs every tick. A game can listen to `ai_deactivated` and `ai_activated` to simulate switched-off pawns more cheaply. Design: pawn spec 8.21, scaling spec 7.1.
 

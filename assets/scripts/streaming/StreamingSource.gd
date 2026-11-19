@@ -3,7 +3,7 @@
 ##
 ## A [ChunkStreamer] finds every source and loads chunks around the active ones. Add this as a child of whatever should keep the world
 ## loaded (an RTS camera, a spawner); it follows its parent, so it needs no code. Turn [member active] off when it shouldn't count. A
-## Pawn needs none: it's a source itself, and is in the group only while it might keep the world loaded.
+## pawn's is a [PawnStreamingSource], a default part, which counts while a player has the pawn.
 ## [br]
 ## [b]The source contract.[/b] Anything in [constant GROUP] with these counts as a source; the chunk streamer, [TerrainNavFeeder],
 ## AIActivationManager and the replay read sources only through them:
@@ -18,21 +18,29 @@ extends Node3D
 const GROUP := &"streaming_sources"
 
 ## Whether this source keeps the world loaded right now. It can be changed at any time.
-@export var active := true
+@export var active := true:
+	set(value):
+		active = value
+		_update_group()
 ## Chunks within this distance are loaded, in metres, measured to the nearest edge of the chunk.
-@export_range(0.0, 2000.0, 1.0, "or_greater") var load_distance := 320.0
+@export_range(0.0, 2000.0, 1.0, "or_greater") var load_distance := 320.0:
+	get:
+		# What _distance_in_use picks; setting it still sets this node's own value, which a plain source uses.
+		return _distance_in_use(load_distance, false)
 ## Nav is built within this distance, in metres. It's separate because nav has about 100 tiles per chunk at 128 m, so building it as
 ## far out as the ground would be slow. 0 means this source builds no nav. It can't exceed [member load_distance].
-@export_range(0.0, 2000.0, 1.0, "or_greater") var nav_distance := 128.0
+@export_range(0.0, 2000.0, 1.0, "or_greater") var nav_distance := 128.0:
+	get:
+		return _distance_in_use(nav_distance, true)
 
 var _network_entity: NetworkEntity = null
 var _last_checked_position := Vector3.ZERO
 var _has_been_checked := false
 
 
-# A node keeps its groups when it leaves the scene and comes back, so joining once here is enough.
+# A node keeps its groups when it leaves the scene and comes back, so joining here is enough; _update_group changes it after.
 func _init() -> void:
-	add_to_group(GROUP)
+	_update_group()
 
 
 ## Whether this source should load chunks on this machine right now. ChunkStreamer asks this at every refresh. A pawn exists on every
@@ -54,6 +62,28 @@ func distance_moved_since_last_check() -> float:
 	_last_checked_position = at
 	_has_been_checked = true
 	return moved
+
+
+# In GROUP exactly while it might count ([method _might_count]), so the streamer and the others look through few nodes.
+func _update_group() -> void:
+	var wanted := _might_count()
+	if wanted == is_in_group(GROUP):
+		return
+	if wanted:
+		add_to_group(GROUP)
+	else:
+		remove_from_group(GROUP)
+
+
+# Whether it belongs in GROUP: always for a plain source, inactive ones included (they're asked and say no). A subclass that
+# counts only some of the time says when.
+func _might_count() -> bool:
+	return true
+
+
+# The distance a reader gets: its own setting here. A subclass may use another (a pawn's source uses the game's).
+func _distance_in_use(own: float, _for_nav: bool) -> float:
+	return own
 
 
 # The NetworkEntity of whatever this source is attached to, or null if it isn't on a networked entity.

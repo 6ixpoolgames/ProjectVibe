@@ -486,7 +486,11 @@ A TURN_AWAY [`HitInterceptor`](#hitinterceptor) (pawn spec 8.23): the hit arrive
 
 A projectile in flight: a networked entity that moves each tick and hits the first pawn (or the ground) in its path.
 
-Fired by a [`FireProjectileStep`](#fireprojectilestep) through `spawn_from()`, which spawns it with `NetworkSession.spawn()` (offline too) as a type named after its scene. The server, or the offline game, moves it and decides hits: each tick it sweeps its path against pawns and the world. Clients draw it from snapshots. A hit goes to the target's AbilityManager like a swing's, carrying the firing ability's on-hit effects, so damage, knockback, parries and dash invulnerability work as for melee. It despawns on a hit, on the world, or past its range or lifetime. Design: pawn spec 8.24.
+Fired by a [`FireProjectileStep`](#fireprojectilestep) through `spawn_from()`, which spawns it with `NetworkSession.spawn()` (offline too) as a
+type named after its scene. The server, or the offline game, moves it and decides hits: each tick it sweeps its path against pawns
+and the world. Clients draw it from snapshots. A hit goes to the target's AbilityManager like a swing's, carrying the firing ability's
+on-hit effects, so damage, knockback, parries and dash invulnerability work as for melee. It despawns on a hit, on the world, or past
+its range or lifetime. Design: pawn spec 8.24.
 
 ```gdscript
 Projectile.spawn_from(preload("res://assets/scenes/projectiles/bolt.tscn"), ability, origin, direction)
@@ -509,7 +513,8 @@ Projectile.spawn_from(preload("res://assets/scenes/projectiles/bolt.tscn"), abil
 ### Functions
 
 - `type_name_for(scene: PackedScene) -> String` *(static)*: The network type name for a projectile scene.
-- `register_scene(scene: PackedScene) -> void` *(static)*: Registers a projectile scene as a network type, once. Every machine does it at startup, before hosting or joining: the list of types is part of the join check, so one registered later stops new players joining (the faction samples register the bolt).
+- `register_scene(scene: PackedScene) -> void` *(static)*: Registers a projectile scene as a network type, once. Every machine does it at startup, before hosting or joining: the list of types
+  is part of the join check, so one registered later stops new players joining (the faction samples register the bolt).
 - `spawn_from(scene: PackedScene, from_ability: AbilityBase, origin: Vector3, direction: Vector3) -> Projectile` *(static)*: Server or offline: fires a projectile from this ability's pawn at origin along direction. Null on a client, or if it couldn't spawn.
 - `launch(from_ability: AbilityBase, direction: Vector3) -> void`: Sets it off from its ability: shooter, team, effects and velocity. spawn_from calls it.
 - `is_done() -> bool`: True once it has hit something or flown its course, on the machine that decides it.
@@ -585,11 +590,14 @@ For effects that belong to a moment in an ability, such as after its hit, rather
 
 Fires a projectile on its first tick, from the pawn's muzzle point toward where it looks.
 
-Server or offline only, and never in a rollback replay: a client doesn't spawn anything, it sees the server's projectile arrive. Aim is the pawn's look (yaw and pitch, so an AI looking at a target's chest aims at it). If `warns_targets`, the first enemy on the straight line ahead is told a hit is coming, so its AI can parry or dodge. Design: pawn spec 8.24.
+Server or offline only, and never in a rollback replay: a client doesn't spawn anything, it sees the server's projectile arrive.
+Aim is the pawn's look (yaw and pitch, so an AI looking at a target's chest aims at it). If `warns_targets`, the first enemy on
+the straight line ahead is told a hit is coming, so its AI can parry or dodge. Design: pawn spec 8.24.
 
 ### Settings and properties
 
-- `projectile_scene: PackedScene`: The projectile scene to fire: a [`Projectile`](#projectile) with a TickStateComponent and a NetworkEntity. Register it at startup (`Projectile.register_scene()`) on every machine.
+- `projectile_scene: PackedScene`: The projectile scene to fire: a [`Projectile`](#projectile) with a TickStateComponent and a NetworkEntity. Register it at startup
+  (`Projectile.register_scene()`) on every machine.
 - `muzzle_height: float` = `1.3`: Where it leaves from: metres above the pawn's feet.
 - `muzzle_forward: float` = `0.5`: Where it leaves from: metres in front of the pawn.
 - `warns_targets: bool` = `true`: On: the first enemy on the straight path ahead hears a hit is coming (AIContextComponent.note_incoming_attack).
@@ -607,8 +615,14 @@ Server or offline only, and never in a rollback replay: a client doesn't spawn a
 
 An attack's hit window: a hit sphere moves from a start point to an end point over length_ticks, and pawns it touches are hit.
 
-Each point is around the pawn, relative to where it faces each tick: angle (degrees, positive to the left, 0 straight ahead), height (metres above the feet) and reach (metres to the sphere's far edge). Each goes straight from start to end, so a slash changes angle, a thrust reach, a chop height; longer patterns are several sweeps in a row. Visuals draw the same path (`offset_at()`).
-Hits are decided on the server only (or offline), never in a rollback replay. Each pawn is hit at most once per run of the ability, its own team is skipped unless `hits_own_team`, and a hit carries the ability's on-hit effects. Signals go out on the ability if it declares them ([`MeleeAttackAbility`](#meleeattackability) does). Design: pawn spec 8.20.
+Each point is around the pawn, relative to where it faces each tick: angle (degrees, positive to the left, 0 straight ahead), height
+(metres above the feet) and reach (metres to the sphere's far edge). Each goes straight from start to end, so a slash changes angle, a
+thrust reach, a chop height; longer patterns are several sweeps in a row. Visuals draw the same path (`offset_at()`).
+
+Hits are decided on the server only (or offline), never in a rollback replay. Each pawn is hit at most once per run of the
+ability, its own team is skipped unless `hits_own_team`, and a hit carries the ability's on-hit effects. Signals go out on the
+ability if it declares them ([`MeleeAttackAbility`](#meleeattackability) does).
+Design: pawn spec 8.20.
 
 ### Settings and properties
 
@@ -624,7 +638,8 @@ Hits are decided on the server only (or offline), never in a rollback replay. Ea
 ### Functions
 
 - `offset_at(at: float, facing: float) -> Vector3`: Where the hit sphere's centre is at this point of the sweep (0 start, 1 end), from the pawn's feet, for a facing in radians.
-- `centres_for_tick(sweep_tick: int) -> Vector3[]`: The spots the sphere passes through on this sweep tick (0 is the first), in the world, no more than half its radius apart. One spot if it doesn't move, so a fast sweep or a 30 Hz match leaves no gaps.
+- `centres_for_tick(sweep_tick: int) -> Vector3[]`: The spots the sphere passes through on this sweep tick (0 is the first), in the world, no more than half its radius apart. One spot
+  if it doesn't move, so a fast sweep or a 30 Hz match leaves no gaps.
 - `centres_for_ticks(sweep_tick: int, count: int) -> Vector3[]`: The same over count ticks from sweep_tick, for a pawn running every Nth tick (pawn spec 8.21). Never goes past the sweep's end.
 - `tick(_dt: float) -> int`
 - `weapon_point(facing: float) -> Variant`

@@ -4,7 +4,7 @@
 
 The body every character is: something a player or the AI can drive. It runs its parts (input, AI, abilities, effects) in a fixed order each tick, then moves.
 
-**Status:** built, tier 0; being slimmed down for the state store refactor (state store spec 12.8). Smoothing is in `VisualSmoother` and the shared table in `SharedPawnTable`. Not yet: the tick stepping in the tick driver, part-finding in the `PawnInitializer`, and a home for the streaming source contract.
+**Status:** built, tier 0; being slimmed down for the state store refactor (state store spec 12.8). Smoothing is in `VisualSmoother`, the shared table in `SharedPawnTable`, the streaming source in its own part (`PawnStreamingSource`), and the parts set their own references on the pawn. Not yet: the batched movement pass (the crowd mover reading and writing the store).
 
 | File | What it's for |
 |---|---|
@@ -29,7 +29,7 @@ The body every character is: something a player or the AI can drive. It runs its
 
 Each tick, in the **input phase**: the AI runs, then the ControllerManager asks whoever is in charge for input. In the **simulate phase**: effects count down, abilities write velocity and facing, gravity is added, and the pawn moves with one `move_and_slide`, or hands the move to its `mover` (the `CrowdMover`, `movement/`, set by the `PawnInitializer`), which then finishes it (`finish_move`, or `move_by_physics_now` where the crowd can't). The state store records it at the tick's end: a pawn on a load step is copied forward on ticks it skips, and its team, tick step and stats' current values are pushed when they change. Each rendered frame, the `VisualSmoother` places Visual between the last two runs.
 
-`PawnInitializer` (`game_mode/`) adds every default part the scene doesn't have, from `resources/pawn_defaults.tres`. The pawn itself holds only the body, its tick order, its part references and general flags: `dead`, frozen, sleeping, `tick_step`.
+`PawnInitializer` (`game_mode/`) adds every default part the scene doesn't have, from `resources/pawn_defaults.tres`. Each part sets its reference on the pawn as it enters the tree (`pawn.ability_manager` and so on), so the references exist once the pawn is in the tree, with or without the GameMode. The pawn itself holds only the body, its tick order, its part references and general flags: `dead`, frozen, sleeping, `tick_step`. The tick driver doesn't call a pawn before its `due_tick`, so one on every 4th tick costs nothing on the three it skips.
 
 Three states that are easy to mix up:
 - **Sleeping**: standing still with nothing to do, it skips its abilities and physics until something wakes it (`sleep_when_idle`).
@@ -42,7 +42,7 @@ Three states that are easy to mix up:
 
 **Put it on a team.** Set `team`. AI sensing only notices pawns on other teams, and a player who takes it plays for that team.
 
-**A hero that keeps the world loaded.** Tick `keeps_world_loaded`. Without it, an AI pawn freezes wherever nothing else keeps the ground loaded, which is what a horde wants.
+**A hero that keeps the world loaded.** Add a `PawnStreamingSource` part to its scene (`assets/scenes/pawn/parts/`) and tick its `keeps_world_loaded`. Without it, an AI pawn freezes wherever nothing else keeps the ground loaded, which is what a horde wants.
 
 **Find every pawn.**
 ```gdscript
@@ -57,7 +57,7 @@ for node in get_tree().get_nodes_in_group(Pawn.GROUP):
 | Setting | Where | Default | What it does |
 |---|---|---|---|
 | `team` | `Pawn` | 0 | Which side it's on |
-| `keeps_world_loaded` | `Pawn` | off | Keeps the world loaded around it without a player |
+| `keeps_world_loaded` | `PawnStreamingSource` | off | Keeps the world loaded around it without a player |
 | `fill_in_default_parts` | `Pawn` | on | The game's default parts fill in what the scene lacks |
 | `skip_default_parts` | `Pawn` | empty | Default parts to leave out, by name |
 | `gravity` | `Pawn` | -1 (project's) | How strongly it falls |

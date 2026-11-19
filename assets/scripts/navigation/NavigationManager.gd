@@ -82,6 +82,9 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	pawn = get_parent() as Pawn
+	# It tells its pawn it's here, before any part's _ready; the first NavigationManager a pawn has is the one it uses.
+	if pawn and not is_instance_valid(pawn.navigation_manager):
+		pawn.navigation_manager = self
 	if pawn == null:
 		push_warning("NavigationManager: its parent isn't a Pawn, so it can't find paths for anything.")
 

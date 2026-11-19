@@ -66,6 +66,9 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	pawn = get_parent() as Pawn # null when the parent isn't a Pawn
+	# It tells its pawn it's here, before any part's _ready; the first ControllerManager a pawn has is the one it uses.
+	if pawn and not is_instance_valid(pawn.controller_manager):
+		pawn.controller_manager = self
 	if pawn == null:
 		push_warning("ControllerManager: its parent isn't a Pawn, so it never puts anyone in charge.")
 
@@ -84,11 +87,12 @@ func _ready() -> void:
 			ai_controller.pawn = pawn
 			break
 	possession_changed.connect(_on_possession_changed)
-	# The server's checks on a client's input come here, not to the pawn.
+	# The server's checks on a client's input come here, not to the pawn, and so does a change of who runs the pawn.
 	if pawn:
 		for child in pawn.get_children():
 			if child is NetworkEntity:
 				child.input_owner = self
+				child.role_changed.connect(_on_network_role_changed)
 	_last_in_charge = get_controller_in_charge()
 
 
@@ -244,6 +248,12 @@ func detach_player(controller: ControllerBase) -> void:
 		player_controller = null
 		_stop_path()
 		_refresh()
+
+
+# The server runs the pawn now (no player owns it): it stops doing what the last player's final input said.
+func _on_network_role_changed(entity: NetworkEntity) -> void:
+	if entity.role == NetworkEntity.Role.AUTHORITY and entity.owner_peer == 0:
+		clear_input()
 
 
 func _on_possession_changed(_pawn: Pawn, _player_has_it: bool) -> void:

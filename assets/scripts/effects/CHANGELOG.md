@@ -17,6 +17,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-19
 
+- **Tells its pawn it's there** (state store step 3): its `_enter_tree` sets the pawn's reference to it, if the pawn has none yet, instead of the pawn looking through its children in `_ready`. The reference is there before any part's `_ready`.
+
 - **An effect landing marks its pawn changed** (`Pawn.mark_state_changed`), so the state store reads a pawn that's between its own runs instead of copying its last row forward.
 
 ## 2026-11-18

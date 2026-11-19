@@ -436,7 +436,7 @@ func _start_spectating() -> FreeFlyCamera:
 func _on_pawn_released(_peer: int, pawn: Pawn) -> void:
 	if NetworkSession.is_client() or not is_instance_valid(pawn) or _is_npc(pawn):
 		return
-	pawn.keeps_world_loaded = true
+	pawn.streaming_source.keeps_world_loaded = true
 
 
 # --- Display ---

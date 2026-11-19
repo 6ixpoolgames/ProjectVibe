@@ -10,7 +10,7 @@ const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const STATS_PART := "res://assets/scenes/pawn/parts/StatManager.tscn"
 # Claude 2026-11-09: the AI parts joined the defaults (pawn spec steps 8a and 8b).
 # Claude 2026-11-10: EffectManager is a default part now (pawn spec 8.11).
-const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"EffectManager", &"AbilityManager", &"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
+const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"EffectManager", &"AbilityManager", &"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3)
 
 
 func _ready() -> void:

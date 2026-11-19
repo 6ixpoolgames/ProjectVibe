@@ -60,6 +60,9 @@ func _init() -> void:
 
 func _enter_tree() -> void:
 	pawn = get_parent() as Pawn
+	# It tells its pawn it's here, before any part's _ready; the first AIContextComponent a pawn has is the one it uses.
+	if pawn and not is_instance_valid(pawn.ai_context):
+		pawn.ai_context = self
 	if pawn == null:
 		push_warning("AIContextComponent: its parent isn't a Pawn, so this AI has nothing to drive.")
 		return

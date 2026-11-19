@@ -151,6 +151,11 @@ Design: netcode spec 7, 10, 13.
 - `last_input_tick: int` = `-1`
 - `missed_inputs: int` = `0`
 
+### Signals
+
+- `role_changed(entity: NetworkEntity)`: Sent when its role or owner changes while running (swapping pawns), after its parent hears _on_network_role. A pawn's
+  ControllerManager listens, to drop the last owner's input.
+
 ### Constants
 
 - `Role.AUTHORITY = 0`

@@ -184,7 +184,7 @@ Twin parity: the comparing and packing runs in C++ (`ReplayMotionPacker`, navcor
 - `FLAG_DEAD = 2`: Dead (Pawn.dead): its Death ability runs.
 - `FLAG_FROZEN = 4`: Frozen: switched off completely, so it doesn't tick at all (Pawn.is_frozen()). The AI switch-off does this where no ground is loaded.
 - `FLAG_SLEEPING = 8`: Sleeping: idle, so it skipped its physics this tick, but still ticks its input and AI and wakes at once (Pawn.is_sleeping).
-- `FLAG_HAS_SOURCE = 16`: Keeps the world loaded around it: it has a chunk source of its own (Pawn.is_keeping_world_loaded()).
+- `FLAG_HAS_SOURCE = 16`: Keeps the world loaded around it: its streaming source counts (Pawn.is_keeping_world_loaded()).
 - `FLAG_HAS_PLAYER = 32`: A player controls it (ControllerManager.has_player()).
 
 ### Functions

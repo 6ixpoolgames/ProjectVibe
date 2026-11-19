@@ -5,6 +5,7 @@
 Every class in `assets/scripts/streaming/`, from its doc comments. The overview is in [README.md](README.md).
 
 - [ChunkStreamer](#chunkstreamer)
+- [PawnStreamingSource](#pawnstreamingsource)
 - [StreamingSource](#streamingsource)
 
 ## ChunkStreamer
@@ -39,13 +40,30 @@ Add it to the scene and set its `terrain` (a [`WorldCoordinator`](../world/REFER
 - `get_stats() -> Dictionary`: How things stand right now, as numbers for tests, stress runs and on-screen displays.
 - `refresh_now() -> void`: Checks the sources now, instead of waiting for the next refresh.
 
+## PawnStreamingSource
+
+`res://assets/scripts/streaming/PawnStreamingSource.gd`, extends [`StreamingSource`](#streamingsource)
+
+A pawn's streaming source: keeps the world loaded around its pawn while a player has it, or always with `keeps_world_loaded` on (a hero).
+
+Every pawn gets one from the game's default parts (the PawnInitializer). It's in `StreamingSource.GROUP` only while it might count, so the chunk streamer, the nav feeder and replay look through the few pawns that matter, not the whole army. Its distances are the game's (`PawnDefaultsRes.world_load_distance` and `PawnDefaultsRes.world_nav_distance`), the same for every pawn: 320 and 128 m without them, and its own settings are hidden. The AI switch-off leaves a pawn on while this counts (`Pawn.is_keeping_world_loaded()`).
+
+### Settings and properties
+
+- `keeps_world_loaded: bool` = `false`: On: it keeps the world loaded around its pawn even without a player (a hero, say). Off (the default), only while a player has the pawn; a horde pawn freezes where nothing else keeps the ground loaded.
+- `pawn: Pawn` = `null`: The pawn this is a part of, or null outside a pawn (then it never counts).
+
+### Functions
+
+- `counts_on_this_machine() -> bool`: Whether it keeps the world loaded on this machine now: a player has the pawn or `keeps_world_loaded` is on, and the pawn is simulated here (another player's pawn on a client doesn't count there).
+
 ## StreamingSource
 
 `res://assets/scripts/streaming/StreamingSource.gd`, extends [`Node3D`](https://docs.godotengine.org/en/stable/classes/class_node3d.html)
 
 Marks something as keeping the world loaded around it.
 
-A [`ChunkStreamer`](#chunkstreamer) finds every source and loads chunks around the active ones. Add this as a child of whatever should keep the world loaded (an RTS camera, a spawner); it follows its parent, so it needs no code. Turn `active` off when it shouldn't count. A Pawn needs none: it's a source itself, and is in the group only while it might keep the world loaded.
+A [`ChunkStreamer`](#chunkstreamer) finds every source and loads chunks around the active ones. Add this as a child of whatever should keep the world loaded (an RTS camera, a spawner); it follows its parent, so it needs no code. Turn `active` off when it shouldn't count. A pawn's is a [`PawnStreamingSource`](#pawnstreamingsource), a default part, which counts while a player has the pawn.
 
 **The source contract.** Anything in `GROUP` with these counts as a source; the chunk streamer, [`TerrainNavFeeder`](../world/REFERENCE.md#terrainnavfeeder), AIActivationManager and the replay read sources only through them:
 - `global_position`, `load_distance`, `nav_distance` (metres).

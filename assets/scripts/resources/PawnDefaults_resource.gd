@@ -15,7 +15,7 @@ class_name PawnDefaultsRes
 ## set the manager scores and picks between, not a behaviour tree). Used instead of the parts list's behaviour-less one, and a
 ## player's pawn gets it too: its AI waits while a player has it and takes over when they let go. Empty: the parts list's.
 @export var ai_brain: PackedScene
-## How far a pawn that keeps the world loaded (a player's, or one with keeps_world_loaded on) loads ground around it, in metres.
+## How far a pawn that keeps the world loaded (a player's, or one whose PawnStreamingSource has keeps_world_loaded on) loads ground around it, in metres.
 @export_range(0.0, 2000.0, 1.0, "or_greater") var world_load_distance := 320.0
 ## How far nav is built around such a pawn, in metres. Building nav as far out as the ground would be slow (about 100 tiles a chunk),
 ## so it's shorter. 0 builds none. It can't exceed world_load_distance.

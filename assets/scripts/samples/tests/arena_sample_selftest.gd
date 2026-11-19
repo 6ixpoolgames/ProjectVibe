@@ -116,7 +116,7 @@ func _ready() -> void:
 	var own: Pawn = coordinator.get_pawn_of()
 	arena._toggle_spectating()
 	_check(own != null and coordinator.get_pawn_of() == null and coordinator.controller.is_spectating(), "U lets go of the pawn and flies as a spectator")
-	_check(not own.controller_manager.has_player() and own.keeps_world_loaded, "the pawn's AI controller has it now, and it keeps the world loaded")
+	_check(not own.controller_manager.has_player() and own.streaming_source.keeps_world_loaded, "the pawn's AI controller has it now, and it keeps the world loaded")
 	await _ticks(5)
 	arena._toggle_spectating()
 	_check(coordinator.get_pawn_of() == own and not coordinator.controller.is_spectating(), "U again takes it back")
