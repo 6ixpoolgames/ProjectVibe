@@ -152,8 +152,8 @@ func clear_input() -> void:
 	held_actions = 0
 
 
-## The end of every tick: what was held this tick, so the next tick can tell a press from a hold; and a tick with real input ends a
-## run of missing ones. The pawn calls this from its own end of tick.
+## Once this tick's input has been read: what was held, so the next tick can tell a press from a hold; and a tick with real input
+## ends a run of missing ones. The pawn calls this in its simulate step, after its abilities, before it moves.
 func finish_tick() -> void:
 	previous_held_actions = held_actions
 	if not _input_missing_this_tick:

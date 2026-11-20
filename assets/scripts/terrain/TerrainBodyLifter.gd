@@ -46,4 +46,8 @@ func _on_ground_raised(center: Vector2, radius: float) -> void:
 			continue
 		var ground := _terrain.height_at(at.x, at.z)
 		if at.y < ground:
-			body.global_position = Vector3(at.x, ground, at.z)
+			# A pawn is teleported, so the crowd, the state store and the move check know it was put there.
+			if body is Pawn:
+				(body as Pawn).teleport(Vector3(at.x, ground, at.z))
+			else:
+				body.global_position = Vector3(at.x, ground, at.z)

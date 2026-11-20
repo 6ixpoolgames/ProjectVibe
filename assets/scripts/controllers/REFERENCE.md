@@ -114,7 +114,7 @@ Only PlayerController calls `attach_player()` and `detach_player()`. Design: paw
 - `is_action_held(action: StringName) -> bool`: True if a named action is held this tick.
 - `was_action_pressed(action: StringName) -> bool`: True if a named action is held this tick but wasn't last tick: a press.
 - `clear_input() -> void`: Nothing pressed, no direction. Keeps where it looks. The pawn calls this when it dies, or when nobody drives it any more.
-- `finish_tick() -> void`: The end of every tick: what was held this tick, so the next tick can tell a press from a hold; and a tick with real input ends a run of missing ones. The pawn calls this from its own end of tick.
+- `finish_tick() -> void`: Once this tick's input has been read: what was held, so the next tick can tell a press from a hold; and a tick with real input ends a run of missing ones. The pawn calls this in its simulate step, after its abilities, before it moves.
 - `decides_own_input() -> bool`: True where this pawn's input is decided: offline, its owner's machine, or the server for a pawn nobody owns. False on the server for a client's pawn, whose input arrives over the network, and on a client for anyone else's pawn.
 - `has_player() -> bool`: True if a player controls this pawn. On a client, that's any player, not only this machine's.
 - `set_has_player(value: bool) -> void`: PossessionCoordinator tells the pawn's manager. Nothing else should call this.

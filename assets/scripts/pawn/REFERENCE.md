@@ -6,6 +6,8 @@ Every class in `assets/scripts/pawn/`, from its doc comments. The overview is in
 
 - [Pawn](#pawn)
 - [SharedPawnTable](#sharedpawntable)
+- [VisualPlacementGD](#visualplacementgd)
+- [VisualPlacer](#visualplacer)
 - [VisualSmoother](#visualsmoother)
 
 ## Pawn
@@ -69,12 +71,12 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 - `get_network_entity() -> NetworkEntity`: This pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
 - `_tick_input(_dt: float, tick: int) -> void`: The input phase: runs the AI, then asks the controller in charge for this tick's input, where this pawn's input is decided here. A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
 - `finish_move(at: Vector3, seconds: float) -> void`: Its mover moved this pawn to at, over seconds: it stands there on the ground, its velocity is what it really moved (as move_and_slide leaves it), and its tick finishes (pawn spec 8.22). The position is rounded as the state store will round it (TickStateComponent.round_position), so the commit changes nothing afterwards and a still pawn is exactly still, and sleeps.
-- `finish_written_move() -> void`: Its mover has already written this run's position, velocity and grounded through the state store (StateStore.write_through), so this only ends the run.
 - `move_by_physics_now() -> void`: Its mover couldn't move this pawn (a wall, an edge, no ground under where it was going), so it moves by physics now, in the same tick, which handles those, and finishes its tick. Its velocity is still this run's.
+- `get_visual_slot() -> int`: Its Visual's slot in the [`VisualPlacer`](#visualplacer) (VisualSmoother.slot), or -1 without a Visual. The crowd mover tells the placer about its pawns' runs by slot, all at once.
 - `get_store_handle() -> int`: Its handle in the state store (TickStateComponent.get_store_handle), or -1 without one.
 - `get_body_radius() -> float`: How wide this pawn's body is: its collision capsule's (or sphere's, or cylinder's) radius, scaled, in metres. 0.4 without one. Found once.
 - `get_body_shape() -> CollisionShape3D`: This pawn's collision shape node (its first CollisionShape3D child with a shape), or null. The CrowdMover sweeps it along a move to find walls. Found once.
-- `_can_sleep(tick: int) -> bool`: True if this pawn sleeps this tick (pawn spec 15.3); not the same as frozen or paused. A rule of its state and the tick number only, so nothing extra rolls back and server and client sleep on the same ticks. It sleeps when sleep_when_idle is on, it's grounded and still, nothing moved it, it isn't a check tick, and no effect or ability timer is running.
+- `_can_sleep(tick: int) -> bool`: True if this pawn sleeps this tick (pawn spec 15.3); not the same as frozen or paused. A rule of its state and the tick number only, so nothing extra rolls back and server and client sleep on the same ticks. It sleeps when sleep_when_idle is on, it's grounded and still, it isn't a check tick, and no effect or ability timer is running; its run also keeps it awake after a teleport.
 - `fired_since_last_run(tick: int, offset: int, interval: int) -> bool`: True if a rule that fires every interval ticks, on the ticks where (tick + offset) is a multiple of interval, fired on this tick or on one this pawn skipped since its last run. For the AI's schedules and the like, so a pawn that runs every Nth tick keeps them (pawn spec 8.21). With ticks_elapsed 1, it's (tick + offset) % interval == 0.
 - `fires_in_run(run_tick: int, run_length: int, offset: int, interval: int) -> bool` *(static)*: The same rule for any run: true if a rule that fires every interval ticks (where (tick + offset) is a multiple of interval) fires on run_tick or on one of the run_length - 1 ticks before it. AISensingManager asks it about a pawn's next run, before that run happens, so both use one rule.
 - `next_run_tick(tick: int) -> int`: The tick this pawn will next run after tick, if its step doesn't change before then. The same rule as _prepare_run, looking ahead from a tick it ran on: the first later tick that lines up with its step, or a whole step on. AISensingManager uses it to ask the worker-thread sensing job in time for a stepping pawn's next run.
@@ -105,18 +107,67 @@ Every pawn in the tree has a row, keyed by its entity id. Pawns NetworkSession n
 - `join(pawn: Node) -> void` *(static)*: Adds a pawn, making the table on first use. The key is its NetworkEntity's entity id (NetworkSession sets it before the pawn enters the tree), else the next key from `KEYS_WITHOUT_ID`.
 - `leave(pawn: Node) -> void` *(static)*: Takes a pawn out.
 
+## VisualPlacementGD
+
+`res://assets/scripts/pawn/VisualPlacementGD.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Places every pawn's Visual between ticks, in one call a frame: the GDScript twin of the C++ VisualPlacement, used where that library isn't available.
+
+Each slot is one drawn body: its Visual, its Model (turned, or none), where the body was after its last two runs and its yaw then, how many ticks the last run covered and when it ended, and what's left of a network correction. `place()` glides each Visual from the run before to the last one: by the tick driver's fraction, or across the whole run for a run longer than a tick (pawn spec 8.21); a correction fades out over about 100 ms (netcode spec 6.2). The [`VisualPlacer`](#visualplacer) owns one and runs it each frame. Both twins do exactly the same; pawn/tests/visual_placement_selftest compares them.
+
+### Functions
+
+- `add(visual: Object, model: Object, position: Vector3, yaw: float) -> int`: A new slot for this Visual and its Model (null: nothing turns), standing at position, facing yaw. Returns its number.
+- `remove(slot: int) -> void`: Frees a slot; its number is reused.
+- `snap(slot: int, position: Vector3, yaw: float) -> void`: The body was put somewhere without moving there (a rollback, a spawn, a teleport): its Visual goes straight there.
+- `note_run(slot: int, position: Vector3, yaw: float, span: int, tick: int) -> void`: A run ended on tick, covering span ticks: the Visual glides from where the last run left the body to position.
+- `note_runs(slots: PackedInt64Array, positions: PackedVector3Array, yaws: PackedFloat32Array, spans: PackedInt64Array, tick: int) -> void`: The same for many slots at once (the crowd mover's pawns); a slot below 0 is skipped.
+- `note_moved(slot: int, position: Vector3, yaw: float) -> void`: On a client, for a pawn someone else controls: moved between snapshots, so the Visual glides after it over one tick.
+- `add_correction(slot: int, jump: Vector3) -> void`: On a client: a correction moved the body by jump. The Visual keeps where it was and catches up.
+- `get_correction(slot: int) -> Vector3`: What's left of a correction on this slot.
+- `place(tick: int, fraction: float, delta: float, spans_runs: bool) -> void`: Places every slot's Visual: tick is the tick driver's, fraction how far it is towards the next, delta the frame's seconds. spans_runs: false without a tick driver, when every glide is one tick long.
+- `get_count() -> int`: Slots in use.
+
+## VisualPlacer
+
+`res://assets/scripts/pawn/VisualPlacer.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
+
+Places every pawn's Visual between ticks, once a frame, in one call: the "place what's drawn" pass (state store spec 12.5).
+
+Each pawn's [`VisualSmoother`](#visualsmoother) holds a slot here and tells it about its runs, snaps and corrections; the crowd mover tells it about all its pawns' runs at once (`note_runs()`). The work is in `placement`: the C++ VisualPlacement where the library has it, else its GDScript twin [`VisualPlacementGD`](#visualplacementgd). Made on first use (`get_or_make()`), under the TickDriver, so it's placed before the scene's own nodes run their frame (a camera following a Visual sees where it is this frame).
+
+```gdscript
+VisualPlacer.get_or_make(pawn).placement.snap(slot, position, yaw)
+```
+
+### Settings and properties
+
+- `current: VisualPlacer` = `null`: The one placer, or null until something needs it.
+- `use_cpp: bool` = `true`: Off: the GDScript twin, even where the C++ one is available. Only read when the placer is made.
+- `placement: Object` = `null`: The slots and the placing: a C++ VisualPlacement or a [`VisualPlacementGD`](#visualplacementgd).
+
+### Functions
+
+- `get_or_make(from: Node) -> VisualPlacer` *(static)*: The placer, made now if there's none. from: any node in the tree, which it's made beside.
+- `note_runs(slots: PackedInt64Array, positions: PackedVector3Array, yaws: PackedFloat32Array, spans: PackedInt64Array, tick: int) -> void`: Many runs at once: each slot's Visual glides to its position and yaw over its span (the crowd mover's pawns). A slot below 0 is skipped.
+
 ## VisualSmoother
 
 `res://assets/scripts/pawn/VisualSmoother.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 Draws a pawn's Visual smoothly between ticks: it glides between where the body was after its last two runs, turns the model the same way, and fades network corrections out.
 
-The pawn makes one when it has a child called Visual, and tells it after every run (`note_run()`), after a rollback puts it back (`snap()`), and from the network hooks (`note_moved()`, `add_correction()`). It only ever reads game state. A pawn running every Nth tick moves once per run, so its Visual glides across the whole run (pawn spec 8.21); a correction fades over about 100 ms, a quick slide rather than a jump (netcode spec 6.2).
+The pawn makes one when it has a child called Visual, and tells it after every run it finishes itself (`note_run()`), after a rollback or a teleport puts it somewhere (`snap()`), and from the network hooks (`note_moved()`, `add_correction()`). It holds the pawn's slot in the [`VisualPlacer`](#visualplacer), which places every Visual once a frame; the crowd mover tells the placer about its pawns' runs itself, all at once. It only ever reads game state. A pawn running every Nth tick moves once per run, so its Visual glides across the whole run (pawn spec 8.21); a correction fades over about 100 ms, a quick slide rather than a jump (netcode spec 6.2).
+
+### Settings and properties
+
+- `slot: int` = `-1`: This pawn's slot in the [`VisualPlacer`](#visualplacer), or -1 while it's out of the tree.
 
 ### Functions
 
-- `setup(pawn: Pawn, visual: Node3D) -> void`: Starts smoothing this Visual of this pawn. The Visual is placed by this part, between ticks, not by the body.
-- `note_run(span: int, tick: int) -> void`: A run just ended on this tick, covering span ticks: the Visual glides from where the last one left the body to where it is now.
-- `snap() -> void`: The body was put somewhere without moving there (a rollback, a spawn): the Visual goes straight there.
+- `setup(pawn: Pawn, visual: Node3D) -> void`: Starts smoothing this Visual of this pawn. The Visual is placed by the VisualPlacer, between ticks, not by the body.
+- `note_run(span: int, tick: int) -> void`: A run just ended on this tick, covering span ticks: the Visual glides from where the last one left the body to where it is now. Where the pawn isn't simulated here, every glide is one tick long.
+- `snap() -> void`: The body was put somewhere without moving there (a rollback, a spawn, a teleport): the Visual goes straight there.
 - `note_moved() -> void`: On a client, for a pawn someone else controls: it was just moved between snapshots, so the Visual glides after it.
 - `add_correction(jump: Vector3) -> void`: On a client: a correction moved the body by this much. The Visual keeps where it was and catches up over about 100 ms.
+- `get_correction_offset() -> Vector3`: What's left of a correction, still fading.

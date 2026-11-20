@@ -20,6 +20,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-21
 
+- **`VisualPlacement`** (new): places every pawn's Visual between ticks in one call a frame, for the `VisualPlacer`; slots hold the last two runs' positions and yaws, the run's length and a fading correction. Twin: `pawn/VisualPlacementGD.gd`. Drawing went from 0.65 ms a frame (303 `_process` calls) to 0.31 at 300 pawns (state store spec 13.9).
+
 - **`StateStore.find_long_moves(tick, dt, allowance, slack)`** (new): the MoveSanityCheck's first pass in one call, returning only the moves an entity's velocity doesn't explain. The check went from 0.12 to 0.03 ms a tick at 300 pawns.
 
 - **`StateStore.mark_changed` drops values written through** for that entity earlier in the tick, so the commit reads its nodes. A teleport after the crowd mover wrote a pawn's move was recorded at the crowd's position (state store spec 13.8).

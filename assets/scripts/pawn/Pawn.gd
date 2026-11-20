@@ -129,7 +129,7 @@ var _next_due_tick := 0 # when this tick's run is followed by the next, for due_
 var _entity: NetworkEntity = null
 var _visual: Node3D = null
 var _smoother: VisualSmoother = null # draws Visual between ticks; null without a Visual
-var _position_after_run := Vector3.ZERO # where its last run left the body: "nothing moved it since" for sleeping and still moves
+var _moved_since_run := false # teleported since its last run began: no sleeping and no skipped move until it has run again
 var _fallback_tick := 0
 var _frozen := false
 
@@ -193,7 +193,6 @@ func _ready() -> void:
 		_smoother.name = "VisualSmoother"
 		add_child(_smoother)
 		_smoother.setup(self, _visual)
-	_position_after_run = global_position
 	# How often it runs and when it last did roll back, so a replay runs on the same ticks (pawn spec 8.21); its team and step are
 	# pushed when they change. It's recorded only when it runs or something marks it (mark_state_changed), so a pawn on a load step
 	# costs the store almost nothing on the ticks it skips.
@@ -279,6 +278,7 @@ func teleport(to: Vector3) -> void:
 		position = _tick_state.round_position(position) # as the recording rounds it, so the store and the node agree
 		_tick_state.mark_changed()
 	last_teleport_tick = TickDriver.tick
+	_moved_since_run = true
 	if CrowdMover.current:
 		CrowdMover.current.note_moved(self)
 	if _smoother:
@@ -328,10 +328,14 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	# The driver needn't call it again before its next run (worked out in _prepare_run). Set here in simulate, not in _prepare_run:
 	# input runs _prepare_run first, and a due_tick set there would make the driver skip this same tick's simulate.
 	due_tick = _next_due_tick
+	# Teleported since its last run: it stays awake for this one. A teleport during this run sets it again, for the next.
+	var was_moved := _moved_since_run
+	_moved_since_run = false
 	# Sleeping (pawn spec 15.3). A sleeping pawn only does the bookkeeping at the end.
-	var sleeping := _can_sleep(tick)
+	var sleeping := not was_moved and _can_sleep(tick)
 	is_sleeping = sleeping
 	if sleeping:
+		_finish_input()
 		_finish_tick()
 		return
 	# Abilities steer, then gravity, then one move_and_slide. Gravity goes by whether it was on the ground when the tick began, so a
@@ -344,11 +348,12 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	if ability_manager:
 		ability_manager.tick_abilities(dt)
 	PerfScopes.end(&"pawn.abilities", abilities_started)
+	_finish_input() # the abilities were the last to read this tick's input
 	if not was_grounded:
 		velocity.y -= _gravity_strength() * dt
 	# move_and_slide uses Godot's physics delta. This scales it so that one tick moves velocity * tick dt.
 	# Standing still with nothing to move it: skip the solve (see skip_move_when_still).
-	if skip_move_when_still and was_grounded and velocity == Vector3.ZERO and global_position == _position_after_run and not _is_check_tick(tick):
+	if skip_move_when_still and was_grounded and velocity == Vector3.ZERO and not was_moved and not _moved_since_run and not _is_check_tick(tick):
 		PerfScopes.add(&"pawn.move_skipped", 0)
 		_finish_tick()
 		return
@@ -389,17 +394,17 @@ func finish_move(at: Vector3, seconds: float) -> void: # public, since its mover
 	_finish_tick()
 
 
-## Its mover has already written this run's position, velocity and grounded through the state store (StateStore.write_through), so
-## this only ends the run.
-func finish_written_move() -> void: # public, since its mover calls it
-	_finish_tick()
-
-
 ## Its mover couldn't move this pawn (a wall, an edge, no ground under where it was going), so it moves by physics now, in the same
 ## tick, which handles those, and finishes its tick. Its velocity is still this run's.
 func move_by_physics_now() -> void: # public, since its mover calls it
 	_move_with_physics()
 	_finish_tick()
+
+
+## Its Visual's slot in the [VisualPlacer] (VisualSmoother.slot), or -1 without a Visual. The crowd mover tells the placer about its
+## pawns' runs by slot, all at once.
+func get_visual_slot() -> int:
+	return _smoother.slot if _smoother else -1
 
 
 ## Its handle in the state store (TickStateComponent.get_store_handle), or -1 without one.
@@ -431,26 +436,27 @@ func get_body_shape() -> CollisionShape3D:
 	return _body_shape
 
 
-# The end of every run, sleeping or not: where the body is now, for the sleeping check and the smoother, and the input bookkeeping.
+# The end of a run the pawn finishes itself, sleeping or not: its Visual glides to where the body is now. The crowd mover does this
+# for the pawns it moves, all at once (VisualPlacer.note_runs).
 func _finish_tick() -> void:
-	_position_after_run = global_position
 	if _smoother:
 		_smoother.note_run(ticks_elapsed, _last_run_tick)
-	# The input bookkeeping, on the ControllerManager: what was held this tick, so the next tick can tell a press from a hold, and a
-	# tick with real input ends a run of missing ones.
+
+
+# Once its abilities have read this tick's input: the ControllerManager's bookkeeping (what was held, so the next tick can tell a press
+# from a hold, and whether input went missing). Before the move, so the crowd mover needn't call each pawn back for it.
+func _finish_input() -> void:
 	if controller_manager:
 		controller_manager.finish_tick()
 
 
 ## True if this pawn sleeps this tick (pawn spec 15.3); not the same as frozen or paused. A rule of its state and the tick number
 ## only, so nothing extra rolls back and server and client sleep on the same ticks. It sleeps when sleep_when_idle is on, it's grounded
-## and still, nothing moved it, it isn't a check tick, and no effect or ability timer is running.
+## and still, it isn't a check tick, and no effect or ability timer is running; its run also keeps it awake after a teleport.
 func _can_sleep(tick: int) -> bool:
 	if not sleep_when_idle or not grounded or velocity != Vector3.ZERO:
 		return false
 	if controller_manager and (controller_manager.move_input != Vector3.ZERO or controller_manager.held_actions != 0):
-		return false
-	if global_position != _position_after_run:
 		return false
 	if _is_check_tick(tick): # shared with skip_move_when_still
 		return false
@@ -555,7 +561,7 @@ func _on_state_loaded(_tick: int) -> void:
 			apply_floor_snap()
 	position = saved_position
 	velocity = saved_velocity
-	_position_after_run = global_position
+	_moved_since_run = false # it stands where the loaded run left it
 	if _smoother:
 		_smoother.snap()
 

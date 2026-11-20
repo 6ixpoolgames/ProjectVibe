@@ -15,6 +15,10 @@ None in this folder yet. Related: `TerrainSettings`, which describes a terrain, 
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-21
+
+- **`TerrainBodyLifter` lifts a pawn with `Pawn.teleport`**, so the crowd, the state store and the move check know it was put there, and a sleeping pawn wakes (state store spec 13.9).
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): moved to the README's new "How edits work" section: the edit log's byte format, multiplayer and saving rules, the body lifter's rules and what `_make_chunk_markers` must return. `TerrainGenerator`'s teaching comments (`GDScript note:`, the "how to read this file" block, the history of the first generator) are gone. No stale comments found.

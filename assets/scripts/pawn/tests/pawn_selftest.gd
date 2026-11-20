@@ -479,7 +479,8 @@ func _test_resting() -> void:
 		if pawn.is_sleeping:
 			rested_again += 1
 	_check(rested_again == pawn.sleep_check_ticks - 1, "and once it has stopped, it sleeps again (%d of %d ticks)" % [rested_again, pawn.sleep_check_ticks])
-	pawn.global_position += Vector3(0.0, 2.0, 0.0)
+	# Claude 2026-11-21: through Pawn.teleport, which is what wakes it now; a position set directly no longer does.
+	pawn.teleport(pawn.global_position + Vector3(0.0, 2.0, 0.0))
 	await _ticks(1)
 	_check(not pawn.is_sleeping, "moved by something else (a teleport into the air): it wakes")
 	await _ticks(60)

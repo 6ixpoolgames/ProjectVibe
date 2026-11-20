@@ -9,6 +9,10 @@ Movement is this folder: `CrowdMover`, a GameMode module, and its C++ batch `Cro
 
 None found in the documentation pass. The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as the fallback where the C++ library isn't loaded.
 
+## 2026-11-21
+
+- **Calls no pawn back after a crowd move**: the written pawns' Visuals are told in one `VisualPlacer.note_runs` call (each member's slot is kept with its other numbers), and their input bookkeeping happens in their own simulate. Finishing went from 0.36 to 0.22 ms a tick, the crowd from 0.85 to 0.70, at 300 pawns (state store spec 13.9).
+
 ## 2026-11-20
 
 - **Writes its moved pawns through the state store** (`write_moves_through`, on): position, velocity and grounded in three `StateStore.write_through` calls instead of one `Pawn.finish_move` each; the pawn only ends its run (`Pawn.finish_written_move`). Finishing went from 0.43 to 0.34 ms a tick at 300 pawns (state store spec 13.8).

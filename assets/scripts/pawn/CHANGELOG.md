@@ -16,6 +16,12 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 
 ## 2026-11-21
 
+- **`VisualPlacer`** and **`VisualPlacementGD`** (new): the "place what's drawn" pass. One placer, made on first use under the TickDriver, places every pawn's Visual once a frame (the C++ `VisualPlacement`, or its GDScript twin). `VisualSmoother` no longer runs each frame: it holds the pawn's slot in the placer (`slot`, `get_correction_offset()`, new) and forwards runs, snaps, moves and corrections (state store spec 13.9).
+- **`get_visual_slot()`** (new): the Visual's slot in the placer, for the crowd mover.
+- **`finish_written_move()` removed**: the crowd mover no longer calls the pawns it moved.
+- **The input bookkeeping moved** from the end of the run to just after the abilities, in the pawn's own simulate (`_finish_input`), so it doesn't wait for the crowd's move.
+- **`_position_after_run` is replaced by `_moved_since_run`**, set by `teleport` and cleared as a run begins and by a rollback load: a teleported pawn stays awake for its next run. A position set directly no longer wakes a sleeping pawn; use `teleport`.
+
 - **`teleport` is recorded even after the crowd mover wrote the pawn's move this tick**: the store's `mark_changed`, which it calls, now drops the written values.
 
 ## 2026-11-20

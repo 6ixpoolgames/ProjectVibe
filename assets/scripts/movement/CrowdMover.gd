@@ -75,6 +75,7 @@ var _member_slopes := PackedFloat32Array()
 var _member_floor_normals := PackedFloat32Array()
 var _member_shapes: Array[Shape3D] = []
 var _member_shape_offsets := PackedVector3Array()
+var _member_visual_slots := PackedInt64Array() # its Visual's slot in the VisualPlacer, or -1
 # This tick's, before the batch: read from their nodes, not the store. Untyped: a pawn freed after its move is skipped, and a typed
 # loop variable errors on a freed one.
 var _moved_this_tick: Array = []
@@ -151,6 +152,7 @@ func add_pawn(pawn: Pawn) -> void:
 	_member_floor_normals.append(0.0)
 	_member_shapes.append(null)
 	_member_shape_offsets.append(Vector3.ZERO)
+	_member_visual_slots.append(-1)
 
 
 ## Takes a pawn out (it calls this as it leaves the tree). The last member takes its slot.
@@ -171,6 +173,7 @@ func remove_pawn(pawn: Pawn) -> void:
 		_member_floor_normals[i] = _member_floor_normals[last]
 		_member_shapes[i] = _member_shapes[last]
 		_member_shape_offsets[i] = _member_shape_offsets[last]
+		_member_visual_slots[i] = _member_visual_slots[last]
 	_members.resize(last)
 	_member_handles.resize(last)
 	_member_ready.resize(last)
@@ -179,6 +182,7 @@ func remove_pawn(pawn: Pawn) -> void:
 	_member_floor_normals.resize(last)
 	_member_shapes.resize(last)
 	_member_shape_offsets.resize(last)
+	_member_visual_slots.resize(last)
 
 
 ## A pawn moved by physics this tick (Pawn._move_with_physics) or teleported (Pawn.teleport): the batch reads where it is from its
@@ -270,19 +274,24 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 				moved_ok)
 	var finish_started := PerfScopes.begin()
 	# The moved pawns with a row in the store get their position, velocity and grounded written through it (into their nodes and the
-	# row this tick's commit records) in three calls; the rest are finished one by one.
+	# row this tick's commit records) in three calls, and their Visuals told in one (VisualPlacer.note_runs): nothing calls each pawn
+	# back. Their input bookkeeping was done in their own simulate. The rest are finished one by one.
 	var store: Object = _store_to_write_through()
 	var written_handles := PackedInt64Array()
 	var written_positions: Array = []
 	var written_velocities: Array = []
-	var written_pawns: Array[Pawn] = []
+	var drawn_slots := PackedInt64Array()
+	var drawn_positions := PackedVector3Array()
+	var drawn_yaws := PackedFloat32Array()
+	var drawn_spans := PackedInt64Array()
 	for i in count:
 		var pawn := pawns[i]
 		if moved_ok[i] != 1:
 			fallbacks_last_tick += 1
 			pawn.move_by_physics_now()
 			continue
-		var handle: int = _member_handles[_member_index[pawn]] if store else -1
+		var member: int = _member_index[pawn]
+		var handle: int = _member_handles[member] if store else -1
 		if handle < 0:
 			pawn.finish_move(moved[i], seconds[i])
 			continue
@@ -291,16 +300,21 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 		written_handles.append(handle)
 		written_positions.append(moved[i]) # its own position too: a member with a row has an unmoved, unturned parent
 		written_velocities.append(Vector3(step.x, 0.0, step.z) / seconds[i] if seconds[i] > 0.0 else Vector3.ZERO)
-		written_pawns.append(pawn)
-	if not written_pawns.is_empty():
+		if _member_visual_slots[member] >= 0:
+			# Before rounding: the Visual may stand up to half a millimetre off the body until the next run, which can't be seen.
+			drawn_slots.append(_member_visual_slots[member])
+			drawn_positions.append(moved[i])
+			drawn_yaws.append(pawn.yaw)
+			drawn_spans.append(pawn.ticks_elapsed)
+	if not written_handles.is_empty():
 		var grounded: Array = []
-		grounded.resize(written_pawns.size())
+		grounded.resize(written_handles.size())
 		grounded.fill(true)
 		store.write_through(written_handles, &"position", written_positions, tick)
 		store.write_through(written_handles, &"velocity", written_velocities, tick)
 		store.write_through(written_handles, &"grounded", grounded, tick)
-		for pawn in written_pawns:
-			pawn.finish_written_move()
+	if not drawn_slots.is_empty() and VisualPlacer.current:
+		VisualPlacer.current.note_runs(drawn_slots, drawn_positions, drawn_yaws, drawn_spans, tick)
 	PerfScopes.end(&"movement.crowd_finish", finish_started)
 	PerfScopes.end(&"movement.crowd", started)
 	# A pawn handed back to physics above noted itself too; next tick it's read from its node, which is still right.
@@ -364,6 +378,7 @@ func _fill_member(i: int) -> void:
 	_member_shapes[i] = body.shape if body else null
 	_member_shape_offsets[i] = body.position if body else Vector3.ZERO
 	_member_handles[i] = _store_handle_of(pawn)
+	_member_visual_slots[i] = pawn.get_visual_slot() # kept while it's in the tree, as its membership is
 
 
 # Its store handle, if the store's "position" for it is its world position: NO_STORE_ROW under a parent that's moved or turned, since

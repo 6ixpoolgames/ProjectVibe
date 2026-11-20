@@ -552,7 +552,23 @@ So: what pays is the abilities' state becoming pushed columns, written when it c
 
 **`MoveSanityCheck`** (diagnostics, every build, after each tick, `DiagnosticsManager.check_moves`): from the store alone, warns once per entity that moved further than its velocity explains (the faster of its last two velocities, over the ticks its run covered, times 1.5, plus 0.5 m), unless it teleported. A dash's velocity explains a dash's move, so no ability needs anything for it; speed limits themselves are left to another check. Its first pass over every entity is the store's `find_long_moves` (both twins), which returns only the long moves; the check looks up the owner of those alone. 0.03 ms a tick at 300 pawns (0.12 when the pass was GDScript reads, 2026-11-20), so it runs in release builds too (owner's call, 2026-11-21).
 
-**Not done:** moving the rest of the finish (input bookkeeping, `_position_after_run`, the smoother's `note_run`) out of the per-pawn call, about 0.2 ms more, left for a decision now the commit's real cost is known.
+**Not done here:** moving the rest of the finish out of the per-pawn call; done in 13.9.
+
+### 13.9 Finishing the crowd mover: nothing calls each pawn back *(Claude, 2026-11-21)*
+
+The owner's call (2026-11-21): finish the crowd mover before the abilities step, with all three pieces, the drawing pass included. After a crowd move, each pawn was called back for three things; each has moved:
+
+- **Input bookkeeping** (`ControllerManager.finish_tick`): called in the pawn's own simulate, after its abilities (the last to read the input), before it moves. What the commit records is unchanged.
+- **"Has something moved it since its run?"** `_position_after_run` is replaced by a flag, `_moved_since_run`, which `Pawn.teleport` and a rollback load set or clear. A teleported pawn doesn't sleep or skip its move on its next run. A position set directly no longer wakes a sleeping pawn: everything that moves a pawn instantly goes through `teleport` (the `TerrainBodyLifter` now does), and the `MoveSanityCheck` warns about anything that doesn't.
+- **Smoothing: the "place what's drawn" pass (12.5).** One `VisualPlacer` (made on first use, under the TickDriver) places every pawn's Visual once a frame in one call: the C++ `VisualPlacement`, or its twin `VisualPlacementGD`. Each `VisualSmoother` holds the pawn's slot and tells the placer about the runs it finishes itself, snaps and corrections; the crowd tells it about all its pawns' runs in one call (`VisualPlacer.note_runs`). The placer keeps the last two runs' positions and yaws itself rather than reading the store's frames: a pawn on a load step has rows copied forward between its runs, a teleport between runs would glide from the wrong row, and a client's remote pawns aren't committed at all, so reading frames would need all three handled for no gain.
+
+| Measured (300-pawn mass battle, headless, `--size=100`, two runs each, against step 4 the same day) | Step 4 | Now |
+|---|---|---|
+| `movement.crowd`, ms a tick | 0.85 | 0.70 |
+| finishing the moved pawns (`crowd_finish`) | 0.36 | 0.22 |
+| Drawing the Visuals (`animation.smoothing`), ms a frame | 0.65 (303 calls) | 0.31 (1 call) |
+
+What's left in the finish is the GDScript loop building the lists for the three write-throughs and the placer (about 2 µs a pawn). The placer's 0.31 ms is the engine's own cost of moving 303 nodes and turning their models.
 
 ## 14. Open
 

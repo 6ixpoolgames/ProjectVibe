@@ -31,7 +31,8 @@ const NOT_ROLLED_BACK := {
 	# Claude 2026-11-19: smoothing moved to VisualSmoother (drawing only); what's left on the pawn is where its last run left it.
 	"Pawn:_next_due_tick": "worked out in _prepare_run from the step, the tick and its own number, and used the same tick",
 	"Pawn:due_tick": "worked out after each run from the step and _last_run_tick, which roll back, and set to 0 by a load (_on_state_loaded); only tells the driver when to call it",
-	"Pawn:_position_after_run": "where its last run left the body: set from the position after a load (_on_state_loaded), and a pawn doesn't move between its runs",
+	# Claude 2026-11-21: replaces _position_after_run; set by a teleport, cleared as a run begins and by a load.
+	"Pawn:_moved_since_run": "teleported since its last run began: cleared as each run begins and by a load (_on_state_loaded); only keeps a pawn awake one run longer",
 	# Worked out fresh every tick from rolled-back state (Pawn._can_sleep: "nothing remembered"); kept for readouts.
 	"Pawn:is_sleeping": "worked out each tick",
 	# Walk's and Sprint's copies of their stats, read again whenever the StatManager's version changes (pawn spec 15.2). Sprint fills

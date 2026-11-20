@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 159 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 161 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -159,6 +159,8 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [ToyWaddle](../assets/scripts/visuals/REFERENCE.md#toywaddle) | [visuals](../assets/scripts/visuals/README.md) | Node3D | Makes a pawn's model move like a toy being played with: rocking, hopping, leaning into a dash and falling over when it dies. |
 | [TurnToFaceStep](../assets/scripts/abilities/REFERENCE.md#turntofacestep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | Turns the pawn toward where it looks, following the look as it moves, at the pawn's TurnRate stat. |
 | [VirtualCamera](../assets/scripts/camera/REFERENCE.md#virtualcamera) | [camera](../assets/scripts/camera/README.md) | Node3D | A place for the real camera to be. |
+| [VisualPlacementGD](../assets/scripts/pawn/REFERENCE.md#visualplacementgd) | [pawn](../assets/scripts/pawn/README.md) | RefCounted | Places every pawn's Visual between ticks, in one call a frame: the GDScript twin of the C++ VisualPlacement, used where that library isn't available. |
+| [VisualPlacer](../assets/scripts/pawn/REFERENCE.md#visualplacer) | [pawn](../assets/scripts/pawn/README.md) | Node | Places every pawn's Visual between ticks, once a frame, in one call: the "place what's drawn" pass (state store spec 12.5). |
 | [VisualSmoother](../assets/scripts/pawn/REFERENCE.md#visualsmoother) | [pawn](../assets/scripts/pawn/README.md) | Node | Draws a pawn's Visual smoothly between ticks: it glides between where the body was after its last two runs, turns the model the same way, and fades network corrections out. |
 | [WaitStep](../assets/scripts/abilities/REFERENCE.md#waitstep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | A timed pause, such as an attack's recovery: it does nothing but take its length_ticks. |
 | [WalkAbility](../assets/scripts/abilities/REFERENCE.md#walkability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | Walking on the ground: accelerating, slowing, steering in the air and turning to face where it's going. The default locomotion. |
