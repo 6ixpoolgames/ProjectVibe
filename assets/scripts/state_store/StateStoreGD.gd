@@ -34,6 +34,10 @@ class _Entity:
 	var paths: Array[NodePath] = []
 	var encodings: Array[StringName] = []
 	var pushed: Array = []
+	# Values written through for the commit of written_tick, one per column, and which columns hold one.
+	var written_tick := -1
+	var written: Array = []
+	var written_mask := PackedByteArray()
 
 
 class _Layout:
@@ -285,11 +289,54 @@ func set_carry_forward(handle: int, on: bool) -> void:
 		entity.changed = true
 
 
-## Something changed this entity since the last commit, so the next one reads its nodes.
+## Something changed this entity since the last commit, so the next one reads its nodes, all of them: values written through for it
+## before this call are dropped.
 func mark_changed(handle: int) -> void:
 	var entity := _entity_of(handle)
 	if entity:
 		entity.changed = true
+		# Values written through earlier this tick may be stale now (a teleport after the crowd moved it): the commit reads the nodes.
+		entity.written_tick = -1
+
+
+## Writes one column, by name, for many entities now: into each one's node (rounded first, as the commit rounds) and into the row the
+## commit for that tick records, which then skips reading that node. For a batch that moves many entities at once (the crowd mover).
+## Whatever writes the same property after this, in the same tick, must write through as well or call [method mark_changed], or the
+## row misses it. Returns how many
+## it wrote; an entity that isn't bound, or whose layout lacks the column, is skipped.
+func write_through(handles: PackedInt64Array, column: StringName, values: Array, tick: int) -> int:
+	var last_layout := -1
+	var index := -1
+	var wrote := 0
+	for i in mini(handles.size(), values.size()):
+		var handle := handles[i]
+		var layout := _layout_of(handle)
+		if layout == null:
+			continue
+		var l := (handle >> _SLOT_BITS) & _LAYOUT_MASK
+		if l != last_layout:
+			last_layout = l
+			index = layout.names.find(String(column))
+		if index < 0 or layout.pushed[index]:
+			continue
+		var entity := layout.slots[handle & _SLOT_MASK]
+		if not entity.bound:
+			continue
+		var node := instance_from_id(entity.node_ids[index])
+		if node == null:
+			continue
+		var value: Variant = StateEncoding.quantize(values[i], entity.encodings[index]) if entity.round_values else values[i]
+		node.set_indexed(entity.paths[index], value)
+		if entity.written_tick != tick:
+			entity.written_tick = tick
+			entity.written.resize(layout.width)
+			entity.written_mask.resize(layout.width)
+			entity.written_mask.fill(0)
+		entity.written[index] = StateEncoding.copy_value(value)
+		entity.written_mask[index] = 1
+		entity.changed = true # a carry-forward entity is committed from its nodes and these values, not copied forward
+		wrote += 1
+	return wrote
 
 
 ## The end of a tick: every active entity's row for this tick. Returns the handles the store couldn't gather (unbound, or a node gone,
@@ -428,6 +475,75 @@ func get_column(layout_index: int, column: int, tick: int) -> Dictionary:
 	return {"handles": handles, "values": values}
 
 
+## One Vector3 column, by name, for each of these entities at a tick, in their order: one call for a whole crowd instead of one read
+## a node each. A NaN x where the row isn't held, the entity's layout has no such column, or the value isn't a Vector3.
+func get_vector3s(handles: PackedInt64Array, column: StringName, tick: int) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	out.resize(handles.size())
+	var none := Vector3(NAN, 0.0, 0.0)
+	var last_layout := -1
+	var index := -1
+	for i in handles.size():
+		var handle := handles[i]
+		out[i] = none
+		if not has_row(handle, tick):
+			continue
+		var l := (handle >> _SLOT_BITS) & _LAYOUT_MASK
+		var layout := _layouts[l]
+		if l != last_layout:
+			last_layout = l
+			index = layout.names.find(String(column))
+		if index < 0:
+			continue
+		var value: Variant = layout.cells[((handle & _SLOT_MASK) * _depth + _frame_of(tick)) * layout.width + index]
+		if value is Vector3:
+			out[i] = value
+	return out
+
+
+## The move check's first pass ([MoveSanityCheck]): every entity, in a layout with Vector3 "position" and "velocity" columns, whose
+## move from tick - 1 to tick is longer than max(|velocity then|, |velocity now|) * dt * allowance + slack. Returns {"handles",
+## "moved", "speeds", "checked"}: the long moves, their lengths and the speeds they were held to, and how many moves were compared.
+func find_long_moves(tick: int, dt: float, allowance: float, slack: float) -> Dictionary:
+	var handles := PackedInt64Array()
+	var moved := PackedFloat32Array()
+	var speeds := PackedFloat32Array()
+	var checked := 0
+	var before := tick - 1
+	# Both rows must still be in the history.
+	if before >= 0 and before > _now - _depth:
+		var frame_now := _frame_of(tick)
+		var frame_before := _frame_of(before)
+		for l in _layouts.size():
+			var layout := _layouts[l]
+			var position := layout.names.find("position")
+			var velocity := layout.names.find("velocity")
+			if position < 0 or velocity < 0:
+				continue
+			for slot in layout.slots.size():
+				var row_now := slot * _depth + frame_now
+				var row_before := slot * _depth + frame_before
+				var generation := layout.row_generation[row_now]
+				# The same entity in both rows: a slot reused in between has a new generation.
+				if generation == 0 or layout.row_tick[row_now] != tick or layout.row_tick[row_before] != before \
+						or layout.row_generation[row_before] != generation:
+					continue
+				var at_now: Variant = layout.cells[row_now * layout.width + position]
+				var at_before: Variant = layout.cells[row_before * layout.width + position]
+				var velocity_now: Variant = layout.cells[row_now * layout.width + velocity]
+				var velocity_before: Variant = layout.cells[row_before * layout.width + velocity]
+				if not (at_now is Vector3 and at_before is Vector3 and velocity_now is Vector3 and velocity_before is Vector3):
+					continue
+				checked += 1
+				var distance: float = (at_now as Vector3).distance_to(at_before)
+				var speed := maxf((velocity_now as Vector3).length(), (velocity_before as Vector3).length())
+				if distance > speed * dt * allowance + slack:
+					handles.append(_make_handle(generation, l, slot))
+					moved.append(distance)
+					speeds.append(speed)
+	return {"handles": handles, "moved": moved, "speeds": speeds, "checked": checked}
+
+
 ## A checksum of every row held for that tick, in layout and slot order. The C++ store gives the same number.
 func frame_checksum(tick: int) -> int:
 	var all: Array = [tick]
@@ -528,9 +644,13 @@ func _commit_one(layout: _Layout, slot: int, tick: int, may_carry: bool) -> bool
 		nodes[c] = node
 	var row := slot * _depth + _frame_of(tick)
 	var base := row * layout.width
+	var has_written := entity.written_tick == tick
 	for c in layout.width:
 		if layout.pushed[c]:
 			layout.cells[base + c] = StateEncoding.copy_value(entity.pushed[c])
+			continue
+		if has_written and entity.written_mask[c] == 1:
+			layout.cells[base + c] = entity.written[c] # written through this tick, already rounded and copied: no node read
 			continue
 		var node: Object = nodes[c]
 		var value: Variant = node.get_indexed(entity.paths[c])

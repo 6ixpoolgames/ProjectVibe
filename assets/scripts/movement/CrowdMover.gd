@@ -8,6 +8,11 @@
 ## threads, walls from the nav mesh); without it a GDScript twin uses physics sweeps and rays, and must give the same answer. A player's
 ## pawn, anything on a client and anything in the air always moves by physics. [member enabled] and [member separation_strength] are in
 ## the start menu's match options. Diagnostics: "movement.crowd", "movement.crowd_queries" and "movement.crowd_fallbacks" (F4).
+##
+## Every pawn in the tree is a member ([method add_pawn], from the pawn itself), with what the batch needs of it found once. The other
+## pawns it keeps clear of stand where the state store's last frame has them (one call for all), except the few that moved by
+## physics or teleported this tick ([method note_moved]), read from their nodes. A pawn otherwise moved by code since the last commit
+## counts at its old place for one tick, which collision corrects (state store spec 13.7).
 class_name CrowdMover
 extends GameModeModule
 
@@ -37,6 +42,9 @@ static var current: CrowdMover = null
 ## On: the batch in C++ (CrowdBatch: worker threads, walls from the nav mesh) when the navcore library is there. Off: the GDScript
 ## batch, with walls from physics sweeps.
 @export var use_cpp_batch := true
+## On: the moved pawns' position, velocity and grounded are written through the state store (into their nodes and this tick's row,
+## in three calls), so the commit doesn't read them back. Off: each pawn is finished on its own ([method Pawn.finish_move]).
+@export var write_moves_through := true
 
 ## Runs after every pawn in TickDriver's simulate phase (pawns register at 0).
 const TICK_ORDER := 1000000
@@ -53,6 +61,23 @@ var _seconds := PackedFloat32Array()
 var _ray := PhysicsRayQueryParameters3D.new()
 var _sweep := PhysicsShapeQueryParameters3D.new() # the wall check
 var _cpp_batch: Object = null # the C++ batch, made on first use (_get_cpp_batch)
+# Every pawn in the tree, in parallel arrays (a pawn's index is the same in each), with what the batch needs of it. A leaving pawn's
+# slot takes the last one's (remove_pawn). Its store handle: -1 until known, NO_STORE_ROW when its store position isn't a world
+# position (a parent that's moved or turned). Its shape's numbers are found on first use (_member_ready 0 until then), since a pawn
+# joins before its shape may be there.
+const NO_STORE_ROW := -2
+var _members: Array[Pawn] = []
+var _member_index := {} # Pawn -> its index
+var _member_handles := PackedInt64Array()
+var _member_ready := PackedByteArray()
+var _member_radii := PackedFloat32Array()
+var _member_slopes := PackedFloat32Array()
+var _member_floor_normals := PackedFloat32Array()
+var _member_shapes: Array[Shape3D] = []
+var _member_shape_offsets := PackedVector3Array()
+# This tick's, before the batch: read from their nodes, not the store. Untyped: a pawn freed after its move is skipped, and a typed
+# loop variable errors on a freed one.
+var _moved_this_tick: Array = []
 
 # CrowdBatch's statuses (crowd_batch.h), the same numbers. Written here because the C++ class may not exist.
 const BATCH_BY_PHYSICS := 0
@@ -74,8 +99,10 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 		_driver.register(self, TICK_ORDER)
 	if game_mode.is_inside_tree():
 		for pawn in game_mode.get_tree().get_nodes_in_group(Pawn.GROUP):
-			if pawn is Pawn and pawn.mover == null:
-				pawn.mover = self
+			if pawn is Pawn:
+				add_pawn(pawn)
+				if pawn.mover == null:
+					pawn.mover = self
 
 
 func _on_module_removed(game_mode: GameModeSingleton) -> void:
@@ -86,6 +113,9 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	if _driver:
 		_driver.unregister(self)
 	_finish_queued_unmoved()
+	for pawn in _members.duplicate():
+		remove_pawn(pawn)
+	_moved_this_tick.clear()
 	if game_mode.is_inside_tree():
 		for pawn in game_mode.get_tree().get_nodes_in_group(Pawn.GROUP):
 			if pawn is Pawn and pawn.mover == self:
@@ -108,6 +138,63 @@ func take_move(pawn: Pawn, was_grounded: bool, seconds: float) -> bool:
 	return true
 
 
+## Makes a pawn a member: one the crowd keeps clear of, and moves faster. The pawn calls it as it enters the tree.
+func add_pawn(pawn: Pawn) -> void:
+	if _member_index.has(pawn):
+		return
+	_member_index[pawn] = _members.size()
+	_members.append(pawn)
+	_member_handles.append(-1)
+	_member_ready.append(0)
+	_member_radii.append(0.0)
+	_member_slopes.append(0.0)
+	_member_floor_normals.append(0.0)
+	_member_shapes.append(null)
+	_member_shape_offsets.append(Vector3.ZERO)
+
+
+## Takes a pawn out (it calls this as it leaves the tree). The last member takes its slot.
+func remove_pawn(pawn: Pawn) -> void:
+	var i: int = _member_index.get(pawn, -1)
+	if i < 0:
+		return
+	_member_index.erase(pawn)
+	var last := _members.size() - 1
+	if i != last:
+		var moved_pawn := _members[last]
+		_members[i] = moved_pawn
+		_member_index[moved_pawn] = i
+		_member_handles[i] = _member_handles[last]
+		_member_ready[i] = _member_ready[last]
+		_member_radii[i] = _member_radii[last]
+		_member_slopes[i] = _member_slopes[last]
+		_member_floor_normals[i] = _member_floor_normals[last]
+		_member_shapes[i] = _member_shapes[last]
+		_member_shape_offsets[i] = _member_shape_offsets[last]
+	_members.resize(last)
+	_member_handles.resize(last)
+	_member_ready.resize(last)
+	_member_radii.resize(last)
+	_member_slopes.resize(last)
+	_member_floor_normals.resize(last)
+	_member_shapes.resize(last)
+	_member_shape_offsets.resize(last)
+
+
+## A pawn moved by physics this tick (Pawn._move_with_physics) or teleported (Pawn.teleport): the batch reads where it is from its
+## node, since the store's last frame has it a tick behind.
+func note_moved(pawn: Pawn) -> void:
+	_moved_this_tick.append(pawn)
+
+
+## Finds a member's shape numbers again, after code changed its collision shape or its floor_max_angle.
+func refresh_pawn(pawn: Pawn) -> void:
+	var i: int = _member_index.get(pawn, -1)
+	if i >= 0:
+		_member_ready[i] = 0
+		_member_handles[i] = -1
+
+
 ## The settings a start menu may offer (GameModeModule.get_match_options).
 func get_match_options() -> PackedStringArray:
 	return PackedStringArray(["enabled", "separation_strength"])
@@ -126,6 +213,7 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 	moved_last_tick = _queued.size()
 	fallbacks_last_tick = 0
 	if _queued.is_empty():
+		_moved_this_tick.clear()
 		return
 	var started := PerfScopes.begin()
 	var gather_started := started # gathering from the pawns, timed apart from the batch and the finishing (diagnostics)
@@ -153,13 +241,19 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 	var shapes: Array[Shape3D] = []
 	var shape_offsets := PackedVector3Array()
 	for pawn in pawns:
+		# Its own position from its node: it may have been moved since the last commit, and a mover must start from where it is.
 		positions.append(pawn.global_position)
-		radii.append(pawn.get_body_radius())
-		slopes.append(tan(pawn.floor_max_angle))
-		floor_normals.append(cos(pawn.floor_max_angle))
-		var body := pawn.get_body_shape()
-		shapes.append(body.shape if body else null)
-		shape_offsets.append(body.position if body else Vector3.ZERO)
+		var i: int = _member_index.get(pawn, -1)
+		if i < 0: # not a member yet (queued before it joined): it joins now
+			add_pawn(pawn)
+			i = _members.size() - 1
+		if _member_ready[i] == 0:
+			_fill_member(i)
+		radii.append(_member_radii[i])
+		slopes.append(_member_slopes[i])
+		floor_normals.append(_member_floor_normals[i])
+		shapes.append(_member_shapes[i])
+		shape_offsets.append(_member_shape_offsets[i])
 	var space := pawns[0].get_world_3d().direct_space_state
 	PerfScopes.end(&"movement.crowd_gather", gather_started)
 	var moved_ok := PackedByteArray() # 1 for each pawn the batch moved, 0 for one it hands back to physics
@@ -172,34 +266,113 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 		moved = _move_batch_cpp(cpp_batch, pawns, positions, motions, radii, seconds, slopes, floor_normals, shapes, shape_offsets, space,
 				moved_ok, tick)
 	else:
-		moved = _move_batch(positions, motions, radii, seconds, slopes, floor_normals, shapes, shape_offsets, _obstacles(pawns), space, moved_ok)
+		moved = _move_batch(positions, motions, radii, seconds, slopes, floor_normals, shapes, shape_offsets, _obstacles(pawns, tick), space,
+				moved_ok)
 	var finish_started := PerfScopes.begin()
+	# The moved pawns with a row in the store get their position, velocity and grounded written through it (into their nodes and the
+	# row this tick's commit records) in three calls; the rest are finished one by one.
+	var store: Object = _store_to_write_through()
+	var written_handles := PackedInt64Array()
+	var written_positions: Array = []
+	var written_velocities: Array = []
+	var written_pawns: Array[Pawn] = []
 	for i in count:
-		if moved_ok[i] == 1:
-			pawns[i].finish_move(moved[i], seconds[i])
-		else:
+		var pawn := pawns[i]
+		if moved_ok[i] != 1:
 			fallbacks_last_tick += 1
-			pawns[i].move_by_physics_now()
+			pawn.move_by_physics_now()
+			continue
+		var handle: int = _member_handles[_member_index[pawn]] if store else -1
+		if handle < 0:
+			pawn.finish_move(moved[i], seconds[i])
+			continue
+		# The velocity from the real move, before rounding, as Pawn.finish_move works it out.
+		var step := moved[i] - positions[i]
+		written_handles.append(handle)
+		written_positions.append(moved[i]) # its own position too: a member with a row has an unmoved, unturned parent
+		written_velocities.append(Vector3(step.x, 0.0, step.z) / seconds[i] if seconds[i] > 0.0 else Vector3.ZERO)
+		written_pawns.append(pawn)
+	if not written_pawns.is_empty():
+		var grounded: Array = []
+		grounded.resize(written_pawns.size())
+		grounded.fill(true)
+		store.write_through(written_handles, &"position", written_positions, tick)
+		store.write_through(written_handles, &"velocity", written_velocities, tick)
+		store.write_through(written_handles, &"grounded", grounded, tick)
+		for pawn in written_pawns:
+			pawn.finish_written_move()
 	PerfScopes.end(&"movement.crowd_finish", finish_started)
 	PerfScopes.end(&"movement.crowd", started)
+	# A pawn handed back to physics above noted itself too; next tick it's read from its node, which is still right.
+	_moved_this_tick.clear()
 	if fallbacks_last_tick > 0:
 		PerfScopes.add(&"movement.crowd_fallbacks", 0, fallbacks_last_tick)
 
 
-## Every other living pawn, which the crowd keeps clear of without moving it: [positions, radii].
-func _obstacles(movers: Array[Pawn]) -> Array:
-	var moving := {}
+## Every other living member, which the crowd keeps clear of without moving it: [positions, radii]. Where the state store's last
+## frame (tick - 1) has it, in one call for all; from its node if it moved by physics this tick or the store has no row for it.
+func _obstacles(movers: Array[Pawn], tick: int) -> Array:
+	var count := _members.size()
+	var skip := PackedByteArray()
+	skip.resize(count)
+	skip.fill(0)
 	for pawn in movers:
-		moving[pawn] = true
+		var i: int = _member_index.get(pawn, -1)
+		if i >= 0:
+			skip[i] = 1
+	var store: Object = _driver.store if _driver else null
+	var at := PackedVector3Array()
+	if store:
+		at = store.get_vector3s(_member_handles, &"position", tick - 1)
+	else:
+		at.resize(count)
+		at.fill(Vector3(NAN, 0.0, 0.0))
+	# NaN means "read the node" below. These moved since the store's last frame.
+	for p in _moved_this_tick:
+		var i: int = _member_index.get(p, -1) if is_instance_valid(p) else -1
+		if i >= 0:
+			at[i] = Vector3(NAN, 0.0, 0.0)
 	var positions := PackedVector3Array()
 	var radii := PackedFloat32Array()
-	for node in get_tree().get_nodes_in_group(Pawn.GROUP): # the list of all pawns
-		var pawn := node as Pawn
-		if pawn == null or moving.has(pawn) or pawn.is_dead():
+	for i in count:
+		if skip[i] == 1:
 			continue
-		positions.append(pawn.global_position)
-		radii.append(pawn.get_body_radius())
+		var pawn := _members[i]
+		if pawn.dead:
+			continue
+		if _member_ready[i] == 0:
+			_fill_member(i)
+		var p := at[i]
+		if is_nan(p.x):
+			p = pawn.global_position
+			# No row: it may have joined the store since, or under a new handle.
+			if _member_handles[i] != NO_STORE_ROW:
+				_member_handles[i] = _store_handle_of(pawn)
+		positions.append(p)
+		radii.append(_member_radii[i])
 	return [positions, radii]
+
+
+# A member's shape numbers and store handle, found once (refresh_pawn finds them again).
+func _fill_member(i: int) -> void:
+	var pawn := _members[i]
+	_member_ready[i] = 1
+	_member_radii[i] = pawn.get_body_radius()
+	_member_slopes[i] = tan(pawn.floor_max_angle)
+	_member_floor_normals[i] = cos(pawn.floor_max_angle)
+	var body := pawn.get_body_shape()
+	_member_shapes[i] = body.shape if body else null
+	_member_shape_offsets[i] = body.position if body else Vector3.ZERO
+	_member_handles[i] = _store_handle_of(pawn)
+
+
+# Its store handle, if the store's "position" for it is its world position: NO_STORE_ROW under a parent that's moved or turned, since
+# the store keeps its own (local) position.
+func _store_handle_of(pawn: Pawn) -> int:
+	var parent := pawn.get_parent() as Node3D
+	if parent and not parent.global_transform.is_equal_approx(Transform3D.IDENTITY):
+		return NO_STORE_ROW
+	return pawn.get_store_handle()
 
 
 ## The GDScript batch, a twin of the C++ CrowdBatch (same answer): where each pawn ends up, with moved_ok[i] set to 1 for each it moved.
@@ -308,6 +481,15 @@ func _walls_and_ground(from: Vector3, to: Vector3, slope: float, floor_normal: f
 	return Vector3(to.x, at.y, to.z)
 
 
+## The state store to write the moved pawns through (StateStore.write_through), or null with write_moves_through off or no store.
+func _store_to_write_through() -> Object:
+	if not write_moves_through:
+		return null
+	var driver := get_node_or_null(^"/root/TickDriver")
+	var store: Object = driver.store if driver else null
+	return store if store and store.has_method(&"write_through") else null
+
+
 ## The C++ batch, made on first use, or null without the library or with use_cpp_batch off.
 ## It's given the job scheduler (null: no worker threads), the sight geometry for the ground (null: the ground by physics rays) and
 ## the NavServer for the walls (null: the walls by physics sweeps).
@@ -337,7 +519,7 @@ func _move_batch_cpp(cpp_batch: Object, pawns: Array[Pawn], positions: PackedVec
 			tiers.append(-1)
 		else:
 			tiers.append(navigation.nav_tier if navigation else 0)
-	var obstacles := _obstacles(pawns)
+	var obstacles := _obstacles(pawns, tick)
 	PerfScopes.end(&"movement.crowd_others", others_started)
 	cpp_batch.set_settings(separation_strength, separation_margin, max_push_speed, max_step, ground_layers, cell_size)
 	var result: PackedVector3Array = cpp_batch.move(positions, motions, radii, seconds, slopes, floor_normals, tiers, obstacles[0],

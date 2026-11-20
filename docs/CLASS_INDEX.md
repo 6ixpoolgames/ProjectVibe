@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 158 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 159 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -83,6 +83,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [MatchOptionsPanel](../assets/scripts/ui/REFERENCE.md#matchoptionspanel) | [ui](../assets/scripts/ui/README.md) | VBoxContainer | A start menu's match options, built from the settings themselves. |
 | [MeleeAttackAbility](../assets/scripts/abilities/REFERENCE.md#meleeattackability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | A melee swing: an action bound to &"primary", built from steps. |
 | [MeleeSweepStep](../assets/scripts/abilities/REFERENCE.md#meleesweepstep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | An attack's hit window: a hit sphere moves from a start point to an end point over length_ticks, and pawns it touches are hit. |
+| [MoveSanityCheck](../assets/scripts/diagnostics/REFERENCE.md#movesanitycheck) | [diagnostics](../assets/scripts/diagnostics/README.md) | RefCounted | Warns when an entity moved further in a tick than its velocity explains: something set its position instead of moving it or calling [method Pawn.teleport]. |
 | [NavArea](../assets/scripts/navigation/REFERENCE.md#navarea) | [navigation](../assets/scripts/navigation/README.md) | NavMarker | A volume that changes how nav treats the ground in it (nav spec 21.3). |
 | [NavDebugView](../assets/scripts/diagnostics/REFERENCE.md#navdebugview) | [diagnostics](../assets/scripts/diagnostics/README.md) | Node3D | A debug view of navigation: the live nav mesh, the nav links and the nav markers, on F9. |
 | [NavigationManager](../assets/scripts/navigation/REFERENCE.md#navigationmanager) | [navigation](../assets/scripts/navigation/README.md) | Node | The pawn's only contact with navigation: finds paths and says which way to walk. |

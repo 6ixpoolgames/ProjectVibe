@@ -9,6 +9,14 @@ Movement is this folder: `CrowdMover`, a GameMode module, and its C++ batch `Cro
 
 None found in the documentation pass. The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as the fallback where the C++ library isn't loaded.
 
+## 2026-11-20
+
+- **Writes its moved pawns through the state store** (`write_moves_through`, on): position, velocity and grounded in three `StateStore.write_through` calls instead of one `Pawn.finish_move` each; the pawn only ends its run (`Pawn.finish_written_move`). Finishing went from 0.43 to 0.34 ms a tick at 300 pawns (state store spec 13.8).
+- **`note_moved_by_physics` is now `note_moved`**: `Pawn.teleport` calls it too.
+
+- **Reads the other pawns from the state store** (state store spec 13.7): the pawns it keeps clear of stand where the store's last frame has them, in one `get_vector3s` call, instead of a read of each node. The few that moved by physics this tick tell it (`note_moved`, from `Pawn._move_with_physics`) and are read from their nodes, since the store has them a tick behind. A pawn moved by code since the last commit counts at its old place for one tick, which collision corrects (the owner's call: accept it rather than build for it).
+- **Members** (`add_pawn`, `remove_pawn`, `refresh_pawn`): every pawn joins as it enters the tree and leaves as it leaves, with its width, slope and shape found once, so neither the moving pawns nor the others are asked each tick. It no longer looks through the pawns' group. At 300 pawns marching, against step 3 run back to back: the crowd mover 1.07 to 0.87 ms a tick (gathering the moving pawns 0.18 to 0.11, the others 0.24 to 0.12).
+
 ## 2026-11-19
 
 - **Finer timings** (diagnostics): `movement.crowd_gather` (reading the moving pawns), `movement.crowd_others` (their nav tiers and every other pawn) and `movement.crowd_finish` (calling each pawn back). At 300 pawns, of 1.1 ms a tick: gathering 0.18, the others 0.25, finishing 0.45, the C++ batch and queries about 0.25 (state store spec 13.6).

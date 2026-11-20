@@ -28,6 +28,7 @@ func _ready() -> void:
 		_test_tripwire(kind[1].call())
 		_test_carry_forward(kind[1].call())
 		_test_pushed_with_node(kind[1].call())
+		_test_long_moves(kind[1].call())
 	if kinds.size() == 2:
 		_test_twins()
 	_finish()
@@ -51,6 +52,31 @@ func _bind(store: Object, handle: int, thing: Thing) -> bool:
 	var part := thing.get_node("Part")
 	return store.bind(handle, [thing, thing, thing, thing, part], [^"position", ^":rotation:y", ^"count", ^"trail", ^":position:x"],
 			[&"vector3_mm", &"angle_u16", &"raw", &"raw", &"float"], true)
+
+
+# Claude 2026-11-21: find_long_moves, the MoveSanityCheck's first pass, from rows written by hand.
+func _test_long_moves(store: Object) -> void:
+	var moving: int = store.define_layout(PackedStringArray(["position", "velocity"]), [&"vector3_mm", &"vector3_mm"])
+	var still: int = store.define_layout(PackedStringArray(["position"]), [&"vector3_mm"])
+	var walker: int = store.add_entity(moving, null)
+	var jumper: int = store.add_entity(moving, null)
+	var dasher: int = store.add_entity(moving, null)
+	var newcomer: int = store.add_entity(moving, null)
+	var no_velocity: int = store.add_entity(still, null)
+	store.write_row(walker, 1, [Vector3.ZERO, Vector3(1, 0, 0)])
+	store.write_row(walker, 2, [Vector3(0.017, 0, 0), Vector3(1, 0, 0)])
+	store.write_row(jumper, 1, [Vector3.ZERO, Vector3.ZERO])
+	store.write_row(jumper, 2, [Vector3(5, 0, 0), Vector3.ZERO])
+	store.write_row(dasher, 1, [Vector3.ZERO, Vector3(600, 0, 0)])
+	store.write_row(dasher, 2, [Vector3(10, 0, 0), Vector3(600, 0, 0)])
+	store.write_row(newcomer, 2, [Vector3(50, 0, 0), Vector3.ZERO])
+	store.write_row(no_velocity, 1, [Vector3.ZERO])
+	store.write_row(no_velocity, 2, [Vector3(50, 0, 0)])
+	var found: Dictionary = store.find_long_moves(2, 1.0 / 60.0, 1.5, 0.5)
+	_check(found["checked"] == 3, "find_long_moves compares entities with both rows, in layouts with position and velocity (%d)" % found["checked"])
+	_check(found["handles"] == PackedInt64Array([jumper]) and is_equal_approx(found["moved"][0], 5.0) and found["speeds"][0] == 0.0,
+			"and returns only a move its velocity doesn't explain, with its length and speed; a dash's velocity explains the dash")
+	_check((store.find_long_moves(1, 1.0 / 60.0, 1.5, 0.5)["checked"] as int) == 0, "a tick with no row before it compares nothing")
 
 
 func _test_layouts(store: Object) -> void:
@@ -106,6 +132,32 @@ func _test_commit(store: Object) -> void:
 	_check(store.load_row(handle, 8) and thing.count == 8 and thing.trail == [1, 2, 3], "load_row writes a row back into the nodes")
 	var column: Dictionary = store.get_column(0, 2, 10)
 	_check(column["handles"] == PackedInt64Array([handle]) and column["values"] == [10], "get_column reads one column of a frame")
+	var at: PackedVector3Array = store.get_vector3s(PackedInt64Array([handle, -1, handle]), &"position", 10)
+	_check(at.size() == 3 and at[0] == thing.position and is_nan(at[1].x) and at[2] == at[0],
+			"get_vector3s reads a Vector3 column by name for many entities, NaN where there's no row")
+	var not_vectors: PackedVector3Array = store.get_vector3s(PackedInt64Array([handle, handle]), &"count", 10)
+	var no_column: PackedVector3Array = store.get_vector3s(PackedInt64Array([handle]), &"nothing", 10)
+	var too_old: PackedVector3Array = store.get_vector3s(PackedInt64Array([handle]), &"position", 2)
+	_check(is_nan(not_vectors[0].x) and is_nan(not_vectors[1].x) and is_nan(no_column[0].x) and is_nan(too_old[0].x),
+			"and NaN for a column that isn't a Vector3, one the layout lacks, or a tick the history no longer holds")
+	var wrote: int = store.write_through(PackedInt64Array([handle, -1]), &"position", [Vector3(5.00049, 0, 1), Vector3.ONE], 11)
+	_check(wrote == 1 and thing.position == StateEncoding.quantize(Vector3(5.00049, 0, 1), StateEncoding.VECTOR3_MM),
+			"write_through writes a column into each entity's node, rounded as the commit rounds, skipping a dead handle")
+	_check(store.write_through(PackedInt64Array([handle]), &"nothing", [1], 11) == 0, "and skips a column the layout lacks")
+	thing.position = Vector3(9, 9, 9) # written around it after the write-through: the row misses this, as documented
+	thing.count = 11
+	store.commit(11)
+	_check(store.get_value(handle, 0, 11) == StateEncoding.quantize(Vector3(5.00049, 0, 1), StateEncoding.VECTOR3_MM)
+			and store.get_value(handle, 2, 11) == 11, "the commit takes what was written through, and reads the other columns from the nodes")
+	store.commit(12)
+	_check(store.get_value(handle, 0, 12) == Vector3(9, 9, 9), "the next tick's commit reads that node again")
+	# Claude 2026-11-21: a teleport after the crowd mover wrote a pawn through, in the same tick, must still be recorded.
+	store.write_through(PackedInt64Array([handle]), &"position", [Vector3(1, 2, 3)], 13)
+	thing.position = Vector3(-4, 0, 7)
+	store.mark_changed(handle)
+	store.commit(13)
+	_check(store.get_value(handle, 0, 13) == StateEncoding.quantize(Vector3(-4, 0, 7), StateEncoding.VECTOR3_MM),
+			"mark_changed drops what was written through, so the commit reads the node")
 	var stats: Dictionary = store.get_stats()
 	_check(stats["entities"] == 1 and stats["bound"] == 1 and stats["cells_per_frame"] == 5, "stats count entities and cells %s" % str(stats))
 	thing.free()

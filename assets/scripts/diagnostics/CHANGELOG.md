@@ -17,6 +17,14 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | The window title in shipped games | `DiagnosticsManager._update_title` | A debugging convenience (role and process id, to tell instances apart) that also renames a release build's window, since diagnostics ship. A setting, or debug builds only, keeps a game's own title | S |
 | "Late" and "very late" as settings | `DiagnosticsManager._summary`; the F4 panel's text; `replay/ReplayViewer`'s strip colours | Fixed at 20 and 34 ms (60 and 30 fps) in three places, while spikes follow the tick rate and `spike_over_budget`. A game aiming at another frame rate can't set them | S |
 
+## 2026-11-21
+
+- **`MoveSanityCheck` runs in every build**, not only debug ones (owner's call): its first pass is now the store's `find_long_moves`, 0.03 ms a tick at 300 pawns instead of 0.12.
+
+## 2026-11-20
+
+- **`MoveSanityCheck`** (new): in debug builds, after each tick, warns once per entity that moved further than its velocity explains and didn't teleport (`Pawn.teleport`). Reads only the state store; 0.12 ms a tick at 300 pawns. Switched by `check_moves` (new, on); `get_move_check()` (new).
+
 ## 2026-11-19
 
 - **The tick total counts the tick driver's new commit phase** (`tick.commit`, the state store's end-of-tick pass), so a tick's cost includes it.

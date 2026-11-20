@@ -36,8 +36,11 @@ extends GameModeModule
 @export var headless_runs_apart := true
 ## Session logs kept; the oldest are deleted when a session starts.
 @export_range(1, 1000, 1, "or_greater") var logs_kept := 30
+## On: after each tick, in every build, warns about any entity that moved further than its velocity explains ([MoveSanityCheck]).
+@export var check_moves := true
 
 var _driver: Node = null
+var _move_check: MoveSanityCheck = null
 var _session: Node = null
 var _recorder: ReplayRecorder = null
 var _channel := ReplayDiagnosticsChannel.new()
@@ -104,6 +107,9 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 		_driver.reset_profile()
 		_last_tick = _driver.tick
 		_last_dropped = _driver.dropped_ticks
+		if check_moves:
+			_move_check = MoveSanityCheck.new()
+			_driver.after_tick.connect(_check_moves)
 	OS.add_logger(_logger)
 	_marker = FrameStartMarker.new()
 	_marker.manager = self
@@ -132,11 +138,25 @@ func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	PerfScopes.enabled = false
 	if _driver:
 		_driver.profile_enabled = false
+		if _driver.after_tick.is_connected(_check_moves):
+			_driver.after_tick.disconnect(_check_moves)
+	_move_check = null
 	OS.remove_logger(_logger)
 	_remove_monitors()
 	if game_mode.module_added.is_connected(_on_other_module):
 		game_mode.module_added.disconnect(_on_other_module)
 	_close_log()
+
+
+## The [MoveSanityCheck] it runs after each tick, or null when [member check_moves] is off.
+func get_move_check() -> MoveSanityCheck:
+	return _move_check
+
+
+func _check_moves(dt: float, tick: int) -> void:
+	var started := PerfScopes.begin()
+	_move_check.check(_driver.store, tick, dt)
+	PerfScopes.end(&"diagnostics.move_check", started)
 
 
 func _exit_tree() -> void:

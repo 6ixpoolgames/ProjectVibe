@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Split the tick-step rule out of `AIActivationManager` | `AIActivationManager.gd` | Two jobs in one module, freezing pawns and choosing their tick step, and the name says only the first. Apart, a game could swap either alone | M |
 | Reuse the free-spot query | `_is_free()` in `SpawnManager.gd` | A new shape and query object for every spot tried; made once and reused, a wave of spawns would allocate nothing | S |
 
+## 2026-11-20
+
+- **SpawnManager**: a respawn moves the pawn with `Pawn.teleport`, so its Visual doesn't glide from where it died and the crowd and the move check know.
+
 ## 2026-11-19
 
 - **`AIActivationManager` reads the pawn's streaming source:** `Pawn.is_keeping_world_loaded()` for leaving a pawn on, and `PawnStreamingSource.pawn` for players' positions in the sources' group.

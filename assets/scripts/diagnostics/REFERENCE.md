@@ -7,6 +7,7 @@ Every class in `assets/scripts/diagnostics/`, from its doc comments. The overvie
 - [DiagnosticsLogger](#diagnosticslogger)
 - [DiagnosticsManager](#diagnosticsmanager)
 - [DiagnosticsPanels](#diagnosticspanels)
+- [MoveSanityCheck](#movesanitycheck)
 - [NavDebugView](#navdebugview)
 - [PerfScopes](#perfscopes)
 
@@ -54,9 +55,11 @@ Design: diagnostics spec.
 - `folder: String` = `"user://diagnostics"`: Where session logs and captures go.
 - `headless_runs_apart: bool` = `true`: On, a run with no display (a test, a dedicated server) writes into folder/headless instead, with its own `logs_kept`.
 - `logs_kept: int` = `30`: Session logs kept; the oldest are deleted when a session starts.
+- `check_moves: bool` = `true`: On: after each tick, in every build, warns about any entity that moved further than its velocity explains ([`MoveSanityCheck`](#movesanitycheck)).
 
 ### Functions
 
+- `get_move_check() -> MoveSanityCheck`: The [`MoveSanityCheck`](#movesanitycheck) it runs after each tick, or null when `check_moves` is off.
 - `get_frames() -> Array`: The history, oldest first.
 - `get_spikes() -> Array`: The spikes kept, newest last.
 - `get_log_lines() -> Array`: Every warning and error so far, as [level, text, where, count], in the order they first came.
@@ -97,6 +100,27 @@ A small fixed-width font in two columns so they never overlap: F1, F2 and F4 dow
 - `toggle(key: int) -> void`: Shows or hides a panel, as its key does.
 - `inspect(pawn: Pawn) -> void`: The pawn the inspector shows.
 - `get_text(key: int) -> String`: The text a panel shows now, for tests.
+
+## MoveSanityCheck
+
+`res://assets/scripts/diagnostics/MoveSanityCheck.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Warns when an entity moved further in a tick than its velocity explains: something set its position instead of moving it or calling `Pawn.teleport()`.
+
+A sanity check run after each tick by the [`DiagnosticsManager`](#diagnosticsmanager), in every build. It reads only the state store: every layout with a "position" and a "velocity" column, comparing each entity's row for this tick with the one before. A move may be as long as the faster of the two velocities allows over the ticks its run covered, times `allowance`, plus `slack`. A pawn that teleported on this tick or the one before is let through. It warns once per entity, naming it, and counts every move it caught. It doesn't judge speeds themselves: a dash's velocity explains a dash's move.
+
+The first pass, over every entity, is the store's own (`StateStore.find_long_moves()`); only the moves it finds too long are looked at here.
+
+### Settings and properties
+
+- `allowance: float` = `1.5`: How much further than its velocity explains a move may go: 1.5 covers walking up a 45 degree slope on a flat velocity.
+- `slack: float` = `0.5`: Metres any move may add on top: snapping to the ground, steps, rounding.
+- `caught: int` = `0`: Moves caught since it started, warned about or not.
+- `checked_last_tick: int` = `0`: Entities whose moves it compared on the last tick checked.
+
+### Functions
+
+- `check(store: Object, tick: int, dt: float) -> void`: Compares every entity's move into this tick with what its velocity explains. dt: the tick's length in seconds.
 
 ## NavDebugView
 

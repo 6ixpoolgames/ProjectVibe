@@ -21,8 +21,10 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/node_path.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/string_name.hpp>
 #include <godot_cpp/variant/variant.hpp>
 
@@ -76,8 +78,15 @@ public:
 	// On: a commit copies this entity's previous row forward, reading no node, unless it was marked changed since the last commit
 	// (an entity that only changes when it runs, such as a pawn on a load step). Pushed columns take their pushed values either way.
 	void set_carry_forward(int64_t handle, bool on);
-	// Something changed this entity since the last commit, so the next one reads its nodes.
+	// Something changed this entity since the last commit, so the next one reads its nodes, all of them: values written through
+	// for it before this call are dropped.
 	void mark_changed(int64_t handle);
+	// Writes one column, by name, for many entities now: into each one's node (rounded first, as the commit rounds) and into the row
+	// the commit for that tick records, which then skips reading that node. For a batch that moves many entities at once (the crowd
+	// mover). Whatever writes the same property after this, in the same tick, must write through as well or call mark_changed, or the
+	// row misses it.
+	// Returns how many it wrote; an entity that isn't bound, or whose layout lacks the column, is skipped.
+	int64_t write_through(const PackedInt64Array &handles, const StringName &column, const Array &values, int64_t tick);
 
 	// The end of a tick: every active entity's row for this tick. Returns the handles the store couldn't gather (unbound, or a node
 	// gone, which unbinds it); their owners write them with write_row.
@@ -100,6 +109,14 @@ public:
 
 	// One column of a layout at a tick: {"handles": PackedInt64Array, "values": Array}, for every row held for that tick.
 	Dictionary get_column(int64_t layout, int64_t column, int64_t tick) const;
+	// One Vector3 column, by name, for each of these entities at a tick, in their order: one call for a whole crowd instead of one
+	// read a node each. A NaN x where the row isn't held, the entity's layout has no such column, or the value isn't a Vector3.
+	PackedVector3Array get_vector3s(const PackedInt64Array &handles, const StringName &column, int64_t tick) const;
+	// The move check's first pass (MoveSanityCheck): every entity, in a layout with Vector3 "position" and "velocity" columns, whose
+	// move from tick - 1 to tick is longer than max(|velocity then|, |velocity now|) * dt * allowance + slack. Returns
+	// {"handles": PackedInt64Array, "moved": PackedFloat32Array, "speeds": PackedFloat32Array, "checked": int}: the long moves, their
+	// lengths and the speeds they were held to, and how many moves were compared (entities with both rows).
+	Dictionary find_long_moves(int64_t tick, double dt, double allowance, double slack) const;
 	// A checksum of every row held for that tick, in layout and slot order. The twin gives the same number.
 	int64_t frame_checksum(int64_t tick) const;
 	// The determinism tripwire: handles of bound, active entities whose nodes no longer hold (once rounded) what their row for that
@@ -136,6 +153,10 @@ private:
 		int64_t newest = -1;
 		std::vector<Accessor> accessors;
 		std::vector<Variant> pushed;
+		// Values written through for the commit of written_tick, one per column, and which columns hold one.
+		int64_t written_tick = -1;
+		std::vector<Variant> written;
+		std::vector<uint8_t> written_mask;
 	};
 	struct Layout {
 		String signature;

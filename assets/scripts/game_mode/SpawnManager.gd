@@ -171,9 +171,9 @@ func _respawn_player(pawn_id: int) -> void:
 	if player_respawn_at_spawn_point:
 		var place := find_place(pawn.team)
 		if not place.is_empty():
-			pawn.global_position = place["position"]
+			pawn.yaw = place["yaw"] # before the teleport, so its Visual is drawn facing that way at once too
 			pawn.velocity = Vector3.ZERO
-			pawn.yaw = place["yaw"]
+			pawn.teleport(place["position"])
 			_claim(place["position"]) # so another player brought back this tick goes somewhere else
 	if pawn.ability_manager:
 		pawn.ability_manager.revive()

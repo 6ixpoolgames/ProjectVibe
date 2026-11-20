@@ -49,7 +49,13 @@ Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
 - `push(handle: int, column: int, value: Variant) -> void`: Sets a pushed column's value; every commit from now on records it, until the next push.
 - `set_carry_forward(handle: int, on: bool) -> void`: On: a commit copies this entity's previous row forward, reading no node, unless it was marked changed since the last commit (an
   entity that only changes when it runs, such as a pawn on a load step). Pushed columns take their pushed values either way.
-- `mark_changed(handle: int) -> void`: Something changed this entity since the last commit, so the next one reads its nodes.
+- `mark_changed(handle: int) -> void`: Something changed this entity since the last commit, so the next one reads its nodes, all of them: values written through for it
+  before this call are dropped.
+- `write_through(handles: PackedInt64Array, column: StringName, values: Array, tick: int) -> int`: Writes one column, by name, for many entities now: into each one's node (rounded first, as the commit rounds) and into the row the
+  commit for that tick records, which then skips reading that node. For a batch that moves many entities at once (the crowd mover).
+  Whatever writes the same property after this, in the same tick, must write through as well or call `mark_changed()`, or the
+  row misses it. Returns how many
+  it wrote; an entity that isn't bound, or whose layout lacks the column, is skipped.
 - `commit(tick: int) -> PackedInt64Array`: The end of a tick: every active entity's row for this tick. Returns the handles the store couldn't gather (unbound, or a node gone,
   which unbinds it); their owners write them with `write_row()`.
 - `commit_entities(tick: int, handles: PackedInt64Array) -> PackedInt64Array`: The same for some entities only (a rollback's re-run rewriting past frames).
@@ -61,6 +67,11 @@ Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
 - `load_row(handle: int, tick: int) -> bool`: Writes a held row back into a bound entity's nodes (`MISSING` values skipped) and its pushed values. False if not bound or not held.
 - `newest_tick(handle: int) -> int`: The newest tick this entity has a row for; -1 for none.
 - `get_column(layout_index: int, column: int, tick: int) -> Dictionary`: One column of a layout at a tick: {"handles": PackedInt64Array, "values": Array}, for every row held for that tick.
+- `get_vector3s(handles: PackedInt64Array, column: StringName, tick: int) -> PackedVector3Array`: One Vector3 column, by name, for each of these entities at a tick, in their order: one call for a whole crowd instead of one read
+  a node each. A NaN x where the row isn't held, the entity's layout has no such column, or the value isn't a Vector3.
+- `find_long_moves(tick: int, dt: float, allowance: float, slack: float) -> Dictionary`: The move check's first pass ([`MoveSanityCheck`](../diagnostics/REFERENCE.md#movesanitycheck)): every entity, in a layout with Vector3 "position" and "velocity" columns, whose
+  move from tick - 1 to tick is longer than max(|velocity then|, |velocity now|) * dt * allowance + slack. Returns {"handles",
+  "moved", "speeds", "checked"}: the long moves, their lengths and the speeds they were held to, and how many moves were compared.
 - `frame_checksum(tick: int) -> int`: A checksum of every row held for that tick, in layout and slot order. The C++ store gives the same number.
 - `verify_nodes(tick: int) -> PackedInt64Array`: The determinism tripwire: handles of bound, active entities whose nodes no longer hold (once rounded) what their row for that tick
   says. Empty when nothing wrote around the store.

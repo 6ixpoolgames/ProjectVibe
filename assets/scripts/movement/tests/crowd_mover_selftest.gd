@@ -22,6 +22,8 @@ func _ready() -> void:
 	await _test_physics_cases()
 	await _test_sleeping() # Claude 2026-11-16: the owner asked whether still pawns sleep with the mover
 	await _test_switched_off()
+	await _test_obstacles_from_store()
+	await _test_teleport_and_move_check()
 	await _test_walks_along_nav_mesh() # Claude 2026-11-17 (C++ bundle stage 3); last, since it sets NavServer up for itself
 	_finish()
 
@@ -267,6 +269,34 @@ func _test_walks_along_nav_mesh() -> void:
 	nav.remove_input_layer(layer)
 
 
+# The pawns the crowd keeps clear of stand where the state store's last frame has them (one call for all), except those that moved
+# by physics this tick, read from their nodes. A pawn moved by code since the last commit counts at its old place until then.
+func _test_obstacles_from_store() -> void:
+	var ground := _make_box(Vector3(0, -0.5, 0), Vector3(400, 1, 400))
+	var standing := _make_pawn(Vector3(2, 0.05, 0))
+	await _ticks(20)
+	var store: Object = get_node("/root/TickDriver").store
+	var handle := standing.get_store_handle()
+	var tick: int = store.newest_tick(handle) + 1 # as during the next tick's simulate
+	var stored: Vector3 = store.get_value(handle, 0, tick - 1)
+	var before: Array = _mover._obstacles([] as Array[Pawn], tick)
+	_check(_mover._member_index.has(standing) and (before[0] as PackedVector3Array).has(stored),
+			"a pawn joins the crowd's members as it enters, and stands where the store's last frame has it")
+	standing.global_position = Vector3(6, 0.05, 0) # moved by code, between ticks
+	var stale: Array = _mover._obstacles([] as Array[Pawn], tick)
+	_check((stale[0] as PackedVector3Array).has(stored), "moved by code since the last commit, it counts at its old place for now")
+	_mover.note_moved(standing)
+	var fresh: Array = _mover._obstacles([] as Array[Pawn], tick)
+	_check((fresh[0] as PackedVector3Array).has(standing.global_position), "moved by physics this tick, it's read from its node")
+	_mover._moved_this_tick.clear()
+	var moving: Array = _mover._obstacles([standing] as Array[Pawn], tick)
+	_check(not (moving[0] as PackedVector3Array).has(stored) and not (moving[0] as PackedVector3Array).has(standing.global_position),
+			"one that's moving with the crowd this tick isn't an obstacle to itself")
+	standing.free()
+	_check(not _mover._member_index.has(standing), "and it leaves the members as it leaves the tree")
+	ground.free()
+
+
 func _box_faces(lo: Vector3, hi: Vector3) -> PackedVector3Array:
 	var c := [
 		Vector3(lo.x, lo.y, lo.z), Vector3(hi.x, lo.y, lo.z), Vector3(hi.x, lo.y, hi.z), Vector3(lo.x, lo.y, hi.z),
@@ -279,6 +309,30 @@ func _box_faces(lo: Vector3, hi: Vector3) -> PackedVector3Array:
 	for q in quads:
 		faces.append_array([c[q[0]], c[q[1]], c[q[2]], c[q[0]], c[q[2]], c[q[3]]])
 	return faces
+
+
+# Pawn.teleport tells the crowd to read the pawn from its node, and the MoveSanityCheck lets the jump through; a position set
+# directly is caught.
+func _test_teleport_and_move_check() -> void:
+	var ground := _make_box(Vector3(0, -0.5, 0), Vector3(400, 1, 400))
+	var pawn := _make_pawn(Vector3(0, 0.05, 0))
+	await _ticks(20)
+	var driver := get_node("/root/TickDriver")
+	var check := MoveSanityCheck.new()
+	pawn.global_position = Vector3(30, 0.05, 0) # set directly: a jump nothing explains
+	for i in 6:
+		await _ticks(1)
+		check.check(driver.store, driver.tick, driver.get_tick_dt())
+	_check(check.caught == 1, "a position set directly is caught by the move check (%d)" % check.caught)
+	pawn.teleport(Vector3(-30, 0.05, 0))
+	_check(_mover._moved_this_tick.has(pawn) and pawn.last_teleport_tick == driver.tick,
+			"a teleport tells the crowd to read the pawn from its node, and notes its tick")
+	for i in 6:
+		await _ticks(1)
+		check.check(driver.store, driver.tick, driver.get_tick_dt())
+	_check(check.caught == 1 and check.checked_last_tick > 0, "and the move check lets a teleport through")
+	pawn.free()
+	ground.free()
 
 
 func _make_box(at: Vector3, size: Vector3, tilt_z := 0.0) -> StaticBody3D:

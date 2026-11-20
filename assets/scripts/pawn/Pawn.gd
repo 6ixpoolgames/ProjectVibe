@@ -68,6 +68,8 @@ var is_sleeping := false
 var yaw := 0.0
 ## Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
 var grounded := false
+## The tick it last moved instantly ([method teleport]), or -1. The MoveSanityCheck lets that move through.
+var last_teleport_tick := -1
 var _body_radius := -1.0 # the capsule's radius, found once (get_body_radius)
 var _body_shape: CollisionShape3D = null # the collision shape, found once (get_body_shape)
 var _tick_state: TickStateComponent = null # its part in the state store, if it has one: pushes, marks, rounding crowd moves
@@ -144,6 +146,8 @@ func _enter_tree() -> void:
 	add_to_group(GROUP) # the list of all pawns
 	add_to_group(TerrainBodyLifter.GROUP)
 	SharedPawnTable.join(self) # the shared table of plain pawn data, which AI sensing's grid reads (C++ only; scaling spec step 1)
+	if CrowdMover.current:
+		CrowdMover.current.add_pawn(self) # every pawn: the crowd keeps clear of it
 	# Its two general parts, which any entity may have, so they don't know about pawns: found here, before its other parts enter.
 	for child in get_children():
 		if child is NetworkEntity:
@@ -169,6 +173,8 @@ func _enter_tree() -> void:
 
 func _exit_tree() -> void:
 	SharedPawnTable.leave(self)
+	if CrowdMover.current:
+		CrowdMover.current.remove_pawn(self)
 	# This first, because leaving the list can switch the pawn back on, which would register it again.
 	var ai := _ai_activation_manager()
 	if ai:
@@ -263,6 +269,22 @@ func mark_state_changed() -> void:
 		_tick_state.mark_changed()
 
 
+## Moves this pawn instantly instead of through the space between, for a respawn, a blink or a debug move. Use it for any such move,
+## so the crowd mover reads it from its node this tick, its Visual is drawn there at once instead of gliding, the state store records
+## it even on a tick it doesn't run or after the crowd wrote its move, and the MoveSanityCheck lets the jump through. Its velocity and
+## yaw stay as they are.
+func teleport(to: Vector3) -> void:
+	global_position = to
+	if _tick_state:
+		position = _tick_state.round_position(position) # as the recording rounds it, so the store and the node agree
+		_tick_state.mark_changed()
+	last_teleport_tick = TickDriver.tick
+	if CrowdMover.current:
+		CrowdMover.current.note_moved(self)
+	if _smoother:
+		_smoother.snap()
+
+
 ## This pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
 func get_network_entity() -> NetworkEntity:
 	return _entity
@@ -346,6 +368,8 @@ func _move_with_physics() -> void:
 	var move_started := PerfScopes.begin()
 	move_and_slide()
 	PerfScopes.end(&"pawn.move_and_slide", move_started)
+	if CrowdMover.current:
+		CrowdMover.current.note_moved(self) # the store's last frame has it a tick behind now
 	velocity /= factor
 	grounded = is_on_floor()
 
@@ -365,11 +389,22 @@ func finish_move(at: Vector3, seconds: float) -> void: # public, since its mover
 	_finish_tick()
 
 
+## Its mover has already written this run's position, velocity and grounded through the state store (StateStore.write_through), so
+## this only ends the run.
+func finish_written_move() -> void: # public, since its mover calls it
+	_finish_tick()
+
+
 ## Its mover couldn't move this pawn (a wall, an edge, no ground under where it was going), so it moves by physics now, in the same
 ## tick, which handles those, and finishes its tick. Its velocity is still this run's.
 func move_by_physics_now() -> void: # public, since its mover calls it
 	_move_with_physics()
 	_finish_tick()
+
+
+## Its handle in the state store (TickStateComponent.get_store_handle), or -1 without one.
+func get_store_handle() -> int:
+	return _tick_state.get_store_handle() if _tick_state else -1
 
 
 ## How wide this pawn's body is: its collision capsule's (or sphere's, or cylinder's) radius, scaled, in metres. 0.4 without one.

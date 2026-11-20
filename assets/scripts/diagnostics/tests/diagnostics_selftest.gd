@@ -154,7 +154,7 @@ func _test_panels(manager: DiagnosticsManager, pawn: Pawn) -> void:
 	panels.inspect(pawn)
 	panels._refresh_left = 0.0
 	panels._process(0.0)
-	_check(panels.is_shown(KEY_F4) and panels.get_text(KEY_F4).contains("F4 timings") and panels.get_text(KEY_F4).contains("pawn.abilities"), # Claude 2026-11-16: see above
+	_check(panels.is_shown(KEY_F4) and panels.get_text(KEY_F4).contains("F4 timings") and panels.get_text(KEY_F4).contains("ms/frame"), # Claude 2026-11-20: any scope rows, since which ones make the list varies (the move check pushed pawn.abilities out)
 		"F4 shows the timings, scopes included")
 	_check(panels.get_text(KEY_F7).contains("Inspected") and panels.get_text(KEY_F7).contains("running:"), "F7 shows the inspected pawn")
 	_check(panels.get_text(KEY_F6).contains("spikes") and panels.get_text(KEY_F8).contains("x10"), "F6 shows spikes, and F8 the warnings with counts")

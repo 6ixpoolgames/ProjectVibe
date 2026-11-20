@@ -9,6 +9,8 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <cmath>
+
 using namespace godot;
 using namespace state_encoding;
 
@@ -272,7 +274,57 @@ void StateStore::set_carry_forward(int64_t handle, bool on) {
 void StateStore::mark_changed(int64_t handle) {
 	if (Entity *entity = entity_of(handle)) {
 		entity->changed = true;
+		// Values written through earlier this tick may be stale now (a teleport after the crowd moved it): the commit reads the nodes.
+		entity->written_tick = -1;
 	}
+}
+
+int64_t StateStore::write_through(const PackedInt64Array &handles, const StringName &column, const Array &values, int64_t tick) {
+	const int64_t count = handles.size() < values.size() ? handles.size() : values.size();
+	const String name = column;
+	int64_t last_layout = -1;
+	int64_t index = -1;
+	int64_t wrote = 0;
+	for (int64_t i = 0; i < count; i++) {
+		int64_t slot = 0;
+		Layout *layout = layout_of(handles[i], slot);
+		if (layout == nullptr) {
+			continue;
+		}
+		const int64_t l = (handles[i] >> SLOT_BITS) & LAYOUT_MASK;
+		if (l != last_layout) {
+			last_layout = l;
+			index = layout->names.find(name);
+		}
+		if (index < 0 || layout->pushed[index]) {
+			continue;
+		}
+		Entity &entity = layout->slots[slot];
+		if (!entity.bound) {
+			continue;
+		}
+		const Accessor &accessor = entity.accessors[index];
+		Object *node = ObjectDB::get_instance(accessor.node_id);
+		if (node == nullptr) {
+			continue;
+		}
+		Variant value = entity.round_values ? quantize_by_id(values[i], accessor.encoding) : values[i];
+		if (accessor.indexed) {
+			node->set_indexed(accessor.path, value);
+		} else {
+			node->set(accessor.name, value);
+		}
+		if (entity.written_tick != tick) {
+			entity.written_tick = tick;
+			entity.written.resize(size_t(layout->width));
+			entity.written_mask.assign(size_t(layout->width), 0);
+		}
+		entity.written[index] = copy_value(value);
+		entity.written_mask[index] = 1;
+		entity.changed = true; // a carry-forward entity is committed from its nodes and these values, not copied forward
+		wrote++;
+	}
+	return wrote;
 }
 
 PackedInt64Array StateStore::commit(int64_t tick) {
@@ -350,9 +402,14 @@ bool StateStore::commit_one(Layout &layout, int64_t slot, int64_t tick, bool may
 		m_nodes[c] = node;
 	}
 	Variant *cells = layout.cells.data() + size_t(row * width);
+	const bool has_written = entity.written_tick == tick;
 	for (int64_t c = 0; c < width; c++) {
 		if (layout.pushed[c]) {
 			cells[c] = copy_value(entity.pushed[c]);
+			continue;
+		}
+		if (has_written && entity.written_mask[c]) {
+			cells[c] = entity.written[c]; // written through this tick, already rounded and copied: no node read
 			continue;
 		}
 		const Accessor &accessor = entity.accessors[c];
@@ -518,6 +575,90 @@ Dictionary StateStore::get_column(int64_t layout_index, int64_t column, int64_t 
 	}
 	out["handles"] = handles;
 	out["values"] = values;
+	return out;
+}
+
+PackedVector3Array StateStore::get_vector3s(const PackedInt64Array &handles, const StringName &column, int64_t tick) const {
+	PackedVector3Array out;
+	const int64_t count = handles.size();
+	out.resize(count);
+	const Vector3 none(NAN, 0.0, 0.0);
+	const String name = column;
+	// Handles of one kind of pawn share a layout, so the column's index is looked up again only when the layout changes.
+	int64_t last_layout = -1;
+	int64_t index = -1;
+	for (int64_t i = 0; i < count; i++) {
+		const int64_t handle = handles[i];
+		out.set(i, none);
+		if (!has_row(handle, tick)) {
+			continue;
+		}
+		const int64_t l = (handle >> SLOT_BITS) & LAYOUT_MASK;
+		const Layout &layout = m_layouts[l];
+		if (l != last_layout) {
+			last_layout = l;
+			index = layout.names.find(name);
+		}
+		if (index < 0) {
+			continue;
+		}
+		const int64_t slot = handle & SLOT_MASK;
+		const Variant &value = layout.cells[size_t((slot * m_depth + frame_of(tick)) * layout.width + index)];
+		if (value.get_type() == Variant::VECTOR3) {
+			out.set(i, value);
+		}
+	}
+	return out;
+}
+
+Dictionary StateStore::find_long_moves(int64_t tick, double dt, double allowance, double slack) const {
+	PackedInt64Array handles;
+	PackedFloat32Array moved;
+	PackedFloat32Array speeds;
+	int64_t checked = 0;
+	const int64_t before = tick - 1;
+	// Both rows must still be in the history.
+	if (before >= 0 && before > m_now - m_depth) {
+		const int64_t frame_now = frame_of(tick);
+		const int64_t frame_before = frame_of(before);
+		for (size_t l = 0; l < m_layouts.size(); l++) {
+			const Layout &layout = m_layouts[l];
+			const int64_t position = layout.names.find("position");
+			const int64_t velocity = layout.names.find("velocity");
+			if (position < 0 || velocity < 0) {
+				continue;
+			}
+			for (int64_t slot = 0; slot < (int64_t)layout.slots.size(); slot++) {
+				const int64_t row_now = slot * m_depth + frame_now;
+				const int64_t row_before = slot * m_depth + frame_before;
+				const uint32_t generation = layout.row_generation[row_now];
+				// The same entity in both rows: a slot reused in between has a new generation.
+				if (generation == 0 || layout.row_tick[row_now] != tick || layout.row_tick[row_before] != before ||
+						layout.row_generation[row_before] != generation) {
+					continue;
+				}
+				const Variant *now = layout.cells.data() + size_t(row_now * layout.width);
+				const Variant *then = layout.cells.data() + size_t(row_before * layout.width);
+				if (now[position].get_type() != Variant::VECTOR3 || then[position].get_type() != Variant::VECTOR3 ||
+						now[velocity].get_type() != Variant::VECTOR3 || then[velocity].get_type() != Variant::VECTOR3) {
+					continue;
+				}
+				checked++;
+				const double distance = Vector3(now[position]).distance_to(Vector3(then[position]));
+				const double speed = std::fmax(Vector3(now[velocity]).length(), Vector3(then[velocity]).length());
+				if (distance > speed * dt * allowance + slack) {
+					handles.push_back(make_handle(generation, (int64_t)l, slot));
+					moved.push_back(float(distance));
+					speeds.push_back(float(speed));
+				}
+			}
+		}
+	}
+	Dictionary out;
+	out["handles"] = handles;
+	out["moved"] = moved;
+	out["speeds"] = speeds;
+	out["checked"] = checked;
 	return out;
 }
 
@@ -723,6 +864,9 @@ void StateStore::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_row", "handle", "tick"), &StateStore::load_row);
 	ClassDB::bind_method(D_METHOD("newest_tick", "handle"), &StateStore::newest_tick);
 	ClassDB::bind_method(D_METHOD("get_column", "layout", "column", "tick"), &StateStore::get_column);
+	ClassDB::bind_method(D_METHOD("get_vector3s", "handles", "column", "tick"), &StateStore::get_vector3s);
+	ClassDB::bind_method(D_METHOD("find_long_moves", "tick", "dt", "allowance", "slack"), &StateStore::find_long_moves);
+	ClassDB::bind_method(D_METHOD("write_through", "handles", "column", "values", "tick"), &StateStore::write_through);
 	ClassDB::bind_method(D_METHOD("frame_checksum", "tick"), &StateStore::frame_checksum);
 	ClassDB::bind_method(D_METHOD("verify_nodes", "tick"), &StateStore::verify_nodes);
 	ClassDB::bind_method(D_METHOD("quantize", "value", "encoding"), &StateStore::quantize);

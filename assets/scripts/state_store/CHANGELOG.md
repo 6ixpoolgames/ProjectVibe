@@ -13,6 +13,18 @@ Code that works but doesn't yet fit the project's goals. Each is marked `REFACTO
 |---|---|---|---|
 | Typed columns instead of Variants | `Layout::cells` in `state_store.h`, `_Layout.cells` in the twin | Each cell is a Variant, so any value fits (today's state lists hold arrays and dictionaries). Worker jobs (sensing, snapshot encoding, replay packing) want plain typed lanes they can read without the engine. Comes with the first job that reads the store | M |
 
+## 2026-11-21
+
+- **`find_long_moves(tick, dt, allowance, slack)`** (new, both twins): every entity with position and velocity columns whose move into that tick is longer than its velocity explains, with the move's length and speed, and how many were compared. The MoveSanityCheck's first pass.
+
+- **`mark_changed` drops values written through** for that entity earlier in the tick (both twins), so the commit reads its nodes. Before, a teleport after the crowd mover wrote a pawn's move was recorded at the crowd's position.
+
+## 2026-11-20
+
+- **`write_through(handles, column, values, tick)`** (new, both twins): one column for many entities, into their nodes and the row the commit for that tick records, which then skips reading them. Measured with the crowd mover: the commit is no faster, since a pawn's cost is its 42 ability, stat and effect columns (state store spec 13.8).
+
+- **`get_vector3s(handles, column, tick)`** (new, both twins): one Vector3 column, by name, for a list of entities in one call; NaN x where there's no row, no such column, or not a Vector3. For readers that want a whole crowd's positions, such as the crowd mover (state store spec 13.7).
+
 ## 2026-11-19
 
 - **Carrying rows forward** (`set_carry_forward`, `mark_changed`): an entity nothing marked since the last commit gets its previous row copied, reading no node; a rollback's re-run, a load and a missing previous row always read. `get_stats()` counts `rows_read` and `rows_carried`.

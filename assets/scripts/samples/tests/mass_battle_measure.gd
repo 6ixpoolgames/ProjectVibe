@@ -209,6 +209,12 @@ func _ready() -> void:
 					per_frame.append("%s %.2f (%.0f calls)" % [scope, entry[0], entry[1]])
 			print("        ms a tick: " + ", ".join(per_tick))
 			print("        ms a frame (%.2f ticks a frame): %s" % [s.steps_per_frame, ", ".join(per_frame)])
+			# Claude 2026-11-20: the state store's last commit, to see where the commit phase goes
+			var store: Object = TickDriver.store
+			if store:
+				var st: Dictionary = store.get_stats()
+				print("        store: last commit %.2f ms, %d rows read, %d carried, %d entities, %d bound" % [st["commit_usec"] / 1000.0,
+						st["rows_read"], st["rows_carried"], st["entities"], st["bound"]])
 	# Claude 2026-11-15: the replay's size, before stopping it
 	var recorder: ReplayRecorder = GameMode.replay_recorder
 	if recorder and recorder.is_recording():

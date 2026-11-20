@@ -514,6 +514,46 @@ Step 2's own figures in 13.5 (commit 1.2, tick 9.3) were from a faster run of th
 
 **The crowd mover: measured, not changed yet.** Of its 1.1 ms a tick at 300 pawns, GDScript around the batch is most: gathering the moving pawns 0.18 ms, their nav tiers and every other pawn as obstacles 0.25, and calling each pawn back 0.45 (about 4.5 µs a pawn: its velocity, position, rounding and the end of its run: `_position_after_run`, the `VisualSmoother`, the `ControllerManager`'s input bookkeeping). The C++ batch and its physics queries are about 0.25. Reading positions from the store would save part of the gathering, but the store's newest frame is the last tick's, one tick behind pawns that moved by physics this tick, and the calling back stays until the per-pawn end-of-run work moves into batched passes (smoothing into the "place what's drawn" pass, 12.5). Writing results straight into the store needs the frame being built to be writable during the tick, with one pass placing nodes from it. That's a design to agree, not a quick change.
 
+### 13.7 The crowd reads the others from the store *(Claude, 2026-11-20)*
+
+The owner's call (2026-11-20): read the other pawns from the store's last frame and accept that a pawn moved since then may overlap for a tick, which collision corrects, rather than build for it. Built:
+
+- **`StateStore.get_vector3s(handles, column, tick)`**, both twins: one Vector3 column, by name, for a list of entities in one call, with a NaN x where there's no row.
+- **The crowd mover's members:** every pawn joins as it enters the tree and leaves as it leaves, with its width, slope and shape found once (`add_pawn`, `remove_pawn`, `refresh_pawn`). Neither the moving pawns nor the others are asked for them each tick, and it no longer looks through the pawns' group.
+- **The others stand where frame `tick - 1` has them**, except the few that moved by physics this tick (`note_moved`, from `Pawn._move_with_physics`) and any without a row (new, paused, or under a parent that's moved or turned, since the store keeps its own position, not the world one), which are read from their nodes. The crowd runs last in simulate, so for the pawns that didn't run this tick (most of them, on a load step) the last frame is exactly where they are.
+- **What stays stale for a tick:** a pawn moved by code since the last commit (a teleport, a respawn). Its moving pawns still start from their nodes, so a crowd pawn itself is never put back.
+
+| Measured (300-pawn march, headless, `--size=100`, two runs each, step 3 from its own checkout beside it) | Step 3 | Reads from the store |
+|---|---|---|
+| `movement.crowd`, ms a tick | 1.07 | 0.87 |
+| gathering the moving pawns (`crowd_gather`) | 0.18 | 0.11 |
+| the others and nav tiers (`crowd_others`) | 0.24 | 0.12 |
+| finishing each pawn (`crowd_finish`) | 0.41 | 0.41 |
+| Simulate, ms a tick | 2.48 | 2.28 |
+
+Finishing each pawn is now most of what's left around the batch (13.8).
+
+### 13.8 Writing during the tick, teleports and the move check *(Claude, 2026-11-20)*
+
+The owner's calls (2026-11-20): test writing the table during the tick before deciding; delete passes where it stays modular; one general teleport instead of code per ability; a cheap sanity check for moves, with speed limits caught some other way.
+
+**Writing through, tested.** `StateStore.write_through(handles, column, values, tick)` (both twins) writes one column for many entities at once, into their nodes and into the row this tick's commit records, which then skips reading those nodes. The crowd mover writes its moved pawns' position, velocity and `grounded` through it in three calls (`CrowdMover.write_moves_through`, on). Mass battle, 300 pawns, two runs each:
+
+| ms a tick | Off | On |
+|---|---|---|
+| Finishing the moved pawns (`movement.crowd_finish`) | 0.43 | 0.34 |
+| The commit | 1.21 to 1.30 | 1.25 to 1.35 |
+
+The store's tripwire (`verify_store_each_tick`) shows the same three warnings either way, from spawning: the rows written through match the nodes. The commit didn't get faster, because position, velocity and grounded are 3 of about 47 columns a pawn has: the other 42 are ability timers and step states (about 3 a ability, 14 abilities), Health and the effects list, each a script property read through the engine, for every pawn that ran (101 a tick here; 202 more are copied forward). The commit's time is those reads (about 0.6 ms) and finding each column's node (about 0.2 ms).
+
+So: what pays is the abilities' state becoming pushed columns, written when it changes (6.3), which is the owner's idea of writing during the tick where it counts. That belongs to the abilities step. Readers still read the last frame: a row written through is never read before the commit, so results don't depend on which system ran first. The rule on writers: whatever writes a written-through property later in the same tick must write through too, or call `mark_changed`, which drops what was written through for that entity so the commit reads its nodes (2026-11-21: `Pawn.teleport` does, so a teleport after the crowd moved a pawn is recorded).
+
+**`Pawn.teleport(to)`.** Every instant move goes through it (respawns now do): the crowd reads the pawn from its node this tick (`CrowdMover.note_moved`, which `_move_with_physics` calls too), its Visual snaps instead of gliding, the store reads it even on a tick it doesn't run, and `last_teleport_tick` lets the move check through. Not yet: clients and replays still blend across a teleport between two snapshots; that needs a marker in the snapshot (netcode, later).
+
+**`MoveSanityCheck`** (diagnostics, every build, after each tick, `DiagnosticsManager.check_moves`): from the store alone, warns once per entity that moved further than its velocity explains (the faster of its last two velocities, over the ticks its run covered, times 1.5, plus 0.5 m), unless it teleported. A dash's velocity explains a dash's move, so no ability needs anything for it; speed limits themselves are left to another check. Its first pass over every entity is the store's `find_long_moves` (both twins), which returns only the long moves; the check looks up the owner of those alone. 0.03 ms a tick at 300 pawns (0.12 when the pass was GDScript reads, 2026-11-20), so it runs in release builds too (owner's call, 2026-11-21).
+
+**Not done:** moving the rest of the finish (input bookkeeping, `_position_after_run`, the smoother's `note_run`) out of the per-pawn call, about 0.2 ms more, left for a decision now the commit's real cost is known.
+
 ## 14. Open
 
 - **Reviews still to do** (the owner): the other major systems, which may change this spec. Abilities and AI behaviours are next; the controllers were reviewed on 2026-11-19 and fit (input commands are already plain data; their holder is the `ControllerManager`).

@@ -14,6 +14,18 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-21
+
+- **`teleport` is recorded even after the crowd mover wrote the pawn's move this tick**: the store's `mark_changed`, which it calls, now drops the written values.
+
+## 2026-11-20
+
+- **`teleport(to)`** (new): the one way to move a pawn instantly. Tells the crowd mover, snaps the Visual, marks its store row changed and sets `last_teleport_tick` (new), which the `MoveSanityCheck` lets through (state store spec 13.8).
+- **`finish_written_move()`** (new): ends a run whose position, velocity and grounded the crowd mover wrote through the state store.
+
+- **Tells the crowd mover about itself**: it joins `CrowdMover.current`'s members as it enters the tree and leaves as it leaves, and notes each move by physics (`note_moved`), so the crowd reads the others from the state store (state store spec 13.7).
+- **`get_store_handle()`** (new): its handle in the state store, or -1.
+
 ## 2026-11-19
 
 - **Pawn slimming for the state store's step 3** (state store spec 12.8): 638 lines to 577 (313 code).

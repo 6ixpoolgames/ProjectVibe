@@ -18,6 +18,18 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Test hooks in `NavServer` | `debug_fail_tile_commits`, `debug_limit_path_corners` in `nav_server.h` (and `GroundDomain`) | Test code bound into the shipping class. A test-only build flag or subclass would keep them out | S |
 | `NavHooks` settings that do nothing | `send_estimates`, `send_link_hints` in `nav_hooks.h` | A designer sees two switches in the inspector that change nothing. Hide them until the coarse planner (estimates) or link hints exist | S |
 
+## 2026-11-21
+
+- **`StateStore.find_long_moves(tick, dt, allowance, slack)`** (new): the MoveSanityCheck's first pass in one call, returning only the moves an entity's velocity doesn't explain. The check went from 0.12 to 0.03 ms a tick at 300 pawns.
+
+- **`StateStore.mark_changed` drops values written through** for that entity earlier in the tick, so the commit reads its nodes. A teleport after the crowd mover wrote a pawn's move was recorded at the crowd's position (state store spec 13.8).
+
+## 2026-11-20
+
+- **`StateStore.write_through(handles, column, values, tick)`** (new): writes one column for many entities into their nodes (rounded as the commit rounds) and into the row that tick's commit records, which then skips those node reads. The crowd mover uses it (state store spec 13.8).
+
+- **`StateStore.get_vector3s(handles, column, tick)`** (new): one Vector3 column, by name, for a list of entities, in one call, with a NaN x where there's no row. The crowd mover reads every other pawn's position with it (state store spec 13.7). The GDScript twin has it too.
+
 ## 2026-11-19
 
 - **`PawnTable` keeps pushes that can't land yet** (the column off, or the pawn not joined), the newest per pawn and column, and applies them once they can. It dropped them before, which the pawn's `detectability` property hid: a column switched on later read it from the pawn. With the property gone (state store step 2), a Detectability stat set before the sensing job switched its column on would have been lost.
