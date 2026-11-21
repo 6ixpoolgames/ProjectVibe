@@ -2,13 +2,13 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 174 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 178 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
 | [AbilityBase](../assets/scripts/abilities/REFERENCE.md#abilitybase) | [abilities](../assets/scripts/abilities/README.md) | Node | One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's [AbilityManager]. |
 | [AbilityCondition](../assets/scripts/abilities/REFERENCE.md#abilitycondition) | [abilities](../assets/scripts/abilities/README.md) | Resource | A condition a step timeline entry can start on: one value of the pawn compared with a number (ability spec 6.3). |
-| [AbilityDefinition](../assets/scripts/abilities/REFERENCE.md#abilitydefinition) | [abilities](../assets/scripts/abilities/README.md) | Resource | The settings one variant of an ability has, shared by every pawn that uses it, such as "Goblin Swing": a Resource an ability node points at (ability spec 3). |
+| [AbilityDefinition](../assets/scripts/abilities/REFERENCE.md#abilitydefinition) | [abilities](../assets/scripts/abilities/README.md) | Definition | The settings one variant of an ability has, shared by every pawn that uses it, such as "Goblin Swing": a Resource an ability node points at (ability spec 3). |
 | [AbilityManager](../assets/scripts/abilities/REFERENCE.md#abilitymanager) | [abilities](../assets/scripts/abilities/README.md) | Node | Starts, runs and stops a pawn's abilities, and takes the hits that land on it. |
 | [AbilityPriorityPart](../assets/scripts/effects/REFERENCE.md#abilityprioritypart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes one of a group of abilities' priority numbers while its effect lasts. A held part ([EffectPart]). |
 | [AbilityStep](../assets/scripts/abilities/REFERENCE.md#abilitystep) | [abilities](../assets/scripts/abilities/README.md) | Node | One step of an ability, such as a windup, a turn or a swing: a child node of the ability. |
@@ -56,7 +56,8 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [DashDefinition](../assets/scripts/abilities/REFERENCE.md#dashdefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | Dash's settings. |
 | [DeathAbility](../assets/scripts/abilities/REFERENCE.md#deathability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | Being dead: an action with no trigger action, started when the pawn's Health reaches 0. |
 | [DeathDefinition](../assets/scripts/abilities/REFERENCE.md#deathdefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | Death's settings: the base ones, with its defaults. |
-| [DefinitionRegistry](../assets/scripts/abilities/REFERENCE.md#definitionregistry) | [abilities](../assets/scripts/abilities/README.md) | RefCounted | Gives every ability definition file an id that's the same on every machine with the same files (ability spec 3.1). |
+| [Definition](../assets/scripts/abilities/REFERENCE.md#definition) | [abilities](../assets/scripts/abilities/README.md) | Resource | Settings shared by everything that uses them, with variants: the base of [AbilityDefinition] and [ProjectileDefinition] (ability spec 3). |
+| [DefinitionRegistry](../assets/scripts/abilities/REFERENCE.md#definitionregistry) | [abilities](../assets/scripts/abilities/README.md) | RefCounted | Gives every definition file (abilities, projectiles) an id that's the same on every machine with the same files (ability spec 3.1). |
 | [DiagnosticsLogger](../assets/scripts/diagnostics/REFERENCE.md#diagnosticslogger) | [diagnostics](../assets/scripts/diagnostics/README.md) | Logger | Catches the engine's warnings and errors for [DiagnosticsManager]. |
 | [DiagnosticsManager](../assets/scripts/diagnostics/REFERENCE.md#diagnosticsmanager) | [diagnostics](../assets/scripts/diagnostics/README.md) | GameModeModule | Measures every frame, keeps the history, spikes and session log, feeds the replay and shows the panels. |
 | [DiagnosticsPanels](../assets/scripts/diagnostics/REFERENCE.md#diagnosticspanels) | [diagnostics](../assets/scripts/diagnostics/README.md) | CanvasLayer | The on-screen panels, one key each, for reading [DiagnosticsManager]'s numbers. |
@@ -122,7 +123,10 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [PlayerCamera](../assets/scripts/camera/REFERENCE.md#playercamera) | [camera](../assets/scripts/camera/README.md) | Camera3D | The one real camera, which follows a VirtualCamera. PlayerController owns it. |
 | [PlayerController](../assets/scripts/player/REFERENCE.md#playercontroller) | [player](../assets/scripts/player/README.md) | ControllerBase | One player's controls: reads their devices, aims their camera, and gives their pawn input. |
 | [PossessionCoordinator](../assets/scripts/game_mode/REFERENCE.md#possessioncoordinator) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Who controls which pawn: players possess and let go of pawns through here. |
-| [Projectile](../assets/scripts/abilities/REFERENCE.md#projectile) | [abilities](../assets/scripts/abilities/README.md) | Node3D | A projectile in flight: a networked entity that moves each tick and hits the first pawn (or the ground) in its path. |
+| [PredictedProjectile](../assets/scripts/abilities/REFERENCE.md#predictedprojectile) | [abilities](../assets/scripts/abilities/README.md) | Node3D | The shooter's own client's copy of its projectile, drawn the moment it fires (ability spec 9): a visual, with no hits. |
+| [Projectile](../assets/scripts/abilities/REFERENCE.md#projectile) | [abilities](../assets/scripts/abilities/README.md) | Node3D | A projectile in flight: a networked entity whose flight is worked out from its launch, hitting pawns (up to max_hits) and the ground. |
+| [ProjectileDefinition](../assets/scripts/abilities/REFERENCE.md#projectiledefinition) | [abilities](../assets/scripts/abilities/README.md) | Definition | A projectile's flight and hits, shared by every shot that uses it (ability spec 9): its speed and how it changes, how much it drops, its size, how far and long it flies, what stops it, how many pawns it passes through, and what's shown where it ends. |
+| [ProjectileTraceView](../assets/scripts/diagnostics/REFERENCE.md#projectiletraceview) | [diagnostics](../assets/scripts/diagnostics/README.md) | Node3D | A debug view of projectiles on F5: each one's planned path, where it has flown, what it met and where it ended. |
 | [RangedAttackAbility](../assets/scripts/abilities/REFERENCE.md#rangedattackability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | A ranged attack: an action bound to &"primary" that fires a projectile, built from steps. |
 | [RangedAttackDefinition](../assets/scripts/abilities/REFERENCE.md#rangedattackdefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | A ranged attack's settings: its projectile, timings and muzzle. |
 | [ReplayChannel](../assets/scripts/replay/REFERENCE.md#replaychannel) | [replay](../assets/scripts/replay/README.md) | RefCounted | The base for one kind of data in a replay file (replay spec section 3). |

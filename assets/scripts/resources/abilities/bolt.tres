@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="ProjectileDefinition" format=3 uid="uid://bnpvgfe6pvji"]
+
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/ProjectileDefinition.gd" id="1_xbc41"]
+[ext_resource type="PackedScene" path="res://assets/scenes/projectiles/bolt_visual.tscn" id="2_umil8"]
+
+[resource]
+script = ExtResource("1_xbc41")
+visual_scene = ExtResource("2_umil8")

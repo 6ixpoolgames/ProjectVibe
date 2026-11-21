@@ -1,5 +1,5 @@
 # Written by Claude (claude-opus-5-5), 2026-11-21. History: abilities/CHANGELOG.md.
-## Gives every ability definition file an id that's the same on every machine with the same files (ability spec 3.1).
+## Gives every definition file (abilities, projectiles) an id that's the same on every machine with the same files (ability spec 3.1).
 ##
 ## The permanent id is the file's Godot resource UID (replays and saves keep it); the index is small, for the store and the network:
 ## the files in [constant FOLDERS], sorted by UID and numbered from 0, so machines with the same files agree. [method table] is the
@@ -29,7 +29,7 @@ static func scan(folders: Array[String] = FOLDERS) -> void:
 			if uid == ResourceUID.INVALID_ID:
 				push_warning("[DefinitionRegistry] %s has no UID; open and save it in the editor to give it one. It has no index." % path)
 				continue
-			if not load(path) is AbilityDefinition:
+			if not load(path) is Definition:
 				continue
 			if _paths.has(uid):
 				push_error("[DefinitionRegistry] %s and %s have the same UID (one was copied outside the editor); give one a new UID. Only the first has an index." % [_paths[uid], path])
@@ -45,18 +45,32 @@ static func scan(folders: Array[String] = FOLDERS) -> void:
 
 ## The definition's index, or -1 if it has none (embedded, made in code, or outside the folders). A resolved copy answers for the
 ## definition it was worked out from.
-static func index_of(definition: AbilityDefinition) -> int:
+static func index_of(definition: Definition) -> int:
 	if definition == null:
 		return -1
 	_scan_once()
-	var source: AbilityDefinition = definition.resolved_from if definition.resolved_from else definition
+	var source: Definition = definition.resolved_from if definition.resolved_from else definition
 	if source.resource_path == "" or source.is_embedded():
 		return -1
 	return _index_of_uid.get(ResourceLoader.get_resource_uid(source.resource_path), -1)
 
 
+## The index of this definition, or of the nearest one it's based on that has one: what a client can look up for an embedded variant,
+## whose own changes then have to travel some other way (a projectile's launch record carries its flight numbers). -1 with none.
+static func nearest_index(definition: Definition) -> int:
+	var at: Definition = definition.resolved_from if definition and definition.resolved_from else definition
+	var depth := 0
+	while at and depth < Definition.MAX_BASE_DEPTH:
+		var index := index_of(at)
+		if index >= 0:
+			return index
+		at = at.based_on
+		depth += 1
+	return -1
+
+
 ## The definition with this index, or null.
-static func find(index: int) -> AbilityDefinition:
+static func find(index: int) -> Definition:
 	_scan_once()
 	if index < 0 or index >= _uids.size():
 		return null
@@ -64,7 +78,7 @@ static func find(index: int) -> AbilityDefinition:
 
 
 ## The definition with this permanent id (a UID), wherever its file is now, or null.
-static func find_by_uid(uid: int) -> AbilityDefinition:
+static func find_by_uid(uid: int) -> Definition:
 	_scan_once()
 	return load(_paths[uid]) if _paths.has(uid) else null
 

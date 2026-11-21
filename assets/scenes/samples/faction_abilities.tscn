@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3]
+[gd_scene load_steps=20 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AbilityManager.tscn" id="1_abilities"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/MeleeAttackAbility.gd" id="3_melee"]
@@ -11,7 +11,6 @@
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/parry_knockback.tres" id="12_parry_knockback"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/interceptors/ParryInterceptor.gd" id="13_parry_front"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/RangedAttackAbility.gd" id="14_ranged"]
-[ext_resource type="PackedScene" path="res://assets/scenes/projectiles/bolt.tscn" id="15_bolt"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/bolt_hit.tres" id="16_bolt_hit"]
 [ext_resource type="Resource" uid="uid://csr3r2mkgmypj" path="res://assets/scripts/resources/abilities/faction_swing.tres" id="d_faction_swing"]
 [ext_resource type="Resource" uid="uid://cidtw0r5blp1f" path="res://assets/scripts/resources/abilities/second_swing.tres" id="d_second_swing"]

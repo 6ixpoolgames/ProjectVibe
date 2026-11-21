@@ -18,6 +18,18 @@ extends Node
 
 enum Kind { LOCOMOTION, ACTION }
 
+## Sent on the server for each pawn this ability hits, by a swing or by its projectile, as the hit is made ([method HitInfo.deliver]).
+## The target takes it later in the same tick, after every pawn has simulated (pawn spec 15.4).
+@warning_ignore("unused_signal") # sent by HitInfo.deliver
+signal hit_landed(hit: HitInfo)
+## Sent once per sweep, on its first tick, with where the hit sphere is and its radius. Every machine that runs the swing sends it
+## (server, offline, a predicting client), never during a replay. Says where it can hit, not whether it did: see [signal hit_landed].
+@warning_ignore("unused_signal") # sent by MeleeSweepStep
+signal hit_window_started(centre: Vector3, radius: float)
+## Sent every tick of a sweep, on the same machines as [signal hit_window_started], with the hit sphere's start and end for this tick.
+@warning_ignore("unused_signal") # sent by MeleeSweepStep
+signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
+
 ## What the code does with it: move the pawn every tick, or start on a press. Set by the kind's script.
 @export var kind := Kind.ACTION
 ## The settings it runs with (ability spec 3): a file shared by every pawn that uses it, or one embedded in this node while
@@ -251,9 +263,17 @@ const NEVER := 1 << 62
 ## are refused, the ability ends and it warns once.
 const MAX_STEP_STARTS_PER_TICK := 32
 var _starts_tick := -1 # the tick _starts_this_tick counts for
-## The pawns its steps have hit this run (instance ids), so each is hit once across all its sweeps. Server only, never in a replay;
-## cleared when it starts.
-var pawns_hit_this_run: Array[int] = []
+## The pawns it has hit this run, by entity id (instance id for a pawn not spawned through the session), so each is hit once across
+## all its sweeps (ability spec 8). Rolls back (pushed). At most [constant MAX_HITS_PER_RUN]; cleared when it starts.
+var pawns_hit_this_run := PackedInt64Array():
+	set(value):
+		if value == pawns_hit_this_run:
+			return
+		pawns_hit_this_run = value
+		push_state(&"pawns_hit_this_run", value)
+## The most pawns one run can hit. Past it a swing hits no one new, with a warning once: a fixed size keeps the rolled-back list small.
+const MAX_HITS_PER_RUN := 32
+var _warned_hit_cap := false
 var _starts_this_tick := 0
 var _warned_too_many_starts := false
 # Where push_state sends values: the pawn's TickStateComponent, and each pushed property's entry there ("AbilityManager/Swing:ends_at").
@@ -297,7 +317,7 @@ func prepare_settings() -> AbilityDefinition:
 	if _own_definition:
 		_own_definition.based_on = chosen # its own changes on top of the definition, or of the kind's defaults
 		chosen = _own_definition
-	settings = chosen.resolved()
+	settings = chosen.resolved() as AbilityDefinition
 	_settings_changed()
 	return settings
 
@@ -389,6 +409,7 @@ func get_pushed_properties() -> Array[String]:
 		out.append_array(["started_at", "ends_at"])
 	if is_stepped():
 		out.append("timeline_state") # every timeline entry's state, as one value
+		out.append("pawns_hit_this_run")
 	if cooldown > 0.0:
 		out.append("ready_at")
 	if buffer_window > 0.0 and trigger_action != &"":
@@ -608,6 +629,25 @@ func current_interrupt_threshold() -> int:
 		if step.running and step.interrupt_threshold >= 0:
 			strictest = maxi(strictest, step.interrupt_threshold)
 	return strictest if strictest >= 0 else interrupt_threshold
+
+
+## True if this run of the ability has already hit this pawn.
+func has_hit(target: Pawn) -> bool:
+	return pawns_hit_this_run.has(HitInfo.key_of(target))
+
+
+## Notes that this run hit this pawn. False, with a warning once, if the run has hit [constant MAX_HITS_PER_RUN] already: then the
+## pawn isn't hit.
+func note_hit(target: Pawn) -> bool:
+	if pawns_hit_this_run.size() >= MAX_HITS_PER_RUN:
+		if not _warned_hit_cap:
+			_warned_hit_cap = true
+			push_warning("%s: hit %d pawns in one run, its most; the rest aren't hit." % [name, MAX_HITS_PER_RUN])
+		return false
+	var hit := pawns_hit_this_run.duplicate()
+	hit.append(HitInfo.key_of(target))
+	pawns_hit_this_run = hit
+	return true
 
 
 ## Called by the manager when the ability has no [HitInterceptor], so it can make its defaults (Dash, Parry). Nothing by default.

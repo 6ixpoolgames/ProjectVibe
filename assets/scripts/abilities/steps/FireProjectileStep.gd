@@ -1,14 +1,17 @@
 # Written by Claude (claude-opus-5-5), 2026-11-18. History: abilities/CHANGELOG.md.
 ## Fires a projectile on its first tick, from the pawn's muzzle point toward where it looks.
 ##
-## Server or offline only, and never in a rollback replay: a client doesn't spawn anything, it sees the server's projectile arrive.
+## The server (or offline game) spawns it, never in a rollback replay. The shooter's own client draws a [PredictedProjectile] at once,
+## a visual only, instead of waiting a round trip for the server's.
 ## Aim is the pawn's look (yaw and pitch, so an AI looking at a target's chest aims at it). If [member warns_targets], the first enemy on
 ## the straight line ahead is told a hit is coming, so its AI can parry or dodge. Design: pawn spec 8.24.
 class_name FireProjectileStep
 extends AbilityStep
 
-## The projectile scene to fire: a [Projectile] with a TickStateComponent and a NetworkEntity. Register it at startup
-## ([method Projectile.register_scene]) on every machine.
+## What it fires: speed, arc, size, hits and look. The built-in projectile flies it (register it at startup on every machine,
+## [method Projectile.register]).
+@export var projectile_definition: ProjectileDefinition
+## For a projectile with code of its own: its scene (see [member RangedAttackDefinition.projectile_scene]). Empty: the built-in one.
 @export var projectile_scene: PackedScene
 ## Where it leaves from: metres above the pawn's feet.
 @export var muzzle_height := 1.3
@@ -27,8 +30,11 @@ func _init() -> void:
 
 
 func tick(_dt: float) -> Status:
-	if step_ticks == 0 and pawn.is_authority() and not TickDriver.is_resimulating() and projectile_scene:
-		_fire()
+	if step_ticks == 0 and not TickDriver.is_resimulating() and (projectile_definition or projectile_scene):
+		if pawn.is_authority():
+			_fire()
+		elif _is_shooters_own_client():
+			PredictedProjectile.fire(projectile_definition, projectile_scene, pawn, muzzle_point(), aim_direction(), TickDriver.tick)
 	return Status.RUNNING
 
 
@@ -48,9 +54,15 @@ func aim_direction() -> Vector3:
 func _fire() -> void:
 	var origin := muzzle_point()
 	var direction := aim_direction()
-	fired = Projectile.spawn_from(projectile_scene, ability, origin, direction)
+	fired = Projectile.fire(ability, origin, direction, projectile_definition, projectile_scene)
 	if fired and warns_targets:
 		_warn_first_on_path(origin, direction)
+
+
+# True on the client that predicts this pawn: the player who fired.
+func _is_shooters_own_client() -> bool:
+	var entity := pawn.get_network_entity()
+	return entity != null and entity.role == NetworkEntity.Role.LOCAL_PREDICTED
 
 
 # Tells the first enemy on the straight path, within range, that a hit is coming and when.

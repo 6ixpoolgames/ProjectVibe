@@ -5,11 +5,9 @@
 ## (metres above the feet) and reach (metres to the sphere's far edge). Each goes straight from start to end, so a slash changes angle, a
 ## thrust reach, a chop height; longer patterns are several sweeps in a row. Visuals draw the same path ([method offset_at]).
 ## [br][br]Hits are decided on the server only (or offline), never in a rollback replay. Each pawn is hit at most once per run of the
-## ability, its own team is skipped unless [member hits_own_team], and a hit carries the ability's on-hit effects. Signals go out on the
-## ability if it declares them ([MeleeAttackAbility] does).
+## ability, its own team is skipped unless [member hits_own_team], and a hit carries the ability's on-hit effects ([method HitInfo.make],
+## as a projectile's). Signals go out on the ability.
 ## Design: pawn spec 8.20.
-# REFACTOR: the signals are sent by name on the ability (has_signal, emit_signal), so an ability using this step only gets them if it
-# declares the same three. Declared once (on AbilityBase, or the step) a new attack would work without copying; extensible.
 class_name MeleeSweepStep
 extends AbilityStep
 
@@ -79,10 +77,9 @@ func tick(_dt: float) -> Status:
 	if TickDriver.is_resimulating():
 		return Status.RUNNING
 	var centres := centres_for_ticks(step_ticks, ability.ticks_elapsed()) # every tick this run covers (pawn spec 8.21)
-	if step_ticks == 0 and ability.has_signal(&"hit_window_started"):
-		ability.emit_signal(&"hit_window_started", centres[0], hit_radius)
-	if ability.has_signal(&"hit_area_moved"):
-		ability.emit_signal(&"hit_area_moved", centres[0], centres[centres.size() - 1], hit_radius)
+	if step_ticks == 0:
+		ability.hit_window_started.emit(centres[0], hit_radius)
+	ability.hit_area_moved.emit(centres[0], centres[centres.size() - 1], hit_radius)
 	if pawn.is_authority(): # hits are decided once, on the server
 		_check_hits(TickDriver.tick, centres)
 	return Status.RUNNING # done after length_ticks
@@ -110,31 +107,23 @@ func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
 	else:
 		targets = _plain_spheres(centres)
 	for target in targets:
-		if target == pawn or target.is_dead() or ability.pawns_hit_this_run.has(target.get_instance_id()):
+		if target == pawn or target.is_dead() or ability.has_hit(target):
 			continue
 		# An invulnerable pawn isn't hit or marked, so a later tick of the sweep can catch it once that ends.
 		if target.ability_manager and target.ability_manager.is_invulnerable():
 			continue
 		if target.team == pawn.team and not hits_own_team:
 			continue
-		ability.pawns_hit_this_run.append(target.get_instance_id())
-		var hit := HitInfo.new()
-		hit.attacker = pawn
-		hit.target = target
-		hit.ability = ability
-		hit.tick = on_tick
+		if not ability.note_hit(target):
+			continue # the run's hit list is full
 		var away := target.global_position - pawn.global_position
 		away.y = 0.0
-		hit.direction = away.normalized() if away.length_squared() > 0.0001 else Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
-		hit.effects = ability.on_hit_effects
-		hit.attacker_effects = ability.on_hit_self_effects
+		if away.length_squared() <= 0.0001:
+			away = Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
 		if ability.on_hit_effects.is_empty() and ability.on_hit_self_effects.is_empty() and not _warned_no_effects:
 			_warned_no_effects = true
 			push_warning("%s hit %s but has no on-hit effects (EffectApplier children), so the hit does nothing." % [ability.name, target.name])
-		if target.ability_manager: # a pawn with no abilities can't be hit
-			target.ability_manager.receive_hit(hit)
-		if ability.has_signal(&"hit_landed"):
-			ability.emit_signal(&"hit_landed", hit)
+		HitInfo.make(pawn, ability, target, away, on_tick, ability.on_hit_effects, ability.on_hit_self_effects).deliver()
 
 
 var _query: PhysicsShapeQueryParameters3D = null # kept between hit ticks (_plain_spheres)

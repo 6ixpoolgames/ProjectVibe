@@ -76,8 +76,7 @@ const NOT_ROLLED_BACK := {
 	# Who this swing has already hit, so each pawn is hit once. Hits are decided on the authority only and never in a replay, and the
 	# server never rolls back, so this is never needed on a machine that does. Hidden before 2026-11-10 by the shared keys.
 	"MeleeAttackAbility:_hit_this_swing": "on the server only, which never rolls back",
-	# Claude 2026-11-16 (pawn spec 8.20): the same list, moved to AbilityBase for every ability's steps to share.
-	"MeleeAttackAbility:pawns_hit_this_run": "on the server only, which never rolls back",
+	# Claude 2026-11-22 (ability spec 8): AbilityBase.pawns_hit_this_run rolls back now, as entity ids, so it's no longer excused.
 	# Claude 2026-11-16 (pawn spec 8.21): worked out at the start of each tick from _last_run_tick and tick_step, which roll back, and
 	# cleared when a rollback loads state (_on_state_loaded), so a replay works them out again.
 	"Pawn:_prepared_tick": "worked out each tick from _last_run_tick, which rolls back",

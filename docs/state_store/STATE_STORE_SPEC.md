@@ -1,4 +1,4 @@
-# State Store Spec v0.5 (agreed direction; steps 1 to 5 built, the abilities step begun)
+# State Store Spec v0.5 (agreed direction; steps 1 to 5 built, the abilities step under way: ability spec parts 1 to 4 built)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 

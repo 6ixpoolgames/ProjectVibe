@@ -13,18 +13,6 @@ extends AbilityBase
 # Its settings with their own type: the same object as settings.
 var _melee: MeleeAttackDefinition = null
 
-## Sent on the server for each pawn the swing hits, when it finds it. The target takes the hit later in the same tick, after every pawn
-## has simulated (pawn spec 15.4).
-@warning_ignore("unused_signal") # sent by its MeleeSweepStep
-signal hit_landed(hit: HitInfo)
-## Sent once per sweep, on its first tick, with where the hit sphere is and its radius. Every machine that runs the swing sends it
-## (server, offline, a predicting client), never during a replay. Says where it can hit, not whether it did: see [signal hit_landed].
-@warning_ignore("unused_signal") # sent by its MeleeSweepStep
-signal hit_window_started(centre: Vector3, radius: float)
-## Sent every tick of a sweep, on the same machines as [signal hit_window_started], with the hit sphere's start and end for this tick.
-@warning_ignore("unused_signal") # sent by its MeleeSweepStep
-signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
-
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
 ## From the definition: [member MeleeAttackDefinition.windup_ticks].
 var windup_ticks: int:

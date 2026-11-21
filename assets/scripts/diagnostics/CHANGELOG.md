@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | The window title in shipped games | `DiagnosticsManager._update_title` | A debugging convenience (role and process id, to tell instances apart) that also renames a release build's window, since diagnostics ship. A setting, or debug builds only, keeps a game's own title | S |
 | "Late" and "very late" as settings | `DiagnosticsManager._summary`; the F4 panel's text; `replay/ReplayViewer`'s strip colours | Fixed at 20 and 34 ms (60 and 30 fps) in three places, while spikes follow the tick rate and `spike_over_budget`. A game aiming at another frame rate can't set them | S |
 
+## 2026-11-22
+
+- **F5 projectile trace** (`ProjectileTraceView`, new, the owner's request; debug builds): each projectile's planned path, where it flew, what it met and where it ended, kept 3 s. Shift+F5 stays the net test bench's.
+
 ## 2026-11-21
 
 - **The pawn panel lists "definitions to check"**: abilities whose settings don't come from a definition file (embedded in a scene, written on the node) or whose definition was of another kind (`AbilityBase.definition_note`, ability spec 3).

@@ -1,11 +1,11 @@
 [gd_resource type="Resource" script_class="RangedAttackDefinition" format=3 uid="uid://bxfhtcb8d3wsl"]
 
-[ext_resource type="PackedScene" path="res://assets/scenes/projectiles/bolt.tscn" id="1_vk6gp"]
+[ext_resource type="Resource" uid="uid://bnpvgfe6pvji" path="res://assets/scripts/resources/abilities/bolt.tres" id="1_vk6gp"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/definitions/RangedAttackDefinition.gd" id="2_sk38w"]
 
 [resource]
 script = ExtResource("2_sk38w")
-projectile_scene = ExtResource("1_vk6gp")
+projectile_definition = ExtResource("1_vk6gp")
 trigger_action = &"ability_3"
 category = &"combat.ranged"
 cooldown = 0.6

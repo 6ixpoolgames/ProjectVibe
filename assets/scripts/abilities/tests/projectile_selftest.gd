@@ -7,10 +7,10 @@
 ##   godot --headless --path . "res://assets/scripts/abilities/tests/projectile_selftest.tscn"
 extends SelfTest
 
-# The faction samples' pawns: their abilities (faction_abilities.tscn) include RangedAttack on ability_3, firing bolt.tscn.
+# The faction samples' pawns: their abilities (faction_abilities.tscn) include RangedAttack on ability_3, firing the bolt (bolt.tres; bolt.tscn until 2026-11-22).
 const PAWN_SCENE := "res://assets/scenes/samples/faction_player.tscn"
 const GOBLIN_SCENE := "res://assets/scenes/samples/faction_goblin.tscn"
-const BOLT_SCENE := preload("res://assets/scenes/projectiles/bolt.tscn")
+const BOLT := preload("res://assets/scripts/resources/abilities/bolt.tres") # Claude 2026-11-22: a definition flown by the built-in projectile, was bolt.tscn
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 const MELEE_BEHAVIOURS: Array[StringName] = [&"Attack", &"HeavyAttack"]
 
@@ -18,7 +18,7 @@ const MELEE_BEHAVIOURS: Array[StringName] = [&"Attack", &"HeavyAttack"]
 func _ready() -> void:
 	print("--- Projectile self-test ---")
 	TickDriver.tick_rate = TickDriver.REFERENCE_RATE
-	Projectile.register_scene(BOLT_SCENE)
+	Projectile.register()
 	var floor_body := StaticBody3D.new()
 	var shape := CollisionShape3D.new()
 	var box := BoxShape3D.new()
@@ -27,12 +27,13 @@ func _ready() -> void:
 	shape.position.y = -0.5
 	floor_body.add_child(shape)
 	add_child(floor_body)
-	# -- --only=<name> runs one part (hit, miss, wall, own_team, parry, dash, gravity, shooter_gone, ai_shoots, keep_distance), for chasing a failure.
+	# -- --only=<name> runs one part (hit, miss, wall, own_team, parry, dash, gravity, shooter_gone, pierce, whitelist, speed_curve, hooks, predicted,
+	# ai_shoots, keep_distance), for chasing a failure.
 	var only := ""
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--only="):
 			only = arg.trim_prefix("--only=")
-	for part: String in ["hit", "miss", "wall", "own_team", "parry", "dash", "gravity", "shooter_gone", "ai_shoots", "keep_distance"]:
+	for part: String in ["hit", "miss", "wall", "own_team", "parry", "dash", "gravity", "shooter_gone", "pierce", "whitelist", "speed_curve", "hooks", "predicted", "ai_shoots", "keep_distance"]:
 		if only == "" or only == part:
 			await call("_test_" + part)
 	_finish()
@@ -44,7 +45,7 @@ func _test_hit() -> void:
 	var target := _make_pawn(Vector3(0, 0.1, -8), 1)
 	await _ticks(10)
 	var ranged := _ranged_of(shooter)
-	_check(ranged != null and ranged.trigger_action == &"ability_3" and ranged.projectile_scene == BOLT_SCENE and ranged.attack_reach() > 10.0,
+	_check(ranged != null and ranged.trigger_action == &"ability_3" and ranged.projectile_definition == BOLT and ranged.attack_reach() > 10.0,
 		"the faction pawns have RangedAttack on ability_3, firing the bolt, with an AI reach (%.0f m)" % (ranged.attack_reach() if ranged else 0.0))
 	var hits := _count_hits(target)
 	_check(shooter.ability_manager.start_ability(ranged), "it starts")
@@ -144,7 +145,7 @@ func _test_dash() -> void:
 	_check(target.ability_manager.start_ability(dash), "the target dashes")
 	await _ticks(1)
 	_check(target.ability_manager.is_invulnerable(), "and is invulnerable")
-	Projectile.spawn_from(BOLT_SCENE, _ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD)
+	Projectile.fire(_ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD, BOLT)
 	await _ticks(8)
 	_check_equal(target.stat_manager.get_health(), 100.0, "a bolt flies through a dashing pawn")
 	await _ticks(60)
@@ -155,8 +156,9 @@ func _test_dash() -> void:
 func _test_gravity() -> void:
 	var shooter := _make_pawn(Vector3(240, 0.1, 0), 0)
 	await _ticks(10)
-	var bolt := Projectile.spawn_from(BOLT_SCENE, _ranged_of(shooter), Vector3(240, 5, -1), Vector3.FORWARD)
-	bolt.gravity = 9.8
+	var heavy: ProjectileDefinition = BOLT.duplicate() # Claude 2026-11-22: gravity is a share of the world's now (gravity_scale)
+	heavy.gravity_scale = 1.0
+	var bolt := Projectile.fire(_ranged_of(shooter), Vector3(240, 5, -1), Vector3.FORWARD, heavy)
 	var start_y := bolt.global_position.y
 	await _ticks(20) # a third of a second: about 0.54 m
 	var dropped := start_y - bolt.global_position.y if is_instance_valid(bolt) else -1.0
@@ -171,7 +173,7 @@ func _test_shooter_gone() -> void:
 	var shooter := _make_pawn(Vector3(320, 0.1, 0), 0)
 	var target := _make_pawn(Vector3(320, 0.1, -12), 1)
 	await _ticks(10)
-	Projectile.spawn_from(BOLT_SCENE, _ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD)
+	Projectile.fire(_ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD, BOLT)
 	await _free(shooter)
 	await _ticks(30)
 	_check_equal(target.stat_manager.get_health(), 85.0, "a bolt whose shooter is gone flies on and still lands")
@@ -307,6 +309,145 @@ func _toward(from: Node3D, to: Node3D) -> Vector3:
 	var offset := to.global_position - from.global_position
 	offset.y = 0.0
 	return offset.normalized() if offset.length_squared() > 0.0001 else Vector3.FORWARD
+
+
+# Claude 2026-11-22 (ability spec 9): max_hits. Kept within the floor (x -400 to 400). Three targets in a row: 2 stops in the second, 0 passes through all, each hit once.
+func _test_pierce() -> void:
+	for max_hits: int in [2, 0]:
+		var shooter := _make_pawn(Vector3(-100 - max_hits * 40, 0.1, 0), 0)
+		var targets: Array[Pawn] = []
+		var hits: Array = []
+		for z: float in [-6.0, -9.0, -12.0]:
+			var target := _make_pawn(Vector3(-100 - max_hits * 40, 0.1, z), 1)
+			targets.append(target)
+			hits.append(_count_hits(target))
+		await _ticks(10)
+		var piercing: ProjectileDefinition = BOLT.duplicate()
+		piercing.max_hits = max_hits
+		var bolt := Projectile.fire(_ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD, piercing)
+		await _ticks(40)
+		var counts: Array = hits.map(func(list: Array) -> int: return list.size())
+		if max_hits == 2:
+			_check(counts == [1, 1, 0] and not is_instance_valid(bolt), "max_hits 2: it hits the first two, once each, and stops in the second (%s)" % str(counts))
+		else:
+			_check(counts == [1, 1, 1], "max_hits 0: it passes through all three, hitting each once (%s)" % str(counts))
+		await _free(shooter, targets[0], targets[1], targets[2])
+
+
+# Claude 2026-11-22: the whitelist and the intersect log. An ally then an enemy in its path: by default the ally is met but not hit, the
+# enemy hit; with hits_allies both are hit; with max_intersects 1 it ends at the ally.
+func _test_whitelist() -> void:
+	var cases := [["default", {}], ["allies", {"hits_allies": true}], ["one intersect", {"max_intersects": 1, "max_hits": 0}]]
+	for i in cases.size():
+		var x := -150.0 - i * 30.0
+		var shooter := _make_pawn(Vector3(x, 0.1, 0), 0)
+		var ally := _make_pawn(Vector3(x, 0.1, -6), 0)
+		var enemy := _make_pawn(Vector3(x, 0.1, -10), 1)
+		var ally_hits := _count_hits(ally)
+		var enemy_hits := _count_hits(enemy)
+		await _ticks(10)
+		var flight: ProjectileDefinition = BOLT.duplicate()
+		for key: String in cases[i][1]:
+			flight.set(key, cases[i][1][key])
+		flight.max_hits = cases[i][1].get("max_hits", 0)
+		var bolt := Projectile.fire(_ranged_of(shooter), Vector3(x, 1.3, -0.5), Vector3.FORWARD, flight)
+		var log: Array = []
+		bolt.intersected.connect(func(_p: Projectile, entry: Dictionary) -> void: log.append([entry.target, entry.hit]))
+		await _ticks(30)
+		match cases[i][0]:
+			"default":
+				_check(log.size() >= 2 and log[0] == [ally, false] and log[1] == [enemy, true] and ally_hits.is_empty() and enemy_hits.size() == 1,
+						"by default it meets the ally without hitting it, and hits the enemy; both are logged (%d)" % log.size())
+			"allies":
+				_check(ally_hits.size() == 1 and enemy_hits.size() == 1, "with hits_allies it hits both")
+			_:
+				_check(log.size() == 1 and enemy_hits.is_empty(), "with max_intersects 1 it ends at the first thing it meets, hit or not")
+		await _free(shooter, ally, enemy)
+
+
+# Claude 2026-11-22: a speed curve from 1 down to 0 over its 3 s life. After 1 s it has flown 30 m x (1 - 1/6) = 25 m, not 30; and its
+# launch record doesn't change in flight, so nothing about it is sent while it flies.
+func _test_speed_curve() -> void:
+	var shooter := _make_pawn(Vector3(-220, 0.1, 0), 0)
+	await _ticks(10)
+	var slowing: ProjectileDefinition = BOLT.duplicate()
+	var curve := Curve.new()
+	curve.add_point(Vector2(0.0, 1.0), 0.0, 0.0, Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+	curve.add_point(Vector2(1.0, 0.0), 0.0, 0.0, Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+	slowing.speed_curve = curve
+	var origin := Vector3(-220, 5, -1)
+	var bolt := Projectile.fire(_ranged_of(shooter), origin, Vector3.FORWARD, slowing)
+	await _ticks(1) # the first record rounds the values (StateEncoding); from then on they don't change
+	var record := [bolt.launch_tick, bolt.launch_origin, bolt.launch_direction]
+	await _ticks(10)
+	# GDScript note: compared one by one; two arrays holding equal vectors can still compare unequal (a -0.0 against a 0.0).
+	_check(is_instance_valid(bolt) and bolt.launch_tick == record[0] and bolt.launch_origin == record[1] and bolt.launch_direction == record[2],
+		"its launch record stays the same in flight")
+	await _ticks(49)
+	var flown := origin.distance_to(bolt.global_position) if is_instance_valid(bolt) else -1.0
+	_check(absf(flown - 25.0) < 0.6, "a speed curve slows it: %.1f m in 1 s, about 25 wanted" % flown)
+	_check(is_instance_valid(bolt) and bolt.velocity.length() < 21.0, "and its speed now is lower (%.1f m/s)" % (bolt.velocity.length() if is_instance_valid(bolt) else 0.0))
+	await _ticks(130)
+	await _free(shooter)
+
+
+# Claude 2026-11-22: the visual hooks (launched, hit_pawn, ended), the impact scene where it ends, and the same hit path as a swing
+# (the ability's hit_landed).
+func _test_hooks() -> void:
+	var shooter := _make_pawn(Vector3(-260, 0.1, 0), 0)
+	var target := _make_pawn(Vector3(-260, 0.1, -8), 1)
+	await _ticks(10)
+	var spark := Node3D.new()
+	spark.name = "Spark"
+	var packed := PackedScene.new()
+	packed.pack(spark)
+	spark.free()
+	var sparking: ProjectileDefinition = BOLT.duplicate()
+	sparking.impact_scene = packed
+	var heard := {"launched": 0, "hit_pawn": null, "ended": null, "hit_landed": 0}
+	var ranged := _ranged_of(shooter)
+	ranged.hit_landed.connect(func(_hit: HitInfo) -> void: heard.hit_landed += 1)
+	var trace := ProjectileTraceView.new() # the diagnostics' F5 view, shown here directly
+	add_child(trace)
+	trace.set_shown(true)
+	var bolt := NetworkSession.spawn(Projectile.TYPE, 0, Vector3(-260, 1.3, -0.5)) as Projectile
+	bolt.launched.connect(func(_p: Projectile) -> void: heard.launched += 1)
+	bolt.hit_pawn.connect(func(_p: Projectile, who: Pawn, _at: Vector3) -> void: heard.hit_pawn = who)
+	bolt.ended.connect(func(_p: Projectile, at: Vector3) -> void: heard.ended = at)
+	bolt.launch(ranged, Vector3(-260, 1.3, -0.5), Vector3.FORWARD, sparking)
+	_check(bolt.get_node_or_null(^"Visual") != null, "the built-in projectile takes its look from its definition's visual scene")
+	await _ticks(20)
+	var spark_at: Node3D = null
+	for child in bolt.get_parent().get_children() if is_instance_valid(bolt) else get_children():
+		if child.name.begins_with("Spark"):
+			spark_at = child
+	if spark_at == null:
+		for child in NetworkSession.world_root.get_children() if NetworkSession.world_root else get_children():
+			if String(child.name).begins_with("Spark"):
+				spark_at = child
+	_check(heard.launched == 1 and heard.hit_pawn == target and heard.ended != null, "its hooks: launched, hit_pawn (the target), then ended")
+	_check(heard.hit_landed == 1, "and its ability hears hit_landed, as a swing's does (one shared hit path)")
+	_check(spark_at != null and spark_at.global_position.distance_to(heard.ended) < 0.01, "its impact scene shows where it ended")
+	var traced: Array = trace._traces.values()
+	_check(traced.size() == 1 and traced[0].plan.size() > 2 and traced[0].marks.size() == 1 and traced[0].end != null,
+			"the F5 trace has its planned path, the intersect and the end")
+	trace.free()
+	await _free(shooter, target)
+
+
+# Claude 2026-11-22: the shooter's predicted copy flies from the same launch and goes when the server's shot ends.
+func _test_predicted() -> void:
+	var shooter := _make_pawn(Vector3(-320, 0.1, 0), 0)
+	await _ticks(10)
+	var tick: int = TickDriver.tick
+	var copy := PredictedProjectile.fire(BOLT, null, shooter, Vector3(-320, 1.3, -0.5), Vector3.FORWARD, tick)
+	await _ticks(6)
+	_check(copy != null and is_instance_valid(copy) and copy.global_position.z < -2.0, "a predicted copy flies at once, drawn from the launch (z %.1f)" % (copy.global_position.z if copy else 0.0))
+	var entity := shooter.get_network_entity()
+	PredictedProjectile.server_shot_ended(entity.entity_id if entity else -1, tick)
+	await _ticks(2)
+	_check(not is_instance_valid(copy), "and goes when the server's shot ends")
+	await _free(shooter)
 
 
 func _ranged_of(pawn: Pawn) -> RangedAttackAbility:

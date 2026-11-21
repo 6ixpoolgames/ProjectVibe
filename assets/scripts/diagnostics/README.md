@@ -44,6 +44,7 @@ It works with `replay/` (channel 6, `ReplayDiagnosticsChannel`, and the viewer's
 | F6 | Spikes: the newest frames over budget, and what took the time |
 | F7 | Pawn inspector: Ctrl + left click a pawn for its flags, Health, input, abilities, effects and AI |
 | F8 | Log: warnings and errors, with how often each came |
+| F5 | Projectile trace: each projectile's planned path, where it flew, what it met (green hit, grey met but not hit, orange the world) and where it ended; kept 3 s after it's gone (debug builds only) |
 | F9 | Nav view: the nav mesh, links and markers around the camera (debug builds only) |
 | F12 | Capture: a folder with a screenshot, the history as a table, the spikes, the log and where the replay is |
 
@@ -67,7 +68,7 @@ Names are dotted, general first. Name animation work `animation.something` and i
 
 **Scopes.** `PerfScopes` is main thread only: work on worker threads is timed by whoever waits for it. A scope costs about a microsecond, so ones that run per pawn per tick use `begin_detailed()`, which times only while F4 is open (or `mass_battle_measure --scopes` runs).
 
-**Always on.** The manager starts a replay when play starts (hosting, joining, or a player taking a pawn offline) and none is running, so recordings exist for bug reports. It ships in release builds: the project setting's `.release` override lists it, and a game can leave it out of either list. The panels ship too; F9 and F10 are debug-only. Its window title also names the role and process id.
+**Always on.** The manager starts a replay when play starts (hosting, joining, or a player taking a pawn offline) and none is running, so recordings exist for bug reports. It ships in release builds: the project setting's `.release` override lists it, and a game can leave it out of either list. The panels ship too; F5, F9 and F10 are debug-only. Its window title also names the role and process id.
 
 **What the panels show.** F1 the keys and the session log's name; F2 the last seconds, a bar per frame split into physics, scripts and rest, lines at 1/60 and 1/30 s; F4 the last second's averages, the tick and up to 14 scopes; F6 the newest spikes; F7 a pawn's flags, abilities, effects, AI and input; F8 warnings and errors with counts; F12 a capture. "Late" is over 20 ms, "very late" over 34 ms.
 

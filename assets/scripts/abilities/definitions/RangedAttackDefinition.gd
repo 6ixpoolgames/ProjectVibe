@@ -6,11 +6,19 @@
 class_name RangedAttackDefinition
 extends AbilityDefinition
 
-## The projectile it fires.
+## For a projectile with code of its own (homing, splitting): a scene whose root extends [Projectile], with a TickStateComponent and a
+## NetworkEntity, registered at startup ([method Projectile.register_scene]). Empty: the built-in projectile, flown by
+## [member projectile_definition].
 @export var projectile_scene: PackedScene:
 	set(value):
 		projectile_scene = value
 		_changed(&"projectile_scene", value)
+## What it fires: speed, arc, size, hits, and how it looks ([ProjectileDefinition]). A definition file, so clients can find it by its
+## registry index.
+@export var projectile_definition: ProjectileDefinition:
+	set(value):
+		projectile_definition = value
+		_changed(&"projectile_definition", value)
 ## Ticks of aiming before the shot, at 60 a second.
 @export_range(0, 120, 1, "or_greater") var windup_ticks: int = 12:
 	set(value):

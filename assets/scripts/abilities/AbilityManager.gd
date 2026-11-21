@@ -635,7 +635,7 @@ func _actions_have_work() -> bool:
 func _start(ability: AbilityBase) -> void:
 	readiness_version += 1
 	ability.buffer_until = 0
-	ability.pawns_hit_this_run.clear()
+	ability.pawns_hit_this_run = PackedInt64Array()
 	# A combo ability takes its position and closes the window until its OpenComboStep opens it again.
 	var taken := combo_position_for(ability)
 	if taken > 0:

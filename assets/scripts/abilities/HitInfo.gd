@@ -10,6 +10,10 @@ extends RefCounted
 
 ## Who hit.
 var attacker: Pawn = null
+## The attacker's entity id, the same on every machine (instance id for a pawn not spawned through the session); -1 with none.
+var attacker_id := -1
+## The hitting ability's place under its AbilityManager; -1 with none.
+var ability_index := -1
 ## Who was hit.
 var target: Pawn = null
 ## The ability that hit, such as a MeleeAttackAbility.
@@ -26,6 +30,38 @@ var attacker_effects: Array[Effect] = []
 var damage_dealt := 0.0
 ## True for a hit an interceptor sends back after stopping one (a parry's push-back); it can't be turned away in turn (pawn spec 8.23).
 var from_interception := false
+
+
+## A hit by this ability on this target, carrying the ability's on-hit effects (or those given): what a swing and a projectile both
+## make. attacker can be null (a projectile whose shooter is gone).
+static func make(attacker_pawn: Pawn, by: AbilityBase, target_pawn: Pawn, push_direction: Vector3, on_tick: int,
+		target_effects: Array[Effect], self_effects: Array[Effect]) -> HitInfo:
+	var hit := HitInfo.new()
+	hit.attacker = attacker_pawn
+	hit.attacker_id = key_of(attacker_pawn) if attacker_pawn else -1
+	hit.ability = by
+	hit.ability_index = by.get_index() if by else -1
+	hit.target = target_pawn
+	hit.tick = on_tick
+	var flat := Vector3(push_direction.x, 0.0, push_direction.z)
+	hit.direction = flat.normalized() if flat.length_squared() > 0.0001 else Vector3.FORWARD
+	hit.effects = target_effects
+	hit.attacker_effects = self_effects
+	return hit
+
+
+## Hands the hit to its target's AbilityManager (a pawn with no abilities can't be hit) and tells the ability it landed.
+func deliver() -> void:
+	if target and target.ability_manager:
+		target.ability_manager.receive_hit(self)
+	if ability and is_instance_valid(ability):
+		ability.hit_landed.emit(self)
+
+
+## A pawn's key for hit lists and ids: its entity id, the same on every machine, else its instance id.
+static func key_of(pawn: Pawn) -> int:
+	var entity := pawn.get_network_entity()
+	return entity.entity_id if entity and entity.entity_id >= 0 else pawn.get_instance_id()
 
 
 ## The Health this hit's effects take before resistances, from their StatChangeParts. For readouts that show a hit before it lands.

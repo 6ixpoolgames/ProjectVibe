@@ -1,0 +1,15 @@
+[gd_scene load_steps=3 format=3]
+
+[sub_resource type="BoxMesh" id="BoxMesh_bolt"]
+size = Vector3(0.08, 0.08, 0.6)
+
+[sub_resource type="StandardMaterial3D" id="Material_bolt"]
+albedo_color = Color(1, 0.85, 0.3, 1)
+emission_enabled = true
+emission = Color(1, 0.7, 0.2, 1)
+
+[node name="BoltVisual" type="Node3D"]
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_bolt")
+surface_material_override/0 = SubResource("Material_bolt")

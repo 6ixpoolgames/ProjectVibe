@@ -42,7 +42,6 @@ const ALLY_SCENE := preload("res://assets/scenes/samples/faction_ally.tscn") # C
 ## Claude 2026-11-16 (the owner's call): this game mode's default AI brain: the soldiers' behaviours (the arena's, plus the heavy attack,
 ## parry and going to the rally point), so a player's pawn let go of fights like its team.
 ## Claude 2026-11-18: the bolt every pawn's RangedAttack fires.
-const BOLT_SCENE := preload("res://assets/scenes/projectiles/bolt.tscn")
 const FACTION_BRAIN := preload("res://assets/scenes/samples/faction_brain.tscn")
 # Claude 2026-11-10: GOBLINS_PER_TEAM is gone. The scene's RedSpawner and BlueSpawner keep four of each alive, 12 m either side of
 # the middle and facing each other, and the arena's script switches them on when a game starts.
@@ -81,7 +80,7 @@ func _ready() -> void:
 	NetworkSession.register_type("goblin", RED_GOBLIN_SCENE)
 	NetworkSession.register_type("goblin_blue", BLUE_GOBLIN_SCENE)
 	NetworkSession.register_type("ally", ALLY_SCENE) # Claude 2026-11-13
-	Projectile.register_scene(BOLT_SCENE) # Claude 2026-11-18: the ranged attack's bolt, before hosting or joining (the type list is in the join check)
+	Projectile.register() # Claude 2026-11-18, 2026-11-22: the built-in projectile the bolt flies as, before hosting or joining (the type list is in the join check)
 	# Claude 2026-11-13: a player leaving frees a place on the players' team for a soldier.
 	# GDScript note: a lambda can be connected to a signal like a function; it's given the signal's values (here the peer).
 	NetworkSession.player_left.connect(func(peer: int) -> void:

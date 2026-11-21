@@ -1,4 +1,4 @@
-# Ability Spec v0.2 (agreed direction; parts 1 to 3 built: state pushed, timers as deadlines, definitions, step timelines)
+# Ability Spec v0.2 (agreed direction; parts 1 to 4 built: state pushed, timers as deadlines, definitions, step timelines, projectiles)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
@@ -13,7 +13,8 @@
 1. **State pushed, timers as deadlines** (sections 4 and 5): built 2026-11-21 ([state store spec 13.10](../state_store/STATE_STORE_SPEC.md)).
 2. **Definitions** (section 3), and the registry that gives them ids (section 3.1): built 2026-11-21 (as built: 3.2).
 3. **Step timelines and conditions** (section 6), replacing the steps' links and their counting `step_state`: built 2026-11-22 (as built: 6.5).
-4. **References as ids, projectiles and arcs** (sections 7 to 9), with projectile penetration and lag compensation (9).
+4. **References as ids and projectiles** (sections 8 and 9): built 2026-11-22 (as built: 9.1). Swing arcs moved to part 5.
+5. **Hits** (section 13): one hit system for melee and projectiles, with swing arcs as keys (section 7). Planned.
 
 ## 1. Decided
 
@@ -190,8 +191,20 @@ Resource ids come from the registry of definitions and effects (3.1).
 - **Flight worked out, not stepped:** a bolt's position at any tick follows from its launch tick, origin, velocity and gravity. Its state is a launch record plus the tick it ended, which doesn't change in flight, so deltas are empty and clients draw the flight themselves; only the launch and the end are sent. The server still sweeps each tick for hits.
 - **Hits are queries made in the tick** (the owner, 2026-11-21), as now: a sphere swept along the tick's step against the pawns' capsules, and a ray against the world. Not physics overlap events: those come after the physics step, in the engine's order, only where the area is at that moment (a fast bolt skips past), and only against where pawns are now, so they can't be rewound. If many bolts cost real time, all of them go to C++ in one call per tick, as the crowd mover does.
 - **Penetration** (the owner, 2026-11-21): `max_hits` in the definition, 1 by default (stops at the first pawn), 0 for no limit. Within a tick's step the pawns touched are taken in order along the path until the count runs out; the bolt keeps the entity ids of the pawns it hit (section 8), so none is hit twice. Whether walls stop it stays its own setting. Damage falling off per pawn passed is an effect's job.
-- **Lag compensation** (the owner, 2026-11-21), by catching up at spawn: the shooter's view delay (`view_ticks_behind`, capped by the session as for melee) is taken when it fires, and the server flies the new bolt forward by that many ticks at once, testing those ticks against pawns rewound to where the shooter saw them (`LagCompensation`, as melee uses); after that it flies normally. So lag bends only the start of a flight, and rewound tests cost a few ticks per bolt. Rewinding for a bolt's whole flight is the alternative: simpler, but targets are hit behind cover for longer.
+- **Lag compensation** (the owner, 2026-11-21; corrected 2026-11-22): first written as catching up at spawn, flying a late bolt forward. That fits a server that hears of a shot late; here the server runs the shot on the tick the client predicted, so the bolt isn't late, the targets the shooter saw are. As built (9.1), its first ticks are checked against pawns rewound to where the shooter saw them, by one tick less each tick. Part 5 moves this into one history query (13), cheap enough to rewind for the whole flight.
 - **Seen at once by the shooter:** the shooter's client draws a predicted copy of its bolt the moment it fires, a visual with no hits, replaced by the server's bolt when that arrives. Today the shooter sees its own bolt a round trip late.
+
+### 9.1 As built (part 4, Claude, 2026-11-22)
+
+- **One built-in projectile** (`scenes/projectiles/projectile.tscn`: `Projectile`, its TickState and NetworkEntity), registered once (`Projectile.register()`), fired with `Projectile.fire(ability, origin, direction, definition)`. A designer makes only a `ProjectileDefinition`; the look comes from its `visual_scene`. A projectile with code of its own (homing) is a scene whose root extends `Projectile`, registered with `register_scene`.
+- **`ProjectileDefinition`** (a `Definition`, so it has variants): speed, a speed curve (a distance table summed once per tick rate), a gravity scale (a share of `physics/3d/default_gravity`, tuning, not physics), radius, range, lifetime, `max_hits`, `max_intersects`, a whitelist (shooter, allies, enemies), its own on-hit effects, whether the world stops it, the visual scene and the impact scene. `Definition` is now the base of `AbilityDefinition` too: the variant machinery left `AbilityDefinition`.
+- **The launch record:** tick, origin, direction, definition index (for an embedded variant, the nearest file it's based on), speed, gravity scale and the shooter's entity id. Clients draw the flight from it at the tick they draw others at; the server sweeps each tick's stretch for hits. The first record rounds the values once (`StateEncoding`); after that nothing changes in flight.
+- **References as ids:** the shooter by entity id, the ability by its index under the AbilityManager, effects by id; `HitInfo` carries `attacker_id` and `ability_index`. Melee's `pawns_hit_this_run` is entity ids now, pushed and rolled back, capped at 32 (`AbilityBase.has_hit`, `note_hit`).
+- **One hit path:** `HitInfo.make()` and `deliver()` for swings and bolts; the hit signals are declared once on `AbilityBase`.
+- **Hooks and tools:** `launched`, `hit_pawn`, `hit_world`, `ended` and `intersected` (each intersect logged, hit or not); the impact scene spawned where it ends, as its own node; the F5 projectile trace in diagnostics.
+- **The shooter's predicted copy** (`PredictedProjectile`): drawn at once on the shooter's client, gone when the server's shot ends.
+- **Moving to part 5:** the projectile's whitelist, on-hit effects, `max_hits` and `max_intersects` go into a `HitDefinition`; its own hit finding into the shared hit query.
+- **Known gaps:** an embedded variant's speed curve, look or impact don't reach clients (speed and gravity scale do); a client places an impact where it last drew the bolt, not where it ended; the predicted copy is tested offline only; walls are tested with a ray, pawns with the sphere.
 
 ## 10. Visuals and events
 
@@ -218,6 +231,7 @@ Refactor rows from the abilities changelog folded in: Death and Knockback found 
 
 ## 12. Open
 
+- **A hit whose source is gone** (the owner, 2026-11-22): in the usual case a hit needs its ability; if the shooter's pawn is removed, its bolts' hits don't land, as some games do on purpose. A fireball that lands regardless needs its own way: keep the source until its projectiles and effects are done, or a global source.
 - **One condition base** for abilities and the AI, or two that look alike.
 - **Authoring step timelines:** a list of entries in Godot's inspector works; a timeline editor belongs to the design studio on the roadmap.
 - **Interceptors:** settings into definitions, and whether one can be started by a timeline entry.

@@ -9,7 +9,6 @@
 extends Node
 
 const PAWN_SCENE := preload("res://assets/scenes/samples/faction_player.tscn")
-const BOLT_SCENE := preload("res://assets/scenes/projectiles/bolt.tscn")
 const HEALTH := 1000.0 # high, so no pawn dies during a run: a hit is 15
 
 var settings: Dictionary = {}
@@ -36,7 +35,7 @@ func _ready() -> void:
 	_session.world_root = self
 	# The same types, in the same order, on every machine, before hosting or joining: the list is in the join check.
 	_session.register_type("pawn", PAWN_SCENE)
-	Projectile.register_scene(BOLT_SCENE)
+	Projectile.register() # Claude 2026-11-22: the built-in projectile, was the bolt scene
 	_debug.fake.latency_ms = float(settings.get("latency", 0))
 	_debug.fake.jitter_ms = float(settings.get("jitter", 0))
 	_debug.fake.loss = float(settings.get("loss", 0))

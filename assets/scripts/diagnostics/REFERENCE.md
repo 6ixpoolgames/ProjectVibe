@@ -10,6 +10,7 @@ Every class in `assets/scripts/diagnostics/`, from its doc comments. The overvie
 - [MoveSanityCheck](#movesanitycheck)
 - [NavDebugView](#navdebugview)
 - [PerfScopes](#perfscopes)
+- [ProjectileTraceView](#projectiletraceview)
 
 ## DiagnosticsLogger
 
@@ -81,7 +82,7 @@ Design: diagnostics spec.
 
 The on-screen panels, one key each, for reading [`DiagnosticsManager`](#diagnosticsmanager)'s numbers.
 
-A small fixed-width font in two columns so they never overlap: F1, F2 and F4 down the top right, F6, F7 and F8 up from the bottom left. F1 help, F2 frame graph, F4 timings (up to `SCOPES_LISTED` scopes), F6 spikes, F7 pawn inspector (Ctrl + left click a pawn), F8 log, F9 nav view ([`NavDebugView`](#navdebugview), debug builds only), F12 capture (`DiagnosticsManager.capture()`). The diagnostics README lists what each shows. Design: diagnostics spec.
+A small fixed-width font in two columns so they never overlap: F1, F2 and F4 down the top right, F6, F7 and F8 up from the bottom left. F1 help, F2 frame graph, F4 timings (up to `SCOPES_LISTED` scopes), F6 spikes, F7 pawn inspector (Ctrl + left click a pawn), F8 log, F5 projectile trace ([`ProjectileTraceView`](#projectiletraceview)) and F9 nav view ([`NavDebugView`](#navdebugview)), both debug builds only, F12 capture (`DiagnosticsManager.capture()`). The diagnostics README lists what each shows. Design: diagnostics spec.
 
 ### Settings and properties
 
@@ -180,3 +181,31 @@ A scope that runs very often (one per behaviour per pawn per tick) uses `begin_d
 - `end(name: StringName, started: int) -> void` *(static)*: Adds the time since `started` (from `begin()`) to the name's total for this frame. Does nothing if it is 0.
 - `add(name: StringName, microseconds: int, count: int = 1) -> void` *(static)*: Adds a time measured some other way (microseconds), such as one a C++ class reports.
 - `take_frame() -> Dictionary` *(static)*: Everything timed since the last call as name -> [microseconds, count], and starts afresh.
+
+## ProjectileTraceView
+
+`res://assets/scripts/diagnostics/ProjectileTraceView.gd`, extends [`Node3D`](https://docs.godotengine.org/en/stable/classes/class_node3d.html)
+
+A debug view of projectiles on F5: each one's planned path, where it has flown, what it met and where it ended.
+
+F5 shows and hides it in any level, through [`DiagnosticsPanels`](#diagnosticspanels), which makes it the first time. Debug builds only: in a release build it does nothing. For every projectile in flight it draws the path its launch record plans (dim), the part flown (bright), each intersect (a cross: green hit, grey met but not hit by the whitelist, orange the world) and where it ended (white). A trace stays `keep_seconds` after its projectile is gone. Intersects are known where hits are decided (the server or offline); a client draws the paths. Hidden, it costs nothing. Design: ability spec 9.
+
+### Settings and properties
+
+- `shown: bool` = `false`: Shown or not; `set_shown()` changes it.
+- `keep_seconds: float` = `3.0`: Seconds a trace stays after its projectile is gone.
+- `plan_points: int` = `48`: Points along a planned path.
+
+### Constants
+
+- `PLAN_COLOR = Color(0.55, 0.65, 1, 0.35)`
+- `FLOWN_COLOR = Color(1, 0.85, 0.3, 1)`
+- `HIT_COLOR = Color(0.3, 1, 0.4, 1)`
+- `MET_COLOR = Color(0.6, 0.6, 0.6, 1)`
+- `WORLD_COLOR = Color(1, 0.55, 0.1, 1)`
+- `END_COLOR = Color(1, 1, 1, 1)`
+- `MARK_SIZE = 0.25`
+
+### Functions
+
+- `set_shown(value: bool) -> void`: Shows or hides it. Debug builds only.

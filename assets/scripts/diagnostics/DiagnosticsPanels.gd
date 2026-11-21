@@ -3,7 +3,7 @@
 ##
 ## A small fixed-width font in two columns so they never overlap: F1, F2 and F4 down the top right, F6, F7 and F8 up from the bottom
 ## left. F1 help, F2 frame graph, F4 timings (up to [constant SCOPES_LISTED] scopes), F6 spikes, F7 pawn inspector (Ctrl + left click
-## a pawn), F8 log, F9 nav view ([NavDebugView], debug builds only), F12 capture ([method DiagnosticsManager.capture]). The
+## a pawn), F8 log, F5 projectile trace ([ProjectileTraceView]) and F9 nav view ([NavDebugView]), both debug builds only, F12 capture ([method DiagnosticsManager.capture]). The
 ## diagnostics README lists what each shows.
 ## Design: diagnostics spec.
 class_name DiagnosticsPanels
@@ -26,6 +26,7 @@ var _refresh_left := 0.0
 var _font: Font
 var _note := "" # a line shown in the help panel, such as where the last capture went
 var _nav_view: NavDebugView = null # F9, made the first time it's shown
+var _trace_view: ProjectileTraceView = null # F5, made the first time it's shown
 
 
 # The frame graph: one thin bar per frame, newest on the right.
@@ -124,6 +125,8 @@ func _make_label() -> Label:
 func is_shown(key: Key) -> bool:
 	if key == KEY_F9:
 		return _nav_view != null and _nav_view.shown # the nav view isn't a panel
+	if key == KEY_F5:
+		return _trace_view != null and _trace_view.shown # nor is the projectile trace
 	return _panels.has(key) and _panels[key][0].visible
 
 
@@ -142,6 +145,13 @@ func toggle(key: Key) -> void:
 			_nav_view.name = "NavDebugView"
 			manager.add_child(_nav_view)
 		_nav_view.set_shown(not _nav_view.shown)
+		return
+	if key == KEY_F5:
+		if _trace_view == null:
+			_trace_view = ProjectileTraceView.new()
+			_trace_view.name = "ProjectileTraceView"
+			manager.add_child(_trace_view)
+		_trace_view.set_shown(not _trace_view.shown)
 		return
 	if _panels.has(key):
 		_panels[key][0].visible = not _panels[key][0].visible
@@ -165,7 +175,8 @@ func get_text(key: Key) -> String:
 
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	if key and key.pressed and not key.echo and key.physical_keycode in [KEY_F1, KEY_F2, KEY_F4, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F12]:
+	var listed := key and key.pressed and not key.echo and key.physical_keycode in [KEY_F1, KEY_F2, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F12]
+	if listed and not (key.physical_keycode == KEY_F5 and key.shift_pressed): # Shift+F5 is the net test bench's
 		toggle(key.physical_keycode)
 		get_viewport().set_input_as_handled()
 		return
@@ -223,6 +234,7 @@ func _help_text() -> String:
 		"  F2 frame graph   F4 timings   F6 spikes",
 		"  F7 pawn inspector (Ctrl + click a pawn)   F8 log",
 		"  F12 capture (screenshot, history, spikes, log, replay tick)",
+		"  F5 projectile trace: paths, intersects, ends (debug builds)",
 		"  F9 nav view: nav mesh, links, markers (debug builds)",
 		"  F10 AI decisions: all in GDScript, and back to C++ (debug builds)",
 		"log: %s" % manager.get_log_path().get_file()])

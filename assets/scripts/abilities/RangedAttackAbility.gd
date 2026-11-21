@@ -6,7 +6,7 @@
 ## several fire steps). It locks out movement and other combat while it runs; Dash cancels it. What a hit does comes from its
 ## EffectApplier children, carried by the projectile. Design: pawn spec 8.24.
 ## [codeblock]
-## # in a pawn's AbilityManager: a RangedAttack with projectile_scene set, and an EffectApplier child (on hit)
+## # in a pawn's AbilityManager: a RangedAttack whose definition names a ProjectileDefinition, and an EffectApplier child (on hit)
 ## pawn.ability_manager.can_start(&"primary")
 ## [/codeblock]
 class_name RangedAttackAbility
@@ -16,6 +16,14 @@ extends AbilityBase
 var _ranged: RangedAttackDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+## From the definition: [member RangedAttackDefinition.projectile_definition].
+var projectile_definition: ProjectileDefinition:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.projectile_definition
+	set(value):
+		_write_setting(&"projectile_definition", value)
 ## From the definition: [member RangedAttackDefinition.projectile_scene].
 var projectile_scene: PackedScene:
 	get:
@@ -149,6 +157,7 @@ func _sync_default_steps() -> void:
 	(get_node(^"TurnToFace") as TurnToFaceStep).degrees_per_second = windup_turn_degrees_per_second
 	var fire := get_node(^"Fire") as FireProjectileStep
 	fire.projectile_scene = projectile_scene
+	fire.projectile_definition = projectile_definition
 	fire.muzzle_height = muzzle_height
 	fire.muzzle_forward = muzzle_forward
 	fire.warns_targets = warns_targets

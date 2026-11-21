@@ -938,7 +938,7 @@ Defaults here are for testing that things work and feel right. Game balance isn'
 
 **6. Combos and cooldowns**
 - A combo is counted by position, the usual combo counter, and positions are shared between light and heavy attacks *(the owner, 2026-11-16)*. Each attack lists `combo_positions`: [1] for an opener (the default), [2] SecondSwing, [3] FinisherSwing, [2, 3] HeavySmash.
-- The AbilityManager keeps `combo_position` (the last filled, 0 for none) and `combo_window_ticks_left`, both rolled back. An OpenComboStep opens the window (30 ticks) after a hit. A follow-up can start only while the window is open and its positions include the next one; openers always can; follow-ups have a higher `priority` than the opener on their key. Outside a window, any attack starts a new combo.
+- The AbilityManager keeps `combo_position` (the last filled, 0 for none) and the window's deadline (`combo_open_until`, a countdown until 2026-11-21), both rolled back. An OpenComboStep opens the window (30 ticks) after a hit. A follow-up can start only while the window is open and its positions include the next one; openers always can; follow-ups have a higher `priority` than the opener on their key. Outside a window, any attack starts a new combo.
 - So Swing, Second, Finisher; Swing, Smash, Finisher; HeavyAttack, Second, Smash; and so on. This replaces the combo boosts (`ComboBoost` and its two effects); boosts stay in the base for other uses.
 - Cooldowns: the basic swing 1.2 s, the heavy attack 1.9 s.
 - HeavyAttack: reach 2.7 m (was 2.4), windup 22 ticks (was 18). HeavySmash, new, on the same key: a downward smash, angle 0, height 2.2 m down to 0.2 m, reach 3.0 m, windup 20, 5 hit ticks, recovery 22.
@@ -951,7 +951,7 @@ Defaults here are for testing that things work and feel right. Game balance isn'
    - HeavySmash and `OpenComboStep` moved to step 3, since they need combo positions.
    - A safeguard was added: at most 32 step starts per ability per tick (`MAX_STEP_STARTS_PER_TICK`), so steps whose own code starts and stops each other can't loop forever within a tick. Every step runs at most once at a time, and loops across ticks end at `max_steps_ticks`.
 3. Combo positions and the cooldowns. **Built 2026-11-16:**
-   - Code: `AbilityBase.combo_positions`, `AbilityManager.combo_position`, `combo_window_ticks_left` and `open_combo_window()` (both values roll back), and `OpenComboStep`. A MeleeAttack's default steps include an OpenCombo after the sweep (`combo_window_ticks`, 30).
+   - Code: `AbilityBase.combo_positions`, `AbilityManager.combo_position`, `combo_open_until` and `open_combo_window()` (both values roll back), and `OpenComboStep`. A MeleeAttack's default steps include an OpenCombo after the sweep (`combo_window_ticks`, 30).
    - The faction arena's attacks: MeleeAttack [1] (cooldown 1.2 s), SecondSwing [2], FinisherSwing [3], HeavyAttack [1] (cooldown 1.9 s), and the new HeavySmash [2, 3] (right mouse; reach 3.0 m; from 2.2 m down to 0.2 m; windup 20, hit 5, recovery 22, the heavy hit's effects for now). The follow-ups have priority 20.
    - The combo boosts are gone from the scene. Their two effect files remain, unused.
    - **Later the same day (the owner's calls):**
@@ -1090,7 +1090,7 @@ The sweep and ray together are about 2.5 microseconds in any of these; the rest 
 - Every machine registers the projectile scene as a network type at startup (`Projectile.register_scene`): the list of types is part of the join check, so registering one mid-match would stop new players joining.
 - The AI's look pitch is measured from `AIController.look_from_height` (1.3 m, the muzzle's default) rather than the feet, so a shot fired along the look meets what the AI looks at.
 
-**In the samples (the owner's call: no new pawn for now).** The faction ability set (`faction_abilities.tscn`, so the faction goblins, soldiers, players and mass-battle heroes) has a `RangedAttack` on `ability_3` firing `bolt.tscn` (`bolt_hit.tres`: 15 damage, a small push). Their brains have a `Shoot` behaviour (an `AIAttackBehaviour` on `ability_3`, score 0.97, above the heavy attack's 0.95), so they shoot whenever a target is within 14 m (and at least 4 m away) and the shot is ready. Between shots they hang back with a `KeepDistance` behaviour (below). G shoots in the faction samples. The plain arena goblins are unchanged.
+**In the samples (the owner's call: no new pawn for now).** The faction ability set (`faction_abilities.tscn`, so the faction goblins, soldiers, players and mass-battle heroes) has a `RangedAttack` on `ability_3` firing the bolt (`bolt.tres` since 2026-11-22, ability spec 9.1; `bolt_hit.tres`: 15 damage, a small push). Their brains have a `Shoot` behaviour (an `AIAttackBehaviour` on `ability_3`, score 0.97, above the heavy attack's 0.95), so they shoot whenever a target is within 14 m (and at least 4 m away) and the shot is ready. Between shots they hang back with a `KeepDistance` behaviour (below). G shoots in the faction samples. The plain arena goblins are unchanged.
 
 **Measured.** See the abilities changelog (2026-11-18): bolts fired, in flight and their flight cost in the mass battle at 25, 50 and 100 a faction (`mass_battle_measure`, which has `--no-ranged` and `--melee-off` to compare).
 
