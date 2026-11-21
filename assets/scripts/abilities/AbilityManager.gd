@@ -166,6 +166,9 @@ func _note_deadline_passed() -> void:
 ## one it replaces calls no setter, but the soonest one still ahead depends on the tick, which went back.
 func state_loaded() -> void:
 	timers_changed()
+	for ability in _abilities:
+		if ability.is_stepped():
+			ability.timeline_loaded() # its running entries' values back onto their steps
 
 
 ## Moves [member readiness_version] on for a change made outside the abilities; the EffectManager calls it when effects change.

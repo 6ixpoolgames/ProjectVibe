@@ -1,4 +1,4 @@
-# Ability Spec v0.2 (agreed direction; parts 1 and 2 built: state pushed, timers as deadlines, definitions)
+# Ability Spec v0.2 (agreed direction; parts 1 to 3 built: state pushed, timers as deadlines, definitions, step timelines)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
@@ -12,7 +12,7 @@
 
 1. **State pushed, timers as deadlines** (sections 4 and 5): built 2026-11-21 ([state store spec 13.10](../state_store/STATE_STORE_SPEC.md)).
 2. **Definitions** (section 3), and the registry that gives them ids (section 3.1): built 2026-11-21 (as built: 3.2).
-3. **Step timelines and conditions** (section 6), replacing the steps' links and their counting `step_state`.
+3. **Step timelines and conditions** (section 6), replacing the steps' links and their counting `step_state`: built 2026-11-22 (as built: 6.5).
 4. **References as ids, projectiles and arcs** (sections 7 to 9), with projectile penetration and lag compensation (9).
 
 ## 1. Decided
@@ -96,7 +96,7 @@ Every timer is the tick something happens, not a count of ticks left (built in p
 | `JumpAbility.ticks_off_ground` | `left_ground_at` |
 | Knockback's fade | worked out from the run's `started_at` (`push_ticks` stays: it's a length) |
 | Sprint's charge | the charge and the tick it last started or stopped (`charge_at_switch`, `switched_at`); `ready_at` when it can start again |
-| `step_state` (running, step ticks) | still counts: each timeline entry's `started_at` and `ended_at` in part 3 (section 6) |
+| `step_state` (running, step ticks) | each timeline entry's start, end, end reason and count origin (6.5) |
 | An effect's ticks left and period left | not yet: `ends_at` and `next_pulse_at` |
 | A projectile's ticks left and distance travelled | not yet: its launch tick (part 4, section 9) |
 
@@ -145,9 +145,9 @@ Goblin Swing (double): the three entries of Goblin Swing, then
   - when a condition holds
   - the first of several of these
 - **End:** the step's own end, or with another entry, or with the ability. The ability ends when no entry that keeps it running is running or due, or at its longest length (today's `max_steps_ticks`).
-- **State:** each entry's `started_at` and `ended_at` (-1 if not yet), one packed array per ability, as `step_state` is now. "At +10" is the ability's `started_at` plus 10: a deadline.
+- **State:** each entry's start and end ticks (-1 if not yet), one packed array per ability. "At +10" is the ability's `started_at` plus 10: a deadline.
 - **Order within a tick:** rules are checked in list order. A step that ends can start the next in the same tick; a step started during a tick gets its first tick on the next, as now. The existing guard stops steps starting each other in a loop.
-- **Today's links** (`starts_first`, `starts_when_finished` on the step nodes) become timeline entries ("at +0", "on end of"), and leave the step nodes.
+- **The old links** (`starts_first`, `starts_when_finished` on the step nodes) became timeline entries ("at +0", "on end of"), and left the step nodes.
 
 ### 6.3 Conditions
 
@@ -156,6 +156,19 @@ Small data Resources over named values, so step timelines stay no-code and C++ c
 ### 6.4 Bespoke scripts
 
 The alternate path: an ability's script sequences its step nodes itself (`run_step(sweep, values)`), for logic a timeline can't express, such as branching on what the swing hit or a swing that homes in. It uses the same steps, state layer and deadlines.
+
+### 6.5 As built (part 3, Claude, 2026-11-22)
+
+- **Classes:** `TimelineEntry` and `AbilityCondition` (`abilities/steps/`); the runner is in `AbilityBase`. The definition's `step_timeline` is a setting like any other, so a variant can have its own.
+- **Which timeline:** the definition's; else the kind's default for the steps it made (`default_timeline()`: MeleeAttack's and RangedAttack's standard sequences); else the steps one after another in tree order. A step no entry names gets a manual entry, so code can still start it (`start_step`, the bespoke path of 6.4).
+- **Labels:** an entry is found by its label, its step's name unless given one; one step in two entries needs a label on one.
+- **No rule set** means it starts with the ability.
+- **State:** four numbers per entry in `timeline_state`: start, end, end reason, and where its step's count starts. A step's length is a deadline from that origin; a tick that doesn't count (the windup waiting for the turn) moves the origin on, the only write while it runs. `step_ticks` is worked out from it.
+- **Due:** an entry not yet started is due if its tick hasn't come, the entry it follows is still to run or end, or its delay is running. An entry with only a condition isn't, so it can't keep the ability going on its own.
+- **Values:** an entry's `values` go onto its step when it starts; the step's own come back when the ability ends, and a rollback puts the running entries' values back.
+- **Windup and turn:** the windup no longer starts the turn (the timeline does) and counts while facing the look or while no turn step runs. A recovery and a windup find their sweep from the timeline, for visuals.
+- **Conditions** stay separate from the AI's for now: one value (look angle, an action held, grounded, a stat, ticks running) against a number.
+- **Measured:** 300 pawns, `pawn.abilities` 0.36 ms a frame and the commit 0.67 to 0.75 ms a tick, as before.
 
 ## 7. Swing arcs as keys
 
@@ -194,7 +207,7 @@ Resource ids come from the registry of definitions and effects (3.1).
 | `AbilityManager.gd` | Done (part 1): no countdowns; it keeps the soonest deadline, and readiness is checked against deadlines |
 | Each ability kind | Done: settings in its definition, timers as deadlines |
 | `MeleeAttackAbility.gd` | Its default steps come from its definition's step timeline; the arc as keys |
-| `steps/*` | Values per run; links move to timeline entries; the step state moves into the timeline's state |
+| `steps/*` | Done (part 3): values per run, links became timeline entries, the step state is the timeline's |
 | `interceptors/*` | To be checked: settings into definitions, the same pattern |
 | `projectiles/Projectile.gd` | A definition; flight worked out from the launch record; ids for the shooter and effects |
 | `effects/EffectManager.gd` | Its list's countdowns become deadlines |

@@ -62,8 +62,9 @@ const NOT_ROLLED_BACK := {
 	# A stat's value, while a held StatModifierPart changes it: base_value with the parts' changes, worked out the same way.
 	"Stat:value": "worked out from active_effects",
 	# Claude 2026-11-16 (wider audit): the totals the EffectManager hands a stat (Stat.set_modifiers), which value is worked out from.
-	# Claude 2026-11-17: run_steps' working list (AbilityBase._steps_this_tick), emptied and filled again at the start of every tick.
-	"MeleeAttackAbility:_steps_this_tick": "a working list, refilled every tick from the steps' running flags, which roll back",
+	# Claude 2026-11-17, renamed 2026-11-22 (step timelines): run_steps' working list (AbilityBase._running_now), emptied and filled
+	# again at the start of every tick.
+	"MeleeAttackAbility:_running_now": "a working list, refilled every tick from the timeline's state, which rolls back",
 	"Stat:_added": "worked out from the effects list, like Stat:value",
 	"Stat:_multiplied": "worked out from the effects list, like Stat:value",
 	# Goes up whenever a stat's value changes, so abilities that keep stat values read them again (pawn spec 15.2). A rollback that

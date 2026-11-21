@@ -1,33 +1,30 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
 ## One step of an ability, such as a windup, a turn or a swing: a child node of the ability.
 ##
-## Steps start when the ability does ([member starts_first]) or when another finishes ([member starts_when_finished]), and several can
-## run at once. Extend it and override [method enter], [method tick] (RUNNING, DONE or FAILED) and [method exit]; the ability ends when
-## no step with [member keeps_ability_running] is left. A step started during a tick enters at once and gets its first tick on the next.
-## [br][br]Rollback: [member running] and [member step_ticks] live in the ability's step_state and roll back; any other state must be
-## listed in [method get_rollback_properties], because a rollback restores values without calling [method enter] or [method exit].
-## Design: pawn spec 8.20.
+## When steps start is the ability's step timeline ([TimelineEntry]): at a tick, when another step starts or ends, or on a condition,
+## so several can run at once and one step can run in several entries. Extend it and override [method enter], [method tick] (RUNNING,
+## DONE or FAILED) and [method exit]; the ability ends when no step with [member keeps_ability_running] is left and nothing is due. A
+## step started during a tick enters at once and gets its first tick on the next.
+## [br][br]Rollback: whether it runs and its count live in its ability's timeline_state and roll back; any other state must be listed
+## in [method get_rollback_properties], because a rollback restores values without calling [method enter] or [method exit].
+## Design: ability spec 6, pawn spec 8.20.
 class_name AbilityStep
 extends Node
 
 enum Status {
 	RUNNING, ## still going
-	DONE, ## finished: the steps in starts_when_finished start
+	DONE, ## finished: the timeline entries that follow its end start
 	FAILED, ## couldn't do its job: the whole ability ends
 }
 
-## On: it starts when its ability starts. With no step marked, the ability's first step starts.
-@export var starts_first := false
-## The steps that start when this one is done (not when it fails or is cancelled). Other steps of the same ability.
-@export var starts_when_finished: Array[NodePath] = []
 ## How long it runs, in ticks at 60 a second (converted for the match's tick rate). 0: until tick() says DONE.
 @export_range(0, 600, 1, "or_greater") var length_ticks := 0
 ## While it runs, how strong a starting ability (or a hit's knockback) must be to cancel its ability. -1: the ability's own
 ## interrupt_threshold. With several steps running, the strictest counts.
 @export var interrupt_threshold := -1
 # For a step during which hits can't land, give it an InvulnerabilityInterceptor child (pawn spec 8.23).
-## On: it ends on the first tick its action isn't held (reason "released") and its next steps start as if it were done. Held input is
-## rolled-back input, so server, prediction and replay agree.
+## On: it ends on the first tick its action isn't held (reason "released"), which starts what follows it as done does (unless an entry
+## says otherwise). Held input is rolled-back input, so server, prediction and replay agree.
 @export var ends_when_released := false
 ## The action that must stay held. Empty: its ability's trigger_action. With neither, it's never released.
 @export var while_held: StringName = &""
@@ -35,29 +32,19 @@ enum Status {
 ## steps are left, the ability ends and they stop with "done".
 @export var keeps_ability_running := true
 
-# State that rolls back, kept in the ability's step_state: 0 while not running, step_ticks + 1 while running.
+# Worked out from its ability's timeline_state, which rolls back.
 ## True while it runs.
 var running: bool:
 	get:
-		return index >= 0 and ability != null and ability.step_state[index] > 0
-	set(value):
-		if index >= 0 and ability != null:
-			ability.set_step_value(index, 1 if value else 0)
+		return ability != null and ability.running_entry_of(self) >= 0
 ## Ticks counted since it started (those [method counts_this_tick] allowed); in [method tick], the ticks before this one. 0 when not running.
 var step_ticks: int:
 	get:
-		return ability.step_state[index] - 1 if running else 0
-	set(value):
-		if running:
-			ability.set_step_value(index, maxi(value, 0) + 1)
-## Its place in its ability's steps (and step_state), set when its ability finds it; -1 before.
-var index := -1
+		return ability.step_ticks_of(self) if ability else 0
 
 ## Set by its ability.
 var ability: AbilityBase = null
 var pawn: Pawn = null
-## starts_when_finished, as steps, found once by its ability.
-var next_steps: Array[AbilityStep] = []
 ## while_held's input bit (or its ability's trigger_action's), worked out once by setup_hold(). 0: no action to hold.
 var hold_bit := 0
 
@@ -86,7 +73,7 @@ func enter() -> void:
 	pass
 
 
-## Every tick it runs: RUNNING to go on, DONE when finished (its next steps start), FAILED to end the whole ability.
+## Every tick it runs: RUNNING to go on, DONE when finished (what follows it in the timeline starts), FAILED to end the whole ability.
 func tick(_dt: float) -> Status:
 	return Status.RUNNING
 

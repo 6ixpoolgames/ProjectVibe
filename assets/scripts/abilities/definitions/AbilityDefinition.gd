@@ -109,6 +109,12 @@ extends Resource
 	set(value):
 		needs_full_movement = value
 		_changed(&"needs_full_movement", value)
+## For a stepped ability: when each step runs (ability spec 6.2), as entries in ticks from its start. Empty: its kind's default (a
+## swing's windup, sweep and recovery), or its steps one after another.
+@export var step_timeline: Array[TimelineEntry] = []:
+	set(value):
+		step_timeline = value
+		_changed(&"step_timeline", value)
 ## For a stepped ability, the longest it can run, in ticks at 60 a second. It ends when no step runs, or at this. Ignored without steps.
 @export_range(1, 6000, 1, "or_greater") var max_steps_ticks: int = 600:
 	set(value):

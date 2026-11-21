@@ -3,7 +3,7 @@
 ##
 ## The look is the crosshair for a player, [code]look_at_point()[/code] for the AI. It runs only while its ability's action is held
 ## (ends_when_released is on): let go and it stops with "released", unless it hasn't yet turned [member min_turn_degrees] or faced the
-## look. It doesn't keep its ability running, so it ends with the swing. A [WindupStep] usually starts it.
+## look. It doesn't keep its ability running, so it ends with the swing. It usually starts with a [WindupStep].
 ## [br][br]Rollback: yaw rolls back, and look and held actions are input, so a replay turns the same way; the minimum counts from step_ticks.
 ## Design: pawn spec 8.20.
 class_name TurnToFaceStep

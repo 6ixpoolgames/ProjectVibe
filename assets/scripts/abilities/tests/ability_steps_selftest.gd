@@ -1,7 +1,7 @@
-## Written by Claude (claude-opus-5-5), 2026-11-16: headless self-test for ability steps (AbilityStep and the runner in AbilityBase,
-## pawn spec 8.20), with test steps that log what happens to them: steps in order and side by side, a step starting another and a
-## step's count waiting for it (the windup and turn), failing, the safety limit, cancel windows from step thresholds, invulnerable steps,
-## the step signals, and step state rolling back.
+## Written by Claude (claude-opus-5-5), 2026-11-16: headless self-test for ability steps and their timeline (AbilityStep, TimelineEntry
+## and the runner in AbilityBase, ability spec 6), with test steps that log what happens to them: entries in order and side by side, one
+## following another's start and a step's count waiting for it (the windup and turn), failing, the safety limit, cancel windows from step
+## thresholds, invulnerable steps, the step signals, state rolling back, one step in two entries, start rules and the timeline's checks.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/abilities/tests/ability_steps_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
@@ -14,15 +14,12 @@ class LogStep extends AbilityStep:
 	var log: Array = [] # shared by the steps of one test: [step name, what, tick]
 	var done_after := -1 # DONE on this tick of its own (counted), -1: never by itself
 	var fail_after := -1
-	var start_on_enter: AbilityStep = null # a step this one starts when it starts, as a windup starts a turn
 	var restart_on_exit: AbilityStep = null # a step this one starts when it stops: with stop_on_enter, a loop within one tick
 	var stop_on_enter: AbilityStep = null
 	var counts_while_stopped: AbilityStep = null # its length only counts while that step isn't running
 
 	func enter() -> void:
 		log.append([String(name), "enter", TickDriver.tick])
-		if start_on_enter:
-			ability.start_step(start_on_enter)
 		if stop_on_enter:
 			ability.stop_step(stop_on_enter)
 
@@ -91,6 +88,9 @@ func _ready() -> void:
 	await _test_loop_in_one_tick()
 	await _test_going_along()
 	await _test_released()
+	await _test_one_step_twice()
+	await _test_start_rules()
+	await _test_timeline_checks()
 	floor_body.free()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -102,23 +102,22 @@ func _test_order_and_side_by_side() -> void:
 	var attack := StepAttack.new()
 	attack.name = "StepAttack"
 	var a := _step(attack, "A", log)
-	a.starts_first = true
 	a.length_ticks = 3
-	a.starts_when_finished = [NodePath("../B"), NodePath("../C")]
 	var b := _step(attack, "B", log)
 	b.length_ticks = 2
 	var c := _step(attack, "C", log)
 	c.done_after = 4
+	attack.step_timeline = [TimelineEntry.at(&"A"), TimelineEntry.after_end_of(&"B", &"A"), TimelineEntry.after_end_of(&"C", &"A")]
 	var pawn := _make_pawn([attack])
 	var manager := pawn.ability_manager
 	var heard := {"started": 0, "finished": 0}
 	manager.step_started.connect(func(_ability: AbilityBase, _step: AbilityStep) -> void: heard.started += 1)
 	manager.step_finished.connect(func(_ability: AbilityBase, _step: AbilityStep, _reason: String) -> void: heard.finished += 1)
 	await _ticks(10)
-	_check(attack.is_stepped() and attack.steps.size() == 3, "an ability with AbilityStep children is stepped, and finds them")
+	_check(attack.is_stepped() and attack.steps.size() == 3 and attack.timeline.size() == 3, "an ability with AbilityStep children is stepped, and finds them and its timeline")
 	_ai(pawn).press(&"primary")
 	await _ticks(1)
-	_check(attack.is_running_timed() and a.running and not b.running, "pressed: it starts, and only its first step runs")
+	_check(attack.is_running_timed() and a.running and not b.running, "pressed: it starts, and only the entry at +0 runs")
 	await _ticks(12)
 	_check(_count(log, "A", "tick") == 3 and _tick_of(log, "A", "exit:done") == _tick_of(log, "B", "enter"), "A runs its 3 ticks, and B starts on the tick A is done")
 	_check(_tick_of(log, "B", "enter") == _tick_of(log, "C", "enter"), "and C with it: both side by side")
@@ -130,23 +129,26 @@ func _test_order_and_side_by_side() -> void:
 	pawn.free()
 
 
-# The windup and turn: W starts T when it starts, and W's 3 ticks only count once T is done (T takes 2).
+# The windup and turn: T starts when W starts, and W's 3 ticks only count once T is done (T takes 2).
 func _test_step_starting_a_step() -> void:
 	var log: Array = []
 	var attack := StepAttack.new()
 	attack.name = "StepAttack"
 	var w := _step(attack, "W", log)
-	w.starts_first = true
 	w.length_ticks = 3
 	var t := _step(attack, "T", log)
 	t.done_after = 2
-	w.start_on_enter = t
 	w.counts_while_stopped = t
+	var with_w := TimelineEntry.new()
+	with_w.step = &"T"
+	with_w.after = &"W"
+	with_w.after_event = TimelineEntry.After.STARTS
+	attack.step_timeline = [TimelineEntry.at(&"W"), with_w]
 	var pawn := _make_pawn([attack])
 	await _ticks(10)
 	_ai(pawn).press(&"primary")
 	await _ticks(1)
-	_check(w.running and t.running and attack.get_running_step_names() == PackedStringArray(["W", "T"]), "a step can start another: W starts T, and both run (%s)" % " + ".join(attack.get_running_step_names()))
+	_check(w.running and t.running and attack.get_running_step_names() == PackedStringArray(["W", "T"]), "an entry can follow another's start: T starts with W, and both run (%s)" % " + ".join(attack.get_running_step_names()))
 	await _ticks(10)
 	_check(_count(log, "T", "tick") == 2 and _count(log, "W", "tick") == 5, "W's 3 ticks only counted once T was done: 5 ticks in all")
 	_check(not attack.is_running_timed(), "then the ability ends")
@@ -159,10 +161,9 @@ func _test_failing() -> void:
 	var attack := StepAttack.new()
 	attack.name = "StepAttack"
 	var f := _step(attack, "F", log)
-	f.starts_first = true
 	f.fail_after = 2
-	var g := _step(attack, "G", log)
-	g.starts_first = true
+	_step(attack, "G", log)
+	attack.step_timeline = [TimelineEntry.at(&"F"), TimelineEntry.at(&"G")]
 	var pawn := _make_pawn([attack])
 	await _ticks(10)
 	_ai(pawn).press(&"primary")
@@ -188,7 +189,7 @@ func _test_safety_limit() -> void:
 	pawn.free()
 
 
-# X (threshold 100) then Y (threshold 0); the ability's own is 50, and the dash's priority 20.
+# X (threshold 100) then Y (threshold 0), with no timeline: one after another. The ability's own is 50, and the dash's priority 20.
 func _test_cancel_windows() -> void:
 	var log: Array = []
 	var attack := StepAttack.new()
@@ -196,7 +197,6 @@ func _test_cancel_windows() -> void:
 	var x := _step(attack, "X", log)
 	x.length_ticks = 10
 	x.interrupt_threshold = 100
-	x.starts_when_finished = [NodePath("../Y")]
 	var y := _step(attack, "Y", log)
 	y.length_ticks = 10
 	y.interrupt_threshold = 0
@@ -212,7 +212,7 @@ func _test_cancel_windows() -> void:
 	await _ticks(2)
 	_check(attack.is_running_timed() and not dash.is_running_timed(), "so the dash (20) can't cancel it")
 	await _ticks(10)
-	_check(y.running and manager.interrupt_threshold_now(attack) == 0, "while Y runs, it's Y's (0)")
+	_check(y.running and manager.interrupt_threshold_now(attack) == 0, "with no timeline its steps run one after another: while Y runs, it's Y's (0)")
 	_ai(pawn).press(&"dash")
 	await _ticks(2)
 	_check(not attack.is_running_timed() and dash.is_running_timed() and _count(log, "Y", "exit:cancelled") == 1,
@@ -229,7 +229,6 @@ func _test_invulnerable_step() -> void:
 	var dodge := InvulnerabilityInterceptor.new() # Claude 2026-11-17 (pawn spec 8.23): was the step's invulnerable flag
 	dodge.name = "Invulnerable"
 	shield.add_child(dodge)
-	shield.starts_when_finished = [NodePath("../Open")]
 	var open := _step(attack, "Open", log)
 	open.length_ticks = 5
 	var pawn := _make_pawn([attack])
@@ -249,14 +248,13 @@ func _test_rollback() -> void:
 	attack.name = "StepAttack"
 	var a := _step(attack, "A", log)
 	a.length_ticks = 6
-	a.starts_when_finished = [NodePath("../B")]
 	var b := _step(attack, "B", log)
 	b.length_ticks = 20
 	var pawn := _make_pawn([attack])
 	await _ticks(10)
 	var listed: Array[String] = (pawn.get_node("TickState") as TickStateComponent).state_properties
-	# Claude 2026-11-16: as one value on the ability (step_state), not two per step, which cost 2.4 ms a tick at 150 pawns.
-	_check(listed.has("AbilityManager/StepAttack:step_state pushed") and not listed.has("AbilityManager/StepAttack/A:running"), "the steps' running and step_ticks roll back, as one value on their ability")
+	# Claude 2026-11-22 (ability spec 6.2): the timeline's state, one value on the ability, as step_state was.
+	_check(listed.has("AbilityManager/StepAttack:timeline_state pushed") and not listed.has("AbilityManager/StepAttack/A:running"), "the timeline's state rolls back, as one value on its ability")
 	_ai(pawn).press(&"primary")
 	await _ticks(10)
 	await get_tree().physics_frame
@@ -267,13 +265,12 @@ func _test_rollback() -> void:
 	pawn.free()
 
 
-# The safeguard: Loop stops itself when it starts and starts itself again when it stops, so it would go round forever in one tick.
+# The safeguard: code that stops Loop when it starts and starts it again when it stops would go round forever in one tick.
 func _test_loop_in_one_tick() -> void:
 	var log: Array = []
 	var attack := StepAttack.new()
 	attack.name = "StepAttack"
 	var loop := _step(attack, "Loop", log)
-	loop.starts_first = true
 	loop.stop_on_enter = loop
 	loop.restart_on_exit = loop
 	var pawn := _make_pawn([attack])
@@ -283,7 +280,7 @@ func _test_loop_in_one_tick() -> void:
 	await _ticks(3)
 	var starts := _count(log, "Loop", "enter")
 	_check(starts <= AbilityBase.MAX_STEP_STARTS_PER_TICK and not attack.is_running_timed(),
-			"steps starting each other in a loop within one tick are stopped at %d starts, and the ability ends (%d)" % [AbilityBase.MAX_STEP_STARTS_PER_TICK, starts])
+			"steps started from code in a loop within one tick are stopped at %d starts, and the ability ends (%d)" % [AbilityBase.MAX_STEP_STARTS_PER_TICK, starts])
 	pawn.free()
 
 
@@ -293,11 +290,10 @@ func _test_going_along() -> void:
 	var attack := StepAttack.new()
 	attack.name = "StepAttack"
 	var main := _step(attack, "Main", log)
-	main.starts_first = true
 	main.length_ticks = 3
 	var along := _step(attack, "Along", log)
-	along.starts_first = true
 	along.keeps_ability_running = false
+	attack.step_timeline = [TimelineEntry.at(&"Main"), TimelineEntry.at(&"Along")]
 	var pawn := _make_pawn([attack])
 	await _ticks(10)
 	_ai(pawn).press(&"primary")
@@ -308,15 +304,13 @@ func _test_going_along() -> void:
 
 
 # Claude 2026-11-16: any step can end on release (ends_when_released): Hold ends the tick its action is let go, with "released", and
-# its next step (After) starts as if it were done.
+# what follows it (After) starts as if it were done.
 func _test_released() -> void:
 	var log: Array = []
 	var attack := StepAttack.new()
 	attack.name = "StepAttack"
 	var hold := _step(attack, "Hold", log)
-	hold.starts_first = true
 	hold.ends_when_released = true
-	hold.starts_when_finished = [NodePath("../After")]
 	var after := _step(attack, "After", log)
 	after.length_ticks = 3
 	var pawn := _make_pawn([attack])
@@ -331,6 +325,93 @@ func _test_released() -> void:
 	_check(not hold.running and _count(log, "Hold", "exit:released") == 1 and after.running, "let go: it ends as released, and its next step starts")
 	await _ticks(5)
 	_check(not attack.is_running_timed(), "and the ability finishes as usual")
+	pawn.free()
+
+
+# Claude 2026-11-22 (ability spec 6.2): one step in two entries, with values of their own (a second sweep on a backswing).
+func _test_one_step_twice() -> void:
+	var log: Array = []
+	var attack := StepAttack.new()
+	attack.name = "StepAttack"
+	var swing := _step(attack, "Swing", log)
+	swing.length_ticks = 5
+	attack.step_timeline = [TimelineEntry.at(&"Swing", 0, {"length_ticks": 2}),
+		TimelineEntry.after_end_of(&"Swing", &"Swing", {"length_ticks": 4}, &"Backswing")]
+	var pawn := _make_pawn([attack])
+	await _ticks(10)
+	_ai(pawn).press(&"primary")
+	await _ticks(12)
+	_check(_count(log, "Swing", "enter") == 2 and _count(log, "Swing", "tick") == 6, "one step runs in two entries, each with its own length (2, then 4)")
+	_check(not attack.is_running_timed() and swing.length_ticks == 5, "and its own value comes back when the ability ends")
+	pawn.free()
+
+
+# Claude 2026-11-22: entries by time, after a delay, on a condition, and an end reason that doesn't count.
+func _test_start_rules() -> void:
+	var log: Array = []
+	var attack := StepAttack.new()
+	attack.name = "StepAttack"
+	var a := _step(attack, "A", log)
+	a.length_ticks = 2
+	var late := _step(attack, "Late", log)
+	late.length_ticks = 1
+	var delayed := _step(attack, "Delayed", log)
+	delayed.length_ticks = 1
+	var on_condition := _step(attack, "OnCondition", log)
+	on_condition.length_ticks = 1
+	var after_delay := TimelineEntry.after_end_of(&"Delayed", &"A")
+	after_delay.delay_ticks = 3
+	var running_long := AbilityCondition.new()
+	running_long.input = AbilityCondition.Reads.TICKS_RUNNING
+	running_long.comparison = AbilityCondition.Comparison.AT_LEAST
+	running_long.value = 4
+	var by_condition := TimelineEntry.new()
+	by_condition.step = &"OnCondition"
+	by_condition.condition = running_long
+	attack.step_timeline = [TimelineEntry.at(&"A"), TimelineEntry.at(&"Late", 8), after_delay, by_condition]
+	var pawn := _make_pawn([attack])
+	await _ticks(10)
+	_ai(pawn).press(&"primary")
+	await _ticks(14)
+	var start := _tick_of(log, "A", "enter")
+	_check(_tick_of(log, "Late", "enter") == start + 8, "at_tick 8: it starts 8 ticks after the ability (+%d)" % (_tick_of(log, "Late", "enter") - start))
+	_check(_tick_of(log, "Delayed", "enter") == _tick_of(log, "A", "exit:done") + 3, "a delay: 3 ticks after A is done")
+	_check(_tick_of(log, "OnCondition", "enter") == start + 4, "a condition: the first tick it holds (+%d)" % (_tick_of(log, "OnCondition", "enter") - start))
+	_check(_count(log, "Late", "exit:done") == 1 and attack.stops == 1, "nothing ran between ticks 5 and 8, yet the ability waited for the entry still due")
+	pawn.free()
+	# Cut, A ends "cancelled": what follows its end (done or released) doesn't start, so a cancelled windup doesn't swing.
+	log.clear()
+	var cut_attack := StepAttack.new()
+	cut_attack.name = "StepAttack"
+	var cut_a := _step(cut_attack, "A", log)
+	cut_a.length_ticks = 5
+	var cutter := _step(cut_attack, "Cutter", log)
+	cutter.length_ticks = 2
+	cutter.stop_on_enter = cut_a
+	_step(cut_attack, "B", log)
+	cut_attack.step_timeline = [TimelineEntry.at(&"A"), TimelineEntry.at(&"Cutter"), TimelineEntry.after_end_of(&"B", &"A")]
+	pawn = _make_pawn([cut_attack])
+	await _ticks(10)
+	_ai(pawn).press(&"primary")
+	await _ticks(6)
+	_check(_count(log, "A", "exit:cancelled") == 1 and _count(log, "B", "enter") == 0 and not cut_attack.is_running_timed(), "an end that isn't done or released doesn't start what follows")
+	pawn.free()
+
+
+# Claude 2026-11-22: a timeline is checked once, when it's worked out.
+func _test_timeline_checks() -> void:
+	var log: Array = []
+	var attack := StepAttack.new()
+	attack.name = "StepAttack"
+	_step(attack, "A", log)
+	_step(attack, "Spare", log)
+	var lost := TimelineEntry.after_end_of(&"A", &"Nowhere", {}, &"Second")
+	attack.step_timeline = [TimelineEntry.at(&"A"), TimelineEntry.at(&"Missing"), lost]
+	print("  (warnings about a missing step and an \"after\" naming no entry are expected next)")
+	var pawn := _make_pawn([attack])
+	await _ticks(2)
+	var labels: Array = attack.timeline.map(func(entry: TimelineEntry) -> String: return "%s%s" % [entry.get_label(), " (manual)" if entry.manual else ""])
+	_check(labels == ["A", "Second", "Spare (manual)"], "an entry naming a missing step is left out, and a step none names gets a manual entry (%s)" % str(labels))
 	pawn.free()
 
 

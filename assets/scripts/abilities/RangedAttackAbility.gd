@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-18. History: abilities/CHANGELOG.md.
 ## A ranged attack: an action bound to &"primary" that fires a projectile, built from steps.
 ##
-## A shot is a [WindupStep] (which starts a [TurnToFaceStep]), a [FireProjectileStep], then a [WaitStep] for recovery. With no
+## A shot is a [WindupStep] with a [TurnToFaceStep] beside it, a [FireProjectileStep], then a [WaitStep] for recovery. With no
 ## [AbilityStep] children of its own it makes those from the settings below; place steps of your own for another pattern (a volley is
 ## several fire steps). It locks out movement and other combat while it runs; Dash cancels it. What a hit does comes from its
 ## EffectApplier children, carried by the projectile. Design: pawn spec 8.24.
@@ -118,21 +118,25 @@ func start() -> void:
 		_sync_default_steps()
 
 
-# Windup (starts TurnToFace, then Fire), Fire (then Recovery). The same names everywhere, so their rolled-back state has the same paths
-# on every machine.
+## The timeline for the steps it made: Windup and TurnToFace together, Fire when the windup is done, then Recovery. With steps of its
+## own and no timeline in its definition, they run one after another.
+func default_timeline() -> Array[TimelineEntry]:
+	if not _made_default_steps:
+		return []
+	return [TimelineEntry.at(&"Windup"), TimelineEntry.at(&"TurnToFace"), TimelineEntry.after_end_of(&"Fire", &"Windup"),
+		TimelineEntry.after_end_of(&"Recovery", &"Fire")]
+
+
+# The default steps, run by its default timeline. Named the same everywhere, so a definition's own timeline can name them.
 func _make_default_steps() -> void:
 	var windup := WindupStep.new()
 	windup.name = "Windup"
-	windup.starts_first = true
-	windup.turn_step = NodePath("../TurnToFace")
-	windup.starts_when_finished = [NodePath("../Fire")]
 	add_child(windup)
 	var turn := TurnToFaceStep.new()
 	turn.name = "TurnToFace"
 	add_child(turn)
 	var fire := FireProjectileStep.new()
 	fire.name = "Fire"
-	fire.starts_when_finished = [NodePath("../Recovery")]
 	add_child(fire)
 	var recovery := WaitStep.new()
 	recovery.name = "Recovery"

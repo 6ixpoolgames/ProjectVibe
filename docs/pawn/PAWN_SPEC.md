@@ -891,15 +891,15 @@ Defaults here are for testing that things work and feel right. Game balance isn'
 **1. What an ability is now**
 - An ability stays the unit that owns the rules: starting on a named action, priority, cooldown, the interrupt table, tags and effects.
 - It can be built from **optional `AbilityStep` child nodes**. An ability with none works exactly as before, so Walk, Sprint, Jump and Dash don't change until they need to.
-- **Steps start each other** (Unreal's ability-task model, the owner's call): when a step finishes, the steps in its `starts_when_finished` start, and a step's own code can start or stop other steps (`ability.start_step()`, `ability.stop_step()`). Several steps can run at once, so running side by side needs no container. Steps marked `starts_first` start with the ability; with none marked, the first step does.
+- **When steps start is the ability's step timeline** (ability spec 6, since 2026-11-22; before, steps started each other through `starts_first` and `starts_when_finished`): entries at a tick, after another entry, or on a condition. Several steps can run at once, so running side by side needs no container. Code can still start or stop a step (`ability.start_step()`, `ability.stop_step()`).
 - **The ability ends when no step is running**, with a `max_steps_ticks` safety (600, 10 s at 60). A step failing ends the ability, and the steps still running get `exit("failed")`.
 - **One action ability at a time per pawn** (the owner's direction): locomotion (walking, sprinting) is the background layer that runs when no action pauses it; reactions (knockback, death) are actions that take over through interrupts; an instant action (jump) holds nothing. Combining movement with an action is one ability with steps running side by side, `moving_attack`, planned but not built yet. This keeps the AI simple: it picks one ability, and the ability holds the detail.
 
 **2. `AbilityStep`, the base class** (`abilities/steps/AbilityStep.gd`, a Node, a child of an ability)
 - **Lifecycle:** `enter()`, `tick(dt) -> Status` (RUNNING, DONE or FAILED, the AI behaviours' Status idea), `exit(reason)` with "done", "failed" or "cancelled".
-- **Settings:** `starts_first`, `starts_when_finished` (steps to start when this one is done), `length_ticks` (at 60 a second, converted for the match's rate; 0 means until `tick()` says DONE), `interrupt_threshold` (-1 uses the ability's), `invulnerable`.
+- **Settings:** `length_ticks` (at 60 a second, converted for the match's rate; 0 means until `tick()` says DONE), `interrupt_threshold` (-1 uses the ability's), `invulnerable`.
 - **Counting:** a step's length counts only the ticks `counts_this_tick()` allows (always, by default). The windup uses it to wait for the turn.
-- **Rollback:** each step's `running` and `step_ticks` roll back, registered by the AbilityManager like the abilities' own state. A step keeps nothing else between ticks unless it names it in `get_rollback_properties()`.
+- **Rollback:** whether each step runs and its count roll back, as its ability's `timeline_state` (ability spec 6.5). A step keeps nothing else between ticks unless it names it in `get_rollback_properties()`.
 - **Timing:** a step started during a tick enters at once and gets its first tick on the next, so a step finishing hands over with no gap and the order never depends on where steps sit in the tree.
 - **Reaches:** `ability`, `pawn`, and the ability's helpers (`move_input()`, `look_yaw()`, `held_actions()`, `read_stat()`).
 

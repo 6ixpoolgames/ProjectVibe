@@ -6,16 +6,11 @@
 class_name WaitStep
 extends AbilityStep
 
-var _after_sweep: MeleeSweepStep = null # the sweep that starts this one, found once in setup()
+var _after_sweep: MeleeSweepStep = null # the sweep whose end starts this one, found once in setup()
 
 
 func setup() -> void:
-	_after_sweep = null
-	for step in ability.steps:
-		var sweep := step as MeleeSweepStep
-		if sweep and sweep.starts_when_finished.any(func(path: NodePath) -> bool: return sweep.get_node_or_null(path) == self):
-			_after_sweep = sweep
-			break
+	_after_sweep = ability.step_before(self) as MeleeSweepStep
 
 
 func weapon_point(facing: float) -> Variant:

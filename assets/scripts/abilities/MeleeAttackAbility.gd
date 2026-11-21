@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: abilities/CHANGELOG.md.
 ## A melee swing: an action bound to &"primary", built from steps.
 ##
-## A swing is a [WindupStep] (which starts a [TurnToFaceStep]), a [MeleeSweepStep] (the hit window), then an [OpenComboStep] and a
+## A swing is a [WindupStep] with a [TurnToFaceStep] beside it, a [MeleeSweepStep] (the hit window), then an [OpenComboStep] and a
 ## [WaitStep] for recovery. With no [AbilityStep] children of its own it makes those from the settings below, about 0.4 s with the
 ## defaults; place steps of your own for another pattern (these settings then only matter for [member attack_range], the AI's reach, and
 ## [member warns_targets]). It locks out movement and other combat; Dash cancels it, Sprint and Jump don't. Hits happen on the server
@@ -183,21 +183,16 @@ func start() -> void:
 		_warn_targets()
 
 
-# The default steps: Windup (starts TurnToFace, then Sweep), Sweep (then OpenCombo and Recovery). Named the same everywhere so their
-# rolled-back state has the same paths on every machine.
+# The default steps, run by its default timeline. Named the same everywhere, so a definition's own timeline can name them.
 func _make_default_steps() -> void:
 	var windup := WindupStep.new()
 	windup.name = "Windup"
-	windup.starts_first = true
-	windup.turn_step = NodePath("../TurnToFace")
-	windup.starts_when_finished = [NodePath("../Sweep")]
 	add_child(windup)
 	var turn := TurnToFaceStep.new()
 	turn.name = "TurnToFace"
 	add_child(turn)
 	var sweep := MeleeSweepStep.new()
 	sweep.name = "Sweep"
-	sweep.starts_when_finished = [NodePath("../OpenCombo"), NodePath("../Recovery")]
 	add_child(sweep)
 	var combo := OpenComboStep.new()
 	combo.name = "OpenCombo"
@@ -206,6 +201,15 @@ func _make_default_steps() -> void:
 	recovery.name = "Recovery"
 	add_child(recovery)
 	_made_default_steps = true
+
+
+## The timeline for the steps it made: Windup and TurnToFace together, Sweep when the windup is done, then OpenCombo and Recovery.
+## With steps of its own and no timeline in its definition, they run one after another.
+func default_timeline() -> Array[TimelineEntry]:
+	if not _made_default_steps:
+		return []
+	return [TimelineEntry.at(&"Windup"), TimelineEntry.at(&"TurnToFace"), TimelineEntry.after_end_of(&"Sweep", &"Windup"),
+		TimelineEntry.after_end_of(&"OpenCombo", &"Sweep"), TimelineEntry.after_end_of(&"Recovery", &"Sweep")]
 
 
 # Copies its settings onto the steps it made.

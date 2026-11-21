@@ -19,6 +19,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, and nothing parry-specific is left in the manager or the base: `ParryAbility` is a plain timed ability that makes a default `ParryInterceptor`, and `guard()` is only read by the debug drawing and tests.
 
+## 2026-11-22
+
+- **Step timelines** (abilities step, part 3; ability spec 6, as built in 6.5): when each step runs is a list of `TimelineEntry` (new) in the definition's `step_timeline` (new), else the kind's `default_timeline()` (new; MeleeAttack's and RangedAttack's for the steps they make), else the steps in tree order one after another. Entries start at a tick, after another entry starts or ends (with the end reasons that count) plus a delay, or on an `AbilityCondition` (new); each runs once per run, and `values` give its step other settings. `starts_first`, `starts_when_finished` and `next_steps` left `AbilityStep`, and `turn_step` left `WindupStep` (the timeline starts the turn; the windup counts while facing the look or while no turn runs). `step_state` and `set_step_value` gave way to `timeline_state`: per entry its start, end, end reason and count origin, so a step that only waits out its length writes nothing while it runs. `running` and `step_ticks` are worked out from it. New: `start_entry`, `stop_entry`, `running_entry_of`, `step_ticks_of`, `steps_after`, `step_before`, `timeline_loaded`. 300 pawns: unchanged (0.36 ms a frame).
+- `ability_steps_selftest` uses timelines, and checks one step in two entries, start rules and the timeline's checks.
+
 ## 2026-11-21
 
 - **Settings move into definitions** (abilities step, part 2; ability spec 3, as built in 3.2): `AbilityDefinition` (new, `definitions/`) and a class per kind with its own settings and defaults (`MeleeAttackDefinition` and eight more). The node exports `kind` and `definition`; each setting stays readable on the node by its old name through a read-only property, so no reader changed. No definition: the kind's defaults, shared. One of another kind: the defaults, with a warning.

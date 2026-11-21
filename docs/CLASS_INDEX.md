@@ -2,11 +2,12 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 172 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 174 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
 | [AbilityBase](../assets/scripts/abilities/REFERENCE.md#abilitybase) | [abilities](../assets/scripts/abilities/README.md) | Node | One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's [AbilityManager]. |
+| [AbilityCondition](../assets/scripts/abilities/REFERENCE.md#abilitycondition) | [abilities](../assets/scripts/abilities/README.md) | Resource | A condition a step timeline entry can start on: one value of the pawn compared with a number (ability spec 6.3). |
 | [AbilityDefinition](../assets/scripts/abilities/REFERENCE.md#abilitydefinition) | [abilities](../assets/scripts/abilities/README.md) | Resource | The settings one variant of an ability has, shared by every pawn that uses it, such as "Goblin Swing": a Resource an ability node points at (ability spec 3). |
 | [AbilityManager](../assets/scripts/abilities/REFERENCE.md#abilitymanager) | [abilities](../assets/scripts/abilities/README.md) | Node | Starts, runs and stops a pawn's abilities, and takes the hits that land on it. |
 | [AbilityPriorityPart](../assets/scripts/effects/REFERENCE.md#abilityprioritypart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes one of a group of abilities' priority numbers while its effect lasts. A held part ([EffectPart]). |
@@ -166,6 +167,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [TickDriverSingleton](../assets/scripts/singletons/REFERENCE.md#tickdriversingleton) | [singletons](../assets/scripts/singletons/README.md) | Node | Runs all gameplay in numbered, fixed-length ticks, online and offline. Autoload "TickDriver". |
 | [TickJobs](../assets/scripts/jobs/REFERENCE.md#tickjobs) | [jobs](../assets/scripts/jobs/README.md) | RefCounted | Finds the one job scheduler every job kind shares (scaling spec section 4). |
 | [TickStateComponent](../assets/scripts/netcode/REFERENCE.md#tickstatecomponent) | [netcode](../assets/scripts/netcode/README.md) | Node | Makes an entity rollback-ready without writing code (netcode spec sections 5 and 6). |
+| [TimelineEntry](../assets/scripts/abilities/REFERENCE.md#timelineentry) | [abilities](../assets/scripts/abilities/README.md) | Resource | One entry of an ability's step timeline: which step runs, the values it runs with, and when it starts (ability spec 6.2). |
 | [ToyWaddle](../assets/scripts/visuals/REFERENCE.md#toywaddle) | [visuals](../assets/scripts/visuals/README.md) | Node3D | Makes a pawn's model move like a toy being played with: rocking, hopping, leaning into a dash and falling over when it dies. |
 | [TurnToFaceStep](../assets/scripts/abilities/REFERENCE.md#turntofacestep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | Turns the pawn toward where it looks, following the look as it moves, at the pawn's TurnRate stat. |
 | [VirtualCamera](../assets/scripts/camera/REFERENCE.md#virtualcamera) | [camera](../assets/scripts/camera/README.md) | Node3D | A place for the real camera to be. |
