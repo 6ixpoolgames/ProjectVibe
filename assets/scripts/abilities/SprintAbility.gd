@@ -11,14 +11,42 @@
 class_name SprintAbility
 extends WalkAbility
 
-## Seconds of sprinting on a full charge.
-@export var max_charge := 3.0
-## How fast the charge refills while not sprinting, in seconds of sprint per second: 0.5 refills at half the rate it drains.
-@export var recharge_rate := 0.5
-## Seconds after it stops before the charge starts refilling.
-@export var recharge_delay := 1.0
-## The charge needed to start, in seconds (at most [member max_charge]).
-@export var min_start_charge := 0.5
+# Its settings with their own type: the same object as settings.
+var _sprint: SprintDefinition = null
+
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+## From the definition: [member SprintDefinition.max_charge].
+var max_charge: float:
+	get:
+		if _sprint == null:
+			prepare_settings()
+		return _sprint.max_charge
+	set(value):
+		_write_setting(&"max_charge", value)
+## From the definition: [member SprintDefinition.recharge_rate].
+var recharge_rate: float:
+	get:
+		if _sprint == null:
+			prepare_settings()
+		return _sprint.recharge_rate
+	set(value):
+		_write_setting(&"recharge_rate", value)
+## From the definition: [member SprintDefinition.recharge_delay].
+var recharge_delay: float:
+	get:
+		if _sprint == null:
+			prepare_settings()
+		return _sprint.recharge_delay
+	set(value):
+		_write_setting(&"recharge_delay", value)
+## From the definition: [member SprintDefinition.min_start_charge].
+var min_start_charge: float:
+	get:
+		if _sprint == null:
+			prepare_settings()
+		return _sprint.min_start_charge
+	set(value):
+		_write_setting(&"min_start_charge", value)
 
 ## Ticks of charge when it last started or stopped. Rolls back (pushed).
 var charge_at_switch := 0:
@@ -36,18 +64,17 @@ var switched_at := -1:
 		push_state(&"switched_at", value)
 
 
-func _init() -> void:
-	super()
-	trigger_action = &"sprint"
-	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.MOVEMENT_SPRINT
-	extra_categories = [Tags.MOVEMENT_BASIC]
-	speed_stat = &"SprintSpeed"
-	fallback_speed = 9.0
-	interrupt_priority = 10 # above Walk, so sprinting cancels actions with a threshold of 10 or less
-
-
 ## Ticks of sprinting it has now: draining while it runs, refilling while it doesn't. Worked out from the tick.
+## Its kind's defaults: a new [SprintDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return SprintDefinition.new()
+
+
+func _settings_changed() -> void:
+	super()
+	_sprint = settings as SprintDefinition
+
+
 func charge_ticks() -> int:
 	if is_running_timed():
 		return maxi(charge_at_switch - (TickDriver.tick - switched_at), 0)

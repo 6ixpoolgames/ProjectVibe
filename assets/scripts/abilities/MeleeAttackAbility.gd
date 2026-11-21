@@ -10,6 +10,9 @@
 class_name MeleeAttackAbility
 extends AbilityBase
 
+# Its settings with their own type: the same object as settings.
+var _melee: MeleeAttackDefinition = null
+
 ## Sent on the server for each pawn the swing hits, when it finds it. The target takes the hit later in the same tick, after every pawn
 ## has simulated (pawn spec 15.4).
 @warning_ignore("unused_signal") # sent by its MeleeSweepStep
@@ -22,50 +25,121 @@ signal hit_window_started(centre: Vector3, radius: float)
 @warning_ignore("unused_signal") # sent by its MeleeSweepStep
 signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
 
-## Ticks from the start of the swing to when it can hit (its Windup step's length).
-@export_range(0, 120, 1, "or_greater") var windup_ticks := 8
-## Ticks it can hit for (its Sweep step's length).
-@export_range(1, 120, 1, "or_greater") var hit_ticks := 4
-## Ticks after hitting before it's over (its Recovery step's length).
-@export_range(0, 120, 1, "or_greater") var recovery_ticks := 12
-## How far it reaches, in metres from the pawn: the far edge of the hit sphere.
-@export_range(0.1, 20.0, 0.05, "or_greater") var attack_range := 1.8
-## The hit sphere's radius, in metres.
-@export_range(0.05, 10.0, 0.05, "or_greater") var hit_radius := 0.8
-## The hit sphere's height above the pawn's feet, in metres: about the chest.
-@export var hit_height := 1.0
-## On: it can hit pawns on its own team.
-@export var hits_own_team := false
-## How far round the hit sphere sweeps during the hit ticks, in degrees, centred straight ahead. 0: it holds still.
-@export_range(0.0, 360.0, 1.0) var sweep_degrees := 100.0
-## On: the sweep goes from the pawn's left to its right. Off: right to left.
-@export var sweep_from_left := false
-## How far above or below hit_height the sphere is at the start of the sweep, in metres: slashes, rises, chops. 0: level.
-@export_range(-3.0, 3.0, 0.05, "or_greater", "or_less") var height_at_sweep_start := 0.0
-## The same at the end of the sweep. Between the two the sphere moves in a straight line up or down.
-@export_range(-3.0, 3.0, 0.05, "or_greater", "or_less") var height_at_sweep_end := 0.0
-## Degrees per second it turns toward where the pawn looks (its TurnToFace step). -1: the pawn's TurnRate stat (540 without one).
-## 0: no turning.
-@export_range(-1.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second := -1.0
-## How long the combo window stays open after its hit, in ticks at 60 a second (its OpenCombo step).
-@export_range(1, 600, 1, "or_greater") var combo_window_ticks := 30
-## On: when a swing starts (server), enemies within reach and in front are told it's coming, so their AI can parry. One sphere query.
-@export var warns_targets := true
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+## From the definition: [member MeleeAttackDefinition.windup_ticks].
+var windup_ticks: int:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.windup_ticks
+	set(value):
+		_write_setting(&"windup_ticks", value)
+## From the definition: [member MeleeAttackDefinition.hit_ticks].
+var hit_ticks: int:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.hit_ticks
+	set(value):
+		_write_setting(&"hit_ticks", value)
+## From the definition: [member MeleeAttackDefinition.recovery_ticks].
+var recovery_ticks: int:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.recovery_ticks
+	set(value):
+		_write_setting(&"recovery_ticks", value)
+## From the definition: [member MeleeAttackDefinition.attack_range].
+var attack_range: float:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.attack_range
+	set(value):
+		_write_setting(&"attack_range", value)
+## From the definition: [member MeleeAttackDefinition.hit_radius].
+var hit_radius: float:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.hit_radius
+	set(value):
+		_write_setting(&"hit_radius", value)
+## From the definition: [member MeleeAttackDefinition.hit_height].
+var hit_height: float:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.hit_height
+	set(value):
+		_write_setting(&"hit_height", value)
+## From the definition: [member MeleeAttackDefinition.hits_own_team].
+var hits_own_team: bool:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.hits_own_team
+	set(value):
+		_write_setting(&"hits_own_team", value)
+## From the definition: [member MeleeAttackDefinition.sweep_degrees].
+var sweep_degrees: float:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.sweep_degrees
+	set(value):
+		_write_setting(&"sweep_degrees", value)
+## From the definition: [member MeleeAttackDefinition.sweep_from_left].
+var sweep_from_left: bool:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.sweep_from_left
+	set(value):
+		_write_setting(&"sweep_from_left", value)
+## From the definition: [member MeleeAttackDefinition.height_at_sweep_start].
+var height_at_sweep_start: float:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.height_at_sweep_start
+	set(value):
+		_write_setting(&"height_at_sweep_start", value)
+## From the definition: [member MeleeAttackDefinition.height_at_sweep_end].
+var height_at_sweep_end: float:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.height_at_sweep_end
+	set(value):
+		_write_setting(&"height_at_sweep_end", value)
+## From the definition: [member MeleeAttackDefinition.windup_turn_degrees_per_second].
+var windup_turn_degrees_per_second: float:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.windup_turn_degrees_per_second
+	set(value):
+		_write_setting(&"windup_turn_degrees_per_second", value)
+## From the definition: [member MeleeAttackDefinition.combo_window_ticks].
+var combo_window_ticks: int:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.combo_window_ticks
+	set(value):
+		_write_setting(&"combo_window_ticks", value)
+## From the definition: [member MeleeAttackDefinition.warns_targets].
+var warns_targets: bool:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.warns_targets
+	set(value):
+		_write_setting(&"warns_targets", value)
 
 var _made_default_steps := false # true when it made its own steps from its settings
-
-
-func _init() -> void:
-	super()
-	kind = Kind.ACTION
-	trigger_action = &"primary"
-	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.COMBAT_MELEE
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
-	interrupt_priority = 15
-	interrupt_threshold = 15
-	buffer_window = 0.15 # a press near the end of a dash waits for it
-	combo_positions = [1] # an opener, unless a scene says it's a follow-up (pawn spec 8.20)
 
 
 # Its steps time and run the swing and the base handles the timer and rollback, so it has no duration_ticks, get_rollback_properties
@@ -73,6 +147,16 @@ func _init() -> void:
 
 
 ## Its attack_range: the AI swings from within it.
+## Its kind's defaults: a new [MeleeAttackDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return MeleeAttackDefinition.new()
+
+
+func _settings_changed() -> void:
+	super()
+	_melee = settings as MeleeAttackDefinition
+
+
 func attack_reach() -> float:
 	return attack_range
 

@@ -1,6 +1,6 @@
 @tool
 ## Written by Claude (claude-opus-5-5), 2026-11-10: swaps the inspector's text fields for tag dropdowns on abilities. For an ability
-## (any script that extends AbilityBase) it replaces the editors of the properties in TAG_PROPERTIES with a TagPickerProperty, which
+## (any script that extends AbilityDefinition, where the settings live) it replaces the editors of the properties in TAG_PROPERTIES with a TagPickerProperty, which
 ## offers the tags the declarations file declares (TagRegistry.read_declared_tags), with their parent levels.
 ##
 ## To give another class tag dropdowns: add its script and its tag properties to HANDLED.
@@ -10,14 +10,14 @@
 extends EditorInspectorPlugin
 
 const TagPickerProperty := preload("res://addons/tag_picker/TagPickerProperty.gd")
-const ABILITY_BASE_PATH := "res://assets/scripts/abilities/AbilityBase.gd"
+const ABILITY_DEFINITION_PATH := "res://assets/scripts/abilities/definitions/AbilityDefinition.gd"
 
 ## Claude 2026-11-10: which tag set a property uses.
 enum TagSet { ABILITY, EFFECT }
 
 ## Claude 2026-11-10: script path -> {property: [is a list, TagSet]}. A script that extends one of these gets its dropdowns.
 const HANDLED := {
-	ABILITY_BASE_PATH: {"category": [false, TagSet.ABILITY], "extra_categories": [true, TagSet.ABILITY], "locks_out": [true, TagSet.ABILITY], "cancelled_by": [true, TagSet.ABILITY]},
+	ABILITY_DEFINITION_PATH: {"category": [false, TagSet.ABILITY], "extra_categories": [true, TagSet.ABILITY], "locks_out": [true, TagSet.ABILITY], "cancelled_by": [true, TagSet.ABILITY]},
 	"res://assets/scripts/effects/Effect.gd": {"tags": [true, TagSet.EFFECT]},
 	"res://assets/scripts/effects/parts/ResistancePart.gd": {"tag": [false, TagSet.EFFECT]},
 	"res://assets/scripts/effects/parts/AbilityPriorityPart.gd": {"ability_tag": [false, TagSet.ABILITY]},

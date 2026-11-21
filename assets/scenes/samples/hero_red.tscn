@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_goblin.tscn" id="1_goblin"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/StatManager.tscn" id="2_stats"]
@@ -8,6 +8,9 @@
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/hero_heavy_hit.tres" id="6_heavy"]
 [ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="7_effect"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/PawnStreamingSource.tscn" id="8_source"]
+[ext_resource type="Resource" uid="uid://bxydvyeunbmht" path="res://assets/scripts/resources/abilities/hero_red_swing.tres" id="d_hero_red_swing"]
+[ext_resource type="Resource" uid="uid://dlcggrw6my558" path="res://assets/scripts/resources/abilities/hero_red_second_swing.tres" id="d_hero_red_second_swing"]
+[ext_resource type="Resource" uid="uid://b4m8uo6birdyf" path="res://assets/scripts/resources/abilities/hero_red_finisher_swing.tres" id="d_hero_red_finisher_swing"]
 
 [sub_resource type="CapsuleShape3D" id="Hero_capsule"]
 radius = 0.6
@@ -31,25 +34,22 @@ base_value = 7.65
 base_value = 1000.0
 
 [node name="MeleeAttack" parent="AbilityManager"]
-attack_range = 2.1
+definition = ExtResource("d_hero_red_swing")
 
 [node name="OnHit" parent="AbilityManager/MeleeAttack" index="0"]
 effects = Array[ExtResource("7_effect")]([ExtResource("3_swing")])
 
 [node name="SecondSwing" parent="AbilityManager"]
-attack_range = 2.1
+definition = ExtResource("d_hero_red_second_swing")
 
 [node name="OnHit" parent="AbilityManager/SecondSwing" index="0"]
 effects = Array[ExtResource("7_effect")]([ExtResource("4_second")])
 
 [node name="FinisherSwing" parent="AbilityManager"]
-attack_range = 2.4
+definition = ExtResource("d_hero_red_finisher_swing")
 
 [node name="OnHit" parent="AbilityManager/FinisherSwing" index="0"]
 effects = Array[ExtResource("7_effect")]([ExtResource("5_finisher")])
-
-[node name="HeavyAttack" parent="AbilityManager"]
-attack_range = 2.7
 
 [node name="OnHit" parent="AbilityManager/HeavyAttack" index="0"]
 effects = Array[ExtResource("7_effect")]([ExtResource("6_heavy")])

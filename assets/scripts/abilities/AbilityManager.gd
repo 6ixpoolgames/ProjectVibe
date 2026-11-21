@@ -339,7 +339,7 @@ func is_action_running(action: StringName) -> bool:
 func _run_locomotion(dt: float) -> void:
 	var chosen: AbilityBase = null
 	for ability in _locomotions:
-		if ability.trigger_action == &"":
+		if ability.trigger_bit == 0: # no action of its own (reads the bit, not the setting: this runs every tick)
 			continue
 		var wanted := _held() & ability.trigger_bit != 0
 		if ability.is_running_timed():
@@ -397,7 +397,7 @@ func _run_actions(dt: float) -> void:
 			if ability.is_run_over():
 				_finish(ability)
 			continue
-		if ability.trigger_action == &"" or used_bits & ability.trigger_bit != 0:
+		if ability.trigger_bit == 0 or used_bits & ability.trigger_bit != 0:
 			continue
 		var pressed := pressed_bits & ability.trigger_bit != 0
 		if not pressed and not ability.is_buffered():
@@ -769,6 +769,7 @@ func _collect_abilities() -> void:
 		if child is AbilityBase:
 			child.manager = self
 			child.pawn = pawn
+			child.prepare_settings() # its definition worked out, or its kind's defaults
 			child.category_mask = TagRegistry.mask_of(child.category) if child.category != &"" else 0
 			child.category_mask |= TagRegistry.category_mask_of_list(child.extra_categories)
 			child.locks_out_mask = TagRegistry.mask_of_list(child.locks_out)
@@ -828,6 +829,12 @@ func _collect_abilities() -> void:
 	_timers_dirty = true
 	_locks_dirty = true
 	readiness_version += 1
+
+
+## An ability's settings changed while playing ([method AbilityBase.use_definition]): its masks, priority order and lists are worked
+## out again.
+func settings_changed() -> void:
+	_collect_abilities()
 
 
 # The ability's EffectApplier children, into its three effect lists (pawn spec 8.11). Each effect is registered so an over-time one in

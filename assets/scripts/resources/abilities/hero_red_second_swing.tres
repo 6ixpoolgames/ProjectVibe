@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="MeleeAttackDefinition" format=3 uid="uid://dlcggrw6my558"]
+
+[ext_resource type="Resource" path="res://assets/scripts/resources/abilities/second_swing.tres" id="1_3yc45"]
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd" id="2_hlgqk"]
+
+[resource]
+script = ExtResource("2_hlgqk")
+attack_range = 2.1
+changed_values = PackedStringArray("attack_range")
+based_on = ExtResource("1_3yc45")

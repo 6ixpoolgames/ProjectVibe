@@ -1,8 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
 ## One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's [AbilityManager].
 ##
-## Extend it, set what's needed in [code]_init()[/code], and override [method can_start], [method start], [method tick], [method stop]
-## and, for counters that run all the time, [method every_tick] (with [method can_sleep]). LOCOMOTION abilities move the pawn every tick
+## Its settings come from its [member definition], a Resource every pawn using it shares (ability spec 3): the node holds that
+## reference and its state, and reads each setting from the definition. Empty, it runs with its kind's defaults.
+## [br][br]Extend it, override [method make_default_definition] for a kind with settings of its own, and override [method can_start],
+## [method start], [method tick], [method stop] and, for counters that run all the time, [method every_tick] (with [method can_sleep]).
+## A quick ability can instead set base settings in [code]_init()[/code]: they go into a definition of its own. LOCOMOTION abilities move the pawn every tick
 ## they're chosen (one runs at a time); ACTION abilities start on a press of their [member trigger_action], at once or for a
 ## [member duration]. Players' keys and AI behaviours press the same actions. Times are set in seconds and kept in ticks (60 a second).
 ## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_pushed_properties] (its setter calls
@@ -15,49 +18,148 @@ extends Node
 
 enum Kind { LOCOMOTION, ACTION }
 
+## What the code does with it: move the pawn every tick, or start on a press. Set by the kind's script.
 @export var kind := Kind.ACTION
-## The named action that starts it, such as &"jump". Empty: only the manager starts it, as the default locomotion.
-@export var trigger_action: StringName = &""
-## What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
-@export var category: StringName = &""
-## More groups it belongs to besides category, such as &"movement.advanced" for a dash. Lockouts, cancels and
-## [method AbilityManager.action_for_tag] answer to all of them. They share one 64-bit mask with every other ability tag.
-@export var extra_categories: Array[StringName] = []
-## Which ability a press picks among those on one action: the highest that can start wins, then the first in the tree. Locomotion
-## with a held action works the same. Effects can add to it (AbilityPriorityPart, pawn spec 8.11).
-@export var priority := 0
-## Which combo positions it can fill: [1] an opener, [2] a second hit, [2, 3] second or third. A follow-up (no 1) starts only while the
-## combo window is open; give it a higher priority than the opener so it wins there. Empty: not in combos. Pawn spec 8.20.
-@export var combo_positions: Array[int] = []
-## A random offset, up to plus or minus this, added to priority when a press picks between abilities. 0: none. It comes from the tick's
-## own random numbers ([method TickDriver.tick_rng]), so a replay picks the same ability. Locomotion ignores it.
-@export var priority_jitter := 0.0
-## Seconds. For an action, 0 means it happens at once. For locomotion, 0 means it runs as long as it's wanted.
-@export_range(0.0, 60.0, 0.05, "or_greater") var duration := 0.0
-## Seconds after it stops before it can start again.
-@export_range(0.0, 60.0, 0.05, "or_greater") var cooldown := 0.0
-## Categories that can't start, or steer, while this runs, such as &"movement" for an attack that roots the pawn.
-@export var locks_out: Array[StringName] = []
-## Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
-@export_range(0.0, 2.0, 0.01, "or_greater") var buffer_window := 0.0
-## How hard it cancels a running ability it conflicts with (pawn spec 8.6): Walk 0, Jump 5, Sprint 10, Parry 10, MeleeAttack 15,
-## Knockback 30, Dash 40, Death 1000.
-@export var interrupt_priority := 0
-## While it runs, a conflicting ability with at least this interrupt_priority cancels it; a weaker one is locked out. 100: only Death
-## cancels it. MeleeAttack uses 15, so Dash cancels a swing and Sprint doesn't.
-@export var interrupt_threshold := 100
-# For invulnerability while it runs, give it an InvulnerabilityInterceptor child (HitInterceptor); Dash makes one by default.
-## Categories that can always cancel it while it runs, whatever the interrupt numbers say, such as &"movement.jump". A category covers
-## its children, as in locks_out.
-@export var cancelled_by: Array[StringName] = []
-## On: locomotion (Walk, Sprint) doesn't run at all while this does, so it neither steers nor slows the pawn (Dash). Off: a locked-out
-## locomotion still slows the pawn to a stop, as an attack that roots the pawn wants.
-@export var pauses_locomotion := false
-## On: while it runs the pawn moves by physics ([code]move_and_slide[/code]), not the CrowdMover, so fast or forced moves such as Dash
-## and Knockback collide properly. Pawn spec 8.22.
-@export var needs_full_movement := false
-## For a stepped ability, the longest it can run, in ticks at 60 a second. It ends when no step runs, or at this. Ignored without steps.
-@export_range(1, 6000, 1, "or_greater") var max_steps_ticks := 600
+## The settings it runs with (ability spec 3): a file shared by every pawn that uses it, or one embedded in this node while
+## prototyping. Empty: its kind's defaults. One of another kind falls back to the defaults, with a warning.
+@export var definition: AbilityDefinition
+## The settings it runs with: [member definition] worked out ([method AbilityDefinition.resolved]), or its kind's defaults. Read-only
+## while playing. Set by [method prepare_settings].
+var settings: AbilityDefinition = null
+## True if its definition was of another kind, so it runs with its kind's defaults (diagnostics lists these).
+var definition_fell_back := false
+# Its own settings on top of its definition (a variant based on it), made when a setting is written on the node.
+var _own_definition: AbilityDefinition = null
+# Each kind's defaults, made once and shared by every node of that kind: script -> definition.
+static var _kind_defaults := {}
+## From the definition: [member AbilityDefinition.trigger_action].
+var trigger_action: StringName:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.trigger_action
+	set(value):
+		_write_setting(&"trigger_action", value)
+## From the definition: [member AbilityDefinition.category].
+var category: StringName:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.category
+	set(value):
+		_write_setting(&"category", value)
+## From the definition: [member AbilityDefinition.extra_categories].
+var extra_categories: Array[StringName]:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.extra_categories
+	set(value):
+		_write_setting(&"extra_categories", value)
+## From the definition: [member AbilityDefinition.priority].
+var priority: int:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.priority
+	set(value):
+		_write_setting(&"priority", value)
+## From the definition: [member AbilityDefinition.combo_positions].
+var combo_positions: Array[int]:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.combo_positions
+	set(value):
+		_write_setting(&"combo_positions", value)
+## From the definition: [member AbilityDefinition.priority_jitter].
+var priority_jitter: float:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.priority_jitter
+	set(value):
+		_write_setting(&"priority_jitter", value)
+## From the definition: [member AbilityDefinition.duration].
+var duration: float:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.duration
+	set(value):
+		_write_setting(&"duration", value)
+## From the definition: [member AbilityDefinition.cooldown].
+var cooldown: float:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.cooldown
+	set(value):
+		_write_setting(&"cooldown", value)
+## From the definition: [member AbilityDefinition.locks_out].
+var locks_out: Array[StringName]:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.locks_out
+	set(value):
+		_write_setting(&"locks_out", value)
+## From the definition: [member AbilityDefinition.buffer_window].
+var buffer_window: float:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.buffer_window
+	set(value):
+		_write_setting(&"buffer_window", value)
+## From the definition: [member AbilityDefinition.interrupt_priority].
+var interrupt_priority: int:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.interrupt_priority
+	set(value):
+		_write_setting(&"interrupt_priority", value)
+## From the definition: [member AbilityDefinition.interrupt_threshold].
+var interrupt_threshold: int:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.interrupt_threshold
+	set(value):
+		_write_setting(&"interrupt_threshold", value)
+## From the definition: [member AbilityDefinition.cancelled_by].
+var cancelled_by: Array[StringName]:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.cancelled_by
+	set(value):
+		_write_setting(&"cancelled_by", value)
+## From the definition: [member AbilityDefinition.pauses_locomotion].
+var pauses_locomotion: bool:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.pauses_locomotion
+	set(value):
+		_write_setting(&"pauses_locomotion", value)
+## From the definition: [member AbilityDefinition.needs_full_movement].
+var needs_full_movement: bool:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.needs_full_movement
+	set(value):
+		_write_setting(&"needs_full_movement", value)
+## From the definition: [member AbilityDefinition.max_steps_ticks].
+var max_steps_ticks: int:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.max_steps_ticks
+	set(value):
+		_write_setting(&"max_steps_ticks", value)
 
 # State that rolls back, pushed to the state store when it changes (push_state). Timers are tick deadlines, which don't change while
 # they run (ability spec 4): nothing counts down, and a pawn running every Nth tick needs nothing special. Each setter tells the manager,
@@ -150,6 +252,119 @@ var _pushed_keys := {}
 func _init() -> void:
 	set_process(false)
 	set_physics_process(false)
+
+
+## The definition a new node of this kind runs with: a new definition of the kind's class, with its defaults. Each kind overrides it.
+func make_default_definition() -> AbilityDefinition:
+	return AbilityDefinition.new()
+
+
+## This kind's defaults, shared by every node of the kind.
+func kind_defaults() -> AbilityDefinition:
+	var script: Script = get_script()
+	var found: AbilityDefinition = _kind_defaults.get(script)
+	if found == null:
+		found = make_default_definition()
+		_kind_defaults[script] = found
+	return found
+
+
+## Works out [member settings] from [member definition]: its kind's defaults with none, or with one of another kind (warning). Settings
+## written on the node (a script's _init(), old scene values, [method make_definition_unique]) go into a variant of its own on top.
+## The manager calls it as it collects its abilities; reading a setting before then calls it too. Returns the settings.
+func prepare_settings() -> AbilityDefinition:
+	var defaults := kind_defaults()
+	var base: AbilityDefinition = definition
+	definition_fell_back = false
+	if base and not _definition_fits(base, defaults):
+		push_warning("[AbilityBase] %s: its definition %s is for another kind of ability; it runs with the %s defaults." 				% [_describe_node(), base.describe(), defaults.get_script().get_global_name()])
+		definition_fell_back = true
+		base = null
+	var chosen: AbilityDefinition = base if base else defaults
+	if _own_definition:
+		_own_definition.based_on = chosen # its own changes on top of the definition, or of the kind's defaults
+		chosen = _own_definition
+	settings = chosen.resolved()
+	_settings_changed()
+	return settings
+
+
+## Gives it another definition while playing (a weapon swap), and has the manager work out its masks and lists again. What rolls back
+## was decided when the pawn started, so a definition that turns on a timer this ability didn't have won't roll it back.
+func use_definition(new_definition: AbilityDefinition) -> void:
+	definition = new_definition
+	prepare_settings()
+	if manager:
+		manager.settings_changed()
+
+
+## Gives it settings of its own, on top of its definition, which this node alone uses: Godot's "Make Unique", while playing. Its
+## settings can be written after that. For prototyping and tests; a shipped game uses another definition.
+func make_definition_unique() -> AbilityDefinition:
+	if _own_definition == null:
+		_own_definition = _new_own_definition()
+	use_definition(definition)
+	return _own_definition
+
+
+## True if it has settings of its own on top of its definition ([method make_definition_unique], its script's _init(), or values a
+## scene sets on the node), not only the shared ones.
+func has_own_settings() -> bool:
+	return _own_definition != null
+
+
+## What to check about where its settings come from, for diagnostics: "fell back" (a definition of another kind), "embedded" (saved
+## in a scene, a prototype tweak), "own settings" (written on the node), or "" when it runs with a definition file or its kind's defaults.
+func definition_note() -> String:
+	if definition_fell_back:
+		return "fell back"
+	if definition and definition.is_embedded():
+		return "embedded"
+	if has_own_settings():
+		return "own settings"
+	return ""
+
+
+# Its own variant, of the definition's class, based on the definition (or the kind's defaults) from the start, so what's written on it
+# counts as changed.
+func _new_own_definition() -> AbilityDefinition:
+	var base: AbilityDefinition = definition if definition and _definition_fits(definition, kind_defaults()) else kind_defaults()
+	var own: AbilityDefinition = base.get_script().new()
+	own.based_on = base
+	return own
+
+
+# Each kind's typed reference to its settings is set here (MeleeAttackAbility._melee).
+func _settings_changed() -> void:
+	pass
+
+
+# A setting written on the node goes into its own variant: freely before the manager sets it up (its script's _init(), values a scene
+# sets), and after that only once it has one (make_definition_unique). Otherwise it's an error: the definition is shared.
+func _write_setting(setting: StringName, value: Variant) -> void:
+	if _own_definition == null:
+		if manager:
+			push_error("[AbilityBase] %s: %s comes from its definition, which every pawn using it shares; give it another with use_definition(), or its own copy with make_definition_unique()." 					% [_describe_node(), setting])
+			return
+		_own_definition = _new_own_definition()
+	_own_definition.set(setting, value)
+	if settings != null:
+		prepare_settings()
+
+
+# True if the definition is of this kind's class, or a class built on it.
+func _definition_fits(chosen: AbilityDefinition, defaults: AbilityDefinition) -> bool:
+	var script: Script = chosen.get_script()
+	var wanted: Script = defaults.get_script()
+	while script:
+		if script == wanted:
+			return true
+		script = script.get_base_script()
+	return false
+
+
+func _describe_node() -> String:
+	return "%s/%s" % [pawn.name, name] if pawn else String(name)
 
 
 ## The properties on this node that roll back and whose setters call [method push_state], so the state store records them only when

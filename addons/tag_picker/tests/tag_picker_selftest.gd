@@ -6,7 +6,7 @@
 ##   godot --headless --path . "res://addons/tag_picker/tests/tag_picker_selftest.tscn"
 extends Node
 
-const ABILITY_BASE_PATH := "res://assets/scripts/abilities/AbilityBase.gd"
+const ABILITY_DEFINITION_PATH := "res://assets/scripts/abilities/definitions/AbilityDefinition.gd" # Claude 2026-11-21: settings moved into definitions
 
 var _failures := 0
 
@@ -20,9 +20,9 @@ func _ready() -> void:
 	_check(scripts_load, "the plugin's three scripts load")
 
 	var inspector: Script = load("res://addons/tag_picker/TagInspectorPlugin.gd")
-	var dash := DashAbility.new()
+	var dash := DashDefinition.new()
 	var plain := Node.new()
-	_check(inspector.extends_script(dash, ABILITY_BASE_PATH) and not inspector.extends_script(plain, ABILITY_BASE_PATH) and not inspector.extends_script(null, ABILITY_BASE_PATH), "it handles abilities (a DashAbility) and nothing else")
+	_check(inspector.extends_script(dash, ABILITY_DEFINITION_PATH) and not inspector.extends_script(plain, ABILITY_DEFINITION_PATH) and not inspector.extends_script(null, ABILITY_DEFINITION_PATH), "it handles ability definitions (a DashDefinition) and nothing else")
 
 	# Claude 2026-11-10 (pawn spec 8.11): effects and their parts get dropdowns too, each from the right tag set.
 	var effect := Effect.new()
@@ -31,7 +31,7 @@ func _ready() -> void:
 	var effect_props: Dictionary = inspector.properties_of(effect)
 	_check(effect_props.has("tags") and effect_props["tags"] == [true, inspector.TagSet.EFFECT], "an Effect's tags: a list of effect tags")
 	_check(inspector.properties_of(priority_part).get("ability_tag") == [false, inspector.TagSet.ABILITY] and inspector.properties_of(resistance_part).get("tag") == [false, inspector.TagSet.EFFECT], "an AbilityPriorityPart names an ability tag, a ResistancePart an effect tag")
-	_check(inspector.properties_of(plain).is_empty() and inspector.properties_of(dash).has("locks_out"), "a plain node gets none, and abilities keep theirs")
+	_check(inspector.properties_of(plain).is_empty() and inspector.properties_of(dash).has("locks_out"), "a plain node gets none, and ability definitions keep theirs")
 	_check(EffectTags.read_declared_tags().has(EffectTags.DAMAGE_ELEMENTAL), "the effect tag dropdown offers parent levels too (damage.elemental)")
 
 	var tags := TagRegistry.read_declared_tags()
@@ -45,7 +45,7 @@ func _ready() -> void:
 	var in_list: OptionButton = property.make_picker(tags, &"combat", false)
 	_check(in_list.item_count == tags.size() and in_list.get_item_metadata(in_list.selected) == &"combat", "a list entry: no (none), parent levels are offered (combat)")
 
-	for node in [dash, plain, single, misspelt, empty, in_list]:
+	for node in [plain, single, misspelt, empty, in_list]: # dash is a Resource, freed when unused
 		node.free()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)

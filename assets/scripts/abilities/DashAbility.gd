@@ -10,18 +10,58 @@
 class_name DashAbility
 extends AbilityBase
 
-## The stat for the speed-up's acceleration, in metres per second per second.
-@export var acceleration_stat: StringName = &"DashAcceleration"
-## The speed-up's acceleration when the pawn has no such stat.
-@export var fallback_acceleration := 100.0
-## How long it speeds up for, in seconds.
-@export_range(0.0, 2.0, 0.01, "or_greater") var speed_up_seconds := 0.1
-## How hard it slows down after, in metres per second per second.
-@export_range(0.0, 1000.0, 1.0, "or_greater") var slow_down_deceleration := 50.0
-## How long it slows down for, in seconds. The defaults take off what the speed-up added (50 x 0.2 against 100 x 0.1).
-@export_range(0.0, 2.0, 0.01, "or_greater") var slow_down_seconds := 0.2
-## On: it can start in the air as well as on the ground. Off: ground only.
-@export var usable_in_air := true
+# Its settings with their own type: the same object as settings.
+var _dash: DashDefinition = null
+
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+## From the definition: [member DashDefinition.acceleration_stat].
+var acceleration_stat: StringName:
+	get:
+		if _dash == null:
+			prepare_settings()
+		return _dash.acceleration_stat
+	set(value):
+		_write_setting(&"acceleration_stat", value)
+## From the definition: [member DashDefinition.fallback_acceleration].
+var fallback_acceleration: float:
+	get:
+		if _dash == null:
+			prepare_settings()
+		return _dash.fallback_acceleration
+	set(value):
+		_write_setting(&"fallback_acceleration", value)
+## From the definition: [member DashDefinition.speed_up_seconds].
+var speed_up_seconds: float:
+	get:
+		if _dash == null:
+			prepare_settings()
+		return _dash.speed_up_seconds
+	set(value):
+		_write_setting(&"speed_up_seconds", value)
+## From the definition: [member DashDefinition.slow_down_deceleration].
+var slow_down_deceleration: float:
+	get:
+		if _dash == null:
+			prepare_settings()
+		return _dash.slow_down_deceleration
+	set(value):
+		_write_setting(&"slow_down_deceleration", value)
+## From the definition: [member DashDefinition.slow_down_seconds].
+var slow_down_seconds: float:
+	get:
+		if _dash == null:
+			prepare_settings()
+		return _dash.slow_down_seconds
+	set(value):
+		_write_setting(&"slow_down_seconds", value)
+## From the definition: [member DashDefinition.usable_in_air].
+var usable_in_air: bool:
+	get:
+		if _dash == null:
+			prepare_settings()
+		return _dash.usable_in_air
+	set(value):
+		_write_setting(&"usable_in_air", value)
 
 ## The way it's dashing, flat and length 1. Rolls back (pushed).
 var dash_direction := Vector3.ZERO:
@@ -32,25 +72,17 @@ var dash_direction := Vector3.ZERO:
 		push_state(&"dash_direction", value)
 
 
-func _init() -> void:
-	super()
-	kind = Kind.ACTION
-	trigger_action = &"dash"
-	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.MOVEMENT_DASH
-	needs_full_movement = true # a dash is too fast for the crowd mover's checks (pawn spec 8.22)
-	extra_categories = [Tags.MOVEMENT_ADVANCED] # the AI asks for this group, not for "dash"
-	# Its length comes from its two phases (duration_ticks), not duration.
-	duration = 0.0
-	cooldown = 2.0
-	# The basic movement group: walk, sprint and jump.
-	locks_out = [Tags.MOVEMENT_BASIC]
-	interrupt_priority = 40 # above knockback's threshold (35)
-	interrupt_threshold = 25 # a knockback (30) cancels it once its invulnerability is over
-	pauses_locomotion = true # Walk would otherwise slow the pawn as well
-
-
 ## With no interceptor of its own, a Dash is invulnerable for its first 0.18 s, so the end of its slow-down can be hit.
+## Its kind's defaults: a new [DashDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return DashDefinition.new()
+
+
+func _settings_changed() -> void:
+	super()
+	_dash = settings as DashDefinition
+
+
 func make_default_interceptors() -> void:
 	var dodge := InvulnerabilityInterceptor.new()
 	dodge.name = "Invulnerable"

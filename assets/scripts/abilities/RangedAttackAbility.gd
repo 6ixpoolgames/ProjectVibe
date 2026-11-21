@@ -12,37 +12,89 @@
 class_name RangedAttackAbility
 extends AbilityBase
 
-## The projectile it fires.
-@export var projectile_scene: PackedScene
-## Ticks of aiming before the shot, at 60 a second.
-@export_range(0, 120, 1, "or_greater") var windup_ticks := 12
-## Ticks after the shot before it's over, at 60 a second.
-@export_range(0, 120, 1, "or_greater") var recovery_ticks := 18
-## How far away a target may be for the AI to shoot, in metres (the AI's reach; the projectile's own range can be longer).
-@export_range(0.5, 200.0, 0.5, "or_greater") var attack_range := 14.0
-## Where the projectile leaves from: metres above the feet and in front of the pawn.
-@export var muzzle_height := 1.3
-@export var muzzle_forward := 0.5
-## How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnSpeed stat.
-@export_range(-1.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second := -1.0
-## On: the first enemy on the projectile's path hears it's coming, so its AI can parry.
-@export var warns_targets := true
+# Its settings with their own type: the same object as settings.
+var _ranged: RangedAttackDefinition = null
+
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+## From the definition: [member RangedAttackDefinition.projectile_scene].
+var projectile_scene: PackedScene:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.projectile_scene
+	set(value):
+		_write_setting(&"projectile_scene", value)
+## From the definition: [member RangedAttackDefinition.windup_ticks].
+var windup_ticks: int:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.windup_ticks
+	set(value):
+		_write_setting(&"windup_ticks", value)
+## From the definition: [member RangedAttackDefinition.recovery_ticks].
+var recovery_ticks: int:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.recovery_ticks
+	set(value):
+		_write_setting(&"recovery_ticks", value)
+## From the definition: [member RangedAttackDefinition.attack_range].
+var attack_range: float:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.attack_range
+	set(value):
+		_write_setting(&"attack_range", value)
+## From the definition: [member RangedAttackDefinition.muzzle_height].
+var muzzle_height: float:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.muzzle_height
+	set(value):
+		_write_setting(&"muzzle_height", value)
+## From the definition: [member RangedAttackDefinition.muzzle_forward].
+var muzzle_forward: float:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.muzzle_forward
+	set(value):
+		_write_setting(&"muzzle_forward", value)
+## From the definition: [member RangedAttackDefinition.windup_turn_degrees_per_second].
+var windup_turn_degrees_per_second: float:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.windup_turn_degrees_per_second
+	set(value):
+		_write_setting(&"windup_turn_degrees_per_second", value)
+## From the definition: [member RangedAttackDefinition.warns_targets].
+var warns_targets: bool:
+	get:
+		if _ranged == null:
+			prepare_settings()
+		return _ranged.warns_targets
+	set(value):
+		_write_setting(&"warns_targets", value)
 
 var _made_default_steps := false
 
 
-func _init() -> void:
-	super()
-	kind = Kind.ACTION
-	trigger_action = &"primary"
-	category = Tags.COMBAT_RANGED
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
-	interrupt_priority = 15
-	interrupt_threshold = 15
-	cooldown = 0.6
-
-
 ## Its attack_range: the AI shoots from within it.
+## Its kind's defaults: a new [RangedAttackDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return RangedAttackDefinition.new()
+
+
+func _settings_changed() -> void:
+	super()
+	_ranged = settings as RangedAttackDefinition
+
+
 func attack_reach() -> float:
 	return attack_range
 

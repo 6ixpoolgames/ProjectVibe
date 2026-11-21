@@ -584,9 +584,7 @@ The owner's call (2026-11-21): push and go on to the abilities step. Abilities v
 
 The commit roughly halved. Deadlines didn't make the abilities faster (the countdowns were cheap); they make the state still while a timer runs, so nothing is pushed, sent or rolled back while one does. The tripwire (`verify_store_each_tick`) shows only the three spawning warnings it showed before.
 
-A cooldown now counts as over from the start of the tick it ends on (the countdown reached 0 only when the abilities ran), so the AI may press one tick sooner; `readiness_version` notices a passed deadline when read, so the AI's kept answers stay right. Two smaller timing changes, both only for a pawn on a load step: a run started between its runs (a knockback from a hit) now counts from the tick it started, where the countdown counted the whole span since the pawn last ran; and a readout between its runs shows the time left now rather than at its last run. Deadlines keep running while a pawn sleeps, but a running cooldown still keeps a pawn awake, so its AI hears when it ends. A timed locomotion's time still waits while an action pauses locomotion: the manager moves its deadlines on (`delay_run`).
-
-Sprint now runs on a charge (the owner, 2026-11-21): it drains while sprinting and refills at half rate a second after it stops, worked out from the charge and the tick when it last started or stopped, so it's two values that change only then (ability spec 4).
+A cooldown now counts as over from the start of the tick it ends on (the countdown reached 0 only when the abilities ran), so the AI may press one tick sooner; `readiness_version` notices a passed deadline when read, so the AI's kept answers stay right. Two smaller timing changes, both only for a pawn on a load step: a run started between its runs (a knockback from a hit) now counts from the tick it started, where the countdown counted the whole span since the pawn last ran; and a readout between its runs shows the time left now rather than at its last run. Deadlines keep running while a pawn sleeps, but a running cooldown still keeps a pawn awake, so its AI hears when it ends.
 
 ## 14. Open
 

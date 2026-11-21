@@ -31,7 +31,8 @@ Everything a pawn does, from walking to a three-hit combo: abilities started by 
 ```
 
 - **`AbilityManager`** is a part on every pawn, with the abilities as its children. Each tick it runs one locomotion ability, then the actions: a press starts the ready ability on that action with the highest priority. It owns the cancelling rules, the combo counter, and the hit path (`receive_hit`), including death.
-- **`AbilityBase`** is one thing a pawn can do. LOCOMOTION moves the pawn every tick (Walk by default, Sprint while held and it has charge: it drains while sprinting and refills at half rate a second after it stops); ACTION starts on a press, at once (Jump) or for a while (Dash, a swing). Its timers roll back.
+- **Definitions** (`definitions/`): an ability's settings live in an `AbilityDefinition` Resource (`MeleeAttackDefinition` and the like for each kind), shared by every pawn that uses it. The node holds the reference (`definition`) and its state, and reads each setting from it. Empty, it runs with its kind's defaults. A definition can be a variant of another (`based_on`): what it hasn't changed follows its base. `DefinitionRegistry` gives each definition file an id. Design: [ability spec](../../../docs/abilities/ABILITY_SPEC.md) 3.
+- **`AbilityBase`** is one thing a pawn can do. LOCOMOTION moves the pawn every tick (Walk by default, Sprint while held and charged); ACTION starts on a press, at once (Jump) or for a while (Dash, a swing). Its timers roll back.
 - **The t0 abilities:** `WalkAbility`, `SprintAbility`, `JumpAbility`, `DashAbility`, `MeleeAttackAbility`, `RangedAttackAbility`, `ParryAbility`, and two with no key: `KnockbackAbility` (on the pawn being hit) and `DeathAbility` (runs while Health is 0).
 - **Steps** (`steps/`): an ability can be built from `AbilityStep` children that start each other and run side by side. A swing is Windup (which starts TurnToFace), then Sweep (the hit window), then OpenCombo and Recovery. MeleeAttack makes these from its settings if it has none.
 - **Projectiles** (`projectiles/`): a `Projectile` is a networked entity, one per shot, spawned by a `FireProjectileStep`. The server (or the offline game) moves it each tick and hits the first pawn or wall in its path; clients draw it from snapshots. Its hit carries the firing ability's on-hit effects. Design: pawn spec 8.24.
@@ -41,9 +42,11 @@ Everything a pawn does, from walking to a three-hit combo: abilities started by 
 
 ## How to use it
 
-**Make a new attack from steps.** Add a `MeleeAttackAbility` (or any `AbilityBase`) under the pawn's AbilityManager, set its `trigger_action`, and give it step children: a `WindupStep` (set `turn_step` to a `TurnToFaceStep` and `starts_when_finished` to the sweep), one or more `MeleeSweepStep`s (start and end angle, height and reach), then a `WaitStep` for recovery. Several sweeps in a row make a zig-zag or a spin. Steps with `starts_first` start with the ability; the ability ends when no step is left running. Put an `EffectApplier` (ON_HIT, TARGET) under the ability with the effects a hit applies, such as `resources/effects/swing_hit.tres`.
+**Give an ability other numbers.** Settings are in its definition, not on the node. In the inspector, give the node's `definition` a new definition of its kind (`New MeleeAttackDefinition`) and change what you need, then save it as a file (`resources/abilities/`) so other pawns can share it. For a variant of an existing one ("Goblin Swing (fast)"), make a new definition, set its `based_on` first, then change only what differs: the rest follows the base, and the revert arrow on a changed value goes back to following it. A definition left inside a scene is a prototype tweak; the pawn panel (F1) lists those under "definitions to check". While playing a definition is shared and read-only: swap it with `use_definition()`, or give one pawn its own copy with `make_definition_unique()` (prototyping and tests). A quick ability's script can still set base settings in `_init()`: they become a definition of its own.
 
-**Make a ranged attack.** Add a `RangedAttackAbility` under the AbilityManager, set its `trigger_action` and `projectile_scene` (such as `scenes/projectiles/bolt.tscn`: a `Projectile` with a `TickStateComponent` recording position and velocity, and a `NetworkEntity`), and put an `EffectApplier` (ON_HIT, TARGET) under it, such as `resources/effects/bolt_hit.tres`. Register the projectile scene on every machine at startup, before hosting or joining: `Projectile.register_scene(scene)` (the type list is part of the join check). For the AI, give its brain an `AIAttackBehaviour` with `presses_action` set to the same action; it shoots from within the ability's `attack_range`. A volley is several `FireProjectileStep`s in a row.
+**Make a new attack from steps.** Add a `MeleeAttackAbility` (or any `AbilityBase`) under the pawn's AbilityManager, give it a definition with its `trigger_action`, and give it step children: a `WindupStep` (set `turn_step` to a `TurnToFaceStep` and `starts_when_finished` to the sweep), one or more `MeleeSweepStep`s (start and end angle, height and reach), then a `WaitStep` for recovery. Several sweeps in a row make a zig-zag or a spin. Steps with `starts_first` start with the ability; the ability ends when no step is left running. Put an `EffectApplier` (ON_HIT, TARGET) under the ability with the effects a hit applies, such as `resources/effects/swing_hit.tres`.
+
+**Make a ranged attack.** Add a `RangedAttackAbility` under the AbilityManager, give it a `RangedAttackDefinition` with its `trigger_action` and `projectile_scene` (such as `resources/abilities/bolt_attack.tres`, which uses `scenes/projectiles/bolt.tscn`: a `Projectile` with a `TickStateComponent` recording position and velocity, and a `NetworkEntity`), and put an `EffectApplier` (ON_HIT, TARGET) under it, such as `resources/effects/bolt_hit.tres`. Register the projectile scene on every machine at startup, before hosting or joining: `Projectile.register_scene(scene)` (the type list is part of the join check). For the AI, give its brain an `AIAttackBehaviour` with `presses_action` set to the same action; it shoots from within the ability's `attack_range`. A volley is several `FireProjectileStep`s in a row.
 
 **Give a step its own rules.** A step's `interrupt_threshold` makes a cancel window (low during recovery, say); `ends_when_released` ends it when the key is let go. An `ApplyEffectStep` applies effects to the pawn at a moment in the ability.
 
@@ -60,7 +63,7 @@ if action != &"":
     pass # hold or press it through the AIController
 ```
 
-**Write a new ability in code.** Extend `AbilityBase`, set `kind`, `trigger_action`, `category` and the numbers in `_init()`, and override `can_start()`, `start()`, `tick(dt)` or `stop()`. Anything it keeps between ticks goes in `get_pushed_properties()`, with a setter that calls `push_state` (the cheap way), or in `get_rollback_properties()` (read at every commit, no setter needed). Timers are tick deadlines: store the tick something happens, and compare with `TickDriver.tick`.
+**Write a new ability in code.** Extend `AbilityBase`, set `kind` and, for a quick one, `trigger_action`, `category` and the numbers in `_init()` (they become a definition of its own). For a kind others will tweak, give it a definition class extending `AbilityDefinition` with its settings (each setter calls `_changed`), return one from `make_default_definition()`, and add read-only properties for its settings as the built-in kinds do. Override `can_start()`, `start()`, `tick(dt)` or `stop()`. Anything it keeps between ticks goes in `get_pushed_properties()`, with a setter that calls `push_state` (the cheap way), or in `get_rollback_properties()` (read at every commit, no setter needed). Timers are tick deadlines: store the tick something happens, and compare with `TickDriver.tick`.
 
 **Hit a pawn from game code** (a trap, say), on the server:
 ```gdscript
@@ -92,19 +95,24 @@ pawn.ability_manager.receive_hit(hit)
 
 ## Settings worth knowing
 
+Ability settings are in its definition (`AbilityDefinition` and each kind's own class); the node reads them by the same names.
+
 | Setting | Where | Default | What it does |
 |---|---|---|---|
-| `trigger_action` | `AbilityBase` | per ability | The named action that starts it; empty for Walk, Knockback, Death |
-| `priority` | `AbilityBase` | 0 | Which ability a press picks among those on one action (higher wins) |
-| `interrupt_priority` / `interrupt_threshold` | `AbilityBase` | 0 / 100 | How hard it cancels others; how hard it is to cancel. Walk 0, Jump 5, Sprint 10, swing 15, Knockback 30 (35), Dash 40 (25) |
-| `locks_out`, `cancelled_by` | `AbilityBase` | empty | Categories it stops while running; categories that can always cancel it |
-| `cooldown`, `buffer_window` | `AbilityBase` | 0 | Seconds before it can start again; seconds an early press waits |
-| `combo_positions` | `AbilityBase` | empty | Which combo positions it can fill |
-| `windup_ticks`, `hit_ticks`, `recovery_ticks` | `MeleeAttackAbility` | 8, 4, 12 | The default swing's timing, at 60 ticks a second |
-| `attack_range`, `hit_radius`, `sweep_degrees` | `MeleeAttackAbility` | 1.8 m, 0.8 m, 100° | The default swing's reach and arc; attack_range is also the AI's reach |
+| `definition` | `AbilityBase` (the node) | empty: the kind's defaults | The settings it runs with |
+| `based_on` | `AbilityDefinition` | empty | The definition this one is a variant of |
+| `trigger_action` | `AbilityDefinition` | per ability | The named action that starts it; empty for Walk, Knockback, Death |
+| `priority` | `AbilityDefinition` | 0 | Which ability a press picks among those on one action (higher wins) |
+| `interrupt_priority` / `interrupt_threshold` | `AbilityDefinition` | 0 / 100 | How hard it cancels others; how hard it is to cancel. Walk 0, Jump 5, Sprint 10, swing 15, Knockback 30 (35), Dash 40 (25) |
+| `locks_out`, `cancelled_by` | `AbilityDefinition` | empty | Categories it stops while running; categories that can always cancel it |
+| `cooldown`, `buffer_window` | `AbilityDefinition` | 0 | Seconds before it can start again; seconds an early press waits |
+| `combo_positions` | `AbilityDefinition` | empty | Which combo positions it can fill |
+| `max_charge`, `recharge_rate`, `recharge_delay`, `min_start_charge` | `SprintDefinition` | 3 s, 0.5, 1 s, 0.5 s | Sprint's charge: how long, how fast it refills, after how long, and what it needs to start |
+| `windup_ticks`, `hit_ticks`, `recovery_ticks` | `MeleeAttackDefinition` | 8, 4, 12 | The default swing's timing, at 60 ticks a second |
+| `attack_range`, `hit_radius`, `sweep_degrees` | `MeleeAttackDefinition` | 1.8 m, 0.8 m, 100° | The default swing's reach and arc; attack_range is also the AI's reach |
 | `active_seconds` | `HitInterceptor` | 0 (whole run) | How long it's on from the start |
 | `front_degrees` | `ParryInterceptor` | 120° | How wide the parried front is |
 
 ## Tests
 
-`abilities/tests/`: `ability_selftest` (the manager's rules, Walk, Sprint, Jump, rollback), `ability_steps_selftest` (steps in order and side by side, failing, the safety limit, cancel windows, step rollback), `combat_selftest` (Dash, MeleeAttack, Knockback, the interrupt rules, hits on the server), `fight_selftest` (Health, damage, Death, revive), `attack_request_selftest` (presses as requests, jitter, combos), `attack_feel_selftest` (sweeps, turning, the hop, invulnerability), `hit_interceptor_selftest` (interceptor rules), `parry_selftest` (the parry and the AI's parry), `projectile_selftest` (bolts offline: hits, misses, walls, teams, parry, dash, gravity, an AI shooting, an AI keeping its distance and switching to melee up close), and `net_projectile_selftest` (bolts between processes at several network conditions, hits once on the server, hit rollback; about a minute, run by name or with `full net`). Run them with `bash tools/run_tests.sh <name>`.
+`abilities/tests/`: `ability_selftest` (the manager's rules, Walk, Sprint, Jump, rollback), `ability_definition_selftest` (kind defaults, variants and their files, fallback, settings written on a node, the sample definitions, the registry), `ability_steps_selftest` (steps in order and side by side, failing, the safety limit, cancel windows, step rollback), `combat_selftest` (Dash, MeleeAttack, Knockback, the interrupt rules, hits on the server), `fight_selftest` (Health, damage, Death, revive), `attack_request_selftest` (presses as requests, jitter, combos), `attack_feel_selftest` (sweeps, turning, the hop, invulnerability), `hit_interceptor_selftest` (interceptor rules), `parry_selftest` (the parry and the AI's parry), `projectile_selftest` (bolts offline: hits, misses, walls, teams, parry, dash, gravity, an AI shooting, an AI keeping its distance and switching to melee up close), and `net_projectile_selftest` (bolts between processes at several network conditions, hits once on the server, hit rollback; about a minute, run by name or with `full net`). Run them with `bash tools/run_tests.sh <name>`.

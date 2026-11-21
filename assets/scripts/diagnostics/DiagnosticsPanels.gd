@@ -290,7 +290,11 @@ func _inspector_text() -> String:
 	if pawn.ability_manager:
 		var running := PackedStringArray()
 		var cooling := PackedStringArray()
+		var to_check := PackedStringArray()
 		for ability in pawn.ability_manager.get_abilities():
+			var note := ability.definition_note()
+			if note != "":
+				to_check.append("%s (%s)" % [ability.name, note])
 			if ability.is_running_timed():
 				# A stepped ability shows its running steps (pawn spec 8.20).
 				var steps_now := ability.get_running_step_names()
@@ -307,6 +311,8 @@ func _inspector_text() -> String:
 				cooling.append("%s (%d)" % [ability.name, ability.cooldown_ticks_left()])
 		lines.append("  running: %s" % (", ".join(running) if not running.is_empty() else "-"))
 		lines.append("  cooling down: %s" % (", ".join(cooling) if not cooling.is_empty() else "-"))
+		if not to_check.is_empty(): # settings not from a definition file: a prototype tweak, or a definition of the wrong kind
+			lines.append("  definitions to check: %s" % ", ".join(to_check))
 	if pawn.effect_manager:
 		var effects := PackedStringArray()
 		for entry: Dictionary in pawn.effect_manager.get_active_effects():

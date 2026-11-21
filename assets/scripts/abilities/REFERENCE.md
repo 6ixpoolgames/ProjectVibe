@@ -16,6 +16,17 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [RangedAttackAbility](#rangedattackability)
 - [SprintAbility](#sprintability)
 - [WalkAbility](#walkability)
+- [AbilityDefinition](#abilitydefinition)
+- [DashDefinition](#dashdefinition)
+- [DeathDefinition](#deathdefinition)
+- [DefinitionRegistry](#definitionregistry)
+- [JumpDefinition](#jumpdefinition)
+- [KnockbackDefinition](#knockbackdefinition)
+- [MeleeAttackDefinition](#meleeattackdefinition)
+- [ParryDefinition](#parrydefinition)
+- [RangedAttackDefinition](#rangedattackdefinition)
+- [SprintDefinition](#sprintdefinition)
+- [WalkDefinition](#walkdefinition)
 - [HitInterceptor](#hitinterceptor)
 - [InvulnerabilityInterceptor](#invulnerabilityinterceptor)
 - [ParryInterceptor](#parryinterceptor)
@@ -35,28 +46,32 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 
 One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's [`AbilityManager`](#abilitymanager).
 
-Extend it, set what's needed in `_init()`, and override `can_start()`, `start()`, `tick()`, `stop()` and, for counters that run all the time, `every_tick()` (with `can_sleep()`). LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities start on a press of their `trigger_action`, at once or for a `duration`. Players' keys and AI behaviours press the same actions. Times are set in seconds and kept in ticks (60 a second).
+Its settings come from its `definition`, a Resource every pawn using it shares (ability spec 3): the node holds that reference and its state, and reads each setting from the definition. Empty, it runs with its kind's defaults.
+Extend it, override `make_default_definition()` for a kind with settings of its own, and override `can_start()`, `start()`, `tick()`, `stop()` and, for counters that run all the time, `every_tick()` (with `can_sleep()`). A quick ability can instead set base settings in `_init()`: they go into a definition of its own. LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities start on a press of their `trigger_action`, at once or for a `duration`. Players' keys and AI behaviours press the same actions. Times are set in seconds and kept in ticks (60 a second).
 Rollback: whatever an ability keeps between ticks must be named in `get_pushed_properties()` (its setter calls `push_state()`) or `get_rollback_properties()` (read at every commit); the base already covers its own timers and step state. It can also be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a swing) and carry [`HitInterceptor`](#hitinterceptor) children that stop hits while it runs. Design: pawn spec 8, 8.20, 8.23.
 
 ### Settings and properties
 
-- `kind: int` = `1`
-- `trigger_action: StringName` = `&""`: The named action that starts it, such as &"jump". Empty: only the manager starts it, as the default locomotion.
-- `category: StringName` = `&""`: What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
-- `extra_categories: StringName[]` = `[]`: More groups it belongs to besides category, such as &"movement.advanced" for a dash. Lockouts, cancels and `AbilityManager.action_for_tag()` answer to all of them. They share one 64-bit mask with every other ability tag.
-- `priority: int` = `0`: Which ability a press picks among those on one action: the highest that can start wins, then the first in the tree. Locomotion with a held action works the same. Effects can add to it (AbilityPriorityPart, pawn spec 8.11).
-- `combo_positions: int[]` = `[]`: Which combo positions it can fill: [1] an opener, [2] a second hit, [2, 3] second or third. A follow-up (no 1) starts only while the combo window is open; give it a higher priority than the opener so it wins there. Empty: not in combos. Pawn spec 8.20.
-- `priority_jitter: float` = `0.0`: A random offset, up to plus or minus this, added to priority when a press picks between abilities. 0: none. It comes from the tick's own random numbers (`TickDriver.tick_rng()`), so a replay picks the same ability. Locomotion ignores it.
-- `duration: float` = `0.0`: Seconds. For an action, 0 means it happens at once. For locomotion, 0 means it runs as long as it's wanted.
-- `cooldown: float` = `0.0`: Seconds after it stops before it can start again.
-- `locks_out: StringName[]` = `[]`: Categories that can't start, or steer, while this runs, such as &"movement" for an attack that roots the pawn.
-- `buffer_window: float` = `0.0`: Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
-- `interrupt_priority: int` = `0`: How hard it cancels a running ability it conflicts with (pawn spec 8.6): Walk 0, Jump 5, Sprint 10, Parry 10, MeleeAttack 15, Knockback 30, Dash 40, Death 1000.
-- `interrupt_threshold: int` = `100`: While it runs, a conflicting ability with at least this interrupt_priority cancels it; a weaker one is locked out. 100: only Death cancels it. MeleeAttack uses 15, so Dash cancels a swing and Sprint doesn't.
-- `cancelled_by: StringName[]` = `[]`: Categories that can always cancel it while it runs, whatever the interrupt numbers say, such as &"movement.jump". A category covers its children, as in locks_out.
-- `pauses_locomotion: bool` = `false`: On: locomotion (Walk, Sprint) doesn't run at all while this does, so it neither steers nor slows the pawn (Dash). Off: a locked-out locomotion still slows the pawn to a stop, as an attack that roots the pawn wants.
-- `needs_full_movement: bool` = `false`: On: while it runs the pawn moves by physics (`move_and_slide`), not the CrowdMover, so fast or forced moves such as Dash and Knockback collide properly. Pawn spec 8.22.
-- `max_steps_ticks: int` = `600`: For a stepped ability, the longest it can run, in ticks at 60 a second. It ends when no step runs, or at this. Ignored without steps.
+- `kind: int` = `1`: What the code does with it: move the pawn every tick, or start on a press. Set by the kind's script.
+- `definition: AbilityDefinition`: The settings it runs with (ability spec 3): a file shared by every pawn that uses it, or one embedded in this node while prototyping. Empty: its kind's defaults. One of another kind falls back to the defaults, with a warning.
+- `settings: AbilityDefinition` = `null`: The settings it runs with: `definition` worked out (`AbilityDefinition.resolved()`), or its kind's defaults. Read-only while playing. Set by `prepare_settings()`.
+- `definition_fell_back: bool` = `false`: True if its definition was of another kind, so it runs with its kind's defaults (diagnostics lists these).
+- `trigger_action: StringName`: From the definition: `AbilityDefinition.trigger_action`.
+- `category: StringName`: From the definition: `AbilityDefinition.category`.
+- `extra_categories: StringName[]`: From the definition: `AbilityDefinition.extra_categories`.
+- `priority: int`: From the definition: `AbilityDefinition.priority`.
+- `combo_positions: int[]`: From the definition: `AbilityDefinition.combo_positions`.
+- `priority_jitter: float`: From the definition: `AbilityDefinition.priority_jitter`.
+- `duration: float`: From the definition: `AbilityDefinition.duration`.
+- `cooldown: float`: From the definition: `AbilityDefinition.cooldown`.
+- `locks_out: StringName[]`: From the definition: `AbilityDefinition.locks_out`.
+- `buffer_window: float`: From the definition: `AbilityDefinition.buffer_window`.
+- `interrupt_priority: int`: From the definition: `AbilityDefinition.interrupt_priority`.
+- `interrupt_threshold: int`: From the definition: `AbilityDefinition.interrupt_threshold`.
+- `cancelled_by: StringName[]`: From the definition: `AbilityDefinition.cancelled_by`.
+- `pauses_locomotion: bool`: From the definition: `AbilityDefinition.pauses_locomotion`.
+- `needs_full_movement: bool`: From the definition: `AbilityDefinition.needs_full_movement`.
+- `max_steps_ticks: int`: From the definition: `AbilityDefinition.max_steps_ticks`.
 - `started_at: int` = `-1`: The tick the current (or last) timed run started.
 - `ends_at: int` = `-1`: The tick the current timed run ends: the manager finishes it on its first run at or after this tick. -1: not running.
 - `ready_at: int` = `0`: The tick it can start again: ready from this tick on.
@@ -85,6 +100,13 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 
 ### Functions
 
+- `make_default_definition() -> AbilityDefinition`: The definition a new node of this kind runs with: a new definition of the kind's class, with its defaults. Each kind overrides it.
+- `kind_defaults() -> AbilityDefinition`: This kind's defaults, shared by every node of the kind.
+- `prepare_settings() -> AbilityDefinition`: Works out `settings` from `definition`: its kind's defaults with none, or with one of another kind (warning). Settings written on the node (a script's _init(), old scene values, `make_definition_unique()`) go into a variant of its own on top. The manager calls it as it collects its abilities; reading a setting before then calls it too. Returns the settings.
+- `use_definition(new_definition: AbilityDefinition) -> void`: Gives it another definition while playing (a weapon swap), and has the manager work out its masks and lists again. What rolls back was decided when the pawn started, so a definition that turns on a timer this ability didn't have won't roll it back.
+- `make_definition_unique() -> AbilityDefinition`: Gives it settings of its own, on top of its definition, which this node alone uses: Godot's "Make Unique", while playing. Its settings can be written after that. For prototyping and tests; a shipped game uses another definition.
+- `has_own_settings() -> bool`: True if it has settings of its own on top of its definition (`make_definition_unique()`, its script's _init(), or values a scene sets on the node), not only the shared ones.
+- `definition_note() -> String`: What to check about where its settings come from, for diagnostics: "fell back" (a definition of another kind), "embedded" (saved in a scene, a prototype tweak), "own settings" (written on the node), or "" when it runs with a definition file or its kind's defaults.
 - `get_pushed_properties() -> String[]`: The properties on this node that roll back and whose setters call `push_state()`, so the state store records them only when they change (state store spec 6.3). An ability that keeps more adds to it with `super()`. The cheap way, and the one the built-in abilities use.
 - `get_rollback_properties() -> String[]`: Other properties on this node that roll back, read from the node at every commit: no setter needed, so the easy way for a quick ability, but each costs a read per pawn per tick. None in the base.
 - `keeps_state(property: String) -> bool`: True if this property rolls back, either way.
@@ -205,6 +227,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 - `receive_hit(hit: HitInfo) -> void`: Something hit this pawn; the server's attacker calls it, such as a [`MeleeSweepStep`](#meleesweepstep). Dead or invulnerable pawns ignore it. During simulate it's queued and delivered after every pawn has simulated, in a fixed order (attacker's entity id, target's, queue order), so it never depends on who simulated first (pawn spec 15.4); otherwise it takes effect at once. Steps: see the README.
 - `health_ran_out(hit: HitInfo) -> void`: The EffectManager calls this on the authority when an effect took Health to 0: Death starts and `died` goes out. hit is the hit that did it, or null (a poison's tick). Nothing if already dead.
 - `revive() -> void`: Brings a dead pawn back with full Health, on the server. Death ends on its next tick.
+- `settings_changed() -> void`: An ability's settings changed while playing (`AbilityBase.use_definition()`): its masks, priority order and lists are worked out again.
 
 ## DashAbility
 
@@ -217,17 +240,18 @@ It cancels a swing, and it's invulnerable for its first 0.18 s (an [`Invulnerabi
 
 ### Settings and properties
 
-- `acceleration_stat: StringName` = `&"DashAcceleration"`: The stat for the speed-up's acceleration, in metres per second per second.
-- `fallback_acceleration: float` = `100.0`: The speed-up's acceleration when the pawn has no such stat.
-- `speed_up_seconds: float` = `0.1`: How long it speeds up for, in seconds.
-- `slow_down_deceleration: float` = `50.0`: How hard it slows down after, in metres per second per second.
-- `slow_down_seconds: float` = `0.2`: How long it slows down for, in seconds. The defaults take off what the speed-up added (50 x 0.2 against 100 x 0.1).
-- `usable_in_air: bool` = `true`: On: it can start in the air as well as on the ground. Off: ground only.
+- `acceleration_stat: StringName`: From the definition: `DashDefinition.acceleration_stat`.
+- `fallback_acceleration: float`: From the definition: `DashDefinition.fallback_acceleration`.
+- `speed_up_seconds: float`: From the definition: `DashDefinition.speed_up_seconds`.
+- `slow_down_deceleration: float`: From the definition: `DashDefinition.slow_down_deceleration`.
+- `slow_down_seconds: float`: From the definition: `DashDefinition.slow_down_seconds`.
+- `usable_in_air: bool`: From the definition: `DashDefinition.usable_in_air`.
 - `dash_direction: Vector3` = `Vector3(0, 0, 0)`: The way it's dashing, flat and length 1. Rolls back (pushed).
 
 ### Functions
 
-- `make_default_interceptors() -> void`: With no interceptor of its own, a Dash is invulnerable for its first 0.18 s, so the end of its slow-down can be hit.
+- `make_default_definition() -> AbilityDefinition`: With no interceptor of its own, a Dash is invulnerable for its first 0.18 s, so the end of its slow-down can be hit. Its kind's defaults: a new [`DashDefinition`](#dashdefinition).
+- `make_default_interceptors() -> void`
 - `get_pushed_properties() -> String[]`
 - `is_timed() -> bool`: Timed, by its two phases rather than duration.
 - `duration_ticks() -> int`: The speed-up's ticks plus the slow-down's.
@@ -246,7 +270,8 @@ Rollback: its timer rolls back with Health, so clients see the pawn dead from sn
 
 ### Functions
 
-- `is_timed() -> bool`: Timed: it runs while Health is 0.
+- `make_default_definition() -> AbilityDefinition`: Timed: it runs while Health is 0. Its kind's defaults: a new [`DeathDefinition`](#deathdefinition).
+- `is_timed() -> bool`
 - `duration_ticks() -> int`
 - `start() -> void`
 - `can_sleep_while_running() -> bool`
@@ -286,7 +311,7 @@ It starts from the ground, or within `coyote_time` of walking off an edge. A pre
 
 ### Settings and properties
 
-- `coyote_time: float` = `0.1`: Seconds after leaving the ground, without jumping, that a press still jumps.
+- `coyote_time: float`: From the definition: `JumpDefinition.coyote_time`.
 - `left_ground_at: int` = `-4611686018427387904`: The last tick the pawn was known to be on the ground before it left it; `ON_GROUND` while it's there. Rolls back (pushed).
 
 ### Constants
@@ -296,6 +321,7 @@ It starts from the ground, or within `coyote_time` of walking off an edge. A pre
 
 ### Functions
 
+- `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`JumpDefinition`](#jumpdefinition).
 - `get_pushed_properties() -> String[]`
 - `ticks_off_ground() -> int`: Ticks since the pawn was last on the ground, up to `COUNT_CAP`; 0 on the ground.
 - `every_tick(_dt: float) -> void`
@@ -319,6 +345,7 @@ Rollback: `push_velocity` and `push_ticks` roll back with its timer, so a correc
 
 ### Functions
 
+- `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`KnockbackDefinition`](#knockbackdefinition).
 - `get_pushed_properties() -> String[]`
 - `is_timed() -> bool`: Timed, by its push's length rather than duration.
 - `duration_ticks() -> int`
@@ -335,20 +362,20 @@ A swing is a [`WindupStep`](#windupstep) (which starts a [`TurnToFaceStep`](#tur
 
 ### Settings and properties
 
-- `windup_ticks: int` = `8`: Ticks from the start of the swing to when it can hit (its Windup step's length).
-- `hit_ticks: int` = `4`: Ticks it can hit for (its Sweep step's length).
-- `recovery_ticks: int` = `12`: Ticks after hitting before it's over (its Recovery step's length).
-- `attack_range: float` = `1.8`: How far it reaches, in metres from the pawn: the far edge of the hit sphere.
-- `hit_radius: float` = `0.8`: The hit sphere's radius, in metres.
-- `hit_height: float` = `1.0`: The hit sphere's height above the pawn's feet, in metres: about the chest.
-- `hits_own_team: bool` = `false`: On: it can hit pawns on its own team.
-- `sweep_degrees: float` = `100.0`: How far round the hit sphere sweeps during the hit ticks, in degrees, centred straight ahead. 0: it holds still.
-- `sweep_from_left: bool` = `false`: On: the sweep goes from the pawn's left to its right. Off: right to left.
-- `height_at_sweep_start: float` = `0.0`: How far above or below hit_height the sphere is at the start of the sweep, in metres: slashes, rises, chops. 0: level.
-- `height_at_sweep_end: float` = `0.0`: The same at the end of the sweep. Between the two the sphere moves in a straight line up or down.
-- `windup_turn_degrees_per_second: float` = `-1.0`: Degrees per second it turns toward where the pawn looks (its TurnToFace step). -1: the pawn's TurnRate stat (540 without one). 0: no turning.
-- `combo_window_ticks: int` = `30`: How long the combo window stays open after its hit, in ticks at 60 a second (its OpenCombo step).
-- `warns_targets: bool` = `true`: On: when a swing starts (server), enemies within reach and in front are told it's coming, so their AI can parry. One sphere query.
+- `windup_ticks: int`: From the definition: `MeleeAttackDefinition.windup_ticks`.
+- `hit_ticks: int`: From the definition: `MeleeAttackDefinition.hit_ticks`.
+- `recovery_ticks: int`: From the definition: `MeleeAttackDefinition.recovery_ticks`.
+- `attack_range: float`: From the definition: `MeleeAttackDefinition.attack_range`.
+- `hit_radius: float`: From the definition: `MeleeAttackDefinition.hit_radius`.
+- `hit_height: float`: From the definition: `MeleeAttackDefinition.hit_height`.
+- `hits_own_team: bool`: From the definition: `MeleeAttackDefinition.hits_own_team`.
+- `sweep_degrees: float`: From the definition: `MeleeAttackDefinition.sweep_degrees`.
+- `sweep_from_left: bool`: From the definition: `MeleeAttackDefinition.sweep_from_left`.
+- `height_at_sweep_start: float`: From the definition: `MeleeAttackDefinition.height_at_sweep_start`.
+- `height_at_sweep_end: float`: From the definition: `MeleeAttackDefinition.height_at_sweep_end`.
+- `windup_turn_degrees_per_second: float`: From the definition: `MeleeAttackDefinition.windup_turn_degrees_per_second`.
+- `combo_window_ticks: int`: From the definition: `MeleeAttackDefinition.combo_window_ticks`.
+- `warns_targets: bool`: From the definition: `MeleeAttackDefinition.warns_targets`.
 
 ### Signals
 
@@ -358,7 +385,8 @@ A swing is a [`WindupStep`](#windupstep) (which starts a [`TurnToFaceStep`](#tur
 
 ### Functions
 
-- `attack_reach() -> float`: Its attack_range: the AI swings from within it.
+- `make_default_definition() -> AbilityDefinition`: Its attack_range: the AI swings from within it. Its kind's defaults: a new [`MeleeAttackDefinition`](#meleeattackdefinition).
+- `attack_reach() -> float`
 - `collect_steps() -> void`: Finds its steps, after making the default ones from its settings if it has none of its own.
 - `start() -> void`
 - `swing_phase() -> Dictionary`: Where the swing is, for visuals: "windup", "hit" or "recovery" with progress 0 to 1 (smooth between ticks), or "none".
@@ -379,10 +407,11 @@ This ability is the stance: it runs for duration (0.35 s, then a 1.5 s cooldown)
 
 ### Settings and properties
 
-- `turn_degrees_per_second: float` = `900.0`: How fast it turns toward where the pawn looks while it runs, in degrees per second. 0: it doesn't turn.
+- `turn_degrees_per_second: float`: From the definition: `ParryDefinition.turn_degrees_per_second`.
 
 ### Functions
 
+- `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`ParryDefinition`](#parrydefinition).
 - `tick(dt: float) -> void`
 - `guard() -> ParryInterceptor`: Its [`ParryInterceptor`](#parryinterceptor), or null. The debug drawing reads the front's width from it.
 - `make_default_interceptors() -> void`: With no interceptor of its own, a ParryInterceptor with the default front (120 degrees).
@@ -402,18 +431,19 @@ pawn.ability_manager.can_start(&"primary")
 
 ### Settings and properties
 
-- `projectile_scene: PackedScene`: The projectile it fires.
-- `windup_ticks: int` = `12`: Ticks of aiming before the shot, at 60 a second.
-- `recovery_ticks: int` = `18`: Ticks after the shot before it's over, at 60 a second.
-- `attack_range: float` = `14.0`: How far away a target may be for the AI to shoot, in metres (the AI's reach; the projectile's own range can be longer).
-- `muzzle_height: float` = `1.3`: Where the projectile leaves from: metres above the feet and in front of the pawn.
-- `muzzle_forward: float` = `0.5`
-- `windup_turn_degrees_per_second: float` = `-1.0`: How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnSpeed stat.
-- `warns_targets: bool` = `true`: On: the first enemy on the projectile's path hears it's coming, so its AI can parry.
+- `projectile_scene: PackedScene`: From the definition: `RangedAttackDefinition.projectile_scene`.
+- `windup_ticks: int`: From the definition: `RangedAttackDefinition.windup_ticks`.
+- `recovery_ticks: int`: From the definition: `RangedAttackDefinition.recovery_ticks`.
+- `attack_range: float`: From the definition: `RangedAttackDefinition.attack_range`.
+- `muzzle_height: float`: From the definition: `RangedAttackDefinition.muzzle_height`.
+- `muzzle_forward: float`: From the definition: `RangedAttackDefinition.muzzle_forward`.
+- `windup_turn_degrees_per_second: float`: From the definition: `RangedAttackDefinition.windup_turn_degrees_per_second`.
+- `warns_targets: bool`: From the definition: `RangedAttackDefinition.warns_targets`.
 
 ### Functions
 
-- `attack_reach() -> float`: Its attack_range: the AI shoots from within it.
+- `make_default_definition() -> AbilityDefinition`: Its attack_range: the AI shoots from within it. Its kind's defaults: a new [`RangedAttackDefinition`](#rangedattackdefinition).
+- `attack_reach() -> float`
 - `collect_steps() -> void`: Finds its steps, after making the default ones from its settings if it has none of its own.
 - `start() -> void`
 
@@ -428,16 +458,17 @@ The charge is worked out from two values set only when it starts or stops (`char
 
 ### Settings and properties
 
-- `max_charge: float` = `3.0`: Seconds of sprinting on a full charge.
-- `recharge_rate: float` = `0.5`: How fast the charge refills while not sprinting, in seconds of sprint per second: 0.5 refills at half the rate it drains.
-- `recharge_delay: float` = `1.0`: Seconds after it stops before the charge starts refilling.
-- `min_start_charge: float` = `0.5`: The charge needed to start, in seconds (at most `max_charge`).
+- `max_charge: float`: From the definition: `SprintDefinition.max_charge`.
+- `recharge_rate: float`: From the definition: `SprintDefinition.recharge_rate`.
+- `recharge_delay: float`: From the definition: `SprintDefinition.recharge_delay`.
+- `min_start_charge: float`: From the definition: `SprintDefinition.min_start_charge`.
 - `charge_at_switch: int` = `0`: Ticks of charge when it last started or stopped. Rolls back (pushed).
 - `switched_at: int` = `-1`: The tick it last started or stopped; -1: never, so the charge is full. Rolls back (pushed).
 
 ### Functions
 
-- `charge_ticks() -> int`: Ticks of sprinting it has now: draining while it runs, refilling while it doesn't. Worked out from the tick.
+- `make_default_definition() -> AbilityDefinition`: Ticks of sprinting it has now: draining while it runs, refilling while it doesn't. Worked out from the tick. Its kind's defaults: a new [`SprintDefinition`](#sprintdefinition).
+- `charge_ticks() -> int`
 - `is_timed() -> bool`
 - `get_pushed_properties() -> String[]`
 - `duration_ticks() -> int`
@@ -455,12 +486,206 @@ Its numbers come from the pawn's stats, so a buff or a different pawn changes th
 
 ### Settings and properties
 
-- `speed_stat: StringName` = `&"MoveSpeed"`: The stat for top speed, in metres per second. Sprint uses its own.
-- `fallback_speed: float` = `5.0`: Top speed when the pawn has no such stat.
+- `speed_stat: StringName`: From the definition: `WalkDefinition.speed_stat`.
+- `fallback_speed: float`: From the definition: `WalkDefinition.fallback_speed`.
 
 ### Functions
 
+- `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`WalkDefinition`](#walkdefinition).
 - `tick(dt: float) -> void`
+
+## AbilityDefinition
+
+`res://assets/scripts/abilities/definitions/AbilityDefinition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+The settings one variant of an ability has, shared by every pawn that uses it, such as "Goblin Swing": a Resource an ability node points at (ability spec 3).
+
+Each kind of ability has its own class with its settings added ([`MeleeAttackDefinition`](#meleeattackdefinition)); a new one starts with the kind's defaults. `based_on` makes it a variant: each setting it hasn't changed comes from its base, so changing the base changes its variants. In the inspector a variant shows its base's values, and the revert arrow on a changed one goes back to following the base.
+Read-only while playing: every pawn using it shares it. A pawn that needs other numbers uses another definition (`AbilityBase.use_definition()`), or gets them from stats and effects. An ability runs with `resolved()`, the copy with every setting worked out.
+
+### Settings and properties
+
+- `changed_values: PackedStringArray` = `PackedStringArray()`: The settings this variant has changed from its base: set as they're edited, and saved with it. Only these are saved in a variant's file; the rest follow the base.
+- `based_on: AbilityDefinition`: The definition this one is a variant of. Empty: one of its own, starting from the kind's defaults.
+- `trigger_action: StringName` = `&""`: The named action that starts it, such as &"jump". Empty: only the manager starts it, as the default locomotion.
+- `category: StringName` = `&""`: What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
+- `extra_categories: StringName[]` = `[]`: More groups it belongs to besides category, such as &"movement.advanced" for a dash. Lockouts, cancels and `AbilityManager.action_for_tag()` answer to all of them. They share one 64-bit mask with every other ability tag.
+- `priority: int` = `0`: Which ability a press picks among those on one action: the highest that can start wins, then the first in the tree. Locomotion with a held action works the same. Effects can add to it (AbilityPriorityPart, pawn spec 8.11).
+- `combo_positions: int[]` = `[]`: Which combo positions it can fill: [1] an opener, [2] a second hit, [2, 3] second or third. A follow-up (no 1) starts only while the combo window is open; give it a higher priority than the opener so it wins there. Empty: not in combos. Pawn spec 8.20.
+- `priority_jitter: float` = `0.0`: A random offset, up to plus or minus this, added to priority when a press picks between abilities. 0: none. It comes from the tick's own random numbers (`TickDriver.tick_rng()`), so a replay picks the same ability. Locomotion ignores it.
+- `duration: float` = `0.0`: Seconds. For an action, 0 means it happens at once. For locomotion, 0 means it runs as long as it's wanted.
+- `cooldown: float` = `0.0`: Seconds after it stops before it can start again.
+- `locks_out: StringName[]` = `[]`: Categories that can't start, or steer, while this runs, such as &"movement" for an attack that roots the pawn.
+- `buffer_window: float` = `0.0`: Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
+- `interrupt_priority: int` = `0`: How hard it cancels a running ability it conflicts with (pawn spec 8.6): Walk 0, Jump 5, Sprint 10, Parry 10, MeleeAttack 15, Knockback 30, Dash 40, Death 1000.
+- `interrupt_threshold: int` = `100`: While it runs, a conflicting ability with at least this interrupt_priority cancels it; a weaker one is locked out. 100: only Death cancels it. MeleeAttack uses 15, so Dash cancels a swing and Sprint doesn't.
+- `cancelled_by: StringName[]` = `[]`: Categories that can always cancel it while it runs, whatever the interrupt numbers say, such as &"movement.jump". A category covers its children, as in locks_out.
+- `pauses_locomotion: bool` = `false`: On: locomotion (Walk, Sprint) doesn't run at all while this does, so it neither steers nor slows the pawn (Dash). Off: a locked-out locomotion still slows the pawn to a stop, as an attack that roots the pawn wants.
+- `needs_full_movement: bool` = `false`: On: while it runs the pawn moves by physics (`move_and_slide`), not the CrowdMover, so fast or forced moves such as Dash and Knockback collide properly. Pawn spec 8.22.
+- `max_steps_ticks: int` = `600`: For a stepped ability, the longest it can run, in ticks at 60 a second. It ends when no step runs, or at this. Ignored without steps.
+- `resolved_from: AbilityDefinition` = `null`: For a resolved copy: the definition it was worked out from. Null on a definition of its own.
+
+### Constants
+
+- `MAX_BASE_DEPTH = 32`
+
+### Functions
+
+- `setting_names() -> PackedStringArray`: The names of its settings: what a variant can change.
+- `value_of(setting: StringName, depth: int = 0) -> Variant`: A setting's value here: its own if it changed it or has no base, else its base's.
+- `resolved() -> AbilityDefinition`: This definition with every setting worked out, the copy an ability runs with: itself when it has no base. Worked out once while playing (definitions don't change then), every time in the editor.
+- `describe() -> String`: A short name for warnings and readouts: its resource_name, its file's name, or the kind.
+- `is_embedded() -> bool`: True if it's saved inside a scene ("Make Unique"), not in a file of its own: a quick tweak while prototyping. Diagnostics lists them.
+
+## DashDefinition
+
+`res://assets/scripts/abilities/definitions/DashDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+Dash's settings.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The Dash node reads it.
+
+### Settings and properties
+
+- `acceleration_stat: StringName` = `&"DashAcceleration"`: The stat for the speed-up's acceleration, in metres per second per second.
+- `fallback_acceleration: float` = `100.0`: The speed-up's acceleration when the pawn has no such stat.
+- `speed_up_seconds: float` = `0.1`: How long it speeds up for, in seconds.
+- `slow_down_deceleration: float` = `50.0`: How hard it slows down after, in metres per second per second.
+- `slow_down_seconds: float` = `0.2`: How long it slows down for, in seconds. The defaults take off what the speed-up added (50 x 0.2 against 100 x 0.1).
+- `usable_in_air: bool` = `true`: On: it can start in the air as well as on the ground. Off: ground only.
+
+## DeathDefinition
+
+`res://assets/scripts/abilities/definitions/DeathDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+Death's settings: the base ones, with its defaults.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The Death node reads it.
+
+## DefinitionRegistry
+
+`res://assets/scripts/abilities/definitions/DefinitionRegistry.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Gives every ability definition file an id that's the same on every machine with the same files (ability spec 3.1).
+
+The permanent id is the file's Godot resource UID (replays and saves keep it); the index is small, for the store and the network: the files in `FOLDERS`, sorted by UID and numbered from 0, so machines with the same files agree. `table()` is the index-to-UID list a replay keeps. A definition embedded in a scene has no index. Why it's built this way: ability spec 3.1.
+
+### Constants
+
+- `FOLDERS = Array[String](["res://assets/scripts/resources/abilities/"])`: Where definition files are found, searched with their subfolders.
+
+### Functions
+
+- `scan(folders: String[] = Array[String](["res://assets/scripts/resources/abilities/"])) -> void` *(static)*: Finds every definition file in the folders, numbers them and reports UIDs that clash (a file copied outside the editor keeps its original's). Called on first use; call it again after adding files while running.
+- `index_of(definition: AbilityDefinition) -> int` *(static)*: The definition's index, or -1 if it has none (embedded, made in code, or outside the folders). A resolved copy answers for the definition it was worked out from.
+- `find(index: int) -> AbilityDefinition` *(static)*: The definition with this index, or null.
+- `find_by_uid(uid: int) -> AbilityDefinition` *(static)*: The definition with this permanent id (a UID), wherever its file is now, or null.
+- `table() -> PackedInt64Array` *(static)*: Index to UID, the list a replay keeps in its header.
+- `count() -> int` *(static)*: How many definitions have an index.
+
+## JumpDefinition
+
+`res://assets/scripts/abilities/definitions/JumpDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+Jump's settings.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The Jump node reads it.
+
+### Settings and properties
+
+- `coyote_time: float` = `0.1`: Seconds after leaving the ground, without jumping, that a press still jumps.
+
+## KnockbackDefinition
+
+`res://assets/scripts/abilities/definitions/KnockbackDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+Knockback's settings: the base ones, with its defaults.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The Knockback node reads it.
+
+## MeleeAttackDefinition
+
+`res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+A melee attack's settings: its timings, reach and sweep.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The MeleeAttack node reads it.
+
+### Settings and properties
+
+- `windup_ticks: int` = `8`: Ticks from the start of the swing to when it can hit (its Windup step's length).
+- `hit_ticks: int` = `4`: Ticks it can hit for (its Sweep step's length).
+- `recovery_ticks: int` = `12`: Ticks after hitting before it's over (its Recovery step's length).
+- `attack_range: float` = `1.8`: How far it reaches, in metres from the pawn: the far edge of the hit sphere.
+- `hit_radius: float` = `0.8`: The hit sphere's radius, in metres.
+- `hit_height: float` = `1.0`: The hit sphere's height above the pawn's feet, in metres: about the chest.
+- `hits_own_team: bool` = `false`: On: it can hit pawns on its own team.
+- `sweep_degrees: float` = `100.0`: How far round the hit sphere sweeps during the hit ticks, in degrees, centred straight ahead. 0: it holds still.
+- `sweep_from_left: bool` = `false`: On: the sweep goes from the pawn's left to its right. Off: right to left.
+- `height_at_sweep_start: float` = `0.0`: How far above or below hit_height the sphere is at the start of the sweep, in metres: slashes, rises, chops. 0: level.
+- `height_at_sweep_end: float` = `0.0`: The same at the end of the sweep. Between the two the sphere moves in a straight line up or down.
+- `windup_turn_degrees_per_second: float` = `-1.0`: Degrees per second it turns toward where the pawn looks (its TurnToFace step). -1: the pawn's TurnRate stat (540 without one). 0: no turning.
+- `combo_window_ticks: int` = `30`: How long the combo window stays open after its hit, in ticks at 60 a second (its OpenCombo step).
+- `warns_targets: bool` = `true`: On: when a swing starts (server), enemies within reach and in front are told it's coming, so their AI can parry. One sphere query.
+
+## ParryDefinition
+
+`res://assets/scripts/abilities/definitions/ParryDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+A parry's settings.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The Parry node reads it.
+
+### Settings and properties
+
+- `turn_degrees_per_second: float` = `900.0`: How fast it turns toward where the pawn looks while it runs, in degrees per second. 0: it doesn't turn.
+
+## RangedAttackDefinition
+
+`res://assets/scripts/abilities/definitions/RangedAttackDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+A ranged attack's settings: its projectile, timings and muzzle.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The RangedAttack node reads it.
+
+### Settings and properties
+
+- `projectile_scene: PackedScene`: The projectile it fires.
+- `windup_ticks: int` = `12`: Ticks of aiming before the shot, at 60 a second.
+- `recovery_ticks: int` = `18`: Ticks after the shot before it's over, at 60 a second.
+- `attack_range: float` = `14.0`: How far away a target may be for the AI to shoot, in metres (the AI's reach; the projectile's own range can be longer).
+- `muzzle_height: float` = `1.3`: Where the projectile leaves from: metres above the feet and in front of the pawn.
+- `muzzle_forward: float` = `0.5`
+- `windup_turn_degrees_per_second: float` = `-1.0`: How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnSpeed stat.
+- `warns_targets: bool` = `true`: On: the first enemy on the projectile's path hears it's coming, so its AI can parry.
+
+## SprintDefinition
+
+`res://assets/scripts/abilities/definitions/SprintDefinition.gd`, extends [`WalkDefinition`](#walkdefinition)
+
+Sprint's settings: Walk's, plus its charge.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The Sprint node reads it.
+
+### Settings and properties
+
+- `max_charge: float` = `3.0`: Seconds of sprinting on a full charge.
+- `recharge_rate: float` = `0.5`: How fast the charge refills while not sprinting, in seconds of sprint per second: 0.5 refills at half the rate it drains.
+- `recharge_delay: float` = `1.0`: Seconds after it stops before the charge starts refilling.
+- `min_start_charge: float` = `0.5`: The charge needed to start, in seconds (at most `max_charge`).
+
+## WalkDefinition
+
+`res://assets/scripts/abilities/definitions/WalkDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+Walk's settings: the default locomotion.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The Walk node reads it.
+
+### Settings and properties
+
+- `speed_stat: StringName` = `&"MoveSpeed"`: The stat for top speed, in metres per second. Sprint uses its own.
+- `fallback_speed: float` = `5.0`: Top speed when the pawn has no such stat.
 
 ## HitInterceptor
 

@@ -100,6 +100,7 @@ func _test_dash() -> void:
 	ai.press(&"dash")
 	await _ticks(2)
 	_check(not dash.is_running_timed() and dash.cooldown_ticks_left() > 0, "its cooldown stops a second dash straight after")
+	dash.make_definition_unique() # Claude 2026-11-21: its own copy of the shared definition
 	dash.usable_in_air = false
 	await _until(func() -> bool: return dash.cooldown_ticks_left() == 0 and pawn.grounded, 150)
 	ai.press(&"jump")
@@ -145,6 +146,7 @@ func _test_interrupt_table() -> void:
 	var listed_rule: Dictionary = manager.interrupt_rule(manager.get_node("Jump"), listed)
 	_check(listed_rule["result"] == "cancels" and String(listed_rule["reason"]).contains("cancelled_by"), "cancelled_by shows, with its reason (%s)" % listed_rule["reason"])
 	var melee: MeleeAttackAbility = manager.get_node("MeleeAttack")
+	melee.make_definition_unique() # Claude 2026-11-21: its own copy of the shared definition
 	melee.interrupt_threshold = 50 # a berserk state, say: swings that can't be broken
 	_check(rule.call("Dash", "MeleeAttack") == "blocked" and rule.call("Knockback", "MeleeAttack") == "blocked", "a threshold changed while playing shows at once: nothing below 50 breaks the swing")
 	melee.interrupt_threshold = 15

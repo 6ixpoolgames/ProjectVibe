@@ -370,6 +370,7 @@ func _lengthen_cooldowns(pawn: Pawn) -> void:
 			continue
 		if ability.cooldown <= 0.0:
 			new_entries.append("%s:ready_at" % pawn.get_path_to(ability))
+		ability.make_definition_unique() # the sample's own numbers, on this pawn only
 		ability.cooldown = cooldowns[String(ability.name)]
 	if tick_state and not new_entries.is_empty():
 		tick_state.add_state_properties(new_entries)

@@ -8,10 +8,26 @@
 class_name WalkAbility
 extends AbilityBase
 
-## The stat for top speed, in metres per second. Sprint uses its own.
-@export var speed_stat: StringName = &"MoveSpeed"
-## Top speed when the pawn has no such stat.
-@export var fallback_speed := 5.0
+# Its settings with their own type: the same object as settings.
+var _walk: WalkDefinition = null
+
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+## From the definition: [member WalkDefinition.speed_stat].
+var speed_stat: StringName:
+	get:
+		if _walk == null:
+			prepare_settings()
+		return _walk.speed_stat
+	set(value):
+		_write_setting(&"speed_stat", value)
+## From the definition: [member WalkDefinition.fallback_speed].
+var fallback_speed: float:
+	get:
+		if _walk == null:
+			prepare_settings()
+		return _walk.fallback_speed
+	set(value):
+		_write_setting(&"fallback_speed", value)
 
 # The five stats, read again only when the StatManager's version changes (pawn spec 15.2); every tick was a third of the cost.
 var _stats_version := -1
@@ -23,15 +39,19 @@ var _air_control := 0.0
 var _turn_rate := 0.0
 
 
+## Its kind's defaults: a new [WalkDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return WalkDefinition.new()
+
+
+func _settings_changed() -> void:
+	super()
+	_walk = settings as WalkDefinition
+
+
 func _init() -> void:
 	super()
 	kind = Kind.LOCOMOTION
-	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.MOVEMENT_WALK
-	extra_categories = [Tags.MOVEMENT_BASIC] # a group, so a rule can name all basic movement at once
-	# Moving cancels only actions with a threshold of 0, such as an emote. Locomotion never blocks an action.
-	interrupt_priority = 0
-	interrupt_threshold = 0
 
 
 func tick(dt: float) -> void:
@@ -62,7 +82,7 @@ func tick(dt: float) -> void:
 # Reads the five stats again if a stat changed (or there was no StatManager before and there is now), or if speed_stat was changed.
 func _refresh_stats() -> void:
 	var version: int = pawn.stat_manager.version if pawn and pawn.stat_manager else 0
-	if version == _stats_version and speed_stat == _stats_speed_stat:
+	if version == _stats_version and _walk and _walk.speed_stat == _stats_speed_stat: # _walk, not the property: this runs every tick
 		return
 	_stats_version = version
 	_stats_speed_stat = speed_stat

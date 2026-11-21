@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="Script" path="res://assets/scripts/abilities/AbilityManager.gd" id="1_manager"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/WalkAbility.gd" id="2_walk"]
@@ -13,6 +13,7 @@
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/swing_hit.tres" id="11_swing_hit"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/AbilityBase.gd" id="12_base"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/kill_self.tres" id="13_kill_self"]
+[ext_resource type="Resource" uid="uid://devpuawhgo7u0" path="res://assets/scripts/resources/abilities/kill_self.tres" id="14_kill_self_def"]
 
 [node name="AbilityManager" type="Node"]
 script = ExtResource("1_manager")
@@ -44,7 +45,7 @@ script = ExtResource("8_death")
 
 [node name="KillSelf" type="Node" parent="."]
 script = ExtResource("12_base")
-trigger_action = &"kill_self"
+definition = ExtResource("14_kill_self_def")
 
 [node name="TakeAllHealth" type="Node" parent="KillSelf"]
 script = ExtResource("9_applier")

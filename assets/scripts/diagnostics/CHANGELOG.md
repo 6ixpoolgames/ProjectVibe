@@ -19,6 +19,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-21
 
+- **The pawn panel lists "definitions to check"**: abilities whose settings don't come from a definition file (embedded in a scene, written on the node) or whose definition was of another kind (`AbilityBase.definition_note`, ability spec 3).
+
 - **The pawn panel reads abilities' time left and cooldowns from their deadlines** (`ticks_left()`, `cooldown_ticks_left()`), now that timers are tick deadlines (state store spec 13.10).
 
 - **`MoveSanityCheck` runs in every build**, not only debug ones (owner's call): its first pass is now the store's `find_long_moves`, 0.03 ms a tick at 300 pawns instead of 0.12.

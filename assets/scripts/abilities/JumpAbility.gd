@@ -8,8 +8,18 @@
 class_name JumpAbility
 extends AbilityBase
 
-## Seconds after leaving the ground, without jumping, that a press still jumps.
-@export_range(0.0, 1.0, 0.01) var coyote_time := 0.1
+# Its settings with their own type: the same object as settings.
+var _jump: JumpDefinition = null
+
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+## From the definition: [member JumpDefinition.coyote_time].
+var coyote_time: float:
+	get:
+		if _jump == null:
+			prepare_settings()
+		return _jump.coyote_time
+	set(value):
+		_write_setting(&"coyote_time", value)
 
 ## The last tick the pawn was known to be on the ground before it left it; [constant ON_GROUND] while it's there. Rolls back (pushed).
 var left_ground_at := ON_GROUND:
@@ -25,15 +35,14 @@ const ON_GROUND := -(1 << 62)
 const COUNT_CAP := 100
 
 
-func _init() -> void:
+## Its kind's defaults: a new [JumpDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return JumpDefinition.new()
+
+
+func _settings_changed() -> void:
 	super()
-	kind = Kind.ACTION
-	trigger_action = &"jump"
-	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.MOVEMENT_JUMP
-	extra_categories = [Tags.MOVEMENT_BASIC]
-	buffer_window = 0.15
-	interrupt_priority = 5 # between Walk (0) and Sprint (10)
+	_jump = settings as JumpDefinition
 
 
 func get_pushed_properties() -> Array[String]:

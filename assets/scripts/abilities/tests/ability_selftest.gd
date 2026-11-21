@@ -98,6 +98,7 @@ func _test_sprint() -> void:
 	var floor_body := _make_floor(400.0)
 	var pawn := _make_pawn(Vector3(0, 0.1, 0))
 	var sprint: SprintAbility = pawn.ability_manager.get_node("Sprint")
+	sprint.make_definition_unique() # Claude 2026-11-21: settings come from a shared definition; this pawn gets its own copy
 	sprint.max_charge = 0.5
 	sprint.recharge_delay = 0.5
 	sprint.min_start_charge = 0.25

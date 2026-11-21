@@ -9,20 +9,28 @@
 class_name ParryAbility
 extends AbilityBase
 
-## How fast it turns toward where the pawn looks while it runs, in degrees per second. 0: it doesn't turn.
-@export_range(0.0, 3600.0, 10.0, "or_greater") var turn_degrees_per_second := 900.0
+# Its settings with their own type: the same object as settings.
+var _parry: ParryDefinition = null
+
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+## From the definition: [member ParryDefinition.turn_degrees_per_second].
+var turn_degrees_per_second: float:
+	get:
+		if _parry == null:
+			prepare_settings()
+		return _parry.turn_degrees_per_second
+	set(value):
+		_write_setting(&"turn_degrees_per_second", value)
 
 
-func _init() -> void:
+## Its kind's defaults: a new [ParryDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return ParryDefinition.new()
+
+
+func _settings_changed() -> void:
 	super()
-	kind = Kind.ACTION
-	trigger_action = &"parry"
-	category = Tags.COMBAT_PARRY
-	duration = 0.35
-	cooldown = 1.5
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
-	interrupt_priority = 10
-	interrupt_threshold = 20
+	_parry = settings as ParryDefinition
 
 
 func tick(dt: float) -> void:

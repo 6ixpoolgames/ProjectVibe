@@ -59,7 +59,7 @@ How to read this:
 | No pawn class hierarchy. Godot can't do Node3D → base pawn → CharacterBody3D, so other body types will be separate classes. `Pawn` is a CharacterBody3D because `move_and_slide` is built on it | 2026-11-07 |
 | Abilities write velocity. The pawn adds gravity and calls `move_and_slide`. No separate motor layer | 2026-11-07 |
 | t0 abilities, part 1: Walk and Jump | 2026-11-07 |
-| Sprint is its own ability, with a cooldown and a maximum duration for now and no stamina. So it can win over Walk without winning all the time, which gives something to test | 2026-11-07 |
+| Sprint is its own ability with a limit, so it can win over Walk without winning all the time, which gives something to test: first a duration and cooldown, a charge since 2026-11-21 | 2026-11-07 |
 | The stat manager takes stat nodes | 2026-11-07 |
 | Sensing, memory, the state manager and the behaviour manager live on the pawn, not on the AI controller | 2026-11-07 |
 | An ability is pressed like a skill in an MMO or MOBA. It can be one action or a sequence | 2026-11-07 |
@@ -301,6 +301,11 @@ enum Kind { LOCOMOTION, ACTION }
 @export var locks_out: Array[StringName] = []    # categories that can't start or steer while this runs
 @export var buffer_window := 0.0                 # seconds a press waits if it can't start yet
 
+# Its settings (ability spec 3, built 2026-11-21): a shared AbilityDefinition, read by the old names through read-only properties
+@export var definition: AbilityDefinition
+var settings: AbilityDefinition                  # the definition worked out, or the kind's defaults
+func use_definition(definition) / make_definition_unique()
+
 # Rolls back, pushed to the state store when it changes: tick deadlines, not countdowns (ability spec 4, built 2026-11-21)
 var started_at / ends_at / ready_at / buffer_until
 
@@ -352,9 +357,9 @@ Test: `abilities/tests/ability_selftest`.
   - A press up to 0.15 s before landing waits and jumps on landing.
   - The height comes from the JumpVelocity stat.
 - **Sprint** is its own locomotion ability, bound to `&"sprint"`.
-  - It has faster numbers, a **maximum duration** and a **cooldown**. There's no stamina yet. *(The owner, 2026-11-21: a **charge** in place of the duration and cooldown. 3 seconds of sprint on a full charge, draining a tick per tick; 1 second after it stops, it refills at half rate. It starts with at least 0.5 seconds of charge, so a key held on an empty charge doesn't flicker it on a tick at a time. Ability spec 4.)*
-  - While `&"sprint"` is held and Sprint is ready, it runs instead of Walk. When its time runs out it ends, its cooldown starts, and Walk takes over even if the key is still held.
-  - The AI uses it the same way: a behaviour such as Chase holds `&"sprint"`, and asks `can_start(&"sprint")` if it cares. So Sprint wins over Walk whenever it's ready, but the cooldown gives it downtime. That's what makes it testable.
+  - It has faster numbers and a **charge**: 3 seconds of sprint when full, draining a tick per tick; 1 second after it stops, it refills at half rate. It starts only with at least 0.5 seconds of charge, so a key held on an empty charge doesn't flicker it on a tick at a time.
+  - While `&"sprint"` is held and it can start, it runs instead of Walk. When the charge runs out it ends, and Walk takes over even if the key is still held.
+  - The AI uses it the same way: a behaviour such as Chase holds `&"sprint"`, and asks `can_start(&"sprint")` if it cares.
 - After the AI is built, more abilities come before fights: Dash, then MeleeAttack.
 
 ### 8.6 Step 9: Dash, MeleeAttack, knockback and cancelling (built 2026-11-09)

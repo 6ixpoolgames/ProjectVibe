@@ -1,0 +1,57 @@
+# Written by Claude (claude-opus-5-5), 2026-11-21. History: abilities/CHANGELOG.md.
+@tool
+## A ranged attack's settings: its projectile, timings and muzzle.
+##
+## A new one starts with the kind's defaults; see [AbilityDefinition] for variants. The RangedAttack node reads it.
+class_name RangedAttackDefinition
+extends AbilityDefinition
+
+## The projectile it fires.
+@export var projectile_scene: PackedScene:
+	set(value):
+		projectile_scene = value
+		_changed(&"projectile_scene", value)
+## Ticks of aiming before the shot, at 60 a second.
+@export_range(0, 120, 1, "or_greater") var windup_ticks: int = 12:
+	set(value):
+		windup_ticks = value
+		_changed(&"windup_ticks", value)
+## Ticks after the shot before it's over, at 60 a second.
+@export_range(0, 120, 1, "or_greater") var recovery_ticks: int = 18:
+	set(value):
+		recovery_ticks = value
+		_changed(&"recovery_ticks", value)
+## How far away a target may be for the AI to shoot, in metres (the AI's reach; the projectile's own range can be longer).
+@export_range(0.5, 200.0, 0.5, "or_greater") var attack_range: float = 14.0:
+	set(value):
+		attack_range = value
+		_changed(&"attack_range", value)
+## Where the projectile leaves from: metres above the feet and in front of the pawn.
+@export var muzzle_height: float = 1.3:
+	set(value):
+		muzzle_height = value
+		_changed(&"muzzle_height", value)
+@export var muzzle_forward: float = 0.5:
+	set(value):
+		muzzle_forward = value
+		_changed(&"muzzle_forward", value)
+## How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnSpeed stat.
+@export_range(-1.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second: float = -1.0:
+	set(value):
+		windup_turn_degrees_per_second = value
+		_changed(&"windup_turn_degrees_per_second", value)
+## On: the first enemy on the projectile's path hears it's coming, so its AI can parry.
+@export var warns_targets: bool = true:
+	set(value):
+		warns_targets = value
+		_changed(&"warns_targets", value)
+
+
+func _init() -> void:
+	super()
+	trigger_action = &"primary"
+	category = Tags.COMBAT_RANGED
+	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
+	interrupt_priority = 15
+	interrupt_threshold = 15
+	cooldown = 0.6

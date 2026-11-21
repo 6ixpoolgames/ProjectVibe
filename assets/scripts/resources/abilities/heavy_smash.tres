@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="MeleeAttackDefinition" format=3 uid="uid://dbete4eghdf1r"]
+
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd" id="1_e4aw8"]
+
+[resource]
+script = ExtResource("1_e4aw8")
+windup_ticks = 20
+hit_ticks = 5
+recovery_ticks = 22
+attack_range = 3.0
+hit_radius = 1.1
+sweep_degrees = 0.0
+height_at_sweep_start = 1.2
+height_at_sweep_end = -0.8
+trigger_action = &"secondary"
+category = &"combat.melee"
+priority = 20
+combo_positions = Array[int]([2, 3])
+locks_out = Array[StringName]([&"movement", &"combat"])
+buffer_window = 0.15
+interrupt_priority = 15
+interrupt_threshold = 15

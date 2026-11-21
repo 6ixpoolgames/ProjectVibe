@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="MeleeAttackDefinition" format=3 uid="uid://csr3r2mkgmypj"]
+
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd" id="1_o62wr"]
+
+[resource]
+script = ExtResource("1_o62wr")
+height_at_sweep_start = 0.6
+height_at_sweep_end = -0.3
+trigger_action = &"primary"
+category = &"combat.melee"
+priority = 10
+combo_positions = Array[int]([1])
+cooldown = 1.2
+locks_out = Array[StringName]([&"movement", &"combat"])
+buffer_window = 0.15
+interrupt_priority = 15
+interrupt_threshold = 15

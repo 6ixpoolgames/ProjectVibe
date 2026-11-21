@@ -55,6 +55,7 @@ func _test_sweep() -> void:
 		var left := _pawn(origin + _flat_at(75.0, 1.3), 0)
 		var behind := _pawn(origin + Vector3(0, 0, 1.5), 0)
 		var melee: MeleeAttackAbility = attacker.ability_manager.get_node("MeleeAttack")
+		melee.make_definition_unique() # Claude 2026-11-21: its own copy of the shared definition
 		melee.sweep_from_left = from_left
 		var hit_at := {}
 		melee.hit_landed.connect(func(hit: HitInfo) -> void: hit_at[hit.target] = TickDriver.tick)
@@ -73,6 +74,7 @@ func _test_sweep() -> void:
 	var side := _pawn(still_origin + _flat_at(-75.0, 1.3), 0)
 	var front := _pawn(still_origin + Vector3(0, 0, -1.4), 0)
 	var still_melee: MeleeAttackAbility = still.ability_manager.get_node("MeleeAttack")
+	still_melee.make_definition_unique()
 	still_melee.sweep_degrees = 0.0
 	var hits := []
 	still_melee.hit_landed.connect(func(hit: HitInfo) -> void: hits.append(hit.target))
@@ -87,6 +89,7 @@ func _test_windup_turn() -> void:
 		var origin := Vector3(0, 0.1, 30) if turn > 0.0 else Vector3(20, 0.1, 30)
 		var pawn := _pawn(origin, 0)
 		var melee: MeleeAttackAbility = pawn.ability_manager.get_node("MeleeAttack")
+		melee.make_definition_unique()
 		melee.windup_turn_degrees_per_second = turn
 		var ai := _ai(pawn)
 		ai.look_at_point(origin + Vector3(0, 1, -10)) # yaw 0

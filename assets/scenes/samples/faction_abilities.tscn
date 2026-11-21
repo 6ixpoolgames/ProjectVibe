@@ -1,4 +1,4 @@
-[gd_scene load_steps=15 format=3]
+[gd_scene load_steps=21 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AbilityManager.tscn" id="1_abilities"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/MeleeAttackAbility.gd" id="3_melee"]
@@ -13,26 +13,21 @@
 [ext_resource type="Script" path="res://assets/scripts/abilities/RangedAttackAbility.gd" id="14_ranged"]
 [ext_resource type="PackedScene" path="res://assets/scenes/projectiles/bolt.tscn" id="15_bolt"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/bolt_hit.tres" id="16_bolt_hit"]
+[ext_resource type="Resource" uid="uid://csr3r2mkgmypj" path="res://assets/scripts/resources/abilities/faction_swing.tres" id="d_faction_swing"]
+[ext_resource type="Resource" uid="uid://cidtw0r5blp1f" path="res://assets/scripts/resources/abilities/second_swing.tres" id="d_second_swing"]
+[ext_resource type="Resource" uid="uid://c01fre6xqoh38" path="res://assets/scripts/resources/abilities/finisher_swing.tres" id="d_finisher_swing"]
+[ext_resource type="Resource" uid="uid://4jhc8ah8jq1k" path="res://assets/scripts/resources/abilities/heavy_attack.tres" id="d_heavy_attack"]
+[ext_resource type="Resource" uid="uid://dbete4eghdf1r" path="res://assets/scripts/resources/abilities/heavy_smash.tres" id="d_heavy_smash"]
+[ext_resource type="Resource" uid="uid://bxfhtcb8d3wsl" path="res://assets/scripts/resources/abilities/bolt_attack.tres" id="d_bolt_attack"]
 
 [node name="AbilityManager" instance=ExtResource("1_abilities")]
 
 [node name="MeleeAttack" parent="." index="4"]
-priority = 10
-cooldown = 1.2
-height_at_sweep_start = 0.6
-height_at_sweep_end = -0.3
+definition = ExtResource("d_faction_swing")
 
 [node name="SecondSwing" type="Node" parent="."]
 script = ExtResource("3_melee")
-extra_categories = Array[StringName]([&"combo.second"])
-priority = 20
-combo_positions = Array[int]([2])
-interrupt_priority = 10
-windup_ticks = 5
-recovery_ticks = 10
-sweep_from_left = true
-height_at_sweep_start = -0.4
-height_at_sweep_end = 0.6
+definition = ExtResource("d_second_swing")
 
 [node name="OnHit" type="Node" parent="SecondSwing"]
 script = ExtResource("4_applier")
@@ -40,19 +35,7 @@ effects = Array[ExtResource("5_effect")]([ExtResource("8_second_hit")])
 
 [node name="FinisherSwing" type="Node" parent="."]
 script = ExtResource("3_melee")
-extra_categories = Array[StringName]([&"combo.finisher"])
-priority = 20
-combo_positions = Array[int]([3])
-interrupt_priority = 10
-interrupt_threshold = 20
-windup_ticks = 10
-hit_ticks = 5
-recovery_ticks = 16
-attack_range = 2.1
-hit_radius = 0.9
-sweep_degrees = 12.0
-height_at_sweep_start = 1.3
-height_at_sweep_end = -0.8
+definition = ExtResource("d_finisher_swing")
 
 [node name="OnHit" type="Node" parent="FinisherSwing"]
 script = ExtResource("4_applier")
@@ -60,14 +43,7 @@ effects = Array[ExtResource("5_effect")]([ExtResource("9_finisher_hit")])
 
 [node name="HeavyAttack" type="Node" parent="."]
 script = ExtResource("3_melee")
-trigger_action = &"secondary"
-windup_ticks = 22
-hit_ticks = 5
-recovery_ticks = 18
-attack_range = 2.7
-hit_radius = 1.1
-sweep_degrees = 160.0
-cooldown = 1.9
+definition = ExtResource("d_heavy_attack")
 
 [node name="OnHit" type="Node" parent="HeavyAttack"]
 script = ExtResource("4_applier")
@@ -75,17 +51,7 @@ effects = Array[ExtResource("5_effect")]([ExtResource("10_heavy_hit")])
 
 [node name="HeavySmash" type="Node" parent="."]
 script = ExtResource("3_melee")
-trigger_action = &"secondary"
-priority = 20
-combo_positions = Array[int]([2, 3])
-windup_ticks = 20
-hit_ticks = 5
-recovery_ticks = 22
-attack_range = 3.0
-hit_radius = 1.1
-sweep_degrees = 0.0
-height_at_sweep_start = 1.2
-height_at_sweep_end = -0.8
+definition = ExtResource("d_heavy_smash")
 
 [node name="OnHit" type="Node" parent="HeavySmash"]
 script = ExtResource("4_applier")
@@ -104,8 +70,7 @@ effects = Array[ExtResource("5_effect")]([ExtResource("12_parry_knockback")])
 
 [node name="RangedAttack" type="Node" parent="."]
 script = ExtResource("14_ranged")
-projectile_scene = ExtResource("15_bolt")
-trigger_action = &"ability_3"
+definition = ExtResource("d_bolt_attack")
 
 [node name="OnHit" type="Node" parent="RangedAttack"]
 script = ExtResource("4_applier")

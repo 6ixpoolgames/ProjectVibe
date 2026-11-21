@@ -25,15 +25,9 @@ var push_ticks := 0:
 		push_state(&"push_ticks", value)
 
 
-func _init() -> void:
-	super()
-	kind = Kind.ACTION
-	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.COMBAT_KNOCKBACK
-	needs_full_movement = true # a push should collide properly, and may lift (pawn spec 8.22)
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
-	interrupt_priority = 30
-	interrupt_threshold = 35 # only Dash (40) cancels it
+## Its kind's defaults: a new [KnockbackDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return KnockbackDefinition.new()
 
 
 func get_pushed_properties() -> Array[String]:

@@ -11,17 +11,12 @@ class_name DeathAbility
 extends AbilityBase
 
 
-func _init() -> void:
-	super()
-	kind = Kind.ACTION
-	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.STATUS_DEAD
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT, Tags.UTILITY]
-	interrupt_priority = 1000
-	interrupt_threshold = 1000
-
-
 ## Timed: it runs while Health is 0.
+## Its kind's defaults: a new [DeathDefinition].
+func make_default_definition() -> AbilityDefinition:
+	return DeathDefinition.new()
+
+
 func is_timed() -> bool:
 	return true
 

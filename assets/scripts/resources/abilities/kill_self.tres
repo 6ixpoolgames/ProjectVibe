@@ -1,0 +1,7 @@
+[gd_resource type="Resource" script_class="AbilityDefinition" format=3 uid="uid://devpuawhgo7u0"]
+
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/AbilityDefinition.gd" id="1_dgtt7"]
+
+[resource]
+script = ExtResource("1_dgtt7")
+trigger_action = &"kill_self"
