@@ -42,14 +42,14 @@ var running: bool:
 		return index >= 0 and ability != null and ability.step_state[index] > 0
 	set(value):
 		if index >= 0 and ability != null:
-			ability.step_state[index] = 1 if value else 0
+			ability.set_step_value(index, 1 if value else 0)
 ## Ticks counted since it started (those [method counts_this_tick] allowed); in [method tick], the ticks before this one. 0 when not running.
 var step_ticks: int:
 	get:
 		return ability.step_state[index] - 1 if running else 0
 	set(value):
 		if running:
-			ability.step_state[index] = maxi(value, 0) + 1
+			ability.set_step_value(index, maxi(value, 0) + 1)
 ## Its place in its ability's steps (and step_state), set when its ability finds it; -1 before.
 var index := -1
 

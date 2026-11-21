@@ -546,6 +546,8 @@ func _forget_due_tick() -> void:
 func _on_state_loaded(_tick: int) -> void:
 	_prepared_tick = -1 # worked out again from the loaded _last_run_tick
 	due_tick = 0
+	if ability_manager:
+		ability_manager.state_loaded()
 	# The ControllerManager's previous_held_actions is restored by the TickState itself, as rollback state.
 	var saved_position := position
 	var saved_velocity := velocity

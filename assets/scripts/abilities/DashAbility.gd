@@ -5,7 +5,7 @@
 ## left alone the pawn ends at the speed it started with. Speed gained some other way during a dash stays. Walking, sprinting and jumping
 ## are locked out while it runs, and it works on the ground and in the air ([member usable_in_air]). The pawn turns to face the dash.
 ## [br][br]It cancels a swing, and it's invulnerable for its first 0.18 s (an [InvulnerabilityInterceptor], pawn spec 8.23). Rollback:
-## [member dash_direction] rolls back with its timer and cooldown; its phase comes from [method AbilityBase.ticks_running].
+## [member dash_direction] rolls back with its timer and cooldown; its phase comes from [method AbilityBase.ticks_before_this_run].
 ## Design: pawn spec 8.6, 8.9.
 class_name DashAbility
 extends AbilityBase
@@ -23,8 +23,13 @@ extends AbilityBase
 ## On: it can start in the air as well as on the ground. Off: ground only.
 @export var usable_in_air := true
 
-## The way it's dashing, flat and length 1. Rolls back.
-var dash_direction := Vector3.ZERO
+## The way it's dashing, flat and length 1. Rolls back (pushed).
+var dash_direction := Vector3.ZERO:
+	set(value):
+		if value == dash_direction:
+			return
+		dash_direction = value
+		push_state(&"dash_direction", value)
 
 
 func _init() -> void:
@@ -53,11 +58,15 @@ func make_default_interceptors() -> void:
 	add_child(dodge)
 
 
-func get_rollback_properties() -> Array[String]:
+func get_pushed_properties() -> Array[String]:
 	var out := super()
-	out.append("ticks_left") # duration is 0, so the base doesn't know it's timed
 	out.append("dash_direction")
 	return out
+
+
+## Timed, by its two phases rather than duration.
+func is_timed() -> bool:
+	return true
 
 
 ## The speed-up's ticks plus the slow-down's.
@@ -82,7 +91,7 @@ func start() -> void:
 
 # Adds speed, then takes it away. dash_direction is flat, so the vertical speed (a jump, gravity) is left alone.
 func tick(dt: float) -> void:
-	if ticks_running() < manager.ticks_for(speed_up_seconds):
+	if ticks_before_this_run() < manager.ticks_for(speed_up_seconds):
 		pawn.velocity += dash_direction * read_stat(acceleration_stat, fallback_acceleration) * dt
 		return
 	# The speed along the dash direction, and how much of it to take off this tick: never more than there is, so never backwards.

@@ -5,9 +5,10 @@
 ## and, for counters that run all the time, [method every_tick] (with [method can_sleep]). LOCOMOTION abilities move the pawn every tick
 ## they're chosen (one runs at a time); ACTION abilities start on a press of their [member trigger_action], at once or for a
 ## [member duration]. Players' keys and AI behaviours press the same actions. Times are set in seconds and kept in ticks (60 a second).
-## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_rollback_properties]; the base already
-## covers its own timers and step state. It can also be built from [AbilityStep] children (a windup, a turn, a swing) and carry
-## [HitInterceptor] children that stop hits while it runs.
+## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_pushed_properties] (its setter calls
+## [method push_state]) or [method get_rollback_properties] (read at every commit); the base already covers its own timers and step
+## state. It can also be built from [AbilityStep] children (a windup, a turn, a swing) and carry [HitInterceptor] children that stop
+## hits while it runs.
 ## Design: pawn spec 8, 8.20, 8.23.
 class_name AbilityBase
 extends Node
@@ -58,29 +59,46 @@ enum Kind { LOCOMOTION, ACTION }
 ## For a stepped ability, the longest it can run, in ticks at 60 a second. It ends when no step runs, or at this. Ignored without steps.
 @export_range(1, 6000, 1, "or_greater") var max_steps_ticks := 600
 
-# State that rolls back. Each setter tells the manager when its timer starts or reaches 0, so only running timers are counted down
-# (pawn spec 15.2); a rollback loading values goes through them too.
-## Ticks left of a timed run; 0: not running.
-var ticks_left := 0:
+# State that rolls back, pushed to the state store when it changes (push_state). Timers are tick deadlines, which don't change while
+# they run (ability spec 4): nothing counts down, and a pawn running every Nth tick needs nothing special. Each setter tells the manager,
+# which keeps the soonest deadline (pawn spec 15.2); a rollback loading values goes through them too.
+## The tick the current (or last) timed run started.
+var started_at := -1:
 	set(value):
-		var flips := (value > 0) != (ticks_left > 0)
+		if value == started_at:
+			return
+		started_at = value
+		push_state(&"started_at", value)
+## The tick the current timed run ends: the manager finishes it on its first run at or after this tick. -1: not running.
+var ends_at := -1:
+	set(value):
+		if value == ends_at:
+			return
+		var flips := (value >= 0) != (ends_at >= 0)
+		ends_at = value
+		push_state(&"ends_at", value)
 		if manager and flips:
 			manager.timers_changed()
-		ticks_left = value
 		if flips:
-			_running_changed(value > 0)
-## Ticks until it can start again.
-var cooldown_ticks_left := 0:
+			_running_changed(value >= 0)
+## The tick it can start again: ready from this tick on.
+var ready_at := 0:
 	set(value):
-		if manager and (value > 0) != (cooldown_ticks_left > 0):
+		if value == ready_at:
+			return
+		ready_at = value
+		push_state(&"ready_at", value)
+		if manager:
 			manager.timers_changed()
-		cooldown_ticks_left = value
-## Ticks a waiting press has left.
-var buffer_ticks_left := 0:
+## A press waiting in the buffer waits until this tick (not including it).
+var buffer_until := 0:
 	set(value):
-		if manager and (value > 0) != (buffer_ticks_left > 0):
+		if value == buffer_until:
+			return
+		buffer_until = value
+		push_state(&"buffer_until", value)
+		if manager:
 			manager.timers_changed()
-		buffer_ticks_left = value
 
 ## Set by the AbilityManager.
 var manager: AbilityManager = null
@@ -105,8 +123,15 @@ var interceptors: Array[HitInterceptor] = []
 ## Its [AbilityStep] children in tree order, found by [method collect_steps]. Empty: no steps.
 var steps: Array[AbilityStep] = []
 ## Its steps' state, one number per step: 0 not running, step_ticks + 1 running. Rolled back as one value (a value per step was slow
-## at 150 pawns).
-var step_state := PackedInt32Array()
+## at 150 pawns). Steps change their number through [method set_step_value].
+var step_state := PackedInt32Array():
+	set(value):
+		if value == step_state:
+			return
+		step_state = value
+		push_state(&"step_state", value)
+## [member ends_at] for a run with no end of its own yet (Death, while Health is 0).
+const NEVER := 1 << 62
 ## The most steps one ability may start in one tick, a guard against steps that start and stop each other in a loop. Past it, starts
 ## are refused, the ability ends and it warns once.
 const MAX_STEP_STARTS_PER_TICK := 32
@@ -116,6 +141,10 @@ var _starts_tick := -1 # the tick _starts_this_tick counts for
 var pawns_hit_this_run: Array[int] = []
 var _starts_this_tick := 0
 var _warned_too_many_starts := false
+# Where push_state sends values: the pawn's TickStateComponent, and each pushed property's entry there ("AbilityManager/Swing:ends_at").
+# Set by the manager when it registers them.
+var _tick_state: TickStateComponent = null
+var _pushed_keys := {}
 
 
 func _init() -> void:
@@ -123,18 +152,40 @@ func _init() -> void:
 	set_physics_process(false)
 
 
-## The properties on this node that roll back. An ability that keeps more adds to it with [code]super()[/code].
-func get_rollback_properties() -> Array[String]:
+## The properties on this node that roll back and whose setters call [method push_state], so the state store records them only when
+## they change (state store spec 6.3). An ability that keeps more adds to it with [code]super()[/code]. The cheap way, and the one the
+## built-in abilities use.
+func get_pushed_properties() -> Array[String]:
 	var out: Array[String] = []
-	if duration > 0.0 or is_stepped(): # a stepped ability is timed too
-		out.append("ticks_left")
+	if is_timed():
+		out.append_array(["started_at", "ends_at"])
 	if is_stepped():
 		out.append("step_state") # every step's state, as one value
 	if cooldown > 0.0:
-		out.append("cooldown_ticks_left")
+		out.append("ready_at")
 	if buffer_window > 0.0 and trigger_action != &"":
-		out.append("buffer_ticks_left")
+		out.append("buffer_until")
 	return out
+
+
+## Other properties on this node that roll back, read from the node at every commit: no setter needed, so the easy way for a quick
+## ability, but each costs a read per pawn per tick. None in the base.
+func get_rollback_properties() -> Array[String]:
+	return []
+
+
+## True if this property rolls back, either way.
+func keeps_state(property: String) -> bool:
+	return get_pushed_properties().has(property) or get_rollback_properties().has(property)
+
+
+## Records a pushed property's new value in the state store, from the next commit on (state store spec 6.3). Each property in
+## [method get_pushed_properties] calls it from its setter, after setting the value. Nothing until the manager has registered them.
+func push_state(property: StringName, value: Variant) -> void:
+	if _tick_state:
+		var key: Variant = _pushed_keys.get(property)
+		if key != null:
+			_tick_state.push_value(key, value)
 
 
 ## How many ticks a timed run lasts: duration in ticks, or max_steps_ticks when stepped. Dash and Knockback override it.
@@ -144,14 +195,66 @@ func duration_ticks() -> int:
 	return manager.ticks_for(duration) if manager else 0
 
 
+## True if it runs for a while once started (a duration, steps, or a length of its own: Dash, Death, Knockback), so it keeps
+## [member started_at] and [member ends_at]. False for one that happens at once, such as Jump.
+func is_timed() -> bool:
+	return duration > 0.0 or is_stepped()
+
+
 ## True while a timed run is going.
 func is_running_timed() -> bool:
-	return ticks_left > 0
+	return ends_at >= 0
 
 
-## Ticks of the current run already ticked: 0 on the tick it starts, and when not running. Worked out from ticks_left, so it rolls back.
+## True once the current run is over: the manager finishes it on this pawn's run. Set by [method end_run], or by reaching ends_at.
+func is_run_over() -> bool:
+	return ends_at >= 0 and TickDriver.tick >= ends_at
+
+
+## Ends the current run this tick: the manager finishes it (stopping its steps, starting its cooldown) before this run of the pawn is
+## over. For steps that are done, and for an ability that decides its own end.
+func end_run() -> void:
+	if ends_at >= 0:
+		ends_at = mini(ends_at, TickDriver.tick)
+
+
+## Moves the current run's deadlines this many ticks later, as if it hadn't run for them: the manager calls it while an action pauses
+## locomotion (a Dash), so a timed locomotion's time waits. An ability with deadlines of its own moves them too, with [code]super()[/code].
+func delay_run(ticks: int) -> void:
+	if ends_at >= 0 and ends_at != NEVER:
+		started_at += ticks
+		ends_at += ticks
+
+
+## Ticks since the current run started, through this tick; 0 when not running. Worked out from [member started_at], so it rolls back.
 func ticks_running() -> int:
-	return duration_ticks() - ticks_left if ticks_left > 0 else 0
+	return maxi(TickDriver.tick - started_at, 0) if ends_at >= 0 else 0
+
+
+## For [method tick]: the ticks of the run that came before this run of the pawn (0 on its first tick). This run covers
+## [method ticks_elapsed] more.
+func ticks_before_this_run() -> int:
+	return maxi(TickDriver.tick - ticks_elapsed() - started_at, 0) if ends_at >= 0 else 0
+
+
+## Ticks left of the current run, from [member ends_at]; 0 when not running. For readouts.
+func ticks_left() -> int:
+	return maxi(ends_at - TickDriver.tick, 0) if ends_at >= 0 else 0
+
+
+## Ticks until it can start again, from [member ready_at]; 0 when ready. For readouts.
+func cooldown_ticks_left() -> int:
+	return maxi(ready_at - TickDriver.tick, 0)
+
+
+## Ticks a waiting press has left in its buffer, from [member buffer_until]; 0 with none. For readouts.
+func buffer_ticks_left() -> int:
+	return maxi(buffer_until - TickDriver.tick, 0)
+
+
+## True while a press waits in its buffer.
+func is_buffered() -> bool:
+	return TickDriver.tick < buffer_until
 
 
 ## Called when a timed run starts or ends, also when a rollback loads new values. [DeathAbility] uses it to keep [code]Pawn.dead[/code] current.
@@ -187,7 +290,7 @@ func start_step(step: AbilityStep) -> void:
 			_warned_too_many_starts = true
 			push_warning("%s: its steps started more than %d steps in one tick, so it's stopped. Check steps that start and stop each other in enter() or exit()." % [name, MAX_STEP_STARTS_PER_TICK])
 		if _starts_this_tick == MAX_STEP_STARTS_PER_TICK + 1:
-			ticks_left = 0 # ends the ability: the manager finishes it, stopping its steps
+			end_run() # the manager finishes it, stopping its steps
 		return
 	step.running = true
 	step.step_ticks = 0
@@ -206,6 +309,15 @@ func stop_step(step: AbilityStep, reason := "cancelled") -> void:
 	if manager:
 		manager.readiness_version += 1
 		manager.step_finished.emit(self, step, reason)
+
+
+## Sets one step's number in [member step_state] and pushes the array. Writing one element directly wouldn't record it: GDScript
+## doesn't call a property's setter for an element write, on a packed array as on any other.
+func set_step_value(index: int, value: int) -> void:
+	if step_state[index] == value:
+		return
+	step_state[index] = value
+	push_state(&"step_state", step_state)
 
 
 ## True while this step of this ability runs.
@@ -308,7 +420,7 @@ func run_steps(dt: float) -> void:
 		if step.running and step.keeps_ability_running:
 			return
 	end_steps("done")
-	ticks_left = 0 # no step left: the ability is over, and the manager finishes it
+	end_run() # no step left: the ability is over, and the manager finishes it
 
 
 ## Where its weapon is now, from the first running step that says, as an offset from the pawn's feet for this facing in radians; null if

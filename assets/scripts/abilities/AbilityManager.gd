@@ -2,9 +2,10 @@
 ## Starts, runs and stops a pawn's abilities, and takes the hits that land on it.
 ##
 ## A part on the pawn, added by PawnInitializer, with the abilities as its children. The pawn calls [method tick_abilities] once a tick,
-## after its input arrives and before [code]move_and_slide[/code]: counters count down, one locomotion ability runs, then pressed actions
-## start the ready ability with the highest priority. It owns the cancelling rules, the combo counter and the hit path. Everything that
-## persists between ticks lives on the abilities (and the combo counter here) and rolls back. Outside code only talks to the manager:
+## after its input arrives and before [code]move_and_slide[/code]: one locomotion ability runs, then pressed actions start the ready
+## ability with the highest priority. Timers are tick deadlines (ability spec 4), so nothing counts down. It owns the cancelling rules,
+## the combo counter and the hit path. Everything that persists between ticks lives on the abilities (and the combo counter here) and
+## rolls back. Outside code only talks to the manager:
 ## [codeblock]
 ## pawn.ability_manager.can_start(&"jump")      # could a press start something now? (the AI asks)
 ## pawn.ability_manager.action_for_tag(tag)     # the action to press for a kind of ability, such as movement.advanced
@@ -67,17 +68,37 @@ var _locked_mask := 0 # categories locked right now, as bits
 var _tick_rate := 60.0
 # Gates and channels (pawn spec 15.2): only what has a reason to run this tick runs.
 var _timed: Array[AbilityBase] = [] # abilities with a timer running (a run, a cooldown or a buffered press)
+var _next_deadline := -1 # the soonest cooldown, buffer or combo window end still ahead, when _timed was built; -1: none
 var _by_action := {} # trigger action -> Array[AbilityBase] answering to it, in run order, so can_start() looks only at those
 const _NONE: Array[AbilityBase] = [] # what _by_action gives for an action nothing answers to
 
 # The combo counter, shared by every ability with combo_positions (pawn spec 8.20). Both values roll back.
-## The combo position the last combo ability took; 0: none yet.
-var combo_position := 0
-## Ticks left in the combo window; while above 0 a follow-up for the next position can start.
-var combo_window_ticks_left := 0
+## The combo position the last combo ability took; 0: none yet. Pushed to the state store when it changes.
+var combo_position := 0:
+	set(value):
+		if value == combo_position:
+			return
+		combo_position = value
+		_push_state(&"combo_position", value)
+## The combo window is open until this tick (not including it): a follow-up for the next position can start. Pushed when it changes.
+var combo_open_until := 0:
+	set(value):
+		if value == combo_open_until:
+			return
+		combo_open_until = value
+		_push_state(&"combo_open_until", value)
+		_timers_dirty = true
+# Where _push_state sends the two above: the pawn's TickStateComponent and their entries there, set by _register_rollback_state.
+var _tick_state: TickStateComponent = null
+var _pushed_keys := {}
 ## Goes up by one whenever something changes that can change what [method can_start] answers (an ability or step starting or ending, a
-## cooldown or the combo window running out, effects changing). The AI keeps its last answer until this moves ([AIInputs]; scaling spec 6.2). Never goes down.
-var readiness_version := 0
+## cooldown or the combo window running out, effects changing). The AI keeps its last answer until this moves ([AIInputs]; scaling spec
+## 6.2). Never goes down. A deadline passing moves it on when it's next read, so the AI in the input step sees a cooldown end on its tick,
+## as [method can_start] does, before this pawn's abilities run.
+var readiness_version := 0:
+	get:
+		_note_deadline_passed()
+		return readiness_version
 var _timers_dirty := true # a timer started or reached 0, so _timed is rebuilt before it's next used
 var _locks_dirty := true # an action started or stopped, so the locks are worked out again before they're next used
 var _every_tick_abilities: Array[AbilityBase] = [] # abilities whose script overrides every_tick()
@@ -108,40 +129,43 @@ func _ready() -> void:
 	_register_rollback_state()
 
 
-## The pawn calls this once a tick; dt is the fixed tick length. Order: counters, locomotion, then actions (see the README).
+## The pawn calls this once a tick; dt is the fixed tick length. Order: deadlines passed, locomotion, then actions (see the README).
 func tick_abilities(dt: float) -> void:
 	if pawn == null:
 		return
 	# Each step only touches what has a reason to run (pawn spec 15.2).
 	if _locks_dirty:
 		_recompute_locks()
+	_note_deadline_passed()
 	if _timers_dirty:
 		_rebuild_timed()
-	# Every timer advances by the ticks this run covers (1, or more for a pawn running every Nth tick, pawn spec 8.21).
-	var elapsed := pawn.ticks_elapsed
-	for ability in _timed:
-		if ability.cooldown_ticks_left > 0:
-			ability.cooldown_ticks_left = maxi(ability.cooldown_ticks_left - elapsed, 0)
-			if ability.cooldown_ticks_left == 0:
-				readiness_version += 1 # it could start again
-		if ability.buffer_ticks_left > 0:
-			ability.buffer_ticks_left = maxi(ability.buffer_ticks_left - elapsed, 0)
 	for ability in _every_tick_abilities:
 		ability.every_tick(dt)
-	if combo_window_ticks_left > 0:
-		combo_window_ticks_left = maxi(combo_window_ticks_left - elapsed, 0)
-		if combo_window_ticks_left == 0:
-			readiness_version += 1 # the follow-ups can't start now
 	_run_locomotion(dt)
 	if _actions_have_work():
 		_run_actions(dt)
 
 
-## The abilities' timers call this when one starts or reaches 0 (pawn spec 15.2).
+## The abilities' timers call this when one is set (pawn spec 15.2).
 func timers_changed() -> void:
 	_timers_dirty = true
 	_locks_dirty = true
 	readiness_version += 1
+
+
+# A cooldown, buffer or combo window ended since the last look: what can start may have changed, and _timed is out of date. Once per
+# deadline: the next is found when _timed is rebuilt.
+func _note_deadline_passed() -> void:
+	if _next_deadline >= 0 and TickDriver.tick >= _next_deadline:
+		_next_deadline = -1
+		readiness_version += 1
+		_timers_dirty = true
+
+
+## After a rollback loads this pawn's state: what's worked out from the deadlines is worked out again. A loaded deadline equal to the
+## one it replaces calls no setter, but the soonest one still ahead depends on the tick, which went back.
+func state_loaded() -> void:
+	timers_changed()
 
 
 ## Moves [member readiness_version] on for a change made outside the abilities; the EffectManager calls it when effects change.
@@ -164,7 +188,7 @@ func can_sleep() -> bool:
 	for ability in _timed:
 		if not ability.can_sleep_while_running():
 			return false
-	if combo_window_ticks_left > 0: # the combo window counts down every tick
+	if is_combo_window_open(): # the window's end must be seen, to tell the AI (readiness_version)
 		return false
 	for ability in _every_tick_abilities:
 		if not ability.can_sleep():
@@ -204,14 +228,14 @@ func start_ability(ability: AbilityBase) -> bool:
 	if ability.is_running_timed():
 		# Starting again ends the run properly first (steps end, stop() runs, ability_finished goes out). Whether it may start is
 		# checked first, as if it weren't running; if not, the run carries on.
-		var left := ability.ticks_left
-		ability.ticks_left = 0
+		var ends := ability.ends_at
+		ability.ends_at = -1
 		var may_restart := _is_ready(ability)
-		ability.ticks_left = left
+		ability.ends_at = ends
 		if not may_restart:
 			return false
 		_finish(ability)
-		ability.cooldown_ticks_left = 0 # starts again from the beginning, without a cooldown in between
+		ability.ready_at = TickDriver.tick # starts again from the beginning, without a cooldown in between
 	if not _is_ready(ability):
 		return false
 	_clear_way(ability)
@@ -340,20 +364,16 @@ func _run_locomotion(dt: float) -> void:
 	if chosen == null:
 		return
 	# An action with pauses_locomotion is running (a Dash): no steering and no slowing this tick, so the action's own movement isn't
-	# fought. A timed locomotion's timer waits too.
+	# fought. A timed locomotion's time waits too: its deadlines move on by the ticks this run covers.
 	for ability in _locomotion_pausers:
 		if ability.is_running_timed():
+			chosen.delay_run(pawn.ticks_elapsed)
 			return
 	chosen.tick(dt)
 	if chosen.is_stepped() and chosen.is_running_timed():
 		chosen.run_steps(dt)
-		if not chosen.is_running_timed():
-			_finish(chosen) # its last step ended: stopped, with its cooldown, as a timed one running out is
-			return
-	if chosen.is_running_timed():
-		chosen.ticks_left -= pawn.ticks_elapsed # every tick this run covers (pawn spec 8.21)
-		if chosen.ticks_left <= 0:
-			_finish(chosen)
+	if chosen.is_run_over():
+		_finish(chosen) # its time is up, or its last step ended: stopped, with its cooldown
 
 
 func _run_actions(dt: float) -> void:
@@ -363,7 +383,7 @@ func _run_actions(dt: float) -> void:
 	# Actions with a press waiting in a buffer: every ready ability on one competes when the wait ends, not only the one holding it.
 	var waiting_bits := 0
 	for ability in _timed:
-		if ability.buffer_ticks_left > 0:
+		if ability.is_buffered():
 			waiting_bits |= ability.trigger_bit
 	_started_later.clear()
 	for ability in _actions:
@@ -373,15 +393,14 @@ func _run_actions(dt: float) -> void:
 				continue
 			ability.tick(dt)
 			if ability.is_stepped():
-				ability.run_steps(dt) # may end it, by setting ticks_left to 0
-			ability.ticks_left -= pawn.ticks_elapsed # every tick this run covers (pawn spec 8.21)
-			if ability.ticks_left <= 0:
+				ability.run_steps(dt) # may end it (end_run)
+			if ability.is_run_over():
 				_finish(ability)
 			continue
 		if ability.trigger_action == &"" or used_bits & ability.trigger_bit != 0:
 			continue
 		var pressed := pressed_bits & ability.trigger_bit != 0
-		if not pressed and ability.buffer_ticks_left <= 0:
+		if not pressed and not ability.is_buffered():
 			continue
 		if _is_ready(ability):
 			# Jitter or an effect's boost can lift another ability on this action above this one.
@@ -392,12 +411,12 @@ func _run_actions(dt: float) -> void:
 				_started_later.append(chosen) # see the top of this loop
 			used_bits |= ability.trigger_bit
 		elif pressed and ability.buffer_window > 0.0:
-			ability.buffer_ticks_left = ticks_for(ability.buffer_window)
+			ability.buffer_until = TickDriver.tick + ticks_for(ability.buffer_window)
 	# A press that started something doesn't also wait in another ability on the same action.
 	if used_bits != 0: # skipped when nothing started
 		for ability in _actions:
 			if used_bits & ability.trigger_bit != 0 and not ability.is_running_timed():
-				ability.buffer_ticks_left = 0
+				ability.buffer_until = 0
 
 
 # Of the ready abilities on first's action that are pressed or waiting, the highest priority plus jitter and boosts (pawn spec 8.11);
@@ -455,13 +474,23 @@ func _bonus(ability: AbilityBase, number: int) -> int:
 # Ready to start: no cooldown, a combo position it fits, every conflicting running ability can be cancelled by it, and its own
 # can_start().
 func _is_ready(ability: AbilityBase) -> bool:
-	return ability.cooldown_ticks_left <= 0 and _combo_allows(ability) and _conflicts_allow(ability) and ability.can_start()
+	return TickDriver.tick >= ability.ready_at and _combo_allows(ability) and _conflicts_allow(ability) and ability.can_start()
 
 
 ## Opens the combo window for this many ticks. An [OpenComboStep] calls it after its ability's hit.
 func open_combo_window(ticks: int) -> void:
-	combo_window_ticks_left = maxi(ticks, 0)
+	combo_open_until = TickDriver.tick + maxi(ticks, 0)
 	readiness_version += 1
+
+
+## True while the combo window is open.
+func is_combo_window_open() -> bool:
+	return TickDriver.tick < combo_open_until
+
+
+## Ticks left in the combo window; 0 when it's shut. For readouts.
+func combo_window_ticks_left() -> int:
+	return maxi(combo_open_until - TickDriver.tick, 0)
 
 
 ## The combo position it would take if it started now: the next, if the window is open and it fits; else 1 for an opener; else 0
@@ -470,7 +499,7 @@ func combo_position_for(ability: AbilityBase) -> int:
 	if ability.combo_positions.is_empty():
 		return 0
 	var next := combo_position + 1
-	if combo_window_ticks_left > 0 and ability.combo_positions.has(next):
+	if is_combo_window_open() and ability.combo_positions.has(next):
 		return next
 	return 1 if ability.combo_positions.has(1) else 0
 
@@ -521,8 +550,8 @@ func interrupt_rule(starting: AbilityBase, running: AbilityBase) -> Dictionary:
 func get_interrupt_table() -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
 	for running in _abilities:
-		# Timed abilities roll back ticks_left, which tells them from instant ones (their length can come from steps, phases or a push).
-		if running.kind != AbilityBase.Kind.LOCOMOTION and not running.get_rollback_properties().has("ticks_left"):
+		# Timed abilities, not instant ones (their length can come from a duration, steps, phases or a push).
+		if running.kind != AbilityBase.Kind.LOCOMOTION and not running.is_timed():
 			continue
 		var row := {"running": running.name, "priority": interrupt_priority_now(running), "threshold": interrupt_threshold_now(running), "cells": {}}
 		for starting in _abilities:
@@ -570,13 +599,24 @@ func _recompute_locks() -> void:
 			_locked_mask |= ability.locks_out_mask
 
 
-# The abilities with a timer running, kept so a tick only counts those down (pawn spec 15.2).
+# The abilities with a timer running, kept so a tick only looks at those (pawn spec 15.2), and the soonest deadline still ahead, when the
+# list next changes by itself.
 func _rebuild_timed() -> void:
 	_timed.clear()
 	_timers_dirty = false
+	var now: int = TickDriver.tick
+	_next_deadline = -1
 	for ability in _abilities:
-		if ability.ticks_left > 0 or ability.cooldown_ticks_left > 0 or ability.buffer_ticks_left > 0:
+		var cooling := now < ability.ready_at
+		var waiting := now < ability.buffer_until
+		if ability.ends_at >= 0 or cooling or waiting:
 			_timed.append(ability)
+		if cooling and (_next_deadline < 0 or ability.ready_at < _next_deadline):
+			_next_deadline = ability.ready_at
+		if waiting and (_next_deadline < 0 or ability.buffer_until < _next_deadline):
+			_next_deadline = ability.buffer_until
+	if now < combo_open_until and (_next_deadline < 0 or combo_open_until < _next_deadline):
+		_next_deadline = combo_open_until
 
 
 # Whether _run_actions has work this tick: a new press of an action answered here, an action running, or a buffered press.
@@ -584,21 +624,24 @@ func _actions_have_work() -> bool:
 	if _held() & ~_previous_held() & _action_bits != 0:
 		return true
 	for ability in _timed:
-		if ability.kind == AbilityBase.Kind.ACTION and (ability.ticks_left > 0 or ability.buffer_ticks_left > 0):
+		if ability.kind == AbilityBase.Kind.ACTION and (ability.ends_at >= 0 or ability.is_buffered()):
 			return true
 	return false
 
 
 func _start(ability: AbilityBase) -> void:
 	readiness_version += 1
-	ability.buffer_ticks_left = 0
+	ability.buffer_until = 0
 	ability.pawns_hit_this_run.clear()
 	# A combo ability takes its position and closes the window until its OpenComboStep opens it again.
 	var taken := combo_position_for(ability)
 	if taken > 0:
 		combo_position = taken
-		combo_window_ticks_left = 0
-	ability.ticks_left = ability.duration_ticks()
+		combo_open_until = 0
+	var length := ability.duration_ticks()
+	if length > 0:
+		ability.started_at = TickDriver.tick
+		ability.ends_at = TickDriver.tick + length
 	if ability.kind == AbilityBase.Kind.ACTION and ability.is_running_timed():
 		_locked_mask |= ability.locks_out_mask # later abilities this tick respect it at once
 	ability.start()
@@ -616,8 +659,9 @@ func _start(ability: AbilityBase) -> void:
 func _finish(ability: AbilityBase) -> void:
 	readiness_version += 1
 	ability.end_steps("cancelled") # steps still running when it ends early; none when they finished
-	ability.ticks_left = 0
-	ability.cooldown_ticks_left = ticks_for(ability.cooldown)
+	ability.ends_at = -1
+	if ability.cooldown > 0.0:
+		ability.ready_at = TickDriver.tick + ticks_for(ability.cooldown)
 	ability.stop()
 	ability_finished.emit(ability)
 
@@ -869,12 +913,21 @@ func _register_rollback_state() -> void:
 	# The combo counter, when any ability takes part in combos.
 	if _abilities.any(func(ability: AbilityBase) -> bool: return not ability.combo_positions.is_empty()):
 		var own_path := String(pawn.get_path_to(self))
-		entries.append("%s:combo_position" % own_path)
-		entries.append("%s:combo_window_ticks_left" % own_path)
+		for property: String in ["combo_position", "combo_open_until"]:
+			entries.append("%s:%s pushed" % [own_path, property])
+			_pushed_keys[StringName(property)] = "%s:%s" % [own_path, property]
+		_tick_state = tick_state
 	for ability in _abilities:
 		var path := String(pawn.get_path_to(ability))
 		for property in ability.get_rollback_properties():
 			entries.append("%s:%s" % [path, property])
+		# Pushed: recorded when the setter calls push_state, never read at the commit (state store spec 6.3). An encoding written
+		# after the name ("dash_direction @vec3_mm") isn't part of the key.
+		for property in ability.get_pushed_properties():
+			var key := "%s:%s" % [path, property.split("@")[0].strip_edges()]
+			entries.append("%s:%s pushed" % [path, property])
+			ability._pushed_keys[StringName(property.split("@")[0].strip_edges())] = key
+		ability._tick_state = tick_state
 		# Its steps' extra state too, so a replay lands in the same steps on the same tick.
 		for step in ability.steps:
 			var step_path := String(pawn.get_path_to(step))
@@ -895,3 +948,11 @@ func _previous_held() -> int:
 
 func _move() -> Vector3:
 	return pawn.controller_manager.move_input if pawn.controller_manager else Vector3.ZERO
+
+
+# Records the combo counter's new value in the state store (see AbilityBase.push_state).
+func _push_state(property: StringName, value: Variant) -> void:
+	if _tick_state:
+		var key: Variant = _pushed_keys.get(property)
+		if key != null:
+			_tick_state.push_value(key, value)

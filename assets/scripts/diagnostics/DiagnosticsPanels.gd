@@ -302,9 +302,9 @@ func _inspector_text() -> String:
 							parts.append("%s %d" % [step.name, step.step_ticks])
 					running.append("%s: %s" % [ability.name, ", ".join(parts)])
 				else:
-					running.append("%s%s (%d)" % [ability.name, ": " + " + ".join(steps_now) if not steps_now.is_empty() else "", ability.ticks_left])
-			elif ability.cooldown_ticks_left > 0:
-				cooling.append("%s (%d)" % [ability.name, ability.cooldown_ticks_left])
+					running.append("%s%s (%d)" % [ability.name, ": " + " + ".join(steps_now) if not steps_now.is_empty() else "", ability.ticks_left()])
+			elif ability.cooldown_ticks_left() > 0:
+				cooling.append("%s (%d)" % [ability.name, ability.cooldown_ticks_left()])
 		lines.append("  running: %s" % (", ".join(running) if not running.is_empty() else "-"))
 		lines.append("  cooling down: %s" % (", ".join(cooling) if not cooling.is_empty() else "-"))
 	if pawn.effect_manager:

@@ -1,4 +1,4 @@
-# State Store Spec v0.5 (agreed direction; steps 1 to 3 built)
+# State Store Spec v0.5 (agreed direction; steps 1 to 5 built, the abilities step begun)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
@@ -204,8 +204,8 @@ The ability spec, [ABILITY_SPEC.md](../abilities/ABILITY_SPEC.md), has the detai
 - **Swing arcs as keys** (time, angle, height, reach), interpolated; animation reads the same keys.
 - **Nothing that adds up every tick** unless it's declared state.
 - **Steps stay thin child nodes**, reusable building blocks the ability declares it uses (as Unreal's ability tasks are). Each step kind's code is shared; a step node can be run several times in one ability with different values.
-- **No-code chains are the typical way** to sequence steps; a bespoke ability script that runs the same step nodes is the alternate. In a chain, each entry names a step node, the values it runs with, and a **start rule**: at +N ticks from the ability's start; on another entry's start or end (with the end reasons that count, so a cancelled windup doesn't swing), optionally plus a delay; when a condition holds; or the first of several. Entries can run at the same time (turn and windup both at +0). A step decides its own end (its length or its condition), or ends with another entry or the ability.
-- **Chain state** per entry: the tick it started and the tick it ended (-1 if not yet), so "at +10" is a deadline. Rules are checked in list order; a step that ends can start the next in the same tick, with the existing guard against loops.
+- **No-code step timelines are the typical way** to sequence steps ("chains" until 2026-11-21); a bespoke ability script that runs the same step nodes is the alternate. In a step timeline, each entry names a step node, the values it runs with, and a **start rule**: at +N ticks from the ability's start; on another entry's start or end (with the end reasons that count, so a cancelled windup doesn't swing), optionally plus a delay; when a condition holds; or the first of several. Entries can run at the same time (turn and windup both at +0). A step decides its own end (its length or its condition), or ends with another entry or the ability.
+- **Step timeline state** per entry: the tick it started and the tick it ended (-1 if not yet), so "at +10" is a deadline. Rules are checked in list order; a step that ends can start the next in the same tick, with the existing guard against loops.
 - **Step conditions** are small data Resources over named values (angle to target, an action held, grounded), like the AI's `AICompareCondition`; the AI and abilities may share one condition base.
 
 ## 12.1 Systems to review *(tentative; each is discussed in turn and filled out before building)*
@@ -338,7 +338,7 @@ Small items found on the way: a ternary at line 1596 with stray tabs inside it, 
 - **The shader waddle v0** *(the owner, 2026-11-19; after the audits, with an A/B switch)*: only the waddle (rock, hop, breathe, squash and stretch) moves into the vertex shader; turns, leans, death and the other moments stay as node rotations. The toy's held pose is baked into a static mesh once per toy type, replacing each pawn's skeleton and paused `AnimationPlayer`. The sword's cheap fixes go in the same A/B test (the owner): its hover bob and sway in its own small vertex shader, its pose worked out only while something happens (a swing, a parry, a change of side, death), a local transform instead of `global_transform`, and the swing's phase read without a new Dictionary.
 - **Gameplay drives animation, never the reverse** *(the owner agreed)*: hitboxes come from gameplay data (capsules, arc keys), and animation follows them. Hitboxes synced to the waddle aren't wanted.
 - **Animation pipeline, for animation v0:** procedural rigid parts (today's toy look) are the cheapest way to animate when batched, and the waddle's maths could even move into the shader with per-instance values. A skeletal pipeline is more expressive, not faster. For crowds the usual answer is tiers: skeletal (and IK) up close, baked vertex animation played in the shader for the middle distance, the cheapest form far away. IK needs rigged models, a pose order (animation, then IK), ground heights for feet (the height field, 12.4), and the hands' targets can come from the ability's arc keys. To settle in the animation v0 review.
-- **Visuals read the new ability layers:** the sword reads the chain's state and the definition's arc keys (ability spec 7), so what's drawn and what hits stay the same path.
+- **Visuals read the new ability layers:** the sword reads the step timeline's state and the definition's arc keys (ability spec 7), so what's drawn and what hits stay the same path.
 - **Playback uses the same pass** (12.3): the viewer loads frames, and this pass draws them.
 - **The camera** follows the drawn pawn and isn't simulation; no change.
 
@@ -546,7 +546,7 @@ The owner's calls (2026-11-20): test writing the table during the tick before de
 
 The store's tripwire (`verify_store_each_tick`) shows the same three warnings either way, from spawning: the rows written through match the nodes. The commit didn't get faster, because position, velocity and grounded are 3 of about 47 columns a pawn has: the other 42 are ability timers and step states (about 3 a ability, 14 abilities), Health and the effects list, each a script property read through the engine, for every pawn that ran (101 a tick here; 202 more are copied forward). The commit's time is those reads (about 0.6 ms) and finding each column's node (about 0.2 ms).
 
-So: what pays is the abilities' state becoming pushed columns, written when it changes (6.3), which is the owner's idea of writing during the tick where it counts. That belongs to the abilities step. Readers still read the last frame: a row written through is never read before the commit, so results don't depend on which system ran first. The rule on writers: whatever writes a written-through property later in the same tick must write through too, or call `mark_changed`, which drops what was written through for that entity so the commit reads its nodes (2026-11-21: `Pawn.teleport` does, so a teleport after the crowd moved a pawn is recorded).
+So: what pays is the abilities' state becoming pushed columns, written when it changes (6.3), which is the owner's idea of writing during the tick where it counts. That belongs to the abilities step (done in 13.10). Readers still read the last frame: a row written through is never read before the commit, so results don't depend on which system ran first. The rule on writers: whatever writes a written-through property later in the same tick must write through too, or call `mark_changed`, which drops what was written through for that entity so the commit reads its nodes (2026-11-21: `Pawn.teleport` does, so a teleport after the crowd moved a pawn is recorded).
 
 **`Pawn.teleport(to)`.** Every instant move goes through it (respawns now do): the crowd reads the pawn from its node this tick (`CrowdMover.note_moved`, which `_move_with_physics` calls too), its Visual snaps instead of gliding, the store reads it even on a tick it doesn't run, and `last_teleport_tick` lets the move check through. Not yet: clients and replays still blend across a teleport between two snapshots; that needs a marker in the snapshot (netcode, later).
 
@@ -569,6 +569,24 @@ The owner's call (2026-11-21): finish the crowd mover before the abilities step,
 | Drawing the Visuals (`animation.smoothing`), ms a frame | 0.65 (303 calls) | 0.31 (1 call) |
 
 What's left in the finish is the GDScript loop building the lists for the three write-throughs and the placer (about 2 µs a pawn). The placer's 0.31 ms is the engine's own cost of moving 303 nodes and turning their models.
+
+### 13.10 The abilities step, part 1: ability state pushed, timers as deadlines *(Claude, 2026-11-21)*
+
+The owner's call (2026-11-21): push and go on to the abilities step. Abilities v2 ([ability spec](../abilities/ABILITY_SPEC.md)) is large, so it's built in parts; this first part is the agreed, mechanical one, and the one 13.8 measured as paying:
+
+- **Every built-in ability's state is pushed** (6.3): each property's setter calls `AbilityBase.push_state`, and the manager registers them as pushed entries, so the commit copies them and reads no ability node. `get_pushed_properties()` lists them; `get_rollback_properties()` stays for properties read at every commit, the easy way for a quick ability with no setter. Steps change their numbers through `AbilityBase.set_step_value`, because GDScript doesn't call a property's setter when one element of a packed array is written.
+- **Timers are tick deadlines** (ability spec 4): `started_at` and `ends_at` (a run), `ready_at` (cooldown), `buffer_until` (a waiting press), the manager's `combo_open_until`, Jump's `left_ground_at`. Nothing counts down; the manager keeps the soonest deadline still ahead, and when it passes moves `readiness_version` on and looks again. Death runs with `ends_at = NEVER` while Health is 0. `ticks_left()`, `cooldown_ticks_left()` and the like are worked out from the deadlines, for readouts and tests.
+
+| Measured (300-pawn mass battle, headless, `--size=100`, two runs each, the same day) | Before | Now |
+|---|---|---|
+| `commit`, ms a tick | 1.42 to 1.63 | 0.60 to 0.80 |
+| `pawn.abilities`, ms a frame | 0.93 | 0.93 |
+
+The commit roughly halved. Deadlines didn't make the abilities faster (the countdowns were cheap); they make the state still while a timer runs, so nothing is pushed, sent or rolled back while one does. The tripwire (`verify_store_each_tick`) shows only the three spawning warnings it showed before.
+
+A cooldown now counts as over from the start of the tick it ends on (the countdown reached 0 only when the abilities ran), so the AI may press one tick sooner; `readiness_version` notices a passed deadline when read, so the AI's kept answers stay right. Two smaller timing changes, both only for a pawn on a load step: a run started between its runs (a knockback from a hit) now counts from the tick it started, where the countdown counted the whole span since the pawn last ran; and a readout between its runs shows the time left now rather than at its last run. Deadlines keep running while a pawn sleeps, but a running cooldown still keeps a pawn awake, so its AI hears when it ends. A timed locomotion's time still waits while an action pauses locomotion: the manager moves its deadlines on (`delay_run`).
+
+Sprint now runs on a charge (the owner, 2026-11-21): it drains while sprinting and refills at half rate a second after it stops, worked out from the charge and the tick when it last started or stopped, so it's two values that change only then (ability spec 4).
 
 ## 14. Open
 

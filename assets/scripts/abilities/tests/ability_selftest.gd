@@ -1,5 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for AbilityManager, AbilityBase, Walk, Sprint and Jump. Checks the
-## odd cases at the top of AbilityManager.gd, Sprint's duration and cooldown, Jump's buffer and coyote time, lockouts, and that ability
+## odd cases at the top of AbilityManager.gd, Sprint's charge, Jump's buffer and coyote time, lockouts, and that ability
 ## state rolls back.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/abilities/tests/ability_selftest.tscn"
@@ -83,8 +83,8 @@ func _test_rollback_registration() -> void:
 	var pawn := _make_pawn()
 	await _ticks(3) # so at least one tick has been recorded
 	var listed: Array[String] = (pawn.get_node("TickState") as TickStateComponent).state_properties
-	_check(listed.has("AbilityManager/Sprint:ticks_left") and listed.has("AbilityManager/Sprint:cooldown_ticks_left"), "Sprint's time left and cooldown roll back")
-	_check(listed.has("AbilityManager/Jump:buffer_ticks_left") and listed.has("AbilityManager/Jump:ticks_off_ground"), "and Jump's waiting press and time off the ground")
+	_check(listed.has("AbilityManager/Sprint:ends_at pushed") and listed.has("AbilityManager/Sprint:ready_at pushed") and listed.has("AbilityManager/Sprint:charge_at_switch pushed") and listed.has("AbilityManager/Sprint:switched_at pushed"), "Sprint's time left, readiness and charge roll back")
+	_check(listed.has("AbilityManager/Jump:buffer_until pushed") and listed.has("AbilityManager/Jump:left_ground_at pushed"), "and Jump's waiting press and time off the ground")
 	var walk_entries := listed.filter(func(entry: String) -> bool: return entry.begins_with("AbilityManager/Walk"))
 	_check(walk_entries.is_empty(), "Walk keeps nothing between ticks, so it adds nothing")
 	print("  (a warning about adding state entries too late is expected next)")
@@ -93,27 +93,52 @@ func _test_rollback_registration() -> void:
 
 
 func _test_sprint() -> void:
+	# Claude 2026-11-21, the owner's call: a charge that drains while sprinting and refills at half rate after a delay, in place of a
+	# duration and cooldown. Short numbers to keep the test quick: 30 ticks of charge, a 30-tick delay, 15 ticks needed to start.
 	var floor_body := _make_floor(400.0)
 	var pawn := _make_pawn(Vector3(0, 0.1, 0))
 	var sprint: SprintAbility = pawn.ability_manager.get_node("Sprint")
-	sprint.duration = 0.5 # 30 ticks, to keep the test short
-	sprint.cooldown = 0.5
+	sprint.max_charge = 0.5
+	sprint.recharge_delay = 0.5
+	sprint.min_start_charge = 0.25
 	var ai := _ai(pawn)
 	await _ticks(20)
+	_check(sprint.charge_ticks() == 30, "it starts with a full charge (%d ticks)" % sprint.charge_ticks())
 	ai.move_in_direction(Vector3(1, 0, 0))
 	ai.hold(&"sprint")
 	await _ticks(20)
 	_check(sprint.is_running_timed() and pawn.velocity.x > 5.5, "holding sprint runs Sprint instead of Walk (%.2f m/s)" % pawn.velocity.x)
-	await _ticks(15)
-	_check(not sprint.is_running_timed() and sprint.cooldown_ticks_left > 0, "its time runs out, and its cooldown starts, though the key is still held")
-	_check(not pawn.ability_manager.can_start(&"sprint"), "so it can't start again yet")
-	await _ticks(20) # tick 55: its cooldown ends at tick 60
-	_check(absf(pawn.velocity.x - 5.0) < 0.05, "and Walk takes over (%.2f m/s)" % pawn.velocity.x)
-	await _ticks(10)
-	_check(sprint.is_running_timed(), "once the cooldown is over, the held key starts it again")
+	_check(sprint.charge_ticks() > 5 and sprint.charge_ticks() < 15, "sprinting drains the charge a tick per tick (%d left)" % sprint.charge_ticks())
+	for i in 20:
+		if not sprint.is_running_timed():
+			break
+		await _ticks(1)
+	var stopped_at := TickDriver.tick
+	_check(not sprint.is_running_timed() and sprint.charge_ticks() == 0, "the charge runs out, and it stops though the key is still held")
+	_check(not pawn.ability_manager.can_start(&"sprint") and sprint.cooldown_ticks_left() > 0, "so it can't start again yet")
+	await _ticks(25)
+	_check(absf(pawn.velocity.x - 5.0) < 0.05, "Walk takes over (%.2f m/s)" % pawn.velocity.x)
+	_check(sprint.charge_ticks() == 0, "the charge waits recharge_delay before refilling (%d)" % sprint.charge_ticks())
+	await _ticks(25)
+	var charge := sprint.charge_ticks()
+	var refilling := TickDriver.tick - stopped_at - 30
+	_check(charge == refilling / 2 and not sprint.is_running_timed(), "then refills at half rate: %d after %d ticks, short of the 15 it needs" % [charge, refilling])
+	for i in 20:
+		if sprint.is_running_timed():
+			break
+		await _ticks(1)
+	var waited := TickDriver.tick - stopped_at
+	_check(sprint.is_running_timed() and waited >= 59 and waited <= 62, "with 15 ticks of charge the held key starts it again (%d ticks after it ran out)" % waited)
+	await _ticks(5)
 	ai.hold(&"sprint", false)
 	await _ticks(1)
-	_check(not sprint.is_running_timed() and sprint.cooldown_ticks_left > 0, "letting go stops it early, and starts the cooldown")
+	var kept := sprint.charge_ticks()
+	_check(not sprint.is_running_timed() and kept > 0 and kept < 15, "letting go stops it early and keeps what's left (%d)" % kept)
+	await _ticks(120)
+	_check(sprint.charge_ticks() == 30, "left alone it refills to full and no further (%d)" % sprint.charge_ticks())
+	ai.hold(&"sprint")
+	await _ticks(2)
+	_check(sprint.is_running_timed(), "and starts again at once")
 	pawn.free()
 	floor_body.free()
 
@@ -201,7 +226,7 @@ func _test_lockouts() -> void:
 	await _ticks(1)
 	_check(attack.starts == 2 and attack.is_running_timed(), "after its cooldown it can start again")
 	manager.cancel(&"primary")
-	_check(not attack.is_running_timed() and attack.stops == 2 and attack.cooldown_ticks_left > 0, "cancel() stops it and starts its cooldown")
+	_check(not attack.is_running_timed() and attack.stops == 2 and attack.cooldown_ticks_left() > 0, "cancel() stops it and starts its cooldown")
 	_check(manager.has_action(&"primary") and not manager.has_action(&"interact"), "has_action() knows which actions it answers to")
 	pawn.free()
 	floor_body.free()
@@ -255,10 +280,12 @@ func _test_rollback_restores_ability_state() -> void:
 	ai.hold(&"sprint")
 	await _ticks(30)
 	await get_tree().physics_frame
-	var real_ticks_left := sprint.ticks_left
+	var real_ticks_left := sprint.ticks_left()
+	var real_charge := sprint.charge_ticks()
 	var real_position := pawn.position
 	var went_back: bool = TickDriver.rollback(TickDriver.tick - 12)
-	_check(went_back and sprint.ticks_left == real_ticks_left, "a replay ends with Sprint's time left exactly as it was (%d ticks)" % sprint.ticks_left)
+	_check(went_back and sprint.ticks_left() == real_ticks_left, "a replay ends with Sprint's time left exactly as it was (%d ticks)" % sprint.ticks_left())
+	_check(sprint.charge_ticks() == real_charge, "and its charge (%d of %d)" % [sprint.charge_ticks(), real_charge])
 	_check(pawn.position.distance_to(real_position) < 0.0011, "and the pawn in the same place")
 	pawn.free()
 	floor_body.free()
@@ -282,9 +309,9 @@ func _test_gates() -> void:
 	var with_every_tick: Array = manager._every_tick_abilities.map(func(a): return String(a.name))
 	_check(counter.calls - calls_before == 10 and with_every_tick.has("Counter") and with_every_tick.has("Jump") and not with_every_tick.has("Walk"), "every_tick() runs only on abilities that override it, every tick (%s)" % str(with_every_tick))
 	var sprint: SprintAbility = manager.get_node("Sprint")
-	sprint.cooldown_ticks_left = 30 # as a rollback loading saved values would
+	sprint.ready_at = TickDriver.tick + 30 # as a rollback loading saved values would
 	await _ticks(10)
-	_check(sprint.cooldown_ticks_left == 20, "a timer written from outside starts counting down at once (%d left after 10 ticks)" % sprint.cooldown_ticks_left)
+	_check(sprint.cooldown_ticks_left() == 20, "a timer written from outside starts counting down at once (%d left after 10 ticks)" % sprint.cooldown_ticks_left())
 	var ai := _ai(pawn)
 	ai.move_in_direction(Vector3(1, 0, 0))
 	await _ticks(40)
@@ -351,13 +378,13 @@ func _test_restart_and_first_tick() -> void:
 	await _ticks(5)
 	_check(manager.start_ability(coded), "restart: a running ability can be started again")
 	_check(coded.starts == 2 and coded.stops == 1 and finished == [&"Coded"], "restart: the run it had is stopped and reported finished first (%d starts, %d stops, finished %s)" % [coded.starts, coded.stops, str(finished)])
-	_check(coded.ticks_left == coded.duration_ticks() and coded.cooldown_ticks_left == 0, "restart: and it runs its whole length again, with no cooldown in between")
+	_check(coded.ticks_left() == coded.duration_ticks() and coded.cooldown_ticks_left() == 0, "restart: and it runs its whole length again, with no cooldown in between")
 
 	# An ability a press starts gets its first tick on the next tick, wherever it is in the list.
 	_ai(pawn).press(&"primary")
 	await _ticks(1)
 	_check(strong.starts == 1 and weak.starts == 0, "(the press starts the one with the higher priority, later in the list)")
-	_check(strong.ticked == 0 and strong.ticks_left == strong.duration_ticks(), "first tick: an ability started in place of an earlier one isn't also ticked on that tick (%d ticks, %d of %d left)" % [strong.ticked, strong.ticks_left, strong.duration_ticks()])
+	_check(strong.ticked == 0 and strong.ticks_left() == strong.duration_ticks(), "first tick: an ability started in place of an earlier one isn't also ticked on that tick (%d ticks, %d of %d left)" % [strong.ticked, strong.ticks_left(), strong.duration_ticks()])
 	await _ticks(1)
 	_check(strong.ticked == 1, "first tick: its first tick is the next one")
 	pawn.free()

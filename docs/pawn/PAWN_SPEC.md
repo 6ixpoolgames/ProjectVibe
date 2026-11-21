@@ -301,10 +301,11 @@ enum Kind { LOCOMOTION, ACTION }
 @export var locks_out: Array[StringName] = []    # categories that can't start or steer while this runs
 @export var buffer_window := 0.0                 # seconds a press waits if it can't start yet
 
-# Rolls back: counts down to 0, so it's small on the network
-var ticks_left / cooldown_ticks_left / buffer_ticks_left
+# Rolls back, pushed to the state store when it changes: tick deadlines, not countdowns (ability spec 4, built 2026-11-21)
+var started_at / ends_at / ready_at / buffer_until
 
-func get_rollback_properties() -> Array[String]  # what to register with the pawn's TickState
+func get_pushed_properties() -> Array[String]    # what to register with the pawn's TickState (setters call push_state)
+func get_rollback_properties() -> Array[String]  # the same, read at every commit instead
 func can_start() -> bool                         # extra conditions; cooldowns and lockouts are checked already
 func start() / tick(dt) / stop() / every_tick(dt)
 func read_stat(stat_name, fallback) -> float
@@ -351,7 +352,7 @@ Test: `abilities/tests/ability_selftest`.
   - A press up to 0.15 s before landing waits and jumps on landing.
   - The height comes from the JumpVelocity stat.
 - **Sprint** is its own locomotion ability, bound to `&"sprint"`.
-  - It has faster numbers, a **maximum duration** and a **cooldown**. There's no stamina yet.
+  - It has faster numbers, a **maximum duration** and a **cooldown**. There's no stamina yet. *(The owner, 2026-11-21: a **charge** in place of the duration and cooldown. 3 seconds of sprint on a full charge, draining a tick per tick; 1 second after it stops, it refills at half rate. It starts with at least 0.5 seconds of charge, so a key held on an empty charge doesn't flicker it on a tick at a time. Ability spec 4.)*
   - While `&"sprint"` is held and Sprint is ready, it runs instead of Walk. When its time runs out it ends, its cooldown starts, and Walk takes over even if the key is still held.
   - The AI uses it the same way: a behaviour such as Chase holds `&"sprint"`, and asks `can_start(&"sprint")` if it cares. So Sprint wins over Walk whenever it's ready, but the cooldown gives it downtime. That's what makes it testable.
 - After the AI is built, more abilities come before fights: Dash, then MeleeAttack.

@@ -94,7 +94,7 @@ func _test_windup_turn() -> void:
 		ai.hold(&"primary", true) # Claude 2026-11-16 (pawn spec 8.20): the swing turns only while its action is held
 		await _ticks(2)
 		ai.look_at_point(origin + Vector3(10, 1, 0)) # to the right: yaw -90 degrees
-		await _until(func() -> bool: return melee.duration_ticks() - melee.ticks_left >= melee.windup_ticks, 30)
+		await _until(func() -> bool: return melee.duration_ticks() - melee.ticks_left() >= melee.windup_ticks, 30)
 		var degrees := rad_to_deg(pawn.yaw)
 		if turn > 0.0:
 			# The look changes a tick after the swing starts, so 7 of the 8 windup ticks turn: 84 of the 90 degrees at 720 a second.
@@ -119,7 +119,7 @@ func _test_no_snap() -> void:
 	var first := absf(rad_to_deg(angle_difference(0.0, pawn.yaw)))
 	var per_tick := (melee.get_node("TurnToFace") as TurnToFaceStep).current_speed() / 60.0 # Claude 2026-11-16: the pawn's TurnRate now
 	_check(melee.is_running_timed() and first <= per_tick * 2.0 + 0.5, "on its first tick a swing turns at most its turn speed allows, not all the way round (%.0f degrees)" % first)
-	await _until(func() -> bool: return melee.duration_ticks() - melee.ticks_left >= melee.windup_ticks, 30)
+	await _until(func() -> bool: return melee.duration_ticks() - melee.ticks_left() >= melee.windup_ticks, 30)
 	var by_hit := absf(rad_to_deg(angle_difference(0.0, pawn.yaw)))
 	_check(by_hit > 60.0 and by_hit < 179.0, "and keeps turning through the windup, without reaching a target behind it (%.0f of 180 degrees)" % by_hit)
 	ai.hold(&"primary", false)

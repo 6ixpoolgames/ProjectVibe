@@ -16,6 +16,8 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 
 ## 2026-11-21
 
+- **A rollback load tells the AbilityManager** (`state_loaded()`), which works out its soonest deadline again: the tick went back, so a deadline already passed may be ahead again (state store spec 13.10).
+
 - **`VisualPlacer`** and **`VisualPlacementGD`** (new): the "place what's drawn" pass. One placer, made on first use under the TickDriver, places every pawn's Visual once a frame (the C++ `VisualPlacement`, or its GDScript twin). `VisualSmoother` no longer runs each frame: it holds the pawn's slot in the placer (`slot`, `get_correction_offset()`, new) and forwards runs, snaps, moves and corrections (state store spec 13.9).
 - **`get_visual_slot()`** (new): the Visual's slot in the placer, for the crowd mover.
 - **`finish_written_move()` removed**: the crowd mover no longer calls the pawns it moved.

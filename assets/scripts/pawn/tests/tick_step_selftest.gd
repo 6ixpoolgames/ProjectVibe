@@ -112,7 +112,7 @@ func _test_ability_timing() -> void:
 		await _until(func() -> bool: return not ability.is_running_timed(), 60)
 		lengths[step] = TickDriver.tick - started
 		var ended := TickDriver.tick
-		await _until(func() -> bool: return ability.cooldown_ticks_left <= 0, 60)
+		await _until(func() -> bool: return ability.cooldown_ticks_left() <= 0, 60)
 		cooldowns[step] = TickDriver.tick - ended
 		pawn.free()
 	_check(absi(lengths[4] - lengths[1]) <= 4 and absi(lengths[1] - 30) <= 1, "a half-second ability lasts as long at step 4 (%d ticks, %d at step 1)" % [lengths[4], lengths[1]])

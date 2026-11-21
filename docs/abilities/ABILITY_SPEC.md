@@ -1,12 +1,19 @@
-# Ability Spec v0.2 (agreed direction, nothing built)
+# Ability Spec v0.2 (agreed direction; part 1 built: state pushed, timers as deadlines)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
 **Status:** agreed direction. Abilities v2 are part of the full refactor on its own branch ([STATE_STORE_SPEC.md](../state_store/STATE_STORE_SPEC.md), "How it's built"), written straight against the state store, after the tick driver, the store and the pawn (the owner, 2026-11-19).
 
-**What it changes:** how abilities and their steps are built, so they fit the state store: settings move into shared definitions, timers become tick deadlines, steps are sequenced by no-code chains, and state is read and written through one small layer that the store can later sit behind. The rules players and AI see (actions, priorities, interrupts, combos, buffering, hits) don't change. Today's design is pawn spec 8 (8.20 steps, 8.23 interceptors, 8.24 projectiles).
+**What it changes:** how abilities and their steps are built, so they fit the state store: settings move into shared definitions, timers become tick deadlines, steps are sequenced by no-code step timelines, and state is read and written through one small layer that the store can later sit behind. The rules players and AI see (actions, priorities, interrupts, combos, buffering, hits) don't change. Today's design is pawn spec 8 (8.20 steps, 8.23 interceptors, 8.24 projectiles).
 
 **Written against the store.** An earlier plan built this first on today's recording; with the rewrite in place, abilities read and write their state in the store from the start.
+
+**Built in parts** (Claude, 2026-11-21), each tested and measured before the next:
+
+1. **State pushed, timers as deadlines** (sections 4 and 5): built 2026-11-21 ([state store spec 13.10](../state_store/STATE_STORE_SPEC.md)).
+2. **Definitions** (section 3), and the registry that gives them ids (section 3.1).
+3. **Step timelines and conditions** (section 6), replacing the steps' links and their counting `step_state`.
+4. **References as ids, projectiles and arcs** (sections 7 to 9).
 
 ## 1. Decided
 
@@ -19,9 +26,12 @@
 | Broken references | Fall back to the kind's own defaults, and announce it | the owner |
 | Timers | Tick deadlines, never countdowns | the owner |
 | Steps | Thin child nodes: building blocks the ability declares it uses | the owner |
-| Sequencing | No-code chains are the typical way; a bespoke script running the same step nodes is the alternate | the owner |
-| Chains | A relative tick timeline with start rules, steps able to run at the same time | the owner's idea |
-| Extending | New data before new code; a subclass for new logic (a double swing can extend MeleeAttack, or be a longer chain) | the owner and Claude |
+| Sequencing | No-code step timelines are the typical way; a bespoke script running the same step nodes is the alternate | the owner |
+| Step timelines | A timeline in ticks from the ability's start, with start rules, steps able to run at the same time. Named "step timeline", the standard word (it was "chain", which suggests one after another) | the owner's idea; the name, the owner (2026-11-21) |
+| Extending | New data before new code; a subclass for new logic (a double swing can extend MeleeAttack, or be a longer timeline) | the owner and Claude |
+| Ids | A definition's permanent id is its Godot resource UID; a small index at runtime; replays and saves keep a table from one to the other (3.1) | the owner (2026-11-21) |
+| Locomotion | Walk and Sprint stay code with a definition, no step timeline: they run every tick with no sequence of steps | the owner (2026-11-21) |
+| Sprint | A charge in place of a duration and cooldown: 3 seconds of sprint, refilling at half rate 1 second after it stops (built 2026-11-21) | the owner |
 | Order | In the full refactor, after the tick driver, the store and the pawn; written straight against the store (2026-11-19, replacing "before the store") | the owner |
 
 ## 2. The three layers
@@ -30,7 +40,7 @@
 |---|---|---|---|
 | Kind | The code: how a melee attack, a dash or a jump works | `MeleeAttackAbility.gd`, `MeleeSweepStep.gd` | The node's script, one copy for every pawn |
 | Definition | One variant's values | "Goblin Swing": windup 8 ticks, arc keys, reach 1.8 m, hit radius 0.8 m, on-hit effects | A Resource file the node references, or one embedded in the node |
-| State | What one pawn's ability is doing now | ready at tick 4120, chain entry 2 started at tick 4108 | Today the node's rolled-back variables; later the store |
+| State | What one pawn's ability is doing now | ready at tick 4120, timeline entry 2 started at tick 4108 | Today the node's rolled-back variables; later the store |
 
 A pawn's ability nodes look as they do today; only what they hold changes:
 
@@ -53,7 +63,17 @@ Goblin (Pawn)
 - **Read-only while playing.** A definition is shared by every pawn that uses it; changing one at runtime changes them all. Per-pawn differences come from variants or from stats and effects (as ability priority bonuses work today), never from writing a definition.
 - **In the join check:** definitions go into the content hash, so connected machines have the same ones.
 - **Fallback:** a missing or broken definition falls back to the kind's defaults, with a warning in the session log and diagnostics naming the pawn, the ability and what was missing. Connected machines fall back the same way (the hash); the replay records it.
-- **Checked once, when loaded:** a chain naming a step the ability doesn't have, a bad start rule, a loop.
+- **Checked once, when loaded:** a step timeline naming a step the ability doesn't have, a bad start rule, a loop.
+
+### 3.1 Ids and the registry
+
+Definitions and effects need an id that's the same on every machine, so the store, the network and replays can name one in a few bytes instead of a file path. Two kinds, as engines usually do it (Unreal's asset ids and network handles, Source's string tables):
+
+- **The permanent id is the definition's Godot resource UID** (`uid://...`): a 64-bit number Godot stores with the file. It's part of the file, so it's the same on every machine, and it survives renames and moves. Replays and save files record this one.
+- **The runtime index** is small and dense: the registry scans the configured folders when the game loads, sorts what it finds by UID and numbers it 0, 1, 2 and so on. The store and the network use the index. Sorted by UID, not by path or by the order the disk lists files, so every machine with the same files gets the same numbers.
+- **Between machines:** the join check's content hash already covers the definitions, so two machines whose indexes could differ never play together.
+- **Replays:** a replay's header holds its table from index to UID. Playback maps each recorded index to its UID, then to whichever file has that UID now, so added or renamed files don't break an old replay. A definition whose content changed since the recording is still found, but the run can't come out exactly the same (true of any engine's replays across a patch), so the replay also records the content hash and playback warns when it differs.
+- **Duplicates:** a file copied outside the editor can carry the same UID as its original. The registry checks for that when it scans and says which files clash.
 
 ## 4. State, as tick deadlines
 
@@ -61,13 +81,14 @@ Every timer becomes the tick something happens, not a count of ticks left. The v
 
 | Today (counts down) | Becomes |
 |---|---|
-| `AbilityBase.ticks_left` | `started_at` (with the duration in the definition), or the chain's state |
+| `AbilityBase.ticks_left` | `started_at` (with the duration in the definition), or the step timeline's state |
 | `cooldown_ticks_left` | `ready_at` |
 | `buffer_ticks_left` | `buffer_until` |
 | `AbilityManager.combo_window_ticks_left` | `combo_open_until` |
-| `step_state` (running, step ticks) | each chain entry's `started_at` and `ended_at` (section 6) |
+| `step_state` (running, step ticks) | each timeline entry's `started_at` and `ended_at` (section 6) |
 | `JumpAbility.ticks_off_ground` | `left_ground_at` |
 | `KnockbackAbility.push_ticks` | `push_until` |
+| Sprint's duration and cooldown | a charge: the charge and the tick it last started or stopped (`charge_at_switch`, `switched_at`), and `ready_at` when the charge reaches the minimum to start (built 2026-11-21) |
 | An effect's ticks left and period left | `ends_at` and `next_pulse_at` |
 | A projectile's ticks left and distance travelled | its launch tick (section 9) |
 
@@ -88,20 +109,21 @@ func write_int(column: int, value: int) -> void # write
 
 - **Backed by the store's columns** (and its GDScript twin). Ability code never holds its state in its own variables.
 - **Cost:** a read through the store is a call into C++, a little more than a member variable. If the dispatch measurement says it matters, an ability reads its columns once at the start of its tick and writes them back at the end.
+- **As built (part 1, 2026-11-21):** the values stay on the ability node, the working copy during a tick (state store spec 4), and each setter pushes the new value to the store (`push_state`), so the commit never reads an ability node. Reads cost a member variable. Reading and writing only through the store can follow if a worker job needs it.
 
-## 6. Steps and chains
+## 6. Steps and step timelines
 
 ### 6.1 Steps
 
 - **Thin child nodes** of the ability: windup, turn, sweep, wait, fire a projectile, apply an effect, open the combo window. Each kind's code is shared.
 - **Building blocks:** the ability declares the steps it uses by having them as children. A step node can run several times in one ability, with different values each time (a second sweep on a backswing arc).
-- **Values per run** come from the chain entry (or the bespoke script), falling back to the step's own.
+- **Values per run** come from the timeline entry (or the bespoke script), falling back to the step's own.
 - **A step decides its own end:** its length, or its condition. It ends with a reason: done, released, failed or cancelled.
 - **Steps can run at the same time** (a turn alongside a windup). The ability's interrupt threshold is the strictest of its running steps', as now; a step can go along without holding the ability open (`keeps_ability_running`, as now).
 
-### 6.2 No-code chains
+### 6.2 No-code step timelines
 
-The typical way to sequence steps. The definition holds a chain: a list of entries, each naming a step node, the values it runs with, and a **start rule**. Ticks are relative to the ability's start.
+The typical way to sequence steps. The definition holds a **step timeline**: a list of entries, each naming a step node, the values it runs with, and a **start rule**. Ticks count from the ability's start. It's a timeline in the usual sense (Unity's Timeline, Unreal's Sequencer, Godot's animation tracks): entries can overlap, and besides a fixed tick an entry can be started by another entry or a condition, as an event track does.
 
 ```
 Goblin Swing
@@ -128,15 +150,15 @@ Goblin Swing (double): the three entries of Goblin Swing, then
 - **End:** the step's own end, or with another entry, or with the ability. The ability ends when no entry that keeps it running is running or due, or at its longest length (today's `max_steps_ticks`).
 - **State:** each entry's `started_at` and `ended_at` (-1 if not yet), one packed array per ability, as `step_state` is now. "At +10" is the ability's `started_at` plus 10: a deadline.
 - **Order within a tick:** rules are checked in list order. A step that ends can start the next in the same tick; a step started during a tick gets its first tick on the next, as now. The existing guard stops steps starting each other in a loop.
-- **Today's links** (`starts_first`, `starts_when_finished` on the step nodes) become chain entries ("at +0", "on end of"), and leave the step nodes.
+- **Today's links** (`starts_first`, `starts_when_finished` on the step nodes) become timeline entries ("at +0", "on end of"), and leave the step nodes.
 
 ### 6.3 Conditions
 
-Small data Resources over named values, so chains stay no-code and C++ can judge them later: the angle to the look or the target, an action held, grounded, a stat compared with a number. The AI's conditions (`AICompareCondition` over `AIInputs`) work the same way; the two may share one base (section 12).
+Small data Resources over named values, so step timelines stay no-code and C++ can judge them later: the angle to the look or the target, an action held, grounded, a stat compared with a number. The AI's conditions (`AICompareCondition` over `AIInputs`) work the same way; the two may share one base (section 12).
 
 ### 6.4 Bespoke scripts
 
-The alternate path: an ability's script sequences its step nodes itself (`run_step(sweep, values)`), for logic a chain can't express, such as branching on what the swing hit or a swing that homes in. It uses the same steps, state layer and deadlines.
+The alternate path: an ability's script sequences its step nodes itself (`run_step(sweep, values)`), for logic a timeline can't express, such as branching on what the swing hit or a swing that homes in. It uses the same steps, state layer and deadlines.
 
 ## 7. Swing arcs as keys
 
@@ -150,7 +172,7 @@ A sweep's path is a list of keys: (time from 0 to 1 through the hit window, angl
 | A projectile's shooter, ability and on-hit effects | The shooter's entity id, the ability's index, effect resource ids |
 | `HitInfo`'s attacker and ability | Entity id and ability index (a hit is delivered in the tick it's made, so it's never state between ticks) |
 
-Resource ids come from a registry of definitions and effects, the same on every machine (part of the join check).
+Resource ids come from the registry of definitions and effects (3.1).
 
 ## 9. Projectiles
 
@@ -167,25 +189,23 @@ Resource ids come from a registry of definitions and effects, the same on every 
 
 | File | Change |
 |---|---|
-| `AbilityBase.gd` | Settings move to `AbilityDefinition`; timers become deadlines; the state layer (5); runs the definition's chain by default |
+| `AbilityBase.gd` | Settings move to `AbilityDefinition`; timers become deadlines; the state layer (5); runs the definition's step timeline by default |
 | `AbilityManager.gd` | No per-tick countdowns (`_timed`, timer dirty flags); combo window as a deadline; readiness checked against deadlines |
 | Each ability kind | Its settings move to its definition; its timers become deadlines |
-| `MeleeAttackAbility.gd` | Its default steps come from its definition's chain; the arc as keys |
-| `steps/*` | Values per run; links move to chain entries; the step state moves into the chain's state |
+| `MeleeAttackAbility.gd` | Its default steps come from its definition's step timeline; the arc as keys |
+| `steps/*` | Values per run; links move to timeline entries; the step state moves into the timeline's state |
 | `interceptors/*` | To be checked: settings into definitions, the same pattern |
 | `projectiles/Projectile.gd` | A definition; flight worked out from the launch record; ids for the shooter and effects |
 | `effects/EffectManager.gd` | Its list's countdowns become deadlines |
 
 Refactor rows from the abilities changelog folded in: Death and Knockback found by tag rather than class; the unused `_stepped` list; the test-only `_sweep_centres` helper; hit signals declared once.
 
-**Tests:** the ability, rollback, network and projectile suites check that play is unchanged. New: chains (start rules, simultaneous steps, end reasons, loops), definitions (variants, embedded, fallback), and a check that no ability keeps state outside what it declares, as `rollback_coverage_selftest` does for the pawn.
+**Tests:** the ability, rollback, network and projectile suites check that play is unchanged. New: step timelines (start rules, simultaneous steps, end reasons, loops), definitions (variants, embedded, fallback), and a check that no ability keeps state outside what it declares, as `rollback_coverage_selftest` does for the pawn.
 
 ## 12. Open
 
 - **Sleeping and Death:** deadlines keep running while a pawn sleeps; Death's timer "waits with the pawn" today. Check what Death's timer is for and keep its behaviour.
 - **One condition base** for abilities and the AI, or two that look alike.
-- **The registry** that gives definitions and effects their ids, and how it's built (scanned folders, or a list).
-- **Authoring chains:** a list of entries in Godot's inspector works; a timeline editor belongs to the design studio on the roadmap.
-- **Locomotion** (Walk, Sprint): whether they have chains at all, or stay code with a definition.
-- **Interceptors:** settings into definitions, and whether one can be started by a chain entry.
+- **Authoring step timelines:** a list of entries in Godot's inspector works; a timeline editor belongs to the design studio on the roadmap.
+- **Interceptors:** settings into definitions, and whether one can be started by a timeline entry.
 - **C++ for hot built-ins** (the sweep, the dash): only where the dispatch measurement shows real gains.

@@ -207,7 +207,7 @@ flowchart LR
 | `singletons/` | TickDriver, NetworkSession, GameMode, NavMarkerManager | TickDriver v2; NetworkSession split into connection, clock, snapshot sending and receiving |
 | `netcode/` | TickStateComponent, NetworkEntity, lag compensation | The store's GDScript side and twin; lag compensation reading the history |
 | `pawn/` | The pawn hub (about 720 lines) | The body and general flags (about 150–200 lines) |
-| `abilities/` | Abilities and steps as nodes with their own settings and state | Thin nodes, definitions, chains, deadlines |
+| `abilities/` | Abilities and steps as nodes with their own settings and state | Thin nodes, definitions, step timelines, deadlines |
 | `ai/` | Managers, senses, states, behaviours; C++ decides per pawn | Batched decisions, central schedule, entity ids |
 | `movement/` | The crowd mover | The movement pass |
 | `replay/` | Channels gathering per pawn | Keyframes and deltas of frames |

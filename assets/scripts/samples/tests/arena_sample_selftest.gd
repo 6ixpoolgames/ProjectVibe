@@ -37,7 +37,7 @@ func _ready() -> void:
 		if ability is MeleeAttackAbility:
 			swing = ability
 	var tick_state: TickStateComponent = player.get_node("TickState")
-	_check(swing.cooldown == arena.DEBUG_COOLDOWNS["MeleeAttack"] and tick_state.state_properties.has("AbilityManager/MeleeAttack:cooldown_ticks_left"), "longer cooldowns, and the swing's rolls back (%.1f s)" % swing.cooldown)
+	_check(swing.cooldown == arena.DEBUG_COOLDOWNS["MeleeAttack"] and tick_state.state_properties.has("AbilityManager/MeleeAttack:ready_at"), "longer cooldowns, and the swing's rolls back (%.1f s)" % swing.cooldown)
 	# Claude 2026-11-09: a dash leaves a trail of capsules that fades within dash_seconds. Done first, while the goblins are far away.
 	var draw: AbilityDebugDraw = arena._debug_draw
 	var dash: AbilityBase = null

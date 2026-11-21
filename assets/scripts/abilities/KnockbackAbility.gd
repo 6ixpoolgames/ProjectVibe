@@ -9,10 +9,20 @@
 class_name KnockbackAbility
 extends AbilityBase
 
-## The push at the start, in metres per second; its y is the hop speed upward. Rolls back.
-var push_velocity := Vector3.ZERO
-## How many ticks this push lasts. Rolls back.
-var push_ticks := 0
+## The push at the start, in metres per second; its y is the hop speed upward. Rolls back (pushed).
+var push_velocity := Vector3.ZERO:
+	set(value):
+		if value == push_velocity:
+			return
+		push_velocity = value
+		push_state(&"push_velocity", value)
+## How many ticks this push lasts. Rolls back (pushed).
+var push_ticks := 0:
+	set(value):
+		if value == push_ticks:
+			return
+		push_ticks = value
+		push_state(&"push_ticks", value)
 
 
 func _init() -> void:
@@ -26,10 +36,15 @@ func _init() -> void:
 	interrupt_threshold = 35 # only Dash (40) cancels it
 
 
-func get_rollback_properties() -> Array[String]:
+func get_pushed_properties() -> Array[String]:
 	var out := super()
-	out.append_array(["ticks_left", "push_velocity", "push_ticks"])
+	out.append_array(["push_velocity", "push_ticks"])
 	return out
+
+
+## Timed, by its push's length rather than duration.
+func is_timed() -> bool:
+	return true
 
 
 func duration_ticks() -> int:
@@ -46,10 +61,11 @@ func push(velocity: Vector3, ticks: int, hop: float = 0.0) -> bool:
 
 
 func tick(_dt: float) -> void:
-	# The hop, on the first tick (the manager counts ticks_left down after each tick, so it's still push_ticks), as Jump does it.
-	if ticks_left == push_ticks and push_velocity.y > 0.0 and pawn.grounded:
+	# The hop, on the first tick, as Jump does it.
+	var before := ticks_before_this_run()
+	if before == 0 and push_velocity.y > 0.0 and pawn.grounded:
 		pawn.velocity.y = push_velocity.y
 		pawn.grounded = false
-	var left := float(ticks_left) / maxf(float(push_ticks), 1.0) # 1 at the start, falling toward 0
+	var left := float(push_ticks - before) / maxf(float(push_ticks), 1.0) # 1 at the start, falling toward 0
 	pawn.velocity.x = push_velocity.x * left
 	pawn.velocity.z = push_velocity.z * left

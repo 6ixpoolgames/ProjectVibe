@@ -21,10 +21,9 @@ func _init() -> void:
 	interrupt_threshold = 1000
 
 
-func get_rollback_properties() -> Array[String]:
-	var out := super()
-	out.append("ticks_left")
-	return out
+## Timed: it runs while Health is 0.
+func is_timed() -> bool:
+	return true
 
 
 # Keeps Pawn.dead current: a plain value C++ (sensing, memory) reads directly (scaling spec step 4).
@@ -33,9 +32,14 @@ func _running_changed(running: bool) -> void:
 		pawn.dead = running
 
 
-# One tick at a time: each tick it adds one back for as long as Health is 0, so it never runs out while the pawn is dead.
+# Started with one tick, then put off for as long as Health is 0 (start and tick).
 func duration_ticks() -> int:
 	return 1
+
+
+func start() -> void:
+	if _health_is_gone():
+		ends_at = NEVER
 
 
 # A corpse lying still may sleep. When Health comes back (revive) this turns false, the pawn wakes and Death ends.
@@ -50,4 +54,6 @@ func _health_is_gone() -> bool:
 
 func tick(_dt: float) -> void:
 	if _health_is_gone():
-		ticks_left += ticks_elapsed() # the manager takes as many away after this, so it stays running
+		ends_at = NEVER
+	else:
+		end_run() # Health is back (revive)

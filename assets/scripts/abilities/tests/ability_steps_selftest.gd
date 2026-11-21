@@ -124,7 +124,7 @@ func _test_order_and_side_by_side() -> void:
 	_check(_tick_of(log, "B", "enter") == _tick_of(log, "C", "enter"), "and C with it: both side by side")
 	_check(_tick_of(log, "B", "tick") == _tick_of(log, "B", "enter") + 1, "a step started during a tick has its first tick on the next one")
 	_check(_count(log, "B", "tick") == 2 and _count(log, "C", "tick") == 4, "B runs 2 ticks and C 4, at the same time")
-	_check(not attack.is_running_timed() and attack.stops == 1 and attack.cooldown_ticks_left > 0, "the ability ends when its last step does, with its cooldown")
+	_check(not attack.is_running_timed() and attack.stops == 1 and attack.cooldown_ticks_left() > 0, "the ability ends when its last step does, with its cooldown")
 	_check(_count(log, "C", "exit:done") == 1 and _count(log, "B", "exit:cancelled") == 0, "every step said done, none cancelled")
 	_check(heard.started == 3 and heard.finished == 3, "step_started and step_finished for each step (%d, %d)" % [heard.started, heard.finished])
 	pawn.free()
@@ -168,7 +168,7 @@ func _test_failing() -> void:
 	_ai(pawn).press(&"primary")
 	await _ticks(5)
 	_check(_count(log, "F", "exit:failed") == 1 and _count(log, "G", "exit:failed") == 1, "a step failing stops the others with \"failed\"")
-	_check(not attack.is_running_timed() and attack.stops == 1 and attack.cooldown_ticks_left > 0, "and ends the ability, with its cooldown")
+	_check(not attack.is_running_timed() and attack.stops == 1 and attack.cooldown_ticks_left() > 0, "and ends the ability, with its cooldown")
 	pawn.free()
 
 
@@ -256,13 +256,13 @@ func _test_rollback() -> void:
 	await _ticks(10)
 	var listed: Array[String] = (pawn.get_node("TickState") as TickStateComponent).state_properties
 	# Claude 2026-11-16: as one value on the ability (step_state), not two per step, which cost 2.4 ms a tick at 150 pawns.
-	_check(listed.has("AbilityManager/StepAttack:step_state") and not listed.has("AbilityManager/StepAttack/A:running"), "the steps' running and step_ticks roll back, as one value on their ability")
+	_check(listed.has("AbilityManager/StepAttack:step_state pushed") and not listed.has("AbilityManager/StepAttack/A:running"), "the steps' running and step_ticks roll back, as one value on their ability")
 	_ai(pawn).press(&"primary")
 	await _ticks(10)
 	await get_tree().physics_frame
-	var real := [a.running, b.running, a.step_ticks, b.step_ticks, attack.ticks_left]
+	var real := [a.running, b.running, a.step_ticks, b.step_ticks, attack.ticks_left()]
 	var went_back: bool = TickDriver.rollback(TickDriver.tick - 8) # back to while A was running
-	var after := [a.running, b.running, a.step_ticks, b.step_ticks, attack.ticks_left]
+	var after := [a.running, b.running, a.step_ticks, b.step_ticks, attack.ticks_left()]
 	_check(went_back and after == real, "a replay from inside A ends in the same steps on the same tick (%s, was %s)" % [str(after), str(real)])
 	pawn.free()
 

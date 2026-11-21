@@ -36,7 +36,7 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's [`AbilityManager`](#abilitymanager).
 
 Extend it, set what's needed in `_init()`, and override `can_start()`, `start()`, `tick()`, `stop()` and, for counters that run all the time, `every_tick()` (with `can_sleep()`). LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities start on a press of their `trigger_action`, at once or for a `duration`. Players' keys and AI behaviours press the same actions. Times are set in seconds and kept in ticks (60 a second).
-Rollback: whatever an ability keeps between ticks must be named in `get_rollback_properties()`; the base already covers its own timers and step state. It can also be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a swing) and carry [`HitInterceptor`](#hitinterceptor) children that stop hits while it runs. Design: pawn spec 8, 8.20, 8.23.
+Rollback: whatever an ability keeps between ticks must be named in `get_pushed_properties()` (its setter calls `push_state()`) or `get_rollback_properties()` (read at every commit); the base already covers its own timers and step state. It can also be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a swing) and carry [`HitInterceptor`](#hitinterceptor) children that stop hits while it runs. Design: pawn spec 8, 8.20, 8.23.
 
 ### Settings and properties
 
@@ -57,9 +57,10 @@ Rollback: whatever an ability keeps between ticks must be named in `get_rollback
 - `pauses_locomotion: bool` = `false`: On: locomotion (Walk, Sprint) doesn't run at all while this does, so it neither steers nor slows the pawn (Dash). Off: a locked-out locomotion still slows the pawn to a stop, as an attack that roots the pawn wants.
 - `needs_full_movement: bool` = `false`: On: while it runs the pawn moves by physics (`move_and_slide`), not the CrowdMover, so fast or forced moves such as Dash and Knockback collide properly. Pawn spec 8.22.
 - `max_steps_ticks: int` = `600`: For a stepped ability, the longest it can run, in ticks at 60 a second. It ends when no step runs, or at this. Ignored without steps.
-- `ticks_left: int` = `0`: Ticks left of a timed run; 0: not running.
-- `cooldown_ticks_left: int` = `0`: Ticks until it can start again.
-- `buffer_ticks_left: int` = `0`: Ticks a waiting press has left.
+- `started_at: int` = `-1`: The tick the current (or last) timed run started.
+- `ends_at: int` = `-1`: The tick the current timed run ends: the manager finishes it on its first run at or after this tick. -1: not running.
+- `ready_at: int` = `0`: The tick it can start again: ready from this tick on.
+- `buffer_until: int` = `0`: A press waiting in the buffer waits until this tick (not including it).
 - `manager: AbilityManager` = `null`: Set by the AbilityManager.
 - `jitter_salt: int` = `0`: Set by the AbilityManager: a number from its name, for the priority_jitter offset.
 - `pawn: Pawn` = `null`
@@ -72,26 +73,40 @@ Rollback: whatever an ability keeps between ticks must be named in `get_rollback
 - `on_hit_self_effects: Effect[]` = `[]`
 - `interceptors: HitInterceptor[]` = `[]`: Its [`HitInterceptor`](#hitinterceptor)s, under it or its steps, found by the manager (pawn spec 8.23).
 - `steps: AbilityStep[]` = `[]`: Its [`AbilityStep`](#abilitystep) children in tree order, found by `collect_steps()`. Empty: no steps.
-- `step_state: PackedInt32Array` = `PackedInt32Array()`: Its steps' state, one number per step: 0 not running, step_ticks + 1 running. Rolled back as one value (a value per step was slow at 150 pawns).
+- `step_state: PackedInt32Array` = `PackedInt32Array()`: Its steps' state, one number per step: 0 not running, step_ticks + 1 running. Rolled back as one value (a value per step was slow at 150 pawns). Steps change their number through `set_step_value()`.
 - `pawns_hit_this_run: int[]` = `[]`: The pawns its steps have hit this run (instance ids), so each is hit once across all its sweeps. Server only, never in a replay; cleared when it starts.
 
 ### Constants
 
 - `Kind.LOCOMOTION = 0`
 - `Kind.ACTION = 1`
+- `NEVER = 4611686018427387904`: `ends_at` for a run with no end of its own yet (Death, while Health is 0).
 - `MAX_STEP_STARTS_PER_TICK = 32`: The most steps one ability may start in one tick, a guard against steps that start and stop each other in a loop. Past it, starts are refused, the ability ends and it warns once.
 
 ### Functions
 
-- `get_rollback_properties() -> String[]`: The properties on this node that roll back. An ability that keeps more adds to it with `super()`.
+- `get_pushed_properties() -> String[]`: The properties on this node that roll back and whose setters call `push_state()`, so the state store records them only when they change (state store spec 6.3). An ability that keeps more adds to it with `super()`. The cheap way, and the one the built-in abilities use.
+- `get_rollback_properties() -> String[]`: Other properties on this node that roll back, read from the node at every commit: no setter needed, so the easy way for a quick ability, but each costs a read per pawn per tick. None in the base.
+- `keeps_state(property: String) -> bool`: True if this property rolls back, either way.
+- `push_state(property: StringName, value: Variant) -> void`: Records a pushed property's new value in the state store, from the next commit on (state store spec 6.3). Each property in `get_pushed_properties()` calls it from its setter, after setting the value. Nothing until the manager has registered them.
 - `duration_ticks() -> int`: How many ticks a timed run lasts: duration in ticks, or max_steps_ticks when stepped. Dash and Knockback override it.
+- `is_timed() -> bool`: True if it runs for a while once started (a duration, steps, or a length of its own: Dash, Death, Knockback), so it keeps `started_at` and `ends_at`. False for one that happens at once, such as Jump.
 - `is_running_timed() -> bool`: True while a timed run is going.
-- `ticks_running() -> int`: Ticks of the current run already ticked: 0 on the tick it starts, and when not running. Worked out from ticks_left, so it rolls back.
+- `is_run_over() -> bool`: True once the current run is over: the manager finishes it on this pawn's run. Set by `end_run()`, or by reaching ends_at.
+- `end_run() -> void`: Ends the current run this tick: the manager finishes it (stopping its steps, starting its cooldown) before this run of the pawn is over. For steps that are done, and for an ability that decides its own end.
+- `delay_run(ticks: int) -> void`: Moves the current run's deadlines this many ticks later, as if it hadn't run for them: the manager calls it while an action pauses locomotion (a Dash), so a timed locomotion's time waits. An ability with deadlines of its own moves them too, with `super()`.
+- `ticks_running() -> int`: Ticks since the current run started, through this tick; 0 when not running. Worked out from `started_at`, so it rolls back.
+- `ticks_before_this_run() -> int`: For `tick()`: the ticks of the run that came before this run of the pawn (0 on its first tick). This run covers `ticks_elapsed()` more.
+- `ticks_left() -> int`: Ticks left of the current run, from `ends_at`; 0 when not running. For readouts.
+- `cooldown_ticks_left() -> int`: Ticks until it can start again, from `ready_at`; 0 when ready. For readouts.
+- `buffer_ticks_left() -> int`: Ticks a waiting press has left in its buffer, from `buffer_until`; 0 with none. For readouts.
+- `is_buffered() -> bool`: True while a press waits in its buffer.
 - `_running_changed(_running: bool) -> void`: Called when a timed run starts or ends, also when a rollback loads new values. [`DeathAbility`](#deathability) uses it to keep `Pawn.dead` current.
 - `ticks_elapsed() -> int`: The ticks this run covers: 1, or more for a pawn running every Nth tick (pawn spec 8.21). Timers and step counts advance by it.
 - `is_stepped() -> bool`: True if it's built from steps.
 - `start_step(step: AbilityStep) -> void`: Starts one of its steps if it isn't running. Steps call it to start others.
 - `stop_step(step: AbilityStep, reason: String = "cancelled") -> void`: Stops a running step, passing the reason to its `AbilityStep.exit()`.
+- `set_step_value(index: int, value: int) -> void`: Sets one step's number in `step_state` and pushes the array. Writing one element directly wouldn't record it: GDScript doesn't call a property's setter for an element write, on a packed array as on any other.
 - `is_step_running(step: AbilityStep) -> bool`: True while this step of this ability runs.
 - `get_running_step_names() -> PackedStringArray`: The names of the steps running now, in tree order. For readouts and debug tools.
 - `current_interrupt_threshold() -> int`: Its interrupt_threshold now, before effects add: the strictest of its running steps' own, or its own when none has one.
@@ -122,7 +137,7 @@ Rollback: whatever an ability keeps between ticks must be named in `get_rollback
 
 Starts, runs and stops a pawn's abilities, and takes the hits that land on it.
 
-A part on the pawn, added by PawnInitializer, with the abilities as its children. The pawn calls `tick_abilities()` once a tick, after its input arrives and before `move_and_slide`: counters count down, one locomotion ability runs, then pressed actions start the ready ability with the highest priority. It owns the cancelling rules, the combo counter and the hit path. Everything that persists between ticks lives on the abilities (and the combo counter here) and rolls back. Outside code only talks to the manager:
+A part on the pawn, added by PawnInitializer, with the abilities as its children. The pawn calls `tick_abilities()` once a tick, after its input arrives and before `move_and_slide`: one locomotion ability runs, then pressed actions start the ready ability with the highest priority. Timers are tick deadlines (ability spec 4), so nothing counts down. It owns the cancelling rules, the combo counter and the hit path. Everything that persists between ticks lives on the abilities (and the combo counter here) and rolls back. Outside code only talks to the manager:
 
 ```gdscript
 pawn.ability_manager.can_start(&"jump")      # could a press start something now? (the AI asks)
@@ -136,9 +151,9 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 ### Settings and properties
 
 - `pawn: Pawn` = `null`
-- `combo_position: int` = `0`: The combo position the last combo ability took; 0: none yet.
-- `combo_window_ticks_left: int` = `0`: Ticks left in the combo window; while above 0 a follow-up for the next position can start.
-- `readiness_version: int` = `0`: Goes up by one whenever something changes that can change what `can_start()` answers (an ability or step starting or ending, a cooldown or the combo window running out, effects changing). The AI keeps its last answer until this moves ([`AIInputs`](../ai/REFERENCE.md#aiinputs); scaling spec 6.2). Never goes down.
+- `combo_position: int` = `0`: The combo position the last combo ability took; 0: none yet. Pushed to the state store when it changes.
+- `combo_open_until: int` = `0`: The combo window is open until this tick (not including it): a follow-up for the next position can start. Pushed when it changes.
+- `readiness_version: int` = `0`: Goes up by one whenever something changes that can change what `can_start()` answers (an ability or step starting or ending, a cooldown or the combo window running out, effects changing). The AI keeps its last answer until this moves ([`AIInputs`](../ai/REFERENCE.md#aiinputs); scaling spec 6.2). Never goes down. A deadline passing moves it on when it's next read, so the AI in the input step sees a cooldown end on its tick, as `can_start()` does, before this pawn's abilities run.
 
 ### Signals
 
@@ -154,8 +169,9 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 
 ### Functions
 
-- `tick_abilities(dt: float) -> void`: The pawn calls this once a tick; dt is the fixed tick length. Order: counters, locomotion, then actions (see the README).
-- `timers_changed() -> void`: The abilities' timers call this when one starts or reaches 0 (pawn spec 15.2).
+- `tick_abilities(dt: float) -> void`: The pawn calls this once a tick; dt is the fixed tick length. Order: deadlines passed, locomotion, then actions (see the README).
+- `timers_changed() -> void`: The abilities' timers call this when one is set (pawn spec 15.2).
+- `state_loaded() -> void`: After a rollback loads this pawn's state: what's worked out from the deadlines is worked out again. A loaded deadline equal to the one it replaces calls no setter, but the soonest one still ahead depends on the tick, which went back.
 - `readiness_changed() -> void`: Moves `readiness_version` on for a change made outside the abilities; the EffectManager calls it when effects change.
 - `ready_follows_body(action: StringName) -> bool`: True if an ability on this action has its own `AbilityBase.can_start()`, which can change without telling the manager (Jump needs the ground). The AI asks such an action at every decision, whatever `readiness_version` says.
 - `can_sleep() -> bool`: True if the pawn can sleep as far as its abilities go (pawn spec 15.3): no timer running (unless that ability can wait), no combo window open, and every every_tick() ability agrees.
@@ -178,6 +194,8 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 - `interrupt_priority_now(ability: AbilityBase) -> int`: Its interrupt_priority right now, with what effects add.
 - `interrupt_threshold_now(ability: AbilityBase) -> int`: Its interrupt_threshold now, with what effects add; for a stepped ability, the strictest of its running steps'.
 - `open_combo_window(ticks: int) -> void`: Opens the combo window for this many ticks. An [`OpenComboStep`](#opencombostep) calls it after its ability's hit.
+- `is_combo_window_open() -> bool`: True while the combo window is open.
+- `combo_window_ticks_left() -> int`: Ticks left in the combo window; 0 when it's shut. For readouts.
 - `combo_position_for(ability: AbilityBase) -> int`: The combo position it would take if it started now: the next, if the window is open and it fits; else 1 for an opener; else 0 (can't start now). 0 too with no combo_positions.
 - `interrupt_rule(starting: AbilityBase, running: AbilityBase) -> Dictionary`: What happens if starting tries to start while running runs, by this pawn's numbers now (effects included). Ignores cooldowns and can_start.
   
@@ -195,7 +213,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 A short, fast burst toward the movement input: an action bound to &"dash".
 
 It adds acceleration along the dash direction for `speed_up_seconds`, then takes speed off for `slow_down_seconds`, so left alone the pawn ends at the speed it started with. Speed gained some other way during a dash stays. Walking, sprinting and jumping are locked out while it runs, and it works on the ground and in the air (`usable_in_air`). The pawn turns to face the dash.
-It cancels a swing, and it's invulnerable for its first 0.18 s (an [`InvulnerabilityInterceptor`](#invulnerabilityinterceptor), pawn spec 8.23). Rollback: `dash_direction` rolls back with its timer and cooldown; its phase comes from `AbilityBase.ticks_running()`. Design: pawn spec 8.6, 8.9.
+It cancels a swing, and it's invulnerable for its first 0.18 s (an [`InvulnerabilityInterceptor`](#invulnerabilityinterceptor), pawn spec 8.23). Rollback: `dash_direction` rolls back with its timer and cooldown; its phase comes from `AbilityBase.ticks_before_this_run()`. Design: pawn spec 8.6, 8.9.
 
 ### Settings and properties
 
@@ -205,12 +223,13 @@ It cancels a swing, and it's invulnerable for its first 0.18 s (an [`Invulnerabi
 - `slow_down_deceleration: float` = `50.0`: How hard it slows down after, in metres per second per second.
 - `slow_down_seconds: float` = `0.2`: How long it slows down for, in seconds. The defaults take off what the speed-up added (50 x 0.2 against 100 x 0.1).
 - `usable_in_air: bool` = `true`: On: it can start in the air as well as on the ground. Off: ground only.
-- `dash_direction: Vector3` = `Vector3(0, 0, 0)`: The way it's dashing, flat and length 1. Rolls back.
+- `dash_direction: Vector3` = `Vector3(0, 0, 0)`: The way it's dashing, flat and length 1. Rolls back (pushed).
 
 ### Functions
 
 - `make_default_interceptors() -> void`: With no interceptor of its own, a Dash is invulnerable for its first 0.18 s, so the end of its slow-down can be hit.
-- `get_rollback_properties() -> String[]`
+- `get_pushed_properties() -> String[]`
+- `is_timed() -> bool`: Timed, by its two phases rather than duration.
 - `duration_ticks() -> int`: The speed-up's ticks plus the slow-down's.
 - `can_start() -> bool`: Anywhere with usable_in_air on (the default); on the ground only with it off.
 - `start() -> void`: Picks the direction (the movement input, or the facing with none) and turns the pawn to face it.
@@ -227,8 +246,9 @@ Rollback: its timer rolls back with Health, so clients see the pawn dead from sn
 
 ### Functions
 
-- `get_rollback_properties() -> String[]`
+- `is_timed() -> bool`: Timed: it runs while Health is 0.
 - `duration_ticks() -> int`
+- `start() -> void`
 - `can_sleep_while_running() -> bool`
 - `tick(_dt: float) -> void`
 
@@ -262,22 +282,24 @@ Plain data, made on the server only, where hits are decided. A hit carries effec
 
 Jumping: an action bound to &"jump", which happens at once.
 
-It starts from the ground, or within `coyote_time` of walking off an edge. A press a moment too early waits `buffer_window` seconds and jumps on landing; holding the key doesn't bounce, because only a press starts it. Height comes from the pawn's JumpVelocity stat, in metres per second upward. Rollback: `ticks_off_ground`. Design: pawn spec 8.5.
+It starts from the ground, or within `coyote_time` of walking off an edge. A press a moment too early waits `buffer_window` seconds and jumps on landing; holding the key doesn't bounce, because only a press starts it. Height comes from the pawn's JumpVelocity stat, in metres per second upward. Rollback: `left_ground_at`. Design: pawn spec 8.5.
 
 ### Settings and properties
 
 - `coyote_time: float` = `0.1`: Seconds after leaving the ground, without jumping, that a press still jumps.
-- `ticks_off_ground: int` = `0`: Ticks since the pawn was last on the ground, capped at COUNT_CAP. Rolls back.
+- `left_ground_at: int` = `-4611686018427387904`: The last tick the pawn was known to be on the ground before it left it; `ON_GROUND` while it's there. Rolls back (pushed).
 
 ### Constants
 
-- `COUNT_CAP = 100`: The cap on `ticks_off_ground`, so it's one byte on the network. Anything past the coyote time counts the same.
+- `ON_GROUND = -4611686018427387904`: `left_ground_at` while the pawn is on the ground.
+- `COUNT_CAP = 100`: The most `ticks_off_ground()` counts. Anything past the coyote time counts the same.
 
 ### Functions
 
-- `get_rollback_properties() -> String[]`
+- `get_pushed_properties() -> String[]`
+- `ticks_off_ground() -> int`: Ticks since the pawn was last on the ground, up to `COUNT_CAP`; 0 on the ground.
 - `every_tick(_dt: float) -> void`
-- `can_sleep() -> bool`: True while `ticks_off_ground` is 0: a sleeping pawn is grounded, so it would only keep it there (pawn spec 15.3).
+- `can_sleep() -> bool`: True while on the ground: a sleeping pawn is grounded, so it would only keep it there (pawn spec 15.3).
 - `can_start() -> bool`
 - `start() -> void`
 
@@ -292,12 +314,13 @@ Rollback: `push_velocity` and `push_ticks` roll back with its timer, so a correc
 
 ### Settings and properties
 
-- `push_velocity: Vector3` = `Vector3(0, 0, 0)`: The push at the start, in metres per second; its y is the hop speed upward. Rolls back.
-- `push_ticks: int` = `0`: How many ticks this push lasts. Rolls back.
+- `push_velocity: Vector3` = `Vector3(0, 0, 0)`: The push at the start, in metres per second; its y is the hop speed upward. Rolls back (pushed).
+- `push_ticks: int` = `0`: How many ticks this push lasts. Rolls back (pushed).
 
 ### Functions
 
-- `get_rollback_properties() -> String[]`
+- `get_pushed_properties() -> String[]`
+- `is_timed() -> bool`: Timed, by its push's length rather than duration.
 - `duration_ticks() -> int`
 - `push(velocity: Vector3, ticks: int, hop: float = 0.0) -> bool`: Starts a push; hop is the upward speed in metres per second (0: none). Returns false if something stronger is running.
 - `tick(_dt: float) -> void`
@@ -398,9 +421,29 @@ pawn.ability_manager.can_start(&"primary")
 
 `res://assets/scripts/abilities/SprintAbility.gd`, extends [`WalkAbility`](#walkability)
 
-Running faster for a while: a locomotion ability bound to &"sprint".
+Running faster while a charge lasts: a locomotion ability bound to &"sprint".
 
-It moves like Walk, at SprintSpeed. While &"sprint" is held and it's ready it runs instead of Walk; it has a maximum duration and a cooldown in place of stamina, so it has downtime. An AI uses it by holding &"sprint". Design: pawn spec 8.5.
+It moves like Walk, at SprintSpeed. While &"sprint" is held and it has charge it runs instead of Walk. Sprinting drains the charge one tick per tick; `recharge_delay` after it stops, the charge refills at `recharge_rate`. It starts only with at least `min_start_charge`, so a held key on an empty charge doesn't flicker it on a tick at a time. An AI uses it by holding &"sprint".
+The charge is worked out from two values set only when it starts or stops (`charge_at_switch`, `switched_at`), so nothing changes while it drains or refills (ability spec 4). `ready_at` is the tick the charge reaches the minimum, so the manager and the AI see when it can start again. Design: pawn spec 8.5.
+
+### Settings and properties
+
+- `max_charge: float` = `3.0`: Seconds of sprinting on a full charge.
+- `recharge_rate: float` = `0.5`: How fast the charge refills while not sprinting, in seconds of sprint per second: 0.5 refills at half the rate it drains.
+- `recharge_delay: float` = `1.0`: Seconds after it stops before the charge starts refilling.
+- `min_start_charge: float` = `0.5`: The charge needed to start, in seconds (at most `max_charge`).
+- `charge_at_switch: int` = `0`: Ticks of charge when it last started or stopped. Rolls back (pushed).
+- `switched_at: int` = `-1`: The tick it last started or stopped; -1: never, so the charge is full. Rolls back (pushed).
+
+### Functions
+
+- `charge_ticks() -> int`: Ticks of sprinting it has now: draining while it runs, refilling while it doesn't. Worked out from the tick.
+- `is_timed() -> bool`
+- `get_pushed_properties() -> String[]`
+- `duration_ticks() -> int`
+- `start() -> void`
+- `stop() -> void`
+- `delay_run(ticks: int) -> void`
 
 ## WalkAbility
 

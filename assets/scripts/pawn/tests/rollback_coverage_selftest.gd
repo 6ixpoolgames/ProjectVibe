@@ -69,6 +69,9 @@ const NOT_ROLLED_BACK := {
 	# Goes up whenever a stat's value changes, so abilities that keep stat values read them again (pawn spec 15.2). A rollback that
 	# puts a value back changes it again, so it never needs to go back itself.
 	"StatManager:version": "a change counter for caches",
+	# Claude 2026-11-21 (ability spec 4): the soonest cooldown, buffer or combo window end, worked out again whenever a deadline is set,
+	# a rollback load included.
+	"AbilityManager:_next_deadline": "worked out from the deadlines, which roll back",
 	# Who this swing has already hit, so each pawn is hit once. Hits are decided on the authority only and never in a replay, and the
 	# server never rolls back, so this is never needed on a machine that does. Hidden before 2026-11-10 by the shared keys.
 	"MeleeAttackAbility:_hit_this_swing": "on the server only, which never rolls back",
