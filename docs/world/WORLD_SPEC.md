@@ -93,6 +93,16 @@ What this implies:
 - The coordinator holds a list of generators, and never assumes one per chunk.
 - A small test generator with stacked rooms, in `tests/`, would prove they're interchangeable. If it needs a change to the coordinator, the contract is wrong.
 
+### Determinism: what "repeatable" has to mean *(Claude 2026-11-23, from comparing Windows and Linux, state store spec 13.11)*
+
+Every machine builds its own world, and a replay or a lockstep game will re-simulate it, so a generator's output must be **the same bits everywhere**: on another run, another machine, another platform, and however fast the machine is. The nav layer already holds up its end for any generator: Recast and Detour sort stably (`native/src/stable_qsort.h`) and nearest-polygon ties go by polygon id, so the same triangles give the same nav mesh and the same query answers on every platform. Grid-aligned levels (dungeons, wave function collapse, tiles) are full of exact ties, which is why both matter more for them than for noisy terrain. What's left is the generator's side:
+
+1. **Randomness from the seed, by hashing**: a value from (seed, position, salt), as `AIContextComponent.random_unit_at` and `TickDriver.tick_rng` do. Not `randf()`, and not one generator's sequence shared across chunks built in whatever order they happen to be.
+2. **Never order by a hash map or by timing.** A C++ `unordered_map` lists its contents in a different order on each standard library; a GDScript `Dictionary` keeps insertion order, which is fine only if the insertions themselves come in a fixed order. Work done on threads is collected and used in a fixed order (by key), never in the order it finished.
+3. **Platform math only where its result is rounded.** sin, cos, pow, exp and the like can differ in their last bit between C runtimes. Either keep them out of geometry (rooms on a grid need none), or round what they produce to a fixed grid before it's used: vertices to the millimetre, as the state store rounds positions, absorb last-bit differences unless a value sits exactly on a rounding boundary.
+4. **Land on ticks.** Whatever is built across frames or on threads becomes visible to play (collision, nav input, markers) only on a landing tick fixed when it was asked for, as terrain chunks and nav tiles do (state store spec 13.12). Today that lives inside `ChunkStreamer`; a second generator is the time to make it a service the coordinator offers every generator.
+5. **Prove it.** The determinism check (`tools/determinism/run_determinism_check.py`, `--compare` across machines, `--nav-dump` for the nav mesh) works on any level. Planned with the second generator: a hash of each landing's geometry in the landing record, so a generator whose output differs is named directly, before it shows as a soldier walking differently.
+
 ### Blending
 
 | Kind | Example | What it needs |

@@ -1,7 +1,8 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-22: compares two replay recordings tick by tick (the owner's request: judge
 ## determinism across separate sessions from their replays, without the determinism check's own run). A tool, not a test: it reads
 ## two .pbreplay files with ReplayReader and reports the first tick where they differ, which pawn and which field, with both values,
-## then how many ticks and pawns differ in all. Two sessions that start the same and play the same give equal files tick for tick.
+## then how many ticks and pawns differ in all; when they agree, what they hold (the most pawns at once, events by kind), so a pass
+## can be judged. Two sessions that start the same and play the same give equal files tick for tick.
 ##
 ## What it compares, per tick: which pawns exist, and each one's name, scene, team, motion (position in whole millimetres, yaw and
 ## velocity as stored, flags) and input; and the tick's events (spawns, world, gameplay), leaving out diagnostics, which are timings.
@@ -68,7 +69,7 @@ func _compare(path_a: String, path_b: String) -> int:
 		if (pair[0] as ReplayReader).open(pair[1]) != OK:
 			print("Couldn't read %s" % pair[1])
 			return 2
-	print("A: %s\nB: %s" % [ProjectSettings.globalize_path(path_a).get_file(), ProjectSettings.globalize_path(path_b).get_file()])
+	print("A: %s\nB: %s" % [path_a.get_file(), path_b.get_file()])
 	for reader: ReplayReader in [a, b]:
 		if reader.is_cut_short():
 			print("  note: %s ends partway through a block; compared up to its last whole one" % ("A" if reader == a else "B"))

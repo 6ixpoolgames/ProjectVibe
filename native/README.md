@@ -21,6 +21,7 @@ Every class here is optional for GDScript: each script checks `ClassDB.class_exi
 - Windows needs the Visual Studio Build Tools (C++). Linux builds a `.so` with `scons` in `native/` (don't commit it: it needs a very new Linux).
 - godot-cpp is a submodule in `thirdparty/godot-cpp`, at **10.0.0-stable**, built for Godot 4.7's API (`api_version` in `SConstruct`). `bin/navcore.gdextension` says `compatibility_minimum = "4.7"`.
 - Recast/Detour are in `thirdparty/recastnavigation`, built with 64-bit poly refs (`DT_POLYREF64`).
+- Their `qsort` calls go to a stable sort of ours (`src/stable_qsort.h`, forced into their sources by the `SConstruct`; their files are untouched), and nearest-polygon lookups go through `GroundDomain`'s own `nearest_poly`, so the nav mesh and its answers are the same on every platform (state store spec 13.11). Call `nearest_poly`, never `dtNavMeshQuery::findNearestPoly`.
 - The library lands in `bin/` (`navcore.windows.template_debug.x86_64.dll`). **Close the Godot editor first**: it holds the DLL open, and the library can't hot-reload (its worker threads).
 
 ## The classes GDScript can use

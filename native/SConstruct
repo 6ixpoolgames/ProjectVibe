@@ -16,7 +16,17 @@ env.Append(CPPPATH=["src/", recast + "Recast/Include", recast + "Detour/Include"
 # Must be defined for Detour's own sources AND ours, so it goes on the whole environment.
 env.Append(CPPDEFINES=["DT_POLYREF64"])
 
-sources = Glob("src/*.cpp") + Glob(recast + "Recast/Source/*.cpp") + Glob(recast + "Detour/Source/*.cpp")
+# Claude 2026-11-23: Recast and Detour sort with qsort, which isn't stable, so ties came out in a different order on another platform's
+# C runtime and the nav mesh differed between Windows and Linux. Their sources get src/stable_qsort.h forced in, which points qsort
+# at a stable sort; the third-party files themselves are untouched. See src/stable_qsort.h and state store spec 13.11.
+recast_env = env.Clone()
+stable_qsort_header = File("src/stable_qsort.h").abspath
+if recast_env.get("is_msvc", False):
+    recast_env.Append(CCFLAGS=["/FI" + stable_qsort_header])
+else:
+    recast_env.Append(CCFLAGS=["-include", stable_qsort_header])
+recast_objects = [recast_env.SharedObject(source) for source in Glob(recast + "Recast/Source/*.cpp") + Glob(recast + "Detour/Source/*.cpp")]
+sources = Glob("src/*.cpp") + recast_objects
 
 library = env.SharedLibrary(
     "../bin/navcore{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),

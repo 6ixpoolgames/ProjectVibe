@@ -28,7 +28,17 @@ public:
 	// (the asked-for points), LOG_START_POS and LOG_END_POS (the snapped points), each point as a = (x bits << 32) | y bits, b = z
 	// bits; LOG_STEP (a: steps used, b: 0 running, 1 done, -1 failed); LOG_NO_START (it failed to start); LOG_GOAL_CANDIDATE (a: a
 	// polygon the goal could snap to, b: 1 if the goal is over it) and LOG_GOAL_CANDIDATE_POS (its closest point to the goal).
-	enum LogKind { LOG_START = 0, LOG_STEP = 1, LOG_START_POS = 2, LOG_END_POS = 3, LOG_NO_START = 4, LOG_FROM = 5, LOG_TO = 6, LOG_GOAL_CANDIDATE = 7, LOG_GOAL_CANDIDATE_POS = 8 };
+	enum LogKind {
+		LOG_START = 0,
+		LOG_STEP = 1,
+		LOG_START_POS = 2,
+		LOG_END_POS = 3,
+		LOG_NO_START = 4,
+		LOG_FROM = 5,
+		LOG_TO = 6,
+		LOG_GOAL_CANDIDATE = 7,
+		LOG_GOAL_CANDIDATE_POS = 8,
+	};
 	void set_debug_log(std::vector<int64_t> *log, int64_t tick) {
 		m_log = log;
 		m_log_tick = tick;

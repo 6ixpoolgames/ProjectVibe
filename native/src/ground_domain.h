@@ -71,8 +71,8 @@ public:
 	void finish_sliced(PathOutcome &out);
 	// The current sliced search's snapped start and end: polygons and points. For PathQueue's debug log.
 	void sliced_endpoints(uint64_t &start_ref, uint64_t &end_ref, float *start_pos, float *end_pos) const;
-	// Every polygon a snap near p could pick, for PathQueue's debug log: per polygon, its ref, whether p is over it, and the closest
-	// point on it (4 + 3 numbers: ref, over, then x y z as floats).
+	// Every polygon a snap near p could pick, in the order Detour meets them, for PathQueue's debug log: each one's ref, whether p is
+	// over it, and the closest point on it (three floats each in closest).
 	void debug_snap_candidates(const float *p, int tier, bool use_links, std::vector<uint64_t> &refs, std::vector<uint8_t> &over,
 			std::vector<float> &closest) const;
 

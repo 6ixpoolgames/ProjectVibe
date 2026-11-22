@@ -15,7 +15,9 @@ Code that works but doesn't yet fit the project's goals. Each is marked `REFACTO
 
 ## 2026-11-23
 
-- **Determinism across platforms** (the owner's request): `run_determinism_check.py --compare A B` compares two fingerprint files made elsewhere, without running. The run's `--trace` also writes the traced pawn's move input, path state and every AI decision it makes (through the decision listener, cleared on exit: left set, the static listener crashed Godot as it quit). New run options for comparing machines: `--nav-dump=TICK` (every nav triangle, link and tile state, bit for bit) and `--paths-to=TICK` (every pawn's path state, and the nav server's path search log). Windows against Linux: the fingerprints split at tick 18 over a nearest-polygon tie that Detour settles in a platform-dependent order; fixed in `GroundDomain` (native changelog), and a 603-pawn, 7200-tick match now agrees on both (state store spec 13.11).
+- **Determinism across platforms** (the owner's request; state store spec 13.11): Windows against Linux, the fingerprints split at tick 18 over a nearest-polygon tie that Detour settles in a platform-dependent order. Fixed in the nav library (native changelog: our own nearest-polygon lookup, then Recast and Detour sorting stably), after which a 603-pawn, 7200-tick match agrees on both platforms on every value.
+- **Tools for comparing machines:** `run_determinism_check.py --compare A B` compares two fingerprint files made elsewhere, without running. New run options: `--terrain-seed=N` (another floor), `--nav-dump=TICK` (every nav triangle, link and tile state, bit for bit), `--paths-to=TICK` (every pawn's path state, and the nav server's path search log), and a fuller `--trace` (the move input, the path state and every AI decision; the static decision listener is cleared on exit, since left set it crashed Godot as it quit).
+- **Under contention:** 4 copies of the check run at once on one machine, on the default floor and on another, each match the run made alone.
 
 ## 2026-11-22
 
