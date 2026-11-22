@@ -4,7 +4,7 @@ this says how it got here and why. -->
 
 # Tags changelog
 
-Tags are this folder (`TagRegistry`, `Tags`), the declarations file (`resources/tag_declarations.tres`, `TagDeclarationsRes`) and the Tag Picker editor plugin (`addons/tag_picker/`). Design: [docs/pawn/PAWN_SPEC.md](../../../docs/pawn/PAWN_SPEC.md) sections 7.1 and 8.10, and the netcode spec section 13. Overview: [README.md](README.md).
+Tags are this folder (`TagRegistry`, `Tags`), the declarations file (`resources/tag_declarations.tres`, `TagDeclarationsRes`), the tools in `tools/tags/` and the Tag Picker editor plugin (`addons/tag_picker/`). Design: [docs/tags/TAG_SPEC.md](../../../docs/tags/TAG_SPEC.md); before it, [pawn spec](../../../docs/pawn/PAWN_SPEC.md) sections 7.1 and 8.10 and the netcode spec section 13. Overview: [README.md](README.md).
 
 ## Refactor candidates
 
@@ -12,7 +12,17 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| One tag-set class for abilities, nav and effects | `TagRegistry`, `navigation/NavTags`, `effects/EffectTags` | The same rules, copied on purpose when NavTags and EffectTags were written so working code didn't change. A single class used once per tag set is one place to fix and test, and a game's own tag set would come free. The matching row is in navigation's changelog | M |
+| More than 64 levels in a category | `TagRegistry` | The tag spec gives a category that outgrows its word a second one. Every caller's mask is one int today, so that waits until a category nears 64 levels; past it, tags get no bit with a warning | M |
+
+## 2026-11-22
+
+- **One registry for every kind of tag** (tag spec step 1, agreed with the owner): `TagRegistry` now holds ability, effect and navigation tags, and the AI's and a pawn's status. A tag's first level is its category (`ability`, `effect`, `status`, `ai`, `nav`), each numbering its own levels in its own 64-bit word, so today's one-AND checks are unchanged. `navigation/NavTags` and `effects/EffectTags`, copies of the same rules, are gone (the refactor row is done). New: `category_of`, `get_categories`, `word_of`, `description_of`, `is_deprecated`, `declare_redirects`, `declare_deprecated`; `names_of` takes the category; `category_mask_of_list` is `full_mask_of_list` (the name EffectTags and NavTags used), since "category" now means the first level. A list mixing categories warns.
+- **Every tag renamed with its category:** `combat.melee` is `ability.combat.melee`, `damage.poison` is `effect.damage.poison`, `point.cover` is `nav.point.cover`. The Death ability's category is `ability.death` (it was `status.dead`, which stays as the pawn's condition for owned tags). Saved resources and scenes were rewritten; every old name has a redirect.
+- **Declarations:** `TagDeclarationsRes` holds each tag with a one-line description, plus `redirects` and `deprecated`. One base file (`resources/tag_declarations.tres`, the three merged); a game lists more in the project setting `project_base/tags/extra_declaration_files` (the old `project_base/tags/declarations_path` and `project_base/nav/tag_declarations_path` are gone).
+- **Constants grouped by category:** `Tags.ABILITY.COMBAT_MELEE`, `Tags.EFFECT.DAMAGE_POISON`, `Tags.STATUS.DEAD`, `Tags.NAV.POINT_COVER`; `ALL` is the category itself. The groups are in capitals because an inner class named `Effect` would clash with the effects system's `Effect` (Godot refuses it).
+- **Tag Picker:** each tag property names the categories its dropdown offers; nav markers' `tag` gets a dropdown too; deprecated tags are hidden.
+- **Tools:** `tools/tags/apply_redirects.py` rewrites old names in saved scenes and resources (and lists any left in scripts); `tools/tags/make_tag_reference.py` writes `docs/tags/TAGS.md`, every tag with its description and old names.
+- **Tests:** `tag_registry_selftest` covers categories, words, redirects, deprecation, descriptions and the grouped constants; `nav_tags_selftest` is gone with `NavTags` (its checks are the same rules).
 
 ## 2026-11-18
 

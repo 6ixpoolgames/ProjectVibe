@@ -1,4 +1,4 @@
-# Ability Spec v0.2 (agreed direction; parts 1 to 4 built: state pushed, timers as deadlines, definitions, step timelines, projectiles)
+# Ability Spec v0.2 (agreed direction; parts 1 to 5 built: state pushed, timers as deadlines, definitions, step timelines, projectiles, hits)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
@@ -14,7 +14,7 @@
 2. **Definitions** (section 3), and the registry that gives them ids (section 3.1): built 2026-11-21 (as built: 3.2).
 3. **Step timelines and conditions** (section 6), replacing the steps' links and their counting `step_state`: built 2026-11-22 (as built: 6.5).
 4. **References as ids and projectiles** (sections 8 and 9): built 2026-11-22 (as built: 9.1). Swing arcs moved to part 5.
-5. **Hits** (section 13): one hit system for melee and projectiles, with swing arcs as keys (section 7). Planned.
+5. **Hits** (section 13): one hit system for melee and projectiles, with swing arcs as keys (section 7): built 2026-11-22 (as built: 13.8). The history query and the batched C++ call are the next step.
 
 ## 1. Decided
 
@@ -203,8 +203,8 @@ Resource ids come from the registry of definitions and effects (3.1).
 - **One hit path:** `HitInfo.make()` and `deliver()` for swings and bolts; the hit signals are declared once on `AbilityBase`.
 - **Hooks and tools:** `launched`, `hit_pawn`, `hit_world`, `ended` and `intersected` (each intersect logged, hit or not); the impact scene spawned where it ends, as its own node; the F5 projectile trace in diagnostics.
 - **The shooter's predicted copy** (`PredictedProjectile`): drawn at once on the shooter's client, gone when the server's shot ends.
-- **Moving to part 5:** the projectile's whitelist, on-hit effects, `max_hits` and `max_intersects` go into a `HitDefinition`; its own hit finding into the shared hit query.
-- **Known gaps:** an embedded variant's speed curve, look or impact don't reach clients (speed and gravity scale do); a client places an impact where it last drew the bolt, not where it ended; the predicted copy is tested offline only; walls are tested with a ray, pawns with the sphere.
+- **Moved in part 5** (13.8): the projectile's whitelist, on-hit effects, `max_hits` and `max_intersects` went into the `HitDefinition`, its hit finding into the shared hit query, and its end is worked out at launch.
+- **Known gaps:** an embedded variant's speed curve, look or impact don't reach clients (speed and gravity scale do); a client places the impact of a bolt a pawn stopped where it last drew it (ends at the world, range or lifetime are exact since part 5); the predicted copy is tested offline only; walls are tested with a ray, pawns with the sphere.
 
 ## 10. Visuals and events
 
@@ -231,8 +231,84 @@ Refactor rows from the abilities changelog folded in: Death and Knockback found 
 
 ## 12. Open
 
-- **A hit whose source is gone** (the owner, 2026-11-22): in the usual case a hit needs its ability; if the shooter's pawn is removed, its bolts' hits don't land, as some games do on purpose. A fireball that lands regardless needs its own way: keep the source until its projectiles and effects are done, or a global source.
+- **A world source** for traps, hazards and arena events (13.5 covers a removed pawn's projectiles).
 - **One condition base** for abilities and the AI, or two that look alike.
 - **Authoring step timelines:** a list of entries in Godot's inspector works; a timeline editor belongs to the design studio on the roadmap.
 - **Interceptors:** settings into definitions, and whether one can be started by a timeline entry.
 - **C++ for hot built-ins** (the sweep, the dash): only where the dispatch measurement shows real gains.
+
+## 13. Hits (part 5, agreed and built 2026-11-22)
+
+The owner's direction (2026-11-22): one way to find and apply hits for melee and projectiles; the whitelist and what a hit does as a definition, swappable; the intersect log the same for both; hit volumes on the pawn, in the world, or along a weapon's path baked as keys (never live bones on the server).
+
+### 13.1 The pipeline
+
+Every tick a hit volume is active (a swing's sweep, a projectile's flight, a placed area):
+
+1. **Shape:** where the volume is this tick: spheres along a path segment (a sweep, a bolt) or one shape (an area). This is the only part that differs between them.
+2. **Who it touches:** `HitQuery.touching(shape, tick, attacker, view_ticks_behind)`, static and shared. Pawns' capsules, nearest first along the path. Inside: the C++ grid (physics without it), and lag compensation against where the attacker saw pawns. Later: the store's position history instead of moving entities back, and every active volume in one batched C++ call a tick.
+3. **May it hit:** the volume's `HitDefinition` (13.2): its whitelist, and not dead or invulnerable.
+4. **Once only:** the volume's `HitRun` (13.3) logs the intersect and checks its hit list.
+5. **Apply:** `ability.land_hit(target, direction, tick, at, hit_definition)`: builds the `HitInfo` from the hit definition's effects, delivers it (the target's interceptors, parry, effects), sends `hit_landed`. An ability can override it (damage falling off with distance, feeding a combo).
+
+The required path is direct calls; signals (`hit_landed`, `intersected`) are optional hooks for visuals, debug and game scripts, sent on events only.
+
+### 13.2 `HitDefinition`
+
+A `Definition` (variants, embedded or a file):
+
+- **Whitelist:** hits self, allies, enemies; target tags later.
+- **Effects:** on the target, and on the attacker when it lands. They move here from the ability's ON_HIT `EffectApplier` children (data, so swappable); on-start effects stay where they are.
+- **Push direction:** away from the attacker, or along the volume's motion.
+- **Limits:** `max_hits` and `max_intersects` per run (a swing) or per projectile; melee gets them too (a cleave that hits at most three).
+
+The ability's definition holds one (`hit`); a timeline entry's values or a projectile definition can name another, and an ability can swap it while playing. Hit definitions matter only where hits are decided, so they need no ids on the wire.
+
+Moves out of part 4: `ProjectileDefinition`'s whitelist, on-hit effects, `max_hits` and `max_intersects`; `MeleeAttackDefinition.hits_own_team` (now a whitelist).
+
+### 13.3 `HitRun`
+
+What one hit volume has done: its hit list, its intersect log and its counts. A swing's is per run of the ability; a projectile owns its own (two bolts of a volley can each hit the same pawn).
+
+- **Hit list:** entity ids, rolled back (as `pawns_hit_this_run` is now), capped.
+- **Intersect log:** packed arrays (keys, ticks, points, flags: hit or met only, pawn or world), not dictionaries; nothing is allocated on a tick that touches nothing. Not rolled back: it's for hooks and debugging. Cleared when the run starts.
+- **Hooks:** `intersected` per entry.
+
+### 13.4 Hit volumes and anchors
+
+- **Pawn** (today's sweep): keys relative to the pawn and its facing.
+- **World:** placed once when its step starts (at the pawn, a target point, the cursor) and left there: a cleave, a slam, a ground area.
+- **Weapon:** the weapon's path baked as keys from the animation, so it follows the sword at no cost and every machine agrees. Live bone tracing stays a visual-only thing.
+- **Keys** (section 7): `SweepKey` (time 0 to 1 through the window, angle, height, reach), interpolated; two keys are today's start and end. Visuals draw the weapon along the same keys.
+- **Shapes:** a sphere now; boxes and cylinders for areas later, as more cases in the shared query.
+
+### 13.5 The source
+
+In the usual case a hit needs its ability: a removed shooter's bolts don't land (logged as met, not hit). A dead pawn still in the world keeps its abilities, so its bolts still hit. A fireball that lands whatever happens to its caster is a deliberate special case (12).
+
+### 13.6 Speed
+
+- The hit definition: one reference and a few comparisons per pawn touched.
+- The log: packed arrays, nothing on quiet ticks.
+- The shared query is the gain: the batched C++ call (whitelist checked there by team and self bits) returns only hittable pairs, so GDScript runs only for hits. Measured before and after, with a few hundred bolts and the mass battle.
+- Weapon paths baked as keys cost nothing; live bones would cost an animation per attacking pawn on the server.
+
+### 13.7 Build order
+
+1. `HitDefinition`, `HitRun`, `HitQuery` (today's grid and lag compensation behind it), `AbilityBase.land_hit`; melee and projectiles through them. Same play, measured.
+2. `SweepKey` keys and the anchors (pawn, world, weapon keys).
+3. The world end of a projectile worked out at launch and carried in its launch record (exact impacts on clients, no ray per tick).
+4. Next step, separately measured: the history query and the batched C++ call.
+
+### 13.8 As built (part 5, Claude, 2026-11-22)
+
+- **Classes:** `HitDefinition` (definitions/), `HitRun` and `HitQuery` (abilities/), `AbilityBase.land_hit`, `hit_definition()`, `use_hit_definition()`, `get_hit_run()`, the `intersected` signal, and `AbilityDefinition.hit`. `MeleeSweepStep._check_hits` and the projectile's flight are now a query, then the run.
+- **Effects:** the hit definition's `target_effects` and `attacker_effects` are applied as well as the ability's on-hit `EffectApplier` children; moving the samples' to hit definitions is a follow-up, so both stay for now.
+- **Defaults:** with no hit definition a hit is on enemies; `RangedAttackDefinition` defaults to one that stops at the first pawn and pushes along the flight. `MeleeAttackDefinition.hits_own_team` and `MeleeSweepStep.hits_own_team` went (now `hits_allies`); a sweep step can name its own `hit`.
+- **The source** (the owner, 2026-11-22): a pawn despawned while its projectiles fly lingers until the last one ends, then goes the tick after: its entity's `linger_until_tick` (each projectile pushes it out to its own end, known at launch), honoured by `NetworkSession.despawn`, which covers a dead body's removal and a leaver's pawn alike. While it lingers it's hidden, frozen and not colliding, so its bolts' hits still go through its ability. A source removed outright lands nothing, unless its hit definition says `lands_without_source`: then the hit carries the effects it set off with and credits the attacker's id. Respawns reuse pawns, so this is cleanup only.
+- **The log:** packed arrays on the `HitRun`; `entry(i)` builds a Dictionary only when a hook asks. The swing's run is made on first use and cleared as its ability starts.
+- **Keys and anchors:** `SweepKey` (steps/), `MeleeSweepStep.keys` and `anchor` (PAWN or WORLD: where the pawn stood and faced as the step began, rolled back), `MeleeAttackDefinition.sweep_keys`. A weapon's path is keys under the PAWN anchor; the tool that bakes them from an animation comes with animation v0. A world-anchored sweep draws its weapon point where it was left.
+- **A projectile's end at launch:** `end_tick` and `end_point` in its launch record: past its range or lifetime, or where its path meets the world, traced once (one ray for a straight flight, six-tick steps refined to the tick for an arc). No ray per tick; clients show the impact exactly there. Geometry that appears after launch (a door, streamed terrain) isn't seen.
+- **Measured** (300 pawns, headless): `pawn.abilities` 0.36 ms a frame, as before; the commit 0.90 to 0.93 ms a tick, against 0.84 to 0.86 for the last commit measured the same day (noise or a little).
+- **Hitscan** (the owner, 2026-11-22): `ProjectileDefinition.hitscan`. On the tick it's fired, a straight line to its range, cut by the world, is checked for pawns as the shooter saw them (its whole view delay) and hit through its hit run; it stays as a tracer for `tracer_seconds`, drawn from the muzzle to where it ended, then goes. The shooter's client traces its own tracer at once.
+- **Tests:** `hit_system_selftest` (new): keys, the whitelist and log, swapping, a cap, a step's own hit definition, the world anchor, a planned end at a wall and under an arc, hitscan (two pawns on its line, a wall), a hit landing without its source, and a despawned shooter lingering until its bolt ends.

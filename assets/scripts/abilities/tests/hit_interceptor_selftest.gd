@@ -17,7 +17,7 @@ class Stance extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		category = &"utility.interact"
+		category = &"ability.utility.interact"
 		duration = 1.0
 
 

@@ -416,6 +416,7 @@ What stays is the body, the general flags (dead, frozen, team), the references t
 - **UI** (`MatchOptionsPanel`) is small and outside the core.
 - **Jobs:** `TickJobs` holds the one `JobScheduler`; navigation's own thread pool folds into it (section 8).
 - **Tags:** `TagRegistry`, `NavTags` and `EffectTags` are three copies of the same tag-set rules (each tagged REFACTOR): one tag-set class used three times.
+  *(Claude 2026-11-22: done: the three are merged into one tag registry with categories; see [tag spec](../tags/TAG_SPEC.md).)*
 - **Platform:** `RunEnvironment` keeps a switch only tests turn on (its REFACTOR row).
 
 **The audit is complete** (2026-11-19), with the overview ([ARCHITECTURE.md](../ARCHITECTURE.md)) and the measurements (13). Next, per the owner: commit, push and branch, then rewrite in place: the tick driver and the store, the pawn and the movement pass, abilities v2 ([ABILITY_SPEC.md](../abilities/ABILITY_SPEC.md)) written straight against the store, then the AI, netcode, replay and diagnostics, and the directors onto ticks. The shader waddle A/B (12.5) is independent.

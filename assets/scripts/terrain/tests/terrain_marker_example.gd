@@ -16,7 +16,7 @@ func _make_chunk_markers(key: Vector2i) -> Array[NavMarker]:
 	var markers: Array[NavMarker] = []
 
 	var seat := NavSmartObject.new()
-	seat.tag = &"use.seat"
+	seat.tag = &"nav.use.seat"
 	seat.radius = 6.0 # large, so it can be seen from the sample's camera
 	var middle := chunk_resolution / 2
 	seat.position = _point_at(key.x * chunk_resolution + middle, key.y * chunk_resolution + middle)
@@ -32,7 +32,7 @@ func _make_chunk_markers(key: Vector2i) -> Array[NavMarker]:
 			if hash(Vector3i(world_x_number, world_z_number, noise_seed)) % 3 != 0:
 				continue
 			var cover := NavPoint.new()
-			cover.tag = &"point.cover"
+			cover.tag = &"nav.point.cover"
 			cover.radius = 3.0
 			cover.position = _point_at(world_x_number, world_z_number)
 			markers.append(cover)

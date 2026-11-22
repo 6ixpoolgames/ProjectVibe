@@ -8,7 +8,7 @@ extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come fr
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 
 
-## A timed action that roots the pawn: while it runs, nothing in "movement" can start or steer.
+## A timed action that roots the pawn: while it runs, nothing in "ability.movement" can start or steer.
 class RootingAttack extends AbilityBase:
 	var starts := 0
 	var stops := 0
@@ -17,10 +17,10 @@ class RootingAttack extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		trigger_action = &"primary"
-		category = &"combat.melee"
+		category = &"ability.combat.melee"
 		duration = 0.5
 		cooldown = 0.5
-		locks_out = [&"movement"]
+		locks_out = [&"ability.movement"]
 
 	func start() -> void:
 		starts += 1
@@ -333,7 +333,7 @@ class CountedAction extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		category = &"combat.melee"
+		category = &"ability.combat.melee"
 		duration = 0.5
 
 	func start() -> void:
@@ -366,7 +366,7 @@ func _test_restart_and_first_tick() -> void:
 	# One started by code, with no action.
 	var coded := CountedAction.new()
 	coded.name = "Coded"
-	coded.category = &"movement.knockback"
+	coded.category = &"ability.movement.knockback"
 	manager.add_child(coded)
 	pawn.add_child(manager)
 	add_child(pawn)

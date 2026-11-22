@@ -8,7 +8,7 @@
 ## rolls back. Outside code only talks to the manager:
 ## [codeblock]
 ## pawn.ability_manager.can_start(&"jump")      # could a press start something now? (the AI asks)
-## pawn.ability_manager.action_for_tag(tag)     # the action to press for a kind of ability, such as movement.advanced
+## pawn.ability_manager.action_for_tag(tag)     # the action to press for a kind of ability, such as ability.movement.advanced
 ## pawn.ability_manager.start_ability(ability)  # starts one with no trigger action, such as Knockback, by the same rules
 ## pawn.ability_manager.receive_hit(hit)        # something hit this pawn (server)
 ## [/codeblock]
@@ -208,7 +208,7 @@ func can_start(action: StringName) -> bool:
 	return false
 
 
-## The action to press to start an ability in this group (a category or extra_category such as &"movement.advanced"): the
+## The action to press to start an ability in this group (a category or extra_category such as &"ability.movement.advanced"): the
 ## highest-priority one that could start now, boosts included; &"" if none. For the AI, so a behaviour asks for a kind of ability, not
 ## one by name. It answers with an action because everything a pawn does goes through its (rolled back) input. Changes nothing.
 func action_for_tag(tag: StringName) -> StringName:
@@ -636,6 +636,8 @@ func _start(ability: AbilityBase) -> void:
 	readiness_version += 1
 	ability.buffer_until = 0
 	ability.pawns_hit_this_run = PackedInt64Array()
+	if ability.hit_run:
+		ability.hit_run.clear() # its swing's log starts again with the run
 	# A combo ability takes its position and closes the window until its OpenComboStep opens it again.
 	var taken := combo_position_for(ability)
 	if taken > 0:
@@ -774,7 +776,7 @@ func _collect_abilities() -> void:
 			child.pawn = pawn
 			child.prepare_settings() # its definition worked out, or its kind's defaults
 			child.category_mask = TagRegistry.mask_of(child.category) if child.category != &"" else 0
-			child.category_mask |= TagRegistry.category_mask_of_list(child.extra_categories)
+			child.category_mask |= TagRegistry.full_mask_of_list(child.extra_categories)
 			child.locks_out_mask = TagRegistry.mask_of_list(child.locks_out)
 			child.cancelled_by_mask = TagRegistry.mask_of_list(child.cancelled_by)
 			_collect_effects(child)
@@ -796,7 +798,7 @@ func _collect_abilities() -> void:
 		if ability.needs_full_movement:
 			_full_movement_abilities.append(ability)
 		# REFACTOR: Death and Knockback are found by class, so a game changes dying or staggering only by extending them. A tag
-		# (status.dead, combat.knockback) would let any ability fill the role; extensible.
+		# (ability.death, ability.combat.knockback) would let any ability fill the role; extensible.
 		if ability is DeathAbility and _death == null:
 			_death = ability
 		if ability is KnockbackAbility and _knockback == null:

@@ -29,7 +29,7 @@ How pawns find their way: a nav mesh built from the level while it streams in, p
 - **Feeders** hand the level to nav: `world/TerrainNavFeeder` the terrain's chunks, `world/BodyNavFeeder` a static body's boxes (walls, rocks).
 - **`NavigationManager`** is a part on every pawn. A controller calls `move_to(point)`, then asks `get_move_direction()` once per tick and walks that way, as a player's keys would. It never moves the pawn itself.
 - **Nav markers** say what a spot means: `NavLink` (a jump, ladder or door), `NavPoint` (cover, patrol), `NavSmartObject` (a seat), `NavArea`, `NavObstacle`. They're plain data; a **module** (a `NavMarkerModule` node in the level) holds the code that acts on one kind. `NavMarkerManager` holds them all and tells modules what arrives and leaves.
-- **`NavTags`** turns marker tags such as `link.jump` into bits, the same on every machine.
+- **Nav tags** such as `nav.link.jump` say what a marker is: the `nav` category of the one tag registry (`tags/TagRegistry`), which turns them into bits, the same on every machine.
 
 ## How to use it
 
@@ -46,7 +46,7 @@ The pawn walks while its controller asks for directions; `arrived` fires at the 
 
 **Place a jump or a ladder.** A `NavMarkerNode` with a `NavLink` marker (set `end_offset`, `two_way`, `press_action`), and a `NavLinkModule` somewhere in the level. Nav also finds jumps and drops at ledges by itself (`NavServer`'s `auto_links`).
 
-**Mark a point of interest.** A `NavMarkerNode` with a `NavPoint` marker and a declared tag (`point.cover`, `point.patrol`...). AI finds them with `NavMarkerManager.find_nearest(tag, from, max_distance)`. Tags are declared in `resources/nav_tag_declarations.tres`.
+**Mark a point of interest.** A `NavMarkerNode` with a `NavPoint` marker and a declared tag (`nav.point.cover`, `nav.point.patrol`...). AI finds them with `NavMarkerManager.find_nearest(tag, from, max_distance)`. Tags are declared in `resources/tag_declarations.tres`; the inspector offers them in a dropdown.
 
 **See it.** Press **F9** in a debug build: the nav mesh coloured by room, links as arcs, markers as crosses.
 

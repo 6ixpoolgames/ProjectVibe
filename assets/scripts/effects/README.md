@@ -31,25 +31,25 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
 - **Parts** (`EffectPart`, in `parts/`) are what an effect does, run in list order. Do-once parts run on the authority only (the server, or offline): damage, heals, pushes, lifesteal. Held parts hold while an over-time effect lasts, on every machine, so a client predicting its own pawn agrees: stat changes, ability number boosts, resistances.
 - **`EffectApplier`** is a child node of an ability (or of a HitInterceptor) that says which effects it applies, when (ON_START, ON_HIT, ON_INTERCEPT) and to whom (TARGET or SELF).
 - **`EffectManager`** is a part on every pawn. It applies effects to its own pawn with its resistances, keeps over-time ones in `active_effects` (rolled back and sent in snapshots), counts them down each tick and clears them when the pawn dies.
-- **`EffectTags`** are effect type tags (`damage.elemental.fire`), with their own 64 bits, declared in `resources/effect_tag_declarations.tres`. Code uses its constants (`EffectTags.DAMAGE_PHYSICAL`).
+- **Effect tags** say what kind of effect something is (`effect.damage.elemental.fire`): the `effect` category of the one tag registry (`tags/TagRegistry`), declared in `resources/tag_declarations.tres`. Code uses the constants in `Tags.EFFECT` (`Tags.EFFECT.DAMAGE_PHYSICAL`).
 - `EffectApplication` (one application, handed to each do-once part) and `EffectHeldTotals` (what the held parts add up to) are plumbing a new part works with.
 
 ## How to use it
 
-**Make damage or a heal.** New Resource > `Effect`, saved in `resources/effects/`. Add a `StatChangePart` with stat Health and amount -20 (damage) or +15 (a heal; untick `is_harmful` so resistances don't touch it). Give it a tag such as `damage.physical`.
+**Make damage or a heal.** New Resource > `Effect`, saved in `resources/effects/`. Add a `StatChangePart` with stat Health and amount -20 (damage) or +15 (a heal; untick `is_harmful` so resistances don't touch it). Give it a tag such as `effect.damage.physical`.
 
 **Make an ability's hit do it.** Add an `EffectApplier` under the ability, trigger ON_HIT, applies_to TARGET, and put the effect in its list. Add a `KnockbackPart` to the effect for a push (and a hop), a `LifestealPart` after the damage to heal the attacker. Applies_to SELF on ON_HIT rewards the attacker only when the hit connects.
 
 **Make a poison or a heal over time.** Set `duration_seconds` (3) and `period_seconds` (1): its do-once parts run when it lands and every period while it lasts. `stacking` ADD_STACK with `max_stacks` makes repeated hits stack.
 
-**Make a slow, a buff or a ward.** An over-time effect with held parts: a `StatModifierPart` (MoveSpeed, multiply 0.7) for a slow, a `ResistancePart` (`damage.elemental.fire`, 0.5) for a fire ward, an `AbilityPriorityPart` to boost a group of abilities' priority or interrupt numbers.
+**Make a slow, a buff or a ward.** An over-time effect with held parts: a `StatModifierPart` (MoveSpeed, multiply 0.7) for a slow, a `ResistancePart` (`effect.damage.elemental.fire`, 0.5) for a fire ward, an `AbilityPriorityPart` to boost a group of abilities' priority or interrupt numbers.
 
-**Give a pawn resistances.** On its EffectManager, `resistances`: effect tag -> amount. 0.25 takes a quarter off, 1 or more ignores those effects, negative is a weakness. A resistance to `damage.elemental` covers fire and frost.
+**Give a pawn resistances.** On its EffectManager, `resistances`: effect tag -> amount. 0.25 takes a quarter off, 1 or more ignores those effects, negative is a weakness. A resistance to `effect.damage.elemental` covers fire and frost.
 
 **From code:**
 ```gdscript
 pawn.effect_manager.apply_effect(effect, source)          # source: who applied it, or null
-pawn.effect_manager.remove_with_tag(EffectTags.DEBUFF)    # a cleanse
+pawn.effect_manager.remove_with_tag(Tags.EFFECT.DEBUFF)    # a cleanse
 var hurt := Effect.make_damage(20)                        # a quick instant damage effect, for traps and tests
 ```
 
@@ -63,9 +63,9 @@ var hurt := Effect.make_damage(20)                        # a quick instant dama
 
 **Rollback.** The active list is one `PackedInt64Array`, `active_effects`, five numbers per effect: its id (`Effect.get_id`, from its file path or `effect_name`), ticks left, ticks to its next period, stacks, and its source (an entity id online, else an instance id). The pawn's `TickStateComponent` rolls it back and sends it in snapshots. What the held parts add up to (stat values, ability numbers, resistances) is worked out from the list whenever it changes, including when a rollback loads it, so it needn't roll back itself.
 
-**Resistances.** The inspector's `resistances` plus every held `ResistancePart`, as effect tag -> amount. An effect's resistance is every one whose tag is one of its tags or a level above one, added up: 0.2 against `damage.elemental` and 0.3 against `damage.elemental.fire` make 0.5 against fire. They apply only to harmful effects.
+**Resistances.** The inspector's `resistances` plus every held `ResistancePart`, as effect tag -> amount. An effect's resistance is every one whose tag is one of its tags or a level above one, added up: 0.2 against `effect.damage.elemental` and 0.3 against `effect.damage.elemental.fire` make 0.5 against fire. They apply only to harmful effects.
 
-**Tags.** Effect tags follow the same rules as `TagRegistry` and `NavTags`: a dot means "inside", every level gets its own bit, and a tag's mask holds its own bit plus its parents', so a resistance to `damage.elemental` catches fire and frost with one AND and never `damaged`. They're declared in `resources/effect_tag_declarations.tres`, sorted and numbered at startup so every machine agrees. A constant in `EffectTags` must be declared there (`effect_selftest` checks it).
+**Tags.** Effect tags are one category of the tag registry (`tags/README.md`): a dot means "inside", every level gets its own bit, and a tag's mask holds its own bit plus its parents', so a resistance to `effect.damage.elemental` catches fire and frost with one AND and never `damaged`. They're declared in `resources/tag_declarations.tres`, sorted and numbered at startup so every machine agrees. A constant in `Tags.EFFECT` must be declared there (`effect_selftest` checks it).
 
 **Odd cases** (all checked in `effect_selftest`):
 - An effect with no parts does nothing, and an over-time one still shows in the active list for its duration.

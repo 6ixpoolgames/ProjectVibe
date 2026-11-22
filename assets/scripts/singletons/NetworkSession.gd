@@ -154,6 +154,8 @@ var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_
 ## since diagnostics names none of them itself.
 const COUNTING_STATS: Array[String] = ["bytes_sent", "bytes_received", "snapshots_encoded", "snapshots_sent", "snapshot_bytes", "snapshots_received",
 	"snapshot_bytes_received", "corrections", "resyncs", "interpolation_underruns"]
+# Despawned entities waiting for their linger_until_tick (entity id -> true), despawned after it.
+var _lingering := {}
 ## Client: which tick of the server's remote entities are being drawn at. -1 before the first snapshot.
 var render_tick: float = -1.0
 ## Client: how loaded the server's ticks are, as a percentage of their budget (TickDriver.load_average), from the newest snapshot.
@@ -534,14 +536,11 @@ func limit_view_ticks_behind(peer: int, claimed: float, tick: int) -> float:
 func content_hash() -> int:
 	if _hash_is_cached:
 		return _cached_hash
-	# REFACTOR: the netcode names three other systems' tag sets here (TagRegistry, NavTags, InputActions). A list that systems add
-	# their own part to would let a new tag set, or a game's own, join the check without editing the session (extensible). See
-	# CHANGELOG.md.
+	# REFACTOR: the netcode names other systems' tables here (TagRegistry, InputActions). A list that systems add their own part to
+	# would let a game's own table join the check without editing the session (extensible). See CHANGELOG.md.
 	var parts := PackedStringArray()
 	parts.append(str(NetPackets.PROTOCOL_VERSION))
-	parts.append(str(TagRegistry.content_hash()))
-	# Navigation has its own tags, and machines must agree on those bits too.
-	parts.append(str(NavTags.content_hash()))
+	parts.append(str(TagRegistry.content_hash())) # every category's tags, navigation's included
 	# The named actions in bit order, so peers agree on what each input bit means even when a build id replaces the file part below.
 	parts.append(",".join(InputActions.get_actions()))
 	parts.append(String(Engine.get_version_info()["hash"]))
@@ -609,10 +608,18 @@ func spawn(type_name: String, owner_peer: int, at: Variant) -> Node:
 	return entity.get_parent() if entity else null
 
 
-## Server or offline: removes an entity everywhere.
+## Server or offline: removes an entity everywhere. One whose [member NetworkEntity.linger_until_tick] is still ahead (a pawn with
+## projectiles in flight) lingers, switched off, and goes the tick after.
 func despawn(entity_id: int) -> void:
 	if _mode == Mode.CLIENT or not _entities.has(entity_id):
 		return
+	var leaving: NetworkEntity = _entities[entity_id]
+	if _driver and leaving.linger_until_tick >= _driver.tick:
+		if not _lingering.has(entity_id):
+			_lingering[entity_id] = true
+			leaving.lingering_started.emit(leaving)
+		return
+	_lingering.erase(entity_id)
 	var replicated: bool = _entities[entity_id].is_replicated
 	_remove_entity(entity_id)
 	if replicated and _mode == Mode.SERVER:
@@ -622,6 +629,16 @@ func despawn(entity_id: int) -> void:
 		for peer: int in _peers:
 			if _peers[peer].welcomed:
 				_send(peer, buffer.data_array, true)
+
+
+# Despawns the lingering entities whose wait is over; one already gone is forgotten.
+func _despawn_lingerers(tick: int) -> void:
+	for entity_id: int in _lingering.keys():
+		var entity: NetworkEntity = _entities.get(entity_id)
+		if entity == null:
+			_lingering.erase(entity_id)
+		elif tick > entity.linger_until_tick:
+			despawn(entity_id)
 
 
 ## Server or offline: gives an entity to another player, or to nobody with 0. Every client hears about it. From
@@ -1249,6 +1266,8 @@ func _on_before_tick(_dt: float, tick: int) -> void:
 
 
 func _on_after_tick(_dt: float, tick: int) -> void:
+	if not _lingering.is_empty():
+		_despawn_lingerers(tick)
 	var profiling: bool = _driver.profile_enabled
 	var mark := Time.get_ticks_usec() if profiling else 0
 	if _mode == Mode.CLIENT:

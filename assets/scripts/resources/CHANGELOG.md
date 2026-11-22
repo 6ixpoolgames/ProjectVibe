@@ -9,6 +9,10 @@ The Resource classes in this folder (`InputActionsRes`, `PawnDefaultsRes`, `TagD
 
 None found.
 
+## 2026-11-22
+
+- **`TagDeclarationsRes`** holds each tag with a one-line description (`tags`, a dictionary), plus `redirects` (old name to new) and `deprecated` (tag spec). `tag_declarations.tres` is the one base file, with `nav_tag_declarations.tres` and `effect_tag_declarations.tres` merged into it and every tag renamed with its category. Ability and effect resources were rewritten to the new names.
+
 ## 2026-11-19
 
 - **`pawn_defaults.tres` lists `PawnStreamingSource`** as the last default part.

@@ -7,7 +7,7 @@
 class_name NavMarker
 extends Resource
 
-## What this marker is, such as &"link.jump". Must be declared for NavTags, or NavMarkerManager refuses the marker.
+## What this marker is, such as &"nav.link.jump". Must be declared in the tag declarations, or NavMarkerManager refuses the marker.
 @export var tag: StringName
 ## How close counts as "at it".
 @export var radius := 1.0

@@ -21,8 +21,8 @@ extends AbilityDefinition
 func _init() -> void:
 	super()
 	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.MOVEMENT_WALK
-	extra_categories = [Tags.MOVEMENT_BASIC] # a group, so a rule can name all basic movement at once
+	category = Tags.ABILITY.MOVEMENT_WALK
+	extra_categories = [Tags.ABILITY.MOVEMENT_BASIC] # a group, so a rule can name all basic movement at once
 	# Moving cancels only actions with a threshold of 0, such as an emote. Locomotion never blocks an action.
 	interrupt_priority = 0
 	interrupt_threshold = 0

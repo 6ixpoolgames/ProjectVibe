@@ -1,15 +1,28 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
-## An attack's hit window: a hit sphere moves from a start point to an end point over length_ticks, and pawns it touches are hit.
+## An attack's hit window: a hit sphere moves along a path over length_ticks, and pawns it touches are hit.
 ##
-## Each point is around the pawn, relative to where it faces each tick: angle (degrees, positive to the left, 0 straight ahead), height
-## (metres above the feet) and reach (metres to the sphere's far edge). Each goes straight from start to end, so a slash changes angle, a
-## thrust reach, a chop height; longer patterns are several sweeps in a row. Visuals draw the same path ([method offset_at]).
+## Each point on the path is an angle (degrees, positive to the left, 0 straight ahead), a height (metres above the feet) and a reach
+## (metres to the sphere's far edge), measured from its [member anchor]: the pawn as it moves and turns (a swing), or where the pawn
+## stood when the step began (a cleave left in the world). The path goes from start to end, or through its [member keys] (ability spec
+## 7), so an arc can curve, dip or reach out mid-swing; a weapon's path baked from its animation is a set of keys. Visuals draw the
+## same path ([method offset_at]).
 ## [br][br]Hits are decided on the server only (or offline), never in a rollback replay. Each pawn is hit at most once per run of the
-## ability, its own team is skipped unless [member hits_own_team], and a hit carries the ability's on-hit effects ([method HitInfo.make],
-## as a projectile's). Signals go out on the ability.
+## ability, and who it may hit and what a hit does come from its [HitDefinition] (its own [member hit], else its ability's), through the
+## same hit system as a projectile's (ability spec 13). Signals go out on the ability.
 ## Design: pawn spec 8.20.
 class_name MeleeSweepStep
 extends AbilityStep
+
+## What the path is measured from.
+enum Anchor {
+	PAWN, ## the pawn, as it moves and turns: a swing
+	WORLD, ## where the pawn stood and faced when the step began: a cleave or slam left in the world
+}
+
+## What the path is measured from.
+@export var anchor := Anchor.PAWN
+## Points the path goes through, in order of their time (ability spec 7). Fewer than two: from Start to End below.
+@export var keys: Array[SweepKey] = []
 
 @export_group("Start")
 ## Degrees from straight ahead, positive to the pawn's left.
@@ -27,10 +40,14 @@ extends AbilityStep
 @export_group("")
 ## The hit sphere's radius, in metres.
 @export_range(0.05, 10.0, 0.05, "or_greater") var hit_radius := 0.8
-## On: it can hit pawns on its own team.
-@export var hits_own_team := false
+## Who this sweep may hit and what it does, in place of its ability's (a backswing that pushes harder). Empty: the ability's.
+@export var hit: HitDefinition
 
-var _warned_no_effects := false
+## With a WORLD anchor: where the pawn stood and faced as the step began. Rolls back.
+var anchor_origin := Vector3.ZERO
+var anchor_yaw := 0.0
+var _sorted_keys: Array[SweepKey] = [] # keys in order of time, sorted when keys changes
+var _sorted_from: Array[SweepKey] = []
 
 
 func _init() -> void:
@@ -38,13 +55,56 @@ func _init() -> void:
 	length_ticks = 4
 
 
-## Where the hit sphere's centre is at this point of the sweep (0 start, 1 end), from the pawn's feet, for a facing in radians.
+## Where the hit sphere's centre is at this point of the sweep (0 start, 1 end), from the anchor's feet, for a facing in radians.
 func offset_at(at: float, facing: float) -> Vector3:
 	# The parameter is "at" because "progress" is a method every step has.
-	var angle := facing + deg_to_rad(lerpf(start_angle, end_angle, at))
+	var point := path_point(at)
+	var angle := facing + deg_to_rad(point.x)
 	var forward := Vector3(-sin(angle), 0.0, -cos(angle)) # Godot's forward is -Z; a bigger yaw turns left
-	var reach := lerpf(start_reach, end_reach, at)
-	return forward * maxf(reach - hit_radius, 0.0) + Vector3(0.0, lerpf(start_height, end_height, at), 0.0)
+	return forward * maxf(point.z - hit_radius, 0.0) + Vector3(0.0, point.y, 0.0)
+
+
+## The path at this point of the sweep: (angle in degrees, height, reach), from its keys, or from Start to End.
+func path_point(at: float) -> Vector3:
+	if keys.size() < 2:
+		return Vector3(start_angle, start_height, start_reach).lerp(Vector3(end_angle, end_height, end_reach), at)
+	if _sorted_from != keys:
+		_sorted_from = keys.duplicate()
+		_sorted_keys = keys.filter(func(key: SweepKey) -> bool: return key != null)
+		_sorted_keys.sort_custom(func(a: SweepKey, b: SweepKey) -> bool: return a.at < b.at)
+	var first := _sorted_keys[0]
+	if at <= first.at:
+		return Vector3(first.angle, first.height, first.reach)
+	for i in range(1, _sorted_keys.size()):
+		var later := _sorted_keys[i]
+		if at <= later.at:
+			var earlier := _sorted_keys[i - 1]
+			var weight := (at - earlier.at) / maxf(later.at - earlier.at, 0.0001)
+			return Vector3(earlier.angle, earlier.height, earlier.reach).lerp(Vector3(later.angle, later.height, later.reach), weight)
+	var last := _sorted_keys[_sorted_keys.size() - 1]
+	return Vector3(last.angle, last.height, last.reach)
+
+
+## The point the path is measured from now: the pawn's feet, or where it stood as the step began.
+func anchor_point() -> Vector3:
+	return anchor_origin if anchor == Anchor.WORLD else pawn.global_position
+
+
+## The facing the path is measured from now, in radians.
+func anchor_facing() -> float:
+	return anchor_yaw if anchor == Anchor.WORLD else pawn.yaw
+
+
+func enter() -> void:
+	if anchor == Anchor.WORLD:
+		anchor_origin = pawn.global_position
+		anchor_yaw = pawn.yaw
+
+
+func get_rollback_properties() -> Array[String]:
+	if anchor == Anchor.WORLD:
+		return ["anchor_origin", "anchor_yaw"] # where it was left, for a rollback mid-sweep
+	return []
 
 
 ## The spots the sphere passes through on this sweep tick (0 is the first), in the world, no more than half its radius apart. One spot
@@ -59,16 +119,18 @@ func centres_for_ticks(sweep_tick: int, count: int) -> Array[Vector3]:
 	var ticks := float(maxi(length(), 1))
 	var from_progress := minf(sweep_tick / ticks, 1.0)
 	var to_progress := minf((sweep_tick + maxi(count, 1)) / ticks, 1.0)
-	var from_spot := offset_at(from_progress, pawn.yaw)
-	var to_spot := offset_at(to_progress, pawn.yaw)
+	var facing := anchor_facing()
+	var origin := anchor_point()
+	var from_spot := offset_at(from_progress, facing)
+	var to_spot := offset_at(to_progress, facing)
 	# The straight distance this tick: close to the arc for one tick's part of a sweep, and counts reach or height changes too.
 	var moved := from_spot.distance_to(to_spot)
 	if moved < 0.0001:
-		out.append(pawn.global_position + offset_at((from_progress + to_progress) * 0.5, pawn.yaw))
+		out.append(origin + offset_at((from_progress + to_progress) * 0.5, facing))
 		return out
 	var spots := maxi(1, ceili(moved / maxf(hit_radius * 0.5, 0.01)))
 	for i in spots + 1:
-		out.append(pawn.global_position + offset_at(lerpf(from_progress, to_progress, float(i) / spots), pawn.yaw))
+		out.append(origin + offset_at(lerpf(from_progress, to_progress, float(i) / spots), facing))
 	return out
 
 
@@ -86,62 +148,25 @@ func tick(_dt: float) -> Status:
 
 
 func weapon_point(facing: float) -> Variant:
+	if anchor == Anchor.WORLD:
+		# Left in the world: where it is, from the pawn's feet now, whichever way the pawn faces.
+		return anchor_point() + offset_at(progress(), anchor_facing()) - pawn.global_position
 	return offset_at(progress(), facing)
 
 
+# The sweep's spheres this tick through the shared hit system (ability spec 13.1): who they touch (HitQuery, as the attacker saw them in
+# a session), then the ability's hit run: met once, checked against the hit definition, hit through land_hit.
 func _check_hits(on_tick: int, centres: Array[Vector3]) -> void:
-	var targets: Array[Pawn] = []
-	var entity := pawn.get_network_entity()
-	# In a session, through lag compensation (against where the player saw others). When nothing would be rewound (AI swings, offline
-	# play), the C++ pawn grid finds who the spheres touch: the same answer as physics, without a query per spot.
-	var view_behind := ability.view_ticks_behind()
-	if entity and entity.session and LagCompensation.would_rewind(entity, view_behind):
-		for found in LagCompensation.melee_spheres(entity, centres, hit_radius, view_behind):
-			var other := found.get_parent() as Pawn
-			if other:
-				targets.append(other)
-	elif SharedPawnTable.get_grid() != null and pawn.is_inside_tree():
-		for found: Object in SharedPawnTable.get_grid().find_touching(PackedVector3Array(centres), hit_radius, pawn, on_tick):
-			if found is Pawn:
-				targets.append(found)
-	else:
-		targets = _plain_spheres(centres)
-	for target in targets:
-		if target == pawn or target.is_dead() or ability.has_hit(target):
-			continue
-		# An invulnerable pawn isn't hit or marked, so a later tick of the sweep can catch it once that ends.
-		if target.ability_manager and target.ability_manager.is_invulnerable():
-			continue
-		if target.team == pawn.team and not hits_own_team:
-			continue
-		if not ability.note_hit(target):
-			continue # the run's hit list is full
-		var away := target.global_position - pawn.global_position
-		away.y = 0.0
-		if away.length_squared() <= 0.0001:
-			away = Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
-		if ability.on_hit_effects.is_empty() and ability.on_hit_self_effects.is_empty() and not _warned_no_effects:
-			_warned_no_effects = true
-			push_warning("%s hit %s but has no on-hit effects (EffectApplier children), so the hit does nothing." % [ability.name, target.name])
-		HitInfo.make(pawn, ability, target, away, on_tick, ability.on_hit_effects, ability.on_hit_self_effects).deliver()
+	var started := PerfScopes.begin() # timed for diagnostics: a swing's whole hit check
+	_check_hits_timed(on_tick, centres)
+	PerfScopes.end(&"melee.hits", started)
 
 
-var _query: PhysicsShapeQueryParameters3D = null # kept between hit ticks (_plain_spheres)
-
-# Without the C++ pawn grid and with nobody to rewind: the same spheres through physics.
-func _plain_spheres(centres: Array[Vector3]) -> Array[Pawn]:
-	var found: Array[Pawn] = []
-	if _query == null:
-		_query = PhysicsShapeQueryParameters3D.new()
-		_query.shape = SphereShape3D.new()
-		_query.exclude = [pawn.get_rid()]
-	(_query.shape as SphereShape3D).radius = hit_radius
-	var query := _query
-	var space := pawn.get_world_3d().direct_space_state
-	for centre in centres:
-		query.transform = Transform3D(Basis.IDENTITY, centre)
-		for hit in space.intersect_shape(query):
-			var other := hit.collider as Pawn
-			if other and not found.has(other):
-				found.append(other)
-	return found
+func _check_hits_timed(on_tick: int, centres: Array[Vector3]) -> void:
+	var run := ability.get_hit_run()
+	run.hit = hit.resolved() as HitDefinition if hit else ability.hit_definition() # variants applied, as the ability's is
+	if run.is_spent():
+		return # its max_hits or max_intersects is reached: this run hits no one else
+	var spots := PackedVector3Array(centres)
+	var touched := HitQuery.touching(spots, hit_radius, on_tick, pawn, ability.view_ticks_behind(), run.hit.hits_self)
+	run.meet_pawns(touched, on_tick, pawn, spots[0], spots[spots.size() - 1], spots[spots.size() - 1] - spots[0], anchor_point())

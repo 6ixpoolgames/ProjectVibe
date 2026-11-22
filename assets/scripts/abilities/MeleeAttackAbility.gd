@@ -62,14 +62,6 @@ var hit_height: float:
 		return _melee.hit_height
 	set(value):
 		_write_setting(&"hit_height", value)
-## From the definition: [member MeleeAttackDefinition.hits_own_team].
-var hits_own_team: bool:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.hits_own_team
-	set(value):
-		_write_setting(&"hits_own_team", value)
 ## From the definition: [member MeleeAttackDefinition.sweep_degrees].
 var sweep_degrees: float:
 	get:
@@ -102,6 +94,14 @@ var height_at_sweep_end: float:
 		return _melee.height_at_sweep_end
 	set(value):
 		_write_setting(&"height_at_sweep_end", value)
+## From the definition: [member MeleeAttackDefinition.sweep_keys].
+var sweep_keys: Array[SweepKey]:
+	get:
+		if _melee == null:
+			prepare_settings()
+		return _melee.sweep_keys
+	set(value):
+		_write_setting(&"sweep_keys", value)
 ## From the definition: [member MeleeAttackDefinition.windup_turn_degrees_per_second].
 var windup_turn_degrees_per_second: float:
 	get:
@@ -210,7 +210,6 @@ func _sync_default_steps() -> void:
 	turn.degrees_per_second = windup_turn_degrees_per_second
 	sweep.length_ticks = hit_ticks
 	sweep.hit_radius = hit_radius
-	sweep.hits_own_team = hits_own_team
 	# Right to left by default: the right is a negative angle. sweep_from_left turns it round.
 	var side := 1.0 if sweep_from_left else -1.0
 	sweep.start_angle = side * sweep_degrees * 0.5
@@ -219,6 +218,7 @@ func _sync_default_steps() -> void:
 	sweep.end_height = hit_height + height_at_sweep_end
 	sweep.start_reach = attack_range
 	sweep.end_reach = attack_range
+	sweep.keys = sweep_keys # a path of its own, when it has one
 	recovery.length_ticks = recovery_ticks
 	(get_node(^"OpenCombo") as OpenComboStep).window_ticks = combo_window_ticks
 

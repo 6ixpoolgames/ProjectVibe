@@ -17,7 +17,7 @@ class Shield extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		trigger_action = &"secondary"
-		category = &"utility.interact"
+		category = &"ability.utility.interact"
 		duration = 2.0
 		# Claude 2026-11-17 (pawn spec 8.23): invulnerable while it runs, through an interceptor (was invulnerable_while_running)
 		var dodge := InvulnerabilityInterceptor.new()

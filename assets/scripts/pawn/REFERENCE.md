@@ -61,6 +61,8 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 
 - `is_keeping_world_loaded() -> bool`: True while this pawn keeps the world loaded around it on this machine: its `streaming_source` counts (a player has it, or its keeps_world_loaded is on, and it's simulated here). The AI switch-off leaves such a pawn on.
 - `get_visual() -> Node3D`: The node that follows the body smoothly, for hanging things from. With no Visual, it's the body.
+- `_on_lingering_started(_entity: NetworkEntity) -> void`: Its entity was despawned while its projectiles still fly (NetworkSession.despawn): it lingers until they end, hidden, not ticking and not colliding, so their hits still have their ability, and goes the tick after.
+- `linger_until(tick: int) -> void`: Keeps its entity until this tick, at least, if it's despawned: a projectile it fired ends then (Projectile.launch).
 - `set_frozen(frozen: bool) -> void`
 - `is_frozen() -> bool`: True while frozen.
 - `runs_ai_here() -> bool`: True where this pawn's AI runs: offline, or on the server. The AI never runs on a client (pawn spec 10.2).

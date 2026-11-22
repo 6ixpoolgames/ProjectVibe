@@ -14,6 +14,10 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-22
+
+- **A despawned pawn lingers while its projectiles fly** (ability spec 13.5): `linger_until()` (new) keeps its entity to the last one's end; while it lingers it's frozen, hidden and has no collision layer (`_on_lingering_started`).
+
 ## 2026-11-21
 
 - **A rollback load tells the AbilityManager** (`state_loaded()`), which works out its soonest deadline again: the tick went back, so a deadline already passed may be ahead again (state store spec 13.10).

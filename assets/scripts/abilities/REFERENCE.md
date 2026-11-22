@@ -9,6 +9,8 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [DashAbility](#dashability)
 - [DeathAbility](#deathability)
 - [HitInfo](#hitinfo)
+- [HitQuery](#hitquery)
+- [HitRun](#hitrun)
 - [JumpAbility](#jumpability)
 - [KnockbackAbility](#knockbackability)
 - [MeleeAttackAbility](#meleeattackability)
@@ -21,6 +23,7 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [DeathDefinition](#deathdefinition)
 - [Definition](#definition)
 - [DefinitionRegistry](#definitionregistry)
+- [HitDefinition](#hitdefinition)
 - [JumpDefinition](#jumpdefinition)
 - [KnockbackDefinition](#knockbackdefinition)
 - [MeleeAttackDefinition](#meleeattackdefinition)
@@ -40,6 +43,7 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [FireProjectileStep](#fireprojectilestep)
 - [MeleeSweepStep](#meleesweepstep)
 - [OpenComboStep](#opencombostep)
+- [SweepKey](#sweepkey)
 - [TimelineEntry](#timelineentry)
 - [TurnToFaceStep](#turntofacestep)
 - [WaitStep](#waitstep)
@@ -97,12 +101,14 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `timeline: TimelineEntry[]` = `[]`: The step timeline it runs (ability spec 6.2): its definition's `AbilityDefinition.step_timeline`, else its kind's default (`default_timeline()`), else its steps one after another in tree order; plus a manual entry for each step none names. Worked out by `collect_steps()`.
 - `timeline_state: PackedInt32Array` = `PackedInt32Array()`: Its timeline's state, four numbers per entry: the tick it started, the tick it ended (-1: not yet), why it ended (`TimelineEntry.Reason`, 0 none) and where its step's count starts (the start, moved on by ticks that didn't count). Rolled back as one value. A step that only waits out its length changes nothing while it runs.
 - `pawns_hit_this_run: PackedInt64Array` = `PackedInt64Array()`: The pawns it has hit this run, by entity id (instance id for a pawn not spawned through the session), so each is hit once across all its sweeps (ability spec 8). Rolls back (pushed). At most `MAX_HITS_PER_RUN`; cleared when it starts.
+- `hit_run: HitRun` = `null`: Its swing's hit run (`get_hit_run()`); null until first used.
 
 ### Signals
 
 - `hit_landed(hit: HitInfo)`: Sent on the server for each pawn this ability hits, by a swing or by its projectile, as the hit is made (`HitInfo.deliver()`). The target takes it later in the same tick, after every pawn has simulated (pawn spec 15.4).
 - `hit_window_started(centre: Vector3, radius: float)`: Sent once per sweep, on its first tick, with where the hit sphere is and its radius. Every machine that runs the swing sends it (server, offline, a predicting client), never during a replay. Says where it can hit, not whether it did: see `hit_landed`.
 - `hit_area_moved(from: Vector3, to: Vector3, radius: float)`: Sent every tick of a sweep, on the same machines as `hit_window_started`, with the hit sphere's start and end for this tick.
+- `intersected(entry: Dictionary)`: Its swing met something, where hits are decided: one entry of its `hit_run`'s log (see `HitRun.entry()`), hit or not.
 
 ### Constants
 
@@ -151,7 +157,11 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `get_running_step_names() -> PackedStringArray`: The names of the steps running now, in tree order. For readouts and debug tools.
 - `current_interrupt_threshold() -> int`: Its interrupt_threshold now, before effects add: the strictest of its running steps' own, or its own when none has one.
 - `has_hit(target: Pawn) -> bool`: True if this run of the ability has already hit this pawn.
-- `note_hit(target: Pawn) -> bool`: Notes that this run hit this pawn. False, with a warning once, if the run has hit `MAX_HITS_PER_RUN` already: then the pawn isn't hit.
+- `note_hit_key(key: int) -> bool`: Notes that this run hit the pawn with this key (`HitInfo.key_of()`). False, with a warning once, if the run has hit `MAX_HITS_PER_RUN` already: then the pawn isn't hit.
+- `hit_definition() -> HitDefinition`: Who its hits may hit and what they do now: one swapped in while playing, else its definition's, else a hit on enemies.
+- `use_hit_definition(hit: HitDefinition) -> void`: Swaps who its hits may hit and what they do, while playing (an empowered state); null goes back to its definition's.
+- `land_hit(target: Pawn, direction: Vector3, tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo`: Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [`HitInfo`](#hitinfo) carrying the hit definition's effects and its own on-hit EffectApplier children, delivered to the target (its interceptors, then effects), then `hit_landed`. The one place a hit is applied; override it for an ability's own rules (damage falling off with distance), calling `super()`.
+- `get_hit_run() -> HitRun`: Its swing's record of this run: whom it hit and what it met. Made the first time it's asked for; cleared as the ability starts.
 - `make_default_interceptors() -> void`: Called by the manager when the ability has no [`HitInterceptor`](#hitinterceptor), so it can make its defaults (Dash, Parry). Nothing by default.
 - `collect_steps() -> void`: Called once by the manager: finds the [`AbilityStep`](#abilitystep) children and works out its `timeline`.
 - `begin_steps() -> void`: Called by the manager when the ability starts: clears the timeline's state and starts the entries due at its start.
@@ -186,7 +196,7 @@ A part on the pawn, added by PawnInitializer, with the abilities as its children
 
 ```gdscript
 pawn.ability_manager.can_start(&"jump")      # could a press start something now? (the AI asks)
-pawn.ability_manager.action_for_tag(tag)     # the action to press for a kind of ability, such as movement.advanced
+pawn.ability_manager.action_for_tag(tag)     # the action to press for a kind of ability, such as ability.movement.advanced
 pawn.ability_manager.start_ability(ability)  # starts one with no trigger action, such as Knockback, by the same rules
 pawn.ability_manager.receive_hit(hit)        # something hit this pawn (server)
 ```
@@ -221,7 +231,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 - `ready_follows_body(action: StringName) -> bool`: True if an ability on this action has its own `AbilityBase.can_start()`, which can change without telling the manager (Jump needs the ground). The AI asks such an action at every decision, whatever `readiness_version` says.
 - `can_sleep() -> bool`: True if the pawn can sleep as far as its abilities go (pawn spec 15.3): no timer running (unless that ability can wait), no combo window open, and every every_tick() ability agrees.
 - `can_start(action: StringName) -> bool`: True if pressing this action now would start something, counting abilities it would cancel. Changes nothing; looks only at the abilities on that action.
-- `action_for_tag(tag: StringName) -> StringName`: The action to press to start an ability in this group (a category or extra_category such as &"movement.advanced"): the highest-priority one that could start now, boosts included; &"" if none. For the AI, so a behaviour asks for a kind of ability, not one by name. It answers with an action because everything a pawn does goes through its (rolled back) input. Changes nothing.
+- `action_for_tag(tag: StringName) -> StringName`: The action to press to start an ability in this group (a category or extra_category such as &"ability.movement.advanced"): the highest-priority one that could start now, boosts included; &"" if none. For the AI, so a behaviour asks for a kind of ability, not one by name. It answers with an action because everything a pawn does goes through its (rolled back) input. Changes nothing.
 - `start_ability(ability: AbilityBase) -> bool`: Starts an ability by the same rules as a press (cooldown, can_start, cancelling what conflicts). For abilities started by code, such as Knockback. One already running starts again from the beginning. Returns false if it couldn't start.
 - `intercept_hit(hit: HitInfo) -> HitInterceptor`: The first active TURN_AWAY interceptor that stops this hit, or null (pawn spec 8.23). Its response and `hit_intercepted` have gone out. A reply to an interception isn't turned away.
 - `is_invulnerable() -> bool`: True while a MISS-stage interceptor is on, such as a Dash's first 0.18 s. Hits don't arrive and harmful effects are refused.
@@ -329,6 +339,54 @@ Plain data, made on the server only, where hits are decided. A hit carries effec
 - `key_of(pawn: Pawn) -> int` *(static)*: A pawn's key for hit lists and ids: its entity id, the same on every machine, else its instance id.
 - `planned_damage() -> float`: The Health this hit's effects take before resistances, from their StatChangeParts. For readouts that show a hit before it lands.
 
+## HitQuery
+
+`res://assets/scripts/abilities/HitQuery.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Which pawns a hit volume touches this tick: one question for a swing's sweep and a projectile's flight (ability spec 13.1).
+
+Spheres of one radius along a path (no more than half a radius apart, so nothing is skipped) against the pawns' capsules, nearest the path's start first. Inside: the C++ pawn grid, physics without it, and lag compensation when the attacker saw other pawns in the past. The history query and one batched call a tick for every volume come in here later, so melee and projectiles get them at once.
+
+### Functions
+
+- `touching(centres: PackedVector3Array, radius: float, tick: int, attacker: Pawn, view_ticks_behind: float = 0.0, include_attacker: bool = false) -> Pawn[]` *(static)*: The pawns these spheres touch on this tick, nearest the first centre first. The attacker is left out unless include_attacker. With view_ticks_behind above 0 and a session, as the attacker saw them (lag compensation).
+- `line_centres(start: Vector3, end: Vector3, radius: float) -> PackedVector3Array` *(static)*: Spheres of this radius along the line start -> end, no more than half a radius apart so nothing between them is skipped: the centres for `touching()` for a projectile's flight or a hitscan line.
+- `point_on_path(start: Vector3, end: Vector3, pawn: Pawn) -> Vector3` *(static)*: The point on the path start -> end nearest a pawn: where a hit on it is placed.
+
+## HitRun
+
+`res://assets/scripts/abilities/HitRun.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+What one hit volume has done: whom it hit, everything it met, and whether it's spent (ability spec 13.3). Shared by swings and projectiles.
+
+A swing's run belongs to the run of its ability; a projectile owns one, so two bolts of a volley can each hit the same pawn. Each tick the volume hands it the pawns [`HitQuery`](#hitquery) found (and the world, if it met it): each pawn is met once, logged, checked against the [`HitDefinition`](#hitdefinition), and hit through `AbilityBase.land_hit()`. The hit list lives on its holder (an ability's rolled-back `AbilityBase.pawns_hit_this_run`, or a projectile's own), so a rollback restores it. The intersect log is packed arrays, for hooks and debugging, not rolled back.
+
+### Settings and properties
+
+- `hit: HitDefinition` = `null`: Who and what a hit does. Set by its owner, and swappable between ticks.
+- `ability: AbilityBase` = `null`: The ability whose hits these are; land_hit goes through it. Null once it's gone: then pawns are met but not hit.
+- `team: int` = `0`: The attacker's team, for the whitelist (kept, so a shooter that's gone still has one).
+- `on_intersect: Callable`: Called with each log entry as it's made (a Dictionary, see `entry()`); the owner sends its own hook from it.
+- `last_point: Vector3` = `Vector3(0, 0, 0)`: Where the meeting that spent it was.
+
+### Constants
+
+- `Kind.PAWN = 0`
+- `Kind.WORLD = 1`
+- `BODY_HEIGHT = 1.8`: How high a pawn's body is checked for the world check, in metres above its feet.
+
+### Functions
+
+- `_init(list_holder: Object = null, list_property: StringName = &"") -> void`: A run whose hit list is this property of holder (its owner keeps the list, and rolls it back if it should).
+- `remember_source(source: AbilityBase) -> void`: Keeps what a hit needs if its source goes before it lands (the hit definition's lands_without_source): the ability's on-hit effects and the hit definition's, and the attacker's id. A projectile calls it as it sets off.
+- `clear() -> void`: Starts again: no one met, nothing hit. A swing's run calls it when its ability starts; the hit list is cleared by its holder.
+- `meet_pawns(pawns: Pawn[], tick: int, attacker: Pawn, path_start: Vector3, path_end: Vector3, motion: Vector3, reach_from: Variant = null) -> bool`: Handles the pawns a volume touched this tick, nearest first: each one met for the first time is logged and, if the hit definition allows, hit. path_start and path_end place each meeting on the path; motion is the volume's way of moving, for the push. reach_from is where the weapon reaches out from (a swing's anchor), for the world check; null: path_start (a projectile's flight). Returns true once it's spent (max_hits or max_intersects), at the pawn that spent it: the caller stops there.
+- `meet_world(tick: int, at: Vector3, normal: Vector3) -> bool`: Logs meeting the world here. Returns true if that spends it (max_intersects).
+- `is_spent() -> bool`: True once it has hit max_hits pawns, or met max_intersects things.
+- `hit_count() -> int`: How many pawns it has hit.
+- `intersect_count() -> int`: How many things it has met.
+- `entry(index: int) -> Dictionary`: One log entry: {"tick", "kind" (Kind), "target" (a Pawn or null), "key" (its id), "point", "normal" (the world's), "hit", "blocked" (the world was in the way)}.
+
 ## JumpAbility
 
 `res://assets/scripts/abilities/JumpAbility.gd`, extends [`AbilityBase`](#abilitybase)
@@ -396,11 +454,11 @@ A swing is a [`WindupStep`](#windupstep) with a [`TurnToFaceStep`](#turntofacest
 - `attack_range: float`: From the definition: `MeleeAttackDefinition.attack_range`.
 - `hit_radius: float`: From the definition: `MeleeAttackDefinition.hit_radius`.
 - `hit_height: float`: From the definition: `MeleeAttackDefinition.hit_height`.
-- `hits_own_team: bool`: From the definition: `MeleeAttackDefinition.hits_own_team`.
 - `sweep_degrees: float`: From the definition: `MeleeAttackDefinition.sweep_degrees`.
 - `sweep_from_left: bool`: From the definition: `MeleeAttackDefinition.sweep_from_left`.
 - `height_at_sweep_start: float`: From the definition: `MeleeAttackDefinition.height_at_sweep_start`.
 - `height_at_sweep_end: float`: From the definition: `MeleeAttackDefinition.height_at_sweep_end`.
+- `sweep_keys: SweepKey[]`: From the definition: `MeleeAttackDefinition.sweep_keys`.
 - `windup_turn_degrees_per_second: float`: From the definition: `MeleeAttackDefinition.windup_turn_degrees_per_second`.
 - `combo_window_ticks: int`: From the definition: `MeleeAttackDefinition.combo_window_ticks`.
 - `warns_targets: bool`: From the definition: `MeleeAttackDefinition.warns_targets`.
@@ -530,20 +588,21 @@ Each kind of ability has its own class with its settings added ([`MeleeAttackDef
 ### Settings and properties
 
 - `trigger_action: StringName` = `&""`: The named action that starts it, such as &"jump". Empty: only the manager starts it, as the default locomotion.
-- `category: StringName` = `&""`: What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
-- `extra_categories: StringName[]` = `[]`: More groups it belongs to besides category, such as &"movement.advanced" for a dash. Lockouts, cancels and `AbilityManager.action_for_tag()` answer to all of them. They share one 64-bit mask with every other ability tag.
+- `category: StringName` = `&""`: What it is, as a tag such as &"ability.movement.jump". Used for lockouts. Empty: nothing can lock it out.
+- `extra_categories: StringName[]` = `[]`: More groups it belongs to besides category, such as &"ability.movement.advanced" for a dash. Lockouts, cancels and `AbilityManager.action_for_tag()` answer to all of them. They share one 64-bit mask with every other ability tag.
 - `priority: int` = `0`: Which ability a press picks among those on one action: the highest that can start wins, then the first in the tree. Locomotion with a held action works the same. Effects can add to it (AbilityPriorityPart, pawn spec 8.11).
 - `combo_positions: int[]` = `[]`: Which combo positions it can fill: [1] an opener, [2] a second hit, [2, 3] second or third. A follow-up (no 1) starts only while the combo window is open; give it a higher priority than the opener so it wins there. Empty: not in combos. Pawn spec 8.20.
 - `priority_jitter: float` = `0.0`: A random offset, up to plus or minus this, added to priority when a press picks between abilities. 0: none. It comes from the tick's own random numbers (`TickDriver.tick_rng()`), so a replay picks the same ability. Locomotion ignores it.
 - `duration: float` = `0.0`: Seconds. For an action, 0 means it happens at once. For locomotion, 0 means it runs as long as it's wanted.
 - `cooldown: float` = `0.0`: Seconds after it stops before it can start again.
-- `locks_out: StringName[]` = `[]`: Categories that can't start, or steer, while this runs, such as &"movement" for an attack that roots the pawn.
+- `locks_out: StringName[]` = `[]`: Categories that can't start, or steer, while this runs, such as &"ability.movement" for an attack that roots the pawn.
 - `buffer_window: float` = `0.0`: Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
 - `interrupt_priority: int` = `0`: How hard it cancels a running ability it conflicts with (pawn spec 8.6): Walk 0, Jump 5, Sprint 10, Parry 10, MeleeAttack 15, Knockback 30, Dash 40, Death 1000.
 - `interrupt_threshold: int` = `100`: While it runs, a conflicting ability with at least this interrupt_priority cancels it; a weaker one is locked out. 100: only Death cancels it. MeleeAttack uses 15, so Dash cancels a swing and Sprint doesn't.
-- `cancelled_by: StringName[]` = `[]`: Categories that can always cancel it while it runs, whatever the interrupt numbers say, such as &"movement.jump". A category covers its children, as in locks_out.
+- `cancelled_by: StringName[]` = `[]`: Categories that can always cancel it while it runs, whatever the interrupt numbers say, such as &"ability.movement.jump". A category covers its children, as in locks_out.
 - `pauses_locomotion: bool` = `false`: On: locomotion (Walk, Sprint) doesn't run at all while this does, so it neither steers nor slows the pawn (Dash). Off: a locked-out locomotion still slows the pawn to a stop, as an attack that roots the pawn wants.
 - `needs_full_movement: bool` = `false`: On: while it runs the pawn moves by physics (`move_and_slide`), not the CrowdMover, so fast or forced moves such as Dash and Knockback collide properly. Pawn spec 8.22.
+- `hit: HitDefinition`: Who its hits may hit and what they do (ability spec 13.2), for its swings and its projectiles. Empty: its kind's default (a swing hits enemies; a ranged attack's projectile stops at the first). A sweep step or a timeline entry can name another.
 - `step_timeline: TimelineEntry[]` = `[]`: For a stepped ability: when each step runs (ability spec 6.2), as entries in ticks from its start. Empty: its kind's default (a swing's windup, sweep and recovery), or its steps one after another.
 - `max_steps_ticks: int` = `600`: For a stepped ability, the longest it can run, in ticks at 60 a second. It ends when no step runs, or at this. Ignored without steps.
 
@@ -620,6 +679,38 @@ The permanent id is the file's Godot resource UID (replays and saves keep it); t
 - `table() -> PackedInt64Array` *(static)*: Index to UID, the list a replay keeps in its header.
 - `count() -> int` *(static)*: How many definitions have an index.
 
+## HitDefinition
+
+`res://assets/scripts/abilities/definitions/HitDefinition.gd`, extends [`Definition`](#definition)
+
+Who a hit may hit and what it does, for a swing and a projectile alike (ability spec 13.2).
+
+An ability's definition holds one (`AbilityDefinition.hit`); a sweep step or a ranged attack's projectile can name another, and an ability can swap it while playing (`AbilityBase.use_hit_definition()`). Variants come from [`Definition`](#definition). It matters only where hits are decided, so it needs no id on the wire.
+
+### Settings and properties
+
+- `hits_self: bool` = `false`: On: it can hit its own pawn (a projectile once it has left the shooter's body).
+- `hits_allies: bool` = `false`: On: it can hit pawns on the attacker's team.
+- `hits_enemies: bool` = `true`: On: it can hit pawns on other teams.
+- `target_effects: Effect[]` = `[]`: Effects on a pawn it hits, as well as the ability's own on-hit EffectApplier children.
+- `attacker_effects: Effect[]` = `[]`: Effects on the attacker when it lands, as well as the ability's own.
+- `push: int` = `0`: Which way a hit pushes its target.
+- `max_hits: int` = `0`: The most pawns one run of it hits (a swing's run, or one projectile): a projectile stops there, a swing hits no one else. 0: no limit.
+- `blocked_by_world: bool` = `true`: On: the world can block a hit (ability spec 13.8). It's checked along the weapon's reach, not from the chest: from the attacker's axis at the height the hit met the target, out to that point, then on to the target's body. So a swing doesn't hit through a wall, but a low crate in front of the attacker doesn't block a swing passing over it. Two short rays per pawn hit. A projectile's flight already stops at the world.
+- `world_mask: int` = `1`: The physics layers that block it. Leave a layer out to let hits through what's on it (a thin wooden wall).
+- `lands_without_source: bool` = `false`: On: a hit still lands when its source is gone (a removed shooter's fireball), with the effects it had when it set off and credit to the attacker's id. Off: a source that's gone lands nothing. A removed pawn usually lingers until its projectiles end anyway (`NetworkEntity.linger_until_tick`), so this is for a source that can't.
+- `max_intersects: int` = `0`: Ends it after this many intersects of any kind (pawns it may or may not hit, the world). 0: no limit.
+
+### Constants
+
+- `Push.FROM_ATTACKER = 0`: away from the attacking pawn (a swing)
+- `Push.ALONG_MOTION = 1`: the way the hit volume was moving (a projectile's flight)
+
+### Functions
+
+- `allows(attacker: Pawn, target: Pawn, attacker_team: int) -> bool`: True if the whitelist lets it hit this pawn, attacked by that one (null: no attacker, so only the team rules apply).
+- `push_direction(from: Vector3, target_position: Vector3, motion: Vector3) -> Vector3`: The direction a hit pushes: away from the attacker's position, or along the motion.
+
 ## JumpDefinition
 
 `res://assets/scripts/abilities/definitions/JumpDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
@@ -656,11 +747,11 @@ A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydef
 - `attack_range: float` = `1.8`: How far it reaches, in metres from the pawn: the far edge of the hit sphere.
 - `hit_radius: float` = `0.8`: The hit sphere's radius, in metres.
 - `hit_height: float` = `1.0`: The hit sphere's height above the pawn's feet, in metres: about the chest.
-- `hits_own_team: bool` = `false`: On: it can hit pawns on its own team.
 - `sweep_degrees: float` = `100.0`: How far round the hit sphere sweeps during the hit ticks, in degrees, centred straight ahead. 0: it holds still.
 - `sweep_from_left: bool` = `false`: On: the sweep goes from the pawn's left to its right. Off: right to left.
 - `height_at_sweep_start: float` = `0.0`: How far above or below hit_height the sphere is at the start of the sweep, in metres: slashes, rises, chops. 0: level.
 - `height_at_sweep_end: float` = `0.0`: The same at the end of the sweep. Between the two the sphere moves in a straight line up or down.
+- `sweep_keys: SweepKey[]` = `[]`: The swing's path as keys (ability spec 7): points it goes through, in order of their time, measured from the pawn. Fewer than two: the arc from the settings above (sweep_degrees and the heights). A weapon's path baked from its animation goes here.
 - `windup_turn_degrees_per_second: float` = `-1.0`: Degrees per second it turns toward where the pawn looks (its TurnToFace step). -1: the pawn's TurnRate stat (540 without one). 0: no turning.
 - `combo_window_ticks: int` = `30`: How long the combo window stays open after its hit, in ticks at 60 a second (its OpenCombo step).
 - `warns_targets: bool` = `true`: On: when a swing starts (server), enemies within reach and in front are told it's coming, so their AI can parry. One sphere query.
@@ -681,26 +772,22 @@ A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydef
 
 `res://assets/scripts/abilities/definitions/ProjectileDefinition.gd`, extends [`Definition`](#definition)
 
-A projectile's flight and hits, shared by every shot that uses it (ability spec 9): its speed and how it changes, how much it drops, its size, how far and long it flies, what stops it, how many pawns it passes through, and what's shown where it ends.
+A projectile's flight, shared by every shot that uses it (ability spec 9): its speed and how it changes, how much it drops, its size, how far and long it flies, whether the world stops it, and its look. Who it may hit and what a hit does is its ability's [`HitDefinition`](#hitdefinition) (ability spec 13).
 
 The one thing a designer makes for a new projectile: a ranged attack's definition names it (`RangedAttackDefinition.projectile_definition`), and the built-in projectile carries the networking. Variants come from [`Definition`](#definition). Save it as a file in a registry folder, so clients find it by its index.
 
 ### Settings and properties
 
+- `hitscan: bool` = `false`: On: hitscan. Everything along a straight line to its range is checked on the tick it's fired, as the shooter saw it, and clients draw a tracer for `tracer_seconds`. Speed, the speed curve and gravity don't apply.
+- `tracer_seconds: float` = `0.1`: With hitscan: how long its tracer shows, from the muzzle to where it ended.
 - `speed: float` = `30.0`: Metres a second at launch (times the speed curve's first value).
 - `speed_curve: Curve`: How its speed changes over its flight: across, 0 to 1 through its lifetime; up, a multiplier on `speed`. Empty: steady. A rocket rises, an arrow falls away. Gravity's drop comes on top.
 - `gravity_scale: float` = `0.0`: How much it drops, as a share of the world's gravity (physics/3d/default_gravity): 0 flies straight, 1 falls like a stone, 2 feels heavy. Tuning for how weighty it reads, not physics.
 - `radius: float` = `0.15`: Radius of the hit sphere swept along its path, in metres.
 - `max_range: float` = `40.0`: Metres it can fly before it's gone.
 - `max_lifetime: float` = `3.0`: Seconds it can fly before it's gone.
-- `max_hits: int` = `1`: How many pawns it hits before it stops: 1 stops at the first, 0 passes through every pawn. Each pawn is hit once.
-- `max_intersects: int` = `0`: Ends it after this many intersects of any kind (pawns it may or may not hit, the world). 0: no limit.
-- `hits_shooter: bool` = `false`: On: it can hit the pawn that fired it, once it has left its body.
-- `hits_allies: bool` = `false`: On: it can hit pawns on the shooter's team.
-- `hits_enemies: bool` = `true`: On: it can hit pawns on other teams.
-- `on_hit_effects: Effect[]` = `[]`: Effects on a pawn it hits, as well as the firing ability's on-hit effects: a fire arrow burns whichever bow fires it.
 - `hits_world: bool` = `true`: On: the level's solid geometry (world_mask) stops it.
-- `world_mask: int` = `1`: The physics layers that stop it (the ground and walls).
+- `world_mask: int` = `1`: The physics layers that stop it (the ground and walls). To let shots through some walls (wood, cloth, thin cover), put those on a physics layer of their own and leave it out here; a variant that includes it is a shot that can't go through (the usual way games handle it). With hitscan, the same.
 - `visual_scene: PackedScene`: How it looks in flight: any scene (a mesh, particles, a trail), turned to face along its flight (-Z forward). Empty: nothing is drawn, but it still flies and hits.
 - `impact_scene: PackedScene`: Spawned where it ends, on a pawn or the world, on every machine that draws it: a spark, a puff of dust. Its own node in the world, not part of the projectile, and a visual: it isn't sent, so a gameplay effect (an explosion that hurts) belongs in a hit's effects.
 - `impact_seconds: float` = `2.0`: Seconds an impact stays before it's freed (0: it frees itself).
@@ -708,6 +795,7 @@ The one thing a designer makes for a new projectile: a ranged attack's definitio
 ### Functions
 
 - `drop_per_second_squared() -> float`: Its drop in metres a second squared: the world's gravity times `gravity_scale`.
+- `tracer_ticks() -> int`: With hitscan: the ticks its tracer shows.
 - `lifetime_ticks() -> int`: How many ticks it flies before its lifetime is up, at the match's rate.
 - `offset_at(direction: Vector3, age: float) -> Vector3`: Where it is this many ticks after launch (a fraction is between ticks), from its launch point, fired along direction (length 1). Worked out, not stepped, so every machine gets the same point for the same tick.
 - `velocity_at(direction: Vector3, age: float) -> Vector3`: Its velocity this many ticks after launch, fired along direction (length 1).
@@ -839,6 +927,7 @@ The server's projectile reaches the shooter a round trip late, so the shooter's 
 - `launch_direction: Vector3` = `Vector3(0, 0, -1)`
 - `flight: ProjectileDefinition` = `null`
 - `shooter: Pawn` = `null`
+- `stops_at_first_pawn: bool` = `true`: On: it stops where it meets another pawn, as a shot whose hit definition stops at the first does.
 
 ### Constants
 
@@ -846,7 +935,7 @@ The server's projectile reaches the shooter a round trip late, so the shooter's 
 
 ### Functions
 
-- `fire(flies_with: ProjectileDefinition, scene: PackedScene, from_pawn: Pawn, origin: Vector3, direction: Vector3, tick: int) -> PredictedProjectile` *(static)*: Fires the shooter's copy of a shot: its definition's visual (or a scene of its own's Visual), flown from origin along direction. Null if there's nothing to draw.
+- `fire(flies_with: ProjectileDefinition, scene: PackedScene, from_pawn: Pawn, origin: Vector3, direction: Vector3, tick: int, stops_at_first_pawn: bool = true) -> PredictedProjectile` *(static)*: Fires the shooter's copy of a shot: its definition's visual (or a scene of its own's Visual), flown from origin along direction. Null if there's nothing to draw.
 - `server_shot_ended(shooter_id: int, tick: int) -> void` *(static)*: The server's projectile for this shot ended: its copy goes.
 
 ## Projectile
@@ -856,7 +945,7 @@ The server's projectile reaches the shooter a round trip late, so the shooter's 
 A projectile in flight: a networked entity whose flight is worked out from its launch, hitting pawns (up to max_hits) and the ground.
 
 A designer makes only a [`ProjectileDefinition`](#projectiledefinition) (numbers, a visual scene, an impact scene); this built-in projectile (`SCENE`, registered once with `register()`) carries the networking and builds its look from the definition. Code of its own (homing) means a scene whose root extends this, registered with `register_scene()`.
-Fired by a [`FireProjectileStep`](#fireprojectilestep) through `fire()`, which spawns it with `NetworkSession.spawn()` (offline too). Its state is a launch record (tick, origin, velocity, definition, shooter's entity id), set once and never changed in flight, so nothing is sent while it flies (ability spec 9). Where it is at any tick follows from that record and its [`ProjectileDefinition`](#projectiledefinition); clients draw the flight themselves. The server (or the offline game) sweeps each tick's stretch of flight for hits, made and delivered as a swing's are (`HitInfo.make()`), carrying the firing ability's on-hit effects, so damage, knockback, parries and dash invulnerability work as for melee. Each pawn is hit once; it stops at max_hits, the world, or past its range or lifetime. For its first ticks of flight, hits are checked against where the shooter saw other pawns (lag compensation).
+Fired by a [`FireProjectileStep`](#fireprojectilestep) through `fire()`, which spawns it with `NetworkSession.spawn()` (offline too). Its state is a launch record (tick, origin, velocity, definition, shooter's entity id), set once and never changed in flight, so nothing is sent while it flies (ability spec 9). Where it is at any tick follows from that record and its [`ProjectileDefinition`](#projectiledefinition); clients draw the flight themselves. The server (or the offline game) sweeps each tick's stretch of flight for hits through the same hit system as a swing's (ability spec 13): [`HitQuery`](#hitquery) finds who it touches, its own [`HitRun`](#hitrun) meets each once against its [`HitDefinition`](#hitdefinition) (the firing ability's, unless it was fired with another), and the ability lands the hit, so damage, knockback, parries and dash invulnerability work as for melee. It stops when its hit run is spent, at the world, or past its range or lifetime. A shooter that's gone lands no hits (ability spec 13.5). For its first ticks of flight, hits are checked against where the shooter saw other pawns (lag compensation).
 Visual hooks, apart from the ability's: `launched`, `hit_pawn`, `hit_world` and `ended`, and its definition's impact_scene where it ends. Hits are only known where they're decided, so a client hears launched and ended. Design: ability spec 9, pawn spec 8.24.
 
 ```gdscript
@@ -873,9 +962,11 @@ Projectile.fire(ability, origin, direction, preload("res://assets/scripts/resour
 - `definition_index: int` = `-1`: The [`DefinitionRegistry`](#definitionregistry) index of the definition it flies with (for an embedded variant, the nearest file it's based on); -1: its own `definition`.
 - `launch_speed: float` = `0.0`: Its speed and gravity scale as fired, so a client flies it the same when it was fired with a variant that changes them.
 - `launch_gravity_scale: float` = `0.0`
+- `end_tick: int` = `-1`: The tick it ends unless a pawn stops it first, worked out at launch: where it meets the world, or runs out of range or lifetime. -1 before launch.
+- `end_point: Vector3` = `Vector3(0, 0, 0)`: Where it ends then: so a client shows the impact exactly there.
 - `shooter_id: int` = `-1`: The firing pawn's entity id; -1 for a pawn not spawned through the session.
 - `team: int` = `0`: The firing pawn's team: its allies, for the whitelist.
-- `intersections: Dictionary[]` = `[]`: Everything it met while flying, in order, where it decides hits: {"tick", "kind" (&"pawn" or &"world"), "target" (a Pawn or null), "key" (the pawn's id), "point", "normal" (the world's), "hit" (true if the whitelist let it hit)}. Each pawn once.
+- `hit_run: HitRun` = `null`: What it has hit and met, where it decides hits (see `HitRun.entry()`); null on a client.
 - `shooter: Pawn`: Who fired it, worked out from its id on the machine that decides hits; null once the shooter is gone.
 - `velocity: Vector3`: Its velocity now, in metres a second.
 - `speed: float`: Metres a second at launch.
@@ -888,11 +979,12 @@ Projectile.fire(ability, origin, direction, preload("res://assets/scripts/resour
 - `hit_pawn(projectile: Projectile, target: Pawn, at: Vector3)`: It hit a pawn, where it decides hits (the server or offline).
 - `hit_world(projectile: Projectile, at: Vector3, normal: Vector3)`: It hit the world, where it decides hits.
 - `ended(projectile: Projectile, at: Vector3)`: It's gone, at this point: on every machine, as it leaves.
-- `intersected(projectile: Projectile, entry: Dictionary)`: It met something, where it decides hits: one entry of `intersections`, recorded whether or not the whitelist lets it hit.
+- `intersected(projectile: Projectile, entry: Dictionary)`: It met something, where it decides hits: one entry of its `hit_run`'s log (see `HitRun.entry()`), hit or not.
 
 ### Constants
 
 - `GROUP = &"projectiles"`: The group every projectile is in, for tools that find them (the diagnostics' projectile trace).
+- `COARSE_TICKS = 6`: Ticks a step of the world trace at launch covers, for an arc.
 - `SCENE = "res://assets/scenes/projectiles/projectile.tscn"`: The built-in projectile: a Projectile with its TickStateComponent and NetworkEntity, whose look comes from its definition.
 - `TYPE = "projectile"`: Its network type's name.
 
@@ -901,10 +993,10 @@ Projectile.fire(ability, origin, direction, preload("res://assets/scripts/resour
 - `register() -> void` *(static)*: Registers the built-in projectile as a network type, once. Every machine does it at startup, before hosting or joining: the list of types is part of the join check, so one registered later stops new players joining.
 - `type_name_for(scene: PackedScene) -> String` *(static)*: The network type name for a projectile scene of its own.
 - `register_scene(scene: PackedScene) -> void` *(static)*: Registers a projectile scene of its own (code of its own) as a network type, once. Every machine does it at startup, before hosting or joining: the list of types is part of the join check, so one registered later stops new players joining (the faction samples register the bolt).
-- `fire(from_ability: AbilityBase, origin: Vector3, direction: Vector3, flies_with: ProjectileDefinition, scene: PackedScene = null) -> Projectile` *(static)*: Server or offline: fires a projectile with this definition from this ability's pawn, at origin along direction. The built-in one, or a scene of its own if given. Null on a client, or if it couldn't spawn.
-- `launch(from_ability: AbilityBase, origin: Vector3, direction: Vector3, flies_with: ProjectileDefinition = null) -> void`: Sets it off from its ability: the launch record, the shooter's id, team and effects. fire() calls it.
+- `fire(from_ability: AbilityBase, origin: Vector3, direction: Vector3, flies_with: ProjectileDefinition, scene: PackedScene = null, hits_with: HitDefinition = null) -> Projectile` *(static)*: Server or offline: fires a projectile with this definition from this ability's pawn, at origin along direction, hitting with the ability's hit definition or the one given. The built-in one, or a scene of its own if given. Null on a client, or if it couldn't spawn.
+- `launch(from_ability: AbilityBase, origin: Vector3, direction: Vector3, flies_with: ProjectileDefinition = null, hits_with: HitDefinition = null) -> void`: Sets it off from its ability: the launch record, the shooter's id and team, and its hit run. fire() calls it.
 - `flight() -> ProjectileDefinition`: The definition it flies with, worked out: the one its launch names, else its own, else the defaults; with the launch's speed and gravity scale where they differ (a variant's).
-- `position_at(age: float) -> Vector3`: Where it is this many ticks after launch (a fraction is between ticks), from its launch record.
+- `position_at(age: float) -> Vector3`: Where it is this many ticks after launch (a fraction is between ticks), from its launch record. Hitscan: along its tracer, from the muzzle to where it ended.
 - `velocity_at(age: float) -> Vector3`: Its velocity this many ticks after launch.
 - `is_done() -> bool`: True once it has hit something or flown its course, on the machine that decides it.
 - `is_own_shot() -> bool`: True if it was fired by the pawn this machine predicts: the shooter's own client, which draws its predicted copy instead.
@@ -1038,13 +1130,15 @@ The server (or offline game) spawns it, never in a rollback replay. The shooter'
 
 `res://assets/scripts/abilities/steps/MeleeSweepStep.gd`, extends [`AbilityStep`](#abilitystep)
 
-An attack's hit window: a hit sphere moves from a start point to an end point over length_ticks, and pawns it touches are hit.
+An attack's hit window: a hit sphere moves along a path over length_ticks, and pawns it touches are hit.
 
-Each point is around the pawn, relative to where it faces each tick: angle (degrees, positive to the left, 0 straight ahead), height (metres above the feet) and reach (metres to the sphere's far edge). Each goes straight from start to end, so a slash changes angle, a thrust reach, a chop height; longer patterns are several sweeps in a row. Visuals draw the same path (`offset_at()`).
-Hits are decided on the server only (or offline), never in a rollback replay. Each pawn is hit at most once per run of the ability, its own team is skipped unless `hits_own_team`, and a hit carries the ability's on-hit effects (`HitInfo.make()`, as a projectile's). Signals go out on the ability. Design: pawn spec 8.20.
+Each point on the path is an angle (degrees, positive to the left, 0 straight ahead), a height (metres above the feet) and a reach (metres to the sphere's far edge), measured from its `anchor`: the pawn as it moves and turns (a swing), or where the pawn stood when the step began (a cleave left in the world). The path goes from start to end, or through its `keys` (ability spec 7), so an arc can curve, dip or reach out mid-swing; a weapon's path baked from its animation is a set of keys. Visuals draw the same path (`offset_at()`).
+Hits are decided on the server only (or offline), never in a rollback replay. Each pawn is hit at most once per run of the ability, and who it may hit and what a hit does come from its [`HitDefinition`](#hitdefinition) (its own `hit`, else its ability's), through the same hit system as a projectile's (ability spec 13). Signals go out on the ability. Design: pawn spec 8.20.
 
 ### Settings and properties
 
+- `anchor: int` = `0`: What the path is measured from.
+- `keys: SweepKey[]` = `[]`: Points the path goes through, in order of their time (ability spec 7). Fewer than two: from Start to End below.
 - `start_angle: float` = `-50.0`: Degrees from straight ahead, positive to the pawn's left.
 - `start_height: float` = `1.0`: Metres above the pawn's feet.
 - `start_reach: float` = `1.8`: Metres from the pawn to the far edge of the hit sphere.
@@ -1052,11 +1146,23 @@ Hits are decided on the server only (or offline), never in a rollback replay. Ea
 - `end_height: float` = `1.0`
 - `end_reach: float` = `1.8`
 - `hit_radius: float` = `0.8`: The hit sphere's radius, in metres.
-- `hits_own_team: bool` = `false`: On: it can hit pawns on its own team.
+- `hit: HitDefinition`: Who this sweep may hit and what it does, in place of its ability's (a backswing that pushes harder). Empty: the ability's.
+- `anchor_origin: Vector3` = `Vector3(0, 0, 0)`: With a WORLD anchor: where the pawn stood and faced as the step began. Rolls back.
+- `anchor_yaw: float` = `0.0`
+
+### Constants
+
+- `Anchor.PAWN = 0`: the pawn, as it moves and turns: a swing
+- `Anchor.WORLD = 1`: where the pawn stood and faced when the step began: a cleave or slam left in the world
 
 ### Functions
 
-- `offset_at(at: float, facing: float) -> Vector3`: Where the hit sphere's centre is at this point of the sweep (0 start, 1 end), from the pawn's feet, for a facing in radians.
+- `offset_at(at: float, facing: float) -> Vector3`: Where the hit sphere's centre is at this point of the sweep (0 start, 1 end), from the anchor's feet, for a facing in radians.
+- `path_point(at: float) -> Vector3`: The path at this point of the sweep: (angle in degrees, height, reach), from its keys, or from Start to End.
+- `anchor_point() -> Vector3`: The point the path is measured from now: the pawn's feet, or where it stood as the step began.
+- `anchor_facing() -> float`: The facing the path is measured from now, in radians.
+- `enter() -> void`
+- `get_rollback_properties() -> String[]`
 - `centres_for_tick(sweep_tick: int) -> Vector3[]`: The spots the sphere passes through on this sweep tick (0 is the first), in the world, no more than half its radius apart. One spot if it doesn't move, so a fast sweep or a 30 Hz match leaves no gaps.
 - `centres_for_ticks(sweep_tick: int, count: int) -> Vector3[]`: The same over count ticks from sweep_tick, for a pawn running every Nth tick (pawn spec 8.21). Never goes past the sweep's end.
 - `tick(_dt: float) -> int`
@@ -1078,6 +1184,25 @@ A follow-up is an ability whose combo_positions include the next position. Put t
 
 - `enter() -> void`
 - `tick(_dt: float) -> int`
+
+## SweepKey
+
+`res://assets/scripts/abilities/steps/SweepKey.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+One point on a swing's path: where the hit sphere is at one moment of the hit window (ability spec 7).
+
+A [`MeleeSweepStep`](#meleesweepstep) with keys moves its sphere from key to key in order of `at`, in a straight line between each pair, so an arc can curve, dip or reach out mid-swing. Two keys are the plain start and end. Visuals draw the weapon along the same keys (`AbilityStep.weapon_point()`), so what's drawn and what hits can't disagree.
+
+### Settings and properties
+
+- `at: float` = `0.0`: When, through the hit window: 0 its start, 1 its end.
+- `angle: float` = `0.0`: Degrees from straight ahead, positive to the pawn's left.
+- `height: float` = `1.0`: Metres above the pawn's feet.
+- `reach: float` = `1.8`: Metres from the pawn to the far edge of the hit sphere.
+
+### Functions
+
+- `make(key_at: float, key_angle: float, key_height: float, key_reach: float) -> SweepKey` *(static)*: A key made in code.
 
 ## TimelineEntry
 

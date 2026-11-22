@@ -42,14 +42,14 @@ func _make_node(node_name: String, tag: StringName, position := Vector3.ZERO) ->
 
 func _test_registers_and_leaves() -> void:
 	NavMarkerManager.reset()
-	var node := _make_node("Spot", &"point.cover", Vector3(3, 0, 4))
+	var node := _make_node("Spot", &"nav.point.cover", Vector3(3, 0, 4))
 	_check(node.get_marker_id() == 0, "registering: no id before it's in the scene")
 	add_child(node)
 	var id := node.get_marker_id()
 	_check(id != 0, "registering: gets an id on entering the scene")
 	_check(id == NavMarkerManager.scene_marker_id(str(node.get_path())), "registering: the id comes from its scene path")
 	NavMarkerManager.flush()
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 10.0) == id, "registering: can be found after the tick")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 10.0) == id, "registering: can be found after the tick")
 	remove_child(node)
 	_check(node.get_marker_id() == 0, "leaving: it has no id afterwards")
 	NavMarkerManager.flush()
@@ -62,7 +62,7 @@ func _test_placement() -> void:
 	var parent := Node3D.new()
 	parent.position = Vector3(10, 0, 0)
 	add_child(parent)
-	var node := _make_node("Child", &"point.cover", Vector3(0, 2, 5))
+	var node := _make_node("Child", &"nav.point.cover", Vector3(0, 2, 5))
 	parent.add_child(node)
 	NavMarkerManager.flush()
 	var id := node.get_marker_id()
@@ -79,7 +79,7 @@ func _test_placement() -> void:
 	var link_node := NavMarkerNode.new()
 	link_node.name = "Link"
 	var link := NavLink.new()
-	link.tag = &"link.jump"
+	link.tag = &"nav.link.jump"
 	link.end_offset = Vector3(0, 0, -5)
 	link_node.marker = link
 	link_node.position = Vector3(1, 0, 1)
@@ -97,7 +97,7 @@ func _test_placement() -> void:
 func _test_copies_dont_share() -> void:
 	NavMarkerManager.reset()
 	var shared := NavPoint.new()
-	shared.tag = &"use.seat"
+	shared.tag = &"nav.use.seat"
 	var first := NavMarkerNode.new()
 	first.name = "First"
 	first.marker = shared
@@ -120,7 +120,7 @@ func _test_copies_dont_share() -> void:
 
 func _test_enabling() -> void:
 	NavMarkerManager.reset()
-	var node := _make_node("Door", &"link.door")
+	var node := _make_node("Door", &"nav.link.door")
 	node.set_marker_enabled(false) # not in the scene yet, so nothing should happen
 	add_child(node)
 	NavMarkerManager.flush()
@@ -153,12 +153,12 @@ func _test_bad_setups() -> void:
 	_check(no_tag._get_configuration_warnings().size() == 1, "bad setups: and shows an inspector warning")
 	no_tag.free()
 
-	var good := _make_node("Good", &"point.cover")
+	var good := _make_node("Good", &"nav.point.cover")
 	add_child(good)
 	_check(good._get_configuration_warnings().is_empty(), "bad setups: a good one shows no warning")
 	good.free()
 
-	var unnamed := _make_node("", &"point.cover")
+	var unnamed := _make_node("", &"nav.point.cover")
 	add_child(unnamed)
 	NavMarkerManager.flush()
 	_check(String(unnamed.name).begins_with("@"), "bad setups: a node with no name gets an automatic one starting with @")
@@ -169,7 +169,7 @@ func _test_bad_setups() -> void:
 
 func _test_reentering() -> void:
 	NavMarkerManager.reset()
-	var node := _make_node("Spot", &"point.cover")
+	var node := _make_node("Spot", &"nav.point.cover")
 	add_child(node)
 	NavMarkerManager.flush()
 	var id := node.get_marker_id()
@@ -178,7 +178,7 @@ func _test_reentering() -> void:
 	NavMarkerManager.flush()
 	_check(node.get_marker_id() == id, "re-entering: same path, same id")
 	_check(NavMarkerManager.get_marker_count() == 1, "re-entering: one marker, not two")
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 10.0).size() == 1, "re-entering: found once")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 10.0).size() == 1, "re-entering: found once")
 	node.free()
 	NavMarkerManager.flush()
 
@@ -189,11 +189,11 @@ func _test_debug_module_draws() -> void:
 	add_child(debug)
 	NavMarkerManager.flush()
 	var point := NavPoint.new()
-	point.tag = &"point.cover"
+	point.tag = &"nav.point.cover"
 	var link := NavLink.new()
-	link.tag = &"link.jump"
+	link.tag = &"nav.link.jump"
 	var area := NavArea.new()
-	area.tag = &"area.road"
+	area.tag = &"nav.area.road"
 	var markers: Array[NavMarker] = [point, link, area]
 	NavMarkerManager.request_markers(1, Vector2i.ZERO, markers)
 	NavMarkerManager.flush()
@@ -220,7 +220,7 @@ func _test_debug_module_limit() -> void:
 	var markers: Array[NavMarker] = []
 	for index in 20:
 		var point := NavPoint.new()
-		point.tag = &"point.cover"
+		point.tag = &"nav.point.cover"
 		markers.append(point)
 	NavMarkerManager.request_markers(1, Vector2i.ZERO, markers)
 	NavMarkerManager.flush()
@@ -237,7 +237,7 @@ func _test_debug_module_and_report() -> void:
 	add_child(debug)
 	NavMarkerManager.flush()
 	var link := NavLink.new()
-	link.tag = &"link.jump"
+	link.tag = &"nav.link.jump"
 	var markers: Array[NavMarker] = [link]
 	NavMarkerManager.request_markers(1, Vector2i.ZERO, markers)
 	NavMarkerManager.flush()
@@ -253,7 +253,7 @@ func _test_debug_module_rebuilds_by_itself() -> void:
 	add_child(debug)
 	NavMarkerManager.flush()
 	var point := NavPoint.new()
-	point.tag = &"point.cover"
+	point.tag = &"nav.point.cover"
 	var markers: Array[NavMarker] = [point]
 	NavMarkerManager.request_markers(1, Vector2i.ZERO, markers)
 	NavMarkerManager.flush()
@@ -273,9 +273,9 @@ func _test_sample_scene() -> void:
 	_check(NavMarkerManager.get_marker_count() == 7, "sample scene: all seven markers register")
 	_check(NavMarkerManager.get_marker(sample.get_node("Ladder").get_marker_id()) is NavLink, "sample scene: types survive being loaded from a file")
 	var bench: NavSmartObject = NavMarkerManager.get_marker(sample.get_node("Bench").get_marker_id())
-	_check(bench.slot_count == 2 and bench.tag == &"use.seat", "sample scene: values survive being loaded from a file")
+	_check(bench.slot_count == 2 and bench.tag == &"nav.use.seat", "sample scene: values survive being loaded from a file")
 	_check(not NavMarkerManager.is_marker_enabled(sample.get_node("DisabledPatrol").get_marker_id()), "sample scene: starts_enabled = false is respected")
-	_check(NavMarkerManager.find_nearest(&"use", Vector3.ZERO, 100.0) == sample.get_node("Bench").get_marker_id(), "sample scene: search finds a placed marker")
+	_check(NavMarkerManager.find_nearest(&"nav.use", Vector3.ZERO, 100.0) == sample.get_node("Bench").get_marker_id(), "sample scene: search finds a placed marker")
 	var debug: NavMarkerDebugModule = sample.get_node("NavMarkerDebugModule")
 	debug.rebuild_now()
 	_check(debug.get_drawn_count() == 7, "sample scene: the debug module draws them all")

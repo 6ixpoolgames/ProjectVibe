@@ -36,11 +36,6 @@ extends AbilityDefinition
 	set(value):
 		hit_height = value
 		_changed(&"hit_height", value)
-## On: it can hit pawns on its own team.
-@export var hits_own_team: bool = false:
-	set(value):
-		hits_own_team = value
-		_changed(&"hits_own_team", value)
 ## How far round the hit sphere sweeps during the hit ticks, in degrees, centred straight ahead. 0: it holds still.
 @export_range(0.0, 360.0, 1.0) var sweep_degrees: float = 100.0:
 	set(value):
@@ -61,6 +56,12 @@ extends AbilityDefinition
 	set(value):
 		height_at_sweep_end = value
 		_changed(&"height_at_sweep_end", value)
+## The swing's path as keys (ability spec 7): points it goes through, in order of their time, measured from the pawn. Fewer than two: the
+## arc from the settings above (sweep_degrees and the heights). A weapon's path baked from its animation goes here.
+@export var sweep_keys: Array[SweepKey] = []:
+	set(value):
+		sweep_keys = value
+		_changed(&"sweep_keys", value)
 ## Degrees per second it turns toward where the pawn looks (its TurnToFace step). -1: the pawn's TurnRate stat (540 without one).
 ## 0: no turning.
 @export_range(-1.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second: float = -1.0:
@@ -83,8 +84,8 @@ func _init() -> void:
 	super()
 	trigger_action = &"primary"
 	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.COMBAT_MELEE
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
+	category = Tags.ABILITY.COMBAT_MELEE
+	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 15
 	interrupt_threshold = 15
 	buffer_window = 0.15 # a press near the end of a dash waits for it

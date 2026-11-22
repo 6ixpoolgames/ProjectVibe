@@ -34,7 +34,7 @@ func tick(_dt: float) -> Status:
 		if pawn.is_authority():
 			_fire()
 		elif _is_shooters_own_client():
-			PredictedProjectile.fire(projectile_definition, projectile_scene, pawn, muzzle_point(), aim_direction(), TickDriver.tick)
+			PredictedProjectile.fire(projectile_definition, projectile_scene, pawn, muzzle_point(), aim_direction(), TickDriver.tick, ability.hit_definition().max_hits == 1)
 	return Status.RUNNING
 
 

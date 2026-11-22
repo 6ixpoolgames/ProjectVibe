@@ -5,7 +5,6 @@
 Every class in `assets/scripts/navigation/`, from its doc comments. The overview is in [README.md](README.md).
 
 - [NavMarkerNode](#navmarkernode)
-- [NavTags](#navtags)
 - [NavigationManager](#navigationmanager)
 - [TerrainSettings](#terrainsettings)
 - [NavArea](#navarea)
@@ -37,41 +36,6 @@ The marker's id comes from this node's scene path, so renaming or moving the nod
 - `get_marker_id() -> int`: The registered marker's id, or 0 if nothing is registered.
 - `set_marker_enabled(enabled: bool) -> void`: Switches this node's marker on or off. The change takes effect on the next tick.
 - `_get_configuration_warnings() -> PackedStringArray`: What the editor shows as a warning triangle on this node. An empty list means no warning.
-
-## NavTags
-
-`res://assets/scripts/navigation/NavTags.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
-
-Navigation's own tag names and bits (nav spec 21.3).
-
-Turns names like "link.jump" into bits, so nav and AI check tags with one AND instead of comparing text. Abilities have their own tags ([`TagRegistry`](../tags/REFERENCE.md#tagregistry)); each system gets its own 64 bits. A tag is a name with dot-separated levels, and each level has its own bit: a tag's mask is its own bit plus its parents', so a search for "link" finds link.jump but never "linkage".
-
-In multiplayer every machine must give a tag the same bit, so the game lists its tags in a declarations file and NavTags sorts and numbers them at startup, identically everywhere. An undeclared tag is added on the spot with a one-time warning (machines may disagree online); declaring after use counts as undeclared, since sorting again would change stored masks. Past 64 levels, tags get no bit and match nothing. Searches never add tags.
-
-### Constants
-
-- `MAX_BITS = 64`
-- `DEFAULT_DECLARATIONS_PATH = "res://assets/scripts/resources/nav_tag_declarations.tres"`: The file read by default. A game can point somewhere else with the project setting below.
-- `DECLARATIONS_SETTING = "project_base/nav/tag_declarations_path"`
-
-### Functions
-
-- `declare(tags: Array) -> void` *(static)*: Adds tags to the declared list. The file is read automatically, so most games never call this. If you do, call it at startup, before anything uses NavTags.
-- `reset(read_declarations_file: bool = true) -> void` *(static)*: Forgets everything, including that the file was read. For tests and tools that reload content. Masks saved before a reset mean nothing afterwards.
-- `bit_of(tag: Variant) -> int` *(static)*: The tag's own bit number, or -1 if it has none (empty tag, or past the 64 limit).
-- `own_bit(tag: Variant) -> int` *(static)*: Just the tag's own bit as a mask, with no parents. For a "forbidden" list: forbidding link.door shouldn't forbid all of link.
-- `mask_of(tag: Variant) -> int` *(static)*: The tag's bit plus its parents' bits. This is what a marker stores, so a search for any level finds it.
-- `mask_of_list(tags: Array) -> int` *(static)*: Several tags' own bits together. For a list like forbidden = [link.door, area.hazard].
-- `full_mask_of_list(tags: Array) -> int` *(static)*: Several tags' full masks together, parents included. For a pawn's capabilities, such as [link.jump, link.climb], because a link's mask includes its parents' bits and has to fit inside this.
-- `matches(mask: int, search_tag: Variant) -> bool` *(static)*: True if something with this mask answers to the search tag, from the first level: "link" and "link.jump" find link.jump, "jump" doesn't. Never adds tags: an unknown tag matches nothing.
-- `has_tag(tag: Variant) -> bool` *(static)*: True if the tag has a bit already. Never adds it.
-- `names_of(mask: int) -> StringName[]` *(static)*: The tag names for the bits in a mask, in bit order. For debug text.
-- `get_tag_count() -> int` *(static)*
-- `get_tags() -> StringName[]` *(static)*: All tags in bit order. It's a copy, so changing it can't damage the real list.
-- `content_hash() -> int` *(static)*: A number that matches on two machines only if they give every tag the same bit. The multiplayer handshake compares it (NetworkSession.content_hash).
-- `normalize(tag: Variant) -> StringName` *(static)*: Cleans up a tag name: trims spaces and drops empty levels. Returns &"" if nothing usable is left.
-- `_ensure_ready() -> void` *(static)*: On first real use: reads the file (once), then numbers every declared level in sorted order. Sorting is what makes every machine agree, whatever order the tags were declared in.
-- `_add_late(tag: StringName, why: String) -> void` *(static)*: Adds a tag, and any parent levels it's missing, after the startup numbering.
 
 ## NavigationManager
 
@@ -148,7 +112,7 @@ A [`TerrainNavFeeder`](../world/REFERENCE.md#terrainnavfeeder) gives NavMarkerMa
 
 A volume that changes how nav treats the ground in it (nav spec 21.3).
 
-Tags such as area.road, area.hazard and area.water say what it means. An area names a surface, not a cost, because each kind of agent has its own cost per surface (NavFilter, nav spec 4): a soldier avoids mud a tank drives through. NavAreaModule will hand areas to nav; until it exists they're registered and do nothing.
+Tags such as nav.area.road, nav.area.hazard and nav.area.water say what it means. An area names a surface, not a cost, because each kind of agent has its own cost per surface (NavFilter, nav spec 4): a soldier avoids mud a tank drives through. NavAreaModule will hand areas to nav; until it exists they're registered and do nothing.
 
 ### Settings and properties
 
@@ -161,7 +125,7 @@ Tags such as area.road, area.hazard and area.water say what it means. An area na
 
 A connection nav can't walk across: an off-mesh link (nav spec 21.3).
 
-A ladder, a jump, a door and a teleporter are all NavLinks, told apart by their tags (link.climb, link.jump, link.door, link.teleport). NavLinkModule hands them to nav so paths can use them; without that module in the level they do nothing.
+A ladder, a jump, a door and a teleporter are all NavLinks, told apart by their tags (nav.link.climb, nav.link.jump, nav.link.door, nav.link.teleport). NavLinkModule hands them to nav so paths can use them; without that module in the level they do nothing.
 
 ### Settings and properties
 
@@ -185,7 +149,7 @@ Plain data with no behaviour: modules ([`NavMarkerModule`](#navmarkermodule)) ho
 
 ### Settings and properties
 
-- `tag: StringName`: What this marker is, such as &"link.jump". Must be declared for NavTags, or NavMarkerManager refuses the marker.
+- `tag: StringName`: What this marker is, such as &"nav.link.jump". Must be declared in the tag declarations, or NavMarkerManager refuses the marker.
 - `radius: float` = `1.0`: How close counts as "at it".
 - `starts_enabled: bool` = `true`: False = registered, but not used until someone switches it on.
 - `position: Vector3` = `Vector3(0, 0, 0)`
@@ -221,7 +185,7 @@ NavObstacleModule will hand these to nav's ObstacleSystem; until it exists they'
 
 A spot that means something to AI: a tactical point or point of interest (nav spec 21.3).
 
-Tags such as point.cover, point.patrol, point.ambush and point.wander say what it's for. It adds nothing to [`NavMarker`](#navmarker); it's a class of its own so "marker is NavPoint" works as a filter and a module can say it handles points.
+Tags such as nav.point.cover, nav.point.patrol, nav.point.ambush and nav.point.wander say what it's for. It adds nothing to [`NavMarker`](#navmarker); it's a class of its own so "marker is NavPoint" works as a filter and a module can say it handles points.
 
 ## NavSmartObject
 
@@ -229,7 +193,7 @@ Tags such as point.cover, point.patrol, point.ambush and point.wander say what i
 
 A point AI can use, with room for a limited number of users (nav spec 21.3).
 
-Tags such as use.seat, use.work and use.pickup say how it's used. Who is using it changes during play, so that belongs to NavSmartObjectModule, not to this data.
+Tags such as nav.use.seat, nav.use.work and nav.use.pickup say how it's used. Who is using it changes during play, so that belongs to NavSmartObjectModule, not to this data.
 
 ### Settings and properties
 

@@ -10,7 +10,7 @@ extends AbilityDefinition
 func _init() -> void:
 	super()
 	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.STATUS_DEAD
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT, Tags.UTILITY]
+	category = Tags.ABILITY.DEATH
+	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT, Tags.ABILITY.UTILITY]
 	interrupt_priority = 1000
 	interrupt_threshold = 1000

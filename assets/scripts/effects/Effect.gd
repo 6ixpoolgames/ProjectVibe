@@ -18,7 +18,7 @@ enum Stacking {
 
 ## A name for readouts and the debug timeline; also how a client recognises an effect made in code (a saved one goes by its path).
 @export var effect_name: StringName = &""
-## What kind of effect it is, as [EffectTags] such as damage.elemental.fire. Resistances and removing by tag go by these.
+## What kind of effect it is, as effect tags ([code]Tags.EFFECT[/code]) such as effect.damage.elemental.fire. Resistances and removing by tag go by these.
 @export var tags: Array[StringName] = []
 ## On: resistances apply and invulnerability (a dash) stops it. Off: it helps, and gets through both.
 @export var is_harmful := true
@@ -44,16 +44,16 @@ func is_instant() -> bool:
 	return duration_seconds <= 0.0
 
 
-## Its tags as one mask, parents included ([method EffectTags.full_mask_of_list]), worked out once.
+## Its tags as one mask, parents included ([method TagRegistry.full_mask_of_list]), worked out once.
 func get_tag_mask() -> int:
 	if _mask < 0:
-		_mask = EffectTags.full_mask_of_list(tags)
+		_mask = TagRegistry.full_mask_of_list(tags)
 	return _mask
 
 
-## True if it has this tag, or a tag inside it: an effect tagged damage.elemental.fire has damage.elemental.
+## True if it has this tag, or a tag inside it: an effect tagged effect.damage.elemental.fire has effect.damage.elemental.
 func has_tag(tag: StringName) -> bool:
-	return EffectTags.has_tag(tag) and get_tag_mask() & EffectTags.own_bit(tag) != 0
+	return TagRegistry.has_tag(tag) and get_tag_mask() & TagRegistry.own_bit(tag) != 0
 
 
 ## True if any of its parts hold while it lasts.
@@ -108,8 +108,8 @@ func describe() -> String:
 	return resource_path.get_file().get_basename() if resource_path != "" else "effect"
 
 
-## An instant effect that takes this much Health, for hits made in code (a trap, a test). Tagged damage.physical unless given tags.
-static func make_damage(amount: float, damage_tags: Array[StringName] = [EffectTags.DAMAGE_PHYSICAL]) -> Effect:
+## An instant effect that takes this much Health, for hits made in code (a trap, a test). Tagged effect.damage.physical unless given tags.
+static func make_damage(amount: float, damage_tags: Array[StringName] = [Tags.EFFECT.DAMAGE_PHYSICAL]) -> Effect:
 	var effect := Effect.new()
 	effect.effect_name = &"damage"
 	effect.tags = damage_tags

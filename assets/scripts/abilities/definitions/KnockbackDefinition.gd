@@ -10,8 +10,8 @@ extends AbilityDefinition
 func _init() -> void:
 	super()
 	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.COMBAT_KNOCKBACK
+	category = Tags.ABILITY.COMBAT_KNOCKBACK
 	needs_full_movement = true # a push should collide properly, and may lift (pawn spec 8.22)
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
+	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 30
 	interrupt_threshold = 35 # only Dash (40) cancels it

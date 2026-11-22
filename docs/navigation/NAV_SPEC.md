@@ -1233,6 +1233,8 @@ Types are the guard: `marker is NavLink` works on every marker, generated or han
 
 **`NavTags` follows `TagRegistry`'s rules with its own 64 bits and its own declarations file.** Names are dotted, a mask includes its parents' bits, and tags are declared and numbered at startup so every machine agrees. A tag nobody declared gets a one-time warning. `NetworkSession.content_hash` must include it, as it does `TagRegistry`.
 
+*(Claude 2026-11-22: `NavTags` is gone: nav tags are now the `nav` category (`nav.link.jump`), merged into one tag registry with categories; see [tag spec](../tags/TAG_SPEC.md).)*
+
 **Handing off to the pawn.** A `NavLink` keeps its nav tag for pathfinding, and its `action_tag` (a `TagRegistry` name such as `movement.jump`) says which action plays when the pawn reaches it. A pawn also needs a small table from its abilities to its nav capabilities, which waits for the pawn design. *(Claude 2026-11-08: `action_tag` became `press_action`, a named input action such as `jump`, because pawns start abilities by pressing named actions. It defaults to `jump`. The table isn't built; `NavigationManager.use_links` turns all links off for a pawn that can't use them.)*
 
 **Surface types:** 16 is accepted (15 plus the default), and allocating them is the designers' job. Stacking works today through layer `order`, where the higher one wins. Changing a region's surface rebuilds the tiles under it. A mix of two surfaces needs a surface type of its own.

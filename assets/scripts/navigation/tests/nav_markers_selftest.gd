@@ -121,31 +121,31 @@ func _add_chunk(chunk: Vector2i, markers: Array[NavMarker]) -> PackedInt64Array:
 
 func _link() -> NavLink:
 	var marker := NavLink.new()
-	marker.tag = &"link.jump"
+	marker.tag = &"nav.link.jump"
 	return marker
 
 
 func _point() -> NavPoint:
 	var marker := NavPoint.new()
-	marker.tag = &"point.cover"
+	marker.tag = &"nav.point.cover"
 	return marker
 
 
 func _smart_object() -> NavSmartObject:
 	var marker := NavSmartObject.new()
-	marker.tag = &"use.seat"
+	marker.tag = &"nav.use.seat"
 	return marker
 
 
 func _area() -> NavArea:
 	var marker := NavArea.new()
-	marker.tag = &"area.road"
+	marker.tag = &"nav.area.road"
 	return marker
 
 
 func _obstacle() -> NavObstacle:
 	var marker := NavObstacle.new()
-	marker.tag = &"obstacle.crate"
+	marker.tag = &"nav.obstacle.crate"
 	return marker
 
 
@@ -168,11 +168,11 @@ func _test_marker_types() -> void:
 	copy.end_offset = Vector3(9, 9, 9)
 	copy.two_way = false
 	_check(link.end_offset == Vector3(0, 5, 0) and link.two_way, "types: changing a duplicate leaves the original alone")
-	_check(copy.tag == &"link.jump", "types: a duplicate keeps the original's values")
+	_check(copy.tag == &"nav.link.jump", "types: a duplicate keeps the original's values")
 
 	var ids := _add_chunk(Vector2i(0, 0), [_link(), _point(), _smart_object(), _area(), _obstacle()])
 	_check(NavMarkerManager.get_marker(ids[0]) is NavLink and NavMarkerManager.get_marker(ids[2]) is NavSmartObject, "types: get_marker gives back the real type")
-	_check(NavMarkerManager.find_nearest(&"use", Vector3.ZERO, 10.0) == ids[2], "types: search works by tag for every type")
+	_check(NavMarkerManager.find_nearest(&"nav.use", Vector3.ZERO, 10.0) == ids[2], "types: search works by tag for every type")
 
 
 # --- Modules ---------------------------------------------------------------------------------------
@@ -186,7 +186,7 @@ func _test_modules_get_their_types() -> void:
 	var nothing := _add_module([])
 
 	var modded := ModdedLink.new()
-	modded.tag = &"link.climb"
+	modded.tag = &"nav.link.climb"
 	var ids := _add_chunk(Vector2i(0, 0), [_link(), _point(), _smart_object(), _area(), modded, _obstacle()])
 	_check(links.added_calls == [PackedInt64Array([ids[0], ids[4]])], "modules: a module gets its type and a modder's subclass of it")
 	_check(points.added_calls == [PackedInt64Array([ids[1], ids[2]])], "modules: a NavPoint module gets smart objects too")
@@ -295,7 +295,7 @@ func _test_module_leaving() -> void:
 	_check(first_removed == [PackedInt64Array([ids[0]])], "leaving: a module gets a final call straight away, for exactly what it handled")
 	_check(second.removed_calls.is_empty(), "leaving: another module sharing the type hears nothing")
 	_check(NavMarkerManager.get_marker(ids[0]) != null, "leaving: the markers stay registered")
-	_check(NavMarkerManager.find_nearest(&"link", Vector3.ZERO, 10.0) == ids[0], "leaving: and can still be found")
+	_check(NavMarkerManager.find_nearest(&"nav.link", Vector3.ZERO, 10.0) == ids[0], "leaving: and can still be found")
 	first.free()
 	var later := _add_chunk(Vector2i(1, 0), [_link()])
 	_check(second.added_calls[-1] == later, "leaving: everything carries on for the other module")
@@ -402,7 +402,7 @@ func _test_unhandled_list() -> void:
 	_check(NavMarkerManager.get_unhandled_types().is_empty(), "report: a type with no markers left isn't listed")
 	_free_module(points)
 	var file_only: NavMarker = load("res://assets/scripts/navigation/markers/NavMarker.gd").new()
-	file_only.tag = &"point.wander"
+	file_only.tag = &"nav.point.wander"
 	_add_chunk(Vector2i(1, 0), [file_only])
 	_check(NavMarkerManager.get_unhandled_types() == {"NavMarker": 1}, "report: a plain NavMarker counts as its own type")
 	NavMarkerManager.print_report()

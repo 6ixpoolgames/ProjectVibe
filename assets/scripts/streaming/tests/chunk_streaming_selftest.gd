@@ -9,7 +9,7 @@ extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come fr
 class OneMarkerTerrain extends TerrainGenerator:
 	func _make_chunk_markers(key: Vector2i) -> Array[NavMarker]:
 		var marker := NavPoint.new()
-		marker.tag = &"point.cover"
+		marker.tag = &"nav.point.cover"
 		marker.position = _point_at(key.x * chunk_resolution, key.y * chunk_resolution)
 		var markers: Array[NavMarker] = [marker]
 		return markers

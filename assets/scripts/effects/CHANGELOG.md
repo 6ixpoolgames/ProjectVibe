@@ -13,7 +13,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | What | Where | Why | Size |
 |---|---|---|---|
 | Threat through a signal | `EffectManager._run_once` | Effects write threat straight into the AI's memory, so this system knows the AI. A signal for Health taken, which the AI listens to (as it does to `hit_arrived`), keeps effects usable without the AI and open to other listeners (UI, scoring) | S |
-| One tag-set class for abilities, nav and effects | `EffectTags`, `tags/TagRegistry`, `navigation/NavTags` | The third copy of the same tag rules, kept apart so working code didn't change. One class used three times cuts the code and the tests to one, and a game's own tag set would come free. The same row is in navigation's changelog | M |
+
+## 2026-11-22
+
+- **Effect tags joined the one tag registry** (tag spec step 1): `EffectTags` is gone; effect tags are the `effect` category of `TagRegistry` (`effect.damage.elemental.fire`), with constants in `Tags.EFFECT`, declared in `resources/tag_declarations.tres` (`effect_tag_declarations.tres` merged into it). Saved effects were rewritten to the new names.
 
 ## 2026-11-19
 

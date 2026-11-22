@@ -547,6 +547,7 @@ The limit is 64 tag levels in all (every level of a tag is one bit). The declara
 - **Movement groups** (new tags): walk, sprint and jump are `movement.basic`; dash is `movement.advanced`, as a grappling hook would be. Dash's `locks_out` is now `[movement.basic]`, the same three abilities it named before.
 - **The AI asks for a group, not an ability:** `AbilityManager.action_for_tag(tag)` (new) gives the action that would start the highest-priority ability in that group that can start now, or nothing. It answers with an action because everything a pawn does goes through its input, which rolls back. Only pressed actions are offered, not held locomotion (walk, sprint). `AIChaseBehaviour` uses it with `close_in_tag` (`movement.advanced` by default) where it pressed `dash` by name, so a pawn with a grappling hook in that group closes in the same way.
 - **Room:** this is one table of 64 for ability rules. Other kinds of tag (damage types, statuses, items) get tables of their own when they're built, as navigation's `NavTags` already has. Masks can grow to two integers (128 bits) if this table ever fills; that changes a few lines in `AbilityManager`, not how designers use tags.
+  *(Claude 2026-11-22: ability, effect and nav tags are merged into one tag registry with categories; see [tag spec](../tags/TAG_SPEC.md).)* Ability tags now carry their category: `ability.combat.melee`.
 - Still to come, when needed: tags the pawn wears while an ability runs (`state.dashing`), and tags an ability needs or can't have to start (`state.stunned`).
 
 **The interrupt table** *(Claude 2026-11-10, the owner's request)*. "What cancels what" for one pawn, worked out from its abilities' numbers and tags as they are now, so a change made while playing shows at once:
@@ -595,6 +596,7 @@ What abilities do to pawns is now **effects**, shaped like Unreal's gameplay eff
   - Signals `effect_applied(effect, application)` and `effect_ended(effect)`.
   - **Rollback:** the active list is one `PackedInt64Array`, `active_effects`, five numbers per effect: id, ticks left, ticks to the next period, stacks, source (an entity id online, else an instance id). Empty, which most pawns are, it costs almost nothing in snapshots. What the held parts add up to (stat values, ability numbers, resistances) is worked out from the list whenever it changes, at once when this script changes it and on the next tick after a rollback loads it, so it needn't roll back. A pawn with effects on it doesn't rest.
 - **`EffectTags`**: effect type tags, such as `damage.elemental.fire`, with the same rules as `TagRegistry` and `NavTags` and their own 64 bits, declared in `resources/effect_tag_declarations.tres` (`damage.physical`, `damage.elemental.fire`, `damage.elemental.frost`, `damage.poison`, `heal`, `buff.combo`, `debuff.slow`). Constants for code (`EffectTags.DAMAGE_PHYSICAL`), and the tag picker offers them as dropdowns on an Effect's `tags` and a ResistancePart's `tag`.
+  *(Claude 2026-11-22: `EffectTags` is gone: effect tags are the `effect` category (`effect.damage.elemental.fire`), merged into one tag registry with categories; see [tag spec](../tags/TAG_SPEC.md).)*
 
 **What changed elsewhere:**
 - **`HitInfo`** carries `effects` (for the target) and `attacker_effects` (for the attacker, once the hit lands) instead of `damage`, `knockback_speed`, `knockback_ticks` and `knockback_hop`. `damage_dealt` is filled in when it lands; `planned_damage()` reads the effects before (the swing's debug label uses it).
@@ -1589,6 +1591,50 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
 - turning on the spot (open question 4)
 
 ---
+
+### 10.13 Changing behaviour priority while playing *(Claude 2026-11-22: agreed with the owner the same day, after two drafts; nothing built yet)*
+
+**Why.** Today a behaviour's priority (its score, 10.7) is fixed: its `max_score` and curves, plus per-pawn persistence, jitter and interrupt overrides. Behaviour priorities should change with game circumstances (a "Charge!" shout, fear, an enraged boss, a squad order), and that's how AI behaviour will be modulated from now on. Abilities already have a way (`AbilityPriorityPart`, 8.11); behaviours have none. The first user is the mass battle test, switching the whole fight between melee and ranged.
+
+**It's part of the behaviour manager.** Changing how behaviours compare is the manager's job, so the machinery lives there, not in a separate piece. Whatever does the changing (an effect, an ability, a squad leader's script, a test) calls it from where it lives:
+
+```
+behaviour_manager.add_score_modifier(modifier: AIScoreModifier, source: Object)
+behaviour_manager.remove_score_modifier(source: Object)
+```
+
+**`AIScoreModifier`**, a definition (variants as for every definition), designer-made:
+- `applies_to`: which behaviours, as a tag query over the behaviours' own tags ([tag spec 4](../tags/TAG_SPEC.md))
+- `amount`: added to their scores; negative lowers
+- `duration_ticks`: how long it lasts; the manager turns it into a tick deadline when it's added and drops it then. 0: until removed.
+- `ongoing_requirements`: a tag query over the pawn's owned tags (tag spec 3); it counts only while that passes. Empty: always.
+- `conditions`: optional conditions over AI inputs, for numbers (the target within 10 m)
+- `blocks`: on, it makes the behaviours it applies to unavailable while it counts, instead of adding to their scores ("no keeping distance during Charge!")
+- `granted_tags`: tags the pawn owns while it's active, so other queries can see it
+- `wakes_decision`: on, adding it asks for a decision at once, as a state change does. Off by default: 300 pawns deciding on one tick is a spike.
+
+**Keyed by source.** Each source's modifiers are kept apart: two sources stack, and each removes only its own.
+
+**In the pick (10.8).** Before each decision the manager drops modifiers past their deadline and works out, for each behaviour, the sum of the modifiers that apply to it and count now, and whether a blocking modifier closes it. The sum is added wherever persistence is added (the ceiling in step 3, the floor, the result in step 4), so pruning stays exact and it reads in the same units as `max_score` (Chase 0.8 + 0.1 beats KeepDistance 0.85). A blocked behaviour is dropped with the hard gates in step 2. The C++ decider (`AIBatchDecider`) gets the sum and the block per behaviour slot when they change, and the GDScript twin does the same; the parity test covers both (rule 8).
+
+**Behaviour tags and tag requirements.** Behaviours get `tags`, from the one tag registry (tag spec 2). Built-in defaults: Chase `ai.stance.melee`, KeepDistance `ai.stance.ranged`; others as they're needed. A behaviour may also carry `tag_requirements`, a tag query over the pawn's owned tags; while it fails, the behaviour is unavailable (step 2).
+
+**Determinism and replay.** The AI runs only on the server and isn't rolled back (10.2); modifiers come from server-side code and effects, so replaying those replays the decisions. The decision recorder logs each behaviour's modifier sum and blocks beside its score, so the readout shows why a behaviour won.
+
+**Charges (limited uses), and the stances.**
+- `AbilityDefinition.max_charges` (0: no limit) and `AbilityBase.charges_spent`, pushed so it rolls back. A start spends one; an ability with none left isn't ready.
+- `charge_restore_ticks`: one charge comes back every so many ticks while any are spent (0: never). All are refilled on revive. A manual reload can come later, as an ability that refills another's charges.
+- `has_charges_tag`: a tag the pawn owns while the ability has charges left. Owned tags are counted, so with two ranged abilities the tag stays while either has charges.
+- KeepDistance gets `tag_requirements: all_of [status.has_ammo.ranged]`. Out of bolts, Chase (close in and melee) wins. With bolts, modifiers decide which stance wins. No new behaviours: KeepDistance is the ranged stance and Chase the melee one.
+- The bolt attack gets `max_charges = 3` and `has_charges_tag = status.has_ammo.ranged`.
+
+**The mass battle test.** `--alternate=N` switches every N seconds: melee mode adds a "Charge!" modifier (`applies_to any_of [ai.stance.melee]`, +0.1) to every pawn's behaviour manager, ranged mode removes it. The test loops over the pawns itself; a helper for a team or everyone waits until squad orders or game modes need one. Each row says its mode, with a swings line beside the bolts line. Test-bed code only (rule 6).
+
+**Tests.** Decider parity with modifiers and blocks; the behaviour manager (raise, lower, block, deadline expiry, ongoing requirements, tag requirements, wakes_decision, two sources stacking and removed apart); charges (spent, not ready at 0, restored over time, refilled on revive, rolled back, the tag); the stance switch (out of bolts → Chase).
+
+**Depends on** the tag spec's merged registry, owned tags and tag queries (its build steps 1 and 2).
+
+**Decided (the owner, 2026-11-22, agreeing the recommendations):** `wakes_decision` opt-in, off by default; a has-charges tag rather than an out-of-charges one; a timed charge restore on the definition, manual reload later; no many-pawns helper in the base yet. "Priority" stays the word for a behaviour's standing: close-enough terms are fine, this isn't a copy of another system.
 
 ## 11. `PawnInitializer` (built 2026-11-07, step 4)
 

@@ -42,14 +42,14 @@ func _init() -> void:
 	super()
 	trigger_action = &"dash"
 	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.MOVEMENT_DASH
+	category = Tags.ABILITY.MOVEMENT_DASH
 	needs_full_movement = true # a dash is too fast for the crowd mover's checks (pawn spec 8.22)
-	extra_categories = [Tags.MOVEMENT_ADVANCED] # the AI asks for this group, not for "dash"
+	extra_categories = [Tags.ABILITY.MOVEMENT_ADVANCED] # the AI asks for this group, not for "dash"
 	# Its length comes from its two phases (DashAbility.duration_ticks), not duration.
 	duration = 0.0
 	cooldown = 2.0
 	# The basic movement group: walk, sprint and jump.
-	locks_out = [Tags.MOVEMENT_BASIC]
+	locks_out = [Tags.ABILITY.MOVEMENT_BASIC]
 	interrupt_priority = 40 # above knockback's threshold (35)
 	interrupt_threshold = 25 # a knockback (30) cancels it once its invulnerability is over
 	pauses_locomotion = true # Walk would otherwise slow the pawn as well

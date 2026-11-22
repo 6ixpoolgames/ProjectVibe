@@ -11,74 +11,60 @@ Every class in `assets/scripts/tags/`, from its doc comments. The overview is in
 
 `res://assets/scripts/tags/TagRegistry.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-The ability tags: turns tag names like "combat.melee.sword" into bits, so checks are one AND instead of comparing text.
+Every tag in the game: turns names like "ability.combat.melee" into bits, so checks are one AND instead of comparing text.
 
-The shared tag registry (pawn spec 7.1, netcode spec 13). Abilities carry tags, and lockouts, interrupts and the AI's `action_for_tag` ask by them. Code writes them as [`Tags`](#tags) constants.
+One registry for every kind of tag (tag spec): what an ability is, what an effect is, a pawn's status, the AI's states and stances, navigation markers. A tag's first level is its **category** (ability, effect, status, ai, nav); code writes tags as [`Tags`](#tags) constants (`Tags.ABILITY.COMBAT_MELEE`).
 
 Tag bit rules:
-- A tag is a StringName with dot-separated levels; a dot means sub-category (combat.melee is inside combat). Names only.
-- Every level gets its own bit: combat, combat.melee and combat.melee.sword are three bits.
-- A tag's mask is its own bit plus its parents' bits, so a query for "combat" catches combat.melee.sword with one AND, and never "combatant". Matching is from the root only: "combat.melee" matches combat.melee.sword, "sword" doesn't.
-- At most 64 levels; extras get no bit (mask 0, match nothing) with a warning.
+- A tag is a StringName with dot-separated levels; a dot means "inside" (ability.combat is inside ability). Names only.
+- Every level gets its own bit, numbered within its category: ability, ability.combat and ability.combat.melee are three bits of the ability category's 64-bit word.
+- A tag's mask is its own bit plus its parents' bits, so a query for "ability.combat" catches ability.combat.melee with one AND, and never "ability.combatant". Matching is from the root only.
+- A mask belongs to one category: masks of different categories can't be combined or compared (a list that mixes them warns).
+- At most 64 levels per category; extras get no bit (mask 0, match nothing) with a warning.
 
-Every machine must give a tag the same bit, so the game declares its tags in a TagDeclarationsRes (resources/tag_declarations.tres) and the registry sorts and numbers them at startup; the netcode handshake compares `content_hash()`. A tag nobody declared is added on the spot with a warning (a desync risk online). Queries never add tags. A static class, so it works in headless tests.
+Every machine must give a tag the same bit, so tags are declared in [`TagDeclarationsRes`](../resources/REFERENCE.md#tagdeclarationsres) files (the base file, then any listed in the project setting `EXTRA_DECLARATIONS_SETTING`), merged and sorted at startup; the netcode handshake compares `content_hash()`. A tag nobody declared is added on the spot with a warning (a desync risk online). Queries never add tags.
+
+Renaming: an old name in a declarations file's redirects is read as its new name, with a warning, so old resources, saves and replays still load (tools/tags/apply_redirects.py rewrites saved files). A deprecated tag still works, with a warning. Bits are never saved: everything saved stores names. A static class, so it works in headless tests.
 
 ### Constants
 
-- `MAX_BITS = 64`
-- `DEFAULT_DECLARATIONS_PATH = "res://assets/scripts/resources/tag_declarations.tres"`: Where declarations are read from. Override with the project setting below if the file lives elsewhere.
-- `DECLARATIONS_SETTING = "project_base/tags/declarations_path"`
+- `MAX_BITS_PER_CATEGORY = 64`: The most levels a category has bits for.
+- `BASE_DECLARATIONS_PATH = "res://assets/scripts/resources/tag_declarations.tres"`: The base declarations file, always read.
+- `EXTRA_DECLARATIONS_SETTING = "project_base/tags/extra_declaration_files"`: A project setting listing more declarations files (a game's, a mod's), read after the base one.
 
 ### Functions
 
-- `declare(tags: Array) -> void` *(static)*: Adds tags to the declared list. Call before the registry is first used (at startup); the declarations file is read automatically, so most games never call this.
-- `reset(read_declarations_file: bool = true) -> void` *(static)*: Forgets everything, including that the declarations file was read. For tests, and for tools that reload content. Masks stored before a reset are meaningless afterwards.
-- `bit_of(tag: Variant) -> int` *(static)*: The tag's own bit index, or -1 if it has none (empty tag, or past the 64 limit).
-- `own_bit(tag: Variant) -> int` *(static)*: Just the tag's own bit as a mask (no parents). Use for lockouts and queries: "lock combat" = own_bit(combat).
-- `mask_of(tag: Variant) -> int` *(static)*: The tag's bit plus its parents' bits. This is what an ability stores as its category_mask.
-- `mask_of_list(tags: Array) -> int` *(static)*: OR of several tags' own bits. Use for a list like locks_out = [combat, movement].
-- `category_mask_of_list(tags: Array) -> int` *(static)*: OR of several tags' full masks. Use for an ability's category plus extra_categories.
-- `matches(category_mask: int, query_tag: Variant) -> bool` *(static)*: True if something with this category mask answers to the query tag (matched from the root: "combat" and "combat.melee" match combat.melee.sword; "sword" does not). A query never adds tags: an unknown tag simply matches nothing.
+- `declare(tags: Array) -> void` *(static)*: Adds tags to the declared list. Call before the registry is first used (at startup); the declarations files are read automatically, so most games never call this.
+- `declare_redirects(redirects: Dictionary) -> void` *(static)*: Adds renames: each old name is read as its new name from then on. Most games put them in a declarations file instead.
+- `declare_deprecated(tags: Array) -> void` *(static)*: Marks tags deprecated: they still work, with a warning. Most games put them in a declarations file instead.
+- `reset(read_declarations_files: bool = true) -> void` *(static)*: Forgets everything, including that the declarations files were read. For tests, and for tools that reload content. Masks stored before a reset are meaningless afterwards.
+- `bit_of(tag: Variant) -> int` *(static)*: The tag's own bit within its category's word, or -1 if it has none (empty tag, or past the 64 limit).
+- `own_bit(tag: Variant) -> int` *(static)*: Just the tag's own bit as a mask (no parents). Use for lockouts and resistances: "lock ability.combat" = own_bit(ability.combat).
+- `mask_of(tag: Variant) -> int` *(static)*: The tag's bit plus its parents' bits. This is what an ability stores as its category_mask, and a nav marker as its mask.
+- `mask_of_list(tags: Array) -> int` *(static)*: OR of several tags' own bits, all of one category. Use for a list like locks_out = [ability.combat, ability.movement].
+- `full_mask_of_list(tags: Array) -> int` *(static)*: OR of several tags' full masks, parents included, all of one category. Use for an ability's category plus extra_categories, an effect's tags, or a pawn's nav capabilities.
+- `matches(mask: int, query_tag: Variant) -> bool` *(static)*: True if something with this mask answers to the query tag (matched from the root: "ability.combat" matches ability.combat.melee, "melee" doesn't). The mask must be of the query tag's category. Never adds tags: an unknown tag matches nothing.
 - `has_tag(tag: Variant) -> bool` *(static)*: True if the tag has a bit already (declared, or added at runtime). Never adds it.
-- `names_of(mask: int) -> StringName[]` *(static)*: Tag names for the bits in a mask, in bit order. For debug text.
-- `get_tag_count() -> int` *(static)*: How many tags have a bit.
-- `get_tags() -> StringName[]` *(static)*: All tags in bit order.
+- `category_of(tag: Variant) -> StringName` *(static)*: A tag's category: its first level (&"ability" for ability.combat.melee). &"" for an empty tag.
+- `get_categories() -> StringName[]` *(static)*: Every category, in word order.
+- `word_of(category: Variant) -> int` *(static)*: The word a category's bits are in (its place in `get_categories()`), or -1 for an unknown category. For records that keep one word per category, such as a pawn's owned tags.
+- `names_of(mask: int, category: Variant) -> StringName[]` *(static)*: Tag names for the bits in a mask of this category, in bit order. For debug text.
+- `get_tag_count() -> int` *(static)*: How many tags have a bit, in every category.
+- `get_tags() -> StringName[]` *(static)*: All tags with a bit, category by category in word order, each category's in bit order.
+- `description_of(tag: Variant) -> String` *(static)*: A tag's one-line description from its declaration, or "".
+- `is_deprecated(tag: Variant) -> bool` *(static)*: True if the tag is declared deprecated: it still works, with a warning, until it's removed.
 - `content_hash() -> int` *(static)*: A number that is the same on two machines only if they assign the same bits. The netcode handshake compares it (netcode spec section 11.2).
-- `read_declared_tags() -> StringName[]` *(static)*: Every tag the declarations file declares, with each one's parent levels, sorted: the list a tag dropdown offers (addons/tag_picker). It only reads the file, so it changes nothing here: safe in the editor, and before or after the registry is in use. Tags declared from code (declare()) aren't in it.
-- `normalize(tag: Variant) -> StringName` *(static)*: Cleans up a tag name: trims spaces, drops empty levels. Returns &"" for nothing usable.
+- `read_declared_tags(categories: Array = []) -> StringName[]` *(static)*: Every tag the declarations files declare, with each one's parent levels, sorted: the list a tag dropdown offers (addons/tag_picker). Only tags of these categories, or every tag with none given; deprecated tags are left out. It only reads the files, so it changes nothing here: safe in the editor, and before or after the registry is in use.
+- `normalize(tag: Variant) -> StringName` *(static)*: Cleans up a tag name: trims spaces, drops empty levels, and follows a redirect from an old name (warning once). Returns &"" for nothing usable.
 
 ## Tags
 
 `res://assets/scripts/tags/Tags.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-The declared ability tags as named constants, so code can't misspell one.
+The declared tags as named constants, grouped by category, so code can't misspell one.
 
-Write `Tags.MOVEMENT_DASH` instead of `&"movement.dash"`: a misspelt constant is an error when the script is checked, where a misspelt name only gives a warning while playing (TagRegistry adds an undeclared tag on the spot).
+Write `Tags.ABILITY.MOVEMENT_DASH` instead of `&"ability.movement.dash"`: a misspelt constant is an error when the script is checked, where a misspelt name only gives a warning while playing ([`TagRegistry`](#tagregistry) adds an undeclared tag on the spot).
 
-The names follow the tags: dots become underscores, letters go upper case. Each tag's parent levels have constants too, because a lockout often names a whole branch (`Tags.MOVEMENT` locks every movement tag).
+One group per category (tag spec 2), named in capitals like the constants inside it (`Tags.EFFECT`: a class named `Effect` would clash with the Effect class). Inside a group, the names follow the tags without the category: dots become underscores, letters go upper case. `ALL` is the category itself. Each tag's parent levels have constants too, because a lockout often names a whole branch (`Tags.ABILITY.MOVEMENT` locks every movement ability).
 
 For code only: designers pick tags from a dropdown (addons/tag_picker) and add new ones to resources/tag_declarations.tres. A constant here must be declared there (tags/tests/tag_registry_selftest checks); a declared tag needs a constant only if code uses it.
-
-### Constants
-
-- `MOVEMENT = &"movement"`
-- `MOVEMENT_WALK = &"movement.walk"`
-- `MOVEMENT_SPRINT = &"movement.sprint"`
-- `MOVEMENT_JUMP = &"movement.jump"`
-- `MOVEMENT_DASH = &"movement.dash"`
-- `MOVEMENT_BASIC = &"movement.basic"`: A group: walk, sprint and jump are basic movement.
-- `MOVEMENT_ADVANCED = &"movement.advanced"`: A group: dash (and later a grappling hook) is advanced movement.
-- `COMBAT = &"combat"`
-- `COMBAT_MELEE = &"combat.melee"`
-- `COMBAT_RANGED = &"combat.ranged"`
-- `COMBAT_EVADE = &"combat.evade"`
-- `COMBAT_KNOCKBACK = &"combat.knockback"`
-- `COMBAT_PARRY = &"combat.parry"`
-- `UTILITY = &"utility"`
-- `UTILITY_HEAL = &"utility.heal"`
-- `UTILITY_INTERACT = &"utility.interact"`
-- `COMBO = &"combo"`: Combo steps (pawn spec 8.11). A swing boosts the abilities tagged combo.second for a moment, and the second swing boosts combo.finisher, so the next press picks them (AbilityPriorityPart).
-- `COMBO_SECOND = &"combo.second"`
-- `COMBO_FINISHER = &"combo.finisher"`
-- `STATUS = &"status"`
-- `STATUS_DEAD = &"status.dead"`

@@ -13,9 +13,9 @@ class Busy extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		trigger_action = &"secondary"
-		category = &"utility.interact"
+		category = &"ability.utility.interact"
 		duration = 2.0
-		locks_out = [&"movement.walk", &"movement.sprint", &"movement.jump"]
+		locks_out = [&"ability.movement.walk", &"ability.movement.sprint", &"ability.movement.jump"]
 
 
 func _ready() -> void:
@@ -119,14 +119,14 @@ func _test_tag_groups() -> void:
 	var dash: DashAbility = manager.get_node("Dash")
 	await _ticks(15)
 	var mask := dash.category_mask
-	_check(TagRegistry.matches(mask, Tags.MOVEMENT_DASH) and TagRegistry.matches(mask, Tags.MOVEMENT_ADVANCED) and TagRegistry.matches(mask, Tags.MOVEMENT) and not TagRegistry.matches(mask, Tags.MOVEMENT_BASIC), "a dash answers to its category, its extra category (movement.advanced) and their parent, and not to basic movement")
-	_check(manager.action_for_tag(Tags.MOVEMENT_ADVANCED) == &"dash", "asked for advanced movement, the manager answers with the action that starts the dash")
-	_check(manager.action_for_tag(Tags.MOVEMENT_BASIC) == &"jump", "asked for basic movement: jump (walk and sprint are held, not pressed, so they're not offered)")
+	_check(TagRegistry.matches(mask, Tags.ABILITY.MOVEMENT_DASH) and TagRegistry.matches(mask, Tags.ABILITY.MOVEMENT_ADVANCED) and TagRegistry.matches(mask, Tags.ABILITY.MOVEMENT) and not TagRegistry.matches(mask, Tags.ABILITY.MOVEMENT_BASIC), "a dash answers to its category, its extra category (movement.advanced) and their parent, and not to basic movement")
+	_check(manager.action_for_tag(Tags.ABILITY.MOVEMENT_ADVANCED) == &"dash", "asked for advanced movement, the manager answers with the action that starts the dash")
+	_check(manager.action_for_tag(Tags.ABILITY.MOVEMENT_BASIC) == &"jump", "asked for basic movement: jump (walk and sprint are held, not pressed, so they're not offered)")
 	_check(manager.action_for_tag(&"no.such.group") == &"" and not TagRegistry.has_tag(&"no.such.group"), "an unknown tag finds nothing, and isn't added to the registry")
 	ai.press(&"dash")
 	await _ticks(2)
-	_check(dash.is_running_timed() and manager.action_for_tag(Tags.MOVEMENT_ADVANCED) == &"", "while the dash runs (or cools down), nothing in the group can start, so nothing is offered")
-	_check(not manager.can_start(&"jump") and manager.action_for_tag(Tags.MOVEMENT_BASIC) == &"", "the dash locks out the basic movement group (locks_out [movement.basic]): jump can't start")
+	_check(dash.is_running_timed() and manager.action_for_tag(Tags.ABILITY.MOVEMENT_ADVANCED) == &"", "while the dash runs (or cools down), nothing in the group can start, so nothing is offered")
+	_check(not manager.can_start(&"jump") and manager.action_for_tag(Tags.ABILITY.MOVEMENT_BASIC) == &"", "the dash locks out the basic movement group (locks_out [movement.basic]): jump can't start")
 	pawn.free()
 
 
@@ -134,7 +134,7 @@ func _test_tag_groups() -> void:
 func _test_interrupt_table() -> void:
 	var listed := Busy.new()
 	listed.name = "CancelledByJump"
-	listed.cancelled_by = [Tags.MOVEMENT_JUMP]
+	listed.cancelled_by = [Tags.ABILITY.MOVEMENT_JUMP]
 	var pawn := _make_pawn(Vector3(60, 0.1, 0), [listed])
 	var manager := pawn.ability_manager
 	await _ticks(5)
@@ -233,7 +233,7 @@ func _test_interrupts() -> void:
 	# cancelled_by: a test-only ability that jump can always cancel, though its threshold (100) is far above jump's priority (5).
 	var cancelled_by_jump := Busy.new()
 	cancelled_by_jump.name = "CancelledByJump"
-	cancelled_by_jump.cancelled_by = [&"movement.jump"]
+	cancelled_by_jump.cancelled_by = [&"ability.movement.jump"]
 	var plain_busy := Busy.new()
 	plain_busy.name = "PlainBusy"
 	plain_busy.trigger_action = &"ability_2"

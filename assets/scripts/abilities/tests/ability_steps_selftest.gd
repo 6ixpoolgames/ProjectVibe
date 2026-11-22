@@ -50,8 +50,8 @@ class StepAttack extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		trigger_action = &"primary"
-		category = Tags.COMBAT_MELEE
-		locks_out = [Tags.MOVEMENT, Tags.COMBAT]
+		category = Tags.ABILITY.COMBAT_MELEE
+		locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 		cooldown = 0.5
 		interrupt_priority = 15
 		interrupt_threshold = 50
@@ -69,7 +69,7 @@ class Canceller extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		trigger_action = &"dash"
-		category = Tags.MOVEMENT_DASH
+		category = Tags.ABILITY.MOVEMENT_DASH
 		duration = 0.2
 		interrupt_priority = 20
 

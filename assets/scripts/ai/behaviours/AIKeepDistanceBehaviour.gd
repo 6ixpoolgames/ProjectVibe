@@ -13,7 +13,7 @@ class_name AIKeepDistanceBehaviour
 extends AIBehaviourBase
 
 ## The group of ability it keeps distance for: any ability tagged with it that has a reach. Ranged combat by default.
-@export var ranged_tag: StringName = Tags.COMBAT_RANGED
+@export var ranged_tag: StringName = Tags.ABILITY.COMBAT_RANGED
 ## Where it stands, as a fraction of the ranged attack's reach from the target: 0.7 of a 14 m bolt is 9.8 m.
 @export_range(0.1, 1.0, 0.05) var reach_fraction := 0.7
 ## How far, in metres, from that distance it may drift before it walks again. It walks until within half of this.

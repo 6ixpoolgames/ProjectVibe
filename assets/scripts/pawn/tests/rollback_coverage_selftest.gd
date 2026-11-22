@@ -35,6 +35,12 @@ const NOT_ROLLED_BACK := {
 	"Pawn:_moved_since_run": "teleported since its last run began: cleared as each run begins and by a load (_on_state_loaded); only keeps a pawn awake one run longer",
 	# Worked out fresh every tick from rolled-back state (Pawn._can_sleep: "nothing remembered"); kept for readouts.
 	"Pawn:is_sleeping": "worked out each tick",
+	# Claude 2026-11-22: read once from the pawn's collision shape, which doesn't change in play (the crowd mover asks for it).
+	"Pawn:_body_radius": "read once from the collision shape, which doesn't change in play",
+	"Pawn:_body_shape": "found once: the collision shape node, which doesn't change in play",
+	# Claude 2026-11-22 (ability spec 13.3): the swing's hit run, made on first use. Its hit list is the ability's pawns_hit_this_run,
+	# which rolls back; its intersect log is for hooks and debugging, and is cleared as each run starts.
+	"MeleeAttackAbility:hit_run": "made on first use; its hit list is pawns_hit_this_run, which rolls back, and its log is cleared each run",
 	# Walk's and Sprint's copies of their stats, read again whenever the StatManager's version changes (pawn spec 15.2). Sprint fills
 	# them the first time it runs; Walk already has by the time play starts here, but the same holds for it.
 	"SprintAbility:_acceleration": "a cache of stats",
@@ -249,7 +255,7 @@ func _add_test_effects(pawn: Pawn) -> void:
 	boost.is_harmful = false
 	boost.duration_seconds = 1.0
 	var stronger := AbilityPriorityPart.new()
-	stronger.ability_tag = Tags.MOVEMENT_DASH
+	stronger.ability_tag = Tags.ABILITY.MOVEMENT_DASH
 	stronger.number = AbilityPriorityPart.Number.INTERRUPT_PRIORITY
 	stronger.amount = 5
 	boost.parts = [stronger]

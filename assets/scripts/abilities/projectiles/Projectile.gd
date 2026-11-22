@@ -7,9 +7,10 @@
 ## [br][br]Fired by a [FireProjectileStep] through [method fire], which spawns it with [method NetworkSession.spawn] (offline too). Its state is a launch record (tick, origin, velocity, definition, shooter's entity id), set once and
 ## never changed in flight, so nothing is sent while it flies (ability spec 9). Where it is at any tick follows from that record and its
 ## [ProjectileDefinition]; clients draw the flight themselves. The server (or the offline game) sweeps each tick's stretch of flight
-## for hits, made and delivered as a swing's are ([method HitInfo.make]), carrying the firing ability's on-hit effects, so damage,
-## knockback, parries and dash invulnerability work as for melee. Each pawn is hit once; it stops at max_hits, the world, or past its
-## range or lifetime. For its first ticks of flight, hits are checked against where the shooter saw other pawns (lag compensation).
+## for hits through the same hit system as a swing's (ability spec 13): [HitQuery] finds who it touches, its own [HitRun] meets each
+## once against its [HitDefinition] (the firing ability's, unless it was fired with another), and the ability lands the hit, so
+## damage, knockback, parries and dash invulnerability work as for melee. It stops when its hit run is spent, at the world, or past its
+## range or lifetime. A shooter that's gone lands no hits (ability spec 13.5). For its first ticks of flight, hits are checked against where the shooter saw other pawns (lag compensation).
 ## [br][br]Visual hooks, apart from the ability's: [signal launched], [signal hit_pawn], [signal hit_world] and [signal ended], and its
 ## definition's impact_scene where it ends. Hits are only known where they're decided, so a client hears launched and ended.
 ## Design: ability spec 9, pawn spec 8.24.
@@ -28,7 +29,7 @@ signal hit_pawn(projectile: Projectile, target: Pawn, at: Vector3)
 signal hit_world(projectile: Projectile, at: Vector3, normal: Vector3)
 ## It's gone, at this point: on every machine, as it leaves.
 signal ended(projectile: Projectile, at: Vector3)
-## It met something, where it decides hits: one entry of [member intersections], recorded whether or not the whitelist lets it hit.
+## It met something, where it decides hits: one entry of its [member hit_run]'s log (see [method HitRun.entry]), hit or not.
 signal intersected(projectile: Projectile, entry: Dictionary)
 
 ## Its flight and hits when its launch names none: for a scene of its own. The built-in projectile is always given one at launch.
@@ -47,14 +48,18 @@ var definition_index := -1
 ## Its speed and gravity scale as fired, so a client flies it the same when it was fired with a variant that changes them.
 var launch_speed := 0.0
 var launch_gravity_scale := 0.0
+## The tick it ends unless a pawn stops it first, worked out at launch: where it meets the world, or runs out of range or lifetime. -1
+## before launch.
+var end_tick := -1
+## Where it ends then: so a client shows the impact exactly there.
+var end_point := Vector3.ZERO
 ## The firing pawn's entity id; -1 for a pawn not spawned through the session.
 var shooter_id := -1
 
 ## The firing pawn's team: its allies, for the whitelist.
 var team := 0
-## Everything it met while flying, in order, where it decides hits: {"tick", "kind" (&"pawn" or &"world"), "target" (a Pawn or null),
-## "key" (the pawn's id), "point", "normal" (the world's), "hit" (true if the whitelist let it hit)}. Each pawn once.
-var intersections: Array[Dictionary] = []
+## What it has hit and met, where it decides hits (see [method HitRun.entry]); null on a client.
+var hit_run: HitRun = null
 ## Who fired it, worked out from its id on the machine that decides hits; null once the shooter is gone.
 var shooter: Pawn:
 	get:
@@ -79,24 +84,23 @@ var max_range: float:
 		return flight().max_range
 
 var _shooter_instance := 0 # the shooter's instance id, for a shooter with no entity id
-var _ability_index := -1 # the firing ability's place under its AbilityManager
-var _effect_ids := PackedInt64Array() # the firing ability's on-hit effects, by id, so a dead shooter's hit still lands
-var _attacker_effect_ids := PackedInt64Array()
-var _seen_keys := PackedInt64Array() # the pawns it has met (entity ids, else instance ids), so each is met once
-var _hits := 0 # the pawns it has hit
-var _cleared_shooter := false # it has left the shooter's body, so the shooter can be hit (hits_shooter)
+var _hit_keys := PackedInt64Array() # the pawns it has hit (HitInfo.key_of): its hit run's list
+var _cleared_shooter := false # it has left the shooter's body, so the shooter can be hit (hits_self)
 var _view_delay := 0.0 # how far behind the shooter saw other pawns when it fired, in ticks
-var _travelled := 0.0
+var _ends_at_world := false # end_tick is the world's, not range or lifetime (server)
+var _world_normal := Vector3.UP
+var _impact_shown := false # a client: shown at end_point already
 var _launched := false
 var _done := false
 var _entity: NetworkEntity = null
-var _ray := PhysicsRayQueryParameters3D.new()
 var _flight: ProjectileDefinition = null
 var _flight_index := -2 # the definition_index _flight was worked out for
 var _heard_launch := false # a client: launched was sent
 
 ## The group every projectile is in, for tools that find them (the diagnostics' projectile trace).
 const GROUP := &"projectiles"
+## Ticks a step of the world trace at launch covers, for an arc.
+const COARSE_TICKS := 6
 
 
 ## The built-in projectile: a Projectile with its TickStateComponent and NetworkEntity, whose look comes from its definition.
@@ -125,10 +129,10 @@ static func register_scene(scene: PackedScene) -> void:
 		NetworkSession.register_type(type, scene)
 
 
-## Server or offline: fires a projectile with this definition from this ability's pawn, at origin along direction. The built-in one,
-## or a scene of its own if given. Null on a client, or if it couldn't spawn.
+## Server or offline: fires a projectile with this definition from this ability's pawn, at origin along direction, hitting with the
+## ability's hit definition or the one given. The built-in one, or a scene of its own if given. Null on a client, or if it couldn't spawn.
 static func fire(from_ability: AbilityBase, origin: Vector3, direction: Vector3, flies_with: ProjectileDefinition,
-		scene: PackedScene = null) -> Projectile:
+		scene: PackedScene = null, hits_with: HitDefinition = null) -> Projectile:
 	var type := type_name_for(scene) if scene else TYPE
 	if NetworkSession.get_type_scene(type) == null:
 		if NetworkSession.is_connected_to_session():
@@ -139,12 +143,13 @@ static func fire(from_ability: AbilityBase, origin: Vector3, direction: Vector3,
 			register()
 	var node := NetworkSession.spawn(type, 0, origin) as Projectile
 	if node:
-		node.launch(from_ability, origin, direction, flies_with)
+		node.launch(from_ability, origin, direction, flies_with, hits_with)
 	return node
 
 
-## Sets it off from its ability: the launch record, the shooter's id, team and effects. fire() calls it.
-func launch(from_ability: AbilityBase, origin: Vector3, direction: Vector3, flies_with: ProjectileDefinition = null) -> void:
+## Sets it off from its ability: the launch record, the shooter's id and team, and its hit run. fire() calls it.
+func launch(from_ability: AbilityBase, origin: Vector3, direction: Vector3, flies_with: ProjectileDefinition = null,
+		hits_with: HitDefinition = null) -> void:
 	if flies_with:
 		definition_index = DefinitionRegistry.nearest_index(flies_with)
 		_flight = flies_with.resolved() as ProjectileDefinition
@@ -160,21 +165,27 @@ func launch(from_ability: AbilityBase, origin: Vector3, direction: Vector3, flie
 		shooter_id = entity.entity_id if entity else -1
 		_shooter_instance = from_pawn.get_instance_id()
 		team = from_pawn.team
+	hit_run = HitRun.new(self, &"_hit_keys")
+	hit_run.team = team
+	hit_run.on_intersect = func(entry: Dictionary) -> void:
+		intersected.emit(self, entry)
+		if entry.hit and entry.kind == HitRun.Kind.PAWN:
+			hit_pawn.emit(self, entry.target, entry.point)
 	if from_ability:
-		_ability_index = from_ability.get_index()
 		_view_delay = from_ability.view_ticks_behind()
-		for effect in from_ability.on_hit_effects:
-			_effect_ids.append(effect.get_id())
-		for effect in from_ability.on_hit_self_effects:
-			_attacker_effect_ids.append(effect.get_id())
-	for effect in settings.on_hit_effects:
-		if effect:
-			effect.register() # so its id finds it
-			_effect_ids.append(effect.get_id())
+		hit_run.ability = from_ability
+		hit_run.hit = hits_with.resolved() as HitDefinition if hits_with else from_ability.hit_definition()
+	elif hits_with:
+		hit_run.hit = hits_with.resolved() as HitDefinition
+	if hit_run.hit and hit_run.hit.lands_without_source:
+		hit_run.remember_source(from_ability)
 	launch_origin = origin
 	launch_direction = direction.normalized() if direction.length_squared() > 0.000001 else Vector3.FORWARD
 	launch_tick = TickDriver.tick
 	global_position = origin
+	_plan_end()
+	if from_pawn:
+		from_pawn.linger_until(launch_tick + end_tick) # a removed shooter stays until this ends, so its hits keep their ability
 	_launched = true
 	_face_flight()
 	_build_visual()
@@ -197,13 +208,18 @@ func flight() -> ProjectileDefinition:
 	return _flight
 
 
-## Where it is this many ticks after launch (a fraction is between ticks), from its launch record.
+## Where it is this many ticks after launch (a fraction is between ticks), from its launch record. Hitscan: along its tracer, from the
+## muzzle to where it ended.
 func position_at(age: float) -> Vector3:
+	if flight().hitscan:
+		return launch_origin.lerp(end_point, clampf(age / float(maxi(end_tick, 1)), 0.0, 1.0))
 	return launch_origin + flight().offset_at(launch_direction, age)
 
 
 ## Its velocity this many ticks after launch.
 func velocity_at(age: float) -> Vector3:
+	if flight().hitscan:
+		return (end_point - launch_origin) * float(TickDriver.get_tick_rate()) / float(maxi(end_tick, 1))
 	return flight().velocity_at(launch_direction, age)
 
 
@@ -229,8 +245,8 @@ func _exit_tree() -> void:
 	TickDriver.unregister(self)
 	if launch_tick >= 0:
 		ended.emit(self, global_position)
-		if not _done and not is_own_shot():
-			flight().spawn_impact(get_parent(), global_position) # a client: where it was drawn last
+		if not _done and not is_own_shot() and not _impact_shown:
+			flight().spawn_impact(get_parent(), global_position) # a client, stopped by a pawn: where it was drawn last
 	PredictedProjectile.server_shot_ended(shooter_id, launch_tick) # the shooter's predicted copy goes with it
 
 
@@ -253,7 +269,16 @@ func _process(_delta: float) -> void:
 				_heard_launch = true
 				_build_visual()
 				launched.emit(self)
-			global_position = position_at(age)
+			if end_tick >= 0 and age >= end_tick:
+				# Its end, known from launch: there exactly, with its impact, though the despawn comes a little later.
+				global_position = end_point
+				if visual:
+					visual.visible = false
+				if not _impact_shown:
+					_impact_shown = true
+					flight().spawn_impact(get_parent(), end_point)
+			else:
+				global_position = position_at(age)
 	_face_flight()
 
 
@@ -273,140 +298,110 @@ func _fly(tick: int) -> void:
 	if age < 1:
 		return # fired this tick: it leaves the muzzle on the next
 	var settings := flight()
+	if settings.hitscan:
+		if age >= end_tick:
+			global_position = end_point
+			_finish() # its hits were all made as it was fired; the tracer has shown
+		return
 	var start := position_at(age - 1)
-	var end := position_at(age)
-	var world_hit := false
-	var world_normal := Vector3.UP
-	if settings.hits_world and is_inside_tree():
-		_ray.from = start
-		_ray.to = end
-		_ray.collision_mask = settings.world_mask
-		_ray.collide_with_areas = false
-		var found := get_world_3d().direct_space_state.intersect_ray(_ray)
-		if not found.is_empty():
-			end = found["position"]
-			world_hit = true
-			world_normal = found["normal"]
-	var path := end - start
-	for target in _pawns_met(start, end, tick, age):
-		var along := clampf((target.global_position - start).dot(path) / maxf(path.length_squared(), 0.000001), 0.0, 1.0)
-		var at := start + path * along
-		var allowed := _whitelisted(target, settings)
-		_seen_keys.append(HitInfo.key_of(target))
-		_record({"tick": tick, "kind": &"pawn", "target": target, "key": HitInfo.key_of(target), "point": at, "normal": Vector3.ZERO, "hit": allowed})
-		if allowed:
-			_hit(target, tick, at)
-			_hits += 1
-		if (allowed and settings.max_hits > 0 and _hits >= settings.max_hits) or _intersects_used_up(settings):
-			global_position = at # stopped in the pawn it met
-			_finish()
-			return
+	var ending := age >= end_tick
+	var end := end_point if ending else position_at(age) # the world, range and lifetime were worked out at launch
+	var spent := false
+	if hit_run.hit:
+		var centres := HitQuery.line_centres(start, end, settings.radius)
+		var from_pawn := shooter
+		# For its first ticks, as the shooter saw other pawns, by less each tick (lag compensation, ability spec 9.1).
+		var touched := HitQuery.touching(centres, settings.radius, tick, from_pawn, _view_delay - float(age - 1), hit_run.hit.hits_self)
+		if from_pawn and hit_run.hit.hits_self and not _cleared_shooter:
+			# It starts inside or beside the shooter: the shooter can be met once it has flown clear of it.
+			if touched.has(from_pawn):
+				touched.erase(from_pawn)
+			else:
+				_cleared_shooter = true
+		spent = hit_run.meet_pawns(touched, tick, from_pawn, start, end, end - start)
+	if spent:
+		global_position = hit_run.last_point # stopped in the pawn it met
+		_finish()
+		return
 	global_position = end
-	_travelled += start.distance_to(end)
-	if world_hit:
-		_record({"tick": tick, "kind": &"world", "target": null, "key": -1, "point": end, "normal": world_normal, "hit": true})
-		hit_world.emit(self, end, world_normal)
-	if world_hit or _intersects_used_up(settings) or _travelled >= settings.max_range or age >= settings.lifetime_ticks():
+	if ending and _ends_at_world:
+		hit_run.meet_world(tick, end, _world_normal)
+		hit_world.emit(self, end, _world_normal)
+	if ending or hit_run.is_spent():
 		_finish()
 
 
-# The pawns along start -> end it hasn't met yet, nearest first, hit or not by the whitelist. Spots every half radius, so a fast
-# projectile leaves no gaps. Dead and invulnerable pawns aren't met (a dashing pawn is flown through, and can be met later). For its
-# first ticks it checks where the shooter saw them, by less each tick (lag compensation, ability spec 9).
-func _pawns_met(start: Vector3, end: Vector3, tick: int, age: int) -> Array[Pawn]:
+# Hitscan, on the tick it's fired: a straight line to its range, cut by the world, checked for pawns as the shooter saw them (its whole
+# view delay: the classic lag compensation for hitscan), met and hit through its hit run. The tracer then shows for tracer_ticks.
+func _resolve_hitscan(settings: ProjectileDefinition) -> void:
+	end_tick = settings.tracer_ticks()
+	end_point = launch_origin + launch_direction * settings.max_range
+	_ends_at_world = false
+	if settings.hits_world and is_inside_tree():
+		var ray := PhysicsRayQueryParameters3D.create(launch_origin, end_point, settings.world_mask)
+		var found := get_world_3d().direct_space_state.intersect_ray(ray)
+		if not found.is_empty():
+			end_point = found["position"]
+			_ends_at_world = true
+			_world_normal = found["normal"]
+	if hit_run == null or hit_run.hit == null or _entity and _entity.follows_snapshots():
+		return
+	var touched := HitQuery.touching(HitQuery.line_centres(launch_origin, end_point, settings.radius), settings.radius, launch_tick, shooter, _view_delay, false)
+	if hit_run.meet_pawns(touched, launch_tick, shooter, launch_origin, end_point, end_point - launch_origin):
+		end_point = hit_run.last_point # stopped in the pawn it met
+		_ends_at_world = false
+	elif _ends_at_world:
+		hit_run.meet_world(launch_tick, end_point, _world_normal)
+		hit_world.emit(self, end_point, _world_normal)
+
+
+# Works out at launch where and when it ends unless a pawn stops it: past its range or lifetime, or where its path meets the world. The
+# world is traced once, here, not every tick: one ray for a straight flight, coarse steps then each tick of the step that meets it for
+# an arc. Geometry that appears later (a door closing, terrain streaming in) isn't seen.
+func _plan_end() -> void:
 	var settings := flight()
-	var length := start.distance_to(end)
-	var spots := maxi(1, ceili(length / maxf(settings.radius * 0.5, 0.01)))
-	var centres := PackedVector3Array()
-	for i in spots + 1:
-		centres.append(start.lerp(end, float(i) / spots))
-	var from_pawn := shooter
-	var leave_out: Pawn = null if settings.hits_shooter else from_pawn # the shooter isn't met unless it can be hit
-	var touched: Array = []
-	var shooter_entity: NetworkEntity = from_pawn.get_network_entity() if from_pawn else null
-	var back := _view_delay - float(age - 1)
-	if back > 0.0 and shooter_entity and shooter_entity.session and LagCompensation.would_rewind(shooter_entity, back):
-		var spheres: Array[Vector3] = []
-		spheres.assign(centres)
-		for entity in LagCompensation.melee_spheres(shooter_entity, spheres, settings.radius, back):
-			touched.append(entity.get_parent())
-	elif SharedPawnTable.get_grid() != null:
-		touched = SharedPawnTable.get_grid().find_touching(centres, settings.radius, leave_out, tick)
-	else:
-		touched = _plain_spheres(centres, leave_out)
-	if from_pawn and settings.hits_shooter and not _cleared_shooter:
-		# It starts inside or beside the shooter: the shooter can be met once it has flown clear of it.
-		if touched.has(from_pawn):
-			touched.erase(from_pawn)
-		else:
-			_cleared_shooter = true
-	var out: Array[Pawn] = []
-	var along_of := {}
-	var path := end - start
-	for found: Object in touched:
-		var other := found as Pawn
-		if other == null or (other == from_pawn and not settings.hits_shooter) or other.is_dead() or _seen_keys.has(HitInfo.key_of(other)):
-			continue
-		if other.ability_manager and other.ability_manager.is_invulnerable():
-			continue
-		along_of[other] = (other.global_position - start).dot(path)
-		out.append(other)
-	out.sort_custom(func(a: Pawn, b: Pawn) -> bool: return along_of[a] < along_of[b])
-	return out
-
-
-# The whitelist: whether it may hit this pawn (its definition's hits_shooter, hits_allies, hits_enemies).
-func _whitelisted(target: Pawn, settings: ProjectileDefinition) -> bool:
-	if target == shooter:
-		return settings.hits_shooter
-	return settings.hits_allies if target.team == team else settings.hits_enemies
-
-
-func _record(entry: Dictionary) -> void:
-	intersections.append(entry)
-	intersected.emit(self, entry)
-
-
-func _intersects_used_up(settings: ProjectileDefinition) -> bool:
-	return settings.max_intersects > 0 and intersections.size() >= settings.max_intersects
-
-
-# Without the C++ pawn grid: the same spheres through physics, on the pawns' layer.
-func _plain_spheres(centres: PackedVector3Array, from_pawn: Pawn) -> Array:
-	var found: Array = []
-	var query := PhysicsShapeQueryParameters3D.new()
-	var sphere := SphereShape3D.new()
-	sphere.radius = flight().radius
-	query.shape = sphere
-	query.collision_mask = 2 # pawns are on layer 2 (pawn.tscn)
-	if from_pawn:
-		query.exclude = [from_pawn.get_rid()]
+	if settings.hitscan:
+		_resolve_hitscan(settings)
+		return
+	var life := settings.lifetime_ticks()
+	end_tick = life
+	end_point = position_at(life)
+	_ends_at_world = false
+	var travelled := 0.0
+	var previous := launch_origin
+	for age in range(1, life + 1):
+		var at := position_at(age)
+		travelled += previous.distance_to(at)
+		previous = at
+		if travelled >= settings.max_range:
+			end_tick = age
+			end_point = at
+			break
+	if not settings.hits_world or not is_inside_tree():
+		return
+	var ray := PhysicsRayQueryParameters3D.new()
+	ray.collision_mask = settings.world_mask
+	ray.collide_with_areas = false
 	var space := get_world_3d().direct_space_state
-	for centre in centres:
-		query.transform = Transform3D(Basis.IDENTITY, centre)
-		for hit in space.intersect_shape(query, 8):
-			if hit.collider is Pawn and not found.has(hit.collider):
-				found.append(hit.collider)
-	return found
-
-
-# The same hit a swing makes (HitInfo.make), pushing along its flight, with the effects it was fired with.
-func _hit(target: Pawn, tick: int, at: Vector3) -> void:
-	var from_pawn := shooter
-	var by: AbilityBase = null
-	if from_pawn and from_pawn.ability_manager and _ability_index >= 0 and _ability_index < from_pawn.ability_manager.get_child_count():
-		by = from_pawn.ability_manager.get_child(_ability_index) as AbilityBase
-	HitInfo.make(from_pawn, by, target, velocity_at(tick - launch_tick), tick, _effects_of(_effect_ids), _effects_of(_attacker_effect_ids)).deliver()
-	hit_pawn.emit(self, target, at)
-
-
-func _effects_of(ids: PackedInt64Array) -> Array[Effect]:
-	var out: Array[Effect] = []
-	for id in ids:
-		var effect := Effect.find(id)
-		if effect:
-			out.append(effect)
-	return out
+	var step := end_tick if settings.drop_per_second_squared() == 0.0 else COARSE_TICKS # a straight flight is one ray
+	var from_age := 0
+	while from_age < end_tick:
+		var to_age := mini(from_age + step, end_tick)
+		ray.from = position_at(from_age)
+		ray.to = position_at(to_age)
+		if not space.intersect_ray(ray).is_empty():
+			# Met in this stretch: find the tick, one tick at a time.
+			for age in range(from_age + 1, to_age + 1):
+				ray.from = position_at(age - 1)
+				ray.to = position_at(age)
+				var found := space.intersect_ray(ray)
+				if not found.is_empty():
+					end_tick = age
+					end_point = found["position"]
+					_ends_at_world = true
+					_world_normal = found["normal"]
+					return
+		from_age = to_age
 
 
 func _find_shooter() -> Pawn:

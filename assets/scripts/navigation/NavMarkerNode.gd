@@ -39,11 +39,11 @@ func _get_configuration_warnings() -> PackedStringArray:
 		warnings.append("Choose a marker type in the inspector, or this node does nothing.")
 		return warnings
 	if Engine.is_editor_hint():
-		NavTags.reset() # the declarations file may have been edited since the last check
+		TagRegistry.reset() # the declarations file may have been edited since the last check
 	if marker.tag == &"":
 		warnings.append("This marker has no tag, so it will be refused.")
-	elif not NavTags.has_tag(marker.tag):
-		warnings.append("The tag '%s' isn't declared in nav_tag_declarations.tres, so this marker will be refused." % marker.tag)
+	elif not TagRegistry.has_tag(marker.tag):
+		warnings.append("The tag '%s' isn't declared in the tag declarations (tag_declarations.tres), so this marker will be refused." % marker.tag)
 	return warnings
 
 

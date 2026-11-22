@@ -1,11 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
 ## Holds every nav marker and answers searches for them. Autoload "NavMarkerManager".
 ##
-## It stores every nav marker, gives each a stable id, and answers searches such as "the nearest point.cover within 20 m". It needs no C++
+## It stores every nav marker, gives each a stable id, and answers searches such as "the nearest nav.point.cover within 20 m". It needs no C++
 ## library, keeps the list of marker modules and tells them when markers change. It doesn't find paths (NavServer) or decide what a pawn
 ## does (AI). Requests apply on the next tick; searches return ids and read the state as of the last tick.
 ## [codeblock]
-## var id := NavMarkerManager.find_nearest(&"point.cover", pawn.global_position, 20.0)   # 0: none
+## var id := NavMarkerManager.find_nearest(&"nav.point.cover", pawn.global_position, 20.0)   # 0: none
 ## var marker := NavMarkerManager.get_marker(id)                                          # the full data, only when needed
 ## [/codeblock]
 ## Design: nav spec 21.5. How it stores markers and searches fast: the README.
@@ -35,7 +35,7 @@ var report_quiet_seconds := 2.0
 # --- The rows: one index is one marker, the same index in every array. A removed marker's row is reused. ---
 var _ids := PackedInt64Array()             # the marker's id; 0 means this row is free
 var _positions := PackedVector3Array()
-var _masks := PackedInt64Array()           # NavTags.mask_of(tag), so a search is one AND
+var _masks := PackedInt64Array()           # TagRegistry.mask_of(tag), so a search is one AND
 var _enabled := PackedByteArray()          # 1 = on, 0 = off
 var _from_chunk := PackedByteArray()       # 1 = a chunk announced it, so its changes outlive the chunk
 var _linked := PackedByteArray()           # 1 = applied and searchable; modules have been told about it
@@ -504,7 +504,7 @@ func _why_refused(marker: NavMarker, id: int) -> String:
 		return "the marker is null"
 	if _row_of_id.has(id):
 		return "id %d is already registered" % id
-	if not NavTags.has_tag(marker.tag):
+	if not TagRegistry.has_tag(marker.tag):
 		return "tag '%s' isn't declared in the nav tag declarations" % marker.tag
 	return ""
 
@@ -515,7 +515,7 @@ func _write_row(marker: NavMarker, id: int, from_chunk: bool) -> int:
 	var enabled: bool = _kept_changes.get(id, marker.starts_enabled)
 	_ids[row] = id
 	_positions[row] = marker.position
-	_masks[row] = NavTags.mask_of(marker.tag)
+	_masks[row] = TagRegistry.mask_of(marker.tag)
 	_enabled[row] = 1 if enabled else 0
 	_from_chunk[row] = 1 if from_chunk else 0
 	_markers[row] = marker
@@ -665,9 +665,9 @@ func _cell_of(position: Vector3) -> Vector2i:
 
 ## The tag's bit for searching, or 0 if nothing can match it. Never adds a tag.
 func _search_bit(tag: StringName) -> int:
-	if not NavTags.has_tag(tag):
+	if not TagRegistry.has_tag(tag):
 		return 0
-	return NavTags.own_bit(tag)
+	return TagRegistry.own_bit(tag)
 
 
 ## The square ring of cells exactly this many cells away from the center.

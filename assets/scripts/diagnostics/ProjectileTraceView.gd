@@ -77,18 +77,16 @@ func _process(delta: float) -> void:
 
 
 func _start_trace(projectile: Projectile) -> void:
-	var settings := projectile.flight()
+	# The path to the end worked out at launch (the world, range or lifetime), unless a pawn stops it first.
 	var plan := PackedVector3Array()
-	var ticks := settings.lifetime_ticks()
-	for i in plan_points + 1:
-		var point := projectile.position_at(ticks * float(i) / plan_points)
-		if projectile.launch_origin.distance_to(point) > settings.max_range:
-			break
-		plan.append(point)
+	var ticks := maxi(projectile.end_tick, 1)
+	for i in plan_points:
+		plan.append(projectile.position_at(ticks * float(i) / plan_points))
+	plan.append(projectile.end_point)
 	var trace := {"plan": plan, "flown": PackedVector3Array([projectile.launch_origin]), "marks": [], "end": null, "gone_at": -1.0}
 	_traces[projectile] = trace
 	projectile.intersected.connect(func(_p: Projectile, entry: Dictionary) -> void:
-		var colour := WORLD_COLOR if entry.kind == &"world" else (HIT_COLOR if entry.hit else MET_COLOR)
+		var colour := WORLD_COLOR if entry.kind == HitRun.Kind.WORLD else (HIT_COLOR if entry.hit else MET_COLOR)
 		trace.marks.append([entry.point, colour]))
 	projectile.ended.connect(func(_p: Projectile, at: Vector3) -> void: trace.end = at)
 

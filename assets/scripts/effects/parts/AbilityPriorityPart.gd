@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## Changes one of a group of abilities' priority numbers while its effect lasts. A held part ([EffectPart]).
 ##
-## Such as boosting abilities tagged combo.second so the next press picks the second swing. [member ability_tag] picks the group (every
+## Such as boosting abilities tagged ability.combo.second so the next press picks the second swing. [member ability_tag] picks the group (every
 ## ability whose category or extra_categories is that tag or inside it); [member number] picks which of three numbers changes.
 ## The AbilityManager adds the totals when it compares numbers, on every machine, so a client's prediction agrees.
 ## Design: pawn spec 8.11.

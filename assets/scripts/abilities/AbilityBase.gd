@@ -29,6 +29,9 @@ signal hit_window_started(centre: Vector3, radius: float)
 ## Sent every tick of a sweep, on the same machines as [signal hit_window_started], with the hit sphere's start and end for this tick.
 @warning_ignore("unused_signal") # sent by MeleeSweepStep
 signal hit_area_moved(from: Vector3, to: Vector3, radius: float)
+## Its swing met something, where hits are decided: one entry of its [member hit_run]'s log (see [method HitRun.entry]), hit or not.
+@warning_ignore("unused_signal") # sent through its HitRun
+signal intersected(entry: Dictionary)
 
 ## What the code does with it: move the pawn every tick, or start on a press. Set by the kind's script.
 @export var kind := Kind.ACTION
@@ -274,6 +277,11 @@ var pawns_hit_this_run := PackedInt64Array():
 ## The most pawns one run can hit. Past it a swing hits no one new, with a warning once: a fixed size keeps the rolled-back list small.
 const MAX_HITS_PER_RUN := 32
 var _warned_hit_cap := false
+## Its swing's hit run ([method get_hit_run]); null until first used.
+var hit_run: HitRun = null
+var _hit_swap: HitDefinition = null # a hit definition swapped in while playing (use_hit_definition)
+var _warned_no_effects := false
+static var _shared_default_hit: HitDefinition = null
 var _starts_this_tick := 0
 var _warned_too_many_starts := false
 # Where push_state sends values: the pawn's TickStateComponent, and each pushed property's entry there ("AbilityManager/Swing:ends_at").
@@ -636,18 +644,75 @@ func has_hit(target: Pawn) -> bool:
 	return pawns_hit_this_run.has(HitInfo.key_of(target))
 
 
-## Notes that this run hit this pawn. False, with a warning once, if the run has hit [constant MAX_HITS_PER_RUN] already: then the
-## pawn isn't hit.
-func note_hit(target: Pawn) -> bool:
+## Notes that this run hit the pawn with this key ([method HitInfo.key_of]). False, with a warning once, if the run has hit
+## [constant MAX_HITS_PER_RUN] already: then the pawn isn't hit.
+func note_hit_key(key: int) -> bool:
 	if pawns_hit_this_run.size() >= MAX_HITS_PER_RUN:
 		if not _warned_hit_cap:
 			_warned_hit_cap = true
 			push_warning("%s: hit %d pawns in one run, its most; the rest aren't hit." % [name, MAX_HITS_PER_RUN])
 		return false
-	var hit := pawns_hit_this_run.duplicate()
-	hit.append(HitInfo.key_of(target))
-	pawns_hit_this_run = hit
+	var listed := pawns_hit_this_run.duplicate()
+	listed.append(key)
+	pawns_hit_this_run = listed
 	return true
+
+
+# A hit on enemies with no effects of its own: the default when nothing names one.
+static func _default_hit() -> HitDefinition:
+	if _shared_default_hit == null:
+		_shared_default_hit = HitDefinition.new()
+	return _shared_default_hit
+
+
+## Who its hits may hit and what they do now: one swapped in while playing, else its definition's, else a hit on enemies.
+func hit_definition() -> HitDefinition:
+	if _hit_swap:
+		return _hit_swap
+	if settings == null:
+		prepare_settings()
+	return settings.hit.resolved() as HitDefinition if settings.hit else _default_hit()
+
+
+## Swaps who its hits may hit and what they do, while playing (an empowered state); null goes back to its definition's.
+func use_hit_definition(hit: HitDefinition) -> void:
+	_hit_swap = hit.resolved() as HitDefinition if hit else null
+
+
+## Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [HitInfo] carrying the hit definition's effects and its
+## own on-hit EffectApplier children, delivered to the target (its interceptors, then effects), then [signal hit_landed]. The one place
+## a hit is applied; override it for an ability's own rules (damage falling off with distance), calling [code]super()[/code].
+func land_hit(target: Pawn, direction: Vector3, tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo:
+	var using := with if with else hit_definition()
+	var target_effects := on_hit_effects
+	var self_effects := on_hit_self_effects
+	if not using.target_effects.is_empty() or not using.attacker_effects.is_empty():
+		target_effects = on_hit_effects.duplicate()
+		self_effects = on_hit_self_effects.duplicate()
+		for effect in using.target_effects:
+			if effect:
+				effect.register() # so an over-time one is recognised by id on every machine
+				target_effects.append(effect)
+		for effect in using.attacker_effects:
+			if effect:
+				effect.register()
+				self_effects.append(effect)
+	if target_effects.is_empty() and self_effects.is_empty() and not _warned_no_effects:
+		_warned_no_effects = true
+		push_warning("%s hit %s but has no on-hit effects (EffectApplier children or its hit definition's), so the hit does nothing." % [name, target.name])
+	var hit := HitInfo.make(pawn, self, target, direction, tick, target_effects, self_effects)
+	hit.deliver()
+	return hit
+
+
+## Its swing's record of this run: whom it hit and what it met. Made the first time it's asked for; cleared as the ability starts.
+func get_hit_run() -> HitRun:
+	if hit_run == null:
+		hit_run = HitRun.new(self, &"pawns_hit_this_run")
+		hit_run.ability = self
+		hit_run.on_intersect = func(entry: Dictionary) -> void: intersected.emit(entry)
+	hit_run.team = pawn.team if pawn else 0
+	return hit_run
 
 
 ## Called by the manager when the ability has no [HitInterceptor], so it can make its defaults (Dash, Parry). Nothing by default.

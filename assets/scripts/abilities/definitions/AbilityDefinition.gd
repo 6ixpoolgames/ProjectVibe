@@ -14,12 +14,12 @@ extends Definition
 	set(value):
 		trigger_action = value
 		_changed(&"trigger_action", value)
-## What it is, as a tag such as &"movement.jump". Used for lockouts. Empty: nothing can lock it out.
+## What it is, as a tag such as &"ability.movement.jump". Used for lockouts. Empty: nothing can lock it out.
 @export var category: StringName = &"":
 	set(value):
 		category = value
 		_changed(&"category", value)
-## More groups it belongs to besides category, such as &"movement.advanced" for a dash. Lockouts, cancels and
+## More groups it belongs to besides category, such as &"ability.movement.advanced" for a dash. Lockouts, cancels and
 ## [method AbilityManager.action_for_tag] answer to all of them. They share one 64-bit mask with every other ability tag.
 @export var extra_categories: Array[StringName] = []:
 	set(value):
@@ -53,7 +53,7 @@ extends Definition
 	set(value):
 		cooldown = value
 		_changed(&"cooldown", value)
-## Categories that can't start, or steer, while this runs, such as &"movement" for an attack that roots the pawn.
+## Categories that can't start, or steer, while this runs, such as &"ability.movement" for an attack that roots the pawn.
 @export var locks_out: Array[StringName] = []:
 	set(value):
 		locks_out = value
@@ -76,7 +76,7 @@ extends Definition
 		interrupt_threshold = value
 		_changed(&"interrupt_threshold", value)
 # For invulnerability while it runs, give it an InvulnerabilityInterceptor child (HitInterceptor); Dash makes one by default.
-## Categories that can always cancel it while it runs, whatever the interrupt numbers say, such as &"movement.jump". A category covers
+## Categories that can always cancel it while it runs, whatever the interrupt numbers say, such as &"ability.movement.jump". A category covers
 ## its children, as in locks_out.
 @export var cancelled_by: Array[StringName] = []:
 	set(value):
@@ -94,6 +94,12 @@ extends Definition
 	set(value):
 		needs_full_movement = value
 		_changed(&"needs_full_movement", value)
+## Who its hits may hit and what they do (ability spec 13.2), for its swings and its projectiles. Empty: its kind's default (a swing
+## hits enemies; a ranged attack's projectile stops at the first). A sweep step or a timeline entry can name another.
+@export var hit: HitDefinition:
+	set(value):
+		hit = value
+		_changed(&"hit", value)
 ## For a stepped ability: when each step runs (ability spec 6.2), as entries in ticks from its start. Empty: its kind's default (a
 ## swing's windup, sweep and recovery), or its steps one after another.
 @export var step_timeline: Array[TimelineEntry] = []:

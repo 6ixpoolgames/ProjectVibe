@@ -16,9 +16,9 @@ extends AbilityDefinition
 func _init() -> void:
 	super()
 	trigger_action = &"parry"
-	category = Tags.COMBAT_PARRY
+	category = Tags.ABILITY.COMBAT_PARRY
 	duration = 0.35
 	cooldown = 1.5
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
+	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 10
 	interrupt_threshold = 20

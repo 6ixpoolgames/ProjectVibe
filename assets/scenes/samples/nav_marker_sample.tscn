@@ -11,42 +11,42 @@
 [sub_resource type="Resource" id="Link_ladder"]
 script = ExtResource("3_link")
 end_offset = Vector3(0, 6, 0)
-action_tag = &"movement.jump"
-tag = &"link.climb"
+action_tag = &"ability.movement.jump"
+tag = &"nav.link.climb"
 radius = 0.5
 
 [sub_resource type="Resource" id="Link_jump"]
 script = ExtResource("3_link")
 end_offset = Vector3(0, 0, -7)
 two_way = false
-action_tag = &"movement.jump"
-tag = &"link.jump"
+action_tag = &"ability.movement.jump"
+tag = &"nav.link.jump"
 radius = 0.5
 
 [sub_resource type="Resource" id="Area_road"]
 script = ExtResource("4_area")
 size = Vector3(4, 1, 16)
 surface = &"road"
-tag = &"area.road"
+tag = &"nav.area.road"
 
 [sub_resource type="Resource" id="Obstacle_crate"]
 script = ExtResource("5_obstacle")
 size = Vector3(2, 2, 2)
-tag = &"obstacle.crate"
+tag = &"nav.obstacle.crate"
 
 [sub_resource type="Resource" id="Point_cover"]
 script = ExtResource("6_point")
-tag = &"point.cover"
+tag = &"nav.point.cover"
 
 [sub_resource type="Resource" id="Point_off"]
 script = ExtResource("6_point")
-tag = &"point.patrol"
+tag = &"nav.point.patrol"
 starts_enabled = false
 
 [sub_resource type="Resource" id="Smart_seat"]
 script = ExtResource("7_smart")
 slot_count = 2
-tag = &"use.seat"
+tag = &"nav.use.seat"
 
 [sub_resource type="StandardMaterial3D" id="Floor_material"]
 albedo_color = Color(0.09, 0.1, 0.12, 1)

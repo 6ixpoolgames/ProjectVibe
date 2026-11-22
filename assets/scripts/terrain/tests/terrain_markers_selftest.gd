@@ -9,7 +9,7 @@ extends Node
 class OneMarkerTerrain extends TerrainGenerator:
 	func _make_chunk_markers(key: Vector2i) -> Array[NavMarker]:
 		var marker := NavPoint.new()
-		marker.tag = &"point.cover"
+		marker.tag = &"nav.point.cover"
 		marker.position = _point_at(key.x * chunk_resolution, key.y * chunk_resolution)
 		var markers: Array[NavMarker] = [marker]
 		return markers
@@ -127,7 +127,7 @@ func _test_chunks_announce() -> void:
 	var terrain := _add_terrain()
 	_check(NavMarkerManager.get_marker_count() == 9, "announcing: a 3 by 3 terrain's chunks each announce theirs")
 	_check(module.added == 9, "announcing: and modules hear about them")
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 1000.0).size() == 9, "announcing: and they can be found")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 1000.0).size() == 9, "announcing: and they can be found")
 	terrain.free()
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker_count() == 0, "releasing: a terrain leaving takes its markers")
@@ -181,11 +181,11 @@ func _test_same_list_every_time() -> void:
 func _test_regenerate() -> void:
 	NavMarkerManager.reset()
 	var terrain := _add_terrain()
-	var ids := NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 1000.0)
+	var ids := NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 1000.0)
 	terrain.generate()
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker_count() == 9, "regenerating: no duplicates and no refusals")
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 1000.0) == ids, "regenerating: the same markers keep the same ids")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 1000.0) == ids, "regenerating: the same markers keep the same ids")
 	terrain.chunk_radius = 0
 	terrain.generate()
 	NavMarkerManager.flush()
@@ -239,13 +239,13 @@ func _test_kept_changes() -> void:
 func _test_leaving_and_returning() -> void:
 	NavMarkerManager.reset()
 	var terrain := _add_terrain()
-	var ids := NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 1000.0)
+	var ids := NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 1000.0)
 	remove_child(terrain)
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker_count() == 0, "leaving: taken out of the scene, its markers go")
 	add_child(terrain)
 	NavMarkerManager.flush()
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 1000.0) == ids, "returning: put back, the same markers return with the same ids")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 1000.0) == ids, "returning: put back, the same markers return with the same ids")
 	terrain.free()
 	NavMarkerManager.flush()
 
@@ -275,8 +275,8 @@ func _test_example_terrain() -> void:
 	example.add_child(TerrainNavFeeder.new())
 	add_child(example)
 	NavMarkerManager.flush()
-	var seats := NavMarkerManager.find_in_radius(&"use.seat", Vector3.ZERO, 100000.0)
-	var cover := NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 100000.0)
+	var seats := NavMarkerManager.find_in_radius(&"nav.use.seat", Vector3.ZERO, 100000.0)
+	var cover := NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 100000.0)
 	_check(seats.size() == 1, "example: one seat in the chunk")
 	_check(cover.size() > 0, "example: and some cover (%d)" % cover.size())
 	var seat_position := NavMarkerManager.get_marker_position(seats[0])

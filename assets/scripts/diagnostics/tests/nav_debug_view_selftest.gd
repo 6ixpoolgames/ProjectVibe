@@ -42,7 +42,7 @@ func _test_toggle() -> void:
 			OS.delay_msec(2)
 	var point := NavMarkerNode.new()
 	var marker := NavPoint.new()
-	marker.tag = &"point.cover"
+	marker.tag = &"nav.point.cover"
 	point.marker = marker
 	point.name = "CoverPoint"
 	add_child(point)

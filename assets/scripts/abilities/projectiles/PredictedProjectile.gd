@@ -19,8 +19,11 @@ var launch_origin := Vector3.ZERO
 var launch_direction := Vector3.FORWARD
 var flight: ProjectileDefinition = null
 var shooter: Pawn = null
+## On: it stops where it meets another pawn, as a shot whose hit definition stops at the first does.
+var stops_at_first_pawn := true
 var _key := ""
 var _stopped := false
+var _hitscan_end := Vector3.ZERO # hitscan: where its tracer ends, traced here at once
 var _last := Vector3.ZERO
 var _ray := PhysicsRayQueryParameters3D.new()
 var _sphere_query := PhysicsShapeQueryParameters3D.new()
@@ -28,7 +31,8 @@ var _sphere_query := PhysicsShapeQueryParameters3D.new()
 
 ## Fires the shooter's copy of a shot: its definition's visual (or a scene of its own's Visual), flown from origin along direction.
 ## Null if there's nothing to draw.
-static func fire(flies_with: ProjectileDefinition, scene: PackedScene, from_pawn: Pawn, origin: Vector3, direction: Vector3, tick: int) -> PredictedProjectile:
+static func fire(flies_with: ProjectileDefinition, scene: PackedScene, from_pawn: Pawn, origin: Vector3, direction: Vector3, tick: int,
+		stops_at_first_pawn := true) -> PredictedProjectile:
 	var settings: ProjectileDefinition = flies_with
 	var visual: Node3D = null
 	if scene:
@@ -51,8 +55,11 @@ static func fire(flies_with: ProjectileDefinition, scene: PackedScene, from_pawn
 	copy.flight = settings.resolved() as ProjectileDefinition
 	copy.shooter = from_pawn
 	copy.launch_tick = tick
+	copy.stops_at_first_pawn = stops_at_first_pawn
 	copy.launch_origin = origin
 	copy.launch_direction = direction.normalized() if direction.length_squared() > 0.000001 else Vector3.FORWARD
+	if copy.flight.hitscan:
+		copy._hitscan_end = copy._trace_hitscan(origin, copy.launch_direction, from_pawn)
 	var entity := from_pawn.get_network_entity()
 	copy._key = "%d:%d" % [entity.entity_id if entity else -1, tick]
 	from_pawn.get_parent().add_child(copy)
@@ -84,6 +91,13 @@ func _process(_delta: float) -> void:
 		return
 	if _stopped:
 		return
+	if flight.hitscan:
+		var tracer := float(flight.tracer_ticks())
+		global_position = launch_origin.lerp(_hitscan_end, clampf(age / tracer, 0.0, 1.0))
+		if age >= tracer:
+			global_position = _hitscan_end
+			_stop(true)
+		return
 	var at := launch_origin + flight.offset_at(launch_direction, age)
 	if launch_origin.distance_to(at) >= flight.max_range or age >= flight.lifetime_ticks():
 		_stop()
@@ -97,7 +111,7 @@ func _process(_delta: float) -> void:
 			global_position = found["position"]
 			_stop(true)
 			return
-	if flight.max_hits == 1 and _touches_pawn(at):
+	if stops_at_first_pawn and _touches_pawn(at):
 		global_position = at
 		_stop(true)
 		return
@@ -107,6 +121,20 @@ func _process(_delta: float) -> void:
 	if moving.length_squared() > 0.0001:
 		var forward := moving.normalized()
 		basis = Basis.looking_at(forward, Vector3.UP if absf(forward.y) < 0.999 else Vector3.FORWARD)
+
+
+# Hitscan: where its tracer ends on this machine: the world, or the first pawn on the line if it stops there.
+func _trace_hitscan(origin: Vector3, direction: Vector3, from_pawn: Pawn) -> Vector3:
+	var end := origin + direction * flight.max_range
+	if flight.hits_world:
+		var found := from_pawn.get_world_3d().direct_space_state.intersect_ray(PhysicsRayQueryParameters3D.create(origin, end, flight.world_mask))
+		if not found.is_empty():
+			end = found["position"]
+	if stops_at_first_pawn:
+		var touched := HitQuery.touching(HitQuery.line_centres(origin, end, flight.radius), flight.radius, TickDriver.tick, from_pawn)
+		if not touched.is_empty():
+			end = HitQuery.point_on_path(origin, end, touched[0])
+	return end
 
 
 # It meets another pawn here: shown stopping, as the server's will.

@@ -43,10 +43,12 @@ Each part is a small scene, so its settings can be changed in the editor. A part
 
 `res://assets/scripts/resources/TagDeclarations_resource.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
-A list of tags a game declares up front, for one tag set.
+A declarations file: the tags a game declares up front, each with a one-line description, plus renames and deprecations.
 
-Each tag set reads its own file at startup and gives bits in sorted order, so every machine in a multiplayer game agrees on them: TagRegistry (ability categories, tag_declarations.tres), NavTags (nav_tag_declarations.tres) and EffectTags (effect_tag_declarations.tres). Write full names with dots for levels ("combat.melee.sword"); parent levels ("combat", "combat.melee") are added automatically.
+[`TagRegistry`](../tags/REFERENCE.md#tagregistry) reads the base file (resources/tag_declarations.tres) and any more a game lists in a project setting, merges them and gives bits in sorted order, so every machine in a multiplayer game agrees on them (tag spec 2). Write full names with dots for levels ("ability.combat.melee"); the first level is the category. Declare every level, categories included, so each has a description for the tag reference (tools/tags/make_tag_reference.py); a parent left out is added without one.
 
 ### Settings and properties
 
-- `tags: StringName[]` = `[]`: The tags, full names with dots.
+- `tags: Dictionary[StringName, String]` = `{}`: The tags, full names with dots, each with a one-line description: what it is, not who uses it.
+- `redirects: Dictionary[StringName, StringName]` = `{}`: Renames: old name -> new name. An old name in saved files is read as the new one (tag spec 5). Keep a redirect for good, so old replays and saves still load.
+- `deprecated: StringName[]` = `[]`: Tags on their way out: they still work, with a warning, and the tag picker hides them. Remove one once nothing saved uses it, and never reuse its name for something else.

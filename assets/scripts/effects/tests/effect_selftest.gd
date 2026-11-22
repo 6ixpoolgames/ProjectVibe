@@ -33,22 +33,22 @@ func _ready() -> void:
 
 
 func _test_tags() -> void:
-	var declared := EffectTags.read_declared_tags()
-	var constants: Array[StringName] = [EffectTags.DAMAGE, EffectTags.DAMAGE_PHYSICAL, EffectTags.DAMAGE_ELEMENTAL,
-			EffectTags.DAMAGE_ELEMENTAL_FIRE, EffectTags.DAMAGE_ELEMENTAL_FROST, EffectTags.DAMAGE_POISON, EffectTags.HEAL,
-			EffectTags.BUFF, EffectTags.BUFF_COMBO, EffectTags.DEBUFF, EffectTags.DEBUFF_SLOW]
+	var declared := TagRegistry.read_declared_tags([Tags.EFFECT.ALL])
+	var constants: Array[StringName] = [Tags.EFFECT.DAMAGE, Tags.EFFECT.DAMAGE_PHYSICAL, Tags.EFFECT.DAMAGE_ELEMENTAL,
+			Tags.EFFECT.DAMAGE_ELEMENTAL_FIRE, Tags.EFFECT.DAMAGE_ELEMENTAL_FROST, Tags.EFFECT.DAMAGE_POISON, Tags.EFFECT.HEAL,
+			Tags.EFFECT.BUFF, Tags.EFFECT.BUFF_COMBO, Tags.EFFECT.DEBUFF, Tags.EFFECT.DEBUFF_SLOW]
 	var missing: Array[StringName] = []
 	for tag in constants:
 		if not declared.has(tag):
 			missing.append(tag)
-	_check(missing.is_empty(), "every EffectTags constant is declared in the effect tag declarations (missing: %s)" % [missing])
-	var fire := EffectTags.mask_of(EffectTags.DAMAGE_ELEMENTAL_FIRE)
-	_check(fire & EffectTags.own_bit(EffectTags.DAMAGE) != 0 and fire & EffectTags.own_bit(EffectTags.DAMAGE_ELEMENTAL) != 0 and fire & EffectTags.own_bit(EffectTags.DAMAGE_PHYSICAL) == 0, "a fire tag's mask holds damage and damage.elemental, and not damage.physical")
-	_check(not EffectTags.has_tag(&"no.such.tag") and EffectTags.own_bit(&"") == 0, "a question never adds a tag, and an empty tag has no bit")
-	var effect := Effect.make_damage(5, [EffectTags.DAMAGE_ELEMENTAL_FIRE])
-	_check(effect.has_tag(EffectTags.DAMAGE_ELEMENTAL) and not effect.has_tag(EffectTags.DAMAGE_PHYSICAL), "an effect answers to its tags' parents")
+	_check(missing.is_empty(), "every Tags.EFFECT constant is declared in the tag declarations (missing: %s)" % [missing])
+	var fire := TagRegistry.mask_of(Tags.EFFECT.DAMAGE_ELEMENTAL_FIRE)
+	_check(fire & TagRegistry.own_bit(Tags.EFFECT.DAMAGE) != 0 and fire & TagRegistry.own_bit(Tags.EFFECT.DAMAGE_ELEMENTAL) != 0 and fire & TagRegistry.own_bit(Tags.EFFECT.DAMAGE_PHYSICAL) == 0, "a fire tag's mask holds effect.damage and effect.damage.elemental, and not effect.damage.physical")
+	_check(not TagRegistry.has_tag(&"no.such.tag") and TagRegistry.own_bit(&"") == 0, "a question never adds a tag, and an empty tag has no bit")
+	var effect := Effect.make_damage(5, [Tags.EFFECT.DAMAGE_ELEMENTAL_FIRE])
+	_check(effect.has_tag(Tags.EFFECT.DAMAGE_ELEMENTAL) and not effect.has_tag(Tags.EFFECT.DAMAGE_PHYSICAL), "an effect answers to its tags' parents")
 	_check(effect.get_id() == Effect.make_damage(1).get_id() and effect.get_id() != 0, "effects made in code with the same effect_name share an id, which is never 0")
-	_check(TagRegistry.has_tag(Tags.COMBO_SECOND) and TagRegistry.has_tag(Tags.COMBO_FINISHER), "the combo ability tags are declared")
+	_check(TagRegistry.has_tag(Tags.ABILITY.COMBO_SECOND) and TagRegistry.has_tag(Tags.ABILITY.COMBO_FINISHER), "the combo ability tags are declared")
 
 
 func _test_instant() -> void:
@@ -58,20 +58,20 @@ func _test_instant() -> void:
 	_check(a.effect_manager != null and a.effect_manager.name == &"EffectManager", "a pawn gets an EffectManager as a default part")
 	a.effect_manager.apply_effect(Effect.make_damage(20), b)
 	_check(a.stat_manager.get_health() == 80.0, "damage takes Health (%d)" % a.stat_manager.get_health())
-	a.effect_manager.resistances[EffectTags.DAMAGE_ELEMENTAL] = 0.2
-	a.effect_manager.resistances[EffectTags.DAMAGE_ELEMENTAL_FIRE] = 0.3
+	a.effect_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL] = 0.2
+	a.effect_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL_FIRE] = 0.3
 	a.effect_manager.active_effects = a.effect_manager.active_effects # the inspector's resistances are read when the list changes
-	var fire := Effect.make_damage(20, [EffectTags.DAMAGE_ELEMENTAL_FIRE])
+	var fire := Effect.make_damage(20, [Tags.EFFECT.DAMAGE_ELEMENTAL_FIRE])
 	_check(is_equal_approx(a.effect_manager.resistance_to(fire), 0.5), "resistances to a tag and its parent add up (0.2 + 0.3 = %.2f)" % a.effect_manager.resistance_to(fire))
 	a.effect_manager.apply_effect(fire, b)
 	_check(a.stat_manager.get_health() == 70.0, "and take that share off (20 fire damage takes 10: %d)" % a.stat_manager.get_health())
-	a.effect_manager.resistances[EffectTags.DAMAGE_ELEMENTAL_FROST] = -0.5
+	a.effect_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL_FROST] = -0.5
 	a.effect_manager.active_effects = a.effect_manager.active_effects
-	a.effect_manager.apply_effect(Effect.make_damage(10, [EffectTags.DAMAGE_ELEMENTAL_FROST]), b)
+	a.effect_manager.apply_effect(Effect.make_damage(10, [Tags.EFFECT.DAMAGE_ELEMENTAL_FROST]), b)
 	_check(a.stat_manager.get_health() == 57.0, "a weakness adds to it (10 frost with 0.2 - 0.5 takes 13: %d)" % a.stat_manager.get_health())
-	a.effect_manager.resistances[EffectTags.DAMAGE_POISON] = 1.0
+	a.effect_manager.resistances[Tags.EFFECT.DAMAGE_POISON] = 1.0
 	a.effect_manager.active_effects = a.effect_manager.active_effects
-	_check(not a.effect_manager.apply_effect(Effect.make_damage(10, [EffectTags.DAMAGE_POISON]), b) and a.stat_manager.get_health() == 57.0, "1 or more: immune, the effect is refused")
+	_check(not a.effect_manager.apply_effect(Effect.make_damage(10, [Tags.EFFECT.DAMAGE_POISON]), b) and a.stat_manager.get_health() == 57.0, "1 or more: immune, the effect is refused")
 	var heal := _effect(&"test heal", false, 0.0, [_change(&"Health", 15.0)])
 	a.effect_manager.apply_effect(heal, a)
 	_check(a.stat_manager.get_health() == 72.0, "a heal adds Health, and resistances don't touch it (%d)" % a.stat_manager.get_health())
@@ -116,7 +116,7 @@ func _test_over_time() -> void:
 	var a := _pawn(Vector3(0, 0.1, 0))
 	await _ticks(3)
 	var slow := _effect(&"test slow", true, 0.5, [_modifier(&"MoveSpeed", 0.0, 0.6)])
-	slow.tags = [EffectTags.DEBUFF_SLOW]
+	slow.tags = [Tags.EFFECT.DEBUFF_SLOW]
 	a.effect_manager.apply_effect(slow, null)
 	_check(a.effect_manager.has_effect(slow) and is_equal_approx(a.stat_manager.get_value(&"MoveSpeed"), 3.0), "a slow holds while it lasts: MoveSpeed 5 x0.6 = %.2f" % a.stat_manager.get_value(&"MoveSpeed"))
 	_check(not a.effect_manager.can_sleep() and a.effect_manager.get_ticks_left(slow) == 30, "a pawn with an effect on it doesn't rest; 0.5 s is 30 ticks (%d)" % a.effect_manager.get_ticks_left(slow))
@@ -148,7 +148,7 @@ func _test_poison() -> void:
 	await _ticks(3)
 	var poison := _effect(&"test poison", true, 0.5, [_change(&"Health", -5.0)])
 	poison.period_seconds = 0.1
-	poison.tags = [EffectTags.DAMAGE_POISON]
+	poison.tags = [Tags.EFFECT.DAMAGE_POISON]
 	a.effect_manager.apply_effect(poison, b)
 	_check(a.stat_manager.get_health() == 95.0, "a poison runs once when first applied (%d)" % a.stat_manager.get_health())
 	await _ticks(40)
@@ -183,9 +183,9 @@ func _test_stacking_and_removing() -> void:
 	var ignore := _effect(&"test ignore", true, 0.5, [])
 	ignore.stacking = Effect.Stacking.IGNORE
 	_check(a.effect_manager.apply_effect(ignore, null) and not a.effect_manager.apply_effect(ignore, null), "IGNORE: the second application is refused")
-	stacking.tags = [EffectTags.DEBUFF_SLOW]
+	stacking.tags = [Tags.EFFECT.DEBUFF_SLOW]
 	stacking._mask = -1
-	a.effect_manager.remove_with_tag(EffectTags.DEBUFF)
+	a.effect_manager.remove_with_tag(Tags.EFFECT.DEBUFF)
 	_check(not a.effect_manager.has_effect(stacking) and a.effect_manager.has_effect(refresh) and a.stat_manager.get_value(&"MoveSpeed") == 4.0, "remove_with_tag(debuff) removes what's tagged debuff.slow and leaves the rest")
 	a.effect_manager.max_active_effects = 3
 	var extra := _effect(&"test extra", true, 0.5, [])
@@ -203,7 +203,7 @@ func _test_ability_numbers() -> void:
 	var manager := a.ability_manager
 	var melee: MeleeAttackAbility = manager.get_node("MeleeAttack")
 	var sprint: AbilityBase = manager.get_node("Sprint")
-	var frail := _effect(&"test easy to interrupt", true, 3.0, [_number(Tags.COMBAT, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD, -10)])
+	var frail := _effect(&"test easy to interrupt", true, 3.0, [_number(Tags.ABILITY.COMBAT, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD, -10)])
 	a.effect_manager.apply_effect(frail, null)
 	_check(manager.interrupt_threshold_now(melee) == 5 and manager.interrupt_threshold_now(sprint) == sprint.interrupt_threshold, "an interrupt threshold change reaches the group it names and nothing else (swing 15 - 10 = %d)" % manager.interrupt_threshold_now(melee))
 	_ai(a).press(&"primary")
@@ -216,7 +216,7 @@ func _test_ability_numbers() -> void:
 	var rows := manager.get_interrupt_table()
 	var swing_row: Dictionary = rows.filter(func(row): return row["running"] == &"MeleeAttack")[0]
 	_check(swing_row["threshold"] == 5 and swing_row["cells"][&"Sprint"]["result"] == "cancels", "and the interrupt table shows it")
-	var strong := _effect(&"test strong dash", false, 1.0, [_number(Tags.MOVEMENT_DASH, AbilityPriorityPart.Number.INTERRUPT_PRIORITY, 5)])
+	var strong := _effect(&"test strong dash", false, 1.0, [_number(Tags.ABILITY.MOVEMENT_DASH, AbilityPriorityPart.Number.INTERRUPT_PRIORITY, 5)])
 	a.effect_manager.apply_effect(strong, null)
 	var dash: AbilityBase = manager.get_node("Dash")
 	_check(manager.interrupt_priority_now(dash) == dash.interrupt_priority + 5 and manager.press_priority_now(dash) == dash.priority, "an interrupt priority change is kept apart from press priority")

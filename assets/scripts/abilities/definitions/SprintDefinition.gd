@@ -31,8 +31,8 @@ extends WalkDefinition
 func _init() -> void:
 	super()
 	trigger_action = &"sprint"
-	category = Tags.MOVEMENT_SPRINT
-	extra_categories = [Tags.MOVEMENT_BASIC]
+	category = Tags.ABILITY.MOVEMENT_SPRINT
+	extra_categories = [Tags.ABILITY.MOVEMENT_BASIC]
 	speed_stat = &"SprintSpeed"
 	fallback_speed = 9.0
 	interrupt_priority = 10 # above Walk, so sprinting cancels actions with a threshold of 10 or less

@@ -152,6 +152,8 @@ func _enter_tree() -> void:
 	for child in get_children():
 		if child is NetworkEntity:
 			_entity = child
+			if not _entity.lingering_started.is_connected(_on_lingering_started):
+				_entity.lingering_started.connect(_on_lingering_started)
 		elif child is TickStateComponent and _tick_state == null:
 			_tick_state = child
 	# Default parts next, so they're children before anything below or any _ready looks for them. A node may add children to itself
@@ -221,6 +223,20 @@ func is_keeping_world_loaded() -> bool:
 ## The node that follows the body smoothly, for hanging things from. With no Visual, it's the body.
 func get_visual() -> Node3D:
 	return _visual if _visual else self
+
+
+## Its entity was despawned while its projectiles still fly (NetworkSession.despawn): it lingers until they end, hidden, not ticking and
+## not colliding, so their hits still have their ability, and goes the tick after.
+func _on_lingering_started(_entity: NetworkEntity) -> void:
+	set_frozen(true)
+	visible = false
+	collision_layer = 0 # nothing meets it: not hit, not in the way
+
+
+## Keeps its entity until this tick, at least, if it's despawned: a projectile it fired ends then (Projectile.launch).
+func linger_until(tick: int) -> void:
+	if _entity:
+		_entity.linger_until_tick = maxi(_entity.linger_until_tick, tick)
 
 
 ## Freezes or unfreezes the pawn: frozen, it doesn't tick at all, and everything about it stays as it is. AIActivationManager calls

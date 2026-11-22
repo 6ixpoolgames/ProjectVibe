@@ -11,8 +11,8 @@
 ##     here (the arena's DEBUG_COOLDOWNS; Claude 2026-11-10: was 1.5), so swing, then click again quickly for the follow-up. Priority picks: higher wins, with no
 ##     jitter on these two.
 ##     Claude 2026-11-10 (pawn spec 8.11): replaced by a combo made of boosts, with no follow-up window. Three swings answer to Attack:
-##     MeleeAttack (priority 10), SecondSwing (0, tagged combo.second) and FinisherSwing (-10, tagged combo.finisher). Starting
-##     MeleeAttack boosts combo.second by 20 for 0.6 s, and starting SecondSwing boosts combo.finisher by 40 for 0.6 s
+##     MeleeAttack (priority 10), SecondSwing (0, tagged ability.combo.second) and FinisherSwing (-10, tagged ability.combo.finisher). Starting
+##     MeleeAttack boosts ability.combo.second by 20 for 0.6 s, and starting SecondSwing boosts ability.combo.finisher by 40 for 0.6 s
 ##     (resources/effects/combo_*_boost.tres). So clicking again quickly gives swing, second, finisher; slowly, swing, swing. A click
 ##     during a swing waits in its buffer, since the next swing can't cancel it (interrupt priority 10 against 15). MeleeAttack has no
 ##     cooldown here (_debug_cooldowns), so the boosts alone decide. Each swing's damage and knockback are its on-hit effects.

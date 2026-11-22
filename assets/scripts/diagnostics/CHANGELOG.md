@@ -19,6 +19,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-22
 
+- The F5 trace plans each projectile's path to the end worked out at its launch, and reads its hit run's log.
+
 - **F5 projectile trace** (`ProjectileTraceView`, new, the owner's request; debug builds): each projectile's planned path, where it flew, what it met and where it ended, kept 3 s. Shift+F5 stays the net test bench's.
 
 ## 2026-11-21

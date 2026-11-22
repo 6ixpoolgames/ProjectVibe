@@ -7,8 +7,8 @@
 script = ExtResource("2_sk38w")
 projectile_definition = ExtResource("1_vk6gp")
 trigger_action = &"ability_3"
-category = &"combat.ranged"
+category = &"ability.combat.ranged"
 cooldown = 0.6
-locks_out = Array[StringName]([&"movement", &"combat"])
+locks_out = Array[StringName]([&"ability.movement", &"ability.combat"])
 interrupt_priority = 15
 interrupt_threshold = 15

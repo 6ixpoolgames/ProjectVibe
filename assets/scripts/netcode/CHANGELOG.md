@@ -14,13 +14,18 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 |---|---|---|---|
 | Split `NetworkSession` into helpers with one job each | `singletons/NetworkSession.gd` | About 2000 lines doing many jobs: connecting and the handshake, the entity list and spawning, the clock and time dilation, inputs, encoding and acknowledging snapshots (deltas, parts), reconciliation, interpolation, world and client channels, connection statistics. Helpers (a snapshot sender and receiver, a clock, the channels) would be easier to read, test and extend, with the autoload keeping the public API | L |
 | Stop the session naming `NetMonitors` | `NET_MONITORS_SCRIPT` in `NetworkSession` | A base autoload names a file in `netcode/debug/`; `docs/TEST_AND_DEBUG_CODE.md` says a base class should never name a debug class. NetMonitors could attach itself, from an editor-only plugin or a module like `DiagnosticsManager` | S |
-| Let systems add their own part to the content hash | `content_hash()` in `NetworkSession` | The netcode names three other systems' tag sets (`TagRegistry`, `NavTags`, `InputActions`). A list systems register into would let a new tag set, or a game's own, join the handshake check without editing the session | S |
+| Let systems add their own part to the content hash | `content_hash()` in `NetworkSession` | The netcode names other systems' tables (`TagRegistry`, `InputActions`). A list systems register into would let a game's own table join the handshake check without editing the session | S |
 | Export the packet limits and `bind_address` | `max_packets_per_second`, `max_bytes_per_second`, `max_packet_bytes`, `bind_address` in `NetworkSession` | Plain vars, unlike the session's other settings, so a designer can't set them without code | S |
 | A `LinkRecord` class for connection statistics | `_new_link()`, `_links` in `NetworkSession` | A Dictionary read by string keys, where the server's other per-client record is a class (`PeerRecord`); a class catches a mistyped key when the script loads | S |
 | A separate part for following the server | `TickStateComponent.gd` | Two jobs in one class: recording and replaying this machine's own state, and placing an entity drawn from server data (`follow_server_at`, the follow cache, extrapolation, about 300 lines) | M |
 | Drop or keep the dictionary form of server state | `receive_authoritative_state()` in `TickStateComponent` | Only tests call it (snapshots use `receive_authoritative_values`): a test-only door in production code. The tests could build the list themselves, or the owner may keep it as a by-name convenience | S |
 | Size the lag compensation record from the rewind cap | `HIT_HISTORY_SIZE` in `NetworkEntity` | A fixed 64 ticks, while how far back lag compensation goes is a setting (`rewind_cap_seconds`). A cap above about 1 s, or a higher tick rate, silently rewinds nothing | S |
 | A public way to sync a body's collision now | `NetworkEntity.rewind_to`, `restore_after_rewind` | They call `TickStateComponent._sync_collision`, a private function of another class | S |
+
+## 2026-11-22
+
+- **One tag fingerprint in the handshake:** `content_hash` takes `TagRegistry.content_hash()` once, covering every category (navigation's included), in place of the ability and nav tag sets' two (tag spec step 1).
+- **Lingering despawns** (the owner's call, ability spec 13.5): `NetworkEntity.linger_until_tick` and its `lingering_started` signal (new). `NetworkSession.despawn` of an entity whose wait is still ahead keeps it, switched off by its holder, and despawns it the tick after (`_despawn_lingerers`, from after_tick). A dead body's removal and a leaver's entities go through it unchanged.
 
 ## 2026-11-19
 

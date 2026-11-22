@@ -25,7 +25,7 @@ extends AIBehaviourBase
 @export var dash_to_close := false
 ## The group of ability it uses to close in, not one ability by name: any ability tagged with it that can start
 ## ([method AbilityManager.action_for_tag]). Advanced movement by default.
-@export var close_in_tag: StringName = Tags.MOVEMENT_ADVANCED
+@export var close_in_tag: StringName = Tags.ABILITY.MOVEMENT_ADVANCED
 ## The farthest the target can be for a dash, in metres.
 @export_range(0.0, 50.0, 0.1, "or_greater") var dash_from_distance := 7.5
 ## The nearest the target can be for a dash, in metres. A dash from a sprint (9 m/s) covers about 4.2 m, so 5.5 lands it a little

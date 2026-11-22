@@ -10,7 +10,7 @@
 
 [sub_resource type="Resource" id="Point_cover"]
 script = ExtResource("7_nav_point")
-tag = &"point.cover"
+tag = &"nav.point.cover"
 
 [sub_resource type="StandardMaterial3D" id="Wall_mat"]
 albedo_color = Color(0.55, 0.52, 0.48, 1)

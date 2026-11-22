@@ -73,24 +73,24 @@ func _test_ids() -> void:
 
 func _test_requests_wait_for_the_tick() -> void:
 	NavMarkerManager.reset()
-	var markers: Array[NavMarker] = [_marker(&"point.cover", Vector3(1, 0, 1))]
+	var markers: Array[NavMarker] = [_marker(&"nav.point.cover", Vector3(1, 0, 1))]
 	_check(NavMarkerManager.request_markers(TERRAIN, Vector2i.ZERO, markers) == 1, "requests: returns how many were accepted")
 	var id := NavMarkerManager.chunk_marker_id(TERRAIN, Vector2i.ZERO, 0)
 	_check(NavMarkerManager.get_marker(id) == markers[0], "requests: the id and full data are available at once")
 	_check(NavMarkerManager.get_pending_count() == 1, "requests: it waits in the queue")
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) == 0, "requests: it isn't searchable yet")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) == 0, "requests: it isn't searchable yet")
 	NavMarkerManager.flush()
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) == id, "requests: searchable once applied")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) == id, "requests: searchable once applied")
 	_check(NavMarkerManager.get_pending_count() == 0, "requests: the queue is empty afterwards")
 	NavMarkerManager.release_markers(TERRAIN, Vector2i.ZERO)
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) == id, "requests: a released marker stays searchable until the tick")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) == id, "requests: a released marker stays searchable until the tick")
 	NavMarkerManager.flush()
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) == 0, "requests: and is gone afterwards")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) == 0, "requests: and is gone afterwards")
 
 
 func _test_tick_applies_requests() -> void:
 	NavMarkerManager.reset()
-	var markers: Array[NavMarker] = [_marker(&"point.cover", Vector3(1, 0, 1))]
+	var markers: Array[NavMarker] = [_marker(&"nav.point.cover", Vector3(1, 0, 1))]
 	NavMarkerManager.request_markers(TERRAIN, Vector2i.ZERO, markers)
 	var tick_before: int = TickDriver.tick
 	# GDScript note: await pauses this function until the signal fires, and the game keeps running meanwhile.
@@ -99,24 +99,24 @@ func _test_tick_applies_requests() -> void:
 	await get_tree().physics_frame
 	_check(TickDriver.tick > tick_before, "tick: the driver really is ticking in this test")
 	_check(NavMarkerManager.get_pending_count() == 0, "tick: the driver's tick applies waiting requests by itself")
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) != 0, "tick: and the marker can be found")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) != 0, "tick: and the marker can be found")
 
 
 func _test_refusals() -> void:
 	NavMarkerManager.reset()
 	var markers: Array[NavMarker] = [
-		_marker(&"point.cover", Vector3.ZERO),
+		_marker(&"nav.point.cover", Vector3.ZERO),
 		_marker(&"not.declared.anywhere", Vector3.ZERO),
 		null,
 		_marker(&"", Vector3.ZERO),
-		_marker(&"point.patrol", Vector3.ZERO),
+		_marker(&"nav.point.patrol", Vector3.ZERO),
 	]
 	_check(NavMarkerManager.request_markers(TERRAIN, Vector2i.ZERO, markers) == 2, "refusals: a bad tag, null and an empty tag are refused, and the rest accepted")
-	_check(not NavTags.has_tag(&"not.declared.anywhere"), "refusals: being refused doesn't add the tag")
+	_check(not TagRegistry.has_tag(&"not.declared.anywhere"), "refusals: being refused doesn't add the tag")
 	_check(NavMarkerManager.get_marker_count() == 2, "refusals: only the accepted ones count")
 	# Ids come from the place in the list, so the good ones keep theirs even with bad ones between them.
 	_check(NavMarkerManager.get_marker(NavMarkerManager.chunk_marker_id(TERRAIN, Vector2i.ZERO, 4)) == markers[4], "refusals: a marker's id still comes from its place in the list")
-	var again: Array[NavMarker] = [_marker(&"point.cover", Vector3.ZERO)]
+	var again: Array[NavMarker] = [_marker(&"nav.point.cover", Vector3.ZERO)]
 	_check(NavMarkerManager.request_markers(TERRAIN, Vector2i.ZERO, again) == 0, "refusals: a duplicate id is refused")
 	var nothing: Array[NavMarker] = []
 	_check(NavMarkerManager.request_markers(TERRAIN, Vector2i(9, 9), nothing) == 0, "refusals: an empty list is fine")
@@ -124,80 +124,80 @@ func _test_refusals() -> void:
 
 func _test_search_basics() -> void:
 	NavMarkerManager.reset()
-	var cover := _add_one(&"point.cover", Vector3(10, 0, 0), Vector2i(0, 0))
-	var patrol := _add_one(&"point.patrol", Vector3(5, 0, 0), Vector2i(0, 1))
-	var jump := _add_one(&"link.jump", Vector3(1, 0, 0), Vector2i(0, 2))
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) == cover, "search: finds by exact tag")
-	_check(NavMarkerManager.find_nearest(&"point", Vector3.ZERO, 100.0) == patrol, "search: a parent tag finds what's inside it, nearest first")
-	_check(NavMarkerManager.find_nearest(&"link", Vector3.ZERO, 100.0) == jump, "search: other parents work too")
-	_check(NavMarkerManager.find_nearest(&"area", Vector3.ZERO, 100.0) == 0, "search: a tag with no markers finds nothing")
+	var cover := _add_one(&"nav.point.cover", Vector3(10, 0, 0), Vector2i(0, 0))
+	var patrol := _add_one(&"nav.point.patrol", Vector3(5, 0, 0), Vector2i(0, 1))
+	var jump := _add_one(&"nav.link.jump", Vector3(1, 0, 0), Vector2i(0, 2))
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) == cover, "search: finds by exact tag")
+	_check(NavMarkerManager.find_nearest(&"nav.point", Vector3.ZERO, 100.0) == patrol, "search: a parent tag finds what's inside it, nearest first")
+	_check(NavMarkerManager.find_nearest(&"nav.link", Vector3.ZERO, 100.0) == jump, "search: other parents work too")
+	_check(NavMarkerManager.find_nearest(&"nav.area", Vector3.ZERO, 100.0) == 0, "search: a tag with no markers finds nothing")
 	_check(NavMarkerManager.find_nearest(&"never.declared", Vector3.ZERO, 100.0) == 0, "search: an undeclared tag finds nothing")
-	_check(not NavTags.has_tag(&"never.declared"), "search: and doesn't add it")
+	_check(not TagRegistry.has_tag(&"never.declared"), "search: and doesn't add it")
 	_check(NavMarkerManager.find_nearest(&"", Vector3.ZERO, 100.0) == 0, "search: an empty tag finds nothing")
-	var found := NavMarkerManager.find_in_radius(&"point", Vector3.ZERO, 100.0)
+	var found := NavMarkerManager.find_in_radius(&"nav.point", Vector3.ZERO, 100.0)
 	_check(found.size() == 2 and found.has(cover) and found.has(patrol), "search: find_in_radius finds every match")
 	_check(found[0] < found[1], "search: results are sorted by id, so machines agree on the order")
-	_check(NavMarkerManager.find_in_radius(&"point", Vector3.ZERO, 6.0) == PackedInt64Array([patrol]), "search: find_in_radius respects the radius")
+	_check(NavMarkerManager.find_in_radius(&"nav.point", Vector3.ZERO, 6.0) == PackedInt64Array([patrol]), "search: find_in_radius respects the radius")
 	_check(NavMarkerManager.get_marker_position(cover) == Vector3(10, 0, 0), "search: get_marker_position gives where it is")
-	_check(NavMarkerManager.get_marker(cover).tag == &"point.cover", "search: get_marker gives the full data")
+	_check(NavMarkerManager.get_marker(cover).tag == &"nav.point.cover", "search: get_marker gives the full data")
 	# Height counts as distance, even though cells ignore it.
 	NavMarkerManager.reset()
-	var above := _add_one(&"point.cover", Vector3(0, 50, 0), Vector2i(0, 0))
-	var beside := _add_one(&"point.cover", Vector3(40, 0, 0), Vector2i(0, 1))
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) == beside, "search: height counts, so a marker high above isn't the nearest")
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3(0, 50, 0), 100.0) == above, "search: and searching from up there finds it")
+	var above := _add_one(&"nav.point.cover", Vector3(0, 50, 0), Vector2i(0, 0))
+	var beside := _add_one(&"nav.point.cover", Vector3(40, 0, 0), Vector2i(0, 1))
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) == beside, "search: height counts, so a marker high above isn't the nearest")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3(0, 50, 0), 100.0) == above, "search: and searching from up there finds it")
 
 
 func _test_nearest_ties_and_limits() -> void:
 	NavMarkerManager.reset()
-	var first := _add_one(&"point.cover", Vector3(10, 0, 0), Vector2i(0, 0))
-	var second := _add_one(&"point.cover", Vector3(-10, 0, 0), Vector2i(0, 1))
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) == mini(first, second), "nearest: equal distances go to the lower id")
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 5.0) == 0, "nearest: nothing within the limit finds nothing")
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 10.0) != 0, "nearest: exactly at the limit counts")
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, -1.0) == 0, "nearest: a negative limit finds nothing")
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 10.0).size() == 2, "radius: exactly at the edge counts")
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, -1.0).is_empty(), "radius: a negative radius finds nothing")
+	var first := _add_one(&"nav.point.cover", Vector3(10, 0, 0), Vector2i(0, 0))
+	var second := _add_one(&"nav.point.cover", Vector3(-10, 0, 0), Vector2i(0, 1))
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) == mini(first, second), "nearest: equal distances go to the lower id")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 5.0) == 0, "nearest: nothing within the limit finds nothing")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 10.0) != 0, "nearest: exactly at the limit counts")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, -1.0) == 0, "nearest: a negative limit finds nothing")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 10.0).size() == 2, "radius: exactly at the edge counts")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, -1.0).is_empty(), "radius: a negative radius finds nothing")
 	# A marker just across a cell edge can be nearer than one in the search's own cell.
 	NavMarkerManager.reset()
-	var same_cell := _add_one(&"point.cover", Vector3(1, 0, 1), Vector2i(0, 0))
-	var next_cell := _add_one(&"point.cover", Vector3(32.5, 0, 1), Vector2i(0, 1))
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3(31.5, 0, 1), 100.0) == next_cell, "nearest: looks past its own cell for something closer")
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3(2, 0, 1), 100.0) == same_cell, "nearest: and still finds the one beside it")
+	var same_cell := _add_one(&"nav.point.cover", Vector3(1, 0, 1), Vector2i(0, 0))
+	var next_cell := _add_one(&"nav.point.cover", Vector3(32.5, 0, 1), Vector2i(0, 1))
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3(31.5, 0, 1), 100.0) == next_cell, "nearest: looks past its own cell for something closer")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3(2, 0, 1), 100.0) == same_cell, "nearest: and still finds the one beside it")
 
 
 func _test_negative_positions_and_cell_edges() -> void:
 	NavMarkerManager.reset()
-	var negative := _add_one(&"point.cover", Vector3(-0.5, 0, -0.5), Vector2i(0, 0))
-	var on_edge := _add_one(&"point.patrol", Vector3(-32, 0, 32), Vector2i(0, 1))
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3(0.5, 0, 0.5), 5.0) == negative, "cells: a search crosses from positive into negative")
-	_check(NavMarkerManager.find_in_radius(&"point.patrol", Vector3(-32, 0, 32), 0.0) == PackedInt64Array([on_edge]), "cells: a marker exactly on a cell edge can be found")
-	var far_away := _add_one(&"point.ambush", Vector3(-8000, 0, 8000), Vector2i(0, 2))
-	_check(NavMarkerManager.find_nearest(&"point.ambush", Vector3(8000, 0, -8000), 100000.0) == far_away, "cells: finds a marker the whole world away")
+	var negative := _add_one(&"nav.point.cover", Vector3(-0.5, 0, -0.5), Vector2i(0, 0))
+	var on_edge := _add_one(&"nav.point.patrol", Vector3(-32, 0, 32), Vector2i(0, 1))
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3(0.5, 0, 0.5), 5.0) == negative, "cells: a search crosses from positive into negative")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.patrol", Vector3(-32, 0, 32), 0.0) == PackedInt64Array([on_edge]), "cells: a marker exactly on a cell edge can be found")
+	var far_away := _add_one(&"nav.point.ambush", Vector3(-8000, 0, 8000), Vector2i(0, 2))
+	_check(NavMarkerManager.find_nearest(&"nav.point.ambush", Vector3(8000, 0, -8000), 100000.0) == far_away, "cells: finds a marker the whole world away")
 
 
 func _test_enabled_and_kept_changes() -> void:
 	NavMarkerManager.reset()
 	var door := Vector2i(5, 5)
-	var markers: Array[NavMarker] = [_marker(&"link.door", Vector3.ZERO), _marker(&"point.cover", Vector3(1, 0, 0), false)]
+	var markers: Array[NavMarker] = [_marker(&"nav.link.door", Vector3.ZERO), _marker(&"nav.point.cover", Vector3(1, 0, 0), false)]
 	NavMarkerManager.request_markers(TERRAIN, door, markers)
 	NavMarkerManager.flush()
 	var door_id := NavMarkerManager.chunk_marker_id(TERRAIN, door, 0)
 	var off_id := NavMarkerManager.chunk_marker_id(TERRAIN, door, 1)
 	_check(NavMarkerManager.is_marker_enabled(door_id), "enabled: on by default")
 	_check(not NavMarkerManager.is_marker_enabled(off_id), "enabled: starts_enabled = false starts off")
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, 100.0) == 0, "enabled: searches skip disabled markers")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, 100.0) == 0, "enabled: searches skip disabled markers")
 	NavMarkerManager.set_enabled(door_id, false)
 	_check(NavMarkerManager.is_marker_enabled(door_id), "enabled: a change waits for the tick, like everything else")
 	NavMarkerManager.flush()
 	_check(not NavMarkerManager.is_marker_enabled(door_id), "enabled: then applies")
-	_check(NavMarkerManager.find_nearest(&"link.door", Vector3.ZERO, 100.0) == 0, "enabled: and searches skip it")
+	_check(NavMarkerManager.find_nearest(&"nav.link.door", Vector3.ZERO, 100.0) == 0, "enabled: and searches skip it")
 	_check(NavMarkerManager.get_kept_change_count() == 1, "kept changes: only the changed marker is remembered")
 	# Now the chunk unloads and comes back.
 	NavMarkerManager.release_markers(TERRAIN, door)
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker(door_id) == null, "kept changes: the chunk's markers leave with it")
-	var fresh: Array[NavMarker] = [_marker(&"link.door", Vector3.ZERO), _marker(&"point.cover", Vector3(1, 0, 0), false)]
+	var fresh: Array[NavMarker] = [_marker(&"nav.link.door", Vector3.ZERO), _marker(&"nav.point.cover", Vector3(1, 0, 0), false)]
 	NavMarkerManager.request_markers(TERRAIN, door, fresh)
 	NavMarkerManager.flush()
 	_check(not NavMarkerManager.is_marker_enabled(door_id), "kept changes: the door is still disabled when its chunk comes back")
@@ -206,33 +206,33 @@ func _test_enabled_and_kept_changes() -> void:
 	_check(NavMarkerManager.get_kept_change_count() == 0, "kept changes: back to how it started, so nothing needs remembering")
 	# A request right after a release, in the same tick, keeps the order they were made in.
 	NavMarkerManager.release_markers(TERRAIN, door)
-	var fresh_again: Array[NavMarker] = [_marker(&"link.door", Vector3(7, 0, 0))]
+	var fresh_again: Array[NavMarker] = [_marker(&"nav.link.door", Vector3(7, 0, 0))]
 	_check(NavMarkerManager.request_markers(TERRAIN, door, fresh_again) == 1, "same tick: a chunk can come back right after leaving")
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker_position(door_id) == Vector3(7, 0, 0), "same tick: and the new version is what's there")
-	_check(NavMarkerManager.find_in_radius(&"link.door", Vector3.ZERO, 100.0).size() == 1, "same tick: with just one copy")
+	_check(NavMarkerManager.find_in_radius(&"nav.link.door", Vector3.ZERO, 100.0).size() == 1, "same tick: with just one copy")
 
 
 func _test_release_and_reuse() -> void:
 	NavMarkerManager.reset()
 	var markers: Array[NavMarker] = []
 	for index in 100:
-		markers.append(_marker(&"point.cover", Vector3(index, 0, 0)))
+		markers.append(_marker(&"nav.point.cover", Vector3(index, 0, 0)))
 	NavMarkerManager.request_markers(TERRAIN, Vector2i(1, 1), markers)
-	var keep := _add_one(&"point.patrol", Vector3(50, 0, 0), Vector2i(2, 2))
+	var keep := _add_one(&"nav.point.patrol", Vector3(50, 0, 0), Vector2i(2, 2))
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker_count() == 101, "release: everything registered")
 	NavMarkerManager.release_markers(TERRAIN, Vector2i(1, 1))
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker_count() == 1, "release: the whole chunk leaves at once")
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, 1000.0).is_empty(), "release: none of them can be found")
-	_check(NavMarkerManager.find_nearest(&"point.patrol", Vector3.ZERO, 1000.0) == keep, "release: another chunk's marker in the same cell is untouched")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, 1000.0).is_empty(), "release: none of them can be found")
+	_check(NavMarkerManager.find_nearest(&"nav.point.patrol", Vector3.ZERO, 1000.0) == keep, "release: another chunk's marker in the same cell is untouched")
 	NavMarkerManager.release_markers(TERRAIN, Vector2i(99, 99)) # never registered
 	NavMarkerManager.release_markers(TERRAIN, Vector2i(1, 1)) # already gone
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker_count() == 1, "release: releasing an unknown chunk does nothing")
 	# Rows get reused, so old data must not leak into a new marker.
-	var reused: Array[NavMarker] = [_marker(&"link.jump", Vector3(-5, 0, -5), false)]
+	var reused: Array[NavMarker] = [_marker(&"nav.link.jump", Vector3(-5, 0, -5), false)]
 	NavMarkerManager.request_markers(TERRAIN, Vector2i(3, 3), reused)
 	NavMarkerManager.flush()
 	var reused_id := NavMarkerManager.chunk_marker_id(TERRAIN, Vector2i(3, 3), 0)
@@ -241,11 +241,11 @@ func _test_release_and_reuse() -> void:
 
 func _test_scene_markers() -> void:
 	NavMarkerManager.reset()
-	var marker := _marker(&"use.seat", Vector3(2, 0, 2))
+	var marker := _marker(&"nav.use.seat", Vector3(2, 0, 2))
 	var id := NavMarkerManager.request_scene_marker("/root/Level/Bench", marker)
 	_check(id == NavMarkerManager.scene_marker_id("/root/Level/Bench"), "scene markers: returns its id")
 	NavMarkerManager.flush()
-	_check(NavMarkerManager.find_nearest(&"use.seat", Vector3.ZERO, 100.0) == id, "scene markers: can be found")
+	_check(NavMarkerManager.find_nearest(&"nav.use.seat", Vector3.ZERO, 100.0) == id, "scene markers: can be found")
 	_check(NavMarkerManager.request_scene_marker("/root/Level/Bench", marker) == 0, "scene markers: a second one at the same path is refused")
 	NavMarkerManager.set_enabled(id, false)
 	_check(NavMarkerManager.get_kept_change_count() == 0, "scene markers: changes aren't kept, because the scene owns them")
@@ -253,7 +253,7 @@ func _test_scene_markers() -> void:
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker(id) == null, "scene markers: can be removed")
 	_check(NavMarkerManager.request_scene_marker("/root/Level/Bench", marker) == id, "scene markers: and registered again")
-	var chunk_id := _add_one(&"point.cover", Vector3.ZERO, Vector2i(4, 4))
+	var chunk_id := _add_one(&"nav.point.cover", Vector3.ZERO, Vector2i(4, 4))
 	NavMarkerManager.remove_scene_marker(chunk_id)
 	NavMarkerManager.flush()
 	_check(NavMarkerManager.get_marker(chunk_id) != null, "scene markers: a chunk's marker can't be removed this way")
@@ -261,13 +261,13 @@ func _test_scene_markers() -> void:
 
 func _test_empty_and_infinite_searches() -> void:
 	NavMarkerManager.reset()
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, INF) == 0, "empty world: an infinite search finishes and finds nothing")
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, INF).is_empty(), "empty world: an infinite radius too")
-	var far := _add_one(&"point.cover", Vector3(5000, 0, 5000), Vector2i(0, 0))
-	_add_one(&"point.patrol", Vector3(0, 0, 0), Vector2i(0, 1))
-	_check(NavMarkerManager.find_nearest(&"point.cover", Vector3.ZERO, INF) == far, "infinite: finds the one far marker")
-	_check(NavMarkerManager.find_in_radius(&"point.cover", Vector3.ZERO, INF) == PackedInt64Array([far]), "infinite: radius finds it too")
-	_check(NavMarkerManager.find_nearest(&"area", Vector3.ZERO, INF) == 0, "infinite: a declared tag with no markers finishes and finds nothing")
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, INF) == 0, "empty world: an infinite search finishes and finds nothing")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, INF).is_empty(), "empty world: an infinite radius too")
+	var far := _add_one(&"nav.point.cover", Vector3(5000, 0, 5000), Vector2i(0, 0))
+	_add_one(&"nav.point.patrol", Vector3(0, 0, 0), Vector2i(0, 1))
+	_check(NavMarkerManager.find_nearest(&"nav.point.cover", Vector3.ZERO, INF) == far, "infinite: finds the one far marker")
+	_check(NavMarkerManager.find_in_radius(&"nav.point.cover", Vector3.ZERO, INF) == PackedInt64Array([far]), "infinite: radius finds it too")
+	_check(NavMarkerManager.find_nearest(&"nav.area", Vector3.ZERO, INF) == 0, "infinite: a declared tag with no markers finishes and finds nothing")
 
 
 func _test_unknown_ids() -> void:
@@ -287,7 +287,7 @@ func _test_against_brute_force() -> void:
 	NavMarkerManager.reset()
 	var random := RandomNumberGenerator.new()
 	random.seed = 4242 # a fixed seed, so a failure repeats exactly
-	var tags: Array[StringName] = [&"point.cover", &"point.patrol", &"use.seat", &"link.jump"]
+	var tags: Array[StringName] = [&"nav.point.cover", &"nav.point.patrol", &"nav.use.seat", &"nav.link.jump"]
 	var all: Dictionary = {} # id -> marker
 	for chunk_number in 40:
 		var chunk := Vector2i(chunk_number, -chunk_number)
@@ -314,17 +314,17 @@ func _test_against_brute_force() -> void:
 
 	var nearest_wrong := 0
 	var radius_wrong := 0
-	var search_tags: Array[StringName] = [&"point", &"point.cover", &"use", &"link.jump", &"area"]
+	var search_tags: Array[StringName] = [&"nav.point", &"nav.point.cover", &"nav.use", &"nav.link.jump", &"nav.area"]
 	for search in 500:
 		var from := Vector3(random.randf_range(-700, 700), random.randf_range(-20, 20), random.randf_range(-700, 700))
 		var tag := search_tags[random.randi() % search_tags.size()]
 		var distance := random.randf_range(0, 400)
-		var bit := NavTags.own_bit(tag)
+		var bit := TagRegistry.own_bit(tag)
 		var best_id := 0
 		var best := distance * distance
 		var in_radius := PackedInt64Array()
 		for id: int in all:
-			if disabled.has(id) or NavTags.mask_of(all[id].tag) & bit == 0:
+			if disabled.has(id) or TagRegistry.mask_of(all[id].tag) & bit == 0:
 				continue
 			var squared := from.distance_squared_to(all[id].position)
 			if squared <= distance * distance:
@@ -350,7 +350,7 @@ func _measure_at_100000() -> void:
 	random.seed = 777
 	var memory_start := OS.get_static_memory_usage()
 	var start := Time.get_ticks_usec()
-	var tags: Array[StringName] = [&"point.cover", &"point.patrol", &"use.seat", &"link.jump"]
+	var tags: Array[StringName] = [&"nav.point.cover", &"nav.point.patrol", &"nav.use.seat", &"nav.link.jump"]
 	var chunks: Array[Array] = []
 	const CHUNK_COUNT := 400 # 250 markers per chunk, so the batches are a believable size
 	for chunk_number in CHUNK_COUNT:
@@ -381,20 +381,20 @@ func _measure_at_100000() -> void:
 	start = Time.get_ticks_usec()
 	var found_nearest := 0
 	for target in targets:
-		if NavMarkerManager.find_nearest(&"point.cover", target, 500.0) != 0:
+		if NavMarkerManager.find_nearest(&"nav.point.cover", target, 500.0) != 0:
 			found_nearest += 1
 	var nearest_us := (Time.get_ticks_usec() - start) / 1000.0
 
 	start = Time.get_ticks_usec()
 	var found_radius := 0
 	for target in targets:
-		found_radius += NavMarkerManager.find_in_radius(&"point", target, 50.0).size()
+		found_radius += NavMarkerManager.find_in_radius(&"nav.point", target, 50.0).size()
 	var radius_us := (Time.get_ticks_usec() - start) / 1000.0
 
 	# The worst case: a tag nothing has, with a long reach, so the search can't stop early.
 	start = Time.get_ticks_usec()
 	for number in 10:
-		NavMarkerManager.find_nearest(&"area.road", targets[number], 20000.0)
+		NavMarkerManager.find_nearest(&"nav.area.road", targets[number], 20000.0)
 	var worst_ms := (Time.get_ticks_usec() - start) / 10000.0
 
 	start = Time.get_ticks_usec()

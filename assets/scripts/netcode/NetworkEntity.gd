@@ -15,6 +15,9 @@ class_name NetworkEntity
 ## Sent when its role or owner changes while running (swapping pawns), after its parent hears _on_network_role. A pawn's
 ## ControllerManager listens, to drop the last owner's input.
 signal role_changed(entity: NetworkEntity)
+## Despawned while [member linger_until_tick] is still ahead: it stays until then, and its holder switches itself off (a pawn hides,
+## stops ticking and stops colliding).
+signal lingering_started(entity: NetworkEntity)
 
 ## What this machine does with the entity: AUTHORITY (server or offline), LOCAL_PREDICTED (your pawn, simulated ahead), REMOTE_FOLLOWING
 ## (drawn between snapshots), REMOTE_PREDICTED (simulated ahead on its last input) or LOCAL_UNPREDICTED (your pawn, MOBA-style). See the README.
@@ -34,6 +37,9 @@ enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED, LOCA
 var input_owner: Node = null
 ## The same on every machine, given by NetworkSession at spawn. -1 until then.
 var entity_id: int = -1
+## A despawn before this tick waits until the tick after it: what the entity started is still running (its projectiles in flight, whose
+## hits need it). Until then it lingers, switched off ([signal lingering_started]). Server or offline. -1: no wait.
+var linger_until_tick := -1
 ## The name it was registered under with NetworkSession.register_type.
 var type_name: String = ""
 ## The peer that sends its input; 0 is the server itself, such as an AI pawn.

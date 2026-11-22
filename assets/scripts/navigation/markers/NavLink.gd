@@ -1,8 +1,8 @@
 # Written by Claude (claude-opus-5-5), 2026-11-06. History: navigation/CHANGELOG.md.
 ## A connection nav can't walk across: an off-mesh link (nav spec 21.3).
 ##
-## A ladder, a jump, a door and a teleporter are all NavLinks, told apart by their tags (link.climb, link.jump, link.door,
-## link.teleport). NavLinkModule hands them to nav so paths can use them; without that module in the level they do nothing.
+## A ladder, a jump, a door and a teleporter are all NavLinks, told apart by their tags (nav.link.climb, nav.link.jump, nav.link.door,
+## nav.link.teleport). NavLinkModule hands them to nav so paths can use them; without that module in the level they do nothing.
 class_name NavLink
 extends NavMarker
 

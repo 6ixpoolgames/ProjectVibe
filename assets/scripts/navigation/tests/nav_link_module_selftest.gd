@@ -21,7 +21,7 @@ func _ready() -> void:
 	var module := NavLinkModule.new()
 	add_child(module)
 	var ladder := NavLink.new()
-	ladder.tag = &"link.climb"
+	ladder.tag = &"nav.link.climb"
 	ladder.position = Vector3(13.5, -2, 0)
 	ladder.end_offset = Vector3(-3, 2, 0)
 	ladder.two_way = false

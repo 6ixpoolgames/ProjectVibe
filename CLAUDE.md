@@ -5,10 +5,10 @@ A Godot 4.7 base for real-time 3D games (GDScript, with hot paths in a C++ GDExt
 ## Rules
 
 1. **Rapid prototyping of architecture** (the owner, 2026-11-18). Fast, measured experiments; a ground-up rewrite may follow once it's clear what works. Summaries stay short.
-2. **Use standard terms and practice.** The owner's wording is often informal: follow the standard, and don't turn a loose phrase into a rule. Discuss big designs before building them.
+2. **Use standard terms and practice.** The owner's wording is often informal or shorthand: follow the standard, don't turn a loose phrase into a rule, and say the standard term when the owner uses another. When naming something, pick the conventional name where one exists. Discuss big designs before building them.
 3. **Names say what things do** (controller manager, terrain generator); code reads `parent.thing.does_this()`.
 4. **Designer-first:** defaults that work, settings in the inspector, data over code where it's cheap. Settings are easy to reason about: AI timings in ticks (written for 60 a second, converted with `TickDriver.ticks_at_rate`), a half-life only where it really is one.
-5. **Never modify legacy files** (`assets/legacy/`, `docs/legacy/`), stubs included. Build new systems beside them under new names.
+5. **Legacy files may change** (`assets/legacy/`, `docs/legacy/`): the owner keeps a copy elsewhere, so they can be changed or removed when that helps. Removing one that old scenes still need is the owner's call.
 6. **Keep test code out of shipping code.** Test hooks go in `tests/` or `samples/` (see `docs/TEST_AND_DEBUG_CODE.md`). Samples are test beds: what they do for convenience isn't a rule of the base.
 7. **Few autoloads:** only truly universal services (`singletons/`). Game rules and per-game defaults are GameMode modules.
 8. **Twins stay in step:** where C++ and GDScript do the same job (the AI decider, packet encoding, the state store, `StateEncoding.quantize`, the crowd mover, the visual placement), a change goes in both and the comparison tests must pass. C++ is the main path; GDScript is the backup.
@@ -26,12 +26,12 @@ A Godot 4.7 base for real-time 3D games (GDScript, with hot paths in a C++ GDExt
 - **Tests:** `bash tools/run_tests.sh <parts of suite names>`, `full`, or `full net` (`net_selftest` runs only when named; about 8 minutes). A suite passes only on exit 0, `ALL PASSED`, and no `FAIL` or `SCRIPT ERROR`. Per change: the affected suites plus the arena smoke tests (`arena`); the full suite before a commit; the network tests when netcode changes. After adding a `class_name`, run `--headless --import --path .` once. Tests extend `tests/SelfTest.gd`. The project runs on Jolt; `-- --tick-rate=30` runs anything at 30 ticks a second.
 - **Godot:** the editor binary beside the project folder (`../Godot_v4.7.2-stable_win64_console.exe`). Never run two Godot processes at once, and don't edit `project.godot` while the editor is open.
 - **C++ library:** `python -m SCons -j8` in `native/` (godot-cpp 10, Godot 4.7's API), with the editor closed (it holds the DLL). Linux builds in WSL (see `CLAUDE.local.md`); the Linux `.so` isn't committed.
-- **Docs:** each system folder has a `README.md`, a generated `REFERENCE.md` (`python tools/docs/make_reference.py <system>`) and a `CHANGELOG.md`. Also `make_class_index.py`, `check_links.py`, `check_comments_only.py` (proves a cleanup changed only comments) and `build_wiki.py` (the wiki, published by GitHub Actions on push). Rules: `tools/docs/README.md`.
+- **Docs:** each system folder has a `README.md`, a generated `REFERENCE.md` (`python tools/docs/make_reference.py <system>`) and a `CHANGELOG.md`. Tags: `tools/tags/apply_redirects.py` (rewrites renamed tags in saved files) and `make_tag_reference.py` (`docs/tags/TAGS.md`). Also `make_class_index.py`, `check_links.py`, `check_comments_only.py` (proves a cleanup changed only comments) and `build_wiki.py` (the wiki, published by GitHub Actions on push). Rules: `tools/docs/README.md`.
 - **Measuring:** `samples/tests/mass_battle_measure.tscn` (`-- --size=N --scopes`, `--ai-shadow`, `--ai-gdscript`), and `mass_battle_net_measure.tscn` over a real network; F4 in a sample shows timings.
 
 ## Map
 
-Each system's README has the detail. Specs are in `docs/` (pawn, netcode, navigation, scaling, streaming, replay, diagnostics, world, wiki, and the ability and state store specs the refactor follows, on the `refactor/tick-core` branch); the plan is `docs/ROADMAP.md`; how the modules connect, today and after the refactor, is `docs/ARCHITECTURE.md`; every class is listed in `docs/CLASS_INDEX.md`.
+Each system's README has the detail. Specs are in `docs/` (pawn, netcode, navigation, scaling, streaming, replay, diagnostics, world, wiki, tags, and the ability and state store specs the refactor follows, on the `refactor/tick-core` branch); the plan is `docs/ROADMAP.md`; how the modules connect, today and after the refactor, is `docs/ARCHITECTURE.md`; every class is listed in `docs/CLASS_INDEX.md`.
 
 | Folder (`assets/scripts/`) | What it is |
 |---|---|
@@ -57,4 +57,4 @@ Samples (`assets/scenes/samples/`, scripts in `assets/scripts/samples/`): `pawn_
 
 ## Legacy
 
-Old code in `assets/legacy/` and old docs in `docs/legacy/`, kept so old scenes open; nothing new uses them. Three old autoloads (`GlobalTools`, `GlobalAICoordinator`, `ResourcePreloadManager`) stay registered for those scenes.
+Old code in `assets/legacy/` and old docs in `docs/legacy/`, kept so old scenes open; nothing new uses them. The owner keeps a copy elsewhere, so they can be changed or removed (rule 5). Three old autoloads (`GlobalTools`, `GlobalAICoordinator`, `ResourcePreloadManager`) stay registered for those scenes.

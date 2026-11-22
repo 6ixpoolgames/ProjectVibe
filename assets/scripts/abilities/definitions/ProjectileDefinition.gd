@@ -1,7 +1,8 @@
 # Written by Claude (claude-opus-5-5), 2026-11-22. History: abilities/CHANGELOG.md.
 @tool
-## A projectile's flight and hits, shared by every shot that uses it (ability spec 9): its speed and how it changes, how much it drops,
-## its size, how far and long it flies, what stops it, how many pawns it passes through, and what's shown where it ends.
+## A projectile's flight, shared by every shot that uses it (ability spec 9): its speed and how it changes, how much it drops, its size,
+## how far and long it flies, whether the world stops it, and its look. Who it may hit and what a hit does is its ability's
+## [HitDefinition] (ability spec 13).
 ##
 ## The one thing a designer makes for a new projectile: a ranged attack's definition names it
 ## ([member RangedAttackDefinition.projectile_definition]), and the built-in projectile carries the networking. Variants come from
@@ -9,6 +10,17 @@
 class_name ProjectileDefinition
 extends Definition
 
+## On: hitscan. Everything along a straight line to its range is checked on the tick it's fired, as the shooter saw it, and clients
+## draw a tracer for [member tracer_seconds]. Speed, the speed curve and gravity don't apply.
+@export var hitscan: bool = false:
+	set(value):
+		hitscan = value
+		_changed(&"hitscan", value)
+## With hitscan: how long its tracer shows, from the muzzle to where it ended.
+@export_range(0.02, 2.0, 0.01, "or_greater") var tracer_seconds: float = 0.1:
+	set(value):
+		tracer_seconds = value
+		_changed(&"tracer_seconds", value)
 ## Metres a second at launch (times the speed curve's first value).
 @export_range(0.5, 500.0, 0.5, "or_greater") var speed: float = 30.0:
 	set(value):
@@ -41,46 +53,14 @@ extends Definition
 	set(value):
 		max_lifetime = value
 		_changed(&"max_lifetime", value)
-## How many pawns it hits before it stops: 1 stops at the first, 0 passes through every pawn. Each pawn is hit once.
-@export_range(0, 100, 1, "or_greater") var max_hits: int = 1:
-	set(value):
-		max_hits = value
-		_changed(&"max_hits", value)
-## Ends it after this many intersects of any kind (pawns it may or may not hit, the world). 0: no limit.
-@export_range(0, 100, 1, "or_greater") var max_intersects: int = 0:
-	set(value):
-		max_intersects = value
-		_changed(&"max_intersects", value)
-
-@export_group("Whitelist")
-## On: it can hit the pawn that fired it, once it has left its body.
-@export var hits_shooter: bool = false:
-	set(value):
-		hits_shooter = value
-		_changed(&"hits_shooter", value)
-## On: it can hit pawns on the shooter's team.
-@export var hits_allies: bool = false:
-	set(value):
-		hits_allies = value
-		_changed(&"hits_allies", value)
-## On: it can hit pawns on other teams.
-@export var hits_enemies: bool = true:
-	set(value):
-		hits_enemies = value
-		_changed(&"hits_enemies", value)
-## Effects on a pawn it hits, as well as the firing ability's on-hit effects: a fire arrow burns whichever bow fires it.
-@export var on_hit_effects: Array[Effect] = []:
-	set(value):
-		on_hit_effects = value
-		_changed(&"on_hit_effects", value)
-@export_group("")
-
 ## On: the level's solid geometry (world_mask) stops it.
 @export var hits_world: bool = true:
 	set(value):
 		hits_world = value
 		_changed(&"hits_world", value)
-## The physics layers that stop it (the ground and walls).
+## The physics layers that stop it (the ground and walls). To let shots through some walls (wood, cloth, thin cover), put those on a
+## physics layer of their own and leave it out here; a variant that includes it is a shot that can't go through (the usual way games
+## handle it). With hitscan, the same.
 @export_flags_3d_physics var world_mask: int = 1:
 	set(value):
 		world_mask = value
@@ -111,6 +91,11 @@ var _distances_rate := -1
 ## Its drop in metres a second squared: the world's gravity times [member gravity_scale].
 func drop_per_second_squared() -> float:
 	return float(ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)) * gravity_scale
+
+
+## With hitscan: the ticks its tracer shows.
+func tracer_ticks() -> int:
+	return maxi(1, roundi(tracer_seconds * TickDriver.get_tick_rate()))
 
 
 ## How many ticks it flies before its lifetime is up, at the match's rate.

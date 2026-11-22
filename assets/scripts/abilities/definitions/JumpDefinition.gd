@@ -17,7 +17,7 @@ func _init() -> void:
 	super()
 	trigger_action = &"jump"
 	# Tags are constants, so a misspelling is an error, not a warning while playing.
-	category = Tags.MOVEMENT_JUMP
-	extra_categories = [Tags.MOVEMENT_BASIC]
+	category = Tags.ABILITY.MOVEMENT_JUMP
+	extra_categories = [Tags.ABILITY.MOVEMENT_BASIC]
 	buffer_window = 0.15
 	interrupt_priority = 5 # between Walk (0) and Sprint (10)

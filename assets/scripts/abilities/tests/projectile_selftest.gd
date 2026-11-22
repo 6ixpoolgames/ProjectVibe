@@ -168,15 +168,21 @@ func _test_gravity() -> void:
 	await _free(shooter)
 
 
-# The shooter freed while its bolt flies: the bolt flies on and still lands (it once handed the freed shooter to the C++ grid, a crash).
+# The shooter freed while its bolt flies: the bolt flies on without crashing (it once handed the freed shooter to the C++ grid) and meets
+# its target, but lands no hit.
 func _test_shooter_gone() -> void:
 	var shooter := _make_pawn(Vector3(320, 0.1, 0), 0)
 	var target := _make_pawn(Vector3(320, 0.1, -12), 1)
 	await _ticks(10)
-	Projectile.fire(_ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD, BOLT)
+	var bolt := Projectile.fire(_ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD, BOLT)
+	var met: Array = []
+	bolt.intersected.connect(func(_p: Projectile, entry: Dictionary) -> void: met.append([entry.target, entry.hit]))
 	await _free(shooter)
 	await _ticks(30)
-	_check_equal(target.stat_manager.get_health(), 85.0, "a bolt whose shooter is gone flies on and still lands")
+	# Claude 2026-11-22 (ability spec 13.5, the owner's call): a hit needs its ability, so a removed shooter's bolt meets the target
+	# but lands nothing. It was "still lands" before.
+	_check(met == [[target, false]] and is_equal_approx(target.stat_manager.get_health(), 100.0),
+			"a bolt whose shooter is gone flies on and meets its target, but lands no hit (%s)" % str(met))
 	await _free(target)
 
 
@@ -322,9 +328,9 @@ func _test_pierce() -> void:
 			targets.append(target)
 			hits.append(_count_hits(target))
 		await _ticks(10)
-		var piercing: ProjectileDefinition = BOLT.duplicate()
+		var piercing := HitDefinition.new() # Claude 2026-11-22 (ability spec 13): max_hits is the hit definition's
 		piercing.max_hits = max_hits
-		var bolt := Projectile.fire(_ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD, piercing)
+		var bolt := Projectile.fire(_ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD, BOLT, null, piercing)
 		await _ticks(40)
 		var counts: Array = hits.map(func(list: Array) -> int: return list.size())
 		if max_hits == 2:
@@ -346,11 +352,10 @@ func _test_whitelist() -> void:
 		var ally_hits := _count_hits(ally)
 		var enemy_hits := _count_hits(enemy)
 		await _ticks(10)
-		var flight: ProjectileDefinition = BOLT.duplicate()
+		var rules := HitDefinition.new() # Claude 2026-11-22 (ability spec 13): the whitelist and limits are the hit definition's
 		for key: String in cases[i][1]:
-			flight.set(key, cases[i][1][key])
-		flight.max_hits = cases[i][1].get("max_hits", 0)
-		var bolt := Projectile.fire(_ranged_of(shooter), Vector3(x, 1.3, -0.5), Vector3.FORWARD, flight)
+			rules.set(key, cases[i][1][key])
+		var bolt := Projectile.fire(_ranged_of(shooter), Vector3(x, 1.3, -0.5), Vector3.FORWARD, BOLT, null, rules)
 		var log: Array = []
 		bolt.intersected.connect(func(_p: Projectile, entry: Dictionary) -> void: log.append([entry.target, entry.hit]))
 		await _ticks(30)

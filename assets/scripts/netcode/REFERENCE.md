@@ -124,9 +124,7 @@ Twin: NetCodec in C++ (`native/src/net_codec.cpp`) writes and reads inputs and s
 
 Makes an entity exist across the network (netcode spec sections 7, 10, 13).
 
-Add it as a child of the entity, after its TickStateComponent. NetworkSession gives it an id (the same on every machine, and what
-anything referring to another entity over the network uses), an owner and a role. Offline it is AUTHORITY and local, nothing is
-sent, and the entity plays as single player. The parent may define optional hooks (see the README, "Hooks on the parent").
+Add it as a child of the entity, after its TickStateComponent. NetworkSession gives it an id (the same on every machine, and what anything referring to another entity over the network uses), an owner and a role. Offline it is AUTHORITY and local, nothing is sent, and the entity plays as single player. The parent may define optional hooks (see the README, "Hooks on the parent").
 
 ```gdscript
 # in the entity's scene: TickStateComponent first, then NetworkEntity
@@ -142,6 +140,7 @@ Design: netcode spec 7, 10, 13.
 - `keep_history_offline: bool` = `false`: On: offline, keep state and input history every tick, for a single-player rewind. Off: nothing is saved or rounded offline (pawn spec 12.1).
 - `input_owner: Node` = `null`: The node that holds this entity's input, for the server's input hooks (a Pawn's ControllerManager sets itself). Null: the parent.
 - `entity_id: int` = `-1`: The same on every machine, given by NetworkSession at spawn. -1 until then.
+- `linger_until_tick: int` = `-1`: A despawn before this tick waits until the tick after it: what the entity started is still running (its projectiles in flight, whose hits need it). Until then it lingers, switched off (`lingering_started`). Server or offline. -1: no wait.
 - `type_name: String` = `""`: The name it was registered under with NetworkSession.register_type.
 - `owner_peer: int` = `0`: The peer that sends its input; 0 is the server itself, such as an AI pawn.
 - `role: int` = `0`: What this machine does with it.
@@ -153,8 +152,8 @@ Design: netcode spec 7, 10, 13.
 
 ### Signals
 
-- `role_changed(entity: NetworkEntity)`: Sent when its role or owner changes while running (swapping pawns), after its parent hears _on_network_role. A pawn's
-  ControllerManager listens, to drop the last owner's input.
+- `role_changed(entity: NetworkEntity)`: Sent when its role or owner changes while running (swapping pawns), after its parent hears _on_network_role. A pawn's ControllerManager listens, to drop the last owner's input.
+- `lingering_started(entity: NetworkEntity)`: Despawned while `linger_until_tick` is still ahead: it stays until then, and its holder switches itself off (a pawn hides, stops ticking and stops colliding).
 
 ### Constants
 
@@ -171,8 +170,7 @@ Design: netcode spec 7, 10, 13.
 - `follows_snapshots() -> bool`: True if this entity is placed from snapshots rather than simulated here.
 - `change_owner(new_owner: int, local: bool, new_role: int) -> void`: Changes who owns this entity while running (swapping pawns). Input queued from the old owner is dropped, and the parent hears its role again.
 - `set_role(new_role: int) -> void`: Changes role while running, when a feature switch changes (NetworkSession.refresh_entities). History starts again from here.
-- `refresh_input_saving() -> void`: Works out which inputs the TickStateComponent saves: a server only those a client predicting it needs; offline none unless
-  `keep_history_offline`; a client every tick, for replays. State is recorded every tick everywhere, in the state store.
+- `refresh_input_saving() -> void`: Works out which inputs the TickStateComponent saves: a server only those a client predicting it needs; offline none unless `keep_history_offline`; a client every tick, for replays. State is recorded every tick everywhere, in the state store.
   
   An entity NetworkSession never configured (made directly, as tests do) saves everything.
 - `set_paused(paused: bool) -> void`: Stops every tick this entity causes (its parent's, its TickState's, its own), or starts them again; state stays as it is.

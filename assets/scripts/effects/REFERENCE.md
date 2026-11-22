@@ -10,7 +10,6 @@ Every class in `assets/scripts/effects/`, from its doc comments. The overview is
 - [EffectHeldTotals](#effectheldtotals)
 - [EffectManager](#effectmanager)
 - [EffectPart](#effectpart)
-- [EffectTags](#effecttags)
 - [AbilityPriorityPart](#abilityprioritypart)
 - [KnockbackPart](#knockbackpart)
 - [LifestealPart](#lifestealpart)
@@ -29,7 +28,7 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 ### Settings and properties
 
 - `effect_name: StringName` = `&""`: A name for readouts and the debug timeline; also how a client recognises an effect made in code (a saved one goes by its path).
-- `tags: StringName[]` = `[]`: What kind of effect it is, as [`EffectTags`](#effecttags) such as damage.elemental.fire. Resistances and removing by tag go by these.
+- `tags: StringName[]` = `[]`: What kind of effect it is, as effect tags (`Tags.EFFECT`) such as effect.damage.elemental.fire. Resistances and removing by tag go by these.
 - `is_harmful: bool` = `true`: On: resistances apply and invulnerability (a dash) stops it. Off: it helps, and gets through both.
 - `duration_seconds: float` = `0.0`: Seconds it lasts. 0: instant.
 - `period_seconds: float` = `0.0`: Over time: its do-once parts run when first applied, then every this many seconds. 0: only when first applied.
@@ -46,15 +45,15 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 ### Functions
 
 - `is_instant() -> bool`: True if it's instant: it does its parts once and isn't kept.
-- `get_tag_mask() -> int`: Its tags as one mask, parents included (`EffectTags.full_mask_of_list()`), worked out once.
-- `has_tag(tag: StringName) -> bool`: True if it has this tag, or a tag inside it: an effect tagged damage.elemental.fire has damage.elemental.
+- `get_tag_mask() -> int`: Its tags as one mask, parents included (`TagRegistry.full_mask_of_list()`), worked out once.
+- `has_tag(tag: StringName) -> bool`: True if it has this tag, or a tag inside it: an effect tagged effect.damage.elemental.fire has effect.damage.elemental.
 - `has_held_parts() -> bool`: True if any of its parts hold while it lasts.
 - `planned_change(stat: StringName) -> float`: How much its StatChangeParts change a stat in one go, before resistances; damage is negative. For readouts before a hit lands.
 - `get_id() -> int`: The number a pawn's active list stores for this effect, the same on every machine: a hash of its file path, else its effect_name. Never 0.
 - `register() -> void`: Makes this effect findable by its id on this machine. Two different effects with the same id is an error: rename one. The AbilityManager registers every effect its abilities can apply; the EffectManager registers any other it's given.
 - `find(id: int) -> Effect` *(static)*: The registered effect with this id, or null.
 - `describe() -> String`: A short name for readouts: effect_name, or the file's name.
-- `make_damage(amount: float, damage_tags: StringName[] = [...]) -> Effect` *(static)*: An instant effect that takes this much Health, for hits made in code (a trap, a test). Tagged damage.physical unless given tags.
+- `make_damage(amount: float, damage_tags: StringName[] = [...]) -> Effect` *(static)*: An instant effect that takes this much Health, for hits made in code (a trap, a test). Tagged effect.damage.physical unless given tags.
 - `make_knockback(speed: float, ticks: int, hop: float = 0.0) -> Effect` *(static)*: An instant effect that pushes the pawn along the hit's direction, for hits made in code. ticks are written for 60 a second.
 
 ## EffectApplication
@@ -122,14 +121,12 @@ The pawn's [`EffectManager`](#effectmanager) makes one whenever its list of effe
 
 Applies effects to its pawn and keeps the over-time ones.
 
-A part on the pawn, added by PawnInitializer. Whatever hits a pawn hands it effects, and the pawn applies them to itself, with its own
-resistances. Instant effects run at once; over-time ones go in a rolled-back active list, count down in `tick_effects()` and
-all end when the pawn dies. Do-once parts run on the authority only; held parts work on every machine.
+A part on the pawn, added by PawnInitializer. Whatever hits a pawn hands it effects, and the pawn applies them to itself, with its own resistances. Instant effects run at once; over-time ones go in a rolled-back active list, count down in `tick_effects()` and all end when the pawn dies. Do-once parts run on the authority only; held parts work on every machine.
 
 ```gdscript
 pawn.effect_manager.apply_effect(effect, source)   # source: who applied it (for memory, lifesteal), or null
 pawn.effect_manager.has_effect(effect)              # is an over-time effect on the pawn now?
-pawn.effect_manager.remove_with_tag(EffectTags.DEBUFF)   # a cleanse
+pawn.effect_manager.remove_with_tag(Tags.EFFECT.DEBUFF)   # a cleanse
 ```
 
 Design: pawn spec 8.11.
@@ -138,7 +135,7 @@ Design: pawn spec 8.11.
 
 - `resistances: Dictionary[StringName, float]` = `{}`: This pawn's resistances by effect tag: 0.25 takes a quarter off harmful effects, 1 or more ignores them, negative is a weakness.
   
-  A tag counts for every effect inside it, and they add up (0.2 damage.elemental + 0.3 damage.elemental.fire = 0.5 against fire).
+  A tag counts for every effect inside it, and they add up (0.2 effect.damage.elemental + 0.3 effect.damage.elemental.fire = 0.5 against fire).
 - `max_active_effects: int` = `16`: The most over-time effects this pawn can have at once. A new one past this is refused.
 - `active_effects: PackedInt64Array`: The active list, five numbers per effect (see `STRIDE`); rolled back and sent in snapshots. Read it with `get_active_effects()`.
 - `pawn: Pawn` = `null`: The pawn it belongs to (its parent).
@@ -159,11 +156,9 @@ Design: pawn spec 8.11.
 
 ### Functions
 
-- `apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> bool`: Applies an effect to this pawn. source is who applied it, or null; source_ability and hit are handed to its parts. Returns false if
-  refused: dead, invulnerable, immune, the list full, or IGNORE stacking.
+- `apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> bool`: Applies an effect to this pawn. source is who applied it, or null; source_ability and hit are handed to its parts. Returns false if refused: dead, invulnerable, immune, the list full, or IGNORE stacking.
 - `apply_effects(effects: Effect[], source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> void`: Applies several, in order, stopping if the pawn dies.
-- `take_hit(hit: HitInfo) -> void`: Called by the AbilityManager when a hit lands, on the authority: the hit's effects, from its attacker. Fills in
-  hit.damage_dealt.
+- `take_hit(hit: HitInfo) -> void`: Called by the AbilityManager when a hit lands, on the authority: the hit's effects, from its attacker. Fills in hit.damage_dealt.
 - `tick_effects() -> void`: The pawn calls this once per tick, before its abilities run, while the list has something in it: counts down, runs periods, ends effects.
 - `can_sleep() -> bool`: True if the pawn can sleep (pawn spec 15.3): nothing in the list to count down, and nothing waiting to be worked out.
 - `has_effect(effect: Effect) -> bool`: True while this over-time effect is on the pawn.
@@ -171,7 +166,7 @@ Design: pawn spec 8.11.
 - `get_ticks_left(effect: Effect) -> int`: Ticks it has left: 0 if it isn't on the pawn.
 - `get_active_effects() -> Dictionary[]`: Every active effect, for readouts: [{"effect": Effect or null, "ticks_left", "stacks", "source": Pawn or null}], oldest first.
 - `remove_effect(effect: Effect) -> void`: Removes an over-time effect, if it's on the pawn.
-- `remove_with_tag(tag: StringName) -> void`: Removes every active effect with this effect tag, or a tag inside it: remove_with_tag(EffectTags.DEBUFF) is a cleanse.
+- `remove_with_tag(tag: StringName) -> void`: Removes every active effect with this effect tag, or a tag inside it: remove_with_tag(Tags.EFFECT.DEBUFF) is a cleanse.
 - `remove_all() -> void`: Removes everything. Done when the pawn dies (it listens for the AbilityManager's died).
 - `resistance_to(effect: Effect) -> float`: This pawn's resistance to an effect (see `resistances`), not capped: 1 or more means immune.
 - `ability_bonus(ability: AbilityBase, number: int) -> int`: What held AbilityPriorityParts add to this ability's number now (AbilityPriorityPart.Number). The AbilityManager asks.
@@ -191,53 +186,13 @@ Do-once parts override `apply_once()` and run on the authority only. Held parts 
 - `add_held(_totals: EffectHeldTotals, _stacks: int) -> void`: A held part adds what it does to the pawn's totals, stacks times. Called whenever the pawn's list of effects changes, on every machine. Override it in a held part; the base does nothing.
 - `apply_once(_application: EffectApplication) -> void`: Runs a do-once part on the pawn the effect landed on. application says who, from whom, how many stacks and what resistance applies, and collects results such as the damage dealt.
 
-## EffectTags
-
-`res://assets/scripts/effects/EffectTags.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
-
-Effect type tags, such as damage.elemental.fire, turned into bits.
-
-What kind of effect something is: resistances, immunities and "remove every poison" go by these. The same rules as [`TagRegistry`](../tags/REFERENCE.md#tagregistry) and NavTags (a dot means "inside", every level gets a bit, a tag's mask includes its parents), but a separate set with its own 64 bits. Code uses the constants below, never text, so a misspelling is an error; each must be declared in the declarations file. Design: pawn spec 8.11.
-
-### Constants
-
-- `DAMAGE = &"damage"`
-- `DAMAGE_PHYSICAL = &"damage.physical"`
-- `DAMAGE_ELEMENTAL = &"damage.elemental"`
-- `DAMAGE_ELEMENTAL_FIRE = &"damage.elemental.fire"`
-- `DAMAGE_ELEMENTAL_FROST = &"damage.elemental.frost"`
-- `DAMAGE_POISON = &"damage.poison"`
-- `HEAL = &"heal"`
-- `BUFF = &"buff"`
-- `BUFF_COMBO = &"buff.combo"`
-- `DEBUFF = &"debuff"`
-- `DEBUFF_SLOW = &"debuff.slow"`
-- `MAX_BITS = 64`: The most tag levels there are bits for; more get no bit, match nothing, and warn once.
-- `DEFAULT_DECLARATIONS_PATH = "res://assets/scripts/resources/effect_tag_declarations.tres"`: The file read by default. A game can point somewhere else with the project setting below.
-- `DECLARATIONS_SETTING = "project_base/effects/tag_declarations_path"`: The project setting that points at another declarations file.
-
-### Functions
-
-- `declare(tags: Array) -> void` *(static)*: Adds tags to the declared list. The file is read automatically, so most games never call this. Call it at startup.
-- `reset(read_declarations_file: bool = true) -> void` *(static)*: Forgets everything, including that the file was read. For tests. Masks saved before a reset mean nothing afterwards.
-- `bit_of(tag: Variant) -> int` *(static)*: The tag's own bit number, or -1 if it has none (empty tag, or past the 64 limit).
-- `own_bit(tag: Variant) -> int` *(static)*: Just the tag's own bit as a mask, with no parents. A resistance to damage.elemental is stored as this: it catches every effect whose mask has that bit, which is every effect tagged damage.elemental or anything inside it.
-- `mask_of(tag: Variant) -> int` *(static)*: The tag's bit plus its parents' bits. What an effect stores for each of its tags.
-- `full_mask_of_list(tags: Array) -> int` *(static)*: Several tags' full masks together, parents included. An effect's tags as one mask.
-- `has_tag(tag: Variant) -> bool` *(static)*: True if the tag has a bit already. Never adds it.
-- `names_of(mask: int) -> StringName[]` *(static)*: The tag names for the bits in a mask, in bit order. For debug text.
-- `get_tags() -> StringName[]` *(static)*: All tags in bit order. A copy.
-- `read_declared_tags() -> StringName[]` *(static)*: Every tag the declarations file declares, with each one's parent levels, sorted: the list a tag dropdown offers (addons/tag_picker). It only reads the file, so it's safe in the editor and changes nothing here.
-- `normalize(tag: Variant) -> StringName` *(static)*: Cleans up a tag name: trims spaces and drops empty levels. Returns &"" if nothing usable is left.
-- `_ensure_ready() -> void` *(static)*: On first real use: reads the file (once), then numbers every declared level in sorted order, so every machine agrees.
-
 ## AbilityPriorityPart
 
 `res://assets/scripts/effects/parts/AbilityPriorityPart.gd`, extends [`EffectPart`](#effectpart)
 
 Changes one of a group of abilities' priority numbers while its effect lasts. A held part ([`EffectPart`](#effectpart)).
 
-Such as boosting abilities tagged combo.second so the next press picks the second swing. `ability_tag` picks the group (every ability whose category or extra_categories is that tag or inside it); `number` picks which of three numbers changes. The AbilityManager adds the totals when it compares numbers, on every machine, so a client's prediction agrees. Design: pawn spec 8.11.
+Such as boosting abilities tagged ability.combo.second so the next press picks the second swing. `ability_tag` picks the group (every ability whose category or extra_categories is that tag or inside it); `number` picks which of three numbers changes. The AbilityManager adds the totals when it compares numbers, on every machine, so a client's prediction agrees. Design: pawn spec 8.11.
 
 ### Settings and properties
 
@@ -297,11 +252,11 @@ Put it after the effect's StatChangePart: parts run in order, and this reads the
 
 Adds to the pawn's resistance to a kind of effect while its effect lasts. A held part ([`EffectPart`](#effectpart)).
 
-Such as +0.5 against damage.elemental.fire for a fire ward. Added to the pawn's `EffectManager.resistances`, which explains how they count. Design: pawn spec 8.11.
+Such as +0.5 against effect.damage.elemental.fire for a fire ward. Added to the pawn's `EffectManager.resistances`, which explains how they count. Design: pawn spec 8.11.
 
 ### Settings and properties
 
-- `tag: StringName` = `&""`: The kind of effect, by effect tag (EffectTags), such as &"damage.elemental.fire".
+- `tag: StringName` = `&""`: The kind of effect, by effect tag (`Tags.EFFECT`), such as &"effect.damage.elemental.fire".
 - `amount: float` = `0.25`: How much resistance it adds: 0.25 takes a quarter off. Negative is a weakness.
 
 ### Functions

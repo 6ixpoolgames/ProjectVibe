@@ -7,7 +7,7 @@
 ## [codeblock]
 ## pawn.effect_manager.apply_effect(effect, source)   # source: who applied it (for memory, lifesteal), or null
 ## pawn.effect_manager.has_effect(effect)              # is an over-time effect on the pawn now?
-## pawn.effect_manager.remove_with_tag(EffectTags.DEBUFF)   # a cleanse
+## pawn.effect_manager.remove_with_tag(Tags.EFFECT.DEBUFF)   # a cleanse
 ## [/codeblock]
 ## Design: pawn spec 8.11.
 class_name EffectManager
@@ -27,7 +27,7 @@ const STACKS := 3
 const SOURCE := 4
 
 ## This pawn's resistances by effect tag: 0.25 takes a quarter off harmful effects, 1 or more ignores them, negative is a weakness.
-## [br]A tag counts for every effect inside it, and they add up (0.2 damage.elemental + 0.3 damage.elemental.fire = 0.5 against fire).
+## [br]A tag counts for every effect inside it, and they add up (0.2 effect.damage.elemental + 0.3 effect.damage.elemental.fire = 0.5 against fire).
 @export var resistances: Dictionary[StringName, float] = {}
 ## The most over-time effects this pawn can have at once. A new one past this is refused.
 @export_range(1, 64, 1, "or_greater") var max_active_effects := 16
@@ -256,7 +256,7 @@ func remove_effect(effect: Effect) -> void:
 		effect_ended.emit(effect)
 
 
-## Removes every active effect with this effect tag, or a tag inside it: remove_with_tag(EffectTags.DEBUFF) is a cleanse.
+## Removes every active effect with this effect tag, or a tag inside it: remove_with_tag(Tags.EFFECT.DEBUFF) is a cleanse.
 func remove_with_tag(tag: StringName) -> void:
 	for entry in get_active_effects():
 		var effect: Effect = entry["effect"]
@@ -351,7 +351,7 @@ func _refresh() -> void:
 	# Each held part adds itself to the totals (EffectPart.add_held), so a new kind of held part needs no change here.
 	var totals := EffectHeldTotals.new()
 	for tag: StringName in resistances:
-		totals.resistance_bits.append([EffectTags.own_bit(tag), resistances[tag]])
+		totals.resistance_bits.append([TagRegistry.own_bit(tag), resistances[tag]])
 	for at in range(0, _entries.size(), STRIDE):
 		var effect := Effect.find(_entries[at + ID])
 		if effect == null:

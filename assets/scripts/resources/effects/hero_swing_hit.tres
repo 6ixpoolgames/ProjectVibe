@@ -17,5 +17,5 @@ hop_speed = 3.0
 [resource]
 script = ExtResource("4_effect")
 effect_name = &"hero swing hit"
-tags = Array[StringName]([&"damage.physical"])
+tags = Array[StringName]([&"effect.damage.physical"])
 parts = Array[ExtResource("1_part")]([SubResource("Damage"), SubResource("Knockback")])

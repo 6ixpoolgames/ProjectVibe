@@ -57,9 +57,13 @@ extends AbilityDefinition
 
 func _init() -> void:
 	super()
+	# A projectile stops at the first pawn it hits and pushes along its flight, unless its hit definition says otherwise.
+	hit = HitDefinition.new()
+	hit.max_hits = 1
+	hit.push = HitDefinition.Push.ALONG_MOTION
 	trigger_action = &"primary"
-	category = Tags.COMBAT_RANGED
-	locks_out = [Tags.MOVEMENT, Tags.COMBAT]
+	category = Tags.ABILITY.COMBAT_RANGED
+	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 15
 	interrupt_threshold = 15
 	cooldown = 0.6

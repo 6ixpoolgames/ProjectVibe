@@ -9,7 +9,7 @@ script = ExtResource("1_projectile")
 
 [node name="TickState" type="Node" parent="."]
 script = ExtResource("2_state")
-state_properties = Array[String](["launch_tick", "launch_origin", "launch_direction", "definition_index", "launch_speed", "launch_gravity_scale", "shooter_id"])
+state_properties = Array[String](["launch_tick", "launch_origin", "launch_direction", "definition_index", "launch_speed", "launch_gravity_scale", "end_tick", "end_point", "shooter_id"])
 
 [node name="NetworkEntity" type="Node" parent="."]
 script = ExtResource("3_entity")

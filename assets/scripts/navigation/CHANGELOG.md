@@ -13,9 +13,12 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | What | Where | Why | Size |
 |---|---|---|---|
 | One shared way to reach `NavServer` | `_nav_server()` in `NavigationManager`, `NavLinkModule`; `_get_nav()` in `world/BodyNavFeeder`; `diagnostics/NavDebugView`; three places in `world/TerrainNavFeeder` | The same "is the C++ library loaded" lookup is written out several times. One static helper (on a small `Nav` class, say) is one place to change and to read | S |
-| One tag-set class for abilities and nav | `NavTags`, `tags/TagRegistry` | The same rules, copied on purpose when NavTags was written. A single class used twice halves the code and the tests, and a third tag set (a game's own) would come free | M |
 | Move `TerrainSettings` out of navigation | `TerrainSettings.gd` | It describes a terrain (where it is, its chunk size), so it belongs in `terrain/` or `world/`; names and folders should say what things are | S |
 | Move `NavMarkerDebugModule` to `diagnostics/` | `modules/NavMarkerDebugModule.gd` | A debug tool in a production folder. `diagnostics/NavDebugView` already uses it; the two sample scenes that place it would follow | S |
+
+## 2026-11-22
+
+- **Nav tags joined the one tag registry** (tag spec step 1): `NavTags` is gone; nav tags are the `nav` category of `TagRegistry` (`nav.link.jump`, `nav.point.cover`), with constants in `Tags.NAV`, declared in `resources/tag_declarations.tres` (`nav_tag_declarations.tres` merged into it). `NavMarkerManager` and `NavMarkerNode` ask `TagRegistry`; nav markers' `tag` gets a Tag Picker dropdown. Saved scenes were rewritten to the new names; `nav_tags_selftest` is gone (its checks are in `tag_registry_selftest`).
 
 ## 2026-11-19
 
