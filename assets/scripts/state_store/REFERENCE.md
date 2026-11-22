@@ -4,7 +4,30 @@
 
 Every class in `assets/scripts/state_store/`, from its doc comments. The overview is in [README.md](README.md).
 
+- [LandingLog](#landinglog)
 - [StateStoreGD](#statestoregd)
+
+## LandingLog
+
+`res://assets/scripts/state_store/LandingLog.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+The record of what landed on which tick: work done off the tick (a terrain chunk, a nav tile) that became part of play.
+
+Each landing is (tick, kind, key): a chunk published by the [`ChunkStreamer`](../streaming/REFERENCE.md#chunkstreamer), a tile committed by the NavServer (noted by the [`TerrainNavFeeder`](../world/REFERENCE.md#terrainnavfeeder)). Work lands on a landing tick fixed when it was asked for (state store spec 13.12), so the same start gives the same record on every run; the determinism check adds each tick's landings to its fingerprint, and an input-based replay can land the same work on the same ticks from it. Keeps the last `KEEP_TICKS` ticks. A static class: nothing to add to a scene.
+
+### Constants
+
+- `KEEP_TICKS = 1200`: Ticks of landings kept.
+- `CHUNK = &"chunk"`: A terrain chunk published (key: `chunk_key()`).
+- `NAV_TILE = &"nav_tile"`: A nav tile committed (key: (x << 32) | z, as NavServer gives it).
+
+### Functions
+
+- `note(kind: StringName, key: int, tick: int) -> void` *(static)*: Notes that something landed on this tick.
+- `landings_at(tick: int) -> Array` *(static)*: What landed on this tick, as [kind, key] pairs in landing order. Empty for a tick with none, or one no longer kept.
+- `hash_at(tick: int) -> int` *(static)*: A number that's the same on two runs only if the same things landed, in the same order, on this tick.
+- `clear() -> void` *(static)*: Forgets every landing. For tests and a new match.
+- `chunk_key(chunk: Vector2i) -> int` *(static)*: A terrain chunk's key as one number.
 
 ## StateStoreGD
 

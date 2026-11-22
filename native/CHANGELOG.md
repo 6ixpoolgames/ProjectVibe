@@ -18,6 +18,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Test hooks in `NavServer` | `debug_fail_tile_commits`, `debug_limit_path_corners` in `nav_server.h` (and `GroundDomain`) | Test code bound into the shipping class. A test-only build flag or subclass would keep them out | S |
 | `NavHooks` settings that do nothing | `send_estimates`, `send_link_hints` in `nav_hooks.h` | A designer sees two switches in the inspector that change nothing. Hide them until the coarse planner (estimates) or link hints exist | S |
 
+## 2026-11-22
+
+- **Nav tiles land on ticks** (state store spec 13.12): `TileManager` gives each build a landing tick when it starts (`build_delay_ticks`, default 6, replacing `commit_budget_ms`) and commits the builds due on each nav tick in the order they started, waiting for any still running; builds that finish early wait. Candidate tiles with the same priority start in tile order. `NavServer.get_landed_tiles()` (new) gives the tiles the last tick committed. So the same tiles land on the same ticks however fast the machine is. A build now holds its slot until it lands, so `max_builds_in_flight` goes from 8 to 48 (8 a tick for 6 ticks), keeping how fast nav fills in; with 8, a pawn's own tile could land well before its target's, and it gave up (`navigation_manager_selftest`). Linux `.so` not rebuilt.
+
 ## 2026-11-21
 
 - **`VisualPlacement`** (new): places every pawn's Visual between ticks in one call a frame, for the `VisualPlacer`; slots hold the last two runs' positions and yaws, the run's length and a fading correction. Twin: `pawn/VisualPlacementGD.gd`. Drawing went from 0.65 ms a frame (303 `_process` calls) to 0.31 at 300 pawns (state store spec 13.9).

@@ -55,7 +55,9 @@ Place one in a level at the height you want (its own Y), well below the lowest g
 
 Feeds nav from a terrain generator, so that neither has to know the other exists.
 
-[`TerrainGenerator`](../terrain/REFERENCE.md#terraingenerator) says when a chunk is built or removed; this hands its triangles to NavServer and announces its markers to NavMarkerManager. It also keeps nav built around every streaming source (within each one's `nav_distance`), and can tick NavServer (`tick_nav`). Normally a child of a [`WorldCoordinator`](#worldcoordinator), or of a TerrainGenerator with no coordinator. Give it a NavHooks to feed nav; with none it only announces markers, which need no C++ library. Design: world spec (docs/world/WORLD_SPEC.md).
+[`TerrainGenerator`](../terrain/REFERENCE.md#terraingenerator) says when a chunk is built or removed; this hands its triangles to NavServer and announces its markers to NavMarkerManager. It also keeps nav built around every streaming source (within each one's `nav_distance`), and can tick NavServer (`tick_nav`). Normally a child of a [`WorldCoordinator`](#worldcoordinator), or of a TerrainGenerator with no coordinator. Give it a NavHooks to feed nav; with none it only announces markers, which need no C++ library.
+
+With the tick driver running, nav goes with the ticks (state store spec 13.12): NavServer ticks once after each tick and the sources' interests are checked on ticks, so tiles land on the same ticks on every run; each tile landing goes in the [`LandingLog`](../state_store/REFERENCE.md#landinglog). Design: world spec (docs/world/WORLD_SPEC.md).
 
 ### Settings and properties
 

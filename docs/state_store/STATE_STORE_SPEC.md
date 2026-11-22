@@ -587,6 +587,38 @@ The commit roughly halved. Deadlines didn't make the abilities faster (the count
 
 A cooldown now counts as over from the start of the tick it ends on (the countdown reached 0 only when the abilities ran), so the AI may press one tick sooner; `readiness_version` notices a passed deadline when read, so the AI's kept answers stay right. Two smaller timing changes, both only for a pawn on a load step: a run started between its runs (a knockback from a hit) now counts from the tick it started, where the countdown counted the whole span since the pawn last ran; and a readout between its runs shows the time left now rather than at its last run. Deadlines keep running while a pawn sleeps, but a running cooldown still keeps a pawn awake, so its AI hears when it ends.
 
+### 13.11 The determinism check *(Claude, 2026-11-22, the owner's request)*
+
+**What it is:** the standard desync checksum, on one machine. `python tools/determinism/run_determinism_check.py` plays the mass battle offline several times from the same start (`--runs`, default 2) and, after every tick's commit, compares a fingerprint of the store: the frame checksum, a hash of each entity's row, and a hash of each layout column across all entities. At the first tick that differs it names the entities and columns, from a names file written beside each run. The run itself is the test bed `samples/tests/determinism_check.tscn`. The load ladder is off by default (`--ladder` turns it on), since it follows how loaded the machine is.
+
+**First findings** (team size 50, 1200 ticks; runs differ some of the time, not every time):
+1. **Terrain streaming.** With the factions 300 m out, a soldier still falling at tick 10 in one run had landed in another (`position`, `velocity`, `yaw`). `ChunkStreamer` builds chunks under a time budget per frame (`max_ms_per_frame`), so how much ground exists by a given tick depends on how fast the machine was just then. Only chunks under a streaming source are built before the tick, and soldiers aren't sources.
+2. **Nav mesh tiles.** With everyone spawned 40 m out (no streaming at stake), one goblin's `velocity` differed at tick 589. `NavServer` builds tiles on worker threads and commits finished ones under a time budget (`commit_budget_ms`), so which tiles exist, and so which paths are found, depends on timing.
+
+3. **Still open: a 1 mm difference at 300 pawns.** After the landing schedule (13.12), at team size 100 over 3600 ticks, runs split into two groups that first differ at the same tick (2144) by exactly 1 mm in one soldier's `position` (the store's rounding), velocity the same. It happens with the job scheduler's workers off too (`--arg=--workers=0`), so it isn't thread timing. Most likely something whose order follows memory addresses, which change between runs (a container keyed by objects or physics ids), changing the order a sum is added up in by a hair. Not yet found.
+
+The first two break the rule sensing keeps (section 4, the scaling spec's rule 3): work done off the tick, or under a time budget, must land on a fixed tick. Fixed by the landing schedule (13.12): afterwards both cases agree over 4 runs of 1200 ticks.
+
+### 13.12 The landing schedule *(Claude 2026-11-22, agreed with the owner the same day: both a fixed delay and a record)*
+
+**The rule.** Work done off the tick (terrain chunks built across frames, nav tiles built on worker threads) may finish whenever it likes, but it **lands** (becomes something play can see: ground to stand on, a height, a nav tile a path can use) only on its **landing tick**, decided when it's asked for: the tick it was asked for plus a fixed delay. If it isn't finished by then, the tick waits for it (a hitch on a machine too slow for the delay). So the same start lands the same work on the same ticks, however fast the machine is. On top of that, every landing is **recorded** (tick, kind, key): the determinism check compares the records, and an input-based replay can land the same work on the same ticks from them.
+
+**Terrain chunks** (`ChunkStreamer`, `TerrainGenerator`):
+- The streamer decides what's wanted on ticks (every `refresh_seconds`, counted in ticks), not on frames. Each newly wanted chunk gets a landing tick: now + `landing_delay_ticks`, spread so no more than `max_landings_per_tick` land on one tick, in order of urgency (ties by chunk).
+- Building still runs in frames under `max_ms_per_frame`, but it stops just before **publishing**: the chunk's points (what `height_at` reads), its collision and `chunk_built` (nav, markers). Its mesh is only a picture, so it may show before. On its landing tick, before the tick runs, the chunk is published, finishing any building left first (the wait).
+- Chunks under a streaming source are still built and published at once, before the tick: they're asked for and land on the same tick.
+- Unloads happen before the tick too, in a fixed order, so ground never vanishes at a time that depends on the machine.
+- Without a tick driver (the editor, a scene with no driver), it works as before: each chunk lands as soon as it's built.
+
+**Nav tiles** (`NavServer`, C++):
+- Each build is given a landing tick when it's dispatched: the nav tick + `build_delay_ticks`. A build that finishes early waits; at its landing tick, the builds due are committed in the order they were dispatched, waiting for any still running. The time budget for commits goes.
+- The nav server ticks with the game: once per tick, after the tick (the feeder connects to the tick driver), not once per physics frame; the sources' interests are updated on ticks too.
+- `is_idle` and how many builds may run at once follow from the landings, so they're the same on every run.
+
+**The record.** `LandingLog` keeps every landing as (tick, kind, key) for recent ticks; the determinism check adds each tick's landings to its fingerprint, so a run that landed something on a different tick is named as such. Saving it in replays waits for input-based replay (the state store's step after this), which is what would read it.
+
+**Measured, not guessed:** the check runs before and after (13.11), and the cost of waiting shows as `streaming.landings` and the nav tick in diagnostics.
+
 ## 14. Open
 
 - **Reviews still to do** (the owner): the other major systems, which may change this spec. Abilities and AI behaviours are next; the controllers were reviewed on 2026-11-19 and fit (input commands are already plain data; their holder is the `ControllerManager`).
@@ -596,3 +628,5 @@ A cooldown now counts as over from the start of the tick it ends on (the countdo
 - **Variable data that can't be capped:** which lists stay derived (paths, AI memory facts beyond the store's slots).
 - **Projectiles and other short-lived entities:** their own layout, and whether spawning goes through the store for them first.
 - **Build order:** a sketch, to agree after the reviews: measure (13); the store with its twin beside the pawn table, fed by one gather; lag compensation and replay motion reading it; rollback history moved in; snapshot and replay encoding on workers; batched tick passes; deterministic replay and branches.
+
+- **Determinism leaks** *(Claude 2026-11-22, from the determinism check, 13.11)*: settled the same day, both a fixed delay and a record: the landing schedule (13.12).

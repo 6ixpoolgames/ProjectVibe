@@ -474,13 +474,14 @@ func _shared_border_matches(terrain: TerrainGenerator) -> bool:
 
 
 func _until_done(streamer: ChunkStreamer) -> void:
-	await get_tree().process_frame
-	await get_tree().process_frame
+	# Claude 2026-11-22: ticks, not drawn frames: with the tick driver running, the streamer refreshes and lands chunks on ticks.
+	await get_tree().physics_frame
+	await get_tree().physics_frame
 	for i in 3000:
 		var stats := streamer.get_stats()
 		if stats.queued == 0 and stats.unload_queued == 0:
 			return
-		await get_tree().process_frame
+		await get_tree().physics_frame
 	_check(false, "the streamer finished within the time limit")
 
 

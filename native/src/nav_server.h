@@ -122,6 +122,8 @@ public:
 	Array get_tile_states() const;
 	Dictionary get_stats() const;
 	bool is_idle() const; // nothing left to build or commit
+	// The tiles the last tick committed, in order, each as (x << 32) | z: the landing record (state store spec 13.12).
+	PackedInt64Array get_landed_tiles() const;
 
 protected:
 	static void _bind_methods();

@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 180 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 181 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -89,6 +89,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [KnockbackDefinition](../assets/scripts/abilities/REFERENCE.md#knockbackdefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | Knockback's settings: the base ones, with its defaults. |
 | [KnockbackPart](../assets/scripts/effects/REFERENCE.md#knockbackpart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Pushes the pawn, once, through its own KnockbackAbility. A do-once part ([EffectPart]). |
 | [LagCompensation](../assets/scripts/netcode/REFERENCE.md#lagcompensation) | [netcode](../assets/scripts/netcode/README.md) | RefCounted | The server checking a late attack against what the shooter saw (netcode spec section 9). |
+| [LandingLog](../assets/scripts/state_store/REFERENCE.md#landinglog) | [state_store](../assets/scripts/state_store/README.md) | RefCounted | The record of what landed on which tick: work done off the tick (a terrain chunk, a nav tile) that became part of play. |
 | [LifestealPart](../assets/scripts/effects/REFERENCE.md#lifestealpart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Gives whoever applied the effect a share of the damage it just dealt, once. A do-once part ([EffectPart]). |
 | [MatchOptionsPanel](../assets/scripts/ui/REFERENCE.md#matchoptionspanel) | [ui](../assets/scripts/ui/README.md) | VBoxContainer | A start menu's match options, built from the settings themselves. |
 | [MeleeAttackAbility](../assets/scripts/abilities/REFERENCE.md#meleeattackability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | A melee swing: an action bound to &"primary", built from steps. |

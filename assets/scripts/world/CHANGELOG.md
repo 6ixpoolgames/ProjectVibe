@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 The "one shared way to reach `NavServer`" row in navigation's changelog applies here too: `TerrainNavFeeder` looks the library up by name in three places.
 
+## 2026-11-22
+
+- **`TerrainNavFeeder` goes with the ticks** (state store spec 13.12): with the tick driver running, it ticks NavServer once after each game tick (not once per physics frame) and checks the sources' interests on ticks, and notes each tile NavServer landed in the `LandingLog`. Without a running tick driver it works as before.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): moved to the README's new "How it works" section: `KillFloor`'s fall reports and odd cases, `TerrainNavFeeder`'s and `BodyNavFeeder`'s odd cases. "The owner's rule" wording removed from `ChunkStreamer` (streaming) and "the owner's end goal" from `WorldCoordinator`. No stale comments found.

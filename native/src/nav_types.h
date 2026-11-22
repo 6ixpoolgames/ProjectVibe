@@ -115,8 +115,12 @@ struct NavConfig {
 	float world_ceiling_y = 600.0f;
 
 	// Budgets.
-	float commit_budget_ms = 1.0f;
-	int max_builds_in_flight = 8;
+	// A tile build lands (is committed) on the nav tick this many ticks after it starts, waiting for it then if it isn't done, so
+	// the same tiles land on the same ticks however fast the machine is (state store spec 13.12). Builds that finish early wait.
+	int build_delay_ticks = 6;
+	// Builds started and not yet landed, finished or not. A build holds its slot until its landing tick, so this is about
+	// build_delay_ticks times the builds that can start each tick (8): fewer would slow how fast nav fills in.
+	int max_builds_in_flight = 48;
 	int worker_threads = 0; // 0 = number of CPU cores - 1
 	int query_iterations_per_tick = 2000;
 

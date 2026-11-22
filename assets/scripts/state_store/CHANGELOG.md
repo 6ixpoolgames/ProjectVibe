@@ -13,6 +13,11 @@ Code that works but doesn't yet fit the project's goals. Each is marked `REFACTO
 |---|---|---|---|
 | Typed columns instead of Variants | `Layout::cells` in `state_store.h`, `_Layout.cells` in the twin | Each cell is a Variant, so any value fits (today's state lists hold arrays and dictionaries). Worker jobs (sensing, snapshot encoding, replay packing) want plain typed lanes they can read without the engine. Comes with the first job that reads the store | M |
 
+## 2026-11-22
+
+- **The landing schedule** (state store spec 13.12, agreed with the owner: a fixed delay and a record): work done off the tick lands on a tick fixed when it's asked for. Terrain chunks (`ChunkStreamer`, `TerrainGenerator`) and nav tiles (`NavServer`, `TerrainNavFeeder`) do; `LandingLog` (new) records every landing, and the determinism check adds each tick's landings to its fingerprint. After it, the check's two cases (streaming at 300 m, nav at 40 m) agree over 4 runs of 1200 ticks.
+- **The determinism check** (state store spec 13.11, the owner's request): `tools/determinism/run_determinism_check.py` and the test bed `samples/tests/determinism_check.tscn`. It plays the mass battle several times from the same start and compares the store after every tick (frame checksum, a hash per entity row and per column), naming the entities and columns at the first difference. First findings: terrain streaming and nav tiles land at timing-dependent ticks (both under time budgets).
+
 ## 2026-11-21
 
 - **`find_long_moves(tick, dt, allowance, slack)`** (new, both twins): every entity with position and velocity columns whose move into that tick is longer than its velocity explains, with the move's length and speed, and how many were compared. The MoveSanityCheck's first pass.

@@ -18,6 +18,7 @@
 #include "input_store.h"
 #include "worker_pool.h"
 
+#include <condition_variable>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -67,11 +68,16 @@ public:
 	// Tick phase 1: create tiles near interests (if some ADD layer has data there), drop far ones.
 	void update_wanted(const InputStore &store, const std::vector<Interest> &interests, GroundDomain &domain,
 			std::vector<TileKey> &changed);
-	// Tick phase 2: swap in finished builds until the time budget is used.
-	void commit_finished(GroundDomain &domain, double budget_ms, std::vector<TileKey> &changed);
+	// Tick phase 2: commit the builds due on this nav tick, in the order they started, waiting for any still running (state store
+	// spec 13.12). Builds that finished early wait for their tick.
+	void commit_finished(GroundDomain &domain, int64_t tick, std::vector<TileKey> &changed);
+	// The tiles committed by the last commit_finished, in commit order (the landing record).
+	const std::vector<TileKey> &last_committed() const { return m_last_committed; }
 	// Tick phase 3: start builds for the most important tiles that need one.
 	// links are the placed links; each build gets those starting in its tile.
-	void schedule(const InputStore &store, const std::vector<Interest> &interests, const std::vector<LinkDef> &links, WorkerPool &pool);
+	// Each build lands on tick + build_delay_ticks.
+	void schedule(const InputStore &store, const std::vector<Interest> &interests, const std::vector<LinkDef> &links, WorkerPool &pool,
+			int64_t tick);
 
 	void stats(TileStats &out) const;
 	void tile_infos(std::vector<TileInfo> &out) const;
@@ -93,6 +99,8 @@ private:
 	};
 
 	float priority(const TileRecord &t, const std::vector<Interest> &interests) const; // lower = sooner
+	// The result of the build started as seq, waiting for it if it's still running.
+	std::unique_ptr<TileBuildResult> wait_for(uint64_t seq);
 
 	NavConfig m_cfg;
 	std::unordered_map<TileKey, TileRecord, TileKeyHash> m_tiles;
@@ -102,6 +110,15 @@ private:
 
 	mutable std::mutex m_done_mutex; // guards m_done, the only thing worker threads touch
 	std::deque<std::unique_ptr<TileBuildResult>> m_done;
+	std::condition_variable m_done_cv; // a worker added to m_done
+	struct Dispatched {
+		uint64_t seq = 0;
+		int64_t due = 0; // the nav tick it lands on
+	};
+	std::deque<Dispatched> m_dispatched; // started and not yet landed, in the order they started (main thread only)
+	std::unordered_map<uint64_t, std::unique_ptr<TileBuildResult>> m_finished; // finished early, waiting for their tick
+	uint64_t m_next_seq = 1;
+	std::vector<TileKey> m_last_committed;
 
 	uint64_t m_builds_committed = 0, m_builds_stale = 0;
 	double m_build_ms_total = 0.0, m_build_ms_max = 0.0;

@@ -15,6 +15,10 @@ None in this folder yet. Related: `TerrainSettings`, which describes a terrain, 
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-22
+
+- **Held chunks** (state store spec 13.12): `build_chunk_step(key, hold)` builds up to publishing and stops: the chunk's points (what `height_at` reads), its collision (built, switched off) and `chunk_built` wait until it's published by `load_chunk`, on its landing tick. `is_chunk_ready_to_publish` (new). A held chunk dug while it waited catches up on its edits when it lands. The mesh and collision builders read the build's own points, so nothing reads half-published ground.
+
 ## 2026-11-21
 
 - **`TerrainBodyLifter` lifts a pawn with `Pawn.teleport`**, so the crowd, the state store and the move check know it was put there, and a sleeping pawn wakes (state store spec 13.9).

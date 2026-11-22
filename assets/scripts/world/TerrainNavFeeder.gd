@@ -5,6 +5,8 @@
 ## NavMarkerManager. It also keeps nav built around every streaming source (within each one's [code]nav_distance[/code]), and can tick
 ## NavServer ([member tick_nav]). Normally a child of a [WorldCoordinator], or of a TerrainGenerator with no coordinator. Give it a
 ## NavHooks to feed nav; with none it only announces markers, which need no C++ library.
+## [br]With the tick driver running, nav goes with the ticks (state store spec 13.12): NavServer ticks once after each tick and the
+## sources' interests are checked on ticks, so tiles land on the same ticks on every run; each tile landing goes in the [LandingLog].
 ## Design: world spec (docs/world/WORLD_SPEC.md).
 class_name TerrainNavFeeder
 extends Node
@@ -15,7 +17,8 @@ extends Node
 # Typed as Resource instead of NavHooks, and NavServer is looked up by name below. Writing either name directly would stop this script
 # compiling on a build without the nav DLL. This way, a game that doesn't use nav always works.
 @export_custom(PROPERTY_HINT_RESOURCE_TYPE, "NavHooks") var nav_hooks: Resource
-## The nav system needs one tick per physics frame from somewhere. Turn this on if nothing else in the scene does it.
+## The nav system needs one tick per game tick (per physics frame without the tick driver) from somewhere. Turn this on if nothing
+## else in the scene does it.
 # REFACTOR: ticking the whole nav library is a job for something universal, not the terrain's feeder. Every level has to remember to
 # turn it on, and a level with nav but no terrain (only BodyNavFeeders) has nothing to tick it (designer friendly). See CHANGELOG.md.
 @export var tick_nav := false
@@ -32,6 +35,8 @@ var _nav_interests := {} # a source's instance id -> its interest id in NavServe
 var _nav_interest_radius := {} # a source's instance id -> the radius its interest was made with
 var _refresh_timer := 0.0
 var _listening_to: TerrainGenerator = null
+var _driver: Node = null
+var _next_refresh_tick := -1
 
 
 func _init() -> void:
@@ -51,6 +56,9 @@ func _enter_tree() -> void:
 	terrain.generation_started.connect(_register_terrain)
 	_connect_to_nav()
 	_register_terrain()
+	_driver = get_node_or_null(^"/root/TickDriver")
+	if _driver and not _driver.after_tick.is_connected(_on_after_tick):
+		_driver.after_tick.connect(_on_after_tick)
 	for key: Vector2i in terrain.get_loaded_chunks():
 		_on_chunk_built(key, terrain.get_chunk_triangles(key))
 
@@ -61,6 +69,8 @@ func _exit_tree() -> void:
 		_listening_to.chunk_removed.disconnect(_on_chunk_removed)
 		_listening_to.generation_started.disconnect(_register_terrain)
 	_listening_to = null
+	if _driver and _driver.after_tick.is_connected(_on_after_tick):
+		_driver.after_tick.disconnect(_on_after_tick)
 	_remove_all_nav_interests()
 	if _nav and _nav_layer >= 0:
 		_nav.remove_input_layer(_nav_layer) # this removes everything the layer held
@@ -82,16 +92,43 @@ func uses_nav() -> bool:
 func refresh_now() -> void:
 	_refresh_timer = refresh_seconds
 	_update_nav_interests()
+	if _on_ticks():
+		_next_refresh_tick = _driver.tick + maxi(1, roundi(refresh_seconds * _driver.get_tick_rate()))
 
 
 func _physics_process(delta: float) -> void:
-	if tick_nav and Engine.has_singleton("NavServer"):
+	if tick_nav and Engine.has_singleton("NavServer") and not _on_ticks():
 		var started := PerfScopes.begin() # timed for diagnostics (PerfScopes)
 		Engine.get_singleton("NavServer").tick(delta)
 		PerfScopes.end(&"nav.tick", started)
 
 
+# With the tick driver: the interests every refresh_seconds, counted in ticks, then NavServer's tick, after the game's tick, and the
+# tiles it landed noted.
+func _on_after_tick(dt: float, tick: int) -> void:
+	if not _on_ticks():
+		return
+	if tick >= _next_refresh_tick:
+		_next_refresh_tick = tick + maxi(1, roundi(refresh_seconds * _driver.get_tick_rate()))
+		var refresh_started := PerfScopes.begin()
+		_update_nav_interests()
+		PerfScopes.end(&"nav.refresh", refresh_started)
+	if tick_nav and Engine.has_singleton("NavServer"):
+		var started := PerfScopes.begin()
+		var nav: Object = Engine.get_singleton("NavServer")
+		nav.tick(dt)
+		for tile: int in nav.get_landed_tiles():
+			LandingLog.note(LandingLog.NAV_TILE, tile, tick)
+		PerfScopes.end(&"nav.tick", started)
+
+
+func _on_ticks() -> bool:
+	return _driver != null and _driver.active
+
+
 func _process(delta: float) -> void:
+	if _on_ticks():
+		return # interests are checked on ticks
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0:
 		var started := PerfScopes.begin() # timed for diagnostics (PerfScopes)

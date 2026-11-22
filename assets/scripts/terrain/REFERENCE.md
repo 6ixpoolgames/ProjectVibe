@@ -133,8 +133,9 @@ It knows nothing about nav building, networks or streaming, so it works with or 
 - `has_chunk(key: Vector2i) -> bool`: True once a chunk is completely built, including its collision. A chunk that's partly built doesn't count.
 - `has_ground_around(world_position: Vector3, margin: float) -> bool`
 - `get_loaded_chunks() -> Vector2i[]`: Every completely built chunk.
-- `build_chunk_step(key: Vector2i) -> bool`
-- `load_chunk(key: Vector2i) -> void`: Builds a chunk completely, right now. Simple, but it takes several milliseconds, so it can show up as a stutter.
+- `build_chunk_step(key: Vector2i, hold: bool = false) -> bool`
+- `load_chunk(key: Vector2i) -> void`: Builds a chunk completely, right now, and publishes it; a held chunk (`build_chunk_step()`) is finished and published. Simple, but building takes several milliseconds, so it can show up as a stutter.
+- `is_chunk_ready_to_publish(key: Vector2i) -> bool`: True if a held chunk is built up to publishing, waiting for its landing tick.
 - `unload_chunk(key: Vector2i) -> void`: Removes a chunk: its mesh and collision, or what's built of them. `chunk_removed` goes out, so its nav data and markers go too. With no TerrainEditLog its edits are lost, and it warns the first time.
 - `get_chunk_triangles(key: Vector2i) -> PackedVector3Array`: A built chunk's triangles, measured from this node, for something that arrives after the chunk was built.
 - `get_chunk_markers(key: Vector2i) -> NavMarker[]`: A chunk's markers, placed in the world. See _make_chunk_markers. TerrainNavFeeder announces them.

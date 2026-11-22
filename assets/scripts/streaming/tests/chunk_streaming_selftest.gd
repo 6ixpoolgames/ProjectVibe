@@ -39,6 +39,7 @@ func _ready() -> void:
 	await _test_chunk_limit()
 	await _test_missing_and_freed_terrain()
 	await _test_budget()
+	await _test_landing_schedule()
 	await _test_turning_back_mid_build()
 	await _test_markers_follow_the_source()
 	await _test_pawn_walks()
@@ -461,6 +462,9 @@ func _test_missing_and_freed_terrain() -> void:
 
 # The chunk under a source is built straight away, so these watch its neighbour, which comes through the budget.
 func _test_budget() -> void:
+	# Claude 2026-11-22: the frame budget decides when a chunk lands only while the tick driver isn't running (with it, chunks land on
+	# their landing ticks: _test_landing_schedule), so these run with it paused.
+	TickDriver.active = false
 	var neighbour := Vector2i(1, 0)
 	var terrain := _make_budget_terrain()
 	var streamer := _make_streamer(terrain)
@@ -511,6 +515,7 @@ func _test_budget() -> void:
 	var slowed: float = streamer.get_stats().worst_step_ms
 	_check(slowed > at_normal_speed * 1.5, "simulate_slower_cpu makes steps slower (%.2f ms against %.2f ms)" % [slowed, at_normal_speed])
 	_check(terrain.has_chunk(neighbour), "and the chunk still arrives (%d frames)" % frames)
+	TickDriver.active = true
 	source.free()
 	streamer.free()
 	terrain.free()
@@ -524,8 +529,13 @@ func _test_turning_back_mid_build() -> void:
 	var source := _make_source(Vector3(128.0, 0.0, 128.0), 140.0)
 	await get_tree().physics_frame
 	await _frames(3)
-	_check(streamer._has_current_build, "(a chunk is partly built)")
-	var building := streamer._current_build
+	# Claude 2026-11-22: with the tick driver running, the chunks wanted are scheduled to land, and the soonest is the one being built
+	# (state store spec 13.12).
+	var building := Vector2i(1 << 20, 0)
+	for key: Vector2i in terrain._building:
+		if streamer.get_landing_tick(key) >= 0 and not terrain.has_chunk(key):
+			building = key
+	_check(building.x != 1 << 20, "(a chunk is partly built, waiting to land)")
 	source.position = Vector3(128.0 + 2560.0, 0.0, 128.0)
 	await _until_done(streamer)
 	_check(not terrain.has_chunk(building) and not terrain._building.has(building), "when its source leaves, a half-built chunk is dropped")
@@ -806,15 +816,50 @@ func _same_chunks(a: Array[Vector2i], b: Array[Vector2i]) -> bool:
 	return true
 
 
+## Claude 2026-11-22 (state store spec 13.12): with the tick driver running, a chunk lands on its landing tick, the same number of ticks
+## after it's asked for on a fast machine and on one that builds a step a frame (which then waits for it), and the landing is recorded.
+func _test_landing_schedule() -> void:
+	var neighbour := Vector2i(1, 0)
+	var after_asked: Array[int] = []
+	for budget: float in [100.0, 0.0]:
+		LandingLog.clear()
+		var terrain := _make_budget_terrain()
+		var streamer := _make_streamer(terrain)
+		streamer.max_ms_per_frame = budget
+		streamer.landing_delay_ticks = 20
+		var source := _make_source(Vector3(128.0, 0.0, 128.0), 140.0)
+		var asked_on := -1
+		var landing := -1
+		for i in 300:
+			await get_tree().physics_frame
+			if asked_on < 0 and streamer.get_landing_tick(neighbour) >= 0:
+				asked_on = TickDriver.tick
+				landing = streamer.get_landing_tick(neighbour)
+			if terrain.has_chunk(neighbour):
+				break
+		var landed_on := -1
+		for tick in range(maxi(asked_on - 5, 0), TickDriver.tick + 1):
+			for entry: Array in LandingLog.landings_at(tick):
+				if entry[0] == LandingLog.CHUNK and entry[1] == LandingLog.chunk_key(neighbour):
+					landed_on = tick
+		_check(asked_on >= 0 and landed_on == landing, "with %s, the chunk lands on its landing tick (%d), recorded (%d)" % ["plenty of budget" if budget > 0.0 else "one step a frame", landing, landed_on])
+		after_asked.append(landed_on - asked_on)
+		source.free()
+		streamer.free()
+		terrain.free()
+	_check(after_asked.size() == 2 and after_asked[0] == after_asked[1], "and it lands the same number of ticks after it's asked for, fast or slow (%s)" % [after_asked])
+
+
 ## Waits until the streamer has seen where the sources are now and has nothing left to do.
 func _until_done(streamer: ChunkStreamer) -> void:
-	await get_tree().process_frame
-	await get_tree().process_frame
+	# Claude 2026-11-22: ticks, not drawn frames: with the tick driver running, the streamer refreshes and lands chunks on ticks.
+	await get_tree().physics_frame
+	await get_tree().physics_frame
 	for i in 3000:
 		var stats := streamer.get_stats()
 		if stats.queued == 0 and stats.unload_queued == 0:
 			return
-		await get_tree().process_frame
+		await get_tree().physics_frame
 	_check(false, "the streamer finished within the time limit")
 
 

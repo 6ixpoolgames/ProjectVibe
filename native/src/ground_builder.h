@@ -16,6 +16,7 @@ struct TileBuildInput {
 	TileKey key;
 	Version version = 0; // tile version this build was started for
 	uint64_t generation = 0; // TileManager reset counter; results from before a reset are thrown away
+	uint64_t seq = 0; // the order it was started in, which is the order it lands in
 	NavConfig cfg;
 	InputSnapshot snapshot;
 	std::vector<LinkDef> placed_links; // placed links that start inside this tile, copied when the build starts
@@ -25,6 +26,7 @@ struct TileBuildResult {
 	TileKey key;
 	Version version = 0;
 	uint64_t generation = 0;
+	uint64_t seq = 0;
 	unsigned char *nav_data = nullptr; // Detour tile data (dtAlloc'd). Ownership moves to dtNavMesh on commit.
 	int nav_data_size = 0;
 	bool empty = false; // nothing walkable: commit just removes the old tile

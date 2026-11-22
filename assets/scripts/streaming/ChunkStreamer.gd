@@ -8,6 +8,10 @@
 ## before each tick, outside the budget, so a pawn has ground on its first tick. A chunk loads within a source's load_distance and only
 ## unloads past load_distance + [member unload_margin]. Each machine runs its own streamer; terrain isn't sent, since the same
 ## settings build the same ground. Design: streaming spec (docs/streaming/STREAMING_SPEC.md).
+## [br]With the tick driver running, chunks land on ticks (state store spec 13.12): what's wanted is decided on ticks, each new chunk
+## gets a landing tick ([member landing_delay_ticks] on, no more than [member max_landings_per_tick] a tick), building stops just
+## before publishing (its points, collision and nav), and it's published before its landing tick runs, finishing it first if it
+## isn't done. So the same start lands the same ground on the same ticks on any machine; each landing goes in the [LandingLog].
 class_name ChunkStreamer
 extends Node
 
@@ -29,6 +33,11 @@ signal chunk_unloaded(key: Vector2i)
 @export_range(0.0, 2.0, 0.01, "or_greater") var refresh_seconds := 0.2
 ## With no active sources, keeps every chunk loaded. Off: they all unload.
 @export var hold_when_no_sources := true
+## With the tick driver: ticks from when a chunk is wanted to when it lands, written for 60 ticks a second. Long enough for a
+## machine to build it in the background; a machine that hasn't by then finishes it on that tick (a hitch).
+@export_range(0, 600, 1, "or_greater") var landing_delay_ticks := 30
+## With the tick driver: the most chunks landing on one tick, so a burst of new chunks is spread over ticks.
+@export_range(1, 64, 1, "or_greater") var max_landings_per_tick := 2
 
 ## The nearest a chunk edge can be to a source before the next chunk is built straight away, in metres.
 const MIN_GROUND_REACH := 2.0
@@ -51,7 +60,11 @@ var _worst_step_usec := 0
 var _total_loaded := 0
 var _total_unloaded := 0
 var _urgent_builds := 0
+var _landing_waits := 0 # chunks that weren't built by their landing tick, so the tick finished them
 var _driver: Node = null
+var _landing_tick := {} # Vector2i -> the tick it lands on (with the tick driver)
+var _landings_on := {} # tick -> how many chunks land on it
+var _next_refresh_tick := -1
 
 
 func _init() -> void:
@@ -68,14 +81,13 @@ func _ready() -> void:
 	if _driver:
 		_driver.before_tick.connect(_on_before_tick)
 		_driver.rollback_state_loaded.connect(_on_rollback_state_loaded)
-	# With a TickDriver, the check before each tick is the one that matters, so the per-frame one is only for a scene with no driver.
-	set_physics_process(_driver == null)
+	# With the tick driver running, the check before each tick is the one that matters; the per-frame one is for when it isn't.
 
 
 ## How things stand right now, as numbers for tests, stress runs and on-screen displays.
 func get_stats() -> Dictionary:
 	return {
-		"queued": _build_queue.size() + (1 if _has_current_build else 0),
+		"queued": _build_queue.size() + (1 if _has_current_build else 0) + _landing_tick.size(), # scheduled ones too, until they land
 		"unload_queued": _unload_queue.size(),
 		"last_frame_ms": _last_frame_usec / 1000.0,
 		"worst_frame_ms": _worst_frame_usec / 1000.0,
@@ -83,21 +95,40 @@ func get_stats() -> Dictionary:
 		"total_loaded": _total_loaded,
 		"total_unloaded": _total_unloaded,
 		"urgent_builds": _urgent_builds,
+		"scheduled": _landing_tick.size(),
+		"landing_waits": _landing_waits,
 	}
 
 
-## Checks the sources now, instead of waiting for the next refresh.
+## Checks the sources now, instead of waiting for the next refresh. With the tick driver, before the next tick.
 func refresh_now() -> void:
 	_refresh_timer = 0.0
-	_refresh()
+	if _on_ticks():
+		_next_refresh_tick = -1
+	else:
+		_refresh()
+
+
+## The tick a chunk is due to land on, or -1 if none is scheduled.
+func get_landing_tick(key: Vector2i) -> int:
+	return _landing_tick.get(key, -1)
 
 
 func _physics_process(_delta: float) -> void:
-	_timed_ground_check()
+	if not _on_ticks():
+		_timed_ground_check()
 
 
-func _on_before_tick(_dt: float, _tick: int) -> void:
+func _on_before_tick(_dt: float, tick: int) -> void:
 	_timed_ground_check()
+	var started := PerfScopes.begin()
+	_land_on_tick(tick)
+	PerfScopes.end(&"streaming.landings", started)
+
+
+# True while chunks land on ticks: the tick driver is running.
+func _on_ticks() -> bool:
+	return _driver != null and _driver.active
 
 
 # Timed for diagnostics (PerfScopes) in one place, so whichever of the two above runs is the one timed.
@@ -142,7 +173,119 @@ func _build_now(key: Vector2i) -> void:
 		_has_current_build = false
 	_urgent_builds += 1
 	_total_loaded += 1
+	if _on_ticks():
+		# Asked for and landed on the same tick, before it runs.
+		_unschedule(key)
+		LandingLog.note(LandingLog.CHUNK, LandingLog.chunk_key(key), _driver.tick)
 	chunk_loaded.emit(key)
+
+
+# --- Landing on ticks (with the tick driver) ---
+
+
+# Before each tick: what's wanted (every refresh_seconds), the chunks due now, then at most one unload.
+func _land_on_tick(tick: int) -> void:
+	if not _on_ticks() or not is_instance_valid(terrain) or not terrain.is_inside_tree():
+		return
+	if tick >= _next_refresh_tick:
+		_next_refresh_tick = tick + maxi(1, roundi(refresh_seconds * _driver.get_tick_rate()))
+		_refresh_on_tick(tick)
+	var due: Array[Vector2i] = []
+	for key: Vector2i in _landing_tick:
+		if _landing_tick[key] <= tick:
+			due.append(key)
+	due.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return _landing_order(a, b))
+	for key in due:
+		if terrain.has_chunk(key):
+			_unschedule(key)
+			continue
+		if not terrain.is_chunk_ready_to_publish(key):
+			_landing_waits += 1
+		terrain.load_chunk(key) # publishes it, finishing it first if it isn't ready (the wait)
+		_unschedule(key)
+		_total_loaded += 1
+		LandingLog.note(LandingLog.CHUNK, LandingLog.chunk_key(key), tick)
+		chunk_loaded.emit(key)
+	if not _unload_queue.is_empty():
+		_unload_next()
+
+
+# The refresh on a tick: new chunks get landing ticks, in order of urgency; scheduled ones no longer wanted are dropped; loaded ones
+# no longer wanted queue to unload.
+func _refresh_on_tick(tick: int) -> void:
+	var sources := _active_sources()
+	if sources.is_empty() and hold_when_no_sources:
+		_unload_queue.clear()
+		return
+	_scores = _score_chunks(sources)
+	_apply_chunk_limit(maxi(sources.size(), 1) * max_chunks_per_source)
+	for key: Vector2i in _landing_tick.keys():
+		if not _scores.has(key):
+			_unschedule(key)
+			terrain.unload_chunk(key) # what was built of it
+	var fresh: Array[Vector2i] = []
+	for key: Vector2i in _scores:
+		if _scores[key] <= 0.0 and not terrain.has_chunk(key) and not _landing_tick.has(key):
+			fresh.append(key)
+	fresh.sort_custom(func(a: Vector2i, b: Vector2i) -> bool:
+		return _scores[a] < _scores[b] if _scores[a] != _scores[b] else (a.x < b.x if a.x != b.x else a.y < b.y))
+	var earliest: int = tick + _driver.ticks_at_rate(landing_delay_ticks)
+	for key in fresh:
+		var landing := earliest
+		while _landings_on.get(landing, 0) >= max_landings_per_tick:
+			landing += 1
+		_landings_on[landing] = _landings_on.get(landing, 0) + 1
+		_landing_tick[key] = landing
+	_unload_queue.clear()
+	for key in terrain.get_loaded_chunks():
+		if not _scores.has(key):
+			_unload_queue.append(key)
+	_unload_queue.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return a.x > b.x if a.x != b.x else a.y > b.y) # popped from the back
+
+
+func _unschedule(key: Vector2i) -> void:
+	if not _landing_tick.has(key):
+		return
+	var landing: int = _landing_tick[key]
+	_landing_tick.erase(key)
+	_landings_on[landing] = _landings_on.get(landing, 1) - 1
+	if _landings_on[landing] <= 0:
+		_landings_on.erase(landing)
+
+
+# One step of a scheduled chunk, up to publishing; true once it's ready to land.
+func _build_scheduled_step(key: Vector2i) -> bool:
+	return terrain.build_chunk_step(key, true)
+
+
+# Landing order: by landing tick, then by chunk.
+func _landing_order(a: Vector2i, b: Vector2i) -> bool:
+	if _landing_tick[a] != _landing_tick[b]:
+		return _landing_tick[a] < _landing_tick[b]
+	return a.x < b.x if a.x != b.x else a.y < b.y
+
+
+# In frames, with the tick driver: build the scheduled chunks up to publishing, soonest landing first, under the budget.
+func _build_scheduled(frame_started: int) -> void:
+	var waiting: Array[Vector2i] = []
+	for key: Vector2i in _landing_tick:
+		if not terrain.is_chunk_ready_to_publish(key) and not terrain.has_chunk(key):
+			waiting.append(key)
+	if waiting.is_empty():
+		return
+	waiting.sort_custom(func(a: Vector2i, b: Vector2i) -> bool: return _landing_order(a, b))
+	var budget_usec := int(max_ms_per_frame * 1000.0)
+	var did_a_step := false
+	for key in waiting:
+		while not did_a_step or Time.get_ticks_usec() - frame_started < budget_usec:
+			var step_started := Time.get_ticks_usec()
+			var ready := _build_scheduled_step(key)
+			_finish_step(step_started)
+			did_a_step = true
+			if ready:
+				break
+		if did_a_step and Time.get_ticks_usec() - frame_started >= budget_usec:
+			return
 
 
 func _process(delta: float) -> void:
@@ -160,6 +303,12 @@ func _stream_chunks(delta: float) -> void:
 		return
 
 	var frame_started := Time.get_ticks_usec()
+	if _on_ticks():
+		# What's wanted, landings and unloads happen on ticks (_land_on_tick); frames only build.
+		_build_scheduled(frame_started)
+		_last_frame_usec = Time.get_ticks_usec() - frame_started
+		_worst_frame_usec = maxi(_worst_frame_usec, _last_frame_usec)
+		return
 	_refresh_timer -= delta
 	if _refresh_timer <= 0.0:
 		_refresh_timer = refresh_seconds

@@ -14,6 +14,7 @@ The central record of play: every gameplay entity's state at the end of every ti
 | [STATE_STORE_SPEC.md](../../../docs/state_store/STATE_STORE_SPEC.md) | The design |
 | `native/src/state_store.h` | The C++ store, the main path |
 | `StateStoreGD.gd` | Its GDScript twin: the same calls and the same results |
+| `LandingLog.gd` | The record of what work done off the tick (terrain chunks, nav tiles) landed on which tick |
 
 ## How it fits
 
@@ -34,6 +35,7 @@ The central record of play: every gameplay entity's state at the end of every ti
 - **Rollback.** The driver loads each predicted entity's row (`load_row`, which writes the nodes), re-runs the ticks, and rewrites their rows with `commit_entities`.
 - **The tripwire.** `TickDriver.verify_store_each_tick` checks, at the start of each tick, that every bound entity's nodes still hold what the last commit recorded. A mismatch is a write that went around the store (state store spec 4). Off by default.
 - **Checksums.** `frame_checksum(tick)` hashes every row held for a tick; the C++ store and the twin give the same number.
+- **Determinism.** `python tools/determinism/run_determinism_check.py` plays the mass battle several times from the same start and compares the store after every tick, naming the first entity and column that differ (spec 13.11). Work done off the tick lands on a tick fixed when it's asked for, and `LandingLog` records each landing (the landing schedule, spec 13.12).
 
 ## Using it
 

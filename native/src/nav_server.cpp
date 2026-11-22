@@ -66,7 +66,7 @@ void NavServer::configure(const Dictionary &config) {
 	getf("max_slope_deg", c.max_slope_deg);
 	getf("world_floor_y", c.world_floor_y);
 	getf("world_ceiling_y", c.world_ceiling_y);
-	getf("commit_budget_ms", c.commit_budget_ms);
+	geti("build_delay_ticks", c.build_delay_ticks);
 	geti("max_builds_in_flight", c.max_builds_in_flight);
 	geti("worker_threads", c.worker_threads);
 	geti("query_iterations_per_tick", c.query_iterations_per_tick);
@@ -103,6 +103,7 @@ void NavServer::configure(const Dictionary &config) {
 	c.cell_height = std::max(c.cell_height, 0.01f);
 	c.tile_size_cells = std::clamp(c.tile_size_cells, 16, 256);
 	c.max_builds_in_flight = std::max(c.max_builds_in_flight, 1);
+	c.build_delay_ticks = std::max(c.build_delay_ticks, 0);
 	c.link_jump_distance = std::clamp(c.link_jump_distance, 0.0f, 10.0f); // the tile border grows with it
 	c.link_drop_reach = std::clamp(c.link_drop_reach, 0.0f, 10.0f);
 	c.link_spacing = std::max(c.link_spacing, c.cell_size);
@@ -145,7 +146,7 @@ Dictionary NavServer::get_config() const {
 	d["tier_radii"] = radii;
 	d["world_floor_y"] = m_cfg.world_floor_y;
 	d["world_ceiling_y"] = m_cfg.world_ceiling_y;
-	d["commit_budget_ms"] = m_cfg.commit_budget_ms;
+	d["build_delay_ticks"] = m_cfg.build_delay_ticks;
 	d["max_builds_in_flight"] = m_cfg.max_builds_in_flight;
 	d["worker_threads"] = m_cfg.worker_threads;
 	d["query_iterations_per_tick"] = m_cfg.query_iterations_per_tick;
@@ -172,11 +173,11 @@ void NavServer::tick(double delta) {
 	std::vector<navcore::TileKey> changed;
 	m_tiles.update_wanted(m_store, m_interests, m_ground, changed);
 
-	// Phase 2: commit finished builds (the only place the nav mesh changes).
-	m_tiles.commit_finished(m_ground, m_cfg.commit_budget_ms, changed);
+	// Phase 2: commit the builds due on this tick (the only place the nav mesh changes).
+	m_tiles.commit_finished(m_ground, int64_t(m_ticks), changed);
 
 	// Phase 3: start new builds.
-	m_tiles.schedule(m_store, m_interests, m_links, m_pool);
+	m_tiles.schedule(m_store, m_interests, m_links, m_pool, int64_t(m_ticks));
 
 	// Phase 4: path searches against the now-stable nav mesh.
 	std::vector<navcore::PathOutcome> outcomes;
@@ -600,6 +601,14 @@ Dictionary NavServer::get_stats() const {
 	return d;
 }
 
+PackedInt64Array NavServer::get_landed_tiles() const {
+	PackedInt64Array out;
+	for (const navcore::TileKey &key : m_tiles.last_committed()) {
+		out.push_back((int64_t(key.x) << 32) | int64_t(uint32_t(key.z)));
+	}
+	return out;
+}
+
 bool NavServer::is_idle() const {
 	return m_pending_dirty.empty() && m_tiles.idle();
 }
@@ -647,6 +656,7 @@ void NavServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_tile_states"), &NavServer::get_tile_states);
 	ClassDB::bind_method(D_METHOD("get_stats"), &NavServer::get_stats);
 	ClassDB::bind_method(D_METHOD("is_idle"), &NavServer::is_idle);
+	ClassDB::bind_method(D_METHOD("get_landed_tiles"), &NavServer::get_landed_tiles);
 
 	ADD_SIGNAL(MethodInfo("path_ready", PropertyInfo(Variant::INT, "request_id"),
 			PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "points"), PropertyInfo(Variant::BOOL, "partial")));

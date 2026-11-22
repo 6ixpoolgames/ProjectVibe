@@ -27,7 +27,20 @@ void TileManager::reset(const NavConfig &cfg) {
 
 void TileManager::resync_after_pool_stop() {
 	std::lock_guard<std::mutex> lock(m_done_mutex);
-	m_in_flight = int(m_done.size());
+	// Builds that never ran are dropped from the landing order; the ones that finished still land on their ticks.
+	while (!m_done.empty()) {
+		const uint64_t seq = m_done.front()->seq;
+		m_finished.emplace(seq, std::move(m_done.front()));
+		m_done.pop_front();
+	}
+	std::deque<Dispatched> kept;
+	for (const Dispatched &d : m_dispatched) {
+		if (m_finished.count(d.seq)) {
+			kept.push_back(d);
+		}
+	}
+	m_dispatched.swap(kept);
+	m_in_flight = int(m_dispatched.size());
 	for (auto &kv : m_tiles) {
 		kv.second.in_flight_version = 0; // their builds may have been dropped; schedule() redoes them
 	}
@@ -115,22 +128,35 @@ void TileManager::update_wanted(const InputStore &store, const std::vector<Inter
 	}
 }
 
-void TileManager::commit_finished(GroundDomain &domain, double budget_ms, std::vector<TileKey> &changed) {
-	const auto t0 = Clock::now();
-	bool committed_any = false;
+std::unique_ptr<TileBuildResult> TileManager::wait_for(uint64_t seq) {
+	auto found = m_finished.find(seq);
+	if (found != m_finished.end()) {
+		std::unique_ptr<TileBuildResult> r = std::move(found->second);
+		m_finished.erase(found);
+		return r;
+	}
+	std::unique_lock<std::mutex> lock(m_done_mutex);
 	for (;;) {
-		if (committed_any && std::chrono::duration<double, std::milli>(Clock::now() - t0).count() >= budget_ms) {
-			break; // leave the rest for next tick; at least one commit always happens so we never stall
-		}
-		std::unique_ptr<TileBuildResult> r;
-		{
-			std::lock_guard<std::mutex> lock(m_done_mutex);
-			if (m_done.empty()) {
-				break;
-			}
-			r = std::move(m_done.front());
+		while (!m_done.empty()) {
+			std::unique_ptr<TileBuildResult> r = std::move(m_done.front());
 			m_done.pop_front();
+			if (r->seq == seq) {
+				return r;
+			}
+			const uint64_t other = r->seq;
+			m_finished.emplace(other, std::move(r));
 		}
+		// Still building: the tick waits for it here (a hitch on a machine too slow for build_delay_ticks).
+		m_done_cv.wait(lock, [this]() { return !m_done.empty(); });
+	}
+}
+
+void TileManager::commit_finished(GroundDomain &domain, int64_t tick, std::vector<TileKey> &changed) {
+	const auto t0 = Clock::now();
+	m_last_committed.clear();
+	while (!m_dispatched.empty() && m_dispatched.front().due <= tick) {
+		std::unique_ptr<TileBuildResult> r = wait_for(m_dispatched.front().seq);
+		m_dispatched.pop_front();
 		--m_in_flight;
 
 		if (r->generation != m_generation) {
@@ -173,7 +199,7 @@ void TileManager::commit_finished(GroundDomain &domain, double budget_ms, std::v
 		m_build_ms_total += r->build_ms;
 		m_build_ms_max = std::max(m_build_ms_max, r->build_ms);
 		changed.push_back(r->key);
-		committed_any = true;
+		m_last_committed.push_back(r->key);
 	}
 	m_last_commit_ms = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 	m_max_commit_ms = std::max(m_max_commit_ms, m_last_commit_ms);
@@ -192,7 +218,8 @@ float TileManager::priority(const TileRecord &t, const std::vector<Interest> &in
 	return best;
 }
 
-void TileManager::schedule(const InputStore &store, const std::vector<Interest> &interests, const std::vector<LinkDef> &links, WorkerPool &pool) {
+void TileManager::schedule(const InputStore &store, const std::vector<Interest> &interests, const std::vector<LinkDef> &links, WorkerPool &pool,
+		int64_t tick) {
 	int slots = m_cfg.max_builds_in_flight - m_in_flight;
 	if (slots <= 0) {
 		return;
@@ -207,8 +234,13 @@ void TileManager::schedule(const InputStore &store, const std::vector<Interest> 
 		}
 	}
 	const size_t n = std::min(candidates.size(), size_t(slots));
-	std::partial_sort(candidates.begin(), candidates.begin() + long(n), candidates.end(),
-			[](const auto &a, const auto &b) { return a.first < b.first; });
+	// Ties go by tile, so the same tiles start in the same order on every run, whatever order the map holds them in.
+	std::partial_sort(candidates.begin(), candidates.begin() + long(n), candidates.end(), [](const auto &a, const auto &b) {
+		if (a.first != b.first) {
+			return a.first < b.first;
+		}
+		return a.second->key.x != b.second->key.x ? a.second->key.x < b.second->key.x : a.second->key.z < b.second->key.z;
+	});
 
 	for (size_t i = 0; i < n; ++i) {
 		TileRecord &t = *candidates[i].second;
@@ -216,6 +248,8 @@ void TileManager::schedule(const InputStore &store, const std::vector<Interest> 
 		input->key = t.key;
 		input->version = t.version;
 		input->generation = m_generation;
+		input->seq = m_next_seq++;
+		m_dispatched.push_back({ input->seq, tick + std::max(m_cfg.build_delay_ticks, 0) });
 		input->cfg = m_cfg;
 		store.snapshot(tile_build_rect(m_cfg, t.key), input->snapshot); // references, not copies
 		// Placed links starting in this tile. Copied, so a link removed mid-build can't change it.
@@ -229,8 +263,11 @@ void TileManager::schedule(const InputStore &store, const std::vector<Interest> 
 		++m_in_flight;
 		pool.submit([this, input]() {
 			std::unique_ptr<TileBuildResult> r = build_ground_tile(*input);
-			std::lock_guard<std::mutex> lock(m_done_mutex);
-			m_done.push_back(std::move(r));
+			{
+				std::lock_guard<std::mutex> lock(m_done_mutex);
+				m_done.push_back(std::move(r));
+			}
+			m_done_cv.notify_one();
 		});
 	}
 }

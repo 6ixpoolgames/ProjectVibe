@@ -327,6 +327,7 @@ std::unique_ptr<TileBuildResult> build_ground_tile(const TileBuildInput &in) {
 	result->key = in.key;
 	result->version = in.version;
 	result->generation = in.generation;
+	result->seq = in.seq;
 
 	const NavConfig &cfg = in.cfg;
 	const int border = cfg.border_cells();

@@ -26,6 +26,7 @@ Loads the ground in chunks around the things that need it (players, cameras, spa
 - **`StreamingSource`** marks something as keeping the world loaded: add it as a child of a camera, a spawner, anything.
 - **`PawnStreamingSource`** is a pawn's, one of the game's default parts: it counts while a player has the pawn, or always with its `keeps_world_loaded` on (a hero), and uses the game's distances from `PawnDefaultsRes`. It's in the group only while it might count, so the streamer looks through a few nodes, not the whole army. Readers use the **source contract** (`global_position`, `load_distance`, `nav_distance`, `counts_on_this_machine()`, `distance_moved_since_last_check()`).
 - **`ChunkStreamer`** scores the chunks near every source, builds the nearest first in small steps within `max_ms_per_frame`, and unloads chunks past `load_distance + unload_margin`. Before each tick it builds any missing chunk a source is over or about to step onto, ignoring the budget, so the ground is always there.
+- **Chunks land on ticks** while the tick driver runs (state store spec 13.12). What's wanted is decided on ticks; each new chunk gets a landing tick (`landing_delay_ticks` on, at most `max_landings_per_tick` a tick); building stops just before publishing (its points, collision and nav), and the chunk is published before its landing tick runs, finished first if a slow machine hasn't (a hitch, counted as `landing_waits`). So the same start lands the same ground on the same ticks on any machine, and each landing goes in the `LandingLog`. Without a running tick driver (the editor), a chunk lands as soon as it's built.
 
 In multiplayer each machine streams for itself: the server around every player, a client around its own pawn. Terrain isn't sent: the same settings make the same ground everywhere.
 
@@ -57,6 +58,8 @@ A chunk loads within a source's `load_distance` but only unloads past `load_dist
 | `nav_distance` | `StreamingSource` | 128 m | Nav is built within this distance; 0 builds none |
 | `active` | `StreamingSource` | on | Whether it keeps the world loaded right now |
 | `max_ms_per_frame` | `ChunkStreamer` | 2 ms | Time a frame may spend building (at least one step always runs) |
+| `landing_delay_ticks` | `ChunkStreamer` | 30 (at 60 a second) | Ticks from when a chunk is wanted to when it lands; long enough to build it in the background |
+| `max_landings_per_tick` | `ChunkStreamer` | 2 | The most chunks landing on one tick, so a burst is spread out |
 | `unload_margin` | `ChunkStreamer` | 64 m | How far past `load_distance` a chunk stays, so edges don't rebuild |
 | `max_chunks_per_source` | `ChunkStreamer` | 256 | A safety limit; the nearest chunks win |
 | `hold_when_no_sources` | `ChunkStreamer` | on | With no active sources, keep everything loaded |

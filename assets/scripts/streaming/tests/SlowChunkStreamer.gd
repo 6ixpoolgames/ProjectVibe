@@ -36,6 +36,13 @@ func _build_next_step() -> void:
 	_slow_down(started)
 
 
+func _build_scheduled_step(key: Vector2i) -> bool: # Claude 2026-11-22: the scheduled build's step (landing on ticks)
+	var started := Time.get_ticks_usec()
+	var ready := super(key)
+	_slow_down(started)
+	return ready
+
+
 func _unload_next() -> void:
 	var started := Time.get_ticks_usec()
 	super()

@@ -15,6 +15,10 @@ None in this folder yet. Serving one terrain only is a "not yet" (streaming spec
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-22
+
+- **Chunks land on ticks** (state store spec 13.12, agreed with the owner after the determinism check found streaming a source of difference): with the tick driver running, what's wanted is decided on ticks, each new chunk gets a landing tick (`landing_delay_ticks`, `max_landings_per_tick`), frames build only up to publishing, and chunks are published before their landing tick runs (finished first if need be: `landing_waits`). Unloads happen before ticks too, in a fixed order. Each landing goes in the `LandingLog`. `get_landing_tick` (new); `queued` counts scheduled chunks. Without a running tick driver it works as before. Tests: the budget checks run with the driver paused; new `_test_landing_schedule` (the same ticks after asking, fast or slow); the tests' `_until_done` (and `terrain_edit_selftest`'s) waits on ticks, not drawn frames.
+
 ## 2026-11-19
 
 - **`PawnStreamingSource`** (new, a default pawn part): a pawn's streaming source, counting while a player has the pawn or with `keeps_world_loaded` on, with the game's distances (`PawnDefaultsRes`). It replaces the source contract the pawn held itself (pawn slimming: source), so every source is a `StreamingSource` node now.

@@ -16,6 +16,8 @@ Loads terrain chunks around every streaming source, and unloads the ones nothing
 
 Add it to the scene and set its `terrain` (a [`WorldCoordinator`](../world/REFERENCE.md#worldcoordinator) does this, and turns off the terrain's `build_on_start`), then add a [`StreamingSource`](#streamingsource) to whatever should keep the world loaded; a pawn that does is a source itself. Building a chunk is split into steps (`TerrainGenerator.build_chunk_step()`) and each frame runs steps until `max_ms_per_frame` is used up, so a slower machine finishes chunks later but its frames stay short. The chunks directly under a source are built at once, right before each tick, outside the budget, so a pawn has ground on its first tick. A chunk loads within a source's load_distance and only unloads past load_distance + `unload_margin`. Each machine runs its own streamer; terrain isn't sent, since the same settings build the same ground. Design: streaming spec (docs/streaming/STREAMING_SPEC.md).
 
+With the tick driver running, chunks land on ticks (state store spec 13.12): what's wanted is decided on ticks, each new chunk gets a landing tick (`landing_delay_ticks` on, no more than `max_landings_per_tick` a tick), building stops just before publishing (its points, collision and nav), and it's published before its landing tick runs, finishing it first if it isn't done. So the same start lands the same ground on the same ticks on any machine; each landing goes in the [`LandingLog`](../state_store/REFERENCE.md#landinglog).
+
 ### Settings and properties
 
 - `terrain: TerrainGenerator`: The terrain to load chunks for. If it's empty and this node's parent is a terrain, it uses the parent.
@@ -24,6 +26,8 @@ Add it to the scene and set its `terrain` (a [`WorldCoordinator`](../world/REFER
 - `max_chunks_per_source: int` = `256`: The most chunks loaded per active source, a safety limit against running out of memory. Per source because a server needs chunks around every player. At the defaults a source wants about 37 chunks.
 - `refresh_seconds: float` = `0.2`: How often to check where the sources are, in seconds. Shorter reacts faster and costs more.
 - `hold_when_no_sources: bool` = `true`: With no active sources, keeps every chunk loaded. Off: they all unload.
+- `landing_delay_ticks: int` = `30`: With the tick driver: ticks from when a chunk is wanted to when it lands, written for 60 ticks a second. Long enough for a machine to build it in the background; a machine that hasn't by then finishes it on that tick (a hitch).
+- `max_landings_per_tick: int` = `2`: With the tick driver: the most chunks landing on one tick, so a burst of new chunks is spread over ticks.
 
 ### Signals
 
@@ -38,7 +42,8 @@ Add it to the scene and set its `terrain` (a [`WorldCoordinator`](../world/REFER
 ### Functions
 
 - `get_stats() -> Dictionary`: How things stand right now, as numbers for tests, stress runs and on-screen displays.
-- `refresh_now() -> void`: Checks the sources now, instead of waiting for the next refresh.
+- `refresh_now() -> void`: Checks the sources now, instead of waiting for the next refresh. With the tick driver, before the next tick.
+- `get_landing_tick(key: Vector2i) -> int`: The tick a chunk is due to land on, or -1 if none is scheduled.
 
 ## PawnStreamingSource
 

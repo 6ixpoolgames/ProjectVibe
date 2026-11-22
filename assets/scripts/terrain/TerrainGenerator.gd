@@ -132,6 +132,7 @@ class _ChunkBuild:
 	var mesh := _MeshData.new()
 	var triangles := PackedVector3Array()
 	var next_edit := 0 # how far through this chunk's edits it has got
+	var held := false # stops before publishing: its points, collision and chunk_built wait for its landing tick (ChunkStreamer)
 
 
 ## The lists a mesh is made from. Each index of the first three describes one vertex.
@@ -276,8 +277,11 @@ func get_loaded_chunks() -> Array[Vector2i]:
 
 ## Does one small piece of building a chunk, and returns true once it's finished; call again with the same chunk to continue.
 ## ChunkStreamer uses it to spread a chunk over frames; several can be partly built at once. The result matches generate()'s.
+## [br]With hold, it stops just before publishing (the chunk's points, which height_at reads, its collision and [signal chunk_built])
+## and returns true once it's ready to publish; the chunk lands later, on its landing tick, through [method load_chunk] (state store
+## spec 13.12). Its mesh is only a picture, so it may show before.
 # So slower machines don't stall while a chunk loads. See POINTS_PER_STEP above.
-func build_chunk_step(key: Vector2i) -> bool:
+func build_chunk_step(key: Vector2i, hold := false) -> bool:
 	if has_chunk(key):
 		return true
 	if not _has_generated:
@@ -287,6 +291,7 @@ func build_chunk_step(key: Vector2i) -> bool:
 		build = _ChunkBuild.new()
 		build.points.resize(_points_per_edge() * _points_per_edge())
 		_building[key] = build
+	build.held = hold # a call without hold publishes it, however it was started
 
 	match build.stage:
 		Stage.POINTS:
@@ -303,8 +308,10 @@ func build_chunk_step(key: Vector2i) -> bool:
 			if _edit_log != null and build.next_edit < _edit_log.get_chunk_edit_count(key):
 				build.next_edit = _edit_log.apply_some_to_chunk(key, build.points, build.next_edit, EDITS_PER_STEP)
 				return false
-			# The points are only made public once they're complete, so height_at never reads half a chunk.
-			_points[key] = build.points
+			# The points are only made public once they're complete, so height_at never reads half a chunk; a held chunk's wait
+			# for its landing tick.
+			if not build.held:
+				_points[key] = build.points
 			if _wants_meshes():
 				_start_mesh_data(build.mesh)
 				build.stage = Stage.MESH_ROWS
@@ -312,7 +319,7 @@ func build_chunk_step(key: Vector2i) -> bool:
 				build.stage = Stage.COLLISION
 		Stage.MESH_ROWS:
 			var end_row := mini(build.next_row + _mesh_rows_per_step(), _mesh_row_count())
-			_fill_mesh_rows(build.mesh, key, build.next_row, end_row)
+			_fill_mesh_rows(build.mesh, key, build.next_row, end_row, build.points)
 			build.next_row = end_row
 			if end_row == _mesh_row_count():
 				build.stage = Stage.MESH_NODE
@@ -320,21 +327,50 @@ func build_chunk_step(key: Vector2i) -> bool:
 			_set_chunk_mesh(key, build.mesh.as_arrays())
 			build.stage = Stage.COLLISION
 		Stage.COLLISION:
-			build.triangles = _chunk_triangles(key)
+			build.triangles = _chunk_triangles(key, build.points)
 			if build_collision and not Engine.is_editor_hint():
-				_rebuild_collision(key, build.triangles)
+				# Built now, the slow part, but switched off until it's published.
+				_rebuild_collision(key, build.triangles, not build.held)
 			build.stage = Stage.ANNOUNCE
 		Stage.ANNOUNCE:
-			_building.erase(key)
-			chunk_built.emit(key, build.triangles)
+			if build.held:
+				return true # ready, waiting for its landing tick
+			_publish(key, build)
 			return true
 	return false
 
 
-## Builds a chunk completely, right now. Simple, but it takes several milliseconds, so it can show up as a stutter.
+## Builds a chunk completely, right now, and publishes it; a held chunk ([method build_chunk_step]) is finished and published. Simple,
+## but building takes several milliseconds, so it can show up as a stutter.
 func load_chunk(key: Vector2i) -> void:
 	while not build_chunk_step(key):
 		pass
+
+
+## True if a held chunk is built up to publishing, waiting for its landing tick.
+func is_chunk_ready_to_publish(key: Vector2i) -> bool:
+	var build: _ChunkBuild = _building.get(key)
+	return build != null and build.held and build.stage == Stage.ANNOUNCE
+
+
+# Makes a finished chunk part of play: its points (height_at), its collision, and chunk_built (nav, markers).
+func _publish(key: Vector2i, build: _ChunkBuild) -> void:
+	if not _points.has(key) and _edit_log != null and build.next_edit < _edit_log.get_chunk_edit_count(key):
+		# Dug while it waited for its landing tick (edits only reach published chunks): it catches up, and lands as edited.
+		build.next_edit = _edit_log.apply_some_to_chunk(key, build.points, build.next_edit, _edit_log.get_chunk_edit_count(key))
+		_points[key] = build.points
+		_building.erase(key)
+		_rebuild_mesh(key)
+		_rebuild_solid(key) # its collision, switched on, and chunk_built
+		return
+	if not _points.has(key):
+		_points[key] = build.points
+	var collision_node: CollisionShape3D = _collision_nodes.get(key)
+	if collision_node and collision_node.disabled:
+		collision_node.disabled = false
+		collision_built.emit(key, collision_node)
+	_building.erase(key)
+	chunk_built.emit(key, build.triangles)
 
 
 ## Removes a chunk: its mesh and collision, or what's built of them. [signal chunk_removed] goes out, so its nav data and markers go too.
@@ -632,8 +668,8 @@ func _apply_noise_settings() -> void:
 # a --- b
 # |  /  |
 # c --- d
-func _chunk_triangles(key: Vector2i) -> PackedVector3Array:
-	var points: PackedVector3Array = _points[key]
+func _chunk_triangles(key: Vector2i, own_points := PackedVector3Array()) -> PackedVector3Array:
+	var points: PackedVector3Array = own_points if not own_points.is_empty() else _points[key]
 	var n := _points_per_edge()
 	var triangles := PackedVector3Array()
 	triangles.resize(chunk_resolution * chunk_resolution * 6)
@@ -719,19 +755,20 @@ func _mesh_rows_per_step() -> int:
 	return maxi(1, SQUARES_PER_STEP / chunk_resolution)
 
 
-func _fill_mesh_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int) -> void:
+# own_points: the chunk's points while it isn't published yet; empty reads the published ones.
+func _fill_mesh_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int, own_points := PackedVector3Array()) -> void:
 	if smooth_shading:
-		_fill_smooth_rows(data, key, from_row, to_row)
+		_fill_smooth_rows(data, key, from_row, to_row, own_points)
 	else:
-		_fill_flat_rows(data, key, from_row, to_row)
+		_fill_flat_rows(data, key, from_row, to_row, own_points)
 
 
-func _fill_flat_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int) -> void:
+func _fill_flat_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int, own_points := PackedVector3Array()) -> void:
 	# Packed arrays are shared, not copied, when assigned like this, so writing to these locals fills the lists in data (and is quicker).
 	var vertices := data.vertices
 	var normals := data.normals
 	var uvs := data.uvs
-	var points: PackedVector3Array = _points[key]
+	var points: PackedVector3Array = own_points if not own_points.is_empty() else _points[key]
 	var n := _points_per_edge()
 	var start_x := key.x * chunk_size
 	var start_z := key.y * chunk_size
@@ -772,12 +809,12 @@ func _fill_flat_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int)
 			next += 6
 
 
-func _fill_smooth_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int) -> void:
+func _fill_smooth_rows(data: _MeshData, key: Vector2i, from_row: int, to_row: int, own_points := PackedVector3Array()) -> void:
 	var vertices := data.vertices
 	var normals := data.normals
 	var uvs := data.uvs
 	var indices := data.indices
-	var points: PackedVector3Array = _points[key]
+	var points: PackedVector3Array = own_points if not own_points.is_empty() else _points[key]
 	var n := _points_per_edge()
 	for z in range(from_row, to_row):
 		for x in n:
@@ -836,7 +873,8 @@ func _rebuild_solid(key: Vector2i) -> void:
 	chunk_built.emit(key, triangles)
 
 
-func _rebuild_collision(key: Vector2i, triangles: PackedVector3Array) -> void:
+# live off: built switched off, for a held chunk, and switched on (and announced) when it's published.
+func _rebuild_collision(key: Vector2i, triangles: PackedVector3Array, live := true) -> void:
 	var collision_node: CollisionShape3D = _collision_nodes.get(key)
 	if collision_node == null:
 		# Godot's physics needs a body, with a collision shape inside it. A static body is one that never moves.
@@ -847,7 +885,9 @@ func _rebuild_collision(key: Vector2i, triangles: PackedVector3Array) -> void:
 		add_child(body)
 		_collision_nodes[key] = collision_node
 	(collision_node.shape as ConcavePolygonShape3D).set_faces(triangles)
-	collision_built.emit(key, collision_node)
+	collision_node.disabled = not live
+	if live:
+		collision_built.emit(key, collision_node)
 
 
 # --- Reading the ground ---
