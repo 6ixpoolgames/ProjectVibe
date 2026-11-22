@@ -17,6 +17,7 @@ None in this folder yet. Related: `TerrainSettings`, which describes a terrain, 
 
 ## 2026-11-22
 
+- **A held chunk's collision stays out of the scene until it's published,** rather than switched off. `SightGeometry` (line of sight, and the crowd mover's ground) leaves switched-off shapes out and never noticed them switched on, so chunks landed through the schedule were missing from it: sight saw through that ground and soldiers there fell back to physics movement. Now the body enters the scene when the chunk lands, and everything following the scene's bodies sees it arrive.
 - **Held chunks** (state store spec 13.12): `build_chunk_step(key, hold)` builds up to publishing and stops: the chunk's points (what `height_at` reads), its collision (built, switched off) and `chunk_built` wait until it's published by `load_chunk`, on its landing tick. `is_chunk_ready_to_publish` (new). A held chunk dug while it waited catches up on its edits when it lands. The mesh and collision builders read the build's own points, so nothing reads half-published ground.
 
 ## 2026-11-21

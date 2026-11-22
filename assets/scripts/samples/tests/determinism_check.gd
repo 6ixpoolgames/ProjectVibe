@@ -25,6 +25,10 @@ var _dump_from := -1
 var _dump_to := -1
 var _ladder := false
 var _workers := -2 # -2: leave the machine's setting
+var _trace_name := "" # --trace=NAME: one pawn's unrounded position and velocity at each stage of the ticks below
+var _trace_from := -1
+var _trace_to := -1
+var _trace: FileAccess = null
 var _out: FileAccess = null
 var _names: FileAccess = null
 var _labelled := {} # handles already named in the .names file
@@ -55,6 +59,12 @@ func _ready() -> void:
 				_ladder = true
 			"workers":
 				_workers = int(value)
+			"trace":
+				_trace_name = value
+			"trace-from":
+				_trace_from = int(value)
+			"trace-to":
+				_trace_to = int(value)
 	if _out_path == "":
 		push_error("determinism_check: give --out=PATH")
 		get_tree().quit(2)
@@ -75,8 +85,26 @@ func _ready() -> void:
 	add_child(arena)
 	await get_tree().physics_frame
 	TickDriver.after_tick.connect(_on_after_tick)
+	if _trace_name != "":
+		_trace = FileAccess.open(_out_path + ".trace", FileAccess.WRITE)
+		TickDriver.before_tick.connect(func(_dt: float, tick: int) -> void: _trace_pawn(tick, "before_tick"))
+		TickDriver.after_simulate.connect(func(_dt: float, tick: int) -> void: _trace_pawn(tick, "after_simulate"))
+		TickDriver.after_tick.connect(func(_dt: float, tick: int) -> void: _trace_pawn(tick, "after_tick"))
 	arena._start_offline()
 	print("--- Determinism check: team size %d, %d ticks, load ladder %s ---" % [_size, _ticks, "on" if _ladder else "off"])
+
+
+# One line about the traced pawn, its values unrounded.
+func _trace_pawn(tick: int, stage: String) -> void:
+	if tick < _trace_from or tick > _trace_to:
+		return
+	var pawn := find_child(_trace_name, true, false) as Node3D
+	if pawn == null:
+		return
+	var p := pawn.global_position
+	var v: Vector3 = pawn.get(&"velocity") if &"velocity" in pawn else Vector3.ZERO
+	_trace.store_line("%d\t%s\tpos %.9f %.9f %.9f\tvel %.9f %.9f %.9f" % [tick, stage, p.x, p.y, p.z, v.x, v.y, v.z])
+	_trace.flush()
 
 
 # After the commit: the frame's checksum and a hash of every entity's row, gathered a column at a time.

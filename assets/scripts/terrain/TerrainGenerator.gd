@@ -365,10 +365,9 @@ func _publish(key: Vector2i, build: _ChunkBuild) -> void:
 		return
 	if not _points.has(key):
 		_points[key] = build.points
-	var collision_node: CollisionShape3D = _collision_nodes.get(key)
-	if collision_node and collision_node.disabled:
-		collision_node.disabled = false
-		collision_built.emit(key, collision_node)
+	var held_body: Node = _collision_nodes[key].get_parent() if _collision_nodes.has(key) else null
+	if held_body and held_body.get_parent() == null:
+		_add_collision_to_scene(key)
 	_building.erase(key)
 	chunk_built.emit(key, build.triangles)
 
@@ -873,7 +872,8 @@ func _rebuild_solid(key: Vector2i) -> void:
 	chunk_built.emit(key, triangles)
 
 
-# live off: built switched off, for a held chunk, and switched on (and announced) when it's published.
+# live off: built but kept out of the scene, for a held chunk, until it's published (_add_collision_to_scene). Out of the scene rather
+# than switched off, because whatever follows the scene's bodies (physics, SightGeometryFeeder) then sees it arrive.
 func _rebuild_collision(key: Vector2i, triangles: PackedVector3Array, live := true) -> void:
 	var collision_node: CollisionShape3D = _collision_nodes.get(key)
 	if collision_node == null:
@@ -882,12 +882,21 @@ func _rebuild_collision(key: Vector2i, triangles: PackedVector3Array, live := tr
 		collision_node.shape = ConcavePolygonShape3D.new()
 		var body := StaticBody3D.new()
 		body.add_child(collision_node)
-		add_child(body)
 		_collision_nodes[key] = collision_node
 	(collision_node.shape as ConcavePolygonShape3D).set_faces(triangles)
-	collision_node.disabled = not live
 	if live:
-		collision_built.emit(key, collision_node)
+		_add_collision_to_scene(key)
+
+
+# Puts a chunk's collision body in the scene, if it isn't, and announces it.
+func _add_collision_to_scene(key: Vector2i) -> void:
+	var collision_node: CollisionShape3D = _collision_nodes.get(key)
+	if collision_node == null:
+		return
+	var body := collision_node.get_parent()
+	if body.get_parent() == null:
+		add_child(body)
+	collision_built.emit(key, collision_node)
 
 
 # --- Reading the ground ---
@@ -984,7 +993,8 @@ func _forget_chunk(key: Vector2i) -> void:
 		_mesh_nodes.erase(key)
 	if _collision_nodes.has(key):
 		var body: Node = _collision_nodes[key].get_parent()
-		remove_child(body)
+		if body.get_parent() == self:
+			remove_child(body)
 		body.queue_free()
 		_collision_nodes.erase(key)
 	_points.erase(key)
