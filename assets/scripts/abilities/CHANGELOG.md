@@ -20,6 +20,7 @@ The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was red
 
 ## 2026-11-22
 
+- **Owned tags** (tag spec step 2): a running timed ability's category and extra categories are owned by its pawn (`OwnedTags`), set from `ends_at`'s setter so a rollback or snapshot sets them too. The Death ability adds `status.dead` while it runs, under its own source name.
 - **Ability tags have their category** (tag spec step 1): `ability.combat.melee`, `ability.movement.dash`; constants are `Tags.ABILITY.*`. The Death ability's category is `ability.death` (it was `status.dead`). Ability resources were rewritten to the new names.
 - **Tidying:** `HitQuery.line_centres` (new) gives the spheres along a line, for a projectile's flight, hitscan and the shooter's own copy, which each built them. A sweep step's own `hit` has its variants applied, as the ability's does. The physics fallback keeps its query between calls again.
 - **Hitscan** (`ProjectileDefinition.hitscan`, `tracer_seconds`; the owner's request): the whole line checked on the tick it's fired, as the shooter saw it, then a tracer; `PredictedProjectile` traces its own. **`HitDefinition.lands_without_source`**: a hit lands when its source is gone, with the effects it set off with (`HitRun.remember_source`). Each projectile keeps its shooter's entity until it ends (`Pawn.linger_until`).

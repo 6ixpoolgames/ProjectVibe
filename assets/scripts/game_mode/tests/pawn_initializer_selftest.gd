@@ -10,7 +10,7 @@ const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const STATS_PART := "res://assets/scenes/pawn/parts/StatManager.tscn"
 # Claude 2026-11-09: the AI parts joined the defaults (pawn spec steps 8a and 8b).
 # Claude 2026-11-10: EffectManager is a default part now (pawn spec 8.11).
-const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"EffectManager", &"AbilityManager", &"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3)
+const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"OwnedTags", &"EffectManager", &"AbilityManager", &"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3); Claude 2026-11-22: owned tags (tag spec step 2)
 
 
 func _ready() -> void:
@@ -57,7 +57,8 @@ func _test_default_parts() -> void:
 	_check(pawn.controller_manager == pawn.get_node(^"ControllerManager"), "and the pawn knows its ControllerManager")
 	var first := pawn.get_node(^"ControllerManager").get_index()
 	# Claude 2026-11-08: NavigationManager is second now. Claude 2026-11-10: and EffectManager between StatManager and AbilityManager.
-	_check(pawn.get_node(^"NavigationManager").get_index() == first + 1 and pawn.get_node(^"StatManager").get_index() == first + 2 and pawn.get_node(^"EffectManager").get_index() == first + 3 and abilities.get_index() == first + 4,
+	# Claude 2026-11-22: OwnedTags between StatManager and EffectManager.
+	_check(pawn.get_node(^"NavigationManager").get_index() == first + 1 and pawn.get_node(^"StatManager").get_index() == first + 2 and pawn.get_node(^"OwnedTags").get_index() == first + 3 and pawn.get_node(^"EffectManager").get_index() == first + 4 and abilities.get_index() == first + 5,
 			"in the list's order, after the scene's own children")
 	_check(pawn.get_node_or_null(^"TickState") != null and pawn.get_node_or_null(^"NetworkEntity") != null, "TickState and NetworkEntity stay in the scene")
 	pawn.free()

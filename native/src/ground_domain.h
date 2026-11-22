@@ -69,6 +69,12 @@ public:
 	// Returns: 0 = still running, 1 = done (call finish_sliced), -1 = failed (nav changed under it)
 	int step_sliced(int max_iterations, int &used);
 	void finish_sliced(PathOutcome &out);
+	// The current sliced search's snapped start and end: polygons and points. For PathQueue's debug log.
+	void sliced_endpoints(uint64_t &start_ref, uint64_t &end_ref, float *start_pos, float *end_pos) const;
+	// Every polygon a snap near p could pick, for PathQueue's debug log: per polygon, its ref, whether p is over it, and the closest
+	// point on it (4 + 3 numbers: ref, over, then x y z as floats).
+	void debug_snap_candidates(const float *p, int tier, bool use_links, std::vector<uint64_t> &refs, std::vector<uint8_t> &over,
+			std::vector<float> &closest) const;
 
 	// ---- debug ------------------------------------------------------------------------------
 	// Triangles of every tile overlapping r, in Godot winding, plus one colour per vertex (by tier).

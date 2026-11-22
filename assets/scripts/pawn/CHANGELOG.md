@@ -16,6 +16,7 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 
 ## 2026-11-22
 
+- **`owned_tags`** (tag spec step 2): a reference to the pawn's `OwnedTags` part, which the part sets as it enters, like the others.
 - **A despawned pawn lingers while its projectiles fly** (ability spec 13.5): `linger_until()` (new) keeps its entity to the last one's end; while it lingers it's frozen, hidden and has no collision layer (`_on_lingering_started`).
 
 ## 2026-11-21

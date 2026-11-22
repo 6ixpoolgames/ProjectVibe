@@ -43,6 +43,8 @@ static var _deprecated: Dictionary = {}    # StringName tag -> true
 static var _frozen := false                # true once bits are handed out; after that, new tags are appended
 static var _loaded_files := false
 static var _warned: Dictionary = {}
+## Goes up by one on every [method reset], so code that caches bits (a [TagQuery], [OwnedTags]) knows to work them out again.
+static var generation := 0
 
 
 # --- Setup -------------------------------------------------------------------------------------
@@ -85,6 +87,7 @@ static func reset(read_declarations_files := true) -> void:
 	_warned.clear()
 	_frozen = false
 	_loaded_files = not read_declarations_files
+	generation += 1
 
 
 # --- Queries -----------------------------------------------------------------------------------
@@ -98,6 +101,12 @@ static func bit_of(tag) -> int:
 	if not _bit_of.has(t):
 		_add_late(t, "not declared")
 	return _bit_of.get(t, -1)
+
+
+## Like [method bit_of], but never adds the tag: -1 for one that has no bit yet. For queries, which never add tags.
+static func known_bit_of(tag) -> int:
+	_ensure_ready()
+	return _bit_of.get(normalize(tag), -1)
 
 
 ## Just the tag's own bit as a mask (no parents). Use for lockouts and resistances: "lock ability.combat" = own_bit(ability.combat).

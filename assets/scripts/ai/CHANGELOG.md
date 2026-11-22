@@ -20,6 +20,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Decision records as a replay channel | `ai/debug/AIDecisionRecorder.gd` | A second recording mechanism with its own storage and file format, beside `ReplayRecorder`, the one place that records everything. An "AI decisions" channel (off by default; 31 MB of JSON for 40 s at 150 pawns) would put them in the replay file, and the shadow comparison could read it live or from a file (the owner's call, 2026-11-17: logged, not now) | M |
 | The sprint action's name as a setting | `&"sprint"` in `AIChaseBehaviour`, `AISearchBehaviour`, `AIInvestigateBehaviour`, `AIKeepDistanceBehaviour` | Written into the code, so a game that names its sprint action differently has to edit four behaviours. A setting, or a tag as Chase's `close_in_tag` is, would need no code | S |
 
+## 2026-11-22
+
+- **Owned tags** (tag spec step 2): the pawn owns its AI state's tag (`OwnedTags`). `AIStateBase.tag` sets it; empty, it's `ai.state.<node name in snake case>` (`get_tag`). The default states' tags are declared: `ai.state.idle`, `ai.state.alert`, `ai.state.combat`.
+
 ## 2026-11-19
 
 - **Tells its pawn it's there** (state store step 3): its `_enter_tree` sets the pawn's reference to it, if the pawn has none yet, instead of the pawn looking through its children in `_ready`. The reference is there before any part's `_ready`.

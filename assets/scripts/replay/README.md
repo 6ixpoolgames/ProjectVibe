@@ -46,6 +46,8 @@ GameMode.replay_recorder.add_channel(MyChannel.new())
 ```
 Add it to the reader too (`ReplayReader.add_channel`) to read it back; a reader without it skips its bytes.
 
+**Compare two recordings.** `python tools/determinism/compare_replays.py A.pbreplay B.pbreplay` (or `--latest`, the two newest headless ones) names the first tick where they differ, which pawn and which field, with both values, then how many ticks and pawns differ in all. `--sessions 3 --size 100 --ticks 3600` plays the mass battle in 3 separate headless sessions first, so it checks determinism across sessions from the replays alone (state store spec 13.11). It compares what the recording keeps: positions to the millimetre, yaw and velocity as half floats, flags, input and events.
+
 **Read a recording in code.** `var reader := ReplayReader.new()`, `reader.open(path)`, then `reader.get_frame(tick)` and `reader.get_events(from, to)`.
 
 ## How it works

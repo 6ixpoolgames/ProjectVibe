@@ -205,6 +205,7 @@ var ends_at := -1:
 		if manager and flips:
 			manager.timers_changed()
 		if flips:
+			_set_owned_tags(value >= 0)
 			_running_changed(value >= 0)
 ## The tick it can start again: ready from this tick on.
 var ready_at := 0:
@@ -517,6 +518,21 @@ func is_buffered() -> bool:
 ## Called when a timed run starts or ends, also when a rollback loads new values. [DeathAbility] uses it to keep [code]Pawn.dead[/code] current.
 func _running_changed(_running: bool) -> void:
 	pass
+
+
+# While a timed run goes, the pawn owns its category and extra categories (tag spec 3). From the ends_at setter, so a rollback or a
+# snapshot that loads a run sets them too, on every machine.
+func _set_owned_tags(running: bool) -> void:
+	var owned: OwnedTags = pawn.owned_tags if pawn else null
+	if owned == null:
+		return
+	if not running:
+		owned.clear_source(self)
+		return
+	var tags: Array = extra_categories.duplicate()
+	if category != &"":
+		tags.push_front(category)
+	owned.set_source(self, tags)
 
 
 # --- Steps (pawn spec 8.20) ---

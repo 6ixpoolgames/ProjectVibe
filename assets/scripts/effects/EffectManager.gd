@@ -41,6 +41,7 @@ var active_effects: PackedInt64Array:
 	set(value):
 		_entries = value
 		_dirty = true
+		_set_owned_tags() # at once, unlike the rest: a client never counts down the effects of pawns it only draws
 
 ## The pawn it belongs to (its parent).
 var pawn: Pawn = null
@@ -367,6 +368,19 @@ func _refresh() -> void:
 	_resistance_bits = totals.resistance_bits
 	_stat_changes = totals.stat_changes
 	_apply_stat_changes()
+	_set_owned_tags()
+
+
+# The pawn owns every active effect's tags, once per effect whatever its stacks (tag spec 3).
+func _set_owned_tags() -> void:
+	if pawn == null or pawn.owned_tags == null:
+		return
+	var tags: Array[StringName] = []
+	for at in range(0, _entries.size(), STRIDE):
+		var effect := Effect.find(_entries[at + ID])
+		if effect:
+			tags.append_array(effect.tags)
+	pawn.owned_tags.set_source(self, tags)
 
 
 # Every stat a held part changes now, or changed before, set from its base value.

@@ -16,6 +16,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-22
 
+- **Owned tags** (tag spec step 2): the pawn owns every active effect's tags (`OwnedTags`), once per effect whatever its stacks. Set again on every refresh, and at once when a rollback or snapshot loads `active_effects`, since a client never counts down the effects of pawns it only draws.
 - **Effect tags joined the one tag registry** (tag spec step 1): `EffectTags` is gone; effect tags are the `effect` category of `TagRegistry` (`effect.damage.elemental.fire`), with constants in `Tags.EFFECT`, declared in `resources/tag_declarations.tres` (`effect_tag_declarations.tres` merged into it). Saved effects were rewritten to the new names.
 
 ## 2026-11-19

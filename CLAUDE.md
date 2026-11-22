@@ -27,7 +27,7 @@ A Godot 4.7 base for real-time 3D games (GDScript, with hot paths in a C++ GDExt
 - **Godot:** the editor binary beside the project folder (`../Godot_v4.7.2-stable_win64_console.exe`). Never run two Godot processes at once, and don't edit `project.godot` while the editor is open.
 - **C++ library:** `python -m SCons -j8` in `native/` (godot-cpp 10, Godot 4.7's API), with the editor closed (it holds the DLL). Linux builds in WSL (see `CLAUDE.local.md`); the Linux `.so` isn't committed.
 - **Docs:** each system folder has a `README.md`, a generated `REFERENCE.md` (`python tools/docs/make_reference.py <system>`) and a `CHANGELOG.md`. Tags: `tools/tags/apply_redirects.py` (rewrites renamed tags in saved files) and `make_tag_reference.py` (`docs/tags/TAGS.md`). Also `make_class_index.py`, `check_links.py`, `check_comments_only.py` (proves a cleanup changed only comments) and `build_wiki.py` (the wiki, published by GitHub Actions on push). Rules: `tools/docs/README.md`.
-- **Determinism:** `python tools/determinism/run_determinism_check.py` plays the mass battle several times and names the first entity and column that differ (state store spec 13.11).
+- **Determinism:** `python tools/determinism/run_determinism_check.py` plays the mass battle several times and names the first entity and column that differ (state store spec 13.11). Across separate sessions, from their replay recordings: `python tools/determinism/compare_replays.py --sessions 3 --size 100` (or two files, or `--latest`).
 - **Measuring:** `samples/tests/mass_battle_measure.tscn` (`-- --size=N --scopes`, `--ai-shadow`, `--ai-gdscript`), and `mass_battle_net_measure.tscn` over a real network; F4 in a sample shows timings.
 
 ## Map

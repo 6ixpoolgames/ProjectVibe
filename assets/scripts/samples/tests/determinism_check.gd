@@ -28,6 +28,10 @@ var _workers := -2 # -2: leave the machine's setting
 var _trace_name := "" # --trace=NAME: one pawn's unrounded position and velocity at each stage of the ticks below
 var _trace_from := -1
 var _trace_to := -1
+var _paths_to := -1 # --paths-to=TICK: every pawn's path state each tick up to then, goals and corners as exact bits, to PATH.paths
+var _paths: FileAccess = null
+var _path_log: FileAccess = null # with --paths-to, the nav server's path search log (NavServer.debug_log_path_steps), to PATH.pathlog
+var _nav_dump_tick := -1 # --nav-dump=TICK: every nav mesh triangle at the end of that tick, bit for bit, to PATH.nav
 var _trace: FileAccess = null
 var _out: FileAccess = null
 var _names: FileAccess = null
@@ -65,11 +69,18 @@ func _ready() -> void:
 				_trace_from = int(value)
 			"trace-to":
 				_trace_to = int(value)
+			"nav-dump":
+				_nav_dump_tick = int(value)
+			"paths-to":
+				_paths_to = int(value)
 	if _out_path == "":
 		push_error("determinism_check: give --out=PATH")
 		get_tree().quit(2)
 		return
 	_out = FileAccess.open(_out_path, FileAccess.WRITE)
+	if _paths_to >= 0 and Engine.has_singleton(&"NavServer"):
+		Engine.get_singleton(&"NavServer").debug_log_path_steps(true)
+		_path_log = FileAccess.open(_out_path + ".pathlog", FileAccess.WRITE)
 	_names = FileAccess.open(_out_path + ".names", FileAccess.WRITE)
 	if _dump_path != "":
 		_dump = FileAccess.open(_dump_path, FileAccess.WRITE)
@@ -90,8 +101,55 @@ func _ready() -> void:
 		TickDriver.before_tick.connect(func(_dt: float, tick: int) -> void: _trace_pawn(tick, "before_tick"))
 		TickDriver.after_simulate.connect(func(_dt: float, tick: int) -> void: _trace_pawn(tick, "after_simulate"))
 		TickDriver.after_tick.connect(func(_dt: float, tick: int) -> void: _trace_pawn(tick, "after_tick"))
+		# Claude 2026-11-23: and every AI decision the traced pawn makes, with what it was made from (the inputs it read).
+		AIBehaviourManager.decision_listener = func(record: AIDecisionRecord, _manager: AIBehaviourManager) -> void:
+			if record.pawn_name == StringName(_trace_name) and record.tick >= _trace_from and record.tick <= _trace_to:
+				_trace.store_line("%d\tdecision\t%s" % [record.tick, JSON.stringify(record.to_dict())])
 	arena._start_offline()
 	print("--- Determinism check: team size %d, %d ticks, load ladder %s ---" % [_size, _ticks, "on" if _ladder else "off"])
+
+
+# The decision listener is static: left set, it would outlive this scene and crash Godot as it quits.
+func _exit_tree() -> void:
+	AIBehaviourManager.decision_listener = Callable()
+	if _path_log and Engine.has_singleton(&"NavServer"):
+		Engine.get_singleton(&"NavServer").debug_log_path_steps(false)
+
+
+# Claude 2026-11-23: every nav mesh triangle as the nav server has it now (its debug triangles, the whole world), as raw bytes, so
+# two machines' nav meshes can be compared bit for bit.
+func _dump_nav() -> void:
+	if not Engine.has_singleton(&"NavServer"):
+		return
+	var nav: Object = Engine.get_singleton(&"NavServer")
+	var world := AABB(Vector3(-100000, -10000, -100000), Vector3(200000, 20000, 200000))
+	var found: Dictionary = nav.get_debug_triangles(world)
+	var file := FileAccess.open(_out_path + ".nav", FileAccess.WRITE)
+	file.store_buffer((found.vertices as PackedVector3Array).to_byte_array())
+	# And the links (jumps and the like, some made from the ground's shape), which searches can cross, and every tile's state.
+	var links: Dictionary = nav.get_debug_links(world)
+	var link_file := FileAccess.open(_out_path + ".links", FileAccess.WRITE)
+	link_file.store_buffer(var_to_bytes(links))
+	link_file.store_buffer(var_to_bytes(nav.get_tile_states()))
+	print("--- Nav dump: %d triangles, %d links ---" % [(found.vertices as PackedVector3Array).size() / 3, (links.values()[0] as Variant).size() if not links.is_empty() else 0])
+
+
+# Claude 2026-11-23: one line per pawn with a path state: its state, queued search, ticks waited, and its goal and corners as exact
+# bits (hex), so two machines can be compared to find the first search that answered differently.
+func _write_paths(tick: int) -> void:
+	if _paths == null:
+		_paths = FileAccess.open(_out_path + ".paths", FileAccess.WRITE)
+	if _path_log:
+		var nav: Object = Engine.get_singleton(&"NavServer")
+		_path_log.store_buffer((nav.take_debug_path_log() as PackedInt64Array).to_byte_array())
+		if tick == _paths_to:
+			nav.debug_log_path_steps(false)
+	for pawn in get_tree().get_nodes_in_group(Pawn.GROUP):
+		var nav: NavigationManager = pawn.navigation_manager
+		if nav == null or nav._state == NavigationManager.PathState.NONE:
+			continue
+		_paths.store_line("%d	%s	state %d request %d pending %d	goal %s	corners %s" % [tick, pawn.name, nav._state,
+			nav._path_request, nav._pending_ticks, var_to_bytes(nav._goal).hex_encode(), var_to_bytes(nav._corners).hex_encode()])
 
 
 # One line about the traced pawn, its values unrounded.
@@ -103,7 +161,20 @@ func _trace_pawn(tick: int, stage: String) -> void:
 		return
 	var p := pawn.global_position
 	var v: Vector3 = pawn.get(&"velocity") if &"velocity" in pawn else Vector3.ZERO
-	_trace.store_line("%d\t%s\tpos %.9f %.9f %.9f\tvel %.9f %.9f %.9f" % [tick, stage, p.x, p.y, p.z, v.x, v.y, v.z])
+	var line := "%d\t%s\tpos %.9f %.9f %.9f\tvel %.9f %.9f %.9f" % [tick, stage, p.x, p.y, p.z, v.x, v.y, v.z]
+	# Claude 2026-11-23: and at the tick's end, the input it acted on (what the input phase decided: the AI's move and actions), to
+	# tell a different decision from a different move.
+	var controllers: ControllerManager = pawn.get(&"controller_manager")
+	if stage == "after_simulate" and controllers:
+		var m := controllers.move_input
+		line += "\tmove %.9f %.9f %.9f actions %d" % [m.x, m.y, m.z, controllers.held_actions]
+	# And where its path stands: the state, a queued search, how long it has waited, and its corners.
+	var nav: NavigationManager = pawn.get(&"navigation_manager")
+	if stage == "after_simulate" and nav:
+		line += "\tpath state %d request %d pending %d corners %d" % [nav._state, nav._path_request, nav._pending_ticks, nav._corners.size()]
+		if nav._corners.size() > 1:
+			line += " first corner %s" % [nav._corners[1]]
+	_trace.store_line(line)
 	_trace.flush()
 
 
@@ -111,6 +182,10 @@ func _trace_pawn(tick: int, stage: String) -> void:
 func _on_after_tick(_dt: float, tick: int) -> void:
 	if _first_tick < 0:
 		_first_tick = tick
+	if tick == _nav_dump_tick:
+		_dump_nav()
+	if tick <= _paths_to:
+		_write_paths(tick)
 	var store: Object = TickDriver.store
 	var rows := {} # handle -> its row's values
 	var names := {} # layout -> its column names, for the dump

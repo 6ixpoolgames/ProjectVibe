@@ -87,6 +87,9 @@ var controller_manager: ControllerManager = null
 var navigation_manager: NavigationManager = null
 ## Shared data and settings for this pawn's AI (pawn spec 10), and the AI's core. Null if the pawn has no AI.
 var ai_context: AIContextComponent = null
+## The tags this pawn owns right now (dead, in combat, a running ability's kind), which tag queries ask about (tag spec 3). Null if it
+## has none, and then it owns nothing.
+var owned_tags: OwnedTags = null
 ## Keeps the world loaded around this pawn while a player has it (or always, with its keeps_world_loaded on). Null if it has none,
 ## and then it never does.
 var streaming_source: PawnStreamingSource = null

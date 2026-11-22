@@ -4,8 +4,75 @@
 
 Every class in `assets/scripts/tags/`, from its doc comments. The overview is in [README.md](README.md).
 
+- [OwnedTags](#ownedtags)
+- [TagQuery](#tagquery)
 - [TagRegistry](#tagregistry)
 - [Tags](#tags)
+
+## OwnedTags
+
+`res://assets/scripts/tags/OwnedTags.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
+
+The tags a pawn owns right now, counted: what a [`TagQuery`](#tagquery) asks about ("is it in combat, dead, out of ammo?"). Tag spec 3.
+
+A part on the pawn, added by PawnInitializer; `pawn.owned_tags`. A tag is owned while its count is above 0, and owning a tag owns its parents too (`ability.combat.melee` answers to `ability.combat`). Two kinds of adding:
+- **Sources:** the pawn's parts say which tags they add now, and each new list replaces their last (`set_source()`). A running timed ability adds its category and extra categories, held effects their tags, the Death ability `status.dead`, the AI state manager its state's tag. Those follow state that already rolls back, so they're set again when a rollback loads it.
+- **Loose tags:** what game code adds itself (`add()`, `remove()`). Counted, pushed to the state store and rolled back, so a client's prediction agrees with the server.
+
+```gdscript
+pawn.owned_tags.add(&"status.burning")          # a loose tag; remove() it as many times as it was added
+pawn.owned_tags.has(Tags.STATUS.DEAD)           # owned, or a tag under it is
+query.matches(pawn.owned_tags)                  # a TagQuery: all of / any of / none of
+```
+
+### Settings and properties
+
+- `pawn: Pawn` = `null`: The pawn it belongs to (its parent), or null outside a pawn.
+- `loose_counts: Dictionary`: Loose tags and their counts, {tag: count}: rolled back (a pushed entry in the pawn's TickStateComponent). Change them with `add()` and `remove()`; setting the whole list is for rollback and snapshots.
+
+### Signals
+
+- `changed(tag: StringName, owned: bool)`: A tag became owned (owned true) or stopped being owned. Only for the tag itself, not its parents. Fires during a rollback too.
+
+### Functions
+
+- `has(tag: StringName) -> bool`: True if this tag, or a tag under it, is owned. Never adds a tag: one that was never declared or owned is never owned.
+- `count_of(tag: StringName) -> int`: How many times this exact tag is owned now, over every source and the loose tags (not counting tags under it).
+- `matches(query: TagQuery) -> bool`: True if the query passes for these tags: the same as `query.matches(self)`. A null query passes.
+- `get_owned() -> StringName[]`: Every tag owned now (not their parents), sorted. For readouts and tests.
+- `get_words() -> PackedInt64Array`: The owned tags as bits: one word per category, in `TagRegistry.get_categories()` order, parents included. Don't change it.
+- `add(tag: StringName, count: int = 1) -> void`: Adds a loose tag (count times). Rolled back; remove it as many times as it was added. An undeclared tag is added to the registry with a warning, as anywhere.
+- `remove(tag: StringName, count: int = 1) -> void`: Takes a loose tag away (count times, at most as many as were added). Tags from sources can't be removed here.
+- `loose_count_of(tag: StringName) -> int`: How many times this loose tag was added and not yet removed.
+- `set_source(source: Variant, tags: Array) -> void`: For the pawn's parts: the tags this source adds now, replacing what it added before. source is anything that names it (the part itself, or a name); an empty list takes its tags away. A tag listed twice counts twice. Not rolled back here: a source sets its tags again from its own state when a rollback loads it.
+- `clear_source(source: Variant) -> void`: Takes away every tag this source adds.
+
+## TagQuery
+
+`res://assets/scripts/tags/TagQuery.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+A yes/no question about a pawn's owned tags: all of these, any of those, none of the others (tag spec 4).
+
+All three lists must pass. A tag in a list covers the tags under it: `none_of = [status]` fails for a pawn that owns `status.dead`. An empty query always passes. Ask it with `matches()` (`query.matches(pawn.owned_tags)`): it's compiled to one mask per category word the first time, so asking costs a few ANDs. A tag nobody has declared can't be owned: in `all_of` it makes the query fail, in the other two it counts for nothing. Edit a list by assigning a new one (a setter notices), not by appending to it.
+
+```gdscript
+var calm := TagQuery.make([], [], [Tags.AI.STATE_COMBAT, Tags.STATUS.DEAD])   # not in combat, not dead
+if calm.matches(pawn.owned_tags): ...
+```
+
+### Settings and properties
+
+- `all_of: StringName[]` = `[]`: Every one of these must be owned (or a tag under it): "only when".
+- `any_of: StringName[]` = `[]`: At least one of these must be owned (or a tag under it): "when this or that". Empty passes.
+- `none_of: StringName[]` = `[]`: None of these may be owned (nor a tag under them): "not when".
+
+### Functions
+
+- `make(all: Array = [], any: Array = [], none: Array = []) -> TagQuery` *(static)*: A query made in code, for tests and for game code that builds one on the fly.
+- `matches(owned: OwnedTags) -> bool`: True if the owned tags pass all three lists. A null owner owns nothing: only a query with an empty all_of and any_of passes.
+- `matches_words(words: PackedInt64Array) -> bool`: The same as `matches()`, for owned tags given as one word per category, in `TagRegistry.get_categories()` order.
+- `is_empty() -> bool`: True if every list is empty: the query passes for anyone.
+- `describe() -> String`: The query as text, for readouts and logs: "all of [..], any of [..], none of [..]", leaving out empty lists.
 
 ## TagRegistry
 
@@ -26,6 +93,10 @@ Every machine must give a tag the same bit, so tags are declared in [`TagDeclara
 
 Renaming: an old name in a declarations file's redirects is read as its new name, with a warning, so old resources, saves and replays still load (tools/tags/apply_redirects.py rewrites saved files). A deprecated tag still works, with a warning. Bits are never saved: everything saved stores names. A static class, so it works in headless tests.
 
+### Settings and properties
+
+- `generation: int` = `0`: Goes up by one on every `reset()`, so code that caches bits (a [`TagQuery`](#tagquery), [`OwnedTags`](#ownedtags)) knows to work them out again.
+
 ### Constants
 
 - `MAX_BITS_PER_CATEGORY = 64`: The most levels a category has bits for.
@@ -39,6 +110,7 @@ Renaming: an old name in a declarations file's redirects is read as its new name
 - `declare_deprecated(tags: Array) -> void` *(static)*: Marks tags deprecated: they still work, with a warning. Most games put them in a declarations file instead.
 - `reset(read_declarations_files: bool = true) -> void` *(static)*: Forgets everything, including that the declarations files were read. For tests, and for tools that reload content. Masks stored before a reset are meaningless afterwards.
 - `bit_of(tag: Variant) -> int` *(static)*: The tag's own bit within its category's word, or -1 if it has none (empty tag, or past the 64 limit).
+- `known_bit_of(tag: Variant) -> int` *(static)*: Like `bit_of()`, but never adds the tag: -1 for one that has no bit yet. For queries, which never add tags.
 - `own_bit(tag: Variant) -> int` *(static)*: Just the tag's own bit as a mask (no parents). Use for lockouts and resistances: "lock ability.combat" = own_bit(ability.combat).
 - `mask_of(tag: Variant) -> int` *(static)*: The tag's bit plus its parents' bits. This is what an ability stores as its category_mask, and a nav marker as its mask.
 - `mask_of_list(tags: Array) -> int` *(static)*: OR of several tags' own bits, all of one category. Use for a list like locks_out = [ability.combat, ability.movement].

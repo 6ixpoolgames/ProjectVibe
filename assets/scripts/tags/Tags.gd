@@ -74,6 +74,11 @@ class STATUS:
 ## The AI's own tags: its states and stances.
 class AI:
 	const ALL := &"ai"
+	## The AI's state: the pawn owns one of these while its AI is in that state (AIStateBase.get_tag).
+	const STATE := &"ai.state"
+	const STATE_IDLE := &"ai.state.idle"
+	const STATE_ALERT := &"ai.state.alert"
+	const STATE_COMBAT := &"ai.state.combat"
 
 
 ## Navigation: what a place, link or marker is.

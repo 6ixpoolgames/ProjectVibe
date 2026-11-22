@@ -181,6 +181,7 @@ void NavServer::tick(double delta) {
 
 	// Phase 4: path searches against the now-stable nav mesh.
 	std::vector<navcore::PathOutcome> outcomes;
+	m_paths.set_debug_log(m_log_paths ? &m_path_log : nullptr, int64_t(m_ticks));
 	m_paths.process(m_ground, m_cfg.query_iterations_per_tick, outcomes);
 
 	// Phase 5 (crowd) isn't here: CrowdBatch moves crowds when CrowdMover asks, on JobScheduler's workers, reading the nav mesh
@@ -601,6 +602,21 @@ Dictionary NavServer::get_stats() const {
 	return d;
 }
 
+void NavServer::debug_log_path_steps(bool on) {
+	m_log_paths = on;
+	m_path_log.clear();
+}
+
+PackedInt64Array NavServer::take_debug_path_log() {
+	PackedInt64Array out;
+	out.resize(int64_t(m_path_log.size()));
+	for (size_t i = 0; i < m_path_log.size(); ++i) {
+		out.set(int64_t(i), m_path_log[i]);
+	}
+	m_path_log.clear();
+	return out;
+}
+
 PackedInt64Array NavServer::get_landed_tiles() const {
 	PackedInt64Array out;
 	for (const navcore::TileKey &key : m_tiles.last_committed()) {
@@ -657,6 +673,8 @@ void NavServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_stats"), &NavServer::get_stats);
 	ClassDB::bind_method(D_METHOD("is_idle"), &NavServer::is_idle);
 	ClassDB::bind_method(D_METHOD("get_landed_tiles"), &NavServer::get_landed_tiles);
+	ClassDB::bind_method(D_METHOD("debug_log_path_steps", "on"), &NavServer::debug_log_path_steps);
+	ClassDB::bind_method(D_METHOD("take_debug_path_log"), &NavServer::take_debug_path_log);
 
 	ADD_SIGNAL(MethodInfo("path_ready", PropertyInfo(Variant::INT, "request_id"),
 			PropertyInfo(Variant::PACKED_VECTOR3_ARRAY, "points"), PropertyInfo(Variant::BOOL, "partial")));

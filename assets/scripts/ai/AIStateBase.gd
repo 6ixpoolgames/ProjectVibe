@@ -12,6 +12,9 @@ extends Node
 
 ## Higher is checked first. A state change is also an interrupt event of this priority (pawn spec 10.7).
 @export var priority := 0
+## The tag the pawn owns while in this state (tag spec 3), on the server. Empty: ai.state.<its node name in snake case>, such as
+## ai.state.combat. Declare it in the tag declarations.
+@export var tag: StringName = &""
 
 ## Set by the AIStateManager.
 var manager: AIStateManager = null
@@ -22,6 +25,11 @@ var perf_name: StringName = &""
 func _init() -> void:
 	set_process(false)
 	set_physics_process(false)
+
+
+## The tag the pawn owns while in this state: [member tag], or ai.state.<its node name in snake case>.
+func get_tag() -> StringName:
+	return tag if tag != &"" else StringName("ai.state." + String(name).to_snake_case())
 
 
 ## Whether this state fits right now. The base never fits, so a state that forgets to override this is never picked by mistake.

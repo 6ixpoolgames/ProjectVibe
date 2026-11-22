@@ -10,6 +10,9 @@
 class_name DeathAbility
 extends AbilityBase
 
+## The name status.dead is added under in the pawn's [OwnedTags].
+const OWNED_TAGS_SOURCE := &"death"
+
 
 ## Timed: it runs while Health is 0.
 ## Its kind's defaults: a new [DeathDefinition].
@@ -21,10 +24,13 @@ func is_timed() -> bool:
 	return true
 
 
-# Keeps Pawn.dead current: a plain value C++ (sensing, memory) reads directly (scaling spec step 4).
+# Keeps Pawn.dead current: a plain value C++ (sensing, memory) reads directly (scaling spec step 4). And the pawn owns status.dead
+# while dead (tag spec 3), as its own source: the ability itself is the source of its ability.death tag.
 func _running_changed(running: bool) -> void:
 	if pawn:
 		pawn.dead = running
+		if pawn.owned_tags:
+			pawn.owned_tags.set_source(OWNED_TAGS_SOURCE, [Tags.STATUS.DEAD] if running else [])
 
 
 # Started with one tick, then put off for as long as Health is 0 (start and tick).

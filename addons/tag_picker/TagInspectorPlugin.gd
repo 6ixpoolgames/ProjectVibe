@@ -16,6 +16,9 @@ const ABILITY_DEFINITION_PATH := "res://assets/scripts/abilities/definitions/Abi
 const ABILITY: Array[StringName] = [&"ability"]
 const EFFECT: Array[StringName] = [&"effect"]
 const NAV: Array[StringName] = [&"nav"]
+const AI: Array[StringName] = [&"ai"]
+## Claude 2026-11-22 (tag spec 4): every category, for a tag query.
+const ANY: Array[StringName] = []
 
 ## Claude 2026-11-10: script path -> {property: [is a list, the categories it offers]}. A script that extends one of these gets its
 ## dropdowns.
@@ -25,6 +28,8 @@ const HANDLED := {
 	"res://assets/scripts/effects/parts/ResistancePart.gd": {"tag": [false, EFFECT]},
 	"res://assets/scripts/effects/parts/AbilityPriorityPart.gd": {"ability_tag": [false, ABILITY]},
 	"res://assets/scripts/navigation/markers/NavMarker.gd": {"tag": [false, NAV]},
+	"res://assets/scripts/tags/TagQuery.gd": {"all_of": [true, ANY], "any_of": [true, ANY], "none_of": [true, ANY]},
+	"res://assets/scripts/ai/AIStateBase.gd": {"tag": [false, AI]},
 }
 
 

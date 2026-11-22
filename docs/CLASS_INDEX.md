@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 181 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 183 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -113,6 +113,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [NetworkEntity](../assets/scripts/netcode/REFERENCE.md#networkentity) | [netcode](../assets/scripts/netcode/README.md) | Node | Makes an entity exist across the network (netcode spec sections 7, 10, 13). |
 | [NetworkSessionSingleton](../assets/scripts/singletons/REFERENCE.md#networksessionsingleton) | [singletons](../assets/scripts/singletons/README.md) | Node | The multiplayer session (autoload "NetworkSession"): connects machines, spawns entities on all of them, and moves inputs and snapshots between them. Offline it does nothing and entities play as single player. |
 | [OpenComboStep](../assets/scripts/abilities/REFERENCE.md#opencombostep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | Opens the combo window when it starts, so a follow-up can start for [member window_ticks]. |
+| [OwnedTags](../assets/scripts/tags/REFERENCE.md#ownedtags) | [tags](../assets/scripts/tags/README.md) | Node | The tags a pawn owns right now, counted: what a [TagQuery] asks about ("is it in combat, dead, out of ammo?"). Tag spec 3. |
 | [ParryAbility](../assets/scripts/abilities/REFERENCE.md#parryability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | A parry stance: while it runs, a hit from the front does nothing to this pawn, and the attacker is pushed back instead. |
 | [ParryDefinition](../assets/scripts/abilities/REFERENCE.md#parrydefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | A parry's settings. |
 | [ParryInterceptor](../assets/scripts/abilities/REFERENCE.md#parryinterceptor) | [abilities](../assets/scripts/abilities/README.md) | HitInterceptor | Turns away hits from the front: a parry. |
@@ -163,6 +164,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [StreamingSource](../assets/scripts/streaming/REFERENCE.md#streamingsource) | [streaming](../assets/scripts/streaming/README.md) | Node3D | Marks something as keeping the world loaded around it. |
 | [SweepKey](../assets/scripts/abilities/REFERENCE.md#sweepkey) | [abilities](../assets/scripts/abilities/README.md) | Resource | One point on a swing's path: where the hit sphere is at one moment of the hit window (ability spec 7). |
 | [TagDeclarationsRes](../assets/scripts/resources/REFERENCE.md#tagdeclarationsres) | [resources](../assets/scripts/resources/README.md) | Resource | A declarations file: the tags a game declares up front, each with a one-line description, plus renames and deprecations. |
+| [TagQuery](../assets/scripts/tags/REFERENCE.md#tagquery) | [tags](../assets/scripts/tags/README.md) | Resource | A yes/no question about a pawn's owned tags: all of these, any of those, none of the others (tag spec 4). |
 | [TagRegistry](../assets/scripts/tags/REFERENCE.md#tagregistry) | [tags](../assets/scripts/tags/README.md) | RefCounted | Every tag in the game: turns names like "ability.combat.melee" into bits, so checks are one AND instead of comparing text. |
 | [Tags](../assets/scripts/tags/REFERENCE.md#tags) | [tags](../assets/scripts/tags/README.md) | RefCounted | The declared tags as named constants, grouped by category, so code can't misspell one. |
 | [TeamRegistry](../assets/scripts/game_mode/REFERENCE.md#teamregistry) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | How many pawns are on each team, kept current as pawns enter and leave the tree and change team. |

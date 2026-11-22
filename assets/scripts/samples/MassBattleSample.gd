@@ -34,6 +34,11 @@
 ##   --perf-log       prints the diagnostics summary every 5 s, as the session log has it
 ##   --near-middle    the player's pawn starts 30 m from the middle instead of at its spawner, so the fight comes to it
 ##   --overhead       starts at the overview of the middle (V), the owner's way of watching the fight
+## Claude 2026-11-22 (the owner's request: determinism across separate sessions, compared by their replay recordings, with
+## tools/determinism/compare_replays.py):
+##   --team-size=N            each faction's size from the start (with --offline, the first wave spawns this many)
+##   --quit-after-ticks=N     quits N ticks after the level starts, which finishes the replay recording
+##   --no-load-ladder         every AI pawn runs every tick: the load ladder follows how busy the machine is, so it differs by session
 ##
 ## Claude 2026-11-16: the spectator here doesn't keep the world loaded, as V's old camera didn't: the spawners, heroes and the centre
 ## have their own sources, and C still freezes the middle while you watch it from above. A player's pawn let go of (U or V) follows the
@@ -90,6 +95,20 @@ var _next_print_msec := 0
 
 
 func _ready() -> void:
+	# Claude 2026-11-22: read before the level starts (super() reads --offline and starts it).
+	var quit_after_ticks := 0
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--team-size="):
+			team_size = int(argument.trim_prefix("--team-size="))
+		elif argument.begins_with("--quit-after-ticks="):
+			quit_after_ticks = int(argument.trim_prefix("--quit-after-ticks="))
+		elif argument == "--no-load-ladder":
+			TickDriver.load_step_override = 1
+	if quit_after_ticks > 0:
+		var last_tick := TickDriver.tick + quit_after_ticks
+		TickDriver.after_tick.connect(func(_dt: float, tick: int) -> void:
+			if tick >= last_tick:
+				get_tree().quit())
 	super()
 	NetworkSession.register_type("hero_red", HERO_RED_SCENE)
 	NetworkSession.register_type("hero_blue", HERO_BLUE_SCENE)

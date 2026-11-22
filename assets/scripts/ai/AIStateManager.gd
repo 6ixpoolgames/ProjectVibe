@@ -5,7 +5,8 @@
 ## highest priority down, whose prerequisites hold, and a change asks for a decision with the new state's priority as the reason.
 ## States are sorted by priority, then name, once, when the manager is ready. Outside code only talks to the manager; a forced state
 ## skips the normal check for a while, and during a tick a force is queued until the pawn's next AI step so the order never depends on
-## which pawn went first (scaling spec step 3). Server and offline only.
+## which pawn went first (scaling spec step 3). Server and offline only. The pawn owns the current state's tag
+## ([method AIStateBase.get_tag], such as ai.state.combat) in its [OwnedTags].
 ## [codeblock]
 ## pawn.ai_context.state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
 ## pawn.ai_context.state_manager.force_state(&"Combat", 120, 50, "scripted") # skip the normal check for 120 ticks
@@ -180,6 +181,8 @@ func _change_to(state: AIStateBase, reason: String, event_priority: int = -1) ->
 	if old:
 		old.exit(context)
 	_current = state
+	if pawn.owned_tags:
+		pawn.owned_tags.set_source(self, [state.get_tag()]) # the AI runs only where the pawn is decided, so this never rolls back
 	state.enter(context)
 	state_changed.emit(old, state, reason)
 	if context:

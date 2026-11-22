@@ -39,6 +39,10 @@ The AI's own tags: its states and stances.
 
 | Tag | What it is | Old names |
 |---|---|---|
+| `ai.state` | The AI's state: what situation it thinks it is in. A pawn owns one while its AI runs. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`ai.state.alert` | Something caught its attention, but it isn't sure of a target yet. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`ai.state.combat` | It has a target it is sure of, and fights. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`ai.state.idle` | Nothing has its attention. |  |
 
 ## `effect`
 

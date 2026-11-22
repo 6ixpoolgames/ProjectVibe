@@ -1,4 +1,4 @@
-# Tag Spec v0.2 (agreed 2026-11-22; step 1 built, see 11)
+# Tag Spec v0.2 (agreed 2026-11-22; steps 1 and 2 built, see 11 and 12)
 
 *Written by Claude (claude-opus-5-5), 2026-11-22, from the discussion with the owner the same day. The owner agreed the recommendations in section 10. Names follow Unreal's gameplay tags where that helps, but this isn't a copy of it: close-enough terms the project already uses stay.*
 
@@ -139,3 +139,23 @@ A game adds its own (`faction`, `squad`) in its own file. No top-level `state`: 
 
 **Tests:** `tag_registry_selftest` (50 checks), `tag_picker_selftest`, and every suite that uses tags.
 
+## 12. As built: step 2 (Claude, 2026-11-22)
+
+**Where things are:** `assets/scripts/tags/OwnedTags.gd` (a pawn part, `pawn.owned_tags`, in the pawn defaults between StatManager and EffectManager; scene `assets/scenes/pawn/parts/OwnedTags.tscn`) and `TagQuery.gd` (a resource). Usage is in the [tags README](../../assets/scripts/tags/README.md).
+
+**How sources work:** each part that adds tags is a **source**, and `set_source(source, tags)` replaces what that source added before. A rollback or snapshot only has to set a source again from the state it already loads, so nothing is stored twice (section 3):
+- an ability: from `AbilityBase.ends_at`'s setter, so only **timed** runs own tags (a Jump, which happens at once, never runs)
+- the EffectManager: on every refresh, and at once when `active_effects` is loaded, since a client never counts down the effects of pawns it only draws; once per effect, whatever its stacks
+- Death: `status.dead`, under its own source name, since the ability itself is the source of its `ability.death`
+- the AI state manager: its state's tag. `AIStateBase.tag`, or `ai.state.<node name in snake case>`; `ai.state.idle`, `ai.state.alert` and `ai.state.combat` are declared
+
+**Loose tags** are one pushed state entry per pawn, `OwnedTags:loose_counts`, a dictionary of counts. The store and snapshots carry dictionaries as they are, so one entry holds every loose tag, rather than one entry per tag.
+
+**What differs from the text above:**
+- **Score modifiers and charges** add their tags in steps 3 and 4, when they exist.
+- **The `changed` signal** is for the tag itself, not its parents.
+- **Queries never add tags:** a tag nobody declared can't be owned, so it fails `all_of` and counts for nothing in `any_of` and `none_of`. `TagRegistry.known_bit_of` (new) looks a bit up without adding it, and `TagRegistry.generation` (new) tells queries and owned tags when to work their bits out again.
+- **GDScript only.** Nothing in C++ reads owned tags yet; the batched AI decider will need them as words in step 3.
+- **Not measured.** Sources change only when a timed run starts or ends, an effect comes or goes, or the AI's state changes. A 300-pawn measurement waits for step 3, the first user that asks queries every decision.
+
+**Tests:** `owned_tags_selftest` (51 checks); `pawn_initializer_selftest` lists the new part.

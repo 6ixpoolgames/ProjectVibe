@@ -301,6 +301,10 @@ Being dead: an action with no trigger action, started when the pawn's Health rea
 The EffectManager calls `AbilityManager.health_ran_out()` when an effect takes Health to 0, and the AbilityManager starts this and sends `AbilityManager.died`. While it runs it locks out movement, combat and utility, nothing cancels it, and `Pawn.is_dead()` is true (the pawn ignores its input and AI, and other pawns' sensing ignores it). It keeps running while Health is 0; `AbilityManager.revive()` ends it. The body stays where it falls: removing it or respawning is game code's job.
 Rollback: its timer rolls back with Health, so clients see the pawn dead from snapshots. It watches `StatManager.HEALTH`. Design: pawn spec 8.7, 8.16.
 
+### Constants
+
+- `OWNED_TAGS_SOURCE = &"death"`: The name status.dead is added under in the pawn's [`OwnedTags`](../tags/REFERENCE.md#ownedtags).
+
 ### Functions
 
 - `make_default_definition() -> AbilityDefinition`: Timed: it runs while Health is 0. Its kind's defaults: a new [`DeathDefinition`](#deathdefinition).

@@ -8,6 +8,7 @@
 #include <DetourNavMeshQuery.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstring>
 
 static_assert(sizeof(dtPolyRef) == 8, "build with DT_POLYREF64 (see SConstruct)");
@@ -19,6 +20,59 @@ constexpr int MAX_PATH_POLYS = 4096;
 constexpr int MAX_STRAIGHT = 1024;
 constexpr int MAX_QUERY_NODES = 8192;
 const float SNAP_EXTENTS[3] = { 2.0f, 4.0f, 2.0f }; // how far from the nav mesh a start/goal may be
+
+// Detour's findNearestPoly with ties settled by polygon ref. Detour keeps the first polygon with the smallest score, in the order
+// its bounding-volume tree hands them over; that tree is built with qsort, which isn't stable, so polygons with equal keys come out
+// in a different order on another platform's C runtime (MSVC against glibc), and so does the winner of a tie. Ties are common: a
+// point over a polygon and within climb height scores 0, as does a point over two at their shared edge. Same score, then the
+// lower ref, so every platform picks the same polygon. Found by comparing Windows and Linux (state store spec 13.11).
+class DeterministicNearestPoly : public dtPolyQuery {
+public:
+	DeterministicNearestPoly(const dtNavMeshQuery *query, const float *center) : m_query(query), m_center(center) {}
+
+	void process(const dtMeshTile *tile, dtPoly **polys, dtPolyRef *refs, int count) override {
+		(void)polys;
+		for (int i = 0; i < count; ++i) {
+			float closest[3];
+			float diff[3];
+			bool over = false;
+			m_query->closestPointOnPoly(refs[i], m_center, closest, &over);
+			dtVsub(diff, m_center, closest);
+			float d;
+			if (over) { // Detour's rule: directly over it and within climb height counts as 0
+				d = dtAbs(diff[1]) - tile->header->walkableClimb;
+				d = d > 0 ? d * d : 0;
+			} else {
+				d = dtVlenSqr(diff);
+			}
+			if (d < best_distance || (d == best_distance && best_ref != 0 && refs[i] < best_ref)) {
+				dtVcopy(best_point, closest);
+				best_distance = d;
+				best_ref = refs[i];
+			}
+		}
+	}
+
+	dtPolyRef best_ref = 0;
+	float best_point[3] = {};
+	float best_distance = FLT_MAX;
+
+private:
+	const dtNavMeshQuery *m_query;
+	const float *m_center;
+};
+
+// Use this, never dtNavMeshQuery::findNearestPoly (see DeterministicNearestPoly). ref gets 0 if there's no polygon in reach.
+dtStatus nearest_poly(const dtNavMeshQuery *query, const float *center, const float *extents, const dtQueryFilter *filter, dtPolyRef *ref,
+		float *point) {
+	DeterministicNearestPoly found(query, center);
+	const dtStatus status = query->queryPolygons(center, extents, filter, &found);
+	*ref = found.best_ref;
+	if (found.best_ref && point) {
+		dtVcopy(point, found.best_point);
+	}
+	return status;
+}
 } // namespace
 
 GroundDomain::GroundDomain() {
@@ -136,8 +190,8 @@ bool GroundDomain::snap_endpoints(dtNavMeshQuery *q, QueryState &state, const fl
 		bool use_links) {
 	const dtQueryFilter &f = filter_for(tier, use_links);
 	dtPolyRef sref = 0, eref = 0;
-	q->findNearestPoly(from, SNAP_EXTENTS, &f, &sref, state.start_pos);
-	q->findNearestPoly(to, SNAP_EXTENTS, &f, &eref, state.end_pos);
+	nearest_poly(q, from, SNAP_EXTENTS, &f, &sref, state.start_pos);
+	nearest_poly(q, to, SNAP_EXTENTS, &f, &eref, state.end_pos);
 	if (!sref) {
 		fail.reason = "no nav mesh near start";
 		return false;
@@ -215,7 +269,7 @@ bool GroundDomain::closest_point(const float *p, int tier, float *out) const {
 	}
 	const float extents[3] = { 4.0f, 8.0f, 4.0f };
 	dtPolyRef ref = 0;
-	m_sync_query->findNearestPoly(p, extents, &filter_for(tier), &ref, out);
+	nearest_poly(m_sync_query, p, extents, &filter_for(tier), &ref, out);
 	return ref != 0;
 }
 
@@ -244,10 +298,10 @@ bool GroundDomain::move_along_surface(dtNavMeshQuery *query, const float *from, 
 	const float extents[3] = { tolerance, height, tolerance };
 	dtPolyRef start = 0;
 	float nearest[3];
-	if (dtStatusFailed(query->findNearestPoly(from, extents, &filter, &start, nearest)) || start == 0) {
+	if (dtStatusFailed(nearest_poly(query, from, extents, &filter, &start, nearest)) || start == 0) {
 		return false;
 	}
-	// The walk starts where the pawn is, across, if that's on the poly found; findNearestPoly gives a point on it.
+	// The walk starts where the pawn is, across, if that's on the poly found; nearest_poly gives a point on it.
 	const float dx = nearest[0] - from[0];
 	const float dz = nearest[2] - from[2];
 	if (dx * dx + dz * dz > tolerance * tolerance) {
@@ -287,6 +341,30 @@ int GroundDomain::step_sliced(int max_iterations, int &used) {
 		return -1;
 	}
 	return dtStatusInProgress(s) ? 0 : 1;
+}
+
+void GroundDomain::sliced_endpoints(uint64_t &start_ref, uint64_t &end_ref, float *start_pos, float *end_pos) const {
+	start_ref = uint64_t(m_sliced_state.start_ref);
+	end_ref = uint64_t(m_sliced_state.end_ref);
+	for (int i = 0; i < 3; ++i) {
+		start_pos[i] = m_sliced_state.start_pos[i];
+		end_pos[i] = m_sliced_state.end_pos[i];
+	}
+}
+
+void GroundDomain::debug_snap_candidates(const float *p, int tier, bool use_links, std::vector<uint64_t> &refs, std::vector<uint8_t> &over,
+		std::vector<float> &closest) const {
+	dtPolyRef found[64];
+	int count = 0;
+	m_sync_query->queryPolygons(p, SNAP_EXTENTS, &filter_for(tier, use_links), found, &count, 64);
+	for (int i = 0; i < count; ++i) {
+		float c[3];
+		bool is_over = false;
+		m_sync_query->closestPointOnPoly(found[i], p, c, &is_over);
+		refs.push_back(uint64_t(found[i]));
+		over.push_back(is_over ? 1 : 0);
+		closest.insert(closest.end(), { c[0], c[1], c[2] });
+	}
 }
 
 void GroundDomain::finish_sliced(PathOutcome &out) {

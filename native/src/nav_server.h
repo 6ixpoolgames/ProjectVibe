@@ -119,6 +119,10 @@ public:
 	// REFACTOR: test hooks bound into the shipping class (test code out of shipping code); a test-only subclass or build flag.
 	void debug_fail_tile_commits(int count) { m_ground.debug_fail_commits(count); }
 	void debug_limit_path_corners(int limit) { m_ground.debug_limit_corners(limit); }
+	// For comparing two machines: on, every path search's start and the steps each tick spends on it are logged (PathQueue's
+	// debug log); take_debug_path_log() hands them over, five numbers an entry, and empties the log. Off by default.
+	void debug_log_path_steps(bool on);
+	PackedInt64Array take_debug_path_log();
 	Array get_tile_states() const;
 	Dictionary get_stats() const;
 	bool is_idle() const; // nothing left to build or commit
@@ -137,6 +141,8 @@ private:
 	navcore::TileManager m_tiles;
 	navcore::GroundDomain m_ground;
 	navcore::PathQueue m_paths;
+	std::vector<int64_t> m_path_log; // PathQueue's debug log, while debug_log_path_steps is on
+	bool m_log_paths = false;
 	// Answers waiting to be taken (take_path_result), with the tick each came in on.
 	struct PathResult {
 		Dictionary result;

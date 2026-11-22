@@ -16,6 +16,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | A public way to read a block's ticks | `ReplayViewer._fill_strip` | The viewer reads `ReplayReader._blocks`, the reader's private data. A `get_block_ticks(index)` keeps the reader free to change how it stores blocks | S |
 | An index of blocks | `ReplayReader.open` | Opening reads the whole file into memory and decompresses every block once just to learn its ticks. At mass-battle sizes (about 160 MB an hour) a long recording is slow to open and heavy to hold; an index (at the end of the file, or a block header outside the compression) would fix both | M |
 
+## 2026-11-22
+
+- **Comparing recordings** (the owner's request: judge determinism across separate sessions from their replays): `samples/tests/replay_compare.tscn` reads two recordings with `ReplayReader` and names the first tick, pawn and field that differ (pawns, their motion and input, and events other than diagnostics), then the totals; `--latest=FOLDER --count=N` compares the newest N, each with the oldest. `tools/determinism/compare_replays.py` runs it, on two files, the newest recordings, or after playing the mass battle in N separate headless sessions (`--sessions`). The mass battle sample takes `--team-size`, `--quit-after-ticks` and `--no-load-ladder` for those sessions.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): class comments cut to a summary and a short paragraph, member comments to a line, `GDScript note:` and "the owner's call" wording removed. The gameplay events' data, the file layout, the writer thread, the safeguards and the viewer's keys and colours moved to a new "How it works" section of the README. Stale comments fixed: `ReplayReader.get_header` and the header comment now list `first_tick` and `block_seconds` too.

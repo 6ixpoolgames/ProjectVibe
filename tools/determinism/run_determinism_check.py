@@ -9,6 +9,8 @@
 # --runs N plays it N times and compares each with the first (a difference that comes and goes needs several). --ladder leaves the
 # load ladder working (it follows how loaded the machine is, so it's a known source of difference). --arg passes an argument on to
 # the run or the sample (--arg=--spawn-distance=40; --arg=--workers=0 runs every job on the main thread). --keep DIR keeps the files. Exit code 0: the runs agree; 1: they differ; 2: a run failed.
+# Claude 2026-11-23: --compare A.bin B.bin compares two fingerprint files made elsewhere (another machine or platform, each written by
+# the run scene with --out=PATH, its .names file beside it) and names the first difference, without running anything.
 # Godot is looked for beside the project folder, as tools/run_tests.sh does; set GODOT to use another.
 #
 # The run itself: assets/scripts/samples/tests/determinism_check.gd. Design: state store spec (deterministic replay).
@@ -98,6 +100,25 @@ def read_dump(path):
     return out
 
 
+def compare_files(path_a, path_b, show):
+    """Two fingerprint files made elsewhere: the first differing tick, entities and columns, without dumps (Claude 2026-11-23)."""
+    a, b = read_fingerprints(path_a), read_fingerprints(path_b)
+    print("Comparing %s (%d ticks) with %s (%d ticks)" % (path_a.name, len(a), path_b.name, len(b)))
+    tick, handles = first_difference(a, b)
+    if tick is None:
+        print("They agree: %d ticks, every entity's row the same every tick." % len(a))
+        return 0
+    labels, entities = read_names(path_a)
+    print("They differ from tick %d (%d ticks in), in %d entities:" % (tick, tick - min(a), len(handles)))
+    for handle in handles[:show]:
+        print("  entity %s" % entities.get(handle, handle))
+    if tick in a and tick in b:
+        print("  columns: %s" % ", ".join(differing_columns(a, b, tick, labels)))
+    later = sum(1 for t in a if t in b and a[t][:2] != b[t][:2])
+    print("  %d of %d ticks differ in all." % (later, len(a)))
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(description="Plays the same match twice and compares the state store after every tick.")
     parser.add_argument("--size", type=int, default=20, help="soldiers per faction (default 20)")
@@ -107,7 +128,10 @@ def main():
     parser.add_argument("--arg", action="append", default=[], help="an argument passed on to the sample, such as --arg=--spawn-distance=40")
     parser.add_argument("--keep", help="a folder to keep the files in")
     parser.add_argument("--show", type=int, default=12, help="differing columns to list (default 12)")
+    parser.add_argument("--compare", nargs=2, metavar=("A", "B"), help="compare two fingerprint files instead of running")
     args = parser.parse_args()
+    if args.compare:
+        return compare_files(pathlib.Path(args.compare[0]), pathlib.Path(args.compare[1]), args.show)
     folder = pathlib.Path(args.keep) if args.keep else pathlib.Path(tempfile.mkdtemp(prefix="determinism_"))
     folder.mkdir(parents=True, exist_ok=True)
     extra = ["--size=%d" % args.size, "--ticks=%d" % args.ticks] + (["--ladder"] if args.ladder else []) + args.arg

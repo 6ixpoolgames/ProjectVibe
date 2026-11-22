@@ -4,7 +4,7 @@ this says how it got here and why. -->
 
 # Tags changelog
 
-Tags are this folder (`TagRegistry`, `Tags`), the declarations file (`resources/tag_declarations.tres`, `TagDeclarationsRes`), the tools in `tools/tags/` and the Tag Picker editor plugin (`addons/tag_picker/`). Design: [docs/tags/TAG_SPEC.md](../../../docs/tags/TAG_SPEC.md); before it, [pawn spec](../../../docs/pawn/PAWN_SPEC.md) sections 7.1 and 8.10 and the netcode spec section 13. Overview: [README.md](README.md).
+Tags are this folder (`TagRegistry`, `Tags`, `OwnedTags`, `TagQuery`), the declarations file (`resources/tag_declarations.tres`, `TagDeclarationsRes`), the tools in `tools/tags/` and the Tag Picker editor plugin (`addons/tag_picker/`). Design: [docs/tags/TAG_SPEC.md](../../../docs/tags/TAG_SPEC.md); before it, [pawn spec](../../../docs/pawn/PAWN_SPEC.md) sections 7.1 and 8.10 and the netcode spec section 13. Overview: [README.md](README.md).
 
 ## Refactor candidates
 
@@ -15,6 +15,12 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | More than 64 levels in a category | `TagRegistry` | The tag spec gives a category that outgrows its word a second one. Every caller's mask is one int today, so that waits until a category nears 64 levels; past it, tags get no bit with a warning | M |
 
 ## 2026-11-22
+
+- **Owned tags and tag queries** (tag spec step 2, as agreed). `OwnedTags`, a new pawn part (`pawn.owned_tags`, in the pawn defaults between StatManager and EffectManager): the tags a pawn owns right now, counted, with their parents, as one word per category. The pawn's parts add theirs as sources, each new list replacing their last: a running timed ability its category and extra categories (from `AbilityBase.ends_at`'s setter), the EffectManager every active effect's tags (at once when a rollback or snapshot loads the list), the Death ability `status.dead`, the AI state manager its state's tag. Sources follow state that already rolls back, so nothing is stored twice. Game code adds loose tags (`add`, `remove`), which are a pushed state entry (`OwnedTags:loose_counts`) and roll back. `changed(tag, owned)` fires when a tag starts or stops being owned.
+- **`TagQuery`**, a resource: `all_of`, `any_of`, `none_of`, compiled to one mask per category word on first use, so asking costs a few ANDs. A tag in a list covers the tags under it; an undeclared tag can't be owned (it fails `all_of`, counts for nothing elsewhere), and queries never add tags. The Tag Picker offers every category in its lists.
+- **AI state tags:** `ai.state`, `ai.state.idle`, `ai.state.alert`, `ai.state.combat` declared, with `Tags.AI.STATE_*` constants. A state's tag is its `tag` setting, or `ai.state.<node name in snake case>`; the picker offers `ai` tags for it.
+- **TagRegistry:** `known_bit_of` (a bit without adding the tag) and `generation` (goes up on every reset, so cached bits are worked out again).
+- **Tests:** `owned_tags_selftest` (51 checks): counting, sources, parents, the signal, queries, and on a real pawn a Dash's run, a held effect, death, the AI's state, loose tags through a rollback. `pawn_initializer_selftest` lists the new part.
 
 - **One registry for every kind of tag** (tag spec step 1, agreed with the owner): `TagRegistry` now holds ability, effect and navigation tags, and the AI's and a pawn's status. A tag's first level is its category (`ability`, `effect`, `status`, `ai`, `nav`), each numbering its own levels in its own 64-bit word, so today's one-AND checks are unchanged. `navigation/NavTags` and `effects/EffectTags`, copies of the same rules, are gone (the refactor row is done). New: `category_of`, `get_categories`, `word_of`, `description_of`, `is_deprecated`, `declare_redirects`, `declare_deprecated`; `names_of` takes the category; `category_mask_of_list` is `full_mask_of_list` (the name EffectTags and NavTags used), since "category" now means the first level. A list mixing categories warns.
 - **Every tag renamed with its category:** `combat.melee` is `ability.combat.melee`, `damage.poison` is `effect.damage.poison`, `point.cover` is `nav.point.cover`. The Death ability's category is `ability.death` (it was `status.dead`, which stays as the pawn's condition for owned tags). Saved resources and scenes were rewritten; every old name has a redirect.

@@ -21,6 +21,7 @@ The body every character is: something a player or the AI can drive. It runs its
  ├─ ControllerManager ─ AIController     input: who's in charge, this tick's input, has_player   (controllers/)
  ├─ NavigationManager                    paths                                                    (navigation/)
  ├─ StatManager, EffectManager           numbers, and effects on them                             (stats/, effects/)
+ ├─ OwnedTags                            the tags it owns right now, for tag queries              (tags/)
  ├─ AbilityManager ─ Walk, Jump, Sprint  steer the pawn; hits and death                           (abilities/)
  ├─ AIContextComponent and the AI parts  decide what the AI's hands do                            (ai/)
  ├─ TickStateComponent, NetworkEntity    rollback and multiplayer (in the scene)                  (netcode/)

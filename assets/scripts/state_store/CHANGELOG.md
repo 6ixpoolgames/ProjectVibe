@@ -13,6 +13,10 @@ Code that works but doesn't yet fit the project's goals. Each is marked `REFACTO
 |---|---|---|---|
 | Typed columns instead of Variants | `Layout::cells` in `state_store.h`, `_Layout.cells` in the twin | Each cell is a Variant, so any value fits (today's state lists hold arrays and dictionaries). Worker jobs (sensing, snapshot encoding, replay packing) want plain typed lanes they can read without the engine. Comes with the first job that reads the store | M |
 
+## 2026-11-23
+
+- **Determinism across platforms** (the owner's request): `run_determinism_check.py --compare A B` compares two fingerprint files made elsewhere, without running. The run's `--trace` also writes the traced pawn's move input, path state and every AI decision it makes (through the decision listener, cleared on exit: left set, the static listener crashed Godot as it quit). New run options for comparing machines: `--nav-dump=TICK` (every nav triangle, link and tile state, bit for bit) and `--paths-to=TICK` (every pawn's path state, and the nav server's path search log). Windows against Linux: the fingerprints split at tick 18 over a nearest-polygon tie that Detour settles in a platform-dependent order; fixed in `GroundDomain` (native changelog), and a 603-pawn, 7200-tick match now agrees on both (state store spec 13.11).
+
 ## 2026-11-22
 
 - **The determinism check traces one pawn:** `--trace=NAME --trace-from=T --trace-to=T` writes its unrounded position and velocity before the tick, after simulate and after the commit, beside the fingerprints (`PATH.trace`), to find which stage of a tick went apart.

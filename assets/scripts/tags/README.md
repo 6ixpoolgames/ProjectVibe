@@ -4,7 +4,7 @@
 
 Names like `ability.combat.melee` or `nav.point.cover` that say what something is, turned into bits so a game can ask "is this any kind of combat?" with one quick check, the same way on every machine. One registry for every kind of tag: abilities, effects, a pawn's status, the AI, navigation.
 
-**Status:** built, tier 0 (tag spec step 1). Next: the tags a pawn owns right now, and tag queries (tag spec step 2). Not yet: more than 64 levels in one category.
+**Status:** built, tier 0 (tag spec steps 1 and 2): the registry, the tags a pawn owns right now, and tag queries. Next: the AI's score modifiers use them (pawn spec 10.13). Not yet: more than 64 levels in one category, owned tags in C++.
 
 | File | What it's for |
 |---|---|
@@ -23,10 +23,16 @@ Names like `ability.combat.melee` or `nav.point.cover` that say what something i
   extra_declaration_files)       ─┘        ▲           NetworkSession (content_hash in the handshake)
  Tags.ABILITY.MOVEMENT_DASH (code) ────────┘
  addons/tag_picker (designers' dropdowns, by category)
+
+ running abilities, held effects, Death, AI state ─► OwnedTags (on each pawn) ◄── loose tags from game code
+                                                       ▲
+                                    TagQuery: all of / any of / none of
 ```
 
 - **`TagRegistry`** turns tag names into bits. A tag's first level is its **category** (`ability`, `effect`, `status`, `ai`, `nav`), and each category numbers its own levels in its own 64-bit word. Every level has its own bit and a tag's mask holds its parents' bits too, so a lockout on `ability.combat` catches `ability.combat.melee`. It reads the declarations files on first use and numbers the tags in sorted order, so every machine agrees. A static class: nothing to add to a scene.
 - **`Tags`** holds the declared tags as constants for code, one group per category (`Tags.ABILITY.MOVEMENT_DASH`, `Tags.EFFECT.DAMAGE_POISON`), so a typo is an error when the script is checked instead of a warning while playing. The groups are in capitals because a class named `Effect` would clash with the effects system's.
+- **`OwnedTags`** is a pawn part (`pawn.owned_tags`): the tags the pawn owns right now, counted. The pawn's parts add theirs as **sources** (a running timed ability its categories, held effects their tags, Death `status.dead`, the AI its state's tag), which follow state that already rolls back. Game code adds **loose tags** (`add`, `remove`), which roll back themselves.
+- **`TagQuery`** is a resource with three lists, `all_of`, `any_of` and `none_of`, asked of a pawn's owned tags in a few ANDs.
 - **`TagDeclarationsRes`** (`resources/`) is a declarations file: every tag with a one-line description, plus redirects (renames) and deprecations.
 - The **Tag Picker** editor plugin (`addons/tag_picker/`, not in this folder) gives designers a dropdown of declared tags in the inspector, only of the categories each setting takes.
 
@@ -43,6 +49,16 @@ if TagRegistry.matches(mask, Tags.ABILITY.COMBAT):           # true: ability.com
     pass
 ```
 A lockout or a resistance on a branch uses `own_bit(tag)`; an ability's category uses `mask_of(tag)`. **A mask belongs to one category:** an ability mask is compared with ability tags, an effect mask with effect tags. A list that mixes categories warns.
+
+**Ask what a pawn is right now.**
+```gdscript
+pawn.owned_tags.has(Tags.STATUS.DEAD)                  # owned, or a tag under it is
+var calm := TagQuery.make([], [], [Tags.AI.STATE_COMBAT, Tags.STATUS.DEAD])
+if calm.matches(pawn.owned_tags):                      # not in combat and not dead
+    pass
+pawn.owned_tags.add(&"status.burning")                 # a loose tag: remove() it as many times as it was added
+```
+A `TagQuery` made as a resource gets tag dropdowns of every category. Its lists cover the tags under theirs: `none_of = [status]` fails for a dead pawn. Assign a new list rather than appending to one, so the query notices.
 
 **An unknown tag** used at runtime is added on the spot with a one-time warning. That's fine offline, but online two machines may number it differently, so declare every tag.
 
@@ -73,8 +89,10 @@ A tag is hard to change once saved files and replays use it, so it's worth getti
 ## How it works
 
 - **Corner cases** (`tests/tag_registry_selftest.gd`): an empty or blank tag has no bit, mask 0, and matches nothing. Messy names (`ability.combat..melee`, ` ability.combat.melee `) are cleaned up. A tag nobody declared and used at runtime is added on the spot with a one-time warning, in a category of its own if its category is new; only setting up (`declare`, `bit_of`, `own_bit`, `mask_of` and the list versions) adds tags, while queries (`matches`, `has_tag`) never do. Declaring after the registry is in use counts as undeclared (appended and warned), since sorting again would change bits already stored in masks. With no declarations file every tag is simply undeclared.
+- **Owned tags** (`tests/owned_tags_selftest.gd`): a tag is owned while its count is above 0; two sources adding it need both to drop it. A source's new list replaces its last (`set_source`), so a rollback only has to set it again: abilities do it from `ends_at`'s setter, the EffectManager when `active_effects` is loaded. `changed(tag, owned)` is for the tag itself, not its parents. The words (one per category, parents included) are worked out again only when something starts or stops being owned, and when the registry is reset (`TagRegistry.generation`). AI state tags exist only where the AI runs (offline and on the server); loose tags are a pushed state entry, so a client predicts them.
+- **Tag queries:** compiled to one mask per category word the first time, and again when the registry changes. A tag nobody declared can't be owned: in `all_of` the query fails, in the others it counts for nothing. Queries never add tags.
 - **64 levels per category.** Past that a category's tags get no bit, with a warning. The tag spec plans a second word for such a category; today's int masks assume one, so that waits until a category nears the limit (a refactor row in the changelog).
 
 ## Tests
 
-`tags/tests/tag_registry_selftest`: bits and masks, categories and their words, two machines agreeing, matching from the root only, late and messy tags, the 64-level limit per category, redirects and deprecation, the declarations file (every tag described, every `Tags` constant declared and named after its tag). Also `addons/tag_picker/tests/tag_picker_selftest`. Run them with `bash tools/run_tests.sh <name>`.
+`tags/tests/owned_tags_selftest`: counting, sources, parents, the signal, queries, and on a real pawn a Dash's run, a held effect, death, the AI's state and loose tags through a rollback. `tags/tests/tag_registry_selftest`: bits and masks, categories and their words, two machines agreeing, matching from the root only, late and messy tags, the 64-level limit per category, redirects and deprecation, the declarations file (every tag described, every `Tags` constant declared and named after its tag). Also `addons/tag_picker/tests/tag_picker_selftest`. Run them with `bash tools/run_tests.sh <name>`.

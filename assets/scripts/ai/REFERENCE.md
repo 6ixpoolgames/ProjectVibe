@@ -566,11 +566,13 @@ A child of the pawn's [`AIStateManager`](#aistatemanager). A state doesn't act: 
 ### Settings and properties
 
 - `priority: int` = `0`: Higher is checked first. A state change is also an interrupt event of this priority (pawn spec 10.7).
+- `tag: StringName` = `&""`: The tag the pawn owns while in this state (tag spec 3), on the server. Empty: ai.state.<its node name in snake case>, such as ai.state.combat. Declare it in the tag declarations.
 - `manager: AIStateManager` = `null`: Set by the AIStateManager.
 - `perf_name: StringName` = `&""`: The timing scope name for its prerequisites_met(), such as &"ai.state.Combat" (see [`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)). Made once by the manager.
 
 ### Functions
 
+- `get_tag() -> StringName`: The tag the pawn owns while in this state: `tag`, or ai.state.<its node name in snake case>.
 - `prerequisites_met(_context: AIContextComponent) -> bool`: Whether this state fits right now. The base never fits, so a state that forgets to override this is never picked by mistake.
 - `enter(_context: AIContextComponent) -> void`: Once, when the pawn enters this state.
 - `exit(_context: AIContextComponent) -> void`: Once, when the pawn leaves this state.
@@ -581,7 +583,7 @@ A child of the pawn's [`AIStateManager`](#aistatemanager). A state doesn't act: 
 
 Picks the pawn's current AI state: the highest-priority state whose prerequisites hold.
 
-A part on the pawn with its [`AIStateBase`](#aistatebase) nodes as children. At each decision it moves the pawn to the first state, checked from the highest priority down, whose prerequisites hold, and a change asks for a decision with the new state's priority as the reason. States are sorted by priority, then name, once, when the manager is ready. Outside code only talks to the manager; a forced state skips the normal check for a while, and during a tick a force is queued until the pawn's next AI step so the order never depends on which pawn went first (scaling spec step 3). Server and offline only.
+A part on the pawn with its [`AIStateBase`](#aistatebase) nodes as children. At each decision it moves the pawn to the first state, checked from the highest priority down, whose prerequisites hold, and a change asks for a decision with the new state's priority as the reason. States are sorted by priority, then name, once, when the manager is ready. Outside code only talks to the manager; a forced state skips the normal check for a while, and during a tick a force is queued until the pawn's next AI step so the order never depends on which pawn went first (scaling spec step 3). Server and offline only. The pawn owns the current state's tag (`AIStateBase.get_tag()`, such as ai.state.combat) in its [`OwnedTags`](../tags/REFERENCE.md#ownedtags).
 
 ```gdscript
 pawn.ai_context.state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
@@ -739,7 +741,7 @@ Allowed in Combat. It follows the target's last known position, holding sprint a
 - `stop_distance: float` = `1.2`: How close, in metres, it gets before stopping.
 - `sprint: bool` = `true`: On: it holds sprint while chasing. Sprint's own cooldown decides when it actually sprints.
 - `dash_to_close: bool` = `false`: On: it presses dash to close in, when the target is between `dash_to_distance` and `dash_from_distance` away and the ability can start (in the air too, Dash's usable_in_air). Off by default. A dash goes the way the pawn is moving, along its path.
-- `close_in_tag: StringName` = `&"movement.advanced"`: The group of ability it uses to close in, not one ability by name: any ability tagged with it that can start (`AbilityManager.action_for_tag()`). Advanced movement by default.
+- `close_in_tag: StringName` = `&"ability.movement.advanced"`: The group of ability it uses to close in, not one ability by name: any ability tagged with it that can start (`AbilityManager.action_for_tag()`). Advanced movement by default.
 - `dash_from_distance: float` = `7.5`: The farthest the target can be for a dash, in metres.
 - `dash_to_distance: float` = `5.5`: The nearest the target can be for a dash, in metres. A dash from a sprint (9 m/s) covers about 4.2 m, so 5.5 lands it a little outside stop_distance.
 
@@ -802,17 +804,11 @@ Allowed in Alert. Available while the most aware memory entry isn't certain yet 
 
 Hangs back at shooting distance from the current target: a ranged pawn's way of moving in a fight, in place of Chase.
 
-Allowed in Combat. Available only to a pawn with a ranged attack (an ability in `ranged_tag`'s group with a reach,
-`AbilityBase.attack_reach()`), and only while the target is at least `melee_distance` away. It walks to
-`reach_fraction` of that attack's reach from the target's last known position, closing in when too far and backing away when too
-close, then stands facing it. Scored 0.85, above Chase (0.8), so a ranged pawn hangs back instead of running in; the Shoot behaviour
-(an [`AIAttackBehaviour`](#aiattackbehaviour) on the ranged attack's action, scored higher) fires whenever the shot is ready. Once the target closes within
-melee_distance it isn't available, so Chase and the melee attacks take over; give Shoot the same distance as its
-`AIAttackBehaviour.min_distance` so the pawn melees rather than shooting at point blank. Design: pawn spec 8.24.
+Allowed in Combat. Available only to a pawn with a ranged attack (an ability in `ranged_tag`'s group with a reach, `AbilityBase.attack_reach()`), and only while the target is at least `melee_distance` away. It walks to `reach_fraction` of that attack's reach from the target's last known position, closing in when too far and backing away when too close, then stands facing it. Scored 0.85, above Chase (0.8), so a ranged pawn hangs back instead of running in; the Shoot behaviour (an [`AIAttackBehaviour`](#aiattackbehaviour) on the ranged attack's action, scored higher) fires whenever the shot is ready. Once the target closes within melee_distance it isn't available, so Chase and the melee attacks take over; give Shoot the same distance as its `AIAttackBehaviour.min_distance` so the pawn melees rather than shooting at point blank. Design: pawn spec 8.24.
 
 ### Settings and properties
 
-- `ranged_tag: StringName` = `&"combat.ranged"`: The group of ability it keeps distance for: any ability tagged with it that has a reach. Ranged combat by default.
+- `ranged_tag: StringName` = `&"ability.combat.ranged"`: The group of ability it keeps distance for: any ability tagged with it that has a reach. Ranged combat by default.
 - `reach_fraction: float` = `0.7`: Where it stands, as a fraction of the ranged attack's reach from the target: 0.7 of a 14 m bolt is 9.8 m.
 - `band: float` = `1.5`: How far, in metres, from that distance it may drift before it walks again. It walks until within half of this.
 - `melee_distance: float` = `4.0`: Closer than this, in metres, it gives up keeping distance and the melee behaviours take over.
@@ -822,8 +818,7 @@ melee_distance it isn't available, so Chase and the melee attacks take over; giv
 
 ### Functions
 
-- `own_conditions() -> AICondition[]`: Has a ranged attack, and the target is at least `melee_distance` away: one condition. With no ranged attack the condition can
-  never pass. If its abilities change during play, call `AIBehaviourBase.rebuild_conditions()`.
+- `own_conditions() -> AICondition[]`: Has a ranged attack, and the target is at least `melee_distance` away: one condition. With no ranged attack the condition can never pass. If its abilities change during play, call `AIBehaviourBase.rebuild_conditions()`.
 - `preferred_distance() -> float`: The metres from the target it stands at: `reach_fraction` of its ranged attack's reach; 0 without one.
 - `find_ranged_attack() -> AbilityBase`: The pawn's ranged attack: the first ability in `ranged_tag`'s group with a reach, found once. Null if it has none.
 - `enter(context: AIContextComponent) -> void`

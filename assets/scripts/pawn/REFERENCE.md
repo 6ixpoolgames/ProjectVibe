@@ -42,6 +42,7 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 - `controller_manager: ControllerManager` = `null`: Picks whose input this pawn follows, and holds that input. Null if the pawn has none, and then nothing writes its input for it.
 - `navigation_manager: NavigationManager` = `null`: Finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
 - `ai_context: AIContextComponent` = `null`: Shared data and settings for this pawn's AI (pawn spec 10), and the AI's core. Null if the pawn has no AI.
+- `owned_tags: OwnedTags` = `null`: The tags this pawn owns right now (dead, in combat, a running ability's kind), which tag queries ask about (tag spec 3). Null if it has none, and then it owns nothing.
 - `streaming_source: PawnStreamingSource` = `null`: Keeps the world loaded around this pawn while a player has it (or always, with its keeps_world_loaded on). Null if it has none, and then it never does.
 - `dead: bool` = `false`: True while the Death ability runs, the same as is_dead(). Kept current by DeathAbility (through its timer, so a rollback updates it too), and read directly by C++, which is much cheaper than calling is_dead(). Read it; don't set it.
 - `tick_step: int` = `1`: How often this pawn simulates: every tick (1), 2nd (2) or 4th (4), spread by its own number. Rolls back (pushed to the state store when it changes). AIActivationManager raises it for far-away AI pawns; a player's pawn always runs every tick. Each run does N ticks' worth (`ticks_elapsed`). Pawn spec 8.21.
