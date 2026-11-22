@@ -16,6 +16,11 @@
 class_name AIController
 extends ControllerBase
 
+## Sees every order given to any AIController, in order: [code]order_listener.call(controller, order, args)[/code], order being the
+## method's name (&"move_to", &"press"...). Empty by default. The order stream's tap (netcode spec 19.3): the same orders, at the same
+## point of the same ticks, give the same input.
+static var order_listener := Callable()
+
 ## Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired
 ## along the look meets the point looked at.
 var look_from_height := 1.3
@@ -38,6 +43,7 @@ var _has_waiting_point := false
 ## Walks to this point along a nav path, and stands still once there. Returns false (and stands still) if there's no way there.
 ## While not in charge it only remembers the point and returns true.
 func move_to(point: Vector3) -> bool:
+	_note(&"move_to", [point])
 	_move = Vector3.ZERO # once the path ends, it stands
 	var navigation := _navigation()
 	if navigation == null:
@@ -62,18 +68,26 @@ func is_following_order() -> bool:
 
 ## Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
 func move_in_direction(direction: Vector3) -> void:
+	_note(&"move_in_direction", [direction])
 	_move = direction.limit_length(1.0)
 	_stop_path()
 
 
 ## Stands still. Held actions stay held.
 func stop() -> void:
+	_note(&"stop", [])
 	_move = Vector3.ZERO
 	_stop_path()
 
 
 ## Looks at a point in the world. Does nothing without a pawn, since there's nowhere to look from.
 func look_at_point(point: Vector3) -> void:
+	_note(&"look_at_point", [point])
+	_aim_at(point)
+
+
+# The aim itself, apart from the order, so following a node and building input don't count as orders.
+func _aim_at(point: Vector3) -> void:
 	if pawn == null:
 		return
 	var offset := point - pawn.global_position
@@ -89,15 +103,17 @@ func look_at_point(point: Vector3) -> void:
 ## Keeps looking at a node, at offset from its origin, worked out again at every input, until [method stop_looking] or another
 ## look. For a behaviour that sleeps through a swing. A freed node ends it.
 func look_at_node(node: Node3D, offset := Vector3.ZERO) -> void:
+	_note(&"look_at_node", [node, offset])
 	_look_node = node
 	_look_offset = offset
 	if is_instance_valid(node):
-		look_at_point(node.global_position + offset)
-		_look_node = node # look_at_point clears it
+		_aim_at(node.global_position + offset)
+		_look_node = node # _aim_at clears it
 
 
 ## Stops looking at anything in particular, and keeps whatever look the pawn already has.
 func stop_looking() -> void:
+	_note(&"stop_looking", [])
 	_look_set = false
 	_look_node = null
 
@@ -109,11 +125,13 @@ func is_looking_at_point() -> bool:
 
 ## Holds this action for the next tick only, so the pawn sees one press.
 func press(action: StringName) -> void:
+	_note(&"press", [action])
 	_pressed_once |= InputActions.mask_of(action)
 
 
 ## Holds or lets go of this action, until changed.
 func hold(action: StringName, held := true) -> void:
+	_note(&"hold", [action, held])
 	if held:
 		_held |= InputActions.mask_of(action)
 	else:
@@ -122,6 +140,7 @@ func hold(action: StringName, held := true) -> void:
 
 ## Back to idle: standing still, nothing held. The look direction stays.
 func release_all() -> void:
+	_note(&"release_all", [])
 	_move = Vector3.ZERO
 	_held = 0
 	_pressed_once = 0
@@ -151,8 +170,8 @@ func take_input_command(_tick: int) -> InputCommand:
 		if is_instance_valid(_look_node):
 			var node := _look_node
 			var offset := _look_offset
-			look_at_point(node.global_position + offset)
-			_look_node = node # look_at_point clears it
+			_aim_at(node.global_position + offset)
+			_look_node = node # _aim_at clears it
 			_look_offset = offset
 		else:
 			_look_node = null # it's gone: keep the last aim
@@ -165,6 +184,15 @@ func take_input_command(_tick: int) -> InputCommand:
 	_command.held_actions = _held | _pressed_once | link_press
 	_pressed_once = 0
 	return _command
+
+
+# Tells the order listener, if there is one.
+# REFACTOR: a prototype tap, one static listener for every controller, made for the order replay test; the order stream (netcode spec
+# 19.3) settles its real shape. Orders that change nothing (a stop while already stopped: over 90% of stops) still count here; drop
+# them before a stream sends them.
+func _note(order: StringName, args: Array) -> void:
+	if order_listener.is_valid():
+		order_listener.call(self, order, args)
 
 
 # The pawn's NavigationManager, or null.

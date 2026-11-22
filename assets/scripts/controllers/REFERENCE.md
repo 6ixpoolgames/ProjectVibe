@@ -29,6 +29,7 @@ While a player has the pawn but the AI keeps deciding, `move_to()` only remember
 
 ### Settings and properties
 
+- `order_listener: Callable` = `Callable()`: Sees every order given to any AIController, in order: `order_listener.call(controller, order, args)`, order being the method's name (&"move_to", &"press"...). Empty by default. The order stream's tap (netcode spec 19.3): the same orders, at the same point of the same ticks, give the same input.
 - `look_from_height: float` = `1.3`: Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired along the look meets the point looked at.
 
 ### Functions

@@ -21,6 +21,12 @@
 ##   --nav-dump=T             at the end of tick T, every nav mesh triangle (PATH.nav), link and tile state (PATH.links), bit for bit
 ##   --paths-to=T             up to tick T, every pawn's path state with goals and corners as exact bits (PATH.paths), and the nav
 ##                            server's log of every queued path search (PATH.pathlog, NavServer.debug_log_path_steps)
+## Playing from orders (Claude 2026-11-23, the owner's request: can clients run the crowds from orders alone? netcode spec 19.3):
+##   --record-orders=FILE     every order the AI gives a pawn's controller (AIController.order_listener): its tick, the pawn, the order
+##                            and its exact arguments, and whether it came during that pawn's own AI step
+##   --replay-orders=FILE     the AI doesn't think: each pawn's AI step plays its recorded orders for that tick instead
+##                            (AIContextComponent.order_source). Compare the two runs' fingerprints with run_determinism_check.py
+##                            --compare: the same means orders alone rebuild the game
 ##
 ## The fingerprint file, per tick: tick (int64), frame checksum (int64), entity count (int32), then per entity, in handle order:
 ## handle (int64) and row hash (int64); then column count (int32) and one hash per column (int64): first the tick's landings
@@ -45,6 +51,17 @@ var _trace_from := -1
 var _trace_to := -1
 var _nav_dump_tick := -1
 var _paths_to := -1
+var _record_orders_path := ""
+var _replay_orders_path := ""
+var _orders_out: FileAccess = null
+var _orders: Dictionary = {} # replaying: tick -> {pawn name -> [[order, args], ...]}
+var _thinking: Node = null # recording: the pawn whose AI step is running, so an order from elsewhere is noticed
+var _orders_recorded := 0
+var _orders_outside := 0 # recorded orders given outside their pawn's own AI step
+var _orders_played := 0
+var _orders_skipped := 0 # replaying: orders given outside their pawn's AI step, which aren't played
+var _pawn_names := {} # replaying: pawn name -> pawn, refreshed each tick, for orders that name a pawn (look_at_node)
+var _pawn_names_tick := -1
 var _out: FileAccess = null
 var _names: FileAccess = null
 var _dump: FileAccess = null
@@ -90,6 +107,10 @@ func _ready() -> void:
 				_nav_dump_tick = int(value)
 			"paths-to":
 				_paths_to = int(value)
+			"record-orders":
+				_record_orders_path = value
+			"replay-orders":
+				_replay_orders_path = value
 	if _out_path == "":
 		push_error("determinism_check: give --out=PATH")
 		get_tree().quit(2)
@@ -103,6 +124,10 @@ func _ready() -> void:
 		if Engine.has_singleton(&"NavServer"):
 			Engine.get_singleton(&"NavServer").debug_log_path_steps(true)
 			_path_log = FileAccess.open(_out_path + ".pathlog", FileAccess.WRITE)
+	if _record_orders_path != "":
+		_start_recording_orders()
+	elif _replay_orders_path != "":
+		_start_replaying_orders()
 	LandingLog.clear()
 	if _workers > -2:
 		TickJobs.set_worker_count(_workers)
@@ -125,11 +150,59 @@ func _ready() -> void:
 		"on" if _ladder else "off", terrain.noise_seed if terrain else "none"])
 
 
-# Both are static, so left on they'd outlive this scene: the decision listener crashes Godot as it quits.
+# These are static, so left on they'd outlive this scene: a listener that outlives it crashes Godot as it quits.
 func _exit_tree() -> void:
 	AIBehaviourManager.decision_listener = Callable()
+	AIController.order_listener = Callable()
+	AIContextComponent.order_source = Callable()
 	if _path_log:
 		Engine.get_singleton(&"NavServer").debug_log_path_steps(false)
+
+
+# Recording: the AI thinks as usual, through an order source that notes whose step it is, and every order goes to the file. A pawn
+# named in an order (look_at_node) is written as {"pawn": its name}, which is the same in every run.
+func _start_recording_orders() -> void:
+	_orders_out = FileAccess.open(_record_orders_path, FileAccess.WRITE)
+	AIContextComponent.order_source = func(context: AIContextComponent, tick: int) -> void:
+		_thinking = context.pawn
+		context.think(tick)
+		_thinking = null
+	AIController.order_listener = func(controller: AIController, order: StringName, args: Array) -> void:
+		var inside := controller.pawn == _thinking
+		if not inside:
+			_orders_outside += 1
+		var plain: Array = args.map(func(arg: Variant) -> Variant: return {"pawn": String(arg.name)} if arg is Node else arg)
+		_orders_out.store_var([TickDriver.tick, String(controller.pawn.name) if controller.pawn else "", order, plain, inside])
+		_orders_recorded += 1
+
+
+# Replaying: every recorded order, by tick and pawn, played in each pawn's AI step instead of its AI.
+func _start_replaying_orders() -> void:
+	var file := FileAccess.open(_replay_orders_path, FileAccess.READ)
+	while file.get_position() < file.get_length():
+		var entry: Array = file.get_var()
+		var by_pawn: Dictionary = _orders.get_or_add(int(entry[0]), {})
+		(by_pawn.get_or_add(String(entry[1]), []) as Array).append([entry[2], entry[3], entry[4]])
+	AIContextComponent.order_source = func(context: AIContextComponent, tick: int) -> void:
+		for order: Array in _orders.get(tick, {}).get(String(context.pawn.name), []):
+			# An order given outside its pawn's AI step (the AI tidying up when its pawn dies, mid-tick) belongs to another moment of
+			# the tick; played here it would come too early. A dead pawn's input is cleared anyway, so it changes nothing. A workaround
+			# until the AI stops giving orders on death (the REFACTOR in AIBehaviourManager._ready).
+			if not order[2]:
+				_orders_skipped += 1
+				continue
+			var args: Array = (order[1] as Array).map(func(arg: Variant) -> Variant: return _pawn_named(arg["pawn"], tick) if arg is Dictionary else arg)
+			context.controller.callv(order[0], args)
+			_orders_played += 1
+
+
+func _pawn_named(pawn_name: String, tick: int) -> Node:
+	if _pawn_names_tick != tick:
+		_pawn_names_tick = tick
+		_pawn_names.clear()
+		for pawn in get_tree().get_nodes_in_group(Pawn.GROUP):
+			_pawn_names[String(pawn.name)] = pawn
+	return _pawn_names.get(pawn_name)
 
 
 func _start_trace() -> void:
@@ -256,5 +329,10 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 		_names.close()
 		if _dump:
 			_dump.close()
+		if _orders_out:
+			_orders_out.close()
+			print("--- Orders recorded: %d, of which %d outside their pawn's own AI step ---" % [_orders_recorded, _orders_outside])
+		if _replay_orders_path != "":
+			print("--- Orders played: %d; skipped, given outside their pawn's AI step: %d ---" % [_orders_played, _orders_skipped])
 		print("--- Wrote %d ticks (%d to %d) ---" % [_written, _first_tick, tick])
 		get_tree().quit(0)

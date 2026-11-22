@@ -191,6 +191,7 @@ Design: pawn spec 10, 10.7 and 10.9.
 - `while_possessed: int` = `1`: What the AI does while a player has the pawn. MEMORY_ONLY suits possessing an NPC and letting go: the AI already knows what's around.
 - `decision_interval_ticks: int` = `15`: How often the AI decides, in ticks at 60 a second (15: four times a second). Each pawn is offset by its own number, so a crowd doesn't all decide on one tick. Some events wake a decision early (pawn spec 10.9).
 - `random_seed: int` = `0`: Part of every random number this AI uses; pawn numbers still make two pawns differ. A game can set it from its world seed.
+- `order_source: Callable` = `Callable()`: Where every AI pawn's orders come from, if not from its own AI: called instead of `think()` in each pawn's AI step, as `order_source.call(context, tick)`, to tell `context.controller` what to do. Empty (the default): the AI thinks. For playing back an order stream (netcode spec 19.3), recorded through `AIController.order_listener`.
 - `pawn: Pawn` = `null`: The pawn this AI belongs to, or null if its parent isn't one.
 - `current_tick: int` = `0`: The tick the AI is running now. Set by the pawn at the start of each AI step.
 - `current_target: Node3D` = `null`: What the AI is focused on, picked by the target selector. Null when there's none.
@@ -229,7 +230,8 @@ Design: pawn spec 10, 10.7 and 10.9.
 - `unknown_hit_point(within_ticks: int) -> Variant`: Where an unknown attacker hit from, if that was within this many ticks; null otherwise. Look Toward and Investigate head there when nothing else is half-noticed.
 - `point_of_interest(within_ticks: int) -> Variant`: Something half-noticed to look at or go and see: the most aware memory entry's last known position while it isn't certain yet, or else where an unremembered attacker hit from, within this many ticks (at 60 a second); null when neither. Their conditions check the same facts through `AIInputs.half_noticed_conditions()`, which the C++ decider can read.
 - `has_target() -> bool`: True when there's a current target, picked by the target selector.
-- `run_ai(tick: int) -> void`: The AI's step, in a fixed order (pawn spec 4 and 10.9), called by the pawn in its input phase. Runs only where the AI runs (offline or the server), never while a rollback replays ticks; while a player has the pawn, only as far as `while_possessed` allows.
+- `run_ai(tick: int) -> void`: The AI's step, called by the pawn in its input phase. Runs only where the AI runs (offline or the server), never while a rollback replays ticks. The pawn's orders for the tick come from `order_source` if one is set, else from `think()`.
+- `think(tick: int) -> void`: The AI thinking, in a fixed order (pawn spec 4 and 10.9): forces, sensing, a decision when one is due, the running behaviour. While a player has the pawn, only as far as `while_possessed` allows. `run_ai()` calls it; an `order_source` may too.
 - `is_decision_tick(tick: int) -> bool`: True on this pawn's regular decision ticks, every `decision_interval_ticks`, offset by its own number.
 - `request_decision(priority: int = 0, normal: bool = true) -> void`: Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state change, a force's priority for a forced state. normal is true only for an ordinary decision, the one kind a behaviour's min_run_ticks holds off. Several requests in one tick combine into one decision with the strongest reason.
 - `has_decision_waiting() -> bool`: True when a decision is waiting to happen.

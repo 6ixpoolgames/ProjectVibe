@@ -16,7 +16,7 @@ The brain on each computer-run pawn: it notices enemies by sight, remembers them
 
 ## The pieces
 
-Every part is a child of the pawn. The pawn calls `AIContextComponent.run_ai` once per tick, offline or on the server only, and it runs the rest in this order:
+Every part is a child of the pawn. The pawn calls `AIContextComponent.run_ai` once per tick, offline or on the server only, and the AI thinks (`think`), running the rest in this order. An order source (`AIContextComponent.order_source`) can supply the pawn's orders instead, as the order replay test does (netcode spec 19.10); the AI gives orders only through the AIController, and should give them only in this step (a death-time exception is a refactor row in the changelog).
 
 ```
  SightSense ─► AISensingManager ─► AIMemory ─► AITargetSelector ─► AIStateManager ─► AIBehaviourManager ─► AIController

@@ -47,7 +47,8 @@ unload_margin = 32.0
 transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 285, 0, 0)
 
 [node name="RedSpawner" parent="Spawning" index="1"]
-transform = Transform3D(0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, 0.866025, -150, 0, 259.808)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 300)
+pawn_type = "goblin_melee"
 keep_alive = 50
 scatter_radius = 10.0
 
@@ -57,7 +58,8 @@ load_distance = 160.0
 nav_distance = 160.0
 
 [node name="BlueSpawner" parent="Spawning" index="2"]
-transform = Transform3D(-0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, -0.866025, -150, 0, -259.808)
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -300, 0, 0)
+pawn_type = "goblin_blue_melee"
 keep_alive = 50
 scatter_radius = 10.0
 
@@ -68,6 +70,7 @@ nav_distance = 160.0
 
 [node name="AllySpawner" parent="Spawning" index="3"]
 transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 300, 0, 0)
+pawn_type = "ally_melee"
 keep_alive = 49
 scatter_radius = 10.0
 
@@ -76,8 +79,53 @@ script = ExtResource("3_source")
 load_distance = 160.0
 nav_distance = 160.0
 
+[node name="GreenSpawner" type="Node3D" parent="Spawning"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, -300)
+script = ExtResource("4_spawner")
+active = false
+pawn_type = "goblin_green_melee"
+keep_alive = 50
+scatter_radius = 10.0
+
+[node name="StreamingSource" type="Node3D" parent="Spawning/GreenSpawner"]
+script = ExtResource("3_source")
+load_distance = 160.0
+nav_distance = 160.0
+
+[node name="RedArcherSpawner" type="Node3D" parent="Spawning"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 300)
+script = ExtResource("4_spawner")
+active = false
+pawn_type = "goblin_archer"
+keep_alive = 0
+scatter_radius = 10.0
+
+[node name="BlueArcherSpawner" type="Node3D" parent="Spawning"]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -300, 0, 0)
+script = ExtResource("4_spawner")
+active = false
+pawn_type = "goblin_blue_archer"
+keep_alive = 0
+scatter_radius = 10.0
+
+[node name="AllyArcherSpawner" type="Node3D" parent="Spawning"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 300, 0, 0)
+script = ExtResource("4_spawner")
+active = false
+pawn_type = "ally_archer"
+keep_alive = 0
+scatter_radius = 10.0
+
+[node name="GreenArcherSpawner" type="Node3D" parent="Spawning"]
+transform = Transform3D(-1, 0, 0, 0, 1, 0, 0, 0, -1, 0, 0, -300)
+script = ExtResource("4_spawner")
+active = false
+pawn_type = "goblin_green_archer"
+keep_alive = 0
+scatter_radius = 10.0
+
 [node name="HeroRedSpawner" type="Node3D" parent="Spawning"]
-transform = Transform3D(0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, 0.866025, -157.5, 0, 272.798)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 315)
 script = ExtResource("4_spawner")
 active = false
 pawn_type = "hero_red"
@@ -86,7 +134,7 @@ respawn_seconds = 30.0
 scatter_radius = 4.0
 
 [node name="HeroBlueSpawner" type="Node3D" parent="Spawning"]
-transform = Transform3D(-0.866025, 0, -0.5, 0, 1, 0, 0.5, 0, -0.866025, -157.5, 0, -272.798)
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, -315, 0, 0)
 script = ExtResource("4_spawner")
 active = false
 pawn_type = "hero_blue"

@@ -82,6 +82,7 @@ func tick(context: AIContextComponent) -> Status:
 	if index < 0:
 		return Status.FAILED # the target is gone
 	var last_known := _memory.last_known_position_at(index)
+	# REFACTOR: an order every tick, as in AIChaseBehaviour, too many for an order stream: a persistent order instead (see there).
 	_hands.look_at_point(last_known + Vector3(0.0, 1.0, 0.0)) # every tick it runs: the look goes stale as the pawn moves
 	var away := pawn.global_position - last_known
 	away.y = 0.0

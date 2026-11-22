@@ -12,6 +12,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
+| The AI gives orders on death | `AIBehaviourManager._ready` (`died` stops the running behaviour, whose `exit` gives orders) | Orders mid-tick, outside the AI step, so an order stream can't place them (netcode spec 19.10; the order replay test skips them). A dead pawn should give none: its controller should let go on death itself. With the behaviour and ability sets pass | S |
+| Orders every tick | `AIChaseBehaviour.tick`, `AIKeepDistanceBehaviour.tick` (`look_at_point` at the remembered position) | About half of all AI orders, too many for an order stream. Persistent orders (look at, follow), using only what clients have (not the AI's memory), or re-sent only when they change enough. Behaviour pass | M |
+| No way to switch a behaviour off | `AIBehaviourBase` (no `enabled`); the mass battle's role scenes name a state that doesn't exist (`Disabled`) | A designer can't turn a behaviour off in an inherited scene, and the sample's archers still carry melee abilities. Behaviour and ability sets (a unit made of sets), with tag requirements (pawn spec 10.13) | M |
+| A prototype order hook | `AIContextComponent.order_source` (with `AIController.order_listener`) | One static source for every AI pawn, made for the order replay test. The order stream (netcode spec 19.3) settles its shape: per world, which pawns | S |
 | One way to find a sibling part early | `_sibling_ability_manager()` in `AIContextComponent` and `AIBehaviourManager`, and the manager's `_sibling_navigation_manager()` | The same lookup written three times, because `pawn.ability_manager` isn't set until the pawn's own `_ready`, after the parts'. One shared helper (on Pawn, say) is one place to change | S |
 | One forcing-and-queueing helper | `AIStateManager.force_state`, `AITargetSelector.force_target` | Forcing with a priority and a hold, refusing a weaker force, and queueing requests made during a tick are the same rules written twice; they could drift apart | M |
 | One copy of the sight rule in GDScript | `SightSense.visibility_of`, `has_line_of_sight` | A third copy of the visibility and ray rules, beside `AIMemoryStoreGD` and C++'s `ai_sight_rules.h` (that pair is deliberate: a fallback checked by the tests). Asking the pawn's memory store would leave one GDScript copy | S |
@@ -19,6 +23,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | The debug timeline as a view over replay | `ai/debug/AIDebugTimeline.gd` | It records positions, facing and the same AI, ability, hit and death events that replay's motion and gameplay channels already record for every pawn, because it was written before replay existed. Reading the replay being recorded instead would leave one copy of the data, and `ReplayViewer`'s ghosts could be shared (the owner's call, 2026-11-17: logged, not now) | M |
 | Decision records as a replay channel | `ai/debug/AIDecisionRecorder.gd` | A second recording mechanism with its own storage and file format, beside `ReplayRecorder`, the one place that records everything. An "AI decisions" channel (off by default; 31 MB of JSON for 40 s at 150 pawns) would put them in the replay file, and the shadow comparison could read it live or from a file (the owner's call, 2026-11-17: logged, not now) | M |
 | The sprint action's name as a setting | `&"sprint"` in `AIChaseBehaviour`, `AISearchBehaviour`, `AIInvestigateBehaviour`, `AIKeepDistanceBehaviour` | Written into the code, so a game that names its sprint action differently has to edit four behaviours. A setting, or a tag as Chase's `close_in_tag` is, would need no code | S |
+
+## 2026-11-23
+
+- **Orders from elsewhere** (netcode spec 19.3 and 19.10): `AIContextComponent.order_source`, a static callable that, when set, decides each AI pawn's orders in its AI step instead of the AI; the AI's work moved from `run_ai` into `think`, which an order source may call. Played back from a recording, orders alone rebuild the game. Found on the way: the AI's death cleanup gives orders mid-tick, outside the AI step (a behaviour's exit); harmless, since a dead pawn's input is cleared, but the order stream's rule is that the AI gives orders only in its AI step.
 
 ## 2026-11-22
 

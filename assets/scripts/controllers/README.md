@@ -25,7 +25,7 @@ Who drives a pawn: a player or the AI makes one input command a tick, and the pa
 - **`InputActions`**: action names (`jump`, `sprint`...) to bits, from the list in `resources/input_actions.tres`, the same on every machine.
 - **`ControllerBase`**: what every controller extends. Its one job is `take_input_command(tick)`.
 - **`ControllerManager`**: a part on every pawn. Picks who's in charge (this machine's player, else nobody if a remote player has it, else the AI), copies their command into the pawn's input, tells presses from holds, and holds whether a player has the pawn. On the server it cleans a client's input and covers missing input.
-- **`AIController`**: the AI's hands, a child of the ControllerManager. The AI's behaviours tell it to walk somewhere, press or hold an action, or look at a point, and it builds the command.
+- **`AIController`**: the AI's hands, a child of the ControllerManager. The AI's behaviours tell it to walk somewhere, press or hold an action, or look at a point, and it builds the command. These calls are the AI's **orders**: `AIController.order_listener` sees each one, and the same orders at the same point of the same ticks give the same input, which is what lets a recorded order stream rebuild a battle (netcode spec 19.10).
 
 ## How to use it
 

@@ -11,8 +11,13 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
+| Orders that change nothing still count | `AIController._note` (and `order_listener`, a prototype tap) | Over 90% of `stop` and `stop_looking` orders repeat one already in force; an order stream should drop them before sending. The listener's shape is the order stream's to settle (netcode spec 19.3) | S |
 | Move the test hooks out of `InputActions` | `reset()`, `use_list()` in `InputActions.gd` | Test hooks in a shipping class; the owner's rule keeps test code in `tests/` | S |
 | Share the missing-input defaults | `_network_input_missing()` in `ControllerManager.gd` | 3 and 6 copy `NetworkSession`'s defaults by hand, so the two can drift apart | S |
+
+## 2026-11-23
+
+- **The order stream's tap** (netcode spec 19.3 and 19.10, the owner's request: test determinism with orders only): `AIController.order_listener`, a static callable that sees every order given to any AI controller (the method and its arguments), in the order given. `look_at_point` is split into the order and the aiming itself (`_aim_at`), so following a node and building input don't count as orders. Recording these orders and playing them back with the AI off rebuilds a 1000-pawn battle exactly.
 
 ## 2026-11-21
 

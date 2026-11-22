@@ -29,6 +29,11 @@ enum WhilePossessed {
 ## Part of every random number this AI uses; pawn numbers still make two pawns differ. A game can set it from its world seed.
 @export var random_seed := 0
 
+## Where every AI pawn's orders come from, if not from its own AI: called instead of [method think] in each pawn's AI step, as
+## [code]order_source.call(context, tick)[/code], to tell [code]context.controller[/code] what to do. Empty (the default): the AI thinks.
+## For playing back an order stream (netcode spec 19.3), recorded through [member AIController.order_listener].
+static var order_source := Callable()
+
 ## The pawn this AI belongs to, or null if its parent isn't one.
 var pawn: Pawn = null
 ## The tick the AI is running now. Set by the pawn at the start of each AI step.
@@ -311,14 +316,25 @@ func has_target() -> bool:
 # --- Running the AI ---
 
 
-## The AI's step, in a fixed order (pawn spec 4 and 10.9), called by the pawn in its input phase. Runs only where the AI runs (offline
-## or the server), never while a rollback replays ticks; while a player has the pawn, only as far as [member while_possessed] allows.
+## The AI's step, called by the pawn in its input phase. Runs only where the AI runs (offline or the server), never while a rollback
+## replays ticks. The pawn's orders for the tick come from [member order_source] if one is set, else from [method think].
 func run_ai(tick: int) -> void:
 	if pawn == null or not pawn.runs_ai_here():
 		return
 	if TickDriver.is_resimulating():
 		return # the AI is never rolled back, so a replay must not run it again
 	current_tick = tick
+	# REFACTOR: a prototype hook, one static source for every AI pawn, made for the order replay test; the order stream (netcode spec
+	# 19.3) settles its real shape (per world, which pawns it plays).
+	if order_source.is_valid():
+		order_source.call(self, tick)
+		return
+	think(tick)
+
+
+## The AI thinking, in a fixed order (pawn spec 4 and 10.9): forces, sensing, a decision when one is due, the running behaviour. While
+## a player has the pawn, only as far as [member while_possessed] allows. [method run_ai] calls it; an [member order_source] may too.
+func think(tick: int) -> void:
 	var has_player := pawn.controller_manager != null and pawn.controller_manager.has_player()
 	var ai_state_manager := state_manager
 	var ai_target_selector := target_selector

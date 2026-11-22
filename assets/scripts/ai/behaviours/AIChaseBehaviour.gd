@@ -64,6 +64,9 @@ func tick(context: AIContextComponent) -> Status:
 		return Status.FAILED # the target is gone
 	var last_known := _memory.last_known_position_at(index)
 	# Every tick it runs: the look is a direction from where the pawn stands now, so it goes stale as the pawn moves.
+	# REFACTOR: an order every tick (with Keep Distance's, about half of all AI orders), too many for an order stream (netcode spec
+	# 19.10). A persistent order (look at, follow) is the fix, but it aims at the remembered position, which clients can't work out
+	# without the AI's memory: the order must use only what clients have, or be re-sent only when it changes enough. Behaviour pass.
 	_hands.look_at_point(last_known + Vector3(0.0, 1.0, 0.0))
 	var offset := last_known - pawn.global_position
 	offset.y = 0.0

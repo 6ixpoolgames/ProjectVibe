@@ -1,0 +1,17 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_goblin_blue.tscn" id="1_base"]
+
+[node name="FactionGoblinBlueArcher" instance=ExtResource("1_base")]
+
+[node name="Attack" parent="AIBehaviourManager"]
+allowed_states = Array[StringName]([&"Disabled"])
+
+[node name="HeavyAttack" parent="AIBehaviourManager"]
+allowed_states = Array[StringName]([&"Disabled"])
+
+[node name="Parry" parent="AIBehaviourManager"]
+allowed_states = Array[StringName]([&"Disabled"])
+
+[node name="FloatingSword" parent="Visual"]
+visible = false

@@ -101,7 +101,7 @@ Owner's decisions, 2026-11-16:
 - **T1.3:** deltas against acknowledged baselines, with full-state recovery (netcode v1). *(Claude 2026-11-16: built in GDScript, with snapshots cut into parts under ENet's packet size and cheaper placing of remote pawns, after the networked mass battle lagged and dropped its client: netcode spec 11.4.1. Acknowledgements from a client that controls nothing: built the same day, an `ACK` packet. The change check in C++: built 2026-11-17, the C++ bundle.)*
 - **T1.4:** input batching, and making lifecycle, teleport and late join wait on the world state they need.
 - **T1.5:** a soak test and validation across machines.
-- **Later, if it's needed:** relevance and priority (netcode v2).
+- **Netcode v2** *(direction agreed 2026-11-23, [netcode spec 19](netcode/NETCODE_SPEC.md))*: targets of 100-200 players and 1000 pawns, player-hosted first; snapshots as the backbone with orders for AI crowds to try; relevancy by chunk rings; a per-client bandwidth budget with priorities; one tick scheduler for hand-offs, spawns and builds. First step: profiling snapshots, commands and orders side by side with bot clients. *(Claude 2026-11-23: profiled offline (orders 50 to 130 times cheaper than snapshots), and orders alone rebuild a 1000-pawn battle exactly. Pending, for the behaviour and ability sets pass: behaviours giving persistent orders instead of one a tick, and the AI giving no orders on death; refactor rows in the AI and controllers changelogs.)*
 
 ## Navigation and terrain track *(the navigation and terrain assessment, 2026-11-16; adopted by the owner. Each claim was checked against the code and confirmed)*
 

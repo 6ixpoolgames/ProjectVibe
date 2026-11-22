@@ -12,6 +12,7 @@ How to read this:
 - Sections 3–6 are the foundation that gets built first, and works offline: the tick driver, clocks, networked state, rollback.
 - Sections 7–11 are the multiplayer features on top.
 - Sections 12–17: security, authority, Godot notes, defaults, build order, open questions. Section 18 logs decisions.
+- Section 19 is the v2 direction (2026-11-23): targets, replication strategies, the tick scheduler, relevancy, hosting, profiling first.
 
 ---
 
@@ -25,7 +26,7 @@ How to read this:
 - **Hits are judged by the server with rewind** (**lag compensation**): it checks what the shooter actually saw.
 - **Prediction is a setting, per game and per ability** (section 7). A MOBA can turn it off and keep its ping-based input delay; a shooter predicts movement and abilities.
 
-**Out of scope:** lockstep (every machine running an identical simulation from inputs alone). It needs bit-exact determinism that GDScript floats and Godot physics don't give.
+**Lockstep** (every machine running an identical simulation from inputs alone) was out of scope here, since it needs bit-exact determinism. *(Claude 2026-11-23: one build is now deterministic across sessions and platforms, so lockstep stays possible as the far end of the replication dial; section 19.3.)*
 
 Single player is just "no network": the same code runs, the local machine is the authority, and nothing is sent.
 
@@ -755,12 +756,12 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 
 ## 17. Open questions
 
-1. **Target player counts and genres** to tune defaults (tick rate, snapshot rate, history length).
+1. **Target player counts and genres** to tune defaults (tick rate, snapshot rate, history length). *(Answered 2026-11-23: section 19.1.)*
 2. **Hit markers:** predicted (instant, sometimes wrong) or confirmed (late, always right)? Per-game setting; which default?
 3. **Projectile prediction** beyond the tier 0 cosmetic version.
 4. **Data-only mod content** pushed by the server, so a modded server accepts vanilla clients.
 5. **Rigid body props:** stay server-only, or predict some later?
-6. **Relevancy method** for v2: distance, line of sight, or both.
+6. **Relevancy method** for v2: distance, line of sight, or both. *(2026-11-23: distance first, by chunk rings from each client's streaming sources, in clusters; line of sight later. Section 19.5.)*
 7. **Dedicated server builds:** headless export without rendering, cameras or UI.
 8. **Your pawn bumping a pawn that isn't replayed.** It stays where it's drawn, the standard behaviour, and the server corrects the difference (section 6.5). Still open: whether a real network or real players change that, and how to keep the large one-off corrections down (To do, below).
 
@@ -815,6 +816,9 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 
 | Decision | Date |
 |---|---|
+| Targets: 100-200 players and 1000 pawns aspirationally, all in one fight as the case to design for; player-hosted first, dedicated as well; moderate fairness (section 19.1) | 2026-11-23 |
+| Snapshots stay the backbone and the source of correction; orders for AI crowds to try, profiled against snapshots; lockstep kept possible for an RTS (section 19.3) | 2026-11-23 |
+| Changes like spawns, hand-offs, builds and load steps happen on scheduled ticks, through one tick scheduler (section 19.4) | 2026-11-23 |
 | Full competitive model: server-authoritative, client prediction, reconciliation, interpolation, lag compensation | 2026-11-04 |
 | Own implementation, modelled on netfox's concepts; no dependency | 2026-11-04 |
 | One tick driver runs all gameplay, on every machine, online and offline; a registered list in fixed phases, signals only for coarse phase events | 2026-11-04 |
@@ -824,7 +828,7 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | Prediction is a project default plus a per-ability override, so MOBA-style felt input delay is possible | 2026-11-04 |
 | Projectiles: server-simulated, per-tick sweeps, broadphase culling as a filter only; seeded spread | 2026-11-04 |
 | Content hash mismatch refuses the connection | 2026-11-04 |
-| Lockstep is out of scope | 2026-11-04 |
+| Lockstep is out of scope *(revised 2026-11-23: kept possible, section 19.3)* | 2026-11-04 |
 | Target range: real-time 3D first, and 3D only. An RTS is real-time 3D with extra needs on top, so with lockstep out of scope it would be server-authoritative here. 2D would be a separate framework | 2026-11-06 |
 | The tick driver and state contract are built before the ability system | 2026-11-04 |
 | Positions and velocities round to 1 mm, not 1 cm; 1.5 mm tolerance when comparing predictions | 2026-11-04 |
@@ -853,3 +857,147 @@ The server-side ones (6 and 7) only ask the server, which only obeys a client th
 | Gameplay reads its own `grounded` state, and entities refresh engine-private floor state after a load (`_on_state_loaded`) | 2026-11-04 |
 | Input is saved in its own phase, after input and before simulate | 2026-11-04 |
 | The tick loop runs inside `_physics_process` with its own accumulator (physics queries stay safe); default tick rate = physics rate; `physics_factor` for `move_and_slide` | 2026-11-04 |
+
+---
+
+## 19. Netcode v2: the direction *(Claude, 2026-11-23, from the discussion with the owner the same day; to agree line by line before anything is built)*
+
+**Why now:** the first game puts hundreds of pawns in one fight and lets players jump into any of them, and the determinism work of 2026-11-22 and 23 changed what's possible (state store spec 13.11): the same build now plays a 603-pawn battle bit for bit the same across sessions, on a loaded machine, and on Windows against Linux. This section sets the targets every default is tuned against, and the shape the netcode grows into. Nothing in it is built yet.
+
+### 19.1 Targets
+
+| | Target | Notes |
+|---|---|---|
+| Players | **100-200 at once**, aspirationally | All in one fight is the case to design for: relevancy can't help when everyone is near everyone |
+| Pawns | **1000 active**, aspirationally | Not all at full resolution: simulation level of detail is fine (far pawns already run every 2nd or 4th tick) |
+| Hosting | **Player-hosted first**, dedicated as well | A low-population game that must stay playable long after any official service. Realistically tens of players on a player's machine; 100-200 needs a dedicated server (19.7) |
+| Fairness | **Moderate** | Server authority; no kernel-level anti-cheat, not to start (19.8) |
+| Genres | **Real-time 3D action first**; an RTS later | Code kept modular enough to adapt; lockstep stays possible (19.3) |
+
+These answer open question 1 (section 17).
+
+### 19.2 What stays
+
+- **Server authority with client prediction** (section 1): the server decides, clients send inputs, your own pawn is predicted and reconciled, others are drawn in the past, hits are judged with rewind.
+- **State synchronization is the backbone.** Snapshots (the server sending results) stay, and stay the source of drift correction: whatever else is sent, a snapshot or keyframe is what puts a client right. They also serve late joiners, pawns entering relevancy, and every player's pawn.
+- **Small games keep today's system as it is:** every relevant entity's state at the snapshot rate, full fidelity, no orders.
+- **The server's state recording stays the archive** (19.6).
+
+### 19.3 Replication as a strategy per kind of entity
+
+Each kind of entity is replicated by one of these, with its own rate and precision:
+
+| Strategy | What's sent | Clients | Good for |
+|---|---|---|---|
+| **Snapshot** | its state, at a rate from every snapshot down to a keyframe every few seconds | draw it (or predict it, if marked) | players' pawns, anything few or important; the correction for everything else |
+| **Order** | an order when the AI or a player gives one ("go here", "attack that"), plus keyframes | simulate it themselves, from the order, deterministically | AI crowds: one order instead of hundreds of ticks of state |
+| **Event** | one message when it happens (a hit, a death, an ability starting, a projectile fired with its seed) | apply it, or fly it the same way | things that happen once |
+
+- **The snapshot rate is a dial:** every snapshot for small games; keyframes with orders in between for big crowds. **Lockstep is the far end of the dial:** no snapshots at all, every machine simulating everything from commands, with an input delay. It stays possible for an RTS (likely with a crowd manager and flow fields), but isn't the priority. This revises "lockstep is out of scope" (section 1, decisions 2026-11-04): the reason given then, that GDScript floats and Godot physics aren't deterministic, no longer holds for one build.
+- **The command stream is a first-class format.** Orders and the commands pawns apply, with keyframes and a checksum per frame, are the same data whether recorded (input-based replay, state store spec 10), streamed to clients (orders), or exchanged by every machine (lockstep). One format, three uses.
+- **What level an order is** is the hybrid's main question, for profiling (19.10): per-tick commands (a move direction every tick) for 1000 pawns cost a lot; orders cost almost nothing, but then pathfinding and steering must be deterministic on clients. They are now, nav included (Recast and Detour sort stably, nearest-polygon ties go by id).
+- **Where the hybrid drifts:** a client that simulates pawn A from orders, but doesn't have pawn B (not relevant to it), gets A wrong when A bumps or hits B. Corrections fix it; relevancy by clusters (19.5) keeps it rare.
+
+### 19.4 The tick scheduler
+
+The owner's call: the landing-tick pattern (state store spec 13.12) becomes the way every change of this kind happens. In standard terms, **commands scheduled for a future tick**, as RTS games and many networked engines do.
+
+- **One service.** Any system books an action for tick T = now + a delay. On T, before the tick runs, it happens on every machine. It's recorded (the landing log), so replays and re-simulation do it on the same tick.
+- **What goes through it:** spawns and despawns, possession hand-offs (19.9), terrain chunks and nav tiles (already), terrain edits, streaming, load ladder steps (decided by the server, announced ahead: networking T1.1), behaviour wake-ups and other timers. It's also the event scheduler on the roadmap (the timer wheel beside the significance manager): one system, not two.
+- **The delay rule online:** the server picks T far enough ahead that every client hears of it in time (its latency plus a margin, roughly 100-200 ms). A client that hears late applies it late and is corrected, as with any late state.
+- **Why:** determinism; every machine prepares ahead (a hand-off can stream the area in before T); and objects come and go only between ticks, so nothing points at a freed object halfway through a tick. (GDScript has no garbage collector, only reference counting and frees by hand; the gain is predictable lifetimes.)
+
+### 19.5 Relevancy (interest management)
+
+- **Per client, the server sends only what's relevant to it.** By distance first, using what already exists: each client's streaming sources and the chunk grid, in rings of chunks. Line of sight can come later (open question 6).
+- **The server always holds everything.** Relevancy decides what's sent, not what's simulated. A client may also cull what it draws, its own choice.
+- **By clusters, not one by one:** pawns close to each other enter and leave together, so a client rarely simulates or draws one half of a fight.
+- **Entering relevancy needs a keyframe** (its state, and for an ordered pawn its current order). A possession far away waits for its area to arrive (19.9).
+- **Server meshing** (splitting one world across several servers and handing entities between them, as Star Citizen does) is the same idea taken further. It spreads the server's CPU, not each client's stream. Not a goal, near or long term; relevancy keeps the door open.
+- **The hard case is full co-relevancy:** everyone near everyone. Relevancy hides nothing there, and 19.6 is what keeps the stream manageable.
+
+### 19.6 Keeping the stream manageable at full co-relevancy
+
+Options, most general first. None is built now; 19.11 says which shape the code takes so they stay possible.
+
+1. **Fewer bytes per update** (general): coarser precision with distance (centimetres and a byte of yaw for a far soldier; 1 mm stays for your own pawn); only changed fields, bit-packed, in the C++ codec; compressing each packet (zstd or ENet's own).
+2. **Fewer updates: a bandwidth budget with priorities** (general; the big one). Each client gets a fixed budget; every entity builds up priority each tick, faster when near, in view, targeting you or changing a lot; each packet sends the highest first until the budget is spent. Near and important things update every tick, far crowds every few ticks, and quality degrades gracefully instead of breaking. Unreal's net priority works this way (a priority accumulator).
+3. **Less per entity** (some game dependence): send only when the client's extrapolation would be wrong by more than a threshold (error-based updates, also called dead reckoning); orders for AI (19.3); events for one-off things; groups sent as one entity (a squad as its centre and orders; a far crowd as a density map). Groups are where flexibility is lost: they depend on how the game groups units.
+4. **Spreading the server's sending** (topology): encode each tick's changes once, on worker threads, and send the same bytes to every caught-up client (an extension of today's shared encodings per entity and baseline; networking T1.2); fan-out relays that copy one stream to many clients, splitting the server's upload.
+
+**A rough budget** (estimates for planning, not measurements): 1200 co-relevant entities, 64 KB/s per client, 30 packets a second gives about 2 KB a packet, room for a few hundred compressed updates, so each entity about 10 times a second on average, near ones every tick. The server then sends about 200 × 64 KB/s, roughly 100 Mbit/s: a dedicated server in a data centre, as 19.7 expects. For comparison, today's delta snapshots, which send every changed entity every time, measured 135 KB/s a client at 154 pawns and 180 KB/s at 300 (section 11.4.1): already past that budget, before any players.
+
+### 19.7 Hosting
+
+- **Player-hosted is the everyday case:** tens of players, with big AI crowds if the hybrid works out. The host's upload is the limit: every client needs its own stream.
+- **Dedicated servers for big matches:** the same build, run headless (open question 7). Servers anyone can run are also how a game outlives its official service.
+- **Connecting without port forwarding:** a relay (Steam's, if the game ships there) with direct IP as the fallback, so it still works with no service at all.
+- **Host migration** (another player takes over when the host leaves): later. Keyframes and the command stream make it easier, since every client already holds most of the world.
+
+### 19.8 Fairness
+
+- Server authority covers the core: no speed hacks, teleports or made-up hits.
+- **On a player-hosted match the host can cheat.** Every listen-server game accepts this.
+- **Information leaks:** clients that simulate crowds (orders, lockstep) know where those crowds are, wallhack-style. Accepted at moderate fairness; relevancy limits what a client knows.
+- Statistical anti-cheat stays deferred (section 17, to do 1).
+
+### 19.9 Possession hand-off over the network
+
+Through the tick scheduler (19.4), on hand-off tick T:
+1. **Asked:** a player asks to take a pawn. The server checks it may, picks T (now + delay), and announces it.
+2. **Before T:** if the pawn isn't relevant to that client, its area and state arrive first (the warm-up). The client builds the pawn's prediction history from received frames.
+3. **On T:** the server's AI lets go and the player's inputs apply, from T on; the client starts predicting it. Inputs from the old owner stamped T or later are dropped (as `set_entity_owner` does today, but on a known tick).
+4. **Letting go:** the same in reverse. The AI takes over on T, from the pawn's state then.
+
+Swapping owners is built (section 17, to do 32); the scheduled tick, the warm-up and the prediction history are what's new.
+
+### 19.10 Profiling first
+
+Before choosing between strategies, measure them side by side: a headless server and simulated bot clients (the owner's call for the state store work), building on `samples/tests/mass_battle_net_measure`.
+- **Compared:** per-tick state snapshots (today's delta snapshots), per-tick commands, and orders, for AI pawns.
+- **Sizes:** 300, 600 and 1000 AI pawns; 1, 8 and 32 clients, then more.
+- **Measured per client:** bytes a second, bytes per entity and per field, after compression; how often and how far clients are corrected. **On the server:** CPU per tick for simulating, encoding and sending.
+
+**First measurements** *(Claude 2026-11-23: `samples/tests/net_cost_measure.tscn`, offline, from the real game state each tick; snapshot entries priced with the real encoder against the previous snapshot, orders sized as a format could be)*. Mid-fight, factions 40 m out; the four-faction scenario has a quarter of each faction archers:
+
+| Scenario, pawns | Snapshots (today) | Compressed (zstd) | Per-tick commands | Orders: decisions | Orders: steering |
+|---|---|---|---|---|---|
+| 3 factions, ~280 | 318 KB/s | 126 KB/s | 139 KB/s | 2.5 KB/s | 4.7 KB/s |
+| 3 factions, ~570 | 667 KB/s | 270 KB/s | | | |
+| 3 factions, ~960 | 1134 KB/s | 470 KB/s | | | |
+| 4 factions, ~360 | 407 KB/s | 159 KB/s | 164 KB/s | 3.1 KB/s | 8.5 KB/s |
+| 4 factions, ~920 | 1044 KB/s | 405 KB/s | 494 KB/s | 8.0 KB/s | 19.7 KB/s |
+
+- **Snapshots grow in a straight line,** about 39 bytes a pawn a snapshot, and compress to about 40%. In a fight every pawn changes every snapshot.
+- **Per-tick commands save little:** an AI pawn's steering changes about 35 times a second, so a command stream costs about half of what snapshots do. Commands are for replays and lockstep, not for saving bandwidth.
+- **Orders are 50 to 130 times cheaper** than snapshots: decisions (a behaviour switch, a target change) at about 1 per pawn a second, steering (a new path goal, a button pressed) at about 2.
+- **Cheap savings in today's snapshots,** whatever the model: `_last_run_tick` (rollback bookkeeping that changes every tick) is 13% of the changed values, and the ranged attack's `timeline_state` 11 to 20%; neither needs to reach a client that only draws the pawn. A pawn sent in full costs 797 bytes. Every entity goes in every snapshot, even unchanged (a small delta), so skipping unchanged ones is another lever.
+
+**Orders alone rebuild the game** *(Claude 2026-11-23, the owner's request: test determinism with orders only, on the four-faction scenario)*. The determinism check records every order the AI gives a pawn's controller (`--record-orders`, through `AIController.order_listener`), then plays the same match again with the AI switched off, each pawn's AI step playing its recorded orders instead (`--replay-orders`, through `AIContextComponent.order_source`), and compares the two runs' fingerprints:
+
+| Pawns, ticks | Orders played | Result |
+|---|---|---|
+| ~160, 1200 | 31,049 | every value of every entity the same, every tick |
+| ~400, 3600 | 264,083 | the same |
+| ~1000, 1800 | 298,135 | the same |
+
+- **The controller is the boundary:** behaviours steer only through `AIController` (`move_to`, `move_in_direction`, `stop`, `look_at_point`, `look_at_node`, `stop_looking`, `press`, `hold`, `release_all`), which turns orders into one input a tick. Played at the same point of the same tick, the same orders give the same game. This is the hybrid of 19.3 working offline, before any networking: a client could run the crowds from orders.
+- **One exception, found and handled:** when a pawn dies, the AI stops its running behaviour on the spot, and the behaviour's exit gives orders (release sprint, stop, stop looking) mid-tick, outside the AI step; replayed in the AI step they came too early and split the runs. They change nothing (a dead pawn's input is cleared every tick), so the replay skips them. The rule for the order stream: **the AI gives orders only during its AI step**; cleaning up on death should be the controller's own deterministic job.
+- **Today's orders are close to per-tick:** about 11 a pawn a second at 400 pawns (4,500 a second), against the 1 to 2 the cost estimate assumed. Half are `look_at_point` re-aiming at a moving target every tick, where the persistent `look_at_node` (which the controller follows itself) would do; `stop` and `stop_looking` are over 90% repeats of the order already in force; chasing re-issues `move_to` toward a moving target. So before the hybrid pays off, behaviours should give **persistent orders** (look at a pawn, follow a pawn), and orders that change nothing should be dropped. In the test's verbose file format the stream was about 450 KB/s at 400 pawns; a compact format and persistent orders are what the estimate of 8 to 20 KB/s assumes.
+
+### 19.11 What to keep open now
+
+Cheap choices, made as the code is touched anyway (the `NetworkSession` split, state store spec 12.2):
+1. **Replication is a strategy per kind of entity** (19.3), with its own rate and precision.
+2. **The snapshot sender works to a per-client budget,** unlimited to start.
+3. **Clients cope with entities updating at different rates:** today every relevant entity is in every snapshot (an unchanged one as a small delta), so this isn't exercised yet; to check when the budget or skipping unchanged entities arrives.
+4. **The command stream is a format of its own,** shared by input-based replay and orders.
+5. **One tick scheduler** (19.4), grown from the landing schedule.
+
+**Order of work, a sketch to agree:** the profiling harness (19.10); the tick scheduler; the `NetworkSession` split with replication strategies and a budget; orders for AI as a prototype against snapshots; relevancy; possession hand-off; then the options in 19.6 as the measurements ask for them.
+
+### 19.12 Decided and open
+
+**Decided (the owner, 2026-11-23):** the targets (19.1); player-hosted first; moderate fairness; snapshots stay the backbone and the correction; orders for AI to try and profile against snapshots; lockstep kept possible; the tick scheduler for every change of this kind.
+
+**Open:** the level of an order (per-tick command or order), from profiling; the delay rule's numbers; the budget per client; relevancy's cluster rule; which of 19.6 to build first, from measurements.

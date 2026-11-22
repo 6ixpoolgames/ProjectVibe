@@ -1,0 +1,11 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_goblin_green.tscn" id="1_base"]
+
+[node name="FactionGoblinGreenMelee" instance=ExtResource("1_base")]
+
+[node name="Shoot" parent="AIBehaviourManager"]
+allowed_states = Array[StringName]([&"Disabled"])
+
+[node name="KeepDistance" parent="AIBehaviourManager"]
+allowed_states = Array[StringName]([&"Disabled"])

@@ -7,9 +7,15 @@
 ##   - Smaller chunks than the other samples (64 m, not 128), and every source loads ground 160 m around it (not 320), so a spread-out
 ##     level fits in a test. Load distances are on each StreamingSource node, and load_distance below for players and heroes (Claude 2026-11-16: the game's
 ##     setting for every pawn that keeps the world loaded, PawnDefaultsRes.world_load_distance, set while this level runs).
-##   - Three faction spawners, 300 m from the middle and 120 degrees apart: red goblins, blue goblins, and the players' soldiers. Each
-##     has a StreamingSource child, so the ground around it is always loaded, wherever the players are. Each faction's hero has its
-##     own spawner beside it, which brings it back 30 s after it dies.
+##   - Claude 2026-11-23 (the owner's request: a harder scenario for testing determinism with orders only): four factions, 90 degrees
+##     apart, spawning close (spawn_distance 40 m; 300 is the old march): red, blue and green goblins (teams 1 to 3) and the players'
+##     soldiers (team 0). Each faction has two spawners side by side: melee fighters (faction_*_melee.tscn: no shooting) and archers
+##     (faction_*_archer.tscn: no swings or parry, no sword, bolts without limit), ranged_share of team_size (a quarter) archers.
+##     A behaviour is switched off by naming a state that doesn't exist (allowed_states = [&"Disabled"]), a stand-in: behaviours
+##     have no on/off switch, and archers still carry the melee abilities (a player who takes one can swing). Behaviour and ability
+##     sets replace it (the AI changelog's refactor rows).
+##     The faction spawners have a StreamingSource child, so the ground around them is always loaded, wherever the players are. Red,
+##     blue and the soldiers have a hero, with its own spawner beside its faction, which brings it back 30 s after it dies.
 ##   - A RallyPoint in the middle (the rally_point group). Every AI pawn has AIGoToPointBehaviour, so an idle one marches there; it
 ##     fights whatever it meets on the way, and mills about once it's there.
 ##   - A CentreSource in the middle, a StreamingSource the C key switches on and off. With it on, the spawners' ground (160 m in from
@@ -61,12 +67,18 @@ const HERO_ALLY_SCENE := preload("res://assets/scenes/samples/hero_ally.tscn")
 ## Claude 2026-11-16 (the owner's request: spawns closer together, for a quick peak-capacity test): how far the factions' spawners
 ## are from the middle, in metres. The scene is laid out at 300, where the march takes about a minute; at 40 they meet within seconds.
 ## The heroes' spawners and the player's start keep their distances from their faction's spawner. From the command line:
-## --spawn-distance=40.
-@export_range(10.0, 1000.0, 5.0, "or_greater") var spawn_distance := 300.0:
+## --spawn-distance=300. Claude 2026-11-23: 40 by default now, the owner's close-spawning scenario.
+@export_range(10.0, 1000.0, 5.0, "or_greater") var spawn_distance := 40.0:
 	set(value):
 		spawn_distance = value
 		if is_node_ready():
 			_place_spawners()
+## Claude 2026-11-23: the share of each faction that are archers (the rest fight in melee). From the command line: --ranged-share=0.25.
+@export_range(0.0, 1.0, 0.05) var ranged_share := 0.25:
+	set(value):
+		ranged_share = value
+		if is_node_ready():
+			_update_team_sizes()
 ## Claude 2026-11-16: the centre's source (C) and the heroes' (H) as settings, so the start menu's match options can set them.
 var centre_source_on: bool:
 	get:
@@ -82,6 +94,19 @@ var hero_sources_on: bool:
 
 ## Claude 2026-11-16: the distance the scene's spawners are laid out at.
 const LAID_OUT_SPAWN_DISTANCE := 300.0
+## Claude 2026-11-23: each faction's melee and archer scenes, by the type name its spawners ask for.
+const ROLE_SCENES := {
+	"goblin_melee": preload("res://assets/scenes/samples/faction_goblin_melee.tscn"),
+	"goblin_archer": preload("res://assets/scenes/samples/faction_goblin_archer.tscn"),
+	"goblin_blue_melee": preload("res://assets/scenes/samples/faction_goblin_blue_melee.tscn"),
+	"goblin_blue_archer": preload("res://assets/scenes/samples/faction_goblin_blue_archer.tscn"),
+	"goblin_green_melee": preload("res://assets/scenes/samples/faction_goblin_green_melee.tscn"),
+	"goblin_green_archer": preload("res://assets/scenes/samples/faction_goblin_green_archer.tscn"),
+	"ally_melee": preload("res://assets/scenes/samples/faction_ally_melee.tscn"),
+	"ally_archer": preload("res://assets/scenes/samples/faction_ally_archer.tscn"),
+}
+## Claude 2026-11-23: the factions' spawner pairs, by the name their spawner nodes start with.
+const FACTIONS := ["Red", "Blue", "Green", "Ally"]
 
 var _laid_out := {} # Claude 2026-11-16: each spawning node -> its position as the scene lays it out
 
@@ -104,6 +129,10 @@ func _ready() -> void:
 			quit_after_ticks = int(argument.trim_prefix("--quit-after-ticks="))
 		elif argument == "--no-load-ladder":
 			TickDriver.load_step_override = 1
+		elif argument.begins_with("--ranged-share="): # Claude 2026-11-23
+			ranged_share = float(argument.trim_prefix("--ranged-share="))
+	for type_name: String in ROLE_SCENES: # Claude 2026-11-23: before super() starts the spawners
+		NetworkSession.register_type(type_name, ROLE_SCENES[type_name])
 	if quit_after_ticks > 0:
 		var last_tick := TickDriver.tick + quit_after_ticks
 		TickDriver.after_tick.connect(func(_dt: float, tick: int) -> void:
@@ -207,7 +236,17 @@ func _place_spawners() -> void:
 
 ## Claude 2026-11-16: this level's settings for the start menu's match options (ArenaSample._build_match_options).
 func _level_match_options() -> PackedStringArray:
-	return PackedStringArray(["team_size", "spawn_distance", "centre_source_on", "hero_sources_on", "load_distance"])
+	return PackedStringArray(["team_size", "ranged_share", "spawn_distance", "centre_source_on", "hero_sources_on", "load_distance"])
+
+
+## Claude 2026-11-23: each faction's two spawners: team_size in all, ranged_share of it archers and the rest melee. The players' team is
+## topped up to team_size with soldiers, as in the faction arena.
+func _update_team_sizes() -> void:
+	for faction: String in FACTIONS:
+		var size := maxi(0, team_size - _players.size()) if faction == "Ally" else team_size
+		var archers := roundi(size * ranged_share)
+		(get_node("Spawning/%sSpawner" % faction) as PawnSpawner).keep_alive = size - archers
+		(get_node("Spawning/%sArcherSpawner" % faction) as PawnSpawner).keep_alive = archers
 
 
 ## True while the middle's StreamingSource is on.
@@ -290,13 +329,13 @@ func _status_text() -> String:
 
 
 func _mass_battle_lines() -> String:
-	var alive := {0: 0, 1: 0, 2: 0}
+	var alive := {0: 0, 1: 0, 2: 0, 3: 0}
 	for pawn: Pawn in _readouts:
 		if is_instance_valid(pawn) and not pawn.is_dead():
 			alive[pawn.team] = alive.get(pawn.team, 0) + 1
 	var heroes := get_heroes().size()
-	return "team_size %d (= and -)    spawns %.0f m out    alive: red %d, blue %d, soldiers %d    heroes %d\ncentre source %s (C)    hero sources %s (H)    V: fly over the middle%s" % [
-		team_size, spawn_distance, alive[1], alive[2], alive[0], heroes, "on" if is_centre_source_on() else "off", "on" if _hero_sources_on else "off",
+	return "team_size %d (= and -), %.0f%% archers    spawns %.0f m out    alive: red %d, blue %d, green %d, soldiers %d    heroes %d\ncentre source %s (C)    hero sources %s (H)    V: fly over the middle%s" % [
+		team_size, ranged_share * 100.0, spawn_distance, alive[1], alive[2], alive[3], alive[0], heroes, "on" if is_centre_source_on() else "off", "on" if _hero_sources_on else "off",
 		" (flying: U goes back to your pawn)" if GameMode.possession_coordinator and GameMode.possession_coordinator.is_spectating() else ""]
 
 

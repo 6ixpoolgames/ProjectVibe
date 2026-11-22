@@ -16,6 +16,7 @@ func _ready() -> void:
 	print("--- Mass battle sample self-test ---")
 	_arena = load(ARENA).instantiate()
 	_arena.team_size = 4
+	_arena.spawn_distance = 300.0 # Claude 2026-11-23: the march layout these checks are about; the sample spawns close by default now
 	add_child(_arena)
 	await get_tree().physics_frame
 	_arena._start_offline()
@@ -32,10 +33,10 @@ func _ready() -> void:
 
 
 func _test_layout() -> void:
-	var spawners := ["RedSpawner", "BlueSpawner", "AllySpawner"].map(func(n: String) -> Node3D: return _arena.get_node("Spawning/" + n))
+	var spawners := ["RedSpawner", "BlueSpawner", "GreenSpawner", "AllySpawner"].map(func(n: String) -> Node3D: return _arena.get_node("Spawning/" + n))
 	var far := spawners.all(func(s: Node3D) -> bool: return Vector2(s.global_position.x, s.global_position.z).length() > 290.0)
 	var sources := spawners.all(func(s: Node3D) -> bool: return s.has_node("StreamingSource") and is_equal_approx((s.get_node("StreamingSource") as StreamingSource).load_distance, 160.0))
-	_check(far and sources, "three faction spawners 300 m from the middle, each loading 160 m of ground around itself")
+	_check(far and sources, "four faction spawners 300 m from the middle, each loading 160 m of ground around itself") # Claude 2026-11-23: four factions
 	var red: Node3D = spawners[0]
 	var to_middle := -red.global_position.normalized()
 	var facing := -red.global_basis.z

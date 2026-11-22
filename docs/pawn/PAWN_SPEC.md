@@ -745,7 +745,7 @@ Both kill through the effect system, so the usual death follows: the Death abili
 **The mass battle (`mass_battle_sample.tscn`, `MassBattleSample.gd`, extending the faction arena)**
 - **Teams:** `team_size` 50 a faction, changed while playing with = and - (by 10).
 - **Ground:** 64 m chunks and 160 m load distances, against 128 m and 320 m elsewhere, so a spread-out level fits.
-- **Spawners:** three faction spawners 300 m from the middle, 120° apart, each with a `StreamingSource` child, so its ground stays loaded wherever the players are. Each has a hero spawner beside it that brings its hero back 30 s after it dies.
+- **Spawners** *(Claude 2026-11-23: now four factions 90° apart, spawning 40 m out by default, a quarter of each faction archers; see `MassBattleSample.gd`)*: three faction spawners 300 m from the middle, 120° apart, each with a `StreamingSource` child, so its ground stays loaded wherever the players are. Each has a hero spawner beside it that brings its hero back 30 s after it dies.
 - **The middle:** a `RallyPoint`, and a `CentreSource` that C switches on and off. With it on, the spawners' ground and the middle's meet. With it off, the AI in the middle freezes once its ground unloads, unless a hero or player is near.
 - **Switches:** H switches the heroes' sources, V shows the middle from above (the camera only), and F4 the `PerformanceOverlay` (`assets/scripts/debug/`). *(Claude 2026-11-16: the overlay is gone; F4 is now diagnostics v0's timings panel, docs/diagnostics/DIAGNOSTICS_SPEC.md.)*
 - **What the overlay shows:** frame times, a tick by phase against its budget, time in the physics frame outside the ticks, dropped ticks, pawns (frozen, dead), chunks, and each team's living pawns and the switches.

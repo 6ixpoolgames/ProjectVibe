@@ -82,6 +82,9 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	_collect_behaviours()
 	# The running behaviour stops when the pawn dies (the AbilityManager's died).
+	# REFACTOR: stopping it runs its exit, which gives orders (release, stop, stop looking) mid-tick, outside the AI step. A dead pawn
+	# should give none: its controller should let go on death by itself, so an order stream holds only AI-step orders (netcode spec
+	# 19.10). With the behaviour and ability sets pass.
 	var abilities := _sibling_ability_manager()
 	if abilities:
 		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: stop_running("died"))
