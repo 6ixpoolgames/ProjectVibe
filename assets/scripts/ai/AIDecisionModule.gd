@@ -4,8 +4,8 @@
 ## A GameMode module ([code]GameMode.get_module(AIDecisionModule)[/code]). It holds the C++ decider ([code]AIBatchDecider[/code]): one
 ## brain per behaviour set, and each pawn's row (its decision state and the facts a decision is made from). A pawn deciding in C++
 ## asks it for each decision ([method decide_in_cpp]) and its [AIBehaviourManager] starts the chosen behaviour. Without this module,
-## or without the C++ library, every pawn decides in GDScript. Facts are written into the row when they change, so a decision gathers
-## nothing. [member check_against_gdscript] is shadow mode: GDScript decides, C++ decides beside it, and the two are compared
+## or without the C++ library, every pawn decides in GDScript. Facts are written into the row when they change; at a decision only the actions
+## that could start and a group's nearest point are written, and only when changed. [member check_against_gdscript] is shadow mode: GDScript decides, C++ decides beside it, and the two are compared
 ## ([method get_counts]). In debug builds F10 switches every pawn to GDScript and back, and a sampled check warns when a written fact
 ## is out of date. Timed as [code]ai.decide.cpp[/code] ([PerfScopes]).
 ## Design: scaling spec 6.2, steps 5c and 5d.
@@ -43,7 +43,6 @@ var _decider: Object = null # the C++ AIBatchDecider, null without the library
 var _warned_no_library := false
 var _brain_of_manager := {} # behaviour manager instance id -> brain number
 var _brain_by_text := {} # a brain's shared description as text -> brain number
-var _state_numbers: Array = [] # brain number -> {state name -> the decider's state number}
 var _managers := {} # instance id -> the behaviour managers it has placed, to move them when decider changes
 var _warned_minds := {} # a special mind's reason -> true, so each is said once
 var _previous_decider := Decider.PAWN_SETTING # what F10 goes back to
@@ -52,7 +51,9 @@ var _kinds_sent := 0 # how many input slots' kinds C++ has
 var _tripwire := OS.is_debug_build() # the sampled fact check runs in debug builds only
 var _decisions_since_check := 0
 var _check_every := FACT_CHECK_EVERY # set again after each check, from how busy the tick is
-var _rows := {} # manager instance id -> {ready_version, ready_slots, groups, on_state, follows_body}: what this module keeps per pawn
+var _tag_generation := -1 # TagRegistry's generation and tag count the brains' tag masks were made with
+var _tag_count := -1
+var _rows := {} # manager instance id -> {ready_version, ready_slots, groups, follows_body, tags_version, modifiers_version}: kept per pawn
 
 
 func _init() -> void:
@@ -94,10 +95,6 @@ func reset_counts() -> void:
 		_counts[key] = 0
 
 
-## The C++ decider, or null without the library. For tests.
-func get_decider() -> Object:
-	return _decider
-
 
 # --- Called by the behaviour manager ---
 
@@ -115,7 +112,7 @@ func place(manager: AIBehaviourManager) -> void:
 			_counts["special_minds"] += 1
 			push_warning("AIDecisionModule: %s decides in GDScript: %s." % [String(manager.pawn.name) if manager.pawn else "a pawn", reason])
 		return
-	var brain := _brain_for(manager, true)
+	var brain := _brain_for(manager)
 	if brain < 0:
 		_forget_row(manager)
 		return
@@ -151,28 +148,16 @@ func place(manager: AIBehaviourManager) -> void:
 			by_group[group][1 if kind == AIInputs.Kind.GROUP_DISTANCE else 2] = slot
 		elif kind == AIInputs.Kind.ACTION_READY:
 			ready_slots.append(slot)
-	var on_state := func(_old: AIStateBase, _new: AIStateBase, _reason: String) -> void: state_changed(manager)
-	var old: Dictionary = _rows.get(id, {})
-	if old.has("on_state") and context.state_manager and context.state_manager.state_changed.is_connected(old["on_state"]):
-		context.state_manager.state_changed.disconnect(old["on_state"])
-	if context.state_manager:
-		context.state_manager.state_changed.connect(on_state)
 	var abilities := manager.pawn.ability_manager
-	_rows[id] = {"ready_version": -1, "ready_slots": ready_slots, "groups": groups, "on_state": on_state,
+	_rows[id] = {"ready_version": -1, "ready_slots": ready_slots, "groups": groups, "tags_version": -1, "modifiers_version": -1,
 		"follows_body": abilities != null and _follows_body(manager, abilities)}
-	state_changed(manager)
+	_write_owned_tags(manager, _rows[id])
+	_write_modifiers(manager, _rows[id])
 	target_changed(manager)
 	facts_changed(manager)
 	for slot in AIInputs.input_count():
 		if AIInputs.kind_of(slot) == AIInputs.Kind.KEPT and slot < context.inputs.values.size():
 			_decider.set_input(row, slot, context.inputs.values[slot])
-
-
-## The pawn's state changed: its number goes into the row. The state manager's state_changed calls it.
-func state_changed(manager: AIBehaviourManager) -> void:
-	if manager.cpp_row < 0:
-		return
-	_decider.set_state(manager.cpp_row, _state_number(manager, manager.pawn.ai_context.current_state_name()))
 
 
 ## The pawn's target changed (the context's current_target setter).
@@ -207,22 +192,31 @@ func forget(manager: AIBehaviourManager) -> void:
 	_brain_of_manager.erase(manager.get_instance_id())
 
 
-## True while the pawn's decisions are made in C++ (not in shadow mode, where GDScript makes them).
-func drives(manager: AIBehaviourManager) -> bool:
-	return manager.cpp_row >= 0 and not check_against_gdscript
-
 
 ## One decision for this pawn in C++: gathers its facts and inputs, asks C++, and returns the chosen behaviour's slot (-1 nothing).
 ## C++ applies the switch to its own copy of the state; the manager starts the behaviour.
 func decide_in_cpp(manager: AIBehaviourManager, tick: int, event_priority: int, event_normal: bool) -> int:
 	var started := PerfScopes.begin()
+	# A tag added late (one nobody declared) or a registry reset can change the bits the brains' tag requirements were compiled to:
+	# describe every brain again. Rare; declared tags never cause it.
+	if TagRegistry.generation != _tag_generation or TagRegistry.get_tag_count() != _tag_count:
+		_tag_generation = TagRegistry.generation
+		_tag_count = TagRegistry.get_tag_count()
+		_brain_by_text.clear()
+		_place_all()
 	var row := manager.cpp_row
 	var kept: Dictionary = _rows[manager.get_instance_id()]
 	if AIInputs.input_count() != _kinds_sent:
 		_kinds_sent = AIInputs.input_count()
 		_decider.set_input_kinds(AIInputs.kinds())
-	# Written here, not by their owner, and only when changed: the actions that could start (once the AbilityManager's
-	# readiness_version moves on), and a group's nearest point (when the lookup, every 2 seconds, finds another).
+	# Written here, not by their owner, and only when changed: the owned tags (OwnedTags.version, the AI's state among them), the score
+	# modifiers (modifiers_version), the actions that could start (once the AbilityManager's readiness_version moves on), and a
+	# group's nearest point (when the lookup, every 2 seconds, finds another).
+	var owned := manager.pawn.owned_tags
+	if owned and owned.version != kept["tags_version"]:
+		_write_owned_tags(manager, kept)
+	if manager.modifiers_version != kept["modifiers_version"]:
+		_write_modifiers(manager, kept)
 	var abilities := manager.pawn.ability_manager
 	if abilities and (abilities.readiness_version != kept["ready_version"] or kept["follows_body"]):
 		kept["ready_version"] = abilities.readiness_version
@@ -304,14 +298,19 @@ func mask_set(manager: AIBehaviourManager, behaviour: AIBehaviourBase) -> void:
 # --- Internals ---
 
 
-# The actions that could start, as a mask by behaviour slot, and any action_ready inputs the conditions read.
-func _write_readiness(manager: AIBehaviourManager, kept: Dictionary) -> void:
-	var inputs := manager.pawn.ai_context.inputs
+# The behaviours whose action could start now, as a mask by behaviour slot.
+static func _can_press_mask(manager: AIBehaviourManager, inputs: AIInputs) -> int:
 	var mask := 0
 	for behaviour in manager.get_behaviour_list():
 		if behaviour.presses_action != &"" and inputs.action_ready(behaviour.presses_action):
 			mask |= 1 << behaviour.decision_index
-	_decider.set_can_press(manager.cpp_row, mask)
+	return mask
+
+
+# The actions that could start, as a mask by behaviour slot, and any action_ready inputs the conditions read.
+func _write_readiness(manager: AIBehaviourManager, kept: Dictionary) -> void:
+	var inputs := manager.pawn.ai_context.inputs
+	_decider.set_can_press(manager.cpp_row, _can_press_mask(manager, inputs))
 	for slot: int in kept["ready_slots"]:
 		_decider.set_input(manager.cpp_row, slot, inputs.value(slot))
 
@@ -333,17 +332,21 @@ func _follows_body(manager: AIBehaviourManager, abilities: AbilityManager) -> bo
 	return false
 
 
-# The decider's number for a state name in this pawn's brain.
-func _state_number(manager: AIBehaviourManager, state_name: StringName) -> int:
-	var brain: int = _brain_of_manager.get(manager.get_instance_id(), -1)
-	if brain < 0:
-		return 0
-	var states: Dictionary = _state_numbers[brain]
-	var number: Variant = states.get(state_name)
-	if number == null:
-		number = _decider.find_state(brain, state_name)
-		states[state_name] = number
-	return number
+func _write_owned_tags(manager: AIBehaviourManager, kept: Dictionary) -> void:
+	var owned := manager.pawn.owned_tags
+	kept["tags_version"] = owned.version if owned else 0
+	_decider.set_owned_tags(manager.cpp_row, owned.get_words() if owned else PackedInt64Array())
+
+
+func _write_modifiers(manager: AIBehaviourManager, kept: Dictionary) -> void:
+	kept["modifiers_version"] = manager.modifiers_version
+	var sums := PackedFloat64Array()
+	var blocked := 0
+	for behaviour in manager.get_behaviour_list():
+		sums.append(behaviour.decision_modifier)
+		if behaviour.decision_blocked:
+			blocked |= 1 << behaviour.decision_index
+	_decider.set_modifiers(manager.cpp_row, sums, blocked)
 
 
 # Shadow mode: every input C++ just worked out against GDScript's own, slot by slot (the hit and swing facts, a game's inputs, the
@@ -363,20 +366,19 @@ func _check_inputs(manager: AIBehaviourManager) -> void:
 			return
 
 
-# Shadow mode: the facts written into the row against the live ones; a difference means a write was missed somewhere.
+# The facts written into the row against the live ones (shadow mode, and the debug build's sampled check); a difference means a write
+# was missed somewhere.
 func _check_facts(manager: AIBehaviourManager) -> void:
 	var facts: Dictionary = _decider.get_facts(manager.cpp_row)
 	var context := manager.pawn.ai_context
 	var target_id: int = facts["target_id"]
 	var live_target := context.current_target.get_instance_id() if context.has_target() else 0
 	var written_target := target_id if target_id != 0 and is_instance_valid(instance_from_id(target_id)) else 0
-	var stale: bool = facts["state"] != _state_number(manager, context.current_state_name()) or written_target != live_target
+	var owned := manager.pawn.owned_tags
+	var live_words := owned.get_words() if owned else PackedInt64Array()
+	var stale: bool = facts["owned"] != live_words or written_target != live_target
 	if not stale:
-		var mask := 0
-		for behaviour in manager.get_behaviour_list():
-			if behaviour.presses_action != &"" and context.inputs.action_ready(behaviour.presses_action):
-				mask |= 1 << behaviour.decision_index
-		stale = mask != facts["can_press"]
+		stale = _can_press_mask(manager, context.inputs) != facts["can_press"]
 	if stale:
 		_counts["stale_facts"] += 1
 		if _counts["stale_facts"] <= warnings_kept:
@@ -427,10 +429,6 @@ func _forget_row(manager: AIBehaviourManager) -> void:
 	if manager.cpp_row >= 0 and _decider:
 		_decider.remove_pawn(manager.get_instance_id())
 	manager.cpp_row = -1
-	var kept: Dictionary = _rows.get(manager.get_instance_id(), {})
-	var states := manager.pawn.ai_context.state_manager if manager.pawn and manager.pawn.ai_context else null
-	if kept.has("on_state") and states and states.state_changed.is_connected(kept["on_state"]):
-		states.state_changed.disconnect(kept["on_state"])
 	_rows.erase(manager.get_instance_id())
 
 
@@ -444,13 +442,12 @@ func _place_all() -> void:
 		place(manager)
 
 
-# The decider's brain for this manager. Pawns with the same behaviour set share one. again: describe it afresh (its conditions may
-# have changed).
-func _brain_for(manager: AIBehaviourManager, again := false) -> int:
+# The decider's brain for this manager, described afresh (its conditions may have changed). Pawns with the same behaviour set share one.
+func _brain_for(manager: AIBehaviourManager) -> int:
+	if _tag_generation < 0: # the tags as the first brain is described
+		_tag_generation = TagRegistry.generation
+		_tag_count = TagRegistry.get_tag_count()
 	var id := manager.get_instance_id()
-	var known: Variant = _brain_of_manager.get(id)
-	if known != null and not again:
-		return known
 	var description := manager.describe()
 	var shared := description.duplicate()
 	for own: String in ["pawn", "pawn_number", "random_seed", "decision_interval_ticks"]:
@@ -460,8 +457,6 @@ func _brain_for(manager: AIBehaviourManager, again := false) -> int:
 	if brain == -2:
 		brain = _decider.add_brain(description) # -1, with an error, if it has too many behaviours
 		_brain_by_text[text] = brain
-		if brain >= 0:
-			_state_numbers.append({})
 	_brain_of_manager[id] = brain
 	return brain
 

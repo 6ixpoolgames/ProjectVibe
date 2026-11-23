@@ -13,8 +13,21 @@ extends Node
 ## What [method tick] returns: keep running, or finished well or badly.
 enum Status { RUNNING, SUCCEEDED, FAILED }
 
-## States it may run in, by node name, such as &"Idle". Empty: any state.
-@export var allowed_states: Array[StringName] = []
+## Off: never chosen, and a running one is replaced, as if it weren't there. The way an inherited scene switches off a behaviour it
+## can't remove.
+@export var enabled := true:
+	set(value):
+		enabled = value
+		if manager:
+			manager.inputs_changed() # C++ gets the brain again
+## What it is, as tags such as &"ai.stance.melee": what score modifiers pick behaviours by ([member AIScoreModifier.applies_to]).
+@export var tags: Array[StringName] = []:
+	set(value):
+		tags = value
+		_tag_words_generation = -1
+## When it may run: a query over the pawn's owned tags, such as any of ai.state.combat (the AI's state is a tag), or none of
+## status.has_ammo. While it fails, the behaviour can't be chosen, and a running one is replaced at the next AI step. Empty: always.
+@export var tag_requirements: TagQuery
 ## The highest score() can return. Lets the manager skip it without running its code when it can't win.
 @export var max_score := 0.5
 ## Optional: the lowest score() can return. Left at -inf it can't help skip others, but it's never wrong.
@@ -63,10 +76,13 @@ var ended_tick := -1
 ## The timing scope names for its is_available() and its tick(), such as &"ai.available.Chase" and &"ai.behaviour.Chase" (see
 ## [PerfScopes]). Made once by the manager, so timing makes no new names.
 var perf_available_name: StringName = &""
+## The timing scope name for its tick(), such as &"ai.behaviour.Chase". Made once by the manager.
 var perf_tick_name: StringName = &""
 
 # Scratch values for one decision, kept here so a decision creates no arrays or objects. Only the manager reads them.
 var decision_persistence := 0.0
+var decision_modifier := 0.0 # the score modifiers' sum for it, worked out when they or the owned tags change
+var decision_blocked := false # a blocking score modifier counts for it
 var decision_jitter := 0.0 # this decision's random offset
 var decision_ceiling := 0.0
 var decision_floor := 0.0 # -INF when min_score isn't set
@@ -83,6 +99,8 @@ var wakes_on_path_end := false
 var wakes_on_action: StringName = &""
 var woken := false # an event it waits for happened since its last tick()
 
+var _tag_words := PackedInt64Array()
+var _tag_words_generation := -1
 var _all_conditions: Array[AICondition] = []
 var _conditions_built := false
 
@@ -203,14 +221,22 @@ func exit(_context: AIContextComponent, _reason: String) -> void:
 # --- Used by the manager ---
 
 
-## True if it may run in this state.
-func is_allowed_in(state_name: StringName) -> bool:
-	return allowed_states.is_empty() or allowed_states.has(state_name)
+## True if it's enabled and its tag requirements pass for the pawn's owned tags, given as words ([method OwnedTags.get_words]).
+func passes_requirements(owned_words: PackedInt64Array) -> bool:
+	return enabled and (tag_requirements == null or tag_requirements.matches_words(owned_words))
+
+
+## Its own [member tags] as words, parents included, for score modifiers' applies_to.
+func tag_words() -> PackedInt64Array:
+	if _tag_words_generation != TagRegistry.generation:
+		_tag_words_generation = TagRegistry.generation
+		_tag_words = TagQuery.words_of(tags)
+	return _tag_words
 
 
 ## True while its cooldown hasn't finished.
-# Parameters are named at_tick, not tick: that would clash with tick() above.
 func is_cooling_down(at_tick: int) -> bool:
+	# The parameter is at_tick, not tick: that would clash with tick() above.
 	return cooldown_ticks > 0 and ended_tick >= 0 and at_tick - ended_tick < TickDriver.ticks_at_rate(cooldown_ticks)
 
 

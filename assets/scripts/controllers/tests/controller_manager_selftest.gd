@@ -23,6 +23,7 @@ func _ready() -> void:
 	await _test_player_elsewhere()
 	await _test_through_possession()
 	await _test_odd_cases()
+	await _test_dead_pawn_takes_no_orders()
 	_test_look_at_point()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -172,6 +173,38 @@ func _test_look_at_point() -> void:
 
 
 # --- Helpers ---
+
+
+# Claude 2026-11-23 (netcode spec 19.10): a dead pawn's AI controller takes no orders and lets go of what it was told; a persistent
+# order on a node that goes away ends.
+func _test_dead_pawn_takes_no_orders() -> void:
+	var pawn := _make_pawn(Vector3(0, 1000, 0))
+	var target := Node3D.new()
+	add_child(target)
+	target.global_position = Vector3(5, 1000, 0)
+	await _ticks(2)
+	var ai := pawn.controller_manager.ai_controller as AIController
+	var heard: Array[StringName] = []
+	AIController.order_listener = func(_controller: AIController, order: StringName, _args: Array) -> void: heard.append(order)
+	ai.hold(&"sprint", true)
+	ai.follow(target, 1.2)
+	_check(ai.get_followed_node() == target and heard == [&"hold", &"follow"], "a persistent order is one order, and is kept")
+	target.free()
+	await _ticks(2)
+	_check(ai.get_followed_node() == null, "its node gone, the persistent order ends")
+	pawn.dead = true # as the Death ability sets it
+	heard.clear()
+	ai.press(&"primary")
+	ai.move_in_direction(Vector3(1, 0, 0))
+	_check(heard.is_empty(), "a dead pawn's controller takes no orders, so none are heard")
+	await _ticks(2) # the pawn's dead ticks have its controller let go
+	pawn.dead = false
+	var command := ai.take_input_command(TickDriver.tick)
+	_check(command.held_actions == 0 and command.move == Vector3.ZERO, "and it comes back from death holding nothing it was told before (sprint)")
+	ai.hold(&"sprint", true)
+	_check(heard == [&"hold"], "alive again: orders are taken")
+	AIController.order_listener = Callable()
+	pawn.free()
 
 
 func _make_pawn(at := Vector3.ZERO) -> Pawn:

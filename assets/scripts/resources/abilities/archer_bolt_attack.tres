@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="RangedAttackDefinition" format=3 uid="uid://55d4sgct3gmc"]
+
+[ext_resource type="Resource" path="res://assets/scripts/resources/abilities/bolt_attack.tres" id="1_72pkg"]
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/RangedAttackDefinition.gd" id="2_46cll"]
+
+[resource]
+script = ExtResource("2_46cll")
+max_charges = 6
+recharges = true
+charge_restore_ticks = 600
+restore_all_charges = true
+changed_values = PackedStringArray("max_charges", "recharges", "charge_restore_ticks", "restore_all_charges")
+based_on = ExtResource("1_72pkg")

@@ -94,6 +94,46 @@ extends Definition
 	set(value):
 		needs_full_movement = value
 		_changed(&"needs_full_movement", value)
+## Tags the pawn must own (all of, any of) and must not own (none of) for it to start, such as none of status.stunned. Only tags
+## clients own too (ability, effect, status): the AI's own tags (ai.*) are owned only on the server, so a client would predict a
+## start that doesn't happen. Empty: no tag rule.
+@export var start_requirements: TagQuery:
+	set(value):
+		start_requirements = value
+		_changed(&"start_requirements", value)
+## Limited uses: how many times it can start before it has to wait for charges to come back. 0: no limit. The ability's own value
+## can be changed while playing, for good or for a while ([method AbilityBase.set_max_charges], [method AbilityBase.add_max_charges_change]).
+@export_range(0, 1000, 1, "or_greater") var max_charges: int = 0:
+	set(value):
+		max_charges = value
+		_changed(&"max_charges", value)
+## On: spent charges come back on their own, every charge_restore_ticks. Off: only a refill gives them back (revive, a reload).
+@export var recharges: bool = false:
+	set(value):
+		recharges = value
+		_changed(&"recharges", value)
+## With recharges on: while any charges are spent, some come back every this many ticks (at 60 a second), counted from the first one
+## spent.
+@export_range(1, 36000, 1, "or_greater") var charge_restore_ticks: int = 600:
+	set(value):
+		charge_restore_ticks = value
+		_changed(&"charge_restore_ticks", value)
+## How many charges come back each time. Ignored when restore_all_charges is on.
+@export_range(1, 1000, 1, "or_greater") var charges_restored: int = 1:
+	set(value):
+		charges_restored = value
+		_changed(&"charges_restored", value)
+## On: each restore gives back every spent charge, a full magazine.
+@export var restore_all_charges: bool = false:
+	set(value):
+		restore_all_charges = value
+		_changed(&"restore_all_charges", value)
+## A tag the pawn owns while this ability has charges left (always, with no limit), such as status.has_ammo.ranged: what the AI's
+## Keep Distance asks for. Empty: none.
+@export var has_charges_tag: StringName = &"":
+	set(value):
+		has_charges_tag = value
+		_changed(&"has_charges_tag", value)
 ## Who its hits may hit and what they do (ability spec 13.2), for its swings and its projectiles. Empty: its kind's default (a swing
 ## hits enemies; a ranged attack's projectile stops at the first). A sweep step or a timeline entry can name another.
 @export var hit: HitDefinition:

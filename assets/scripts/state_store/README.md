@@ -4,7 +4,7 @@
 
 The central record of play: every gameplay entity's state at the end of every tick, in plain rows, with a history of recent ticks. Rollback, snapshots and corrections read it; replay, lag compensation, AI sensing and diagnostics move onto it in later steps of the refactor.
 
-**Status:** step 1 of the refactor (the store and the tick driver's commit), on the `refactor/tick-core` branch. Today's `TickStateComponent` feeds it; the systems that keep their own copies today fold in later (state store spec 12.1, `docs/ARCHITECTURE.md`).
+**Status:** steps 1 to 5 of the refactor built, on the `refactor/tick-core` branch (state store spec 13.4-13.12): the store and the commit, pushed columns, rows carried forward, the crowd mover reading and writing through it, abilities' state pushed, and the landing schedule. `TickStateComponent` is each entity's holder; the systems that still keep their own copies fold in later (state store spec 12.1, `docs/ARCHITECTURE.md`).
 
 | File | What it's for |
 |---|---|
@@ -30,7 +30,7 @@ The central record of play: every gameplay entity's state at the end of every ti
 - **`TickDriver.store`** is the one store. It's the C++ `StateStore` when the library is there, else `StateStoreGD` (`-- --gdscript-store` forces the twin). `TickDriver.history_depth` (64) is how many frames it keeps.
 - **Layouts.** Entities with the same columns share a table (an archetype). A `TickStateComponent` makes one layout per state list, so every goblin with the same parts shares one.
 - **Slots and handles.** A slot never moves. A freed slot waits until the history has moved past its old occupant, then comes back with a new generation. A handle is `(generation << 32) | (layout << 20) | slot`, so a stale handle matches nothing.
-- **Gathered and pushed columns.** Gathered columns are read from nodes at every commit. Pushed columns hold what a holder last pushed (`push(handle, column, value)`). Today every column a `TickStateComponent` lists is gathered; holders that push come with the later steps.
+- **Gathered and pushed columns.** Gathered columns are read from nodes at every commit. Pushed columns hold what a holder last pushed (`push(handle, column, value)`). A `TickStateComponent` entry marked `pushed` is pushed by its owner's setter (team, tick step, stats' current values, abilities' state); the rest are gathered. An entity that only changes when it runs is copied forward on ticks nothing marked it (`set_carry_forward`, `mark_changed`). A batch that moves many entities writes through the store (`write_through`), and the crowd mover reads others' positions from it (`get_vector3s`); `find_long_moves` feeds the move check.
 - **Binding.** `bind(handle, nodes, properties, encodings, round)` gives the store one node, one property path and one settled encoding per gathered column. A layout column declared `auto` takes each entity's encoding from its binding. Until an entity is bound (an entry's node is missing, or an `auto` encoding isn't settled yet), and whenever a bound node is freed, the store hands it to its owner each commit.
 - **Rollback.** The driver loads each predicted entity's row (`load_row`, which writes the nodes), re-runs the ticks, and rewrites their rows with `commit_entities`.
 - **The tripwire.** `TickDriver.verify_store_each_tick` checks, at the start of each tick, that every bound entity's nodes still hold what the last commit recorded. A mismatch is a write that went around the store (state store spec 4). Off by default.

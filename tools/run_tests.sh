@@ -80,6 +80,16 @@ elif [ $# -gt 0 ]; then
       if [[ "$(basename "$scene")" == *"$wanted"* ]]; then run_scene "$scene"; break; fi
     done
   done
+  for wanted in "$@"; do # the navigation test is a plain script, not a scene
+    if [[ "nav_selftest" == *"$wanted"* ]]; then
+      run_suite "nav_selftest" 300 --script res://assets/scripts/navigation/tests/nav_selftest.gd
+      break
+    fi
+  done
+  if [ "$ran" -eq 0 ]; then
+    echo "No suite matched: $*. Suites are the *_selftest scenes; stress and compare scenes are run by hand."
+    exit 2
+  fi
 else
   sed -n '2,18p' "$0"
   exit 2

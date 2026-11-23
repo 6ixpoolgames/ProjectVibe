@@ -67,7 +67,8 @@ func _remove_link(marker_id: int) -> void:
 	_link_ids.erase(marker_id)
 
 
-# REFACTOR: the same lookup is written out in NavigationManager, BodyNavFeeder and NavDebugView; one shared helper would do.
+# REFACTOR: the same lookup is written out in NavigationManager, BodyNavFeeder, NavDebugView, TerrainNavFeeder (four places) and
+# CrowdMover; one shared helper would do (navigation/CHANGELOG.md).
 func _nav_server() -> Object:
 	if Engine.has_singleton(&"NavServer"):
 		return Engine.get_singleton(&"NavServer")

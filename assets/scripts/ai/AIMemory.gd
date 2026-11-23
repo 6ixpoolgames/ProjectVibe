@@ -236,7 +236,8 @@ func _on_fade_edited() -> void:
 
 # A profile whose script isn't FadeProfile itself may override value_at(), so the C++ store calls it rather than doing the maths.
 static func _is_custom(profile: FadeProfile) -> bool:
-	return profile.get_script() != _FADE_PROFILE_SCRIPT
+	# As AIDecisionModule decides it: only a fade that overrides value_at is custom; a subclass that only adds settings isn't.
+	return profile.get_script() != _FADE_PROFILE_SCRIPT and ScriptOverrides.overrides(profile.get_script(), &"value_at")
 
 
 # A LINEAR FadeProfile from full to nothing over this many ticks: the default fades.

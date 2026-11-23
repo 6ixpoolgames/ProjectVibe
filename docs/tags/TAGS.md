@@ -39,6 +39,9 @@ The AI's own tags: its states and stances.
 
 | Tag | What it is | Old names |
 |---|---|---|
+| `ai.stance` | How a behaviour fights: the AI's fighting styles, which score modifiers can favour. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`ai.stance.melee` | Fighting up close: closing in to swing. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`ai.stance.ranged` | Fighting from a distance: keeping away and shooting. |  |
 | `ai.state` | The AI's state: what situation it thinks it is in. A pawn owns one while its AI runs. |  |
 | &nbsp;&nbsp;&nbsp;&nbsp;`ai.state.alert` | Something caught its attention, but it isn't sure of a target yet. |  |
 | &nbsp;&nbsp;&nbsp;&nbsp;`ai.state.combat` | It has a target it is sure of, and fights. |  |
@@ -98,3 +101,5 @@ A condition a pawn is in right now.
 | Tag | What it is | Old names |
 |---|---|---|
 | `status.dead` | The pawn is dead. |  |
+| `status.has_ammo` | An ability with limited uses has some left. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`status.has_ammo.ranged` | A ranged attack has shots left. |  |

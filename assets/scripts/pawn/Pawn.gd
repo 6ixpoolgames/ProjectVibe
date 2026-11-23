@@ -2,18 +2,15 @@
 ## A body something can possess, which runs its parts in a fixed order each tick.
 ##
 ## Its parts (managers, abilities, AI, its streaming source) are child nodes that PawnInitializer adds from the game's defaults
-## ([member fill_in_default_parts], [member skip_default_parts]), and each tells the pawn it's there; the pawn keeps the body, the
-## tick order, references to its parts and a few general flags. Use
-## pawn.tscn as it is, or inherit from it. A controller writes its input each tick through its ControllerManager, and its abilities
-## turn that into movement. Optional scene children: AbilityManager, TickStateComponent and NetworkEntity (rollback and multiplayer;
-## the last two stay in the scene) and a Node3D called Visual.
+## ([member fill_in_default_parts], [member skip_default_parts]); each tells the pawn it's there. The pawn keeps the body, the tick
+## order, references to its parts and a few general flags. Use pawn.tscn as it is, or inherit from it; TickStateComponent and
+## NetworkEntity (rollback and multiplayer) stay in the scene, and a Node3D called Visual is drawn smoothly between ticks.
 ## [br]
-## Each tick: [b]input[/b] (the AI runs, then the ControllerManager asks the controller in charge, where input is decided here),
-## [b]simulate[/b] (effects count down, abilities steer by writing [member velocity], gravity, then one move: its [member mover]'s if
-## it takes it, else the pawn's own move_and_slide), then the state store records it. Hits resolve after every pawn has simulated. The
-## body's rotation is never written (it slowly changed its scale and made replays collide differently; see TickSamplePawn): facing is
-## [member yaw] and only the model turns. A child called Visual is drawn smoothly between ticks by a VisualSmoother. It also works
-## without the tick driver (it ticks itself) and without a mover. Design: pawn spec 4, 15.1; state store spec 12.8.
+## Each tick: [b]input[/b] (the AI runs, then the ControllerManager asks the controller in charge), [b]simulate[/b] (effects count down,
+## abilities steer by writing [member velocity], gravity, then one move: its [member mover]'s if it takes it, else move_and_slide),
+## then the state store records it. Hits resolve after every pawn has simulated. The body never rotates (rotation slowly changed its
+## scale): facing is [member yaw] and only the model turns. It also works without the tick driver and without a mover. Design: pawn
+## spec 4, 15.1; state store spec 12.8.
 class_name Pawn
 extends CharacterBody3D
 
@@ -230,7 +227,7 @@ func get_visual() -> Node3D:
 
 ## Its entity was despawned while its projectiles still fly (NetworkSession.despawn): it lingers until they end, hidden, not ticking and
 ## not colliding, so their hits still have their ability, and goes the tick after.
-func _on_lingering_started(_entity: NetworkEntity) -> void:
+func _on_lingering_started(_lingering: NetworkEntity) -> void:
 	set_frozen(true)
 	visible = false
 	collision_layer = 0 # nothing meets it: not hit, not in the way
@@ -287,10 +284,8 @@ func mark_state_changed() -> void:
 		_tick_state.mark_changed()
 
 
-## Moves this pawn instantly instead of through the space between, for a respawn, a blink or a debug move. Use it for any such move,
-## so the crowd mover reads it from its node this tick, its Visual is drawn there at once instead of gliding, the state store records
-## it even on a tick it doesn't run or after the crowd wrote its move, and the MoveSanityCheck lets the jump through. Its velocity and
-## yaw stay as they are.
+## Moves this pawn instantly, for a respawn, a blink or a debug move: the crowd mover, its Visual, the state store and the
+## MoveSanityCheck all take it as a jump, not a glide. Its velocity and yaw stay as they are.
 func teleport(to: Vector3) -> void:
 	global_position = to
 	if _tick_state:
@@ -322,6 +317,7 @@ func _tick_input(_dt: float, tick: int) -> void:
 	if is_dead():
 		if controller_manager:
 			controller_manager.clear_input() # a dead pawn ignores its controllers and its AI
+			controller_manager.let_go_of_ai_orders() # and the AI's hands forget theirs, so it comes back from a revive with none
 		return
 	# The AI first (step 1 of pawn spec section 4), before the controller in charge is asked for input. Its ordered step is in its
 	# core part, AIContextComponent.run_ai.
@@ -370,7 +366,6 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	_finish_input() # the abilities were the last to read this tick's input
 	if not was_grounded:
 		velocity.y -= _gravity_strength() * dt
-	# move_and_slide uses Godot's physics delta. This scales it so that one tick moves velocity * tick dt.
 	# Standing still with nothing to move it: skip the solve (see skip_move_when_still).
 	if skip_move_when_still and was_grounded and velocity == Vector3.ZERO and not was_moved and not _moved_since_run and not _is_check_tick(tick):
 		PerfScopes.add(&"pawn.move_skipped", 0)
@@ -386,6 +381,7 @@ func _tick_simulate(dt: float, tick: int) -> void:
 
 # One move by physics: move_and_slide with this run's velocity, then whether it's on the floor.
 func _move_with_physics() -> void:
+	# move_and_slide uses Godot's physics delta; this scales it so that one tick moves velocity * tick dt.
 	# Times ticks_elapsed, so a pawn running every Nth tick moves N ticks' worth.
 	var factor: float = (_driver.get_physics_factor() if _driver else 1.0) * ticks_elapsed
 	velocity *= factor
@@ -487,7 +483,7 @@ func _can_sleep(tick: int) -> bool:
 # One of this pawn's check ticks, every sleep_check_ticks, staggered by entity id, when a sleeping or still pawn runs a full tick
 # anyway so ground that went away under it is noticed.
 func _is_check_tick(tick: int) -> bool:
-	var stagger: int = _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
+	var stagger := _stagger()
 	# "< ticks_elapsed" rather than "== 0", so a pawn running every Nth tick still finds the check tick that fell between its runs.
 	# sleep_check_ticks is written for 60 ticks a second (scaling spec step 6).
 	return posmod(tick + stagger, TickDriver.ticks_at_rate(sleep_check_ticks)) < ticks_elapsed
@@ -528,11 +524,6 @@ func _current_step() -> int:
 
 func _stagger() -> int:
 	return _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
-
-
-## True while it runs every tick: tick_step 1, or a player has it.
-func runs_every_tick() -> bool:
-	return tick_step <= 1 or _has_a_player()
 
 
 # Works out, once per tick, whether this pawn runs this tick and how many ticks the run covers (pawn spec 8.21). Due when its step is

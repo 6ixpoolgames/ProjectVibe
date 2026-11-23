@@ -24,7 +24,7 @@ A test that checks visual parts while running headless turns `visuals_without_di
 
 ### Settings and properties
 
-- `visuals_without_display: bool` = `false`
+- `visuals_without_display: bool` = `false`: On: visual-only parts run even with no display. Off (the default): with no display they build nothing and never run, since nothing can see them (the floating swords cost 1.4 ms a tick on a headless mass battle server).
 
 ### Functions
 

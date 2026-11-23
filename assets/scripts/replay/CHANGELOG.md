@@ -12,9 +12,14 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
+| Test-only reads | `ReplayViewer.get_visible_ghost_count`, `get_reader` | Only `replay_selftest` calls them; a test helper in `tests/` keeps them out of the shipping class | S |
 | One list of the base's channels | `ReplayRecorder._init`, `ReplayReader._init` | The same list is written out twice (the recorder's without diagnostics, which `DiagnosticsManager` adds). One static list on `ReplayChannel` is one place to add a base channel | S |
 | A public way to read a block's ticks | `ReplayViewer._fill_strip` | The viewer reads `ReplayReader._blocks`, the reader's private data. A `get_block_ticks(index)` keeps the reader free to change how it stores blocks | S |
 | An index of blocks | `ReplayReader.open` | Opening reads the whole file into memory and decompresses every block once just to learn its ticks. At mass-battle sizes (about 160 MB an hour) a long recording is slow to open and heavy to hold; an index (at the end of the file, or a block header outside the compression) would fix both | M |
+
+## 2026-11-23
+
+- **The code pass:** `ReplayRecorder`'s id-to-pawn map and its `write_on_thread` switch removed (nothing read or set them); `ReplayWriter.use_thread`'s doc says what it's for; `ReplayViewer`'s test-only reads flagged `REFACTOR:` (row above).
 
 ## 2026-11-22
 

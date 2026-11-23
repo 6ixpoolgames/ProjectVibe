@@ -16,9 +16,9 @@ Every class in `assets/scripts/pawn/`, from its doc comments. The overview is in
 
 A body something can possess, which runs its parts in a fixed order each tick.
 
-Its parts (managers, abilities, AI, its streaming source) are child nodes that PawnInitializer adds from the game's defaults (`fill_in_default_parts`, `skip_default_parts`), and each tells the pawn it's there; the pawn keeps the body, the tick order, references to its parts and a few general flags. Use pawn.tscn as it is, or inherit from it. A controller writes its input each tick through its ControllerManager, and its abilities turn that into movement. Optional scene children: AbilityManager, TickStateComponent and NetworkEntity (rollback and multiplayer; the last two stay in the scene) and a Node3D called Visual.
+Its parts (managers, abilities, AI, its streaming source) are child nodes that PawnInitializer adds from the game's defaults (`fill_in_default_parts`, `skip_default_parts`); each tells the pawn it's there. The pawn keeps the body, the tick order, references to its parts and a few general flags. Use pawn.tscn as it is, or inherit from it; TickStateComponent and NetworkEntity (rollback and multiplayer) stay in the scene, and a Node3D called Visual is drawn smoothly between ticks.
 
-Each tick: **input** (the AI runs, then the ControllerManager asks the controller in charge, where input is decided here), **simulate** (effects count down, abilities steer by writing `velocity`, gravity, then one move: its `mover`'s if it takes it, else the pawn's own move_and_slide), then the state store records it. Hits resolve after every pawn has simulated. The body's rotation is never written (it slowly changed its scale and made replays collide differently; see TickSamplePawn): facing is `yaw` and only the model turns. A child called Visual is drawn smoothly between ticks by a VisualSmoother. It also works without the tick driver (it ticks itself) and without a mover. Design: pawn spec 4, 15.1; state store spec 12.8.
+Each tick: **input** (the AI runs, then the ControllerManager asks the controller in charge), **simulate** (effects count down, abilities steer by writing `velocity`, gravity, then one move: its `mover`'s if it takes it, else move_and_slide), then the state store records it. Hits resolve after every pawn has simulated. The body never rotates (rotation slowly changed its scale): facing is `yaw` and only the model turns. It also works without the tick driver and without a mover. Design: pawn spec 4, 15.1; state store spec 12.8.
 
 ### Settings and properties
 
@@ -62,7 +62,7 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 
 - `is_keeping_world_loaded() -> bool`: True while this pawn keeps the world loaded around it on this machine: its `streaming_source` counts (a player has it, or its keeps_world_loaded is on, and it's simulated here). The AI switch-off leaves such a pawn on.
 - `get_visual() -> Node3D`: The node that follows the body smoothly, for hanging things from. With no Visual, it's the body.
-- `_on_lingering_started(_entity: NetworkEntity) -> void`: Its entity was despawned while its projectiles still fly (NetworkSession.despawn): it lingers until they end, hidden, not ticking and not colliding, so their hits still have their ability, and goes the tick after.
+- `_on_lingering_started(_lingering: NetworkEntity) -> void`: Its entity was despawned while its projectiles still fly (NetworkSession.despawn): it lingers until they end, hidden, not ticking and not colliding, so their hits still have their ability, and goes the tick after.
 - `linger_until(tick: int) -> void`: Keeps its entity until this tick, at least, if it's despawned: a projectile it fired ends then (Projectile.launch).
 - `set_frozen(frozen: bool) -> void`
 - `is_frozen() -> bool`: True while frozen.
@@ -70,7 +70,7 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 - `is_authority() -> bool`: True where this pawn's state is decided: offline, or on the server. Hits are decided here.
 - `is_dead() -> bool`: True while this pawn's Death ability runs: from Health reaching 0 until it's revived (AbilityManager.revive). A pawn with no Death ability never dies. Returns `dead`, which the Death ability keeps current.
 - `mark_state_changed() -> void`: Something changed this pawn between its own runs (an effect landed on it), so the state store reads it at the next commit instead of copying its last row forward. Its runs mark it themselves.
-- `teleport(to: Vector3) -> void`: Moves this pawn instantly instead of through the space between, for a respawn, a blink or a debug move. Use it for any such move, so the crowd mover reads it from its node this tick, its Visual is drawn there at once instead of gliding, the state store records it even on a tick it doesn't run or after the crowd wrote its move, and the MoveSanityCheck lets the jump through. Its velocity and yaw stay as they are.
+- `teleport(to: Vector3) -> void`: Moves this pawn instantly, for a respawn, a blink or a debug move: the crowd mover, its Visual, the state store and the MoveSanityCheck all take it as a jump, not a glide. Its velocity and yaw stay as they are.
 - `get_network_entity() -> NetworkEntity`: This pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
 - `_tick_input(_dt: float, tick: int) -> void`: The input phase: runs the AI, then asks the controller in charge for this tick's input, where this pawn's input is decided here. A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
 - `finish_move(at: Vector3, seconds: float) -> void`: Its mover moved this pawn to at, over seconds: it stands there on the ground, its velocity is what it really moved (as move_and_slide leaves it), and its tick finishes (pawn spec 8.22). The position is rounded as the state store will round it (TickStateComponent.round_position), so the commit changes nothing afterwards and a still pawn is exactly still, and sleeps.
@@ -83,7 +83,6 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 - `fired_since_last_run(tick: int, offset: int, interval: int) -> bool`: True if a rule that fires every interval ticks, on the ticks where (tick + offset) is a multiple of interval, fired on this tick or on one this pawn skipped since its last run. For the AI's schedules and the like, so a pawn that runs every Nth tick keeps them (pawn spec 8.21). With ticks_elapsed 1, it's (tick + offset) % interval == 0.
 - `fires_in_run(run_tick: int, run_length: int, offset: int, interval: int) -> bool` *(static)*: The same rule for any run: true if a rule that fires every interval ticks (where (tick + offset) is a multiple of interval) fires on run_tick or on one of the run_length - 1 ticks before it. AISensingManager asks it about a pawn's next run, before that run happens, so both use one rule.
 - `next_run_tick(tick: int) -> int`: The tick this pawn will next run after tick, if its step doesn't change before then. The same rule as _prepare_run, looking ahead from a tick it ran on: the first later tick that lines up with its step, or a whole step on. AISensingManager uses it to ask the worker-thread sensing job in time for a stepping pawn's next run.
-- `runs_every_tick() -> bool`: True while it runs every tick: tick_step 1, or a player has it.
 - `_on_state_loaded(_tick: int) -> void`: TickState restored our properties, but CharacterBody3D also keeps a private "on floor" flag that still holds what the body is doing now. Nothing can set it directly, so this makes the engine work it out again, then puts things back.
 - `_on_network_role(entity: NetworkEntity) -> void`: Works for a role that changes while running, as swapping pawns does.
 - `_on_network_interpolated() -> void`: On a client, for a pawn someone else controls: it was just moved between snapshots, so Visual follows.
@@ -173,4 +172,4 @@ The pawn makes one when it has a child called Visual, and tells it after every r
 - `snap() -> void`: The body was put somewhere without moving there (a rollback, a spawn, a teleport): the Visual goes straight there.
 - `note_moved() -> void`: On a client, for a pawn someone else controls: it was just moved between snapshots, so the Visual glides after it.
 - `add_correction(jump: Vector3) -> void`: On a client: a correction moved the body by this much. The Visual keeps where it was and catches up over about 100 ms.
-- `get_correction_offset() -> Vector3`: What's left of a correction, still fading.
+- `get_correction_offset() -> Vector3`

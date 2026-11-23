@@ -20,11 +20,13 @@ extends Node3D
 @export_range(0.1, 10.0, 0.05, "or_greater") var sword_scale := 2.2
 
 @export_group("Hovering")
-## Where it hovers, from the pawn's feet: this far to the pawn's right, and this high, in metres.
+## Where it hovers, from the pawn's feet: this far to the pawn's right, in metres.
 @export var hover_side := 0.8
+## And this high, in metres.
 @export var hover_height := 1.0
-## How far it bobs up and down, in metres, and how many times a second.
+## How far it bobs up and down, in metres.
 @export_range(0.0, 0.5, 0.005) var bob_height := 0.06
+## How many times a second it bobs.
 @export_range(0.0, 5.0, 0.05) var bob_rate := 1.1
 ## How far the blade leans out from straight up, away from the pawn, in degrees.
 @export_range(0.0, 90.0, 0.5) var hover_lean_degrees := 14.0
@@ -47,8 +49,9 @@ extends Node3D
 @export_range(0.01, 3.0, 0.01, "or_greater") var side_change_seconds := 0.35
 
 @export_group("Parrying")
-## While a parry runs, how far in front of the pawn the guarding sword is, and how high, in metres.
+## While a parry runs, how far in front of the pawn the guarding sword is, in metres.
 @export var guard_forward := 0.6
+## And how high, in metres.
 @export var guard_height := 1.15
 
 var _pawn: Pawn = null

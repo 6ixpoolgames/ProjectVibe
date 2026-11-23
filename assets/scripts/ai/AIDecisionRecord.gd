@@ -23,8 +23,12 @@ const CAUSE_DIRECT := &"direct"
 
 ## A hard rule that ruled a behaviour out before any of its own code ran (pawn spec 10.8 step 2). None: it was a candidate.
 const RULE_NONE := &""
-## Not allowed in the current state.
-const RULE_STATE := &"state"
+## Its tag requirements failed for the pawn's owned tags (the AI's state is one of them).
+const RULE_TAGS := &"tags"
+## Switched off ([member AIBehaviourBase.enabled]).
+const RULE_OFF := &"off"
+## A score modifier blocks it.
+const RULE_BLOCKED := &"blocked"
 ## Cooling down.
 const RULE_COOLDOWN := &"cooldown"
 ## Needs a target, and there's none.
@@ -59,6 +63,8 @@ var state_after: StringName = &""
 
 ## The state the behaviours were judged in.
 var state: StringName = &""
+## The tags the pawn owned when the behaviours were judged (without their parents), sorted.
+var owned_tags: Array[StringName] = []
 ## True if there was a target when the behaviours were judged.
 var has_target := false
 ## The behaviour running before the decision (&"": none), and the tick it started (-1: none).
@@ -94,10 +100,10 @@ func changed() -> bool:
 
 
 ## Adds one behaviour's entry from the scratch values the manager left on it. rule: the hard rule that ruled it out, or
-## [constant RULE_NONE]. Keys: name, rule, and for a candidate persistence, jitter, ceiling, floor (null: none), available
-## (1 yes, 0 no, -1 never asked) and score (null: not scored).
+## [constant RULE_NONE]. Keys: name, rule, modifier (the score modifiers' sum), and for a candidate persistence, jitter, ceiling, floor
+## (null: none), available (1 yes, 0 no, -1 never asked) and score (null: not scored).
 func add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void:
-	var entry := {"name": behaviour.name, "rule": rule}
+	var entry := {"name": behaviour.name, "rule": rule, "modifier": behaviour.decision_modifier}
 	if rule == RULE_NONE:
 		entry["persistence"] = behaviour.decision_persistence
 		entry["jitter"] = behaviour.decision_jitter
@@ -134,8 +140,15 @@ func to_dict() -> Dictionary:
 		"target_before": target_before_id, "target_before_name": String(target_before_name),
 		"target_after": target_after_id, "target_after_name": String(target_after_name),
 		"state_before": String(state_before), "state_after": String(state_after),
-		"state": String(state), "has_target": has_target,
+		"state": String(state), "owned_tags": _names(owned_tags), "has_target": has_target,
 		"running_before": String(running_before), "running_started_tick": running_started_tick,
 		"kept_by_interrupt": kept_by_interrupt, "behaviours": entries, "chosen": String(chosen),
 		"inputs": Array(inputs),
 	}
+
+
+static func _names(tags: Array[StringName]) -> Array:
+	var out: Array = []
+	for tag in tags:
+		out.append(String(tag))
+	return out

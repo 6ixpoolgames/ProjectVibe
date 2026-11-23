@@ -49,8 +49,6 @@ var _miss_interceptors: Array[HitInterceptor] = []
 var _turn_away_interceptors: Array[HitInterceptor] = []
 var _full_movement_abilities: Array[AbilityBase] = [] # those with needs_full_movement (pawn spec 8.22)
 var _locomotion_pausers: Array[AbilityBase] = [] # those with pauses_locomotion, usually just Dash
-# REFACTOR: _stepped is filled in _collect_abilities but never read. Drop it, or use it; efficient.
-var _stepped: Array[AbilityBase] = [] # abilities built from steps (pawn spec 8.20)
 
 var pawn: Pawn = null
 var _driver: Node = null # the TickDriver, for hits during simulate
@@ -91,19 +89,23 @@ var combo_open_until := 0:
 # Where _push_state sends the two above: the pawn's TickStateComponent and their entries there, set by _register_rollback_state.
 var _tick_state: TickStateComponent = null
 var _pushed_keys := {}
-## Goes up by one whenever something changes that can change what [method can_start] answers (an ability or step starting or ending, a
-## cooldown or the combo window running out, effects changing). The AI keeps its last answer until this moves ([AIInputs]; scaling spec
-## 6.2). Never goes down. A deadline passing moves it on when it's next read, so the AI in the input step sees a cooldown end on its tick,
-## as [method can_start] does, before this pawn's abilities run.
+## Goes up by one whenever what [method can_start] answers may change (a run or step starting or ending, a deadline passing, effects
+## changing, the owned tags changing while an ability has start requirements); the AI keeps its last answer until it moves (scaling
+## spec 6.2). A passed deadline or a tag change moves it when next read, so the AI sees a cooldown end on its tick.
 var readiness_version := 0:
 	get:
 		_note_deadline_passed()
+		_note_tags_changed()
 		return readiness_version
 var _timers_dirty := true # a timer started or reached 0, so _timed is rebuilt before it's next used
 var _locks_dirty := true # an action started or stopped, so the locks are worked out again before they're next used
 var _every_tick_abilities: Array[AbilityBase] = [] # abilities whose script overrides every_tick()
 var _action_bits := 0 # the input bits of every action's trigger_action: the presses anything here answers to
 var _follows_body := {} # trigger action -> true when an ability on it has its own can_start(), such as Jump needing the ground
+var _charged: Array[AbilityBase] = [] # abilities with limited uses
+var _next_charge_tick := -1 # the soonest charge deadline (a restore, a change ending) among them; -1: none
+var _has_start_requirements := false # some ability here has start_requirements, so owned-tag changes move readiness_version
+var _tags_version_seen := -1
 
 
 func _init() -> void:
@@ -139,6 +141,12 @@ func tick_abilities(dt: float) -> void:
 	_note_deadline_passed()
 	if _timers_dirty:
 		_rebuild_timed()
+	var now: int = TickDriver.tick
+	if _next_charge_tick >= 0 and now >= _next_charge_tick:
+		for ability in _charged:
+			ability.apply_charge_deadlines(now)
+		_timers_dirty = true
+		_rebuild_timed()
 	for ability in _every_tick_abilities:
 		ability.every_tick(dt)
 	_run_locomotion(dt)
@@ -166,9 +174,21 @@ func _note_deadline_passed() -> void:
 ## one it replaces calls no setter, but the soonest one still ahead depends on the tick, which went back.
 func state_loaded() -> void:
 	timers_changed()
+	for ability in _charged:
+		ability.update_charges_tag() # a loaded value equal to the one it replaces calls no setter
 	for ability in _abilities:
 		if ability.is_stepped():
 			ability.timeline_loaded() # its running entries' values back onto their steps
+
+
+# The owned tags changed since the last look, and some ability's start requirements read them: what can start may have changed.
+func _note_tags_changed() -> void:
+	if not _has_start_requirements or pawn == null or pawn.owned_tags == null:
+		return
+	var version := pawn.owned_tags.version
+	if version != _tags_version_seen:
+		_tags_version_seen = version
+		readiness_version += 1
 
 
 ## Moves [member readiness_version] on for a change made outside the abilities; the EffectManager calls it when effects change.
@@ -192,6 +212,8 @@ func can_sleep() -> bool:
 		if not ability.can_sleep_while_running():
 			return false
 	if is_combo_window_open(): # the window's end must be seen, to tell the AI (readiness_version)
+		return false
+	if _next_charge_tick >= 0: # charges coming back flip the has-charges tag the AI reads
 		return false
 	for ability in _every_tick_abilities:
 		if not ability.can_sleep():
@@ -303,7 +325,7 @@ func is_locked(ability: AbilityBase) -> bool:
 	return ability.category_mask & _locked_mask != 0
 
 
-## Seconds as whole ticks at 60 a second, at least 1 for anything above 0.
+## Seconds as whole ticks at the match's tick rate, at least 1 for anything above 0.
 func ticks_for(seconds: float) -> int:
 	return 0 if seconds <= 0.0 else maxi(1, roundi(seconds * _tick_rate))
 
@@ -445,9 +467,7 @@ func _best_ready(first: AbilityBase, wanted_bits: int) -> AbilityBase:
 func _priority_now(ability: AbilityBase) -> float:
 	if ability.priority_jitter <= 0.0:
 		return float(press_priority_now(ability))
-	var entity := pawn.get_network_entity()
-	var key: int = entity.entity_id if entity and entity.entity_id >= 0 else pawn.get_instance_id()
-	var rng: RandomNumberGenerator = TickDriver.tick_rng(key, ability.jitter_salt)
+	var rng: RandomNumberGenerator = TickDriver.tick_rng(HitInfo.key_of(pawn), ability.jitter_salt)
 	return press_priority_now(ability) + rng.randf_range(-ability.priority_jitter, ability.priority_jitter)
 
 
@@ -474,10 +494,17 @@ func _bonus(ability: AbilityBase, number: int) -> int:
 	return effects.ability_bonus(ability, number)
 
 
-# Ready to start: no cooldown, a combo position it fits, every conflicting running ability can be cancelled by it, and its own
-# can_start().
+# Ready to start: no cooldown, a charge left, its start requirements pass, a combo position it fits, every conflicting running ability can be
+# cancelled by it, and its own can_start().
 func _is_ready(ability: AbilityBase) -> bool:
-	return TickDriver.tick >= ability.ready_at and _combo_allows(ability) and _conflicts_allow(ability) and ability.can_start()
+	return TickDriver.tick >= ability.ready_at and (not ability.uses_charges() or ability.charges_left() > 0) and _tags_allow(ability) \
+		and _combo_allows(ability) and _conflicts_allow(ability) and ability.can_start()
+
+
+# Its start requirements against the pawn's owned tags (no requirements: yes).
+func _tags_allow(ability: AbilityBase) -> bool:
+	var query := ability.start_requirements
+	return query == null or query.matches(pawn.owned_tags if pawn else null)
 
 
 ## Opens the combo window for this many ticks. An [OpenComboStep] calls it after its ability's hit.
@@ -620,6 +647,13 @@ func _rebuild_timed() -> void:
 			_next_deadline = ability.buffer_until
 	if now < combo_open_until and (_next_deadline < 0 or combo_open_until < _next_deadline):
 		_next_deadline = combo_open_until
+	_next_charge_tick = -1
+	for ability in _charged:
+		var due := ability.next_charge_deadline()
+		if due >= 0 and (_next_charge_tick < 0 or due < _next_charge_tick):
+			_next_charge_tick = due
+	if _next_charge_tick >= 0 and (_next_deadline < 0 or _next_charge_tick < _next_deadline):
+		_next_deadline = _next_charge_tick # readiness moves on when charges come back
 
 
 # Whether _run_actions has work this tick: a new press of an action answered here, an action running, or a buffered press.
@@ -635,6 +669,7 @@ func _actions_have_work() -> bool:
 func _start(ability: AbilityBase) -> void:
 	readiness_version += 1
 	ability.buffer_until = 0
+	ability.spend_charge()
 	ability.pawns_hit_this_run = PackedInt64Array()
 	if ability.hit_run:
 		ability.hit_run.clear() # its swing's log starts again with the run
@@ -700,6 +735,8 @@ func revive() -> void:
 	var stat := pawn.stat_manager.get_stat(StatManager.HEALTH)
 	if stat and stat.changes_during_play:
 		stat.current = stat.value
+	for ability in _charged:
+		ability.refill_charges()
 
 
 # The hit itself. Checked again here: a queued hit can arrive after another killed this pawn, and a dash started in the same tick
@@ -790,11 +827,8 @@ func _collect_abilities() -> void:
 	_knockback = null
 	_full_movement_abilities.clear()
 	_locomotion_pausers.clear()
-	_stepped.clear()
 	for ability in _abilities:
 		ability.jitter_salt = hash(String(ability.name))
-		if ability.is_stepped():
-			_stepped.append(ability)
 		if ability.needs_full_movement:
 			_full_movement_abilities.append(ability)
 		# REFACTOR: Death and Knockback are found by class, so a game changes dying or staggering only by extending them. A tag
@@ -821,6 +855,13 @@ func _collect_abilities() -> void:
 			_action_bits |= ability.trigger_bit # the input channel
 		if ScriptOverrides.overrides(ability.get_script(), &"every_tick"):
 			_every_tick_abilities.append(ability)
+	_note_start_requirements()
+	_charged.clear()
+	for ability in _abilities:
+		if ability.uses_charges():
+			_charged.append(ability)
+		ability.update_charges_tag()
+	_timers_dirty = true
 	_by_action.clear()
 	_follows_body.clear()
 	for ability in _abilities:
@@ -840,6 +881,22 @@ func _collect_abilities() -> void:
 ## out again.
 func settings_changed() -> void:
 	_collect_abilities()
+
+
+# Which abilities have start requirements (so owned-tag changes move readiness_version), with a warning for a query that names the
+# AI's own tags, which clients never own.
+func _note_start_requirements() -> void:
+	_has_start_requirements = false
+	_tags_version_seen = -1
+	for ability in _abilities:
+		var query := ability.start_requirements
+		if query == null or query.is_empty():
+			continue
+		_has_start_requirements = true
+		for tag in query.all_of + query.any_of + query.none_of:
+			if String(tag).begins_with("ai.") or String(tag) == "ai":
+				push_warning("AbilityManager: %s's start requirements name %s, an AI tag only the server owns, so a client predicts its start wrong. Use ability, effect or status tags." % [ability.name, tag])
+				break
 
 
 # The ability's EffectApplier children, into its three effect lists (pawn spec 8.11). Each effect is registered so an over-time one in

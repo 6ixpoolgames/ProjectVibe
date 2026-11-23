@@ -14,6 +14,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | A shared base for per-frame pawn visuals | `_find_pawn()` and `_bind()` in `ToyWaddle` and `FloatingSword` | The same pawn search and first-frame binding written twice | S |
 | Abilities report a pose, instead of being found by class | `FloatingSword._bind()`, `_running_swing()`, `_running_parry()` | It knows MeleeAttackAbility and ParryAbility by class, so a new attack or guard needs code here. Fits the modular animation work on the roadmap | M |
 
+## 2026-11-23
+
+- **Documentation pass:** `FloatingSword`'s and `ToyWaddle`'s paired settings documented one per line.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): the `FloatingSword` and `ToyWaddle` class comments shortened (the frame-by-frame description and the combo-side rule moved to the README's "How it works"; the owner's toy look is here). `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.

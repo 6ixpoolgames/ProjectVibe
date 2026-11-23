@@ -7,7 +7,7 @@
 ## [method start], [method tick], [method stop] and, for counters that run all the time, [method every_tick] (with [method can_sleep]).
 ## A quick ability can instead set base settings in [code]_init()[/code]: they go into a definition of its own. LOCOMOTION abilities move the pawn every tick
 ## they're chosen (one runs at a time); ACTION abilities start on a press of their [member trigger_action], at once or for a
-## [member duration]. Players' keys and AI behaviours press the same actions. Times are set in seconds and kept in ticks (60 a second).
+## [member duration]. Players' keys and AI behaviours press the same actions. Times are set in seconds and kept in ticks (at the match's tick rate).
 ## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_pushed_properties] (its setter calls
 ## [method push_state]) or [method get_rollback_properties] (read at every commit); the base already covers its own timers and step
 ## state. It can also be built from [AbilityStep] children (a windup, a turn, a swing) and carry [HitInterceptor] children that stop
@@ -71,6 +71,62 @@ var extra_categories: Array[StringName]:
 		return settings.extra_categories
 	set(value):
 		_write_setting(&"extra_categories", value)
+## From the definition: [member AbilityDefinition.max_charges].
+var max_charges: int:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.max_charges
+	set(value):
+		_write_setting(&"max_charges", value)
+## From the definition: [member AbilityDefinition.recharges].
+var recharges: bool:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.recharges
+	set(value):
+		_write_setting(&"recharges", value)
+## From the definition: [member AbilityDefinition.charge_restore_ticks].
+var charge_restore_ticks: int:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.charge_restore_ticks
+	set(value):
+		_write_setting(&"charge_restore_ticks", value)
+## From the definition: [member AbilityDefinition.charges_restored].
+var charges_restored: int:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.charges_restored
+	set(value):
+		_write_setting(&"charges_restored", value)
+## From the definition: [member AbilityDefinition.restore_all_charges].
+var restore_all_charges: bool:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.restore_all_charges
+	set(value):
+		_write_setting(&"restore_all_charges", value)
+## From the definition: [member AbilityDefinition.has_charges_tag].
+var has_charges_tag: StringName:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.has_charges_tag
+	set(value):
+		_write_setting(&"has_charges_tag", value)
+## From the definition: [member AbilityDefinition.start_requirements].
+var start_requirements: TagQuery:
+	get:
+		if settings == null:
+			prepare_settings()
+		return settings.start_requirements
+	set(value):
+		_write_setting(&"start_requirements", value)
 ## From the definition: [member AbilityDefinition.priority].
 var priority: int:
 	get:
@@ -216,6 +272,40 @@ var ready_at := 0:
 		push_state(&"ready_at", value)
 		if manager:
 			manager.timers_changed()
+## Charges used and not yet back (its definition's max_charges above 0). A start spends one.
+var charges_spent := 0:
+	set(value):
+		if value == charges_spent:
+			return
+		charges_spent = value
+		push_state(&"charges_spent", value)
+		_charges_changed()
+## The tick spent charges next come back (a deadline); -1: none waiting.
+var next_restore_tick := -1:
+	set(value):
+		if value == next_restore_tick:
+			return
+		next_restore_tick = value
+		push_state(&"next_restore_tick", value)
+		if manager:
+			manager.timers_changed()
+## Its most charges before changes that last a while: -1 for its definition's max_charges, or what [method set_max_charges] set for good.
+var max_charges_base := -1:
+	set(value):
+		if value == max_charges_base:
+			return
+		max_charges_base = value
+		push_state(&"max_charges_base", value)
+		_charges_changed()
+## Changes to its most charges that last a while, by name: {name: [amount, the tick it ends or -1]}. Change it with
+## [method add_max_charges_change] and [method remove_max_charges_change]; a new Dictionary each time, so it's pushed.
+var max_charges_changes := {}:
+	set(value):
+		max_charges_changes = value
+		push_state(&"max_charges_changes", value)
+		_charges_changed()
+		if manager:
+			manager.timers_changed() # an end is a deadline
 ## A press waiting in the buffer waits until this tick (not including it).
 var buffer_until := 0:
 	set(value):
@@ -239,10 +329,11 @@ var locks_out_mask := 0
 var cancelled_by_mask := 0
 ## trigger_action's input bit ([InputActions]), or 0 with none. Worked out once by the manager (pawn spec 15.2).
 var trigger_bit := 0
-## From its EffectApplier children, collected once by the manager (pawn spec 8.11): on its own pawn when it starts; on a pawn it hits;
-## on its own pawn when it hits. A [MeleeSweepStep] hands the last two to the [HitInfo].
+## Effects on its own pawn when it starts, from its EffectApplier children, collected once by the manager (pawn spec 8.11).
 var on_start_effects: Array[Effect] = []
+## Effects on a pawn it hits, handed to the [HitInfo] by [method land_hit] (a sweep's hit or a projectile's).
 var on_hit_effects: Array[Effect] = []
+## Effects on its own pawn when it hits, handed over by [method land_hit] like [member on_hit_effects].
 var on_hit_self_effects: Array[Effect] = []
 ## Its [HitInterceptor]s, under it or its steps, found by the manager (pawn spec 8.23).
 var interceptors: Array[HitInterceptor] = []
@@ -319,7 +410,7 @@ func prepare_settings() -> AbilityDefinition:
 	var base: AbilityDefinition = definition
 	definition_fell_back = false
 	if base and not _definition_fits(base, defaults):
-		push_warning("[AbilityBase] %s: its definition %s is for another kind of ability; it runs with the %s defaults." 				% [_describe_node(), base.describe(), defaults.get_script().get_global_name()])
+		push_warning("[AbilityBase] %s: its definition %s is for another kind of ability; it runs with the %s defaults." % [_describe_node(), base.describe(), defaults.get_script().get_global_name()])
 		definition_fell_back = true
 		base = null
 	var chosen: AbilityDefinition = base if base else defaults
@@ -386,7 +477,7 @@ func _settings_changed() -> void:
 func _write_setting(setting: StringName, value: Variant) -> void:
 	if _own_definition == null:
 		if manager:
-			push_error("[AbilityBase] %s: %s comes from its definition, which every pawn using it shares; give it another with use_definition(), or its own copy with make_definition_unique()." 					% [_describe_node(), setting])
+			push_error("[AbilityBase] %s: %s comes from its definition, which every pawn using it shares; give it another with use_definition(), or its own copy with make_definition_unique()." % [_describe_node(), setting])
 			return
 		_own_definition = _new_own_definition()
 	_own_definition.set(setting, value)
@@ -423,6 +514,8 @@ func get_pushed_properties() -> Array[String]:
 		out.append("ready_at")
 	if buffer_window > 0.0 and trigger_action != &"":
 		out.append("buffer_until")
+	if uses_charges():
+		out.append_array(["charges_spent", "next_restore_tick", "max_charges_base", "max_charges_changes"])
 	return out
 
 
@@ -430,6 +523,110 @@ func get_pushed_properties() -> Array[String]:
 ## ability, but each costs a read per pawn per tick. None in the base.
 func get_rollback_properties() -> Array[String]:
 	return []
+
+
+## True if it has limited uses (its definition's max_charges above 0).
+func uses_charges() -> bool:
+	return max_charges > 0
+
+
+## Its most charges now: its own value (the definition's, or what [method set_max_charges] set) plus the changes still running. Never
+## below 0.
+func max_charges_now(at_tick := -1) -> int:
+	var now := TickDriver.tick if at_tick < 0 else at_tick
+	var most := max_charges_base if max_charges_base >= 0 else max_charges
+	for change: Array in max_charges_changes.values():
+		if change[1] < 0 or now < change[1]:
+			most += int(change[0])
+	return maxi(most, 0)
+
+
+## Charges left now; -1 with no limit.
+func charges_left() -> int:
+	return maxi(max_charges_now() - charges_spent, 0) if uses_charges() else -1
+
+
+## Changes its most charges for good (a bigger quiver). Rolled back.
+func set_max_charges(value: int) -> void:
+	max_charges_base = maxi(value, 0)
+
+
+## Changes its most charges by amount for lasting_ticks (at 60 a second; 0: until removed), under a name; the same name replaces the
+## last. Rolled back, so a name, not an object: the same on every machine.
+func add_max_charges_change(change_name: StringName, amount: int, lasting_ticks := 0) -> void:
+	var changes := max_charges_changes.duplicate()
+	var ends := TickDriver.tick + TickDriver.ticks_at_rate(lasting_ticks) if lasting_ticks > 0 else -1
+	changes[String(change_name)] = [amount, ends]
+	max_charges_changes = changes
+
+
+## Takes a change to its most charges away.
+func remove_max_charges_change(change_name: StringName) -> void:
+	if max_charges_changes.has(String(change_name)):
+		var changes := max_charges_changes.duplicate()
+		changes.erase(String(change_name))
+		max_charges_changes = changes
+
+
+## Every charge back at once (a revive, a reload).
+func refill_charges() -> void:
+	charges_spent = 0
+	next_restore_tick = -1
+
+
+## The manager calls this when it starts: one charge spent, and the restore clock started if none was waiting.
+func spend_charge() -> void:
+	if not uses_charges():
+		return
+	charges_spent += 1
+	if next_restore_tick < 0 and recharges:
+		next_restore_tick = TickDriver.tick + TickDriver.ticks_at_rate(charge_restore_ticks)
+
+
+## The manager calls this when a charge deadline passes: charges come back for every restore due by now, each counted from the last,
+## and changes that ended are dropped.
+func apply_charge_deadlines(now: int) -> void:
+	while next_restore_tick >= 0 and now >= next_restore_tick:
+		var back := charges_spent if restore_all_charges else charges_restored
+		charges_spent = maxi(charges_spent - back, 0)
+		next_restore_tick = next_restore_tick + TickDriver.ticks_at_rate(charge_restore_ticks) if charges_spent > 0 and recharges else -1
+	var ended := false
+	for change: Array in max_charges_changes.values():
+		ended = ended or (change[1] >= 0 and now >= change[1])
+	if ended:
+		var kept := {}
+		for key: String in max_charges_changes:
+			var change: Array = max_charges_changes[key]
+			if change[1] < 0 or now < change[1]:
+				kept[key] = change
+		max_charges_changes = kept
+
+
+## The soonest charge deadline still ahead (a restore, or a change to the most ending); -1: none.
+func next_charge_deadline() -> int:
+	var soonest := next_restore_tick
+	for change: Array in max_charges_changes.values():
+		if change[1] >= 0 and (soonest < 0 or change[1] < soonest):
+			soonest = change[1]
+	return soonest
+
+
+## Its has_charges_tag owned or not, as its charges say now. The manager calls it as it collects abilities and after a rollback.
+func update_charges_tag() -> void:
+	var owned: OwnedTags = pawn.owned_tags if pawn else null
+	if owned == null:
+		return
+	var source := "charges:%d" % get_instance_id()
+	if has_charges_tag == &"" or (uses_charges() and charges_left() <= 0):
+		owned.clear_source(source)
+	else:
+		owned.set_source(source, [has_charges_tag])
+
+
+func _charges_changed() -> void:
+	update_charges_tag()
+	if manager:
+		manager.readiness_changed()
 
 
 ## True if this property rolls back, either way.
@@ -698,7 +895,7 @@ func use_hit_definition(hit: HitDefinition) -> void:
 ## Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [HitInfo] carrying the hit definition's effects and its
 ## own on-hit EffectApplier children, delivered to the target (its interceptors, then effects), then [signal hit_landed]. The one place
 ## a hit is applied; override it for an ability's own rules (damage falling off with distance), calling [code]super()[/code].
-func land_hit(target: Pawn, direction: Vector3, tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo:
+func land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo:
 	var using := with if with else hit_definition()
 	var target_effects := on_hit_effects
 	var self_effects := on_hit_self_effects
@@ -716,7 +913,7 @@ func land_hit(target: Pawn, direction: Vector3, tick: int, _at: Vector3, with: H
 	if target_effects.is_empty() and self_effects.is_empty() and not _warned_no_effects:
 		_warned_no_effects = true
 		push_warning("%s hit %s but has no on-hit effects (EffectApplier children or its hit definition's), so the hit does nothing." % [name, target.name])
-	var hit := HitInfo.make(pawn, self, target, direction, tick, target_effects, self_effects)
+	var hit := HitInfo.make(pawn, self, target, direction, at_tick, target_effects, self_effects)
 	hit.deliver()
 	return hit
 

@@ -9,6 +9,7 @@
 ## pawn.ai_context.behaviour_manager.get_running_behaviour()
 ## pawn.ai_context.behaviour_manager.add_persistence_ticks(&"Chase", 60)    # say after landing a hit
 ## pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say for a confused effect
+## pawn.ai_context.behaviour_manager.add_score_modifier(charge_shout, self)   # raise melee until removed (AIScoreModifier)
 ## [/codeblock]
 ## With the [AIDecisionModule] in the game, C++ makes the decisions and this manager is the backup ([method decide]).
 ## Design: pawn spec 10.7 and 10.8, scaling spec 6.2.
@@ -60,12 +61,24 @@ var _by_floor := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 	return a.decision_floor > b.decision_floor or (a.decision_floor == b.decision_floor and a.decision_index < b.decision_index)
 var _by_index := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 	return a.decision_index < b.decision_index
-var _warned_states := {} # state name -> true, for "no behaviour is allowed in this state"
+## Goes up by one whenever the score modifiers' sums or blocks change, so the C++ decider's copy is written again. Don't set it.
+var modifiers_version := 0
+
+var _warned_states := {} # state name -> true, for "no behaviour's tag requirements pass in this state"
+# Score modifiers (pawn spec 10.13): {modifier (resolved), source (a key), ends (a tick, -1 until removed)}, in the order added.
+var _modifiers: Array[Dictionary] = []
+var _modifiers_dirty := false
+var _modifier_values_set := false # some behaviour has a sum or a block, so clearing them needs a pass
+var _soonest_modifier_end := -1
+var _modifiers_tags_version := -1 # the owned tags' version the sums were worked out for
+var _checked_tags_version := -1 # check_running()'s last look
+var _checked_modifiers_version := -1
 var _input_slots := PackedInt32Array() # the worked-out inputs the behaviours' conditions read
 var _input_slots_known := false
 var _placed_by: AIDecisionModule = null # the module that settled where it decides
 
-const TIE_SALT := 0x7135 # what the tie-breaking random number is for, so it differs from every behaviour's jitter
+const TIE_SALT := 0x7135
+const MODIFIER_TAG_SOURCE := &"score_modifiers" # the owned-tags source for the modifiers' granted tags # what the tie-breaking random number is for, so it differs from every behaviour's jitter
 
 
 func _init() -> void:
@@ -81,17 +94,15 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	_collect_behaviours()
-	# The running behaviour stops when the pawn dies (the AbilityManager's died).
-	# REFACTOR: stopping it runs its exit, which gives orders (release, stop, stop looking) mid-tick, outside the AI step. A dead pawn
-	# should give none: its controller should let go on death by itself, so an order stream holds only AI-step orders (netcode spec
-	# 19.10). With the behaviour and ability sets pass.
-	var abilities := _sibling_ability_manager()
+	# The running behaviour stops when the pawn dies (the AbilityManager's died). Its exit's orders are ignored: a dead pawn's controller
+	# takes none and lets go of everything itself, so an order stream holds only AI-step orders (netcode spec 19.10).
+	var abilities := pawn.ability_manager if pawn else null
 	if abilities:
 		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: stop_running("died"))
 		# Wake-ups: the running behaviour's tick() runs at its next AI step after an event it waits for.
 		abilities.ability_finished.connect(_on_ability_ended)
 		abilities.ability_cancelled.connect(func(ability: AbilityBase, _by: AbilityBase) -> void: _on_ability_ended(ability))
-	var navigation := _sibling_navigation_manager()
+	var navigation := pawn.navigation_manager if pawn else null
 	if navigation:
 		navigation.path_ended.connect(_on_path_ended)
 
@@ -125,9 +136,9 @@ func describe() -> Dictionary:
 	var context := pawn.ai_context if pawn else null
 	var behaviours: Array = []
 	for behaviour in _behaviours:
-		var states: Array = []
-		for state in behaviour.allowed_states:
-			states.append(String(state))
+		var tag_names: Array = []
+		for tag in behaviour.tags:
+			tag_names.append(String(tag))
 		var lowest: Variant = null # JSON has no infinity
 		if behaviour.min_score > -INF:
 			lowest = behaviour.min_score
@@ -135,7 +146,9 @@ func describe() -> Dictionary:
 		if behaviour.persistence_fade:
 			fade = behaviour.persistence_fade.values_at_rate()
 		behaviours.append({
-			"name": String(behaviour.name), "name_hash": behaviour.name_hash, "allowed_states": states,
+			"name": String(behaviour.name), "name_hash": behaviour.name_hash, "tags": tag_names, "enabled": behaviour.enabled,
+			# Names and the words they make now (TagQuery.describe_words); null: no requirements.
+			"tag_requirements": behaviour.tag_requirements.describe_words() if behaviour.tag_requirements else null,
 			"max_score": behaviour.max_score, "min_score": lowest,
 			"needs_target": behaviour.needs_target, "presses_action": String(behaviour.presses_action),
 			"cooldown_ticks": behaviour.cooldown_ticks, "cooldown_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.cooldown_ticks),
@@ -155,7 +168,7 @@ func describe() -> Dictionary:
 		"random_seed": context.random_seed if context else 0,
 		"decision_interval_ticks": context.decision_interval_ticks if context else 0,
 		"default_score_jitter": default_score_jitter, "randomize_ties": randomize_ties,
-		"tie_margin": tie_margin, "tie_salt": TIE_SALT, "behaviours": behaviours,
+		"tie_margin": tie_margin, "tie_salt": TIE_SALT, "tag_words": TagRegistry.get_categories().size(), "behaviours": behaviours,
 	}
 
 
@@ -179,6 +192,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		module.place(self)
 	# The inputs the conditions read start afresh, each worked out when first read (scaling spec 6.2). A record needs them all.
 	context.inputs.begin_decision(tick)
+	refresh_modifiers(tick)
 	# C++, the main path: it decides, from its own copy of the state and the facts written into it, and this starts what it chose.
 	if cpp_row >= 0 and not module.check_against_gdscript:
 		var slot := module.decide_in_cpp(self, tick, event_priority, event_is_normal)
@@ -194,8 +208,10 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	var cpp_choice := module.decide_in_cpp(self, tick, event_priority, event_is_normal) if module and cpp_row >= 0 else -2
 	if record:
 		context.inputs.fill(worked_out_inputs())
-	# 0. Interrupts.
-	if _running and not _can_replace_running(event_priority, event_is_normal, tick):
+	var owned := _owned_words()
+	# 0. Interrupts. A running behaviour whose tag requirements fail, or that a modifier blocks, isn't held by its min_run_ticks;
+	# its interrupt_threshold and cannot_be_interrupted still hold it, as they hold it through a state change.
+	if _running and not _can_replace_running(event_priority, event_is_normal and not _must_go(_running, owned), tick):
 		if record:
 			_fill_record(record, tick, event_priority, event_is_normal, true)
 			record.chosen = _running.name
@@ -208,9 +224,11 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	var any_allowed := false
 	_candidates.clear()
 	for behaviour in _behaviours:
-		if not behaviour.is_allowed_in(state_name):
+		if not behaviour.passes_requirements(owned): # includes switched off
 			continue
 		any_allowed = true
+		if behaviour.decision_blocked:
+			continue
 		if behaviour != _running and behaviour.is_cooling_down(tick):
 			continue
 		if behaviour.needs_target and not context.has_target():
@@ -222,14 +240,16 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		var jitter := behaviour.effective_jitter()
 		behaviour.decision_persistence = behaviour.persistence_now(tick)
 		behaviour.decision_jitter = jitter * context.random_signed(behaviour.name_hash) if jitter > 0.0 else 0.0
-		behaviour.decision_ceiling = behaviour.max_score + behaviour.decision_persistence + jitter
-		behaviour.decision_floor = behaviour.min_score + behaviour.decision_persistence - jitter if behaviour.min_score > -INF else -INF
+		# Persistence and the score modifiers' sum, added together first, as C++ does, so the two agree to the bit.
+		var boost := behaviour.decision_persistence + behaviour.decision_modifier
+		behaviour.decision_ceiling = behaviour.max_score + boost + jitter
+		behaviour.decision_floor = behaviour.min_score + boost - jitter if behaviour.min_score > -INF else -INF
 		behaviour.availability_checked = false
 		behaviour.decision_scored = false
 		_candidates.append(behaviour)
 	if not any_allowed and not _warned_states.has(state_name):
 		_warned_states[state_name] = true
-		push_warning("AIBehaviourManager: no behaviour on %s is allowed in the state %s, so it stands still there." % [pawn.name, state_name])
+		push_warning("AIBehaviourManager: no behaviour on %s passes its tag requirements in the state %s, so it stands still there." % [pawn.name, state_name])
 	# 3, continued. A floor is only certain if its behaviour is available, so take the highest floor from the first available
 	# behaviour, highest floor down (else a fixed-score behaviour that doesn't apply, like Search, would shut out ones that do).
 	var highest_floor := -INF
@@ -256,7 +276,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		_check_score_range(behaviour, raw)
 		behaviour.decision_score = raw
 		behaviour.decision_scored = true
-		var result := raw + behaviour.decision_persistence + behaviour.decision_jitter
+		var result := raw + (behaviour.decision_persistence + behaviour.decision_modifier) + behaviour.decision_jitter
 		if best == null or result > best_result + tie_margin:
 			best = behaviour
 			best_result = result
@@ -264,7 +284,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 			_ties.append(behaviour)
 		elif result >= best_result - tie_margin:
 			_ties.append(behaviour)
-	# 6. Ties.
+	# 5. Ties.
 	if _ties.size() > 1:
 		_ties.sort_custom(_by_index)
 		best = _ties[mini(int(context.random_unit(TIE_SALT) * _ties.size()), _ties.size() - 1)] if randomize_ties else _ties[0]
@@ -272,7 +292,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	if record:
 		_fill_record(record, tick, event_priority, event_is_normal, false)
 		record.chosen = best.name if best else &""
-	# 7. Switching.
+	# 6. Switching.
 	_switch_to(best, event_is_normal, tick)
 	if record:
 		decision_listener.call(record, self)
@@ -280,7 +300,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		module.compare(self, cpp_choice, tick)
 
 
-## [method AIContextComponent.run_ai] calls this every tick the AI runs, after any decision. Ticks the running behaviour.
+## [method AIContextComponent.think] calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 func tick_running(tick: int) -> void:
 	if _running == null or pawn == null:
 		return
@@ -371,7 +391,127 @@ func set_score_jitter(behaviour_name: StringName, jitter: float) -> void:
 			decision_module.jitter_set(self, behaviour.decision_index, behaviour.effective_jitter())
 
 
+## Adds a score modifier (pawn spec 10.13), kept under this source: anything that names it, usually the node or effect that adds it.
+## A source may add several; [method remove_score_modifier] takes all of its own away.
+func add_score_modifier(modifier: AIScoreModifier, source: Variant) -> void:
+	if modifier == null:
+		return
+	var resolved := modifier.resolved() as AIScoreModifier
+	var now := _now()
+	var ends := now + TickDriver.ticks_at_rate(resolved.duration_ticks) if resolved.duration_ticks > 0 else -1
+	_modifiers.append({"modifier": resolved, "source": _source_key(source), "ends": ends})
+	_modifiers_dirty = true
+	refresh_modifiers(now)
+	if resolved.wakes_decision and pawn and pawn.ai_context:
+		pawn.ai_context.request_decision(0, false)
+
+
+## Takes away every score modifier this source added.
+func remove_score_modifier(source: Variant) -> void:
+	var key: Variant = _source_key(source)
+	var wakes := false
+	for i in range(_modifiers.size() - 1, -1, -1):
+		if _modifiers[i]["source"] == key:
+			wakes = wakes or _modifiers[i]["modifier"].wakes_decision
+			_modifiers.remove_at(i)
+			_modifiers_dirty = true
+	if not _modifiers_dirty:
+		return
+	refresh_modifiers(_now())
+	if wakes and pawn and pawn.ai_context:
+		pawn.ai_context.request_decision(0, false)
+
+
+## The score modifiers now, in the order added: {modifier, source, ends} each (ends is the tick it goes, -1 until removed).
+func get_score_modifiers() -> Array[Dictionary]:
+	return _modifiers.duplicate(true)
+
+
+## Works the modifiers' sum and block for each behaviour out again, if anything they depend on changed: the list, a deadline passing,
+## or the pawn's owned tags (their ongoing requirements). Every decision calls it first; cheap when nothing changed.
+func refresh_modifiers(tick: int) -> void:
+	var owned := pawn.owned_tags if pawn else null
+	var tags_version := owned.version if owned else 0
+	var expired := _soonest_modifier_end >= 0 and tick >= _soonest_modifier_end
+	if not _modifiers_dirty and not expired and (tags_version == _modifiers_tags_version or _modifiers.is_empty()):
+		return
+	_modifiers_dirty = false
+	_soonest_modifier_end = -1
+	var granted: Array[StringName] = []
+	for i in range(_modifiers.size() - 1, -1, -1):
+		var ends: int = _modifiers[i]["ends"]
+		if ends >= 0 and tick >= ends:
+			_modifiers.remove_at(i)
+			continue
+		if ends >= 0 and (_soonest_modifier_end < 0 or ends < _soonest_modifier_end):
+			_soonest_modifier_end = ends
+	for entry in _modifiers:
+		granted.append_array(entry["modifier"].granted_tags)
+	if owned:
+		owned.set_source(MODIFIER_TAG_SOURCE, granted) # may change the owned tags, read just below
+		tags_version = owned.version
+	_modifiers_tags_version = tags_version
+	if _modifiers.is_empty() and not _modifier_values_set:
+		return
+	var words := _owned_words()
+	var any_set := false
+	var changed := false
+	for behaviour in _behaviours:
+		var sum := 0.0
+		var blocked := false
+		for entry in _modifiers: # in the order added, so the sum is the same on every run
+			var modifier: AIScoreModifier = entry["modifier"]
+			if not modifier.counts_for(words) or not modifier.applies_to_behaviour(behaviour):
+				continue
+			if modifier.blocks:
+				blocked = true
+			else:
+				sum += modifier.amount
+		if sum != behaviour.decision_modifier or blocked != behaviour.decision_blocked:
+			changed = true
+			behaviour.decision_modifier = sum
+			behaviour.decision_blocked = blocked
+		any_set = any_set or sum != 0.0 or blocked
+	_modifier_values_set = any_set
+	if changed:
+		modifiers_version += 1
+
+
+## The AI step calls this every run, before deciding: if the owned tags or the modifiers changed and the running behaviour's tag
+## requirements now fail (or a modifier blocks it), it asks for a decision that its min_run_ticks don't hold off (its
+## interrupt_threshold still does). A pawn out of shots leaves Keep Distance at once instead of at its next decision tick.
+func check_running(tick: int) -> void:
+	refresh_modifiers(tick)
+	if _running == null or _running.cannot_be_interrupted or pawn == null or pawn.ai_context == null:
+		return
+	var owned := pawn.owned_tags
+	var tags_version := owned.version if owned else 0
+	if tags_version == _checked_tags_version and modifiers_version == _checked_modifiers_version:
+		return
+	_checked_tags_version = tags_version
+	_checked_modifiers_version = modifiers_version
+	if _must_go(_running, _owned_words()):
+		pawn.ai_context.request_decision(0, false)
+
+
 # --- Internals ---
+
+
+# A behaviour that may no longer run: its tag requirements fail, or a modifier blocks it.
+func _must_go(behaviour: AIBehaviourBase, owned_words: PackedInt64Array) -> bool:
+	return behaviour.decision_blocked or not behaviour.passes_requirements(owned_words)
+
+
+# The pawn's owned tags as words (none without an OwnedTags part).
+func _owned_words() -> PackedInt64Array:
+	return pawn.owned_tags.get_words() if pawn and pawn.owned_tags else PackedInt64Array()
+
+
+# A modifier's source as a key: an object by its instance id (so a freed one still matches), anything else as it is.
+static func _source_key(source: Variant) -> Variant:
+	if source is Object:
+		return source.get_instance_id()
+	return source
 
 
 # Pawn spec 10.7: an event replaces the running behaviour only if it isn't cannot_be_interrupted, the event's priority reaches its
@@ -387,7 +527,7 @@ func _can_replace_running(event_priority: int, event_is_normal: bool, tick: int)
 	return true
 
 
-# Step 7: starts the chosen behaviour, or stops the running one if nothing was chosen. C++ has already applied the same switch to
+# Step 6: starts the chosen behaviour, or stops the running one if nothing was chosen. C++ has already applied the same switch to
 # its own copy of the state.
 func _switch_to(best: AIBehaviourBase, event_is_normal: bool, tick: int) -> void:
 	if best == _running:
@@ -459,16 +599,23 @@ func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, even
 	record.running_started_tick = _running.started_tick if _running else -1
 	record.kept_by_interrupt = kept_by_interrupt
 	record.inputs = context.inputs.values.duplicate()
+	if pawn.owned_tags:
+		record.owned_tags = pawn.owned_tags.get_owned()
 	if record.cause != AIDecisionRecord.CAUSE_AI_STEP: # no target or state update ran, so before and after are what they are now
 		record.note_target_before(context.current_target)
 		record.state_before = record.state
 		record.state_after = record.state
 	if kept_by_interrupt:
 		return # no behaviour was looked at
+	var owned := _owned_words()
 	for behaviour in _behaviours:
 		var rule := AIDecisionRecord.RULE_NONE
-		if not behaviour.is_allowed_in(record.state):
-			rule = AIDecisionRecord.RULE_STATE
+		if not behaviour.enabled:
+			rule = AIDecisionRecord.RULE_OFF
+		elif not behaviour.passes_requirements(owned):
+			rule = AIDecisionRecord.RULE_TAGS
+		elif behaviour.decision_blocked:
+			rule = AIDecisionRecord.RULE_BLOCKED
 		elif behaviour != _running and behaviour.is_cooling_down(tick):
 			rule = AIDecisionRecord.RULE_COOLDOWN
 		elif behaviour.needs_target and not record.has_target:
@@ -561,25 +708,3 @@ func _on_path_ended(_reached: bool) -> void:
 func _on_ability_ended(ability: AbilityBase) -> void:
 	if _running and _running.wakes_on_action != &"" and ability.trigger_action == _running.wakes_on_action:
 		_running.woken = true
-
-
-# The pawn's NavigationManager, a sibling, found at _ready, or null.
-# REFACTOR: the same lookup as _sibling_ability_manager below (reusable). See CHANGELOG.md.
-func _sibling_navigation_manager() -> NavigationManager:
-	if pawn == null:
-		return null
-	for child in pawn.get_children():
-		if child is NavigationManager:
-			return child
-	return null
-
-
-# The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
-# REFACTOR: the same lookup as AIContextComponent's (reusable). See CHANGELOG.md.
-func _sibling_ability_manager() -> AbilityManager:
-	if pawn == null:
-		return null
-	for child in pawn.get_children():
-		if child is AbilityManager:
-			return child
-	return null

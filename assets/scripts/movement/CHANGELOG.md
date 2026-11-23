@@ -7,7 +7,11 @@ Movement is this folder: `CrowdMover`, a GameMode module, and its C++ batch `Cro
 
 ## Refactor candidates
 
-None found in the documentation pass. The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as the fallback where the C++ library isn't loaded.
+None found in the documentation pass. The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as the fallback where the C++ library isn't loaded; the twins' refactor row is in [native/CHANGELOG.md](../../../native/CHANGELOG.md).
+
+## 2026-11-23
+
+- **`CrowdMover`'s early return** (nothing to move) now clears the moved-this-tick list and closes its `movement.crowd_gather` and `movement.crowd` timing scopes, so a quiet tick doesn't leave last tick's pawns marked or a scope open.
 
 ## 2026-11-21
 

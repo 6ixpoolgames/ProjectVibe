@@ -218,10 +218,8 @@ func get_owner(handle: int) -> Object:
 	return instance_from_id(entity.owner_id) if entity and entity.owner_id else null
 
 
-## The accessors for an entity's columns: one node, one property path and one encoding per column, in column order. An encoding must
-## be settled (never "auto") and match the layout's unless the layout's is "auto". A pushed column may have a node too (or null): its
-## value is read from it now, written back to it by [method load_row], and checked by [method verify_nodes], but never read by a
-## commit. round_values: round to each encoding and write back what changed. False, binding nothing, otherwise.
+## The accessors for an entity's columns: a node, a property path and a settled encoding per column, in column order (a pushed column's
+## node is written by [method load_row] but never read by a commit). round_values: round and write back what changed. False if refused.
 func bind(handle: int, nodes: Array, properties: Array, encodings: Array, round_values: bool) -> bool:
 	var layout := _layout_of(handle)
 	if layout == null or nodes.size() != layout.width or properties.size() != layout.width or encodings.size() != layout.width:
@@ -299,11 +297,9 @@ func mark_changed(handle: int) -> void:
 		entity.written_tick = -1
 
 
-## Writes one column, by name, for many entities now: into each one's node (rounded first, as the commit rounds) and into the row the
-## commit for that tick records, which then skips reading that node. For a batch that moves many entities at once (the crowd mover).
-## Whatever writes the same property after this, in the same tick, must write through as well or call [method mark_changed], or the
-## row misses it. Returns how many
-## it wrote; an entity that isn't bound, or whose layout lacks the column, is skipped.
+## Writes one column for many entities now, into each node (rounded) and into that tick's row, which then skips reading the node: for
+## a batch such as the crowd mover. A later write of the same property that tick must write through too, or call [method mark_changed].
+## Returns how many it wrote.
 func write_through(handles: PackedInt64Array, column: StringName, values: Array, tick: int) -> int:
 	var last_layout := -1
 	var index := -1

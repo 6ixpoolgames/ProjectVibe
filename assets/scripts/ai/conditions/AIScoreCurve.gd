@@ -4,7 +4,7 @@
 ## Scaling spec 6.2. A straight line: [member from_value] gives 0, [member to_value] gives 1, with 0 below and 1 above. Set to_value
 ## below from_value to turn it round (more input, less score). A behaviour's score is
 ## [code]low + (max_score - low) × every curve's amount multiplied together[/code], where low is min_score, or 0 when min_score isn't
-## set ([method AIBehaviourBase.score]). With no curves the score is max_score, as before.
+## set ([method AIBehaviourBase.score]). With no curves the score is max_score.
 ## [codeblock]
 ## target_distance, from 20 to 2     # 0 at 20 m or further, 1 at 2 m or closer: the nearer, the keener
 ## [/codeblock]

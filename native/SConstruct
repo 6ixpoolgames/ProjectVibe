@@ -4,9 +4,9 @@
 #                            python -m SCons target=template_release
 # Output goes to ../bin/, next to navcore.gdextension.
 
-# Claude 2026-11-17 (C++ bundle stage 1): godot-cpp 10.0.0-stable, aimed at Godot 4.7's API. From version 10, godot-cpp is
-# versioned apart from Godot and builds for any API from 4.3 up; api_version picks which one (it was the 4.4 bindings before).
-# An extension built for 4.7 won't load in an older Godot, which is why navcore.gdextension says compatibility_minimum = "4.7".
+# godot-cpp 10.0.0-stable, aimed at Godot 4.7's API. From version 10, godot-cpp is versioned apart from Godot and builds for any API
+# from 4.3 up; api_version picks which one. An extension built for 4.7 won't load in an older Godot, which is why navcore.gdextension
+# says compatibility_minimum = "4.7".
 env = SConscript("thirdparty/godot-cpp/SConstruct", {"api_version": "4.7"})
 env = env.Clone()  # don't leak our settings into the godot-cpp library build
 
@@ -16,8 +16,8 @@ env.Append(CPPPATH=["src/", recast + "Recast/Include", recast + "Detour/Include"
 # Must be defined for Detour's own sources AND ours, so it goes on the whole environment.
 env.Append(CPPDEFINES=["DT_POLYREF64"])
 
-# Claude 2026-11-23: Recast and Detour sort with qsort, which isn't stable, so ties came out in a different order on another platform's
-# C runtime and the nav mesh differed between Windows and Linux. Their sources get src/stable_qsort.h forced in, which points qsort
+# Recast and Detour sort with qsort, which isn't stable: ties come out in an order that depends on the platform's C runtime, so the
+# nav mesh could differ between Windows and Linux. Their sources get src/stable_qsort.h forced in, which points qsort
 # at a stable sort; the third-party files themselves are untouched. See src/stable_qsort.h and state store spec 13.11.
 recast_env = env.Clone()
 stable_qsort_header = File("src/stable_qsort.h").abspath

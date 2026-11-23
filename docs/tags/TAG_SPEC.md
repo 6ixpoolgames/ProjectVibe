@@ -114,9 +114,9 @@ A game adds its own (`faction`, `squad`) in its own file. No top-level `state`: 
 
 1. The merged registry, declarations with descriptions, constants, the picker, redirects, the reference generator. Every tag renamed by a rewrite tool that stays for later renames, with a redirect from each old name.
 2. Owned tags (with loose tags pushed as state) and `TagQuery`.
-3. AI score modifiers and blocking modifiers (pawn spec 10.13).
-4. Charges and the melee and ranged stances.
-5. The mass battle switch between melee and ranged.
+3. AI score modifiers and blocking modifiers (pawn spec 10.13). *(Built 2026-11-23, with behaviour tag requirements in place of `allowed_states`.)*
+4. Charges and the melee and ranged stances. *(Built 2026-11-23, with ability start requirements.)*
+5. The mass battle switch between melee and ranged. *(Scrapped 2026-11-23, the owner: the four-faction archers switch when their magazine runs out instead.)*
 
 ## 10. Decided (the owner, 2026-11-22, agreeing the recommendations)
 
@@ -133,7 +133,7 @@ A game adds its own (`faction`, `squad`) in its own file. No top-level `state`: 
 - **Constant groups are in capitals:** `Tags.ABILITY.COMBAT_MELEE`, `Tags.EFFECT.DAMAGE_POISON`, `Tags.STATUS.DEAD`, `Tags.NAV.POINT_COVER`, with `ALL` for the category itself. Godot refuses an inner class named `Effect` because the effects system has a class of that name, and capitals can't clash with any class.
 - **One word per category for now.** Every caller's mask is a single int, so a category past 64 levels gets no more bits (with a warning) rather than a second word. Today's largest, `ability`, has 21 levels. The second word waits until a category nears the limit (a refactor row in the tags changelog).
 - **The Death ability's category is `ability.death`.** An ability's tags are compared as one category's masks, so its category can't be `status.dead`; `status.dead` stays declared for the pawn's owned tags (step 2).
-- **No tags under `ai` yet:** the stance tags come with step 3, when something uses them.
+- **Tags under `ai`:** the AI states (`ai.state.*`, section 12) and the stances (`ai.stance.melee`, `ai.stance.ranged`, behaviours' own tags). Under `status`: `status.has_ammo.ranged`, owned while a ranged attack has charges.
 - **Nav markers' `tag` got a Tag Picker dropdown** along the way.
 - `category_mask_of_list` became `full_mask_of_list`, since "category" now means a tag's first level. An ability's own `category` setting keeps its name: it's the ability's main tag, as before.
 

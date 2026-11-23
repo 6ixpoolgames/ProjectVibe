@@ -4,7 +4,7 @@
 
 **What this is:** a map of the framework, today and after the coming refactor, with diagrams. Each system's README has the detail; the refactor's design is in [STATE_STORE_SPEC.md](state_store/STATE_STORE_SPEC.md) and [ABILITY_SPEC.md](abilities/ABILITY_SPEC.md). The plan is in [ROADMAP.md](ROADMAP.md).
 
-**Status:** today's map is checked against the code (the audit, 2026-11-19). The map after the refactor is the agreed direction, not built: it changes as the specs do.
+**Status:** today's map is checked against the code (the audit, 2026-11-19); the problems it lists are as found then. The map after the refactor is the agreed direction, built in part on `refactor/tick-core` (the store and its commit, pushed columns, the landing schedule, the one pass that places what's drawn; state store spec 13.4-13.12): it changes as the specs do.
 
 ## 1. The big picture
 
@@ -108,7 +108,7 @@ sequenceDiagram
 
 - **The same data is kept many times.** Each entity's state is gathered or held by the rollback recorder, its input history, the network entity's lag compensation positions, the client's baselines, its follow buffer, its reconcile copy, the pawn table and the replay's channels.
 - **Most per-tick work is per-pawn GDScript**: each pawn and each of its parts is called one by one, and gathers what it needs itself. Worker threads can't help until data is gathered once into plain buffers.
-- **Some decisions depend on time:** the load ladder, spawns once a frame, AI switch-off per physics frame, chunk builds under a wall-clock budget, nav tiles committed under a time budget.
+- **Some decisions depend on time:** the load ladder, spawns once a frame, AI switch-off per physics frame, chunk builds under a wall-clock budget, nav tiles committed under a time budget (since replaced by landing ticks, state store spec 13.12).
 - **Each pawn carries its own node tree** of abilities, steps, behaviours, states, senses and stats (about 113 nodes a pawn in the 300-pawn battle).
 
 ## 3. After the refactor
@@ -213,7 +213,7 @@ flowchart LR
 | `replay/` | Channels gathering per pawn | Keyframes and deltas of frames |
 | `diagnostics/` | Frame timing, session log, panels | Plus the store inspector, game speed, worker time |
 | `visuals/` | Per-pawn scripts | One batched pass, LOD, shader waddle |
-| `native/src/` | The C++ library | Plus the store |
+| `native/src/` | The C++ library | The store (built) |
 
 ## 5. Order of work
 

@@ -14,6 +14,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 |---|---|---|---|
 | More than 64 levels in a category | `TagRegistry` | The tag spec gives a category that outgrows its word a second one. Every caller's mask is one int today, so that waits until a category nears 64 levels; past it, tags get no bit with a warning | M |
 
+## 2026-11-23
+
+- **`TagQuery.describe_words`, `words_of`, `shared`**, for the C++ decider, saved records and built-in defaults; `OwnedTags.version` goes up whenever ownership changes. New tags: `ai.stance.melee`, `ai.stance.ranged`, `status.has_ammo.ranged`.
+- **Documentation pass:** `TagRegistry`'s class doc trimmed to the reference style.
+
 ## 2026-11-22
 
 - **Owned tags and tag queries** (tag spec step 2, as agreed). `OwnedTags`, a new pawn part (`pawn.owned_tags`, in the pawn defaults between StatManager and EffectManager): the tags a pawn owns right now, counted, with their parents, as one word per category. The pawn's parts add theirs as sources, each new list replacing their last: a running timed ability its category and extra categories (from `AbilityBase.ends_at`'s setter), the EffectManager every active effect's tags (at once when a rollback or snapshot loads the list), the Death ability `status.dead`, the AI state manager its state's tag. Sources follow state that already rolls back, so nothing is stored twice. Game code adds loose tags (`add`, `remove`), which are a pushed state entry (`OwnedTags:loose_counts`) and roll back. `changed(tag, owned)` fires when a tag starts or stops being owned.

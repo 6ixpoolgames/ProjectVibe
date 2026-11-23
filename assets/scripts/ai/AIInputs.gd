@@ -138,27 +138,11 @@ static func kinds() -> PackedInt32Array:
 	return _kinds.duplicate()
 
 
-## True if the C++ decider works this input out itself (the memory-based ones); false for group, action and kept inputs.
-static func cpp_works_out(slot: int) -> bool:
-	if slot < 0 or slot >= _kinds.size():
-		return false
-	var kind := _kinds[slot]
-	return kind != Kind.KEPT and kind != Kind.GROUP_DISTANCE and kind != Kind.GROUP_FOUND and kind != Kind.ACTION_READY
-
-
 ## True if the slot's input is a time in ticks.
 static func is_ticks(slot: int) -> bool:
 	return slot >= 0 and slot < _in_ticks.size() and _in_ticks[slot] == 1
 
 
-## The names the inspector suggests for a condition: the built-ins, then every name used so far.
-static func suggested_names() -> PackedStringArray:
-	var names := PackedStringArray([TARGET_DISTANCE, MOST_AWARE_CERTAIN, MOST_AWARE_UNCERTAIN, TICKS_SINCE_UNKNOWN_HIT, INCOMING_ATTACK,
-		INCOMING_ATTACK_TICK, INCOMING_ATTACKER, GROUP_DISTANCE + "rally_point", GROUP_FOUND + "rally_point", ACTION_READY + "primary"])
-	for input_name in _names:
-		if not names.has(String(input_name)):
-			names.append(String(input_name))
-	return names
 
 
 ## The conditions for "something half-noticed", shared by Look Toward and Investigate: the most aware entry isn't certain yet, or

@@ -4,7 +4,7 @@ now, this says how it got here and why. -->
 
 # Navigation changelog
 
-Navigation is this folder (`NavigationManager`, nav markers and their modules, `NavTags`), the nav library in C++ (`native/src/`, `NavServer`), `NavMarkerManager` (`singletons/`), and the feeders that hand it the world (`world/TerrainNavFeeder`, `world/BodyNavFeeder`). Design: [docs/navigation/NAV_SPEC.md](../../../docs/navigation/NAV_SPEC.md). Overview: [README.md](README.md).
+Navigation is this folder (`NavigationManager`, nav markers and their modules), the nav library in C++ (`native/src/`, `NavServer`), `NavMarkerManager` (`singletons/`), and the feeders that hand it the world (`world/TerrainNavFeeder`, `world/BodyNavFeeder`). Design: [docs/navigation/NAV_SPEC.md](../../../docs/navigation/NAV_SPEC.md). Overview: [README.md](README.md).
 
 ## Refactor candidates
 
@@ -12,9 +12,13 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| One shared way to reach `NavServer` | `_nav_server()` in `NavigationManager`, `NavLinkModule`; `_get_nav()` in `world/BodyNavFeeder`; `diagnostics/NavDebugView`; three places in `world/TerrainNavFeeder` | The same "is the C++ library loaded" lookup is written out several times. One static helper (on a small `Nav` class, say) is one place to change and to read | S |
+| One shared way to reach `NavServer` | `_nav_server()` in `NavigationManager`, `NavLinkModule`; `_get_nav()` in `world/BodyNavFeeder`; `diagnostics/NavDebugView`; four places in `world/TerrainNavFeeder`; `movement/CrowdMover._get_cpp_batch` | The same "is the C++ library loaded" lookup is written out several times. One static helper (on a small `Nav` class, say) is one place to change and to read | S |
 | Move `TerrainSettings` out of navigation | `TerrainSettings.gd` | It describes a terrain (where it is, its chunk size), so it belongs in `terrain/` or `world/`; names and folders should say what things are | S |
 | Move `NavMarkerDebugModule` to `diagnostics/` | `modules/NavMarkerDebugModule.gd` | A debug tool in a production folder. `diagnostics/NavDebugView` already uses it; the two sample scenes that place it would follow | S |
+
+## 2026-11-23
+
+- **Documentation pass:** a stale comment in `NavigationManager` fixed, `NavLinkModule` flagged `REFACTOR:` (row above), the README's test list and this header brought up to date.
 
 ## 2026-11-22
 

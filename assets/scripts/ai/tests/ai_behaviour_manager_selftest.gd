@@ -72,6 +72,8 @@ func _ready() -> void:
 	_test_ties()
 	_test_persistence()
 	_test_interrupts()
+	_test_tag_gates()
+	_test_score_modifiers()
 	await _test_finishing()
 	_test_tick_interval()
 	_test_wake_ups()
@@ -121,7 +123,7 @@ func _test_hard_rules() -> void:
 	var cant_press := _b("Press", 1.0)
 	cant_press.presses_action = &"no_such_action"
 	var elsewhere := _b("Elsewhere", 1.0)
-	elsewhere.allowed_states = [&"Combat"]
+	elsewhere.tag_requirements = TagQuery.make([Tags.AI.STATE_COMBAT])
 	var fallback := _b("Fallback", 0.1)
 	var pawn := _make_pawn([quick, target_needed, cant_press, elsewhere, fallback])
 	_decide(pawn, 100)
@@ -342,10 +344,10 @@ func _test_interrupts() -> void:
 	combat.name = "Combat"
 	combat.priority = 20
 	var guard := _b("Guard", 0.6)
-	guard.allowed_states = [&"Idle"]
+	guard.tag_requirements = TagQuery.make([Tags.AI.STATE_IDLE])
 	guard.interrupt_threshold = 50
 	var fight := _b("Fight", 0.5)
-	fight.allowed_states = [&"Combat"]
+	fight.tag_requirements = TagQuery.make([Tags.AI.STATE_COMBAT])
 	pawn = _make_pawn([guard, fight], [combat])
 	_decide(pawn, 1)
 	combat.fits = true
@@ -354,6 +356,118 @@ func _test_interrupts() -> void:
 	pawn.ai_context.behaviour_manager.set_interrupt_threshold(&"Guard", 0)
 	_decide(pawn, 3)
 	_check(_running_name(pawn) == &"Fight", "set_interrupt_threshold: lowered while running, the next decision replaces it")
+	pawn.free()
+
+
+# Claude 2026-11-23 (pawn spec 10.13): tag requirements over the pawn's owned tags, the running check, and the switch.
+func _test_tag_gates() -> void:
+	var shoot := _b("Shoot", 0.9)
+	shoot.tag_requirements = TagQuery.make([Tags.STATUS.HAS_AMMO_RANGED])
+	shoot.min_run_ticks = 600
+	var fight := _b("Fight", 0.5)
+	var pawn := _make_pawn([shoot, fight])
+	var manager := pawn.ai_context.behaviour_manager
+	_decide(pawn, 1)
+	_check(_running_name(pawn) == &"Fight", "a behaviour whose tag requirements fail isn't chosen")
+	_check(shoot.scored == 0, "...and its score() isn't run")
+	pawn.owned_tags.add(Tags.STATUS.HAS_AMMO_RANGED)
+	_decide(pawn, 2)
+	_check(_running_name(pawn) == &"Shoot", "the tag owned: it's chosen")
+	pawn.owned_tags.remove(Tags.STATUS.HAS_AMMO_RANGED)
+	pawn.ai_context.clear_decision()
+	manager.check_running(3)
+	_check(pawn.ai_context.has_decision_waiting() and not pawn.ai_context.waiting_event_is_normal(),
+			"check_running: its requirements stopped passing, so it asks for a decision min_run_ticks don't hold off")
+	manager.decide(3)
+	_check(_running_name(pawn) == &"Fight", "...which replaces it, though its min_run_ticks (600) haven't passed")
+	pawn.ai_context.clear_decision()
+	manager.check_running(4)
+	_check(not pawn.ai_context.has_decision_waiting(), "check_running asks nothing when nothing changed")
+	# A threshold still holds it, as it does through a state change.
+	pawn.owned_tags.add(Tags.STATUS.HAS_AMMO_RANGED)
+	_decide(pawn, 5)
+	shoot.interrupt_threshold = 50
+	pawn.owned_tags.remove(Tags.STATUS.HAS_AMMO_RANGED)
+	_decide(pawn, 6, 0, false)
+	_check(_running_name(pawn) == &"Shoot", "an interrupt_threshold above the reason's priority still keeps it")
+	_decide(pawn, 7, 60, false)
+	_check(_running_name(pawn) == &"Fight", "...and a strong enough reason replaces it")
+	# Switched off.
+	fight.enabled = false
+	_decide(pawn, 8)
+	_check(_running_name(pawn) == &"", "enabled off: a running behaviour is replaced, and nothing else passes, so nothing runs")
+	fight.enabled = true
+	_decide(pawn, 9)
+	_check(_running_name(pawn) == &"Fight", "enabled on again: chosen again")
+	pawn.free()
+
+
+# Claude 2026-11-23 (pawn spec 10.13): score modifiers, keyed by source, with deadlines, requirements, blocks and granted tags.
+func _test_score_modifiers() -> void:
+	var melee := _b("Melee", 0.8)
+	melee.tags = [Tags.AI.STANCE_MELEE]
+	var ranged := _b("Ranged", 0.85)
+	ranged.tags = [Tags.AI.STANCE_RANGED]
+	var pawn := _make_pawn([melee, ranged])
+	var manager := pawn.ai_context.behaviour_manager
+	_decide(pawn, 1)
+	_check(_running_name(pawn) == &"Ranged", "no modifiers: Ranged (0.85) over Melee (0.8)")
+	var charge := AIScoreModifier.new()
+	charge.applies_to = TagQuery.make([], [Tags.AI.STANCE_MELEE])
+	charge.amount = 0.1
+	charge.granted_tags = [Tags.AI.STANCE_MELEE]
+	var shout_a := Node.new()
+	var shout_b := Node.new()
+	manager.add_score_modifier(charge, shout_a)
+	_check(is_equal_approx(melee.decision_modifier, 0.1) and ranged.decision_modifier == 0.0, "a modifier adds to the behaviours it applies to (by their tags) only")
+	_check(pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "its granted tags are owned while it's added")
+	_decide(pawn, 2)
+	_check(_running_name(pawn) == &"Melee", "Melee 0.8 + 0.1 beats Ranged 0.85")
+	manager.add_score_modifier(charge, shout_b)
+	_check(is_equal_approx(melee.decision_modifier, 0.2), "two sources stack")
+	manager.remove_score_modifier(shout_a)
+	_check(is_equal_approx(melee.decision_modifier, 0.1) and pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing one source leaves the other's")
+	manager.remove_score_modifier(shout_b)
+	_check(melee.decision_modifier == 0.0 and not pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing the last: no sum, no granted tag")
+	# A deadline.
+	var brief := AIScoreModifier.new()
+	brief.applies_to = charge.applies_to
+	brief.amount = 0.1
+	brief.duration_ticks = 10
+	TickDriver.tick = 100
+	manager.add_score_modifier(brief, shout_a)
+	manager.refresh_modifiers(109)
+	_check(is_equal_approx(melee.decision_modifier, 0.1), "a 10-tick modifier counts at tick 109")
+	manager.refresh_modifiers(110)
+	_check(melee.decision_modifier == 0.0 and manager.get_score_modifiers().is_empty(), "...and is gone at its deadline, tick 110")
+	# Ongoing requirements.
+	var with_ammo := AIScoreModifier.new()
+	with_ammo.applies_to = TagQuery.make([], [Tags.AI.STANCE_RANGED])
+	with_ammo.amount = -0.2
+	with_ammo.ongoing_requirements = TagQuery.make([], [], [Tags.STATUS.HAS_AMMO])
+	manager.add_score_modifier(with_ammo, shout_a)
+	_check(is_equal_approx(ranged.decision_modifier, -0.2), "ongoing requirements pass (no ammo tag): it counts")
+	pawn.owned_tags.add(Tags.STATUS.HAS_AMMO_RANGED)
+	manager.refresh_modifiers(111)
+	_check(ranged.decision_modifier == 0.0, "the pawn now owns a tag under status.has_ammo: it stops counting")
+	pawn.owned_tags.remove(Tags.STATUS.HAS_AMMO_RANGED)
+	manager.remove_score_modifier(shout_a)
+	# A block, on the running behaviour.
+	_decide(pawn, 120)
+	_check(_running_name(pawn) == &"Ranged", "back to Ranged")
+	var no_ranged := AIScoreModifier.new()
+	no_ranged.applies_to = TagQuery.make([], [Tags.AI.STANCE_RANGED])
+	no_ranged.blocks = true
+	no_ranged.wakes_decision = true
+	pawn.ai_context.clear_decision()
+	manager.add_score_modifier(no_ranged, shout_b)
+	_check(ranged.decision_blocked and pawn.ai_context.has_decision_waiting(), "a blocking modifier blocks, and wakes_decision asks for a decision")
+	manager.decide(121)
+	_check(_running_name(pawn) == &"Melee", "a blocked running behaviour is replaced")
+	manager.remove_score_modifier(shout_b)
+	_check(not ranged.decision_blocked, "removed: unblocked")
+	shout_a.free()
+	shout_b.free()
 	pawn.free()
 
 
@@ -443,7 +557,7 @@ func _test_odd_cases() -> void:
 	_check(lonely.get_running_behaviour() == null, "its parent isn't a Pawn: it does nothing")
 	lonely.free()
 	var only_combat := _b("OnlyCombat", 0.5)
-	only_combat.allowed_states = [&"Combat"]
+	only_combat.tag_requirements = TagQuery.make([Tags.AI.STATE_COMBAT])
 	var pawn := _make_pawn([only_combat])
 	print("  (a warning about a state with no behaviour is expected next, once)")
 	_decide(pawn, 1)

@@ -8,7 +8,7 @@
 //
 // Tile states (derived, for stats/debug):
 //   queued   = wanted, never built yet
-//   building = a build is running on a worker
+//   building = a build has started and hasn't landed (running on a worker, or finished and waiting for its landing tick)
 //   ready    = live data matches the current version
 //   dirty    = live data is older than the current version (old data keeps serving queries)
 #pragma once

@@ -32,6 +32,8 @@ SPECS = [
     ("netcode/NETCODE_SPEC.md", "Netcode"), ("scaling/SCALING_SPEC.md", "Scaling"), ("streaming/STREAMING_SPEC.md", "Streaming"),
     ("world/WORLD_SPEC.md", "World"), ("replay/REPLAY_SPEC.md", "Replay"), ("diagnostics/DIAGNOSTICS_SPEC.md", "Diagnostics"),
     ("TEST_AND_DEBUG_CODE.md", "Test and debug code"), ("wiki/WIKI_SPEC.md", "Wiki"),
+    ("state_store/STATE_STORE_SPEC.md", "State store"), ("abilities/ABILITY_SPEC.md", "Abilities"), ("tags/TAG_SPEC.md", "Tags"),
+    ("tags/TAGS.md", "Tag list"), ("ARCHITECTURE.md", "Architecture"),
 ]
 LINK = re.compile(r"(!?\[[^\]]*\])\(([^)\s]+)\)")
 

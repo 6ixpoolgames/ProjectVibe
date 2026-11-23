@@ -4,7 +4,7 @@ now, this says how it got here and why. -->
 
 # Effects changelog
 
-Effects are this folder: `Effect` and its parts (`parts/`), `EffectApplier`, `EffectManager`, `EffectApplication`, `EffectHeldTotals` and `EffectTags`. They're what abilities and hits do to pawns; the abilities that apply them have their own changelog (`abilities/`). Design: [docs/pawn/PAWN_SPEC.md](../../../docs/pawn/PAWN_SPEC.md), section 8.11. Overview: [README.md](README.md).
+Effects are this folder: `Effect` and its parts (`parts/`), `EffectApplier`, `EffectManager`, `EffectApplication` and `EffectHeldTotals` (effect tags are in the one tag registry, `tags/`). They're what abilities and hits do to pawns; the abilities that apply them have their own changelog (`abilities/`). Design: [docs/pawn/PAWN_SPEC.md](../../../docs/pawn/PAWN_SPEC.md), section 8.11. Overview: [README.md](README.md).
 
 ## Refactor candidates
 
@@ -13,6 +13,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | What | Where | Why | Size |
 |---|---|---|---|
 | Threat through a signal | `EffectManager._run_once` | Effects write threat straight into the AI's memory, so this system knows the AI. A signal for Health taken, which the AI listens to (as it does to `hit_arrived`), keeps effects usable without the AI and open to other listeners (UI, scoring) | S |
+
+## 2026-11-23
+
+- **Documentation pass:** `EffectManager` reaches the ability manager as `pawn.ability_manager`, and keys a hit's source by `HitInfo.key_of` like the ability manager; `EffectApplier`'s doc and this header brought up to date.
 
 ## 2026-11-22
 

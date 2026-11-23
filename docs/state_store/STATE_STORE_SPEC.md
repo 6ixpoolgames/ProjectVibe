@@ -1,8 +1,8 @@
-# State Store Spec v0.5 (agreed direction; steps 1 to 5 built, the abilities step under way: ability spec parts 1 to 4 built)
+# State Store Spec v0.5 (agreed direction; steps 1 to 5 built, and ability spec parts 1 to 5)
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, from the discussion with the owner the same day.*
 
-**Status:** the code audit is done (section 12) and the measurements are in (section 13). Building starts on its own branch from master, rewriting the classes that run on ticks in place (the owner, 2026-11-19); master keeps today's working v0 to go back to. Details still open are in section 14.
+**Status:** the code audit is done (section 12) and the measurements are in (section 13). Steps 1 to 5 are built on `refactor/tick-core`, rewriting the classes that run on ticks in place (the owner, 2026-11-19; sections 13.4-13.12); master keeps the working v0 to go back to. Details still open are in section 14.
 
 **What it is:** one central record of everything that matters to play, tick by tick: a C++ service with a GDScript twin, holding every gameplay entity's state in plain columns, with a history of recent ticks. Rollback, lag compensation, snapshots, replays, AI sensing and diagnostics all read it, instead of each gathering its own copy from the nodes. Around it: a refactor of the tick driver, and deterministic replay.
 

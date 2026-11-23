@@ -134,7 +134,6 @@ var _made_default_steps := false # true when it made its own steps from its sett
 # or tick of its own.
 
 
-## Its attack_range: the AI swings from within it.
 ## Its kind's defaults: a new [MeleeAttackDefinition].
 func make_default_definition() -> AbilityDefinition:
 	return MeleeAttackDefinition.new()
@@ -145,11 +144,14 @@ func _settings_changed() -> void:
 	_melee = settings as MeleeAttackDefinition
 
 
+## Its attack_range: the AI swings from within it.
 func attack_reach() -> float:
 	return attack_range
 
 
 ## Finds its steps, after making the default ones from its settings if it has none of its own.
+# REFACTOR: the same pattern as the other attack's collect_steps (default steps made once, then kept in step with the settings);
+# one in AbilityBase with hooks (abilities/CHANGELOG.md).
 func collect_steps() -> void:
 	var has_own := false
 	for child in get_children():
@@ -167,7 +169,7 @@ func start() -> void:
 	# No snap to the look: its TurnToFace step turns the pawn. The made steps take the settings again, in case they changed in play.
 	if _made_default_steps:
 		_sync_default_steps()
-	if warns_targets and pawn.is_authority() and not _is_replaying():
+	if warns_targets and pawn.is_authority() and not TickDriver.is_resimulating():
 		_warn_targets()
 
 
@@ -285,13 +287,9 @@ func _warn_targets() -> void:
 		if to.length_squared() > 0.0001 and facing.angle_to(to.normalized()) > widest:
 			continue
 		# Straight to the target's AI, on the server.
-		if other.ai_context and other.is_authority() and not other.is_dead():
+		if other.ai_context and other.is_authority():
 			other.ai_context.note_incoming_attack(pawn, now, now + windup_length())
 
-
-func _is_replaying() -> bool:
-	var driver: Node = pawn.get_node_or_null("/root/TickDriver")
-	return driver != null and driver.is_resimulating()
 
 
 ## Where the hit sphere is straight ahead: the middle of the sweep. With a sweep, see [method hit_centre_at].
@@ -314,6 +312,7 @@ func hit_offset_at(progress: float, facing: float) -> Vector3:
 
 
 ## Ticks a swing takes if its windup doesn't wait for the turn: first windup, sweep and recovery. 0 with none. For tests and tools.
+# REFACTOR: only tests call it (with hit_centre_at, and hit_centre through _sweep_centres): the test-only helper row in CHANGELOG.md.
 func planned_ticks() -> int:
 	var total := windup_length() + hit_length()
 	for step in steps:

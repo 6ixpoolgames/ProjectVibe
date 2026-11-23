@@ -12,11 +12,20 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| Death and Knockback found by tag | `AbilityManager._collect_abilities` (`_death`, `_knockback`) | Found by class, so a game changes dying or staggering only by extending `DeathAbility` or `KnockbackAbility`. A tag (`status.dead`, `combat.knockback`) would let any ability fill the role | S |
+| A copy of the hit query | `PredictedProjectile._touches_pawn` | Makes a new `SphereShape3D` every frame and repeats `HitQuery`'s physics query and collision mask; `HitQuery.touching`, as `_trace_hitscan` in the same file uses | S |
+| Default steps made twice the same way | `MeleeAttackAbility.collect_steps`, `RangedAttackAbility.collect_steps` (`_made_default_steps`, the re-sync in `start()`) | Copied word for word; one pattern in `AbilityBase` with `_make_default_steps()` and `_sync_default_steps()` hooks | S |
+| Death and Knockback found by tag | `AbilityManager._collect_abilities` (`_death`, `_knockback`) | Found by class, so a game changes dying or staggering only by extending `DeathAbility` or `KnockbackAbility`. A tag (`ability.death`, `ability.combat.knockback`) would let any ability fill the role | S |
 | An unused list | `AbilityManager._stepped` | Filled when abilities are collected, never read | S |
-| A test-only helper | `MeleeAttackAbility._sweep_centres` | Only `visuals/tests/visuals_selftest` calls it; the test can ask the sweep step (`centres_for_tick`) itself, keeping test helpers out of production code | S |
+| A test-only helper | `MeleeAttackAbility._sweep_centres`, and `planned_ticks`, `hit_centre_at` (and `hit_centre`, which only `_sweep_centres` uses) | Only `visuals/tests/visuals_selftest` calls it; the test can ask the sweep step (`centres_for_tick`) itself, keeping test helpers out of production code | S |
 
 The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, and nothing parry-specific is left in the manager or the base: `ParryAbility` is a plain timed ability that makes a default `ParryInterceptor`, and `guard()` is only read by the debug drawing and tests.
+
+## 2026-11-23
+
+- **Script warnings:** `land_hit`'s `tick` parameter is `at_tick` (it shadowed `tick()`); `PredictedProjectile.fire`'s `stops_first`; `Projectile._hit_keys` is marked as read by name (its HitRun).
+- **Charges (limited uses)** (pawn spec 10.13): `max_charges`, `recharges` (the owner: whether they come back on their own; off by default), `charge_restore_ticks`, `charges_restored`, `restore_all_charges` and `has_charges_tag` on `AbilityDefinition`; the ability spends one per start, gets them back on tick deadlines, refills on revive, and its most can change for good (`set_max_charges`) or for a while (`add_max_charges_change`), all rolled back. A ranged attack's `has_charges_tag` defaults to `status.has_ammo.ranged`. A pawn waiting for charges doesn't sleep.
+- **Start requirements:** `AbilityDefinition.start_requirements`, a tag query checked with readiness; owned-tag changes move `readiness_version`, and a query naming `ai.*` tags warns (clients never own them). Test: `ability_charges_selftest` (new).
+- **The code and documentation pass:** `AbilityManager._stepped` and `HitInfo.ability_index` removed (nothing read them); the interrupt priority is keyed by `HitInfo.key_of`, as hits are; the melee ability asks `TickDriver.is_resimulating()` instead of working it out. Docs that sat above the wrong member moved onto theirs, long ones trimmed, and the README brought up to the built parts. `collect_steps`, `planned_ticks` and `PredictedProjectile` are flagged `REFACTOR:` (rows above).
 
 ## 2026-11-22
 

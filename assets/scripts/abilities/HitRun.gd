@@ -73,9 +73,8 @@ func clear() -> void:
 
 
 ## Handles the pawns a volume touched this tick, nearest first: each one met for the first time is logged and, if the hit definition
-## allows, hit. path_start and path_end place each meeting on the path; motion is the volume's way of moving, for the push. reach_from
-## is where the weapon reaches out from (a swing's anchor), for the world check; null: path_start (a projectile's flight). Returns true
-## once it's spent (max_hits or max_intersects), at the pawn that spent it: the caller stops there.
+## allows, hit (path_start and path_end place meetings, motion gives the push, reach_from is where the world check starts; null:
+## path_start). True once it's spent (max_hits or max_intersects): the caller stops there.
 func meet_pawns(pawns: Array[Pawn], tick: int, attacker: Pawn, path_start: Vector3, path_end: Vector3, motion: Vector3,
 		reach_from: Variant = null) -> bool:
 	for target in pawns:

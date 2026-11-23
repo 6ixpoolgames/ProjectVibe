@@ -69,6 +69,9 @@ class EFFECT:
 class STATUS:
 	const ALL := &"status"
 	const DEAD := &"status.dead"
+	## An ability with limited uses has some left (AbilityDefinition.has_charges_tag).
+	const HAS_AMMO := &"status.has_ammo"
+	const HAS_AMMO_RANGED := &"status.has_ammo.ranged"
 
 
 ## The AI's own tags: its states and stances.
@@ -79,6 +82,10 @@ class AI:
 	const STATE_IDLE := &"ai.state.idle"
 	const STATE_ALERT := &"ai.state.alert"
 	const STATE_COMBAT := &"ai.state.combat"
+	## How a behaviour fights (its AIBehaviourBase.tags), so score modifiers can favour one style.
+	const STANCE := &"ai.stance"
+	const STANCE_MELEE := &"ai.stance.melee"
+	const STANCE_RANGED := &"ai.stance.ranged"
 
 
 ## Navigation: what a place, link or marker is.

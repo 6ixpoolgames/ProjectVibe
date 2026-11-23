@@ -1,8 +1,8 @@
 // Written by Claude (claude-opus-5-5), 2026-11-09. History: native/CHANGELOG.md.
 // AIPawnGrid: a shared grid of pawns for "who's near me" questions: AI sensing's (pawn spec 10.4 and 10.11) and swing hit checks.
 //
-// GDScript: Pawn.gd makes the one grid over the PawnTable; AISensingManager queries it (or hands it to AISensingJob), and
-// MeleeSweepStep asks find_touching for a swing's hits when nothing is rewound.
+// GDScript: SharedPawnTable.get_grid() makes the one grid over the PawnTable; AISensingManager queries it (or hands it to
+// AISensingJob), and HitQuery asks find_touching for a swing's or a projectile's hits when nothing is rewound.
 //
 // Built from the PawnTable (scaling spec step 1). It's rebuilt at most once a tick, on the first query of that tick, after the
 // table has read its rows, and then every pawn's query reads it. Pawns are in the table's slot order, which is by entity id, so

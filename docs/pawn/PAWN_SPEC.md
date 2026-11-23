@@ -30,7 +30,7 @@
 - v0.18 (2026-11-09): rollback recording in C++ (`TickStateRecorder`) and saved only where it's read (`history_interval_ticks`), measured in 12.1. Open question 16 settled.
 - v0.17 (2026-11-09): debug shapes for swings and dashes (`AbilityDebugDraw`), `MeleeAttackAbility.hit_window_started`, Chase's `dash_to_close`, and the arena readout's last ability (8.6, 10.7, 12).
 
-**Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, because legacy files are never changed and new systems sit beside them.
+**Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, so new systems sit beside the legacy ones.
 
 **Scope:** everything on a pawn. That covers its parts, how a controller drives it, abilities, stats, navigation and the AI.
 
@@ -1326,7 +1326,7 @@ A state with rules no settings cover is a script that extends `AIStateBase` and 
 class_name AIBehaviourBase extends Node
 enum Status { RUNNING, SUCCEEDED, FAILED }
 
-@export var allowed_states: Array[StringName] = []  # empty = any state
+@export var tag_requirements: TagQuery          # when it may run (owned tags; the state is ai.state.*). 2026-11-23: was allowed_states (10.13)
 @export var max_score := 0.5           # the highest score() can return
 @export var min_score := -INF          # optional: the lowest score() can return. Unset, it can't help pruning (10.8)
 @export var needs_target := false
@@ -1592,7 +1592,7 @@ What's left is spread thin: the GDScript calls into C++ each pass, behaviours, a
 
 ---
 
-### 10.13 Changing behaviour priority while playing *(Claude 2026-11-22: agreed with the owner the same day, after two drafts; nothing built yet)*
+### 10.13 Changing behaviour priority while playing *(Claude 2026-11-22: agreed with the owner the same day, after two drafts; built 2026-11-23, as built below)*
 
 **Why.** Today a behaviour's priority (its score, 10.7) is fixed: its `max_score` and curves, plus per-pawn persistence, jitter and interrupt overrides. Behaviour priorities should change with game circumstances (a "Charge!" shout, fear, an enraged boss, a squad order), and that's how AI behaviour will be modulated from now on. Abilities already have a way (`AbilityPriorityPart`, 8.11); behaviours have none. The first user is the mass battle test, switching the whole fight between melee and ranged.
 
@@ -1623,18 +1623,29 @@ behaviour_manager.remove_score_modifier(source: Object)
 
 **Charges (limited uses), and the stances.**
 - `AbilityDefinition.max_charges` (0: no limit) and `AbilityBase.charges_spent`, pushed so it rolls back. A start spends one; an ability with none left isn't ready.
-- `charge_restore_ticks`: one charge comes back every so many ticks while any are spent (0: never). All are refilled on revive. A manual reload can come later, as an ability that refills another's charges.
+- `charge_restore_ticks`: while any are spent, `charges_restored` come back every so many ticks (0: never, the original design). The restore is a tick deadline. All are refilled on revive. A manual reload can come later, as an ability that refills another's charges. *(Revised 2026-11-23, the owner: a designer setting for how many come back each time; the test uses a long restore that gives back a full magazine.)*
+- `max_charges` is the ability's own value, with hooks to change it permanently (its base) and temporarily (modifiers that end at a tick deadline, keyed by source) *(the owner, 2026-11-23)*.
 - `has_charges_tag`: a tag the pawn owns while the ability has charges left. Owned tags are counted, so with two ranged abilities the tag stays while either has charges.
 - KeepDistance gets `tag_requirements: all_of [status.has_ammo.ranged]`. Out of bolts, Chase (close in and melee) wins. With bolts, modifiers decide which stance wins. No new behaviours: KeepDistance is the ranged stance and Chase the melee one.
 - The bolt attack gets `max_charges = 3` and `has_charges_tag = status.has_ammo.ranged`.
 
-**The mass battle test.** `--alternate=N` switches every N seconds: melee mode adds a "Charge!" modifier (`applies_to any_of [ai.stance.melee]`, +0.1) to every pawn's behaviour manager, ranged mode removes it. The test loops over the pawns itself; a helper for a team or everyone waits until squad orders or game modes need one. Each row says its mode, with a swings line beside the bolts line. Test-bed code only (rule 6).
+**The mass battle test** *(scrapped 2026-11-23, the owner: the four-faction archers shoot until they're out of bolts, then melee, which tests the switch with every other system at once)*. Was: `--alternate=N` switches every N seconds: melee mode adds a "Charge!" modifier (`applies_to any_of [ai.stance.melee]`, +0.1) to every pawn's behaviour manager, ranged mode removes it. The test loops over the pawns itself; a helper for a team or everyone waits until squad orders or game modes need one. Each row says its mode, with a swings line beside the bolts line. Test-bed code only (rule 6).
 
 **Tests.** Decider parity with modifiers and blocks; the behaviour manager (raise, lower, block, deadline expiry, ongoing requirements, tag requirements, wakes_decision, two sources stacking and removed apart); charges (spent, not ready at 0, restored over time, refilled on revive, rolled back, the tag); the stance switch (out of bolts → Chase).
 
 **Depends on** the tag spec's merged registry, owned tags and tag queries (its build steps 1 and 2).
 
 **Decided (the owner, 2026-11-22, agreeing the recommendations):** `wakes_decision` opt-in, off by default; a has-charges tag rather than an out-of-charges one; a timed charge restore on the definition, manual reload later; no many-pawns helper in the base yet. "Priority" stays the word for a behaviour's standing: close-enough terms are fine, this isn't a copy of another system.
+
+**As built (Claude, 2026-11-23):**
+- **Behaviours:** `tags`, `tag_requirements` (a `TagQuery`; `allowed_states` is gone, the built-ins ask for their `ai.state.*` tag), and `enabled` (off: never chosen, the way an inherited scene switches one off). A running behaviour that fails its requirements, is blocked or switched off isn't held by `min_run_ticks`; its `interrupt_threshold` and `cannot_be_interrupted` still hold it, as through a state change. `AIBehaviourManager.check_running` asks for that decision at the next AI step when the owned tags or modifiers change.
+- **Modifiers:** `AIScoreModifier` (a `Definition`) with `applies_to`, `amount`, `blocks`, `duration_ticks`, `ongoing_requirements`, `granted_tags`, `wakes_decision`. `conditions` (numbers from AI inputs) isn't built: inputs are worked out in C++ at each decision, so it needs the decider to read conditions per modifier; added when something needs it. The sum is added to persistence before the ceiling, floor and result (as one boost, so both deciders agree to the bit). C++ gets the owned tags as words, the sums and the blocked mask when they change (`set_owned_tags`, `set_modifiers`); the brain gets each behaviour's requirements as masks and `enabled`.
+- **Records:** owned tags, and each behaviour's modifier sum and rule (`tags`, `blocked`, `off`).
+- **Charges:** `AbilityDefinition.max_charges`, `recharges` (off by default: the original design, no refill), `charge_restore_ticks`, `charges_restored`, `restore_all_charges`, `has_charges_tag`; on the ability `charges_spent`, `next_restore_tick` (a deadline), `max_charges_base` (`set_max_charges`), `max_charges_changes` (`add_max_charges_change` by name, with a deadline), all pushed and rolled back. A ranged attack's `has_charges_tag` is `status.has_ammo.ranged`, and Keep Distance requires it.
+- **Ability start gates:** `AbilityDefinition.start_requirements`, checked with readiness; owned-tag changes move `readiness_version`. A query naming `ai.*` warns.
+- **The test:** the four-faction archers (`archer_bolt_attack.tres`, 6 bolts, all back after 10 s) shoot until empty, then melee. `archer_switch_selftest`.
+
+**Decided (the owner, 2026-11-23):** `allowed_states` becomes a tag gate (AI states are `ai.state.*` tags); abilities get start gates (tags required or blocking, only tags clients also have); behaviours give persistent orders (19.10 in the netcode spec), built before charges; every timer is a tick deadline unless there's a good reason; the workarounds these replace are removed as they land.
 
 ## 11. `PawnInitializer` (built 2026-11-07, step 4)
 

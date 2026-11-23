@@ -72,7 +72,6 @@ var dash_direction := Vector3.ZERO:
 		push_state(&"dash_direction", value)
 
 
-## With no interceptor of its own, a Dash is invulnerable for its first 0.18 s, so the end of its slow-down can be hit.
 ## Its kind's defaults: a new [DashDefinition].
 func make_default_definition() -> AbilityDefinition:
 	return DashDefinition.new()
@@ -83,6 +82,7 @@ func _settings_changed() -> void:
 	_dash = settings as DashDefinition
 
 
+## With no interceptor of its own, a Dash is invulnerable for its first 0.18 s, so the end of its slow-down can be hit.
 func make_default_interceptors() -> void:
 	var dodge := InvulnerabilityInterceptor.new()
 	dodge.name = "Invulnerable"

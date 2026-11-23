@@ -15,7 +15,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Tick nav from one universal place | `tick_nav` in `TerrainNavFeeder` | Ticking the whole nav library isn't the terrain feeder's job. Every level has to remember to turn it on, and a level with nav but no terrain (only `BodyNavFeeder`s) has nothing to tick it. An autoload or GameMode module that ticks nav whenever the library is loaded would need no setup | S |
 | Fall reports out of `KillFloor` | `KillFloor` (`report_falls`, `fall_report`, `_last_on_ground`) | A debugging aid inside a gameplay class, on by default, tracking every pawn's last standing place on every check. A diagnostics module could track pawns and write the report when `pawn_fell` fires | S |
 
-The "one shared way to reach `NavServer`" row in navigation's changelog applies here too: `TerrainNavFeeder` looks the library up by name in three places.
+The "one shared way to reach `NavServer`" row in navigation's changelog applies here too: `TerrainNavFeeder` looks the library up by name in four places.
+
+## 2026-11-23
+
+- **Documentation pass:** a `TerrainNavFeeder` comment fixed; the README lists `tick_nav`.
 
 ## 2026-11-22
 

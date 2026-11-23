@@ -29,6 +29,10 @@ var loose_counts: Dictionary:
 	set(value):
 		_load_loose(value)
 
+## Goes up by one whenever a tag starts or stops being owned, so a reader that keeps a copy (the AI decider's row, a behaviour's tag
+## requirements) knows to look again. Don't set it.
+var version := 0
+
 var _loose := {}   # StringName tag -> count
 var _counts := {}  # StringName tag -> count over every source and the loose tags
 var _sources := {} # source key -> Array[StringName], what that source adds now
@@ -179,6 +183,7 @@ func _change(tag: StringName, delta: int) -> void:
 		_counts.erase(tag)
 	if (before > 0) != (after > 0):
 		_words_dirty = true
+		version += 1
 		changed.emit(tag, after > 0)
 
 

@@ -233,7 +233,10 @@ func _tick_simulate(_dt: float, tick: int) -> void:
 	_queued = []
 	_motions = PackedVector3Array()
 	_seconds = PackedFloat32Array()
-	if pawns.is_empty():
+	if pawns.is_empty(): # every queued pawn was freed: as with nothing queued
+		_moved_this_tick.clear()
+		PerfScopes.end(&"movement.crowd_gather", gather_started)
+		PerfScopes.end(&"movement.crowd", started)
 		return
 	# What the batch needs from each pawn, in one pass: where it stands, its width, its steepest walkable floor (as a rise per metre,
 	# and as the least upward normal), and its collision shape and where that sits on it, for the wall sweep.

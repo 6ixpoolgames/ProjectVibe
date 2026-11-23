@@ -65,7 +65,7 @@ func is_state_forced() -> bool:
 	return _forced != null
 
 
-## [method AIContextComponent.run_ai] calls this at each decision. Checks the states in order and moves to the first that fits,
+## [method AIContextComponent.think] calls this at each decision. Checks the states in order and moves to the first that fits,
 ## unless a force holds.
 func update_state(tick: int) -> void:
 	if pawn == null:
@@ -89,7 +89,7 @@ func update_state(tick: int) -> void:
 		push_warning("AIStateManager: no state fits on %s, so it stays in %s. An AIIdleState, which always fits, prevents this." % [pawn.name, String(_current.name) if _current else "no state"])
 
 
-## [method AIContextComponent.run_ai] calls this every tick, so a force that runs out hands back to the normal check on time.
+## [method AIContextComponent.think] calls this every tick, so a force that runs out hands back to the normal check on time.
 func check_force_expiry(tick: int) -> void:
 	if _forced and _force_until_tick >= 0 and tick >= _force_until_tick:
 		_end_force()
@@ -114,7 +114,7 @@ func force_state(state_name: StringName, hold_ticks: int, priority: int, reason:
 	return _apply_force(state, hold_ticks, priority, reason)
 
 
-## [method AIContextComponent.run_ai] calls this at the start of the AI step: applies the forces and releases queued during the
+## [method AIContextComponent.think] calls this at the start of the AI step: applies the forces and releases queued during the
 ## last tick, in the order they were asked for.
 func apply_queued(_tick: int) -> void:
 	if _queued.is_empty():

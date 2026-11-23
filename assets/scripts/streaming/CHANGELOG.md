@@ -4,7 +4,7 @@ now, this says how it got here and why. -->
 
 # Streaming changelog
 
-Streaming is this folder: `ChunkStreamer` and `StreamingSource`, plus the source contract that lets a `Pawn` be a source (`pawn/Pawn.gd`). Design: [docs/streaming/STREAMING_SPEC.md](../../../docs/streaming/STREAMING_SPEC.md). Overview: [README.md](README.md).
+Streaming is this folder: `ChunkStreamer`, `StreamingSource` and `PawnStreamingSource` (the part that makes a pawn a source). Design: [docs/streaming/STREAMING_SPEC.md](../../../docs/streaming/STREAMING_SPEC.md). Overview: [README.md](README.md).
 
 ## Refactor candidates
 
@@ -14,6 +14,11 @@ None in this folder yet. Serving one terrain only is a "not yet" (streaming spec
 
 | What | Where | Why | Size |
 |---|---|---|---|
+
+## 2026-11-23
+
+- **Script warnings:** a local named `ready` renamed (it shadowed the `ready` signal).
+- **`ChunkStreamer.land_now(key)`**: lands one chunk now if it isn't loaded, for a spawn that can't wait (`SpawnManager`); streamers join the `chunk_streamers` group so others can find a terrain's streamer. Test: `_test_edit_while_held` in `chunk_streaming_selftest` (with the terrain fix). Comments and this header brought up to date.
 
 ## 2026-11-22
 

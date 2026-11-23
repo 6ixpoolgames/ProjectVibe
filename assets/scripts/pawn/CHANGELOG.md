@@ -9,10 +9,16 @@ The pawn is this folder (`Pawn.gd`), with its scene `assets/scenes/pawn/pawn.tsc
 
 Code that works but doesn't yet fit the project's goals (reusable, extensible, efficient, designer friendly). Each is marked `REFACTOR:` in the code. Sizes are rough: S an hour or two, M a day, L more.
 
-The owner wants the pawn to keep only the body, its tick order, its part references and general flags (pawn slimming). Input, possession, hits, death, camera and team counts have moved out (M1 to M5). What still sits on Pawn and belongs elsewhere:
+The owner wants the pawn to keep only the body, its tick order, its part references and general flags (pawn slimming). Input, possession, hits, death, camera and team counts have moved out (M1 to M5). Nothing found still sits on Pawn that belongs elsewhere. Other rows:
 
 | What | Where | Why | Size |
 |---|---|---|---|
+| A test-only read | `VisualSmoother.get_correction_offset` | Only `netcode/tests/net_test_node` calls it; the test can read `VisualPlacer.current.placement.get_correction(slot)` itself | S |
+
+## 2026-11-23
+
+- **Script warnings:** `_on_lingering_started`'s parameter renamed (it shadowed `_entity`).
+- **The code and documentation pass:** `runs_every_tick` removed (unused); `_is_check_tick` uses `_stagger()`; the physics-delta comment moved into `_move_with_physics`; the class doc and `teleport`'s trimmed; `VisualSmoother` flagged `REFACTOR:` (row above). README: owned tags, the streaming source and `PawnStreamingSource`.
 
 ## 2026-11-22
 

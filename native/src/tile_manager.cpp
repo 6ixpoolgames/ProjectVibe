@@ -296,7 +296,7 @@ void TileManager::stats(TileStats &out) const {
 	}
 	{
 		std::lock_guard<std::mutex> lock(m_done_mutex);
-		out.results_waiting = int(m_done.size());
+		out.results_waiting = int(m_done.size() + m_finished.size()); // finished, not yet landed
 	}
 	out.builds_committed = m_builds_committed;
 	out.builds_stale = m_builds_stale;

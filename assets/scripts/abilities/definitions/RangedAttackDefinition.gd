@@ -39,11 +39,12 @@ extends AbilityDefinition
 	set(value):
 		muzzle_height = value
 		_changed(&"muzzle_height", value)
+## How far in front of the pawn the projectile starts, in metres.
 @export var muzzle_forward: float = 0.5:
 	set(value):
 		muzzle_forward = value
 		_changed(&"muzzle_forward", value)
-## How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnSpeed stat.
+## How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnRate stat.
 @export_range(-1.0, 3600.0, 10.0, "or_greater") var windup_turn_degrees_per_second: float = -1.0:
 	set(value):
 		windup_turn_degrees_per_second = value
@@ -63,6 +64,7 @@ func _init() -> void:
 	hit.push = HitDefinition.Push.ALONG_MOTION
 	trigger_action = &"primary"
 	category = Tags.ABILITY.COMBAT_RANGED
+	has_charges_tag = Tags.STATUS.HAS_AMMO_RANGED # owned while it can shoot: Keep Distance runs only then
 	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 15
 	interrupt_threshold = 15

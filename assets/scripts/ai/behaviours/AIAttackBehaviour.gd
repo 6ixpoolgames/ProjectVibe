@@ -25,7 +25,7 @@ var _hold_from_tick := -1 # the tick to start holding on, when a press had to wa
 
 func _init() -> void:
 	super()
-	allowed_states = [&"Combat"]
+	tag_requirements = TagQuery.shared([Tags.AI.STATE_COMBAT])
 	needs_target = true
 	presses_action = &"primary"
 	max_score = 0.9

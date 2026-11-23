@@ -2,7 +2,7 @@
 ## A client's estimate of the server's clock (netcode spec section 4).
 ##
 ## The client feeds it pongs ([method add_sample]); it estimates the server's tick from the fastest recent ping and the round trip from
-## the average. Times are microseconds, ticks are 60 a second.
+## the average. Times are microseconds; the tick length is the match's.
 ## Design: netcode spec 4.
 class_name NetClock
 extends RefCounted
@@ -43,18 +43,6 @@ func get_rtt_usec() -> float:
 	for sample: Dictionary in _samples:
 		total += sample["rtt"]
 	return float(total) / _samples.size()
-
-
-## How much the round trip varies, in microseconds (standard deviation).
-func get_jitter_usec() -> float:
-	if _samples.size() < 2:
-		return 0.0
-	var average := get_rtt_usec()
-	var total := 0.0
-	for sample: Dictionary in _samples:
-		var difference: float = sample["rtt"] - average
-		total += difference * difference
-	return sqrt(total / _samples.size())
 
 
 ## Which tick the server is on right now, from the fastest recent ping. 0 before any sample.

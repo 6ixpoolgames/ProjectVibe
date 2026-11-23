@@ -28,7 +28,7 @@ var _pause_until := -1 # the tick its current pause ends; -1: not pausing
 
 func _init() -> void:
 	super()
-	allowed_states = [&"Idle"]
+	tag_requirements = TagQuery.shared([Tags.AI.STATE_IDLE])
 	# A low, fixed score: Wander is what a pawn does when nothing more interesting can run.
 	max_score = 0.1
 	min_score = 0.1

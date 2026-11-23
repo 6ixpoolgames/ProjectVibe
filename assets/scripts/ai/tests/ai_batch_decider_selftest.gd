@@ -61,7 +61,7 @@ class ReadinessCheckingRecorder extends AIDecisionRecorder:
 			if behaviour.presses_action == &"" or behaviour.name == record.running_before:
 				continue
 			var entry := record.entry_for(behaviour.name)
-			var rule: StringName = entry.get("rule", &"state")
+			var rule: StringName = entry.get("rule", &"tags")
 			if rule != AIDecisionRecord.RULE_ACTION and rule != AIDecisionRecord.RULE_NONE:
 				continue # ruled out before the action was looked at
 			checked += 1
@@ -76,6 +76,7 @@ var _added_module := false # whether this test added it (else the game's own, pu
 
 
 func _ready() -> void:
+	TagRegistry.declare([&"ai.state.alarm"]) # the test's own Alarm state's tag (AIStateBase.get_tag)
 	TickDriver.tick_rate = TickDriver.REFERENCE_RATE
 	print("--- AI batch decider self-test ---")
 	if not ClassDB.class_exists(&"AIBatchDecider"):
@@ -87,6 +88,7 @@ func _ready() -> void:
 	_test_random_numbers()
 	_test_brains()
 	_test_made_up_brains()
+	_test_gates_and_modifiers()
 	await _test_real_fight()
 	_recorder.stop()
 	if _module:
@@ -113,17 +115,39 @@ func _test_random_numbers() -> void:
 
 func _test_brains() -> void:
 	var decider: Object = ClassDB.instantiate(&"AIBatchDecider")
-	var brain: int = decider.add_brain({"behaviours": [
-		{"name": "Zulu", "allowed_states": ["Combat"]},
-		{"name": "Alpha", "allowed_states": []},
-		{"name": "Mike", "allowed_states": ["Alert", "Combat"]},
+	var words := TagRegistry.get_categories().size()
+	var brain: int = decider.add_brain({"tag_words": words, "behaviours": [
+		{"name": "Zulu", "scorer": "conditions", "tag_requirements": TagQuery.make([Tags.AI.STATE_COMBAT]).describe_words()},
+		{"name": "Alpha", "scorer": "conditions", "max_score": 0.1},
+		{"name": "Mike", "scorer": "conditions", "tag_requirements": TagQuery.make([], [Tags.AI.STATE_ALERT, Tags.AI.STATE_COMBAT]).describe_words()},
 	]})
 	_check_equal(brain, 0, "a brain is added")
 	_check(decider.get_behaviour_name(brain, 0) == &"Alpha" and decider.get_behaviour_name(brain, 2) == &"Zulu", "its behaviours are in the fixed order, by name")
 	_check_equal(decider.find_behaviour(brain, &"Mike"), 1, "find_behaviour gives the slot")
-	_check(decider.find_state(brain, &"Combat") > 0 and decider.find_state(brain, &"Alert") > 0, "named states get numbers")
-	_check_equal(decider.find_state(brain, &"Idle"), 0, "a state no behaviour names is 0, the any-state mask")
 	_check_equal(decider.get_stride(), 3, "the stride is the largest brain's behaviour count")
+	# Tag requirements against each row's owned tags: idle (neither passes), alert (Mike), combat (both: a tie, Mike first by order),
+	# and combat with Mike blocked by a modifier, and with Zulu raised by one.
+	var owned_rows := [[Tags.AI.STATE_IDLE], [Tags.AI.STATE_ALERT], [Tags.AI.STATE_COMBAT], [Tags.AI.STATE_COMBAT], [Tags.AI.STATE_COMBAT]]
+	var rows := owned_rows.size()
+	var owned := PackedInt64Array()
+	for tags: Array in owned_rows:
+		owned.append_array(TagQuery.words_of(tags))
+	var zeros := PackedFloat64Array()
+	zeros.resize(rows * 3)
+	zeros.fill(0.0)
+	var modifier := zeros.duplicate()
+	modifier[4 * 3 + 2] = 0.2 # row 4, Zulu
+	var columns := {"brain": PackedInt32Array([0, 0, 0, 0, 0]), "pawn_number": PackedInt64Array([1, 1, 1, 1, 1]),
+		"random_seed": PackedInt64Array([0, 0, 0, 0, 0]), "tick": PackedInt64Array([1, 1, 1, 1, 1]), "owned": owned, "tag_words": words,
+		"has_target": PackedByteArray([0, 0, 0, 0, 0]), "event_normal": PackedByteArray([1, 1, 1, 1, 1]),
+		"event_priority": PackedInt32Array([0, 0, 0, 0, 0]), "running": PackedInt32Array([-1, -1, -1, -1, -1]),
+		"running_started": PackedInt64Array([-1, -1, -1, -1, -1]), "cooling": PackedInt64Array([0, 0, 0, 0, 0]),
+		"can_press": PackedInt64Array([-1, -1, -1, -1, -1]), "available_known": PackedInt64Array([0, 0, 0, 0, 0]),
+		"available": PackedInt64Array([0, 0, 0, 0, 0]), "persistence": zeros, "modifier": modifier,
+		"blocked": PackedInt64Array([0, 0, 0, 1 << 1, 0])}
+	var answer: Dictionary = decider.decide(columns)
+	_check_equal(answer.get("chosen", PackedInt32Array()), PackedInt32Array([0, 1, 1, 2, 2]),
+		"tag requirements: idle Alpha, alert Mike, combat Mike (a tie, by order), Mike blocked Zulu, Zulu raised Zulu")
 	var too_many: Array = []
 	for i in 65:
 		too_many.append({"name": "B%02d" % i})
@@ -206,7 +230,7 @@ func _play_made_up(_shadow: bool) -> Array[String]:
 	var foxtrot := _b("Foxtrot", 0.97)
 	foxtrot.presses_action = &"no_such_action"
 	var golf := _b("Golf", 0.65)
-	golf.allowed_states = [&"Alarm"]
+	golf.tag_requirements = TagQuery.make([&"ai.state.alarm"])
 	golf.min_score = 0.6
 	var one := _make_pawn([alpha, bravo, charlie, delta, echo, foxtrot, golf], [alarm])
 	one.name = "One"
@@ -246,6 +270,82 @@ func _play_made_up(_shadow: bool) -> Array[String]:
 	for pawn: Pawn in [one, two, three]:
 		pawn.free()
 	return choices
+
+
+# Claude 2026-11-23 (pawn spec 10.13): tag requirements, switched-off behaviours, score modifiers and blocks, in both deciders. Plain
+# behaviours (no code of their own), so the pawn decides in C++ too: recorded decisions are replayed through decide(), and live shadow
+# mode checks decide_pawn() and the facts written into the row (owned tags, modifiers).
+func _test_gates_and_modifiers() -> void:
+	var melee := _plain("Melee", 0.8)
+	melee.tags = [Tags.AI.STANCE_MELEE]
+	var ranged := _plain("Ranged", 0.85)
+	ranged.tags = [Tags.AI.STANCE_RANGED]
+	ranged.tag_requirements = TagQuery.make([Tags.STATUS.HAS_AMMO_RANGED])
+	ranged.min_run_ticks = 20
+	var hold := _plain("Hold", 0.95)
+	var rest := _plain("Rest", 0.1)
+	var pawn := _make_pawn([melee, ranged, hold, rest])
+	pawn.name = "Four"
+	var manager := pawn.ai_context.behaviour_manager
+	var charge := AIScoreModifier.new()
+	charge.applies_to = TagQuery.make([], [Tags.AI.STANCE_MELEE])
+	charge.amount = 0.1
+	var no_ranged := AIScoreModifier.new()
+	no_ranged.applies_to = TagQuery.make([], [Tags.AI.STANCE_RANGED])
+	no_ranged.blocks = true
+	no_ranged.duration_ticks = 15
+	_module.reset_counts()
+	_recorder.clear()
+	_recorder.start()
+	var chosen := {}
+	for t in 400:
+		var tick := 9000 + t
+		TickDriver.tick = tick
+		if t % 37 == 0:
+			pawn.owned_tags.add(Tags.STATUS.HAS_AMMO_RANGED)
+		elif t % 37 == 20:
+			pawn.owned_tags.remove(Tags.STATUS.HAS_AMMO_RANGED)
+		if t % 60 == 10:
+			manager.add_score_modifier(charge, self)
+		elif t % 60 == 40:
+			manager.remove_score_modifier(self)
+		if t % 90 == 50:
+			manager.add_score_modifier(no_ranged, &"block")
+		hold.enabled = t % 70 >= 60
+		manager.check_running(tick)
+		_decide(pawn, tick, 0, t % 5 != 0)
+		var running := manager.get_running_behaviour()
+		chosen[running.name if running else &""] = true
+	_recorder.stop()
+	var rules := {}
+	var summed := 0
+	for record in _recorder.get_records():
+		for entry in record.behaviours:
+			rules[entry["rule"]] = true
+			summed += 1 if entry.get("modifier", 0.0) != 0.0 else 0
+	_check(chosen.has(&"Melee") and chosen.has(&"Ranged") and chosen.has(&"Hold") and rules.has(AIDecisionRecord.RULE_TAGS)
+			and rules.has(AIDecisionRecord.RULE_OFF) and rules.has(AIDecisionRecord.RULE_BLOCKED) and summed > 20,
+			"the run used gates, switching off, blocks and sums (chosen %s, rules %s, summed %d)" % [chosen.keys(), rules.keys(), summed])
+	var result := DecisionReplay.compare(DecisionReplay.from_recorder(_recorder))
+	print("  gates and modifiers: " + DecisionReplay.describe(result))
+	for example: String in result["examples"]:
+		print("    " + example)
+	_check(result["decisions"] > 300 and result["agreed"] == result["decisions"], "C++ decide() makes every gated and modified decision the same way")
+	var counts := _module.get_counts()
+	print("  live shadow, gates and modifiers: %s" % str(counts))
+	_check(counts["checked"] > 300 and counts["agreed"] == counts["checked"], "live shadow: decide_pawn() agrees with every one (%d of %d)" % [counts["agreed"], counts["checked"]])
+	_check_equal(counts["stale_facts"], 0, "...and the owned tags and modifiers written into its row were never out of date")
+	_recorder.clear()
+	_module.reset_counts()
+	pawn.free()
+
+
+func _plain(behaviour_name: String, score: float) -> AIBehaviourBase:
+	var behaviour := AIBehaviourBase.new()
+	behaviour.name = behaviour_name
+	behaviour.max_score = score
+	behaviour.min_score = score
+	return behaviour
 
 
 func _test_real_fight() -> void:

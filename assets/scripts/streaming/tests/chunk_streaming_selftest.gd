@@ -40,6 +40,7 @@ func _ready() -> void:
 	await _test_missing_and_freed_terrain()
 	await _test_budget()
 	await _test_landing_schedule()
+	await _test_edit_while_held() # Claude 2026-11-23
 	await _test_turning_back_mid_build()
 	await _test_markers_follow_the_source()
 	await _test_pawn_walks()
@@ -848,6 +849,47 @@ func _test_landing_schedule() -> void:
 		streamer.free()
 		terrain.free()
 	_check(after_asked.size() == 2 and after_asked[0] == after_asked[1], "and it lands the same number of ticks after it's asked for, fast or slow (%s)" % [after_asked])
+
+
+# Claude 2026-11-23 (the code pass): an edit while a chunk waits for its landing tick used to publish it there and then, at a moment
+# that depended on how far the build had got. Now it lands on its tick, and with the edit (read from the log as it lands).
+func _test_edit_while_held() -> void:
+	LandingLog.clear()
+	var neighbour := Vector2i(1, 0)
+	var middle := Vector3(384.0, 0.0, 128.0) # the middle of chunk (1, 0), 256 m chunks
+	var plain := _make_budget_terrain() # the same ground, never edited, to compare with
+	plain.load_chunk(neighbour)
+	var unedited := plain.height_at(middle.x, middle.z)
+	plain.free()
+	var terrain := _make_budget_terrain()
+	terrain.add_child(TerrainEditLog.new())
+	var streamer := _make_streamer(terrain)
+	streamer.landing_delay_ticks = 40
+	var source := _make_source(Vector3(128.0, 0.0, 128.0), 140.0)
+	var landing := -1
+	for i in 300:
+		await get_tree().physics_frame
+		if terrain.is_chunk_ready_to_publish(neighbour):
+			landing = streamer.get_landing_tick(neighbour)
+			break
+	_check(landing > TickDriver.tick, "(a chunk built and waiting for its landing tick, %d)" % landing)
+	terrain.edit(middle, 12.0, 5.0)
+	_check(not terrain.has_chunk(neighbour), "an edit doesn't publish a chunk waiting for its landing tick")
+	for i in 300:
+		await get_tree().physics_frame
+		if terrain.has_chunk(neighbour):
+			break
+	var landed_on := -1
+	for tick in range(maxi(landing - 5, 0), TickDriver.tick + 1):
+		for entry: Array in LandingLog.landings_at(tick):
+			if entry[0] == LandingLog.CHUNK and entry[1] == LandingLog.chunk_key(neighbour):
+				landed_on = tick
+	_check(landed_on == landing, "it lands on its landing tick all the same (%d, recorded %d)" % [landing, landed_on])
+	var edited := terrain.height_at(middle.x, middle.z)
+	_check(edited > unedited + 4.0, "with the edit: %.2f m where the unedited ground is %.2f m" % [edited, unedited])
+	source.free()
+	streamer.free()
+	terrain.free()
 
 
 ## Waits until the streamer has seen where the sources are now and has nothing left to do.

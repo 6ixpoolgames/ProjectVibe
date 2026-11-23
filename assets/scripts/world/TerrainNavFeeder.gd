@@ -40,7 +40,7 @@ var _next_refresh_tick := -1
 
 
 func _init() -> void:
-	# The same as ChunkStreamer: before TickDriver's -100, so nav is up to date before anything ticks in a physics frame.
+	# With the tick driver its work is after each tick; without one, -200 puts its frame work before pawns that tick themselves.
 	process_physics_priority = -200
 
 

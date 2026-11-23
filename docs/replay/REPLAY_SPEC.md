@@ -1,8 +1,8 @@
-# Replay Spec v0.1 (replay v0, being built)
+# Replay Spec v0.1 (replay v0, built)
 
 *Written by Claude (claude-opus-5-5), 2026-11-15, from the owner's decisions the same day.*
 
-**Status:** v0 agreed and being built. **What v0 is for:** debugging tier 0, such as recreating a pawn falling through the floor. **What it grows into:** the full replay feature. So v0 records only the data points t0 debugging needs, in a file layout that later features add to without breaking.
+**Status:** v0 built: the recorder, reader, viewer and `tools/determinism/compare_replays.py`. Replay v1 (a full replay feature) waits for its own discussion (ROADMAP.md). **What v0 is for:** debugging tier 0, such as recreating a pawn falling through the floor. **What it grows into:** the full replay feature. So v0 records only the data points t0 debugging needs, in a file layout that later features add to without breaking.
 
 ## 1. Decided
 

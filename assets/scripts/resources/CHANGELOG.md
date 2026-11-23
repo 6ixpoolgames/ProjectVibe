@@ -9,6 +9,11 @@ The Resource classes in this folder (`InputActionsRes`, `PawnDefaultsRes`, `TagD
 
 None found.
 
+## 2026-11-23
+
+- **`archer_bolt_attack.tres`**: the four-faction archers' bolts, a variant of `bolt_attack.tres` with a 6-bolt magazine that comes back whole 10 s after the first is spent. New tags declared: the stances and `status.has_ammo`.
+- **Documentation pass:** the README brought up to the resources there are now.
+
 ## 2026-11-22
 
 - **`TagDeclarationsRes`** holds each tag with a one-line description (`tags`, a dictionary), plus `redirects` (old name to new) and `deprecated` (tag spec). `tag_declarations.tres` is the one base file, with `nav_tag_declarations.tres` and `effect_tag_declarations.tres` merged into it and every tag renamed with its category. Ability and effect resources were rewritten to the new names.

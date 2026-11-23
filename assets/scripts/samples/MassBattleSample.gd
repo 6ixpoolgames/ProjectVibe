@@ -10,10 +10,11 @@
 ##   - Claude 2026-11-23 (the owner's request: a harder scenario for testing determinism with orders only): four factions, 90 degrees
 ##     apart, spawning close (spawn_distance 40 m; 300 is the old march): red, blue and green goblins (teams 1 to 3) and the players'
 ##     soldiers (team 0). Each faction has two spawners side by side: melee fighters (faction_*_melee.tscn: no shooting) and archers
-##     (faction_*_archer.tscn: no swings or parry, no sword, bolts without limit), ranged_share of team_size (a quarter) archers.
-##     A behaviour is switched off by naming a state that doesn't exist (allowed_states = [&"Disabled"]), a stand-in: behaviours
-##     have no on/off switch, and archers still carry the melee abilities (a player who takes one can swing). Behaviour and ability
-##     sets replace it (the AI changelog's refactor rows).
+##     (faction_*_archer.tscn), ranged_share of team_size (a quarter) archers. Archers shoot until their magazine is empty
+##     (archer_bolt_attack.tres: 6 bolts, all back 10 s after the first is spent), then fight in melee until it's full again: Keep
+##     Distance needs the status.has_ammo.ranged tag (Claude 2026-11-23, the owner's test of behaviour switching). The melee fighters'
+##     Shoot and Keep Distance are switched off (enabled = false), and every role still carries every ability (a player who takes a
+##     melee fighter can shoot). Behaviour and ability sets replace that (the AI changelog's refactor rows).
 ##     The faction spawners have a StreamingSource child, so the ground around them is always loaded, wherever the players are. Red,
 ##     blue and the soldiers have a hero, with its own spawner beside its faction, which brings it back 30 s after it dies.
 ##   - A RallyPoint in the middle (the rally_point group). Every AI pawn has AIGoToPointBehaviour, so an idle one marches there; it

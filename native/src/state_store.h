@@ -12,6 +12,7 @@
 //
 // Twin: assets/scripts/state_store/StateStoreGD.gd does exactly the same in GDScript; a change goes in both, and
 // state_store/tests/state_store_selftest compares them. Rounding is StateEncoding.quantize's, value for value.
+// REFACTOR: kept twice, here and in StateStoreGD.gd (reusable, extensible); see the row in native/CHANGELOG.md.
 #pragma once
 
 #include "state_encoding.h"
@@ -189,7 +190,6 @@ private:
 	int64_t m_rows_carried = 0;
 	std::vector<Layout> m_layouts;
 	std::vector<Object *> m_nodes; // scratch, one per column while gathering
-	std::vector<Variant> m_values; // scratch
 
 	state_encoding::EncodingNames m_encoding_names;
 	StringName m_missing;

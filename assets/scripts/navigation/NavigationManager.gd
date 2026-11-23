@@ -254,7 +254,7 @@ func _find_path(point: Vector3) -> PathState:
 	if nav.closest_point(start, nav_tier) == null:
 		# NavServer is idle once every tile it was asked for is built. Not idle, the nav under the pawn may just not be built yet.
 		return PathState.PENDING if not nav.is_idle() else _straight_line(start, point)
-	# Nav under the pawn. From here, no path is UNREACHABLE whether or not nav is still building (see the top of the file).
+	# Nav under the pawn. From here, no path is UNREACHABLE whether or not nav is still building (README, How a move works).
 	# Straight away if this tick's budget allows; otherwise queued, and the pawn waits until get_move_direction takes the answer.
 	if not _may_search_now():
 		_path_request = nav.find_path(start, point, nav_tier, use_links)

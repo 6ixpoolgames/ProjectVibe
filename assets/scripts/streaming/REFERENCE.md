@@ -38,12 +38,14 @@ With the tick driver running, chunks land on ticks (state store spec 13.12): wha
 
 - `MIN_GROUND_REACH = 2.0`: The nearest a chunk edge can be to a source before the next chunk is built straight away, in metres.
 - `MAX_PREDICTED_MOVE = 8.0`: More than this between two checks, in metres, counts as a jump instead of movement. That's 480 m/s at 60 ticks a second.
+- `GROUP = &"chunk_streamers"`: The group every ChunkStreamer is in, so code that needs ground at once (spawning) can find the one for its terrain.
 
 ### Functions
 
 - `get_stats() -> Dictionary`: How things stand right now, as numbers for tests, stress runs and on-screen displays.
 - `refresh_now() -> void`: Checks the sources now, instead of waiting for the next refresh. With the tick driver, before the next tick.
 - `get_landing_tick(key: Vector2i) -> int`: The tick a chunk is due to land on, or -1 if none is scheduled.
+- `land_now(key: Vector2i) -> void`: Builds and lands this chunk right now, for code that needs its ground at once (a spawn): with the tick driver it lands on this tick, recorded like any landing. Nothing to do for a chunk already landed.
 
 ## PawnStreamingSource
 

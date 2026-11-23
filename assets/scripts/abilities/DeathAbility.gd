@@ -14,12 +14,12 @@ extends AbilityBase
 const OWNED_TAGS_SOURCE := &"death"
 
 
-## Timed: it runs while Health is 0.
 ## Its kind's defaults: a new [DeathDefinition].
 func make_default_definition() -> AbilityDefinition:
 	return DeathDefinition.new()
 
 
+## Timed: it runs while Health is 0.
 func is_timed() -> bool:
 	return true
 

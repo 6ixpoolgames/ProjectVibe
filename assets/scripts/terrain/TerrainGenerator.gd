@@ -114,7 +114,7 @@ var _mesh_nodes := {} # Vector2i -> MeshInstance3D
 var _collision_nodes := {} # Vector2i -> CollisionShape3D, each one inside its own StaticBody3D
 var _plain_material := StandardMaterial3D.new() # used when the material setting is empty
 var _has_generated := false
-# The next three are for building and unloading one chunk at a time.
+# The next three are for building chunks in steps (several at once, some held for their landing tick) and unloading them.
 var _building := {} # Vector2i -> _ChunkBuild, the chunks that are partly built
 var _edited_chunks := {} # Vector2i -> true, used only to warn when an unload is about to lose an edit
 var _warned_about_lost_edits := false
@@ -456,10 +456,19 @@ func apply_edit_from_log(x: float, z: float, radius: float, amount: float) -> vo
 
 
 ## Finishes every half-built chunk right now, before an edit is recorded: a chunk either finished first and gets the edit from the
-## loaded-chunk pass, or starts later and reads it from the log. Never both.
+## loaded-chunk pass, or starts later and reads it from the log. Never both. Held chunks are left to land on their tick (see below).
 # No underscore, because another class (TerrainEditLog) calls it.
 func finish_building_chunks() -> void:
 	for key: Vector2i in _building.keys():
+		_finish_unless_held(key)
+
+
+# A held chunk waits for its landing tick: its points aren't public, so the loaded-chunk pass never touches it, and it reads the edit
+# from the log while building or catches up when it lands (_publish). Finishing it here would publish it before its tick, at a moment
+# that depends on how far this machine had got with it.
+func _finish_unless_held(key: Vector2i) -> void:
+	var build: _ChunkBuild = _building.get(key)
+	if build == null or not build.held:
 		load_chunk(key)
 
 
@@ -544,7 +553,7 @@ func _shape_height(_x: float, _z: float, noise_height: float) -> float:
 
 ## Override to give a chunk its links and points of interest (copy tests/terrain_marker_example.gd). A TerrainNavFeeder announces them
 ## when the chunk is built and after an edit, and releases them when it's gone. Return new markers each call, positioned from this
-## node, built from the chunk's numbers (not random ones), with tags declared in nav_tag_declarations.tres.
+## node, built from the chunk's numbers (not random ones), with tags declared in resources/tag_declarations.tres.
 # The nav spec's section 21.6. The generator knows its own terrain, so it says what's there.
 func _make_chunk_markers(_key: Vector2i) -> Array[NavMarker]:
 	return []
@@ -580,7 +589,7 @@ func _return_to_default_ground() -> void:
 # No underscore, because another class (TerrainEditLog) calls it.
 func rebuild_chunks_for_log(chunks: Array) -> void:
 	for key: Vector2i in _building.keys():
-		load_chunk(key) # so a half-built chunk can't finish with what it read before
+		_finish_unless_held(key) # so a half-built chunk can't finish with what it read before
 	for key: Vector2i in chunks:
 		if has_chunk(key) and not _rebuild_queue.has(key):
 			_rebuild_queue.append(key)

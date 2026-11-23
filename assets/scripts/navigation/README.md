@@ -79,4 +79,4 @@ Over the network a client follows its own path and only sends directions; the se
 
 ## Tests
 
-`navigation/tests/`: `navigation_manager_selftest` (paths, links, waiting), `nav_selftest` (the library: tiles, paths, budgets), `nav_links_selftest`, `nav_link_module_selftest`, `nav_markers_selftest`, `nav_marker_node_selftest`, `nav_marker_manager_selftest`, `nav_tags_selftest`. Also `world/tests/body_nav_feeder_selftest` and `diagnostics/tests/nav_debug_view_selftest`. Run them with `bash tools/run_tests.sh <name>`.
+`navigation/tests/`: `navigation_manager_selftest` (paths, links, waiting), `nav_selftest` (the library: tiles, paths, budgets), `nav_links_selftest`, `nav_link_module_selftest`, `nav_markers_selftest`, `nav_marker_node_selftest`, `nav_marker_manager_selftest`, `tags/tests/tag_registry_selftest` (nav tags are the `nav` category). Also `world/tests/body_nav_feeder_selftest` and `diagnostics/tests/nav_debug_view_selftest`. Run them with `bash tools/run_tests.sh <name>`.

@@ -3,7 +3,7 @@
 ##
 ## A part on the pawn, added by PawnInitializer. It makes no decisions: it holds what the other AI parts share (the pawn, its AI
 ## controller, the other parts, the current target, the pawn's [AIInputs], the last hit and swing coming, the waiting decision, and
-## random numbers that replay the same), and the pawn calls [method run_ai] from its own tick. Behaviours and states get it as their
+## random numbers that replay the same), and the pawn calls [method run_ai] from its own tick, which runs [method think]. Behaviours and states get it as their
 ## "context":
 ## [codeblock]
 ## context.controller, context.memory, context.state_manager, context.behaviour_manager
@@ -36,7 +36,7 @@ static var order_source := Callable()
 
 ## The pawn this AI belongs to, or null if its parent isn't one.
 var pawn: Pawn = null
-## The tick the AI is running now. Set by the pawn at the start of each AI step.
+## The tick the AI is running now. Set by [method run_ai] at the start of each AI step.
 var current_tick := 0
 ## What the AI is focused on, picked by the target selector. Null when there's none.
 var current_target: Node3D = null:
@@ -86,12 +86,12 @@ func _exit_tree() -> void:
 
 # The AI notes every hit that reaches the pawn, parried ones included, by listening to the AbilityManager's hit_arrived.
 func _ready() -> void:
-	var abilities := _sibling_ability_manager()
+	var abilities := pawn.ability_manager if pawn else null
 	if abilities:
 		abilities.hit_arrived.connect(note_hit)
 
 
-# --- References (read when needed, because the pawn finds its parts in its own _ready, after ours) ---
+# --- References (read through the pawn when needed, so a part swapped later is still found) ---
 
 
 ## The AI's hands, or null if the pawn has no AI controller.
@@ -249,7 +249,7 @@ var incoming_start_tick := -1
 var incoming_hit_tick := -1
 
 
-## Called by an enemy's MeleeAttackAbility, on the server, when it starts a swing that may reach this pawn. Notes it and asks for a
+## Called by an enemy's MeleeAttackAbility or FireProjectileStep, on the server, when it starts an attack that may reach this pawn. Notes it and asks for a
 ## decision at once, since a swing's windup is shorter than the time between ordinary decisions.
 func note_incoming_attack(attacker: Pawn, start_tick: int, hit_tick: int) -> void:
 	incoming_attacker = attacker
@@ -361,6 +361,9 @@ func think(tick: int) -> void:
 		ai_target_selector.check_force_expiry(tick)
 	if is_decision_tick(tick):
 		request_decision()
+	# A running behaviour whose tag requirements stopped passing (out of shots, say) is replaced now, not at the next decision tick.
+	if ai_behaviour_manager:
+		ai_behaviour_manager.check_running(tick)
 	var decide_started := PerfScopes.begin()
 	if has_decision_waiting():
 		# A record of this decision, only while something listens (AIBehaviourManager.decision_listener): what the target and the
@@ -480,7 +483,7 @@ func pawn_number() -> int:
 	# StringNames compare by pointer, far cheaper than hashing the text.
 	if pawn.name != _number_name:
 		_number_name = pawn.name
-		_name_number = String(pawn.name).hash() & 0x7FFFFFFF
+		_name_number = _number_from_name(pawn.name)
 	return _name_number
 
 
@@ -491,15 +494,9 @@ static func number_of(other: Pawn) -> int:
 	var entity := other.get_network_entity()
 	if entity and entity.entity_id >= 0:
 		return entity.entity_id
-	return String(other.name).hash() & 0x7FFFFFFF
+	return _number_from_name(other.name)
 
-# The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
-# REFACTOR: the same lookup is in AIBehaviourManager. One shared way to find a sibling part before the pawn's own _ready (on Pawn,
-# say) would be one place to change (reusable).
-func _sibling_ability_manager() -> AbilityManager:
-	if pawn == null:
-		return null
-	for child in pawn.get_children():
-		if child is AbilityManager:
-			return child
-	return null
+
+# A pawn's number when it has no entity id; pawn_number and number_of must agree, so a replay rolls the same.
+static func _number_from_name(pawn_name: StringName) -> int:
+	return String(pawn_name).hash() & 0x7FFFFFFF

@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 183 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 184 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -36,6 +36,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [AIMemoryStoreGD](../assets/scripts/ai/REFERENCE.md#aimemorystoregd) | [ai](../assets/scripts/ai/README.md) | RefCounted | One pawn's AI memory in GDScript, plus the loops that read and write it: the sight check, the most aware entry, target scoring. |
 | [AIParryBehaviour](../assets/scripts/ai/REFERENCE.md#aiparrybehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Parries a swing coming at the pawn, some of the time ([member parry_chance]). |
 | [AIScoreCurve](../assets/scripts/ai/REFERENCE.md#aiscorecurve) | [ai](../assets/scripts/ai/README.md) | Resource | Turns one input into an amount from 0 to 1 that scales a behaviour's score: the "how much" to a condition's "whether". |
+| [AIScoreModifier](../assets/scripts/ai/REFERENCE.md#aiscoremodifier) | [ai](../assets/scripts/ai/README.md) | Definition | A change to how some behaviours compare while it lasts: "Charge!" raising melee, fear lowering fighting, a block (pawn spec 10.13). |
 | [AISearchBehaviour](../assets/scripts/ai/REFERENCE.md#aisearchbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Hunts around where an enemy it became certain of was last seen: "I know you were here". |
 | [AISenseBase](../assets/scripts/ai/REFERENCE.md#aisensebase) | [ai](../assets/scripts/ai/README.md) | Node | The base for one AI sense, such as sight: notices other pawns and writes what it found into memory. |
 | [AISensingManager](../assets/scripts/ai/REFERENCE.md#aisensingmanager) | [ai](../assets/scripts/ai/README.md) | Node | Runs a pawn's AI senses on their turn, and finds the other-team pawns they may notice. |

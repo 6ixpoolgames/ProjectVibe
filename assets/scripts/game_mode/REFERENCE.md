@@ -23,9 +23,9 @@ It also sets `Pawn.tick_step` for each running AI pawn: every tick within `full_
 
 ### Settings and properties
 
-- `edge_margin: float` = `2.0`: How close a pawn may get to unbuilt ground, in metres. It has to be further than the pawn moves between its checks, about 0.5 m for a walking pawn at the default of 6 frames.
-- `spread_over_frames: int` = `6`: Each pawn is checked once in this many physics frames, so a big horde isn't all checked at once.
-- `max_checks_per_frame: int` = `500`: The most pawns checked in one frame, however many there are. A very large horde takes longer to get through, so with a lot of fast pawns, raise edge_margin too. A removed chunk is always handled at once, so this only delays walking to an edge.
+- `edge_margin: float` = `2.0`: How close a pawn may get to unbuilt ground, in metres. It has to be further than the pawn moves between its checks, about 0.5 m for a walking pawn at the default of 6 ticks.
+- `spread_over_ticks: int` = `6`: Each pawn is checked once in this many ticks (physics frames without the tick driver), so a big horde isn't all checked at once.
+- `max_checks_per_tick: int` = `500`: The most pawns checked in one tick, however many there are. A very large horde takes longer to get through, so with a lot of fast pawns, raise edge_margin too. A removed chunk is always handled at once, so this only delays walking to an edge.
 - `steps_by_distance: bool` = `true`: On, AI pawns far from every viewer run every 2nd or 4th tick (pawn spec 8.21). Off, distance changes nothing (the load ladder still applies).
 - `full_rate_within_chunks: float` = `2.0`: Within this many chunks of the nearest viewer, an AI pawn runs every tick. Counted in whole rings of chunks.
 - `every_4th_tick_beyond_chunks: float` = `4.0`: Beyond this many chunks of the nearest viewer, every 4th tick; between the two, every 2nd.
@@ -47,7 +47,7 @@ It also sets `Pawn.tick_step` for each running AI pawn: every tick within `full_
 - `step_for(pawn: Node3D) -> int`: How often this pawn should run now: 1 (every tick), 2 or 4. See the class description.
 - `_has_ground_around(at: Vector3) -> bool`: True if some terrain has all the chunks around this position, or if there are no terrains to ask.
 - `_refresh_terrains() -> void`: Finds the terrains again, and listens for chunks going away on any new ones.
-- `_on_chunk_removed(_key: Vector2i) -> void`: A pawn could be standing on it. Its next tick can't wait for its turn in the staggered checks, so everyone gets checked before the next tick. At most one chunk unloads per frame.
+- `_on_chunk_removed(_key: Vector2i) -> void`: A pawn could be standing on it, and can't wait for its turn in the staggered checks. During a tick (chunks unload in before_tick, at most one a tick) everyone is checked at once, before the tick runs; without the tick driver, at the next check.
 
 ## GameModeModule
 

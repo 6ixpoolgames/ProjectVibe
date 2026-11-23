@@ -14,6 +14,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Settings for the InputMap names | `PlayerController` (`move_left`..., `scrollWheel_up`, `left_click`, `middleMouse_button`) | Written in the code, unlike `action_keys`; a designer can't remap them without code | S |
 | One shared path-following helper | `PlayerController.take_input_command`, `controllers/AIController.take_input_command` | Following a path and pressing a link's action is written out twice | S |
 
+## 2026-11-23
+
+- **Documentation pass:** `PlayerController`'s members documented one per line, the class doc trimmed (spectating is in the README), and references to the old camera arm replaced.
+
 ## 2026-11-18
 
 - **Comments rewritten to the reference style** (the documentation pass): the `PlayerController` and `WorldCursor` class comments shortened (spectating and the odd cases moved to the README's "How it works"). `GDScript note:` teaching comments removed, keeping any non-obvious fact shortened.

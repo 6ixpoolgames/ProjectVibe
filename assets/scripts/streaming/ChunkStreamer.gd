@@ -67,9 +67,14 @@ var _landings_on := {} # tick -> how many chunks land on it
 var _next_refresh_tick := -1
 
 
+## The group every ChunkStreamer is in, so code that needs ground at once (spawning) can find the one for its terrain.
+const GROUP := &"chunk_streamers"
+
+
 func _init() -> void:
-	# Before TickDriver's -100, so ground exists before anything ticks in a physics frame.
+	# With the tick driver its work is in before_tick; without one, -200 puts its frame work before pawns that tick themselves.
 	process_physics_priority = -200
+	add_to_group(GROUP)
 
 
 func _ready() -> void:
@@ -81,7 +86,6 @@ func _ready() -> void:
 	if _driver:
 		_driver.before_tick.connect(_on_before_tick)
 		_driver.rollback_state_loaded.connect(_on_rollback_state_loaded)
-	# With the tick driver running, the check before each tick is the one that matters; the per-frame one is for when it isn't.
 
 
 ## How things stand right now, as numbers for tests, stress runs and on-screen displays.
@@ -165,6 +169,13 @@ func _build_ground_under_sources() -> void:
 			var key := terrain.chunk_of(at + corner)
 			if not terrain.has_chunk(key):
 				_build_now(key)
+
+
+## Builds and lands this chunk right now, for code that needs its ground at once (a spawn): with the tick driver it lands on this tick,
+## recorded like any landing. Nothing to do for a chunk already landed.
+func land_now(key: Vector2i) -> void:
+	if terrain and not terrain.has_chunk(key):
+		_build_now(key)
 
 
 func _build_now(key: Vector2i) -> void:
@@ -253,7 +264,8 @@ func _unschedule(key: Vector2i) -> void:
 		_landings_on.erase(landing)
 
 
-# One step of a scheduled chunk, up to publishing; true once it's ready to land.
+# One step of a scheduled chunk, up to publishing; true once it's ready to land. Its own function so tests/SlowChunkStreamer can
+# slow it down.
 func _build_scheduled_step(key: Vector2i) -> bool:
 	return terrain.build_chunk_step(key, true)
 
@@ -279,10 +291,10 @@ func _build_scheduled(frame_started: int) -> void:
 	for key in waiting:
 		while not did_a_step or Time.get_ticks_usec() - frame_started < budget_usec:
 			var step_started := Time.get_ticks_usec()
-			var ready := _build_scheduled_step(key)
+			var finished := _build_scheduled_step(key)
 			_finish_step(step_started)
 			did_a_step = true
-			if ready:
+			if finished:
 				break
 		if did_a_step and Time.get_ticks_usec() - frame_started >= budget_usec:
 			return

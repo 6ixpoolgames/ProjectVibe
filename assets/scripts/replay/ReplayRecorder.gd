@@ -39,8 +39,6 @@ const LOCAL_IDS_START := 1 << 30
 @export_range(0, 1000, 1, "or_greater") var keep_recordings := 10
 ## Block length in seconds. Seeking starts at a block's keyframe: shorter seeks faster, longer makes smaller files.
 @export_range(0.1, 10.0, 0.1) var block_seconds := 1.0
-## Off: blocks are written on the main thread ([member ReplayWriter.use_thread]). For tests; not an inspector setting.
-var write_on_thread := true
 ## The longest a recording may be, in seconds (3 hours). 0 switches it off, as for the other safeguards below.
 @export_range(0.0, 86400.0, 60.0, "or_greater") var max_recording_seconds := 10800.0
 ## The biggest a recording's file may get, in megabytes (2 GB).
@@ -58,7 +56,6 @@ var _path := ""
 var _writer: ReplayWriter = null
 var _driver: Node = null
 var _ids := {} # pawn instance id -> replay id
-var _pawns := {} # replay id -> pawn, while it's in the tree
 var _arrived: Array = [] # pawns that entered the tree since last tick, handed to the channels at the next tick
 var _next_local_id := LOCAL_IDS_START
 var _block: Array[StreamPeerBuffer] = [] # one buffer per channel, in the order of _channels
@@ -143,7 +140,6 @@ func start_recording(role: String) -> Error:
 		_path = role_folder.path_join("%s_%d.%s" % [stamp, suffix, FILE_EXTENSION])
 		suffix += 1
 	_writer = ReplayWriter.new()
-	_writer.use_thread = write_on_thread
 	_writer.max_queued_blocks = max_queued_blocks
 	var error := _writer.open(_path, _header(role))
 	if error != OK:
@@ -154,7 +150,6 @@ func start_recording(role: String) -> Error:
 	_stopped_reason = ""
 	_next_space_check_msec = Time.get_ticks_msec() + 60000
 	_ids.clear()
-	_pawns.clear()
 	_arrived.clear()
 	_next_local_id = LOCAL_IDS_START
 	_ticks_recorded = 0
@@ -193,7 +188,6 @@ func stop_recording() -> void:
 		push_warning("ReplayRecorder: writing %s failed (error %d); the file may stop early." % [_path, _writer.get_error()])
 	_writer = null
 	_ids.clear()
-	_pawns.clear()
 	_arrived.clear()
 	recording_stopped.emit(_path)
 
@@ -287,7 +281,6 @@ func _hand_over_arrivals() -> void:
 			id = _next_local_id
 			_next_local_id += 1
 		_ids[pawn.get_instance_id()] = id
-		_pawns[id] = pawn
 		for channel in _channels:
 			channel.pawn_added(pawn, id)
 
@@ -307,7 +300,6 @@ func _on_node_removed(node: Node) -> void:
 		return
 	var id: int = _ids[key]
 	_ids.erase(key)
-	_pawns.erase(id)
 	for channel in _channels:
 		channel.pawn_removed(node, id)
 

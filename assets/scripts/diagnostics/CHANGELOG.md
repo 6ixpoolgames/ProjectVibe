@@ -4,7 +4,7 @@ does now, this says how it got here and why. -->
 
 # Diagnostics changelog
 
-Diagnostics is this folder: `PerfScopes`, `DiagnosticsManager`, `DiagnosticsLogger`, `DiagnosticsPanels` and `NavDebugView` (whose history is in [navigation's changelog](../navigation/CHANGELOG.md)), plus `replay/ReplayDiagnosticsChannel` (in [replay's changelog](../replay/CHANGELOG.md)). Design: [docs/diagnostics/DIAGNOSTICS_SPEC.md](../../../docs/diagnostics/DIAGNOSTICS_SPEC.md). Overview: [README.md](README.md).
+Diagnostics is this folder: `PerfScopes`, `DiagnosticsManager`, `DiagnosticsLogger`, `DiagnosticsPanels`, `MoveSanityCheck`, `ProjectileTraceView` (F5) and `NavDebugView` (whose history is in [navigation's changelog](../navigation/CHANGELOG.md)), plus `replay/ReplayDiagnosticsChannel` (in [replay's changelog](../replay/CHANGELOG.md)). Design: [docs/diagnostics/DIAGNOSTICS_SPEC.md](../../../docs/diagnostics/DIAGNOSTICS_SPEC.md). Overview: [README.md](README.md).
 
 ## Refactor candidates
 
@@ -12,10 +12,17 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
+| A test-only read | `DiagnosticsPanels.get_text` | Only tests call it; a test helper in `tests/` keeps it out of the shipping class | S |
+| Network stats named twice | `DiagnosticsManager._net_summary` | Reads `net_snapshots_encoded`, `net_snapshot_bytes`, `net_corrections` and others by name, so renaming one in `NetworkSession` breaks the summary without an error; work from `NetworkSession.COUNTING_STATS` | S |
 | Split the manager | `DiagnosticsManager` | One 700-line class measures frames, writes the session log, takes captures, feeds the editor's monitors, starts recordings and sets the window title. A session log writer and a capture taker of their own would each be easier to read and to swap | M |
 | Always-on recordings belong to the recorder | `DiagnosticsManager._on_possessed`, `_set_role` | A replay rule living in diagnostics: a game without the manager gets no always-on recordings. An `always_on` setting on `ReplayRecorder` keeps the rule with the recorder | S |
 | The window title in shipped games | `DiagnosticsManager._update_title` | A debugging convenience (role and process id, to tell instances apart) that also renames a release build's window, since diagnostics ship. A setting, or debug builds only, keeps a game's own title | S |
 | "Late" and "very late" as settings | `DiagnosticsManager._summary`; the F4 panel's text; `replay/ReplayViewer`'s strip colours | Fixed at 20 and 34 ms (60 and 30 fps) in three places, while spikes follow the tick rate and `spike_over_budget`. A game aiming at another frame rate can't set them | S |
+
+## 2026-11-23
+
+- **`MoveSanityCheck` allows for crowd pushes:** the crowd mover's separation pushes a pawn at up to `max_push_speed` without changing its velocity, so a pawn running every 4th tick could be pushed 0.67 m in one run, past the slack, and was warned about (the owner saw nine in a 3.5-minute four-faction battle with the load ladder on). The push is real movement, so the allowance now adds it for a pawn the crowd mover moves. A local named `owner` renamed (it shadowed `Node.owner`).
+- **Documentation pass:** `_net_summary` (network stats named twice) and `DiagnosticsPanels.get_text` (read only by tests) flagged `REFACTOR:` (rows above); `check_moves` added to the README's settings.
 
 ## 2026-11-22
 

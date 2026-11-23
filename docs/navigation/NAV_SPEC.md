@@ -1,4 +1,4 @@
-<!-- Written by Claude (claude-opus-5-5), 2026-11-02: design spec for the bespoke voxel-first dynamic navigation system. Nothing here is built yet. -->
+<!-- Written by Claude (claude-opus-5-5), 2026-11-02: design spec for the bespoke voxel-first dynamic navigation system. -->
 
 # Navigation System Spec (draft 1)
 

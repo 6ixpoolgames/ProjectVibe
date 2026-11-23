@@ -32,7 +32,7 @@ var _sphere_query := PhysicsShapeQueryParameters3D.new()
 ## Fires the shooter's copy of a shot: its definition's visual (or a scene of its own's Visual), flown from origin along direction.
 ## Null if there's nothing to draw.
 static func fire(flies_with: ProjectileDefinition, scene: PackedScene, from_pawn: Pawn, origin: Vector3, direction: Vector3, tick: int,
-		stops_at_first_pawn := true) -> PredictedProjectile:
+		stops_first := true) -> PredictedProjectile:
 	var settings: ProjectileDefinition = flies_with
 	var visual: Node3D = null
 	if scene:
@@ -55,7 +55,7 @@ static func fire(flies_with: ProjectileDefinition, scene: PackedScene, from_pawn
 	copy.flight = settings.resolved() as ProjectileDefinition
 	copy.shooter = from_pawn
 	copy.launch_tick = tick
-	copy.stops_at_first_pawn = stops_at_first_pawn
+	copy.stops_at_first_pawn = stops_first
 	copy.launch_origin = origin
 	copy.launch_direction = direction.normalized() if direction.length_squared() > 0.000001 else Vector3.FORWARD
 	if copy.flight.hitscan:
@@ -138,6 +138,8 @@ func _trace_hitscan(origin: Vector3, direction: Vector3, from_pawn: Pawn) -> Vec
 
 
 # It meets another pawn here: shown stopping, as the server's will.
+# REFACTOR: a new sphere every frame and a copy of HitQuery's physics query (with its collision mask); HitQuery.touching, as
+# _trace_hitscan uses (abilities/CHANGELOG.md).
 func _touches_pawn(at: Vector3) -> bool:
 	var sphere := SphereShape3D.new()
 	sphere.radius = flight.radius

@@ -3,8 +3,8 @@
 // slot per pawn, so slot 7 in every array is the same pawn, and slots in a fixed order: by each pawn's key, its entity id, which
 // is the same on every machine.
 //
-// GDScript: Pawn.get_table() makes the one table (when the library is loaded). Pawns join when they enter the tree and leave when
-// they leave it (Pawn.gd); AISensingManager requires the columns sensing reads; Stat.gd pushes a stat's value into its column
+// GDScript: SharedPawnTable.get_table() makes the one table (when the library is loaded). Pawns join when they enter the tree and
+// leave when they leave it (SharedPawnTable.join and leave, from Pawn.gd); AISensingManager requires the columns sensing reads; Stat.gd pushes a stat's value into its column
 // (set_value). The rows are read from the pawns' nodes once a tick, at the first refresh(tick) of that tick, so everything that
 // reads the table during a tick sees the same frozen copy. Worker jobs (AISensingJob) and AIPawnGrid read it instead of nodes.
 //
@@ -97,7 +97,6 @@ public:
 	int64_t version() const { return _version; }
 	Object *node_at(int64_t slot) const { return _nodes[size_t(slot)]; }
 	uint64_t id_at(int64_t slot) const { return _ids[size_t(slot)]; } // the pawn's instance id
-	int64_t key_at(int64_t slot) const { return _keys[size_t(slot)]; }
 	const Vector3 &position_at(int64_t slot) const { return _positions[size_t(slot)]; }
 	int64_t team_at(int64_t slot) const { return _teams[size_t(slot)]; }
 	// A column's index, for the accessors below, or -1. Indexes don't change once a column exists.

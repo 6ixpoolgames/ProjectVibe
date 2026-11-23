@@ -251,7 +251,6 @@ Safeguards stop a recording with a warning (`get_stopped_reason()`) and leave th
 - `headless_runs_apart: bool` = `true`: On, a run with no display (a test, a dedicated server) records into folder/headless/<role> instead, with its own `keep_recordings`.
 - `keep_recordings: int` = `10`: Recordings kept per role's folder; older ones are deleted when a new one starts. 0 keeps all, and skips `max_folder_megabytes` too.
 - `block_seconds: float` = `1.0`: Block length in seconds. Seeking starts at a block's keyframe: shorter seeks faster, longer makes smaller files.
-- `write_on_thread: bool` = `true`: Off: blocks are written on the main thread (`ReplayWriter.use_thread`). For tests; not an inspector setting.
 - `max_recording_seconds: float` = `10800.0`: The longest a recording may be, in seconds (3 hours). 0 switches it off, as for the other safeguards below.
 - `max_file_megabytes: int` = `2048`: The biggest a recording's file may get, in megabytes (2 GB).
 - `min_free_megabytes: int` = `1024`: The least free disk space recording needs, in megabytes (1 GB). Checked at the start and every minute.
@@ -328,7 +327,7 @@ Runs `replay_viewer.tscn`. Nothing is simulated; it only shows what was recorded
 
 - `show_tick(tick: int) -> void`: Shows the nearest recorded tick at or before this one.
 - `get_shown_tick() -> int`: The tick shown now.
-- `get_visible_ghost_count() -> int`: How many ghosts are visible now, for tests.
+- `get_visible_ghost_count() -> int`
 - `get_reader() -> ReplayReader`: The reader behind the viewer, for tests.
 
 ## ReplayWorldChannel
@@ -372,7 +371,7 @@ Design: replay spec 1 and 2.
 
 ### Settings and properties
 
-- `use_thread: bool` = `true`: Off: blocks are compressed and written on the calling thread, at once (for tests, and platforms without threads).
+- `use_thread: bool` = `true`: Off: blocks are compressed and written on the calling thread, at once, for a platform without threads.
 - `max_queued_blocks: int` = `60`: The most blocks that may wait. `push_block()` refuses more, so a slow disk never fills memory; the recorder then stops.
 
 ### Functions

@@ -11,9 +11,8 @@ extends RefCounted
 ## Who hit.
 var attacker: Pawn = null
 ## The attacker's entity id, the same on every machine (instance id for a pawn not spawned through the session); -1 with none.
+## For records and the network, which name pawns by entity id; nothing in the base reads it yet.
 var attacker_id := -1
-## The hitting ability's place under its AbilityManager; -1 with none.
-var ability_index := -1
 ## Who was hit.
 var target: Pawn = null
 ## The ability that hit, such as a MeleeAttackAbility.
@@ -40,7 +39,6 @@ static func make(attacker_pawn: Pawn, by: AbilityBase, target_pawn: Pawn, push_d
 	hit.attacker = attacker_pawn
 	hit.attacker_id = key_of(attacker_pawn) if attacker_pawn else -1
 	hit.ability = by
-	hit.ability_index = by.get_index() if by else -1
 	hit.target = target_pawn
 	hit.tick = on_tick
 	var flat := Vector3(push_direction.x, 0.0, push_direction.z)

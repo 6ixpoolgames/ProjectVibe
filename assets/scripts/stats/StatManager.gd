@@ -22,15 +22,16 @@ const DETECTABILITY := &"Detectability"
 
 ## How easy this pawn is for AI to see: its Detectability stat's value, 1 without one (pawn spec 10.4). Effects change it through the
 ## stat; game rules for stealth belong in a GameMode module.
-static func detectability_of(pawn: Node) -> float:
-	var manager: StatManager = pawn.get(&"stat_manager") if pawn else null
+static func detectability_of(of_pawn: Node) -> float:
+	var manager: StatManager = of_pawn.get(&"stat_manager") if of_pawn else null
 	var stat: Stat = manager.get_stat(DETECTABILITY) if manager else null
 	return stat.value if stat else 1.0
 
 
 ## Sets this pawn's Detectability stat's base value (what effects build on). Does nothing for a pawn without the stat.
-static func set_detectability(pawn: Node, value: float) -> void:
-	var manager: StatManager = pawn.get(&"stat_manager") if pawn else null
+# REFACTOR: only tests call it; a test helper in tests/ would keep it out of the shipping class (stats/CHANGELOG.md).
+static func set_detectability(of_pawn: Node, value: float) -> void:
+	var manager: StatManager = of_pawn.get(&"stat_manager") if of_pawn else null
 	var stat: Stat = manager.get_stat(DETECTABILITY) if manager else null
 	if stat:
 		stat.base_value = value

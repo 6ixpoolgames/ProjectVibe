@@ -54,7 +54,7 @@ Other folders: `terrain/` (the generator), `streaming/` (the streamer and source
 | Setting | Where | Default | What it does |
 |---|---|---|---|
 | `nav_hooks` | `TerrainNavFeeder` | empty | Set it to feed nav; empty, the terrain is invisible to nav |
-| `tick_nav` | `TerrainNavFeeder` | off | Ticks the nav library each physics frame, if nothing else does |
+| `tick_nav` | `TerrainNavFeeder` | off | Ticks the nav library: once after each game tick with the tick driver (noting the tiles that landed in `LandingLog`), each physics frame without it; if nothing else does |
 | `unload_margin` | `TerrainNavFeeder` | 64 m | How far past a source's nav distance its nav stays built |
 | `kill_effect` | `KillFloor` | `kill_self.tres` | What a pawn below the floor gets |
 | `check_every_ticks` | `KillFloor` | 10 | How often it checks, in ticks at 60 a second |

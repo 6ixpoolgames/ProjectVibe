@@ -8,7 +8,7 @@
 #
 # What it touches: .tres and .tscn files under assets/, only on the lines of properties that hold tags (TAG_PROPERTIES below; add a
 # game's own with --property NAME). A quoted name is replaced only when it's a whole redirect key, so "combat" never touches
-# "combatant". Scripts aren't rewritten: code uses the Tags constants, and any old name left in a script's string is listed instead.
+# "combatant". Scripts aren't rewritten: code uses the Tags constants, and any old name left in a script as a &"..." literal is listed instead.
 import argparse
 import pathlib
 import re
@@ -63,7 +63,7 @@ def rewrite_line(line, redirects, properties):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description="Rewrites old tag names (the declarations' redirects) in saved scenes and resources.")
     parser.add_argument("--dry-run", action="store_true", help="list what would change without writing")
     parser.add_argument("--property", action="append", default=[], help="another property name that holds tags")
     args = parser.parse_args()

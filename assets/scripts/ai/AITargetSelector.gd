@@ -5,10 +5,10 @@
 ## is a candidate, and the highest priority wins (ties go to the nearer, then the lower id); the winner becomes the context's
 ## current_target. The current target gets a fading bonus so the pawn doesn't flick between two close targets.
 ## [codeblock]
-## priority = awareness_weight Ã— awareness
-##          + distance_weight Ã— (1 âˆ’ distance / distance_range)     (distance to its last known position)
-##          + threat_weight Ã— threat
-##          + current_target_bonus Ã— current_target_fade's value    (only for the current target)
+## priority = awareness_weight × awareness
+##          + distance_weight × (1 − distance / distance_range)     (distance to its last known position)
+##          + threat_weight × threat
+##          + current_target_bonus × current_target_fade's value    (only for the current target)
 ## [/codeblock]
 ## [method force_target] overrides the choice, for taunts. A game with its own rules overrides [method target_priority]; the loop then
 ## runs in GDScript instead of the memory store ([code]AIMemoryStore[/code] in C++, whose [code]best_target[/code] must match this
@@ -84,7 +84,7 @@ func is_target_forced() -> bool:
 	return _forced != null
 
 
-## [method AIContextComponent.run_ai] calls this at each decision, before the state is checked.
+## [method AIContextComponent.think] calls this at each decision, before the state is checked.
 func update_target(tick: int) -> void:
 	if pawn == null:
 		return
@@ -161,7 +161,7 @@ func release_forced_target() -> void:
 		_end_force()
 
 
-## [method AIContextComponent.run_ai] calls this at the start of the AI step: applies the forces and releases queued during the
+## [method AIContextComponent.think] calls this at the start of the AI step: applies the forces and releases queued during the
 ## last tick, in the order they were asked for.
 func apply_queued(_tick: int) -> void:
 	if _queued.is_empty():
@@ -191,7 +191,7 @@ func _apply_force(entity: Node3D, hold_ticks: int, priority: int, reason: String
 	return true
 
 
-## [method AIContextComponent.run_ai] calls this every tick, so a forced target that runs out hands back on time.
+## [method AIContextComponent.think] calls this every tick, so a forced target that runs out hands back on time.
 func check_force_expiry(tick: int) -> void:
 	if _forced and _force_until_tick >= 0 and tick >= _force_until_tick:
 		_end_force()

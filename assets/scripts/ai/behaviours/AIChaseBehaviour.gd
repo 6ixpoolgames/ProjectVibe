@@ -1,11 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Runs after the current target, and stops within reach for Attack to take over.
 ##
-## Allowed in Combat. It follows the target's last known position, holding sprint and looking at it the whole time. It finds a new path
-## every [member repath_ticks], or sooner when the target has moved more than [member repath_distance] from where the path leads. Within
-## [member stop_distance] it stops and faces the target for Attack. With [member dash_to_close] on it also dashes to close the last few
-## metres. It never finishes on its own: when the target is out of sight long enough, Combat's prerequisites fail and the state change
-## replaces it.
+## Allowed in Combat. While the target is seen it gives one persistent order, [method AIController.follow]: the controller closes in on
+## the target, repathing every [member repath_ticks] or when the target moves [member repath_distance], stops within
+## [member stop_distance] and faces it for Attack. Once the target hasn't been seen for [member lost_after_ticks] it walks to where it
+## was last seen instead. It holds sprint throughout; with [member dash_to_close] on it also dashes to close the last few metres. It
+## never finishes on its own: when the target is out of sight long enough, Combat's prerequisites fail and the state change replaces it.
+## Orders only when one of those changes, so an order stream carries a few per chase, not one a tick (netcode spec 19.10).
 ## Design: pawn spec 10.7.
 # REFACTOR: the sprint action's name, &"sprint", is written into Chase, Search and Investigate. A setting (or a tag, as close_in_tag
 # is) would let a game with another name for sprinting use them without code (designer friendly). See CHANGELOG.md.
@@ -16,6 +17,8 @@ extends AIBehaviourBase
 @export_range(1, 600, 1, "or_greater") var repath_ticks := 20
 ## How far, in metres, the target must move from where the path leads before a new path is found early.
 @export_range(0.1, 50.0, 0.1, "or_greater") var repath_distance := 1.5
+## Ticks since the target was last seen after which it's chased to where it was last seen, not where it is (at 60 a second).
+@export_range(0, 600, 1, "or_greater") var lost_after_ticks := 30
 ## How close, in metres, it gets before stopping.
 @export_range(0.0, 20.0, 0.1, "or_greater") var stop_distance := 1.2 # just inside MeleeAttack attack_range (1.8) minus Attack approach_margin (0.3)
 ## On: it holds sprint while chasing. Sprint's own cooldown decides when it actually sprints.
@@ -33,17 +36,16 @@ extends AIBehaviourBase
 @export_range(0.0, 50.0, 0.1, "or_greater") var dash_to_distance := 5.5
 
 var _goal := Vector3.ZERO
-var _last_path_tick := -1000000
-# Looked up once in enter(), and what it last did, so a tick skips repeating it (ai_stress: Chase's tick, repeated by every chasing pawn,
-# cost more than its path requests).
+# Looked up once in enter(), and what it last ordered, so a tick gives an order only when something changed.
 var _hands: AIController = null
 var _memory: AIMemory = null
-var _standing := false # stopped near the target
+var _following: Node3D = null # the target it told the controller to follow; null while it walks to the last known position
 
 
 func _init() -> void:
 	super()
-	allowed_states = [&"Combat"]
+	tag_requirements = TagQuery.shared([Tags.AI.STATE_COMBAT])
+	tags = [Tags.AI.STANCE_MELEE]
 	needs_target = true
 	max_score = 0.8
 	min_score = 0.8
@@ -53,8 +55,8 @@ func _init() -> void:
 func enter(context: AIContextComponent) -> void:
 	_hands = context.controller
 	_memory = context.memory
-	_last_path_tick = -1000000
-	_standing = false
+	_following = null
+	_goal = Vector3.INF
 	_hands.hold(&"sprint", sprint)
 
 
@@ -62,26 +64,22 @@ func tick(context: AIContextComponent) -> Status:
 	var index := context.current_target_index()
 	if index < 0:
 		return Status.FAILED # the target is gone
-	var last_known := _memory.last_known_position_at(index)
-	# Every tick it runs: the look is a direction from where the pawn stands now, so it goes stale as the pawn moves.
-	# REFACTOR: an order every tick (with Keep Distance's, about half of all AI orders), too many for an order stream (netcode spec
-	# 19.10). A persistent order (look at, follow) is the fix, but it aims at the remembered position, which clients can't work out
-	# without the AI's memory: the order must use only what clients have, or be re-sent only when it changes enough. Behaviour pass.
-	_hands.look_at_point(last_known + Vector3(0.0, 1.0, 0.0))
-	var offset := last_known - pawn.global_position
+	var target := context.current_target
+	var seen := is_instance_valid(target) and _memory.ticks_since_seen_at(index, context.current_tick) <= TickDriver.ticks_at_rate(lost_after_ticks)
+	var there := target.global_position if seen else _memory.last_known_position_at(index)
+	if seen:
+		if _following != target:
+			_following = target
+			_hands.follow(target, stop_distance, Vector3(0.0, 1.0, 0.0), 0.3, repath_ticks, repath_distance)
+	elif _following != null or there.distance_to(_goal) > repath_distance:
+		# Out of sight: one walk to where it was last seen, given again only if that spot moves (memory heard of it again).
+		_following = null
+		_goal = there
+		_hands.move_to(there)
+		_hands.look_at_point(there + Vector3(0.0, 1.0, 0.0))
+	var offset := there - pawn.global_position
 	offset.y = 0.0
-	if offset.length_squared() <= stop_distance * stop_distance:
-		if not _standing:
-			_standing = true
-			_hands.stop()
-		return Status.RUNNING
-	var now := context.current_tick
-	if _standing or now - _last_path_tick >= TickDriver.ticks_at_rate(repath_ticks) or last_known.distance_to(_goal) > repath_distance or not _hands.is_following_order():
-		_standing = false
-		_goal = last_known
-		_last_path_tick = now
-		_hands.move_to(last_known)
-		# A dash to close in: whatever ability in close_in_tag's group can start. Pressed only when it can, so a press never waits in Dash's buffer.
+	# A dash to close in: whatever ability in close_in_tag's group can start. Pressed only when it can, so a press never waits in Dash's buffer.
 	if dash_to_close and pawn.ability_manager:
 		var distance_squared := offset.length_squared()
 		if distance_squared <= dash_from_distance * dash_from_distance and distance_squared >= dash_to_distance * dash_to_distance:

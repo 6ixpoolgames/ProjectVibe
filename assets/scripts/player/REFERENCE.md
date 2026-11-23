@@ -15,28 +15,28 @@ One player's controls: reads their devices, aims their camera, and gives their p
 
 Survives with no pawn, as Unreal's does. PossessionCoordinator creates it and tells it which pawn it has. It reads the player's devices (this machine only), holds the look direction and aims the camera arm, owns the player's one arm (it moves to each pawn taken), and gives its pawn this tick's input when the ControllerManager asks (`take_input_command()`). Named actions come from keys through `action_keys`. It moves nothing itself: the pawn's abilities do. To drive it from a script, extend it and override the _read functions.
 
-**Spectating:** PossessionCoordinator.spectate() lets go of the pawn and calls `start_spectating()`; the player then flies a FreeFlyCamera (`spectator_scene`). Taking a pawn stops it. While spectating with a pawn still attached (a client waiting for the server's answer), the keys fly the spectator and the pawn gets no input from them. Design: pawn spec 5, 6.2, 8.18.
+Spectating (`start_spectating()`, a FreeFlyCamera): the player README. Design: pawn spec 5, 6.2, 8.18.
 
 ### Settings and properties
 
-- `look_mode: int` = `0`
+- `look_mode: int` = `0`: How the mouse turns the view: captured, or turning at the screen's edge.
 - `mouse_sensitivity: float` = `0.0025`: Radians turned per pixel the mouse moves, in CAPTURED mode.
 - `edge_zone: float` = `0.125`: How much of the screen counts as the edge, in SCREEN_EDGE mode, as a share of its width.
 - `edge_turn_speed: float` = `150.0`: How fast the view turns at the very edge, in degrees per second, in SCREEN_EDGE mode.
 - `click_to_move: bool` = `false`: On: clicking the ground walks there, along a nav path. The pawn's NavigationManager finds and follows it.
 - `action_keys: Dictionary[StringName, StringName]` = `{...}`
 - `spectator_scene: PackedScene`: The free-flying camera used while spectating (start_spectating()). Its root must be a FreeFlyCamera. Empty: a FreeFlyCamera with its default settings.
-- `fly_up_key: StringName` = `&"move_jump"`: The keys (InputMap actions) that fly the spectator straight up and down: jump and crouch by default, so flying matches walking.
-- `fly_down_key: StringName` = `&"move_crouch"`
+- `fly_up_key: StringName` = `&"move_jump"`: The key (InputMap action) that flies the spectator straight up: jump by default, so flying matches walking.
+- `fly_down_key: StringName` = `&"move_crouch"`: The key that flies the spectator straight down: crouch by default.
 - `camera: PlayerCamera` = `null`: The real camera. It holds where it is while there's no view to follow.
 - `world_cursor: WorldCursor` = `null`: What the mouse or crosshair points at. It's off until something asks it.
-- `look_yaw: float` = `0.0`: Where the player is looking, in radians.
-- `look_pitch: float` = `0.0`
+- `look_yaw: float` = `0.0`: Where the player is looking, sideways, in radians.
+- `look_pitch: float` = `0.0`: Where the player is looking, up and down, in radians.
 
 ### Constants
 
 - `LookMode.CAPTURED = 0`: The mouse is captured and turns the view, as in most action games.
-- `LookMode.SCREEN_EDGE = 1`: The mouse stays free and the view turns when it nears the edge of the screen, as the old camera arm did.
+- `LookMode.SCREEN_EDGE = 1`: The mouse stays free and the view turns when it nears the edge of the screen, as many strategy games do.
 
 ### Functions
 
@@ -54,7 +54,7 @@ Survives with no pawn, as Unreal's does. PossessionCoordinator creates it and te
 - `_read_action_pressed(action: StringName) -> bool`: True on the rendered frame the key for this named action went down.
 - `_read_fly_up_down() -> float`: Spectating: up (1) or down (-1), from fly_up_key and fly_down_key (Space and Ctrl by default), so flying matches walking.
 - `_read_look_extra() -> Vector2`: Any turning this frame beyond the mouse, as yaw and pitch in radians. For scripts, and later for gamepads.
-- `_edge_turn(delta: float) -> float`: The old camera arm's way of turning: faster the closer the mouse is to the edge.
+- `_edge_turn(delta: float) -> float`: SCREEN_EDGE turning: faster the closer the mouse is to the edge.
 
 ## WorldCursor
 

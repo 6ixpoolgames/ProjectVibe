@@ -127,7 +127,7 @@ def main():
     parser.add_argument("--runs", type=int, default=2, help="how many runs, each compared with the first (default 2)")
     parser.add_argument("--arg", action="append", default=[], help="an argument passed on to the sample, such as --arg=--spawn-distance=40")
     parser.add_argument("--keep", help="a folder to keep the files in")
-    parser.add_argument("--show", type=int, default=12, help="differing columns to list (default 12)")
+    parser.add_argument("--show", type=int, default=12, help="differing entities and values to list (default 12)")
     parser.add_argument("--compare", nargs=2, metavar=("A", "B"), help="compare two fingerprint files instead of running")
     args = parser.parse_args()
     if args.compare:

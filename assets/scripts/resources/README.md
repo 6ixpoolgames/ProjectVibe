@@ -12,8 +12,8 @@ The Resource classes a game fills in once, and the base's own files made from th
 | `PawnDefaultsRes` | `pawn_defaults.tres` | The parts every pawn gets, the default AI brain, and how far a player's pawn loads ground and nav | `game_mode/PawnInitializer`, streaming |
 | `TagDeclarationsRes` | `tag_declarations.tres` (a game can add its own) | Every tag with a one-line description, plus renames (redirects) and deprecations, so every machine gives them the same bits | `tags/TagRegistry` |
 
-`effects/` holds the ability effects (`Effect` resources) the samples use; see `assets/scripts/effects/`.
+`effects/` holds the ability effects (`Effect` resources) the samples use; see `assets/scripts/effects/`. `abilities/` holds the ability, projectile and hit definitions (`DefinitionRegistry` finds them there).
 
-**Add an action or a tag:** add its name to the end of the list in the `.tres` file. **Change every pawn's parts:** edit `pawn_defaults.tres` (see [game_mode/README.md](../game_mode/README.md)).
+**Add an action:** add its name to the end of the list in `input_actions.tres`. **Add a tag:** see the tags README, "Add a tag" (a name and a one-line description, with its parent levels). **Change every pawn's parts:** edit `pawn_defaults.tres` (see [game_mode/README.md](../game_mode/README.md)).
 
 Every class and setting: [REFERENCE.md](REFERENCE.md) (`python tools/docs/make_reference.py resources`). History: [CHANGELOG.md](CHANGELOG.md). Tests are with the systems that read these files.

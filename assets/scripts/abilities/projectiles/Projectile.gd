@@ -1,19 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-18. History: abilities/CHANGELOG.md.
 ## A projectile in flight: a networked entity whose flight is worked out from its launch, hitting pawns (up to max_hits) and the ground.
 ##
-## A designer makes only a [ProjectileDefinition] (numbers, a visual scene, an impact scene); this built-in projectile
-## ([constant SCENE], registered once with [method register]) carries the networking and builds its look from the definition. Code of
-## its own (homing) means a scene whose root extends this, registered with [method register_scene].
-## [br][br]Fired by a [FireProjectileStep] through [method fire], which spawns it with [method NetworkSession.spawn] (offline too). Its state is a launch record (tick, origin, velocity, definition, shooter's entity id), set once and
-## never changed in flight, so nothing is sent while it flies (ability spec 9). Where it is at any tick follows from that record and its
-## [ProjectileDefinition]; clients draw the flight themselves. The server (or the offline game) sweeps each tick's stretch of flight
-## for hits through the same hit system as a swing's (ability spec 13): [HitQuery] finds who it touches, its own [HitRun] meets each
-## once against its [HitDefinition] (the firing ability's, unless it was fired with another), and the ability lands the hit, so
-## damage, knockback, parries and dash invulnerability work as for melee. It stops when its hit run is spent, at the world, or past its
-## range or lifetime. A shooter that's gone lands no hits (ability spec 13.5). For its first ticks of flight, hits are checked against where the shooter saw other pawns (lag compensation).
-## [br][br]Visual hooks, apart from the ability's: [signal launched], [signal hit_pawn], [signal hit_world] and [signal ended], and its
-## definition's impact_scene where it ends. Hits are only known where they're decided, so a client hears launched and ended.
-## Design: ability spec 9, pawn spec 8.24.
+## A designer makes only a [ProjectileDefinition]; this built-in projectile ([constant SCENE], registered with [method register])
+## carries the networking and builds its look from the definition; code of its own (homing) means a scene extending this, registered
+## with [method register_scene]. Fired by a [FireProjectileStep] through [method fire]. Its state is a launch record set once, so nothing
+## is sent while it flies; clients draw the flight themselves. The server sweeps each tick's stretch of flight through the same hit
+## system as a swing ([HitQuery], its own [HitRun]), with lag compensation for its first ticks. A shooter that's gone lands no hits,
+## unless its hit definition's lands_without_source is on. Details: the abilities README. Design: ability spec 9, pawn spec 8.24.
 ## [codeblock]
 ## Projectile.register()     # at startup, on every machine, before hosting or joining
 ## Projectile.fire(ability, origin, direction, preload("res://assets/scripts/resources/abilities/bolt.tres"))
@@ -84,6 +77,7 @@ var max_range: float:
 		return flight().max_range
 
 var _shooter_instance := 0 # the shooter's instance id, for a shooter with no entity id
+@warning_ignore("unused_private_class_variable") # read and written by name, by its HitRun
 var _hit_keys := PackedInt64Array() # the pawns it has hit (HitInfo.key_of): its hit run's list
 var _cleared_shooter := false # it has left the shooter's body, so the shooter can be hit (hits_self)
 var _view_delay := 0.0 # how far behind the shooter saw other pawns when it fired, in ticks
@@ -122,7 +116,7 @@ static func type_name_for(scene: PackedScene) -> String:
 
 
 ## Registers a projectile scene of its own (code of its own) as a network type, once. Every machine does it at startup, before hosting or joining: the list of types
-## is part of the join check, so one registered later stops new players joining (the faction samples register the bolt).
+## is part of the join check, so one registered later stops new players joining.
 static func register_scene(scene: PackedScene) -> void:
 	var type := type_name_for(scene)
 	if NetworkSession.get_type_scene(type) == null:

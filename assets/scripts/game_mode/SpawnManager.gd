@@ -222,13 +222,26 @@ func _spot(centre: Vector3, yaw: float, radius: float, rng: RandomNumberGenerato
 	return {"position": at, "yaw": yaw}
 
 
+# The chunk, landed now if it isn't yet: through the terrain's ChunkStreamer, so it's on this tick and recorded (state store spec 13.12),
+# rather than published at a moment of its own. A terrain with no streamer builds it itself.
+func _land_chunk(terrain: TerrainGenerator, key: Vector2i) -> void:
+	if terrain.has_chunk(key):
+		return
+	for node in get_tree().get_nodes_in_group(ChunkStreamer.GROUP):
+		var streamer := node as ChunkStreamer
+		if streamer and streamer.terrain == terrain:
+			streamer.land_now(key)
+			return
+	terrain.load_chunk(key)
+
+
 ## The height a pawn appears at here: on terrain, just above the ground (building that chunk first if it isn't yet, since the server
 ## may have no ground there); without terrain, the height it was given.
 func _ground_height(at: Vector3) -> float:
 	for node in get_tree().get_nodes_in_group(TerrainGenerator.GROUP):
 		var terrain := node as TerrainGenerator
 		if terrain:
-			terrain.load_chunk(terrain.chunk_of(at))
+			_land_chunk(terrain, terrain.chunk_of(at))
 			return terrain.height_at(at.x, at.z) + ground_lift
 	return at.y
 

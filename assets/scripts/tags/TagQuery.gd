@@ -37,6 +37,7 @@ var _impossible := false # all_of names a tag with no bit, which nothing can own
 var _needs_any := false
 var _compiled_generation := -1
 var _compiled_tag_count := -1
+static var _shared := {} # shared()'s queries, by their lists as text
 
 
 ## A query made in code, for tests and for game code that builds one on the fly.
@@ -66,6 +67,40 @@ func matches_words(words: PackedInt64Array) -> bool:
 		if word & _any[i] != 0:
 			any_hit = true
 	return any_hit
+
+
+## The query compiled, for C++ (the AI decider) and saved records: the three lists by name, and as one word per category in
+## [method TagRegistry.get_categories] order (all, any, none), with impossible (all_of names a tag nothing can own).
+func describe_words() -> Dictionary:
+	_compile_if_needed()
+	return {"all_of": _names(all_of), "any_of": _names(any_of), "none_of": _names(none_of),
+		"all": _all.duplicate(), "any": _any.duplicate(), "none": _none.duplicate(), "impossible": _impossible}
+
+
+## Owned tag names as one word per category, parents included, as [method OwnedTags.get_words] gives them: for a saved list of owned
+## tags read back in another run, where the bits may differ.
+static func words_of(tags: Array) -> PackedInt64Array:
+	var words := _empty_words(TagRegistry.get_categories().size())
+	for tag in tags:
+		var t := TagRegistry.normalize(tag)
+		var mask := TagRegistry.mask_of(t)
+		var word := TagRegistry.word_of(TagRegistry.category_of(t))
+		if word >= words.size(): # a category added by mask_of
+			words.resize(word + 1)
+		if word >= 0:
+			words[word] |= mask
+	return words
+
+
+## A query made once and shared, for a script's built-in default (every behaviour of a kind reads the same one). Don't change it:
+## assign a new query instead.
+static func shared(all: Array = [], any: Array = [], none: Array = []) -> TagQuery:
+	var key := "%s|%s|%s" % [all, any, none]
+	var query: TagQuery = _shared.get(key)
+	if query == null:
+		query = make(all, any, none)
+		_shared[key] = query
+	return query
 
 
 ## True if every list is empty: the query passes for anyone.
@@ -121,6 +156,13 @@ static func _empty_words(count: int) -> PackedInt64Array:
 	words.resize(count)
 	words.fill(0)
 	return words
+
+
+static func _names(tags: Array[StringName]) -> Array:
+	var out: Array = []
+	for tag in tags:
+		out.append(String(tag))
+	return out
 
 
 static func _typed(tags: Array) -> Array[StringName]:

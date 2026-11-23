@@ -185,9 +185,9 @@ func _start_replaying_orders() -> void:
 		(by_pawn.get_or_add(String(entry[1]), []) as Array).append([entry[2], entry[3], entry[4]])
 	AIContextComponent.order_source = func(context: AIContextComponent, tick: int) -> void:
 		for order: Array in _orders.get(tick, {}).get(String(context.pawn.name), []):
-			# An order given outside its pawn's AI step (the AI tidying up when its pawn dies, mid-tick) belongs to another moment of
-			# the tick; played here it would come too early. A dead pawn's input is cleared anyway, so it changes nothing. A workaround
-			# until the AI stops giving orders on death (the REFACTOR in AIBehaviourManager._ready).
+			# Claude 2026-11-23: none are expected since a dead pawn's controller takes no orders (it was the AI tidying up mid-tick when
+			# its pawn died). One given outside its pawn's AI step belongs to another moment of the tick, so it's left out and counted,
+			# and the summary line says so.
 			if not order[2]:
 				_orders_skipped += 1
 				continue

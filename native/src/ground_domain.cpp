@@ -21,11 +21,10 @@ constexpr int MAX_STRAIGHT = 1024;
 constexpr int MAX_QUERY_NODES = 8192;
 const float SNAP_EXTENTS[3] = { 2.0f, 4.0f, 2.0f }; // how far from the nav mesh a start/goal may be
 
-// Detour's findNearestPoly with ties settled by polygon ref. Detour keeps the first polygon with the smallest score, in the order
-// its bounding-volume tree hands them over; that tree is built with qsort, which isn't stable, so polygons with equal keys come out
-// in a different order on another platform's C runtime (MSVC against glibc), and so does the winner of a tie. Ties are common: a
-// point over a polygon and within climb height scores 0, as does a point over two at their shared edge. Same score, then the
-// lower ref, so every platform picks the same polygon. Found by comparing Windows and Linux (state store spec 13.11).
+// Detour's findNearestPoly with ties settled by polygon ref. Detour keeps the first polygon with the smallest score, in the order its
+// bounding-volume tree hands them over. That order is the same everywhere now (stable_qsort.h), but a tie is still settled by an
+// accident of the tree; here it goes to the lower ref, whatever the order. Ties are common: a point over a polygon within climb height
+// scores 0, as does a point over two at their shared edge (state store spec 13.11).
 class DeterministicNearestPoly : public dtPolyQuery {
 public:
 	DeterministicNearestPoly(const dtNavMeshQuery *query, const float *center) : m_query(query), m_center(center) {}

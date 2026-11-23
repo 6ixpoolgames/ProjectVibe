@@ -22,13 +22,13 @@ signal ai_deactivated(pawn: Node3D)
 signal ai_activated(pawn: Node3D)
 
 ## How close a pawn may get to unbuilt ground, in metres. It has to be further than the pawn moves between its checks,
-## about 0.5 m for a walking pawn at the default of 6 frames.
+## about 0.5 m for a walking pawn at the default of 6 ticks.
 @export var edge_margin := 2.0
-## Each pawn is checked once in this many physics frames, so a big horde isn't all checked at once.
-@export_range(1, 60, 1) var spread_over_frames := 6
-## The most pawns checked in one frame, however many there are. A very large horde takes longer to get through, so with a lot
-## of fast pawns, raise edge_margin too. A removed chunk is always handled at once, so this only delays walking to an edge.
-@export_range(1, 100000, 1, "or_greater") var max_checks_per_frame := 500
+## Each pawn is checked once in this many ticks (physics frames without the tick driver), so a big horde isn't all checked at once.
+@export_range(1, 60, 1) var spread_over_ticks := 6
+## The most pawns checked in one tick, however many there are. A very large horde takes longer to get through, so with a lot of fast
+## pawns, raise edge_margin too. A removed chunk is always handled at once, so this only delays walking to an edge.
+@export_range(1, 100000, 1, "or_greater") var max_checks_per_tick := 500
 ## On, AI pawns far from every viewer run every 2nd or 4th tick (pawn spec 8.21). Off, distance changes nothing (the load ladder
 ## still applies).
 @export var steps_by_distance := true
@@ -46,20 +46,28 @@ var _connected_terrains := {} # TerrainGenerator -> true
 var _check_everyone := false
 var _viewers := PackedVector3Array() # where the viewers are this frame
 var _chunk_size := 64.0 # from the first terrain, for the distances
+var _driver: Node = null
 
 
 func _init() -> void:
-	# After ChunkStreamer's -200, so new ground counts, and before TickDriver's -100, so nothing ticks over ground that's gone.
+	# Without the tick driver: after ChunkStreamer's -200, so new ground counts, and before pawns that tick themselves.
 	process_physics_priority = -150
 
 
 func _on_module_added(game_mode: GameModeSingleton) -> void:
 	game_mode.ai_activation_manager = self
 	_session = get_node_or_null("/root/NetworkSession")
+	# With the tick driver, the checks run before each tick, so which pawns are checked when doesn't depend on how many ticks a frame
+	# runs (deterministic, as the landing schedule is).
+	_driver = get_node_or_null("/root/TickDriver")
+	if _driver and not _driver.before_tick.is_connected(_on_before_tick):
+		_driver.before_tick.connect(_on_before_tick)
 
 
 func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	game_mode.ai_activation_manager = null
+	if _driver and _driver.before_tick.is_connected(_on_before_tick):
+		_driver.before_tick.disconnect(_on_before_tick)
 	for pawn: Node3D in _inactive.keys():
 		if is_instance_valid(pawn):
 			_set_active(pawn, true)
@@ -124,12 +132,27 @@ func get_watched_count() -> int:
 
 
 func _physics_process(_delta: float) -> void:
+	if not _on_ticks():
+		_timed_check()
+
+
+func _on_before_tick(_dt: float, _tick: int) -> void:
+	if _on_ticks() and not TickDriver.is_resimulating():
+		_timed_check()
+
+
+func _timed_check() -> void:
 	var started := PerfScopes.begin() # timed for diagnostics (PerfScopes)
 	_check_pawns()
 	PerfScopes.end(&"ai.activation", started)
 
 
-# The work itself, timed by _physics_process.
+# True while the tick driver runs: the checks are on its ticks then.
+func _on_ticks() -> bool:
+	return _driver != null and _driver.active
+
+
+# The work itself, timed by _timed_check.
 func _check_pawns() -> void:
 	if _pawns.is_empty():
 		return
@@ -140,7 +163,7 @@ func _check_pawns() -> void:
 		for pawn: Node3D in _pawns:
 			if is_instance_valid(pawn):
 				_check_pawn(pawn)
-	var count := mini(ceili(float(_pawns.size()) / spread_over_frames), max_checks_per_frame)
+	var count := mini(ceili(float(_pawns.size()) / spread_over_ticks), max_checks_per_tick)
 	for i in count:
 		if _pawns.is_empty():
 			return
@@ -244,10 +267,12 @@ func _refresh_terrains() -> void:
 				terrain.chunk_removed.connect(_on_chunk_removed)
 
 
-## A pawn could be standing on it. Its next tick can't wait for its turn in the staggered checks, so everyone gets checked
-## before the next tick. At most one chunk unloads per frame.
+## A pawn could be standing on it, and can't wait for its turn in the staggered checks. During a tick (chunks unload in before_tick,
+## at most one a tick) everyone is checked at once, before the tick runs; without the tick driver, at the next check.
 func _on_chunk_removed(_key: Vector2i) -> void:
 	_check_everyone = true
+	if _on_ticks():
+		_check_pawns()
 
 
 func _on_possession_changed(pawn: Node3D, _has_player: bool) -> void:

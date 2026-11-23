@@ -85,8 +85,6 @@ int AIBatchDecider::add_brain(const Dictionary &description) {
 	brain.tie_margin = double(description.get("tie_margin", 0.0001));
 	brain.randomize_ties = bool(description.get("randomize_ties", false));
 	brain.tie_salt = int64_t(description.get("tie_salt", 0x7135));
-	// Each behaviour's allowed states, kept until the fixed order is known.
-	std::vector<Array> allowed;
 	for (int64_t i = 0; i < list.size(); ++i) {
 		const Dictionary entry = list[i];
 		Behaviour behaviour;
@@ -132,8 +130,27 @@ int AIBatchDecider::add_brain(const Dictionary &description) {
 			curve.to = double(described.get("to", 1.0));
 			brain.curves.push_back(curve);
 		}
+		// Switched off (enabled false): a gate nothing passes.
+		if (!bool(entry.get("enabled", true))) {
+			behaviour.has_gate = true;
+			behaviour.gate_impossible = true;
+		}
+		const Variant gate = entry.get("tag_requirements", Variant());
+		if (gate.get_type() == Variant::DICTIONARY) {
+			const Dictionary g = gate;
+			const PackedInt64Array all = g.get("all", PackedInt64Array());
+			const PackedInt64Array any = g.get("any", PackedInt64Array());
+			const PackedInt64Array none = g.get("none", PackedInt64Array());
+			behaviour.has_gate = true;
+			behaviour.gate_impossible = behaviour.gate_impossible || bool(g.get("impossible", false)); // switched off stays off
+			for (int64_t w = 0; w < all.size(); ++w) {
+				behaviour.gate_all.push_back(uint64_t(all[w]));
+				behaviour.gate_any.push_back(w < any.size() ? uint64_t(any[w]) : 0);
+				behaviour.gate_none.push_back(w < none.size() ? uint64_t(none[w]) : 0);
+				behaviour.gate_needs_any = behaviour.gate_needs_any || (w < any.size() && any[w] != 0);
+			}
+		}
 		brain.behaviours.push_back(behaviour);
-		allowed.push_back(entry.get("allowed_states", Array()));
 	}
 	// The fixed order: by name, as AIBehaviourManager._collect_behaviours sorts (String comparison, so the same order).
 	std::vector<int> order(brain.behaviours.size());
@@ -144,14 +161,10 @@ int AIBatchDecider::add_brain(const Dictionary &description) {
 		return String(brain.behaviours[a].name) < String(brain.behaviours[b].name);
 	});
 	std::vector<Behaviour> sorted;
-	std::vector<Array> sorted_allowed;
 	for (int i : order) {
 		sorted.push_back(brain.behaviours[i]);
-		sorted_allowed.push_back(allowed[i]);
 	}
 	brain.behaviours = sorted;
-	// The state masks: [0] for any state no behaviour names, then one per named state.
-	brain.state_masks.push_back(0);
 	for (size_t slot = 0; slot < brain.behaviours.size(); ++slot) {
 		const uint64_t bit = uint64_t(1) << slot;
 		if (brain.behaviours[slot].needs_target) {
@@ -160,28 +173,10 @@ int AIBatchDecider::add_brain(const Dictionary &description) {
 		if (brain.behaviours[slot].presses_action) {
 			brain.presses_action_mask |= bit;
 		}
-		const Array &states = sorted_allowed[slot];
-		if (states.is_empty()) {
-			for (int64_t &mask : brain.state_masks) {
-				mask = int64_t(uint64_t(mask) | bit); // allowed everywhere, so in every mask, including ones added later (below)
-			}
-			continue;
-		}
-		for (int64_t i = 0; i < states.size(); ++i) {
-			const StringName state = StringName(String(states[i]));
-			size_t index = 0;
-			while (index < brain.state_names.size() && brain.state_names[index] != state) {
-				++index;
-			}
-			if (index == brain.state_names.size()) {
-				brain.state_names.push_back(state);
-				brain.state_masks.push_back(brain.state_masks[0]); // starts with the ones allowed everywhere so far
-			}
-			brain.state_masks[index + 1] = int64_t(uint64_t(brain.state_masks[index + 1]) | bit);
+		if (brain.behaviours[slot].has_gate) {
+			brain.gated_mask |= bit;
 		}
 	}
-	// A behaviour allowed everywhere that came before a state was first named is already in that state's mask (copied from [0]);
-	// one that comes after is added to every mask above. Either way, every mask holds every behaviour with no allowed_states.
 	_brains.push_back(brain);
 	_stride = std::max(_stride, int(brain.behaviours.size()));
 	return int(_brains.size()) - 1;
@@ -298,15 +293,24 @@ StringName AIBatchDecider::get_behaviour_name(int brain, int slot) const {
 	return _brains[brain].behaviours[slot].name;
 }
 
-int AIBatchDecider::find_state(int brain, const StringName &state) const {
-	ERR_FAIL_INDEX_V(brain, int(_brains.size()), 0);
-	const std::vector<StringName> &names = _brains[brain].state_names;
-	for (size_t i = 0; i < names.size(); ++i) {
-		if (names[i] == state) {
-			return int(i) + 1;
+bool AIBatchDecider::passes_gate(const Behaviour &behaviour, const uint64_t *owned, int64_t owned_count) {
+	if (!behaviour.has_gate) {
+		return true;
+	}
+	if (behaviour.gate_impossible) {
+		return false;
+	}
+	bool any_hit = !behaviour.gate_needs_any;
+	for (size_t i = 0; i < behaviour.gate_all.size(); ++i) {
+		const uint64_t word = int64_t(i) < owned_count ? owned[i] : 0;
+		if ((word & behaviour.gate_all[i]) != behaviour.gate_all[i] || (word & behaviour.gate_none[i]) != 0) {
+			return false;
+		}
+		if (word & behaviour.gate_any[i]) {
+			any_hit = true;
 		}
 	}
-	return 0;
+	return any_hit;
 }
 
 int AIBatchDecider::get_stride() const {
@@ -391,13 +395,12 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	const int64_t rows = brains_holder.size();
 	const int64_t flat = rows * _stride;
 	PackedInt64Array pawn_h, seed_h, tick_h, started_h, cooling_h, press_h, known_h, avail_h;
-	PackedInt32Array state_h, priority_h, running_h;
+	PackedInt32Array priority_h, running_h;
 	PackedByteArray target_h, normal_h;
 	PackedFloat64Array persistence_h, score_h;
 	const auto *pawn = column(columns, "pawn_number", Variant::PACKED_INT64_ARRAY, rows, pawn_h);
 	const auto *seed = column(columns, "random_seed", Variant::PACKED_INT64_ARRAY, rows, seed_h);
 	const auto *tick = column(columns, "tick", Variant::PACKED_INT64_ARRAY, rows, tick_h);
-	const auto *state = column(columns, "state", Variant::PACKED_INT32_ARRAY, rows, state_h);
 	const auto *has_target = column(columns, "has_target", Variant::PACKED_BYTE_ARRAY, rows, target_h);
 	const auto *normal = column(columns, "event_normal", Variant::PACKED_BYTE_ARRAY, rows, normal_h);
 	const auto *priority = column(columns, "event_priority", Variant::PACKED_INT32_ARRAY, rows, priority_h);
@@ -416,7 +419,17 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	if (input_stride > 0 && !inputs) {
 		return result; // column() said why
 	}
-	if (!pawn || !seed || !tick || !state || !has_target || !normal || !priority || !running || !started || !cooling || !can_press ||
+	// The owned tags (rows * tag_words), the modifiers' sums (rows * stride) and the blocks: all optional.
+	const int64_t tag_words = int64_t(columns.get("tag_words", 0));
+	PackedInt64Array owned_h, blocked_h;
+	PackedFloat64Array modifier_h;
+	const auto *owned = tag_words > 0 ? column(columns, "owned", Variant::PACKED_INT64_ARRAY, rows * tag_words, owned_h) : nullptr;
+	const auto *modifiers = columns.has("modifier") ? column(columns, "modifier", Variant::PACKED_FLOAT64_ARRAY, flat, modifier_h) : nullptr;
+	const auto *blocked = columns.has("blocked") ? column(columns, "blocked", Variant::PACKED_INT64_ARRAY, rows, blocked_h) : nullptr;
+	if ((tag_words > 0 && !owned) || (columns.has("modifier") && !modifiers) || (columns.has("blocked") && !blocked)) {
+		return result; // column() said why
+	}
+	if (!pawn || !seed || !tick || !has_target || !normal || !priority || !running || !started || !cooling || !can_press ||
 			!known || !available || !persistence) {
 		return result;
 	}
@@ -435,6 +448,8 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	const double *persistence_of = persistence->ptr();
 	const double *score_of = scores ? scores->ptr() : nullptr;
 	const double *inputs_of = inputs ? inputs->ptr() : nullptr;
+	const uint64_t *owned_of = owned ? reinterpret_cast<const uint64_t *>(owned->ptr()) : nullptr;
+	const double *modifier_of = modifiers ? modifiers->ptr() : nullptr;
 
 	for (int64_t r = 0; r < rows; ++r) {
 		chosen_out.set(r, -1);
@@ -452,7 +467,10 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 		in.now = (*tick)[r];
 		in.event_priority = (*priority)[r];
 		in.event_normal = (*normal)[r] != 0;
-		in.state = (*state)[r];
+		in.owned = owned_of ? owned_of + r * tag_words : nullptr;
+		in.owned_count = owned_of ? tag_words : 0;
+		in.modifier = modifier_of ? modifier_of + r * _stride : nullptr;
+		in.blocked = blocked ? uint64_t((*blocked)[r]) : 0;
 		in.has_target = (*has_target)[r] != 0;
 		in.cooling = uint64_t((*cooling)[r]);
 		in.can_press = uint64_t((*can_press)[r]);
@@ -482,23 +500,30 @@ AIBatchDecider::RowResult AIBatchDecider::decide_row(const Brain &brain, const R
 		return out;
 	}
 	const uint64_t run_bit = (run >= 0 && run < count) ? (uint64_t(1) << run) : 0;
-	// 0. Interrupts (AIBehaviourManager._can_replace_running).
+	// 0. Interrupts (AIBehaviourManager._can_replace_running). One whose tag requirements fail, or that a modifier blocks (_must_go),
+	// isn't held by its min_run_ticks; its threshold and cannot_be_interrupted still hold it.
 	if (run_bit) {
 		const Behaviour &running_one = brain.behaviours[run];
 		const int64_t threshold = in.interrupt_threshold ? in.interrupt_threshold[run] : running_one.interrupt_threshold;
+		const bool must_go = (in.blocked & run_bit) != 0 || !passes_gate(running_one, in.owned, in.owned_count);
+		const bool normal = in.event_normal && !must_go;
 		const bool keep = running_one.cannot_be_interrupted || in.event_priority < threshold ||
-				(in.event_normal && running_one.min_run_ticks > 0 && now - in.running_started < running_one.min_run_ticks);
+				(normal && running_one.min_run_ticks > 0 && now - in.running_started < running_one.min_run_ticks);
 		if (keep) {
 			out.chosen = run;
 			out.kept = true;
 			return out;
 		}
 	}
-	// 1 and 2. Valid behaviours and the hard rules, as masks: allowed in the state; not cooling down (the running one excepted);
-	// a target if it needs one; its action can start (the running one excepted, having pressed it already).
-	const uint64_t allowed = (in.state >= 0 && in.state < int(brain.state_masks.size())) ? uint64_t(brain.state_masks[in.state])
-																						  : uint64_t(brain.state_masks[0]);
-	uint64_t candidates = allowed;
+	// 1 and 2. Valid behaviours and the hard rules, as masks: tag requirements pass; not blocked; not cooling down (the running one
+	// excepted); a target if it needs one; its action can start (the running one excepted, having pressed it already).
+	uint64_t candidates = count >= 64 ? ~uint64_t(0) : (uint64_t(1) << count) - 1;
+	for (int slot = 0; slot < count; ++slot) {
+		if (((brain.gated_mask >> slot) & 1) && !passes_gate(brain.behaviours[slot], in.owned, in.owned_count)) {
+			candidates &= ~(uint64_t(1) << slot);
+		}
+	}
+	candidates &= ~in.blocked;
 	candidates &= ~(in.cooling & ~run_bit);
 	if (!in.has_target) {
 		candidates &= ~brain.needs_target_mask;
@@ -515,7 +540,8 @@ AIBatchDecider::RowResult AIBatchDecider::decide_row(const Brain &brain, const R
 		const double jitter = in.jitter ? in.jitter[slot] : behaviour.jitter;
 		Candidate c;
 		c.slot = slot;
-		c.persistence = in.persistence[slot];
+		// Persistence and the modifiers' sum together, added as GDScript adds them (its boost), so the two agree to the bit.
+		c.persistence = in.persistence[slot] + (in.modifier ? in.modifier[slot] : 0.0);
 		c.jitter = jitter > 0.0 ? jitter * (random_unit_at(view.random_seed, view.pawn_number, now, behaviour.name_hash) * 2.0 - 1.0) : 0.0;
 		c.ceiling = behaviour.max_score + c.persistence + jitter;
 		c.has_floor = behaviour.has_min_score;
@@ -564,7 +590,7 @@ AIBatchDecider::RowResult AIBatchDecider::decide_row(const Brain &brain, const R
 			_ties.push_back(c.slot);
 		}
 	}
-	// 6. Ties: the fixed order, or a replayable random pick.
+	// 5. Ties: the fixed order, or a replayable random pick.
 	if (_ties.size() > 1) {
 		std::sort(_ties.begin(), _ties.end());
 		if (brain.randomize_ties) {
@@ -877,9 +903,21 @@ void AIBatchDecider::set_body(int row, int64_t body_id, Object *memory_store) {
 	_pawns[row].memory_store = Ref<RefCounted>(Object::cast_to<RefCounted>(memory_store));
 }
 
-void AIBatchDecider::set_state(int row, int state) {
+void AIBatchDecider::set_owned_tags(int row, const PackedInt64Array &words) {
 	ERR_FAIL_COND(!row_ok(row));
-	_pawns[row].state = state;
+	std::vector<uint64_t> &owned = _pawns[row].owned;
+	owned.resize(size_t(words.size()));
+	for (int64_t i = 0; i < words.size(); ++i) {
+		owned[i] = uint64_t(words[i]);
+	}
+}
+
+void AIBatchDecider::set_modifiers(int row, const PackedFloat64Array &sums, int64_t blocked_mask) {
+	ERR_FAIL_COND(!row_ok(row));
+	PawnRow &p = _pawns[row];
+	ERR_FAIL_COND_MSG(sums.size() != int64_t(_brains[p.brain].behaviours.size()), "AIBatchDecider.set_modifiers: one sum per behaviour.");
+	p.modifier.assign(sums.ptr(), sums.ptr() + sums.size());
+	p.blocked = uint64_t(blocked_mask);
 }
 
 void AIBatchDecider::set_target(int row, int64_t target_id) {
@@ -918,7 +956,17 @@ Dictionary AIBatchDecider::get_facts(int row) const {
 	Dictionary facts;
 	ERR_FAIL_COND_V(!row_ok(row), facts);
 	const PawnRow &p = _pawns[row];
-	facts["state"] = p.state;
+	PackedInt64Array owned;
+	for (uint64_t word : p.owned) {
+		owned.append(int64_t(word));
+	}
+	facts["owned"] = owned;
+	PackedFloat64Array modifier;
+	for (double sum : p.modifier) {
+		modifier.append(sum);
+	}
+	facts["modifier"] = modifier;
+	facts["blocked"] = int64_t(p.blocked);
 	facts["target_id"] = int64_t(p.target_id);
 	facts["can_press"] = int64_t(p.can_press);
 	return facts;
@@ -949,7 +997,10 @@ int AIBatchDecider::decide_pawn(int row, int64_t tick, int64_t event_priority, b
 	in.now = tick;
 	in.event_priority = event_priority;
 	in.event_normal = event_normal;
-	in.state = p.state;
+	in.owned = p.owned.data();
+	in.owned_count = int64_t(p.owned.size());
+	in.modifier = p.modifier.empty() ? nullptr : p.modifier.data();
+	in.blocked = p.blocked;
 	in.has_target = alive(p.target_id) != nullptr;
 	in.cooling = cooling;
 	in.can_press = p.can_press;
@@ -988,7 +1039,6 @@ void AIBatchDecider::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_behaviour_count", "brain"), &AIBatchDecider::get_behaviour_count);
 	ClassDB::bind_method(D_METHOD("find_behaviour", "brain", "name"), &AIBatchDecider::find_behaviour);
 	ClassDB::bind_method(D_METHOD("get_behaviour_name", "brain", "slot"), &AIBatchDecider::get_behaviour_name);
-	ClassDB::bind_method(D_METHOD("find_state", "brain", "state"), &AIBatchDecider::find_state);
 	ClassDB::bind_method(D_METHOD("get_stride"), &AIBatchDecider::get_stride);
 	ClassDB::bind_method(D_METHOD("decide", "columns"), &AIBatchDecider::decide);
 	ClassDB::bind_method(D_METHOD("random_unit", "seed", "pawn_number", "tick", "salt"), &AIBatchDecider::random_unit);
@@ -1007,7 +1057,8 @@ void AIBatchDecider::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("persistence_now", "row", "slot", "tick"), &AIBatchDecider::persistence_now);
 	ClassDB::bind_method(D_METHOD("decide_pawn", "row", "tick", "event_priority", "event_normal"), &AIBatchDecider::decide_pawn);
 	ClassDB::bind_method(D_METHOD("set_body", "row", "body_id", "memory_store"), &AIBatchDecider::set_body);
-	ClassDB::bind_method(D_METHOD("set_state", "row", "state"), &AIBatchDecider::set_state);
+	ClassDB::bind_method(D_METHOD("set_owned_tags", "row", "words"), &AIBatchDecider::set_owned_tags);
+	ClassDB::bind_method(D_METHOD("set_modifiers", "row", "sums", "blocked_mask"), &AIBatchDecider::set_modifiers);
 	ClassDB::bind_method(D_METHOD("set_target", "row", "target_id"), &AIBatchDecider::set_target);
 	ClassDB::bind_method(D_METHOD("set_can_press", "row", "mask"), &AIBatchDecider::set_can_press);
 	ClassDB::bind_method(D_METHOD("set_input", "row", "slot", "value"), &AIBatchDecider::set_input);

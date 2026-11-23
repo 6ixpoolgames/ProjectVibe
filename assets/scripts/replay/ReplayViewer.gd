@@ -79,6 +79,7 @@ func get_shown_tick() -> int:
 
 
 ## How many ghosts are visible now, for tests.
+# REFACTOR: this and get_reader are read only by replay_selftest (replay/CHANGELOG.md).
 func get_visible_ghost_count() -> int:
 	var count := 0
 	for id: int in _ghosts:

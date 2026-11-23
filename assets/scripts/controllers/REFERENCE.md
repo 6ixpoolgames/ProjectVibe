@@ -22,30 +22,42 @@ A child of the pawn's ControllerManager, in charge whenever no player has the pa
 ai.move_to(point)                        # walks there along a nav path; false if there's no way there
 ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way; drops any path
 ai.press(&"jump")                        # held for one tick, so the pawn sees one press
-ai.hold(&"sprint", true)                 # held until hold(&"sprint", false)
+ai.follow(target, 1.2)                   # a persistent order: closes in on target until a move order (netcode spec 19.10)
 ```
 
-While a player has the pawn but the AI keeps deciding, `move_to()` only remembers the point (and returns true), so it can't overwrite the player's path; the walk starts when the AI is in charge again. Design: pawn spec 6.3, 10.3.
+A dead pawn's controller takes no orders and lets go of everything; the controllers README has the rest. Design: pawn spec 6.3, 10.3.
 
 ### Settings and properties
 
 - `order_listener: Callable` = `Callable()`: Sees every order given to any AIController, in order: `order_listener.call(controller, order, args)`, order being the method's name (&"move_to", &"press"...). Empty by default. The order stream's tap (netcode spec 19.3): the same orders, at the same point of the same ticks, give the same input.
 - `look_from_height: float` = `1.3`: Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired along the look meets the point looked at.
 
+### Constants
+
+- `_Follow.NONE = 0`
+- `_Follow.CLOSE_IN = 1`
+- `_Follow.KEEP_AWAY = 2`
+
 ### Functions
 
+- `follow(node: Node3D, stop_distance: float, look_offset: Vector3 = Vector3(0, 1, 0), band: float = 0.3, repath_ticks: int = 20, repath_distance: float = 1.5) -> void`: Closes in on a node and stops stop_distance away (flat), looking at it offset above its origin; walks again once it's further than stop_distance plus band. Repaths every repath_ticks (at 60 a second) or when the node has moved repath_distance from where the path leads. Carried out at every input until a move order or another persistent order; a freed node ends it (standing still).
+- `keep_distance(node: Node3D, distance: float, band: float = 1.5, look_offset: Vector3 = Vector3(0, 1, 0), repath_ticks: int = 20, repath_distance: float = 1.5) -> void`: Keeps about distance (flat) from a node, closing in when further and backing away when nearer, and stands, looking at it, once within band of that distance (half of it, from walking). Otherwise as `follow()`.
+- `get_followed_node() -> Node3D`: The node a persistent order follows, or null.
+- `is_standing_by() -> bool`: True while a persistent order has it standing (near enough, or at its distance).
 - `move_to(point: Vector3) -> bool`: Walks to this point along a nav path, and stands still once there. Returns false (and stands still) if there's no way there. While not in charge it only remembers the point and returns true.
 - `is_following_order() -> bool`: True while its own last move_to is under way: following its path (or waiting for nav, PENDING) when in charge, or waiting to start it when not. False once it arrives, gives up, or is told to do something else.
 - `move_in_direction(direction: Vector3) -> void`: Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
 - `stop() -> void`: Stands still. Held actions stay held.
 - `look_at_point(point: Vector3) -> void`: Looks at a point in the world. Does nothing without a pawn, since there's nowhere to look from.
 - `look_at_node(node: Node3D, offset: Vector3 = Vector3(0, 0, 0)) -> void`: Keeps looking at a node, at offset from its origin, worked out again at every input, until `stop_looking()` or another look. For a behaviour that sleeps through a swing. A freed node ends it.
+- `look_at_node_quietly(node: Node3D, offset: Vector3 = Vector3(0, 0, 0)) -> void`: The same as `look_at_node()` without counting as an order: for a persistent order, whose own order covers its look.
 - `stop_looking() -> void`: Stops looking at anything in particular, and keeps whatever look the pawn already has.
 - `is_looking_at_point() -> bool`: True while it's looking at a point it was given. AI sight faces this way then (SightSense).
 - `press(action: StringName) -> void`: Holds this action for the next tick only, so the pawn sees one press.
 - `hold(action: StringName, held: bool = true) -> void`: Holds or lets go of this action, until changed.
 - `release_all() -> void`: Back to idle: standing still, nothing held. The look direction stays.
 - `take_input_command(_tick: int) -> InputCommand`: This tick's input. Uses up press(), so call it once per tick: ControllerManager does.
+- `let_go() -> void`: Forgets every order (standing, nothing held, no look, no persistent order), without counting as one. The pawn calls it through its ControllerManager on each tick it's dead, on every machine that runs it, so it comes back from a revive with no orders and gives none while dead (netcode spec 19.10).
 
 ## ControllerBase
 
@@ -67,7 +79,7 @@ How to make one: extend this, and override `take_input_command()`.
 
 ### Functions
 
-- `take_input_command(_tick: int) -> InputCommand`
+- `take_input_command(_tick: int) -> InputCommand`: This tick's input. Called once per tick. The default is an idle command: standing still, nothing held.
 
 ## ControllerManager
 
@@ -94,7 +106,7 @@ Only PlayerController calls `attach_player()` and `detach_player()`. Design: paw
 - `move_input: Vector3` = `Vector3(0, 0, 0)`: the direction to go, in world space, up to length 1
 - `held_actions: int` = `0`: which named actions are held this tick, as bits from InputActions
 - `look_yaw: float` = `0.0`: where the player is looking, which is often not where the pawn is facing
-- `look_pitch: float` = `0.0`
+- `look_pitch: float` = `0.0`: where the player is looking, up and down
 - `view_ticks_behind: float` = `0.0`: How many ticks behind its own tick the controller was drawing other pawns, for lag compensation. The server limits it to what's believable (LagCompensation).
 - `previous_held_actions: int` = `0`: Last tick's held_actions, so a press can be told from a hold. In the TickState's state list, so a correction fixes it.
 - `pawn: Pawn` = `null`: The pawn this manager belongs to, or null if its parent isn't one.
@@ -115,6 +127,7 @@ Only PlayerController calls `attach_player()` and `detach_player()`. Design: paw
 - `is_action_held(action: StringName) -> bool`: True if a named action is held this tick.
 - `was_action_pressed(action: StringName) -> bool`: True if a named action is held this tick but wasn't last tick: a press.
 - `clear_input() -> void`: Nothing pressed, no direction. Keeps where it looks. The pawn calls this when it dies, or when nobody drives it any more.
+- `let_go_of_ai_orders() -> void`: The pawn calls this on each tick it's dead: its AIController lets go of every order it was given (`AIController.let_go()`).
 - `finish_tick() -> void`: Once this tick's input has been read: what was held, so the next tick can tell a press from a hold; and a tick with real input ends a run of missing ones. The pawn calls this in its simulate step, after its abilities, before it moves.
 - `decides_own_input() -> bool`: True where this pawn's input is decided: offline, its owner's machine, or the server for a pawn nobody owns. False on the server for a client's pawn, whose input arrives over the network, and on a client for anyone else's pawn.
 - `has_player() -> bool`: True if a player controls this pawn. On a client, that's any player, not only this machine's.
@@ -168,8 +181,8 @@ InputCommand.make(direction, [&"sprint"])
 ### Settings and properties
 
 - `move: Vector3` = `Vector3(0, 0, 0)`: Which way to go, in world space, up to length 1. Shorter means slower, as a stick pushed halfway gives.
-- `look_yaw: float` = `0.0`: Where the controller is looking, in radians. Often not where the pawn faces.
-- `look_pitch: float` = `0.0`
+- `look_yaw: float` = `0.0`: Where the controller is looking, sideways, in radians. Often not where the pawn faces.
+- `look_pitch: float` = `0.0`: Where the controller is looking, up and down, in radians.
 - `held_actions: int` = `0`: Which named actions are held this tick, as bits from InputActions. A press is "held this tick, not held last tick", which the ControllerManager works out, so a press is never sent twice.
 - `view_ticks_behind: float` = `0.0`: How many ticks behind its own tick the sender was drawing other pawns, for lag compensation. The player's controller fills it from NetworkSession; the AI's stays 0.
 

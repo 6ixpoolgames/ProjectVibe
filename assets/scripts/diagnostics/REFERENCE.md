@@ -100,7 +100,7 @@ A small fixed-width font in two columns so they never overlap: F1, F2 and F4 dow
 - `is_shown(key: int) -> bool`: True while a panel is shown.
 - `toggle(key: int) -> void`: Shows or hides a panel, as its key does.
 - `inspect(pawn: Pawn) -> void`: The pawn the inspector shows.
-- `get_text(key: int) -> String`: The text a panel shows now, for tests.
+- `get_text(key: int) -> String`
 
 ## MoveSanityCheck
 
@@ -108,7 +108,7 @@ A small fixed-width font in two columns so they never overlap: F1, F2 and F4 dow
 
 Warns when an entity moved further in a tick than its velocity explains: something set its position instead of moving it or calling `Pawn.teleport()`.
 
-A sanity check run after each tick by the [`DiagnosticsManager`](#diagnosticsmanager), in every build. It reads only the state store: every layout with a "position" and a "velocity" column, comparing each entity's row for this tick with the one before. A move may be as long as the faster of the two velocities allows over the ticks its run covered, times `allowance`, plus `slack`. A pawn that teleported on this tick or the one before is let through. It warns once per entity, naming it, and counts every move it caught. It doesn't judge speeds themselves: a dash's velocity explains a dash's move.
+A sanity check run after each tick by the [`DiagnosticsManager`](#diagnosticsmanager), in every build. It reads only the state store: every layout with a "position" and a "velocity" column, comparing each entity's row for this tick with the one before. A move may be as long as the faster of the two velocities allows over the ticks its run covered, times `allowance`, plus the crowd mover's push, plus `slack`. A pawn that teleported on this tick or the one before is let through. It warns once per entity, naming it, and counts every move it caught. It doesn't judge speeds themselves: a dash's velocity explains a dash's move.
 
 The first pass, over every entity, is the store's own (`StateStore.find_long_moves()`); only the moves it finds too long are looked at here.
 

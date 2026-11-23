@@ -54,6 +54,11 @@ func _test_health_and_death() -> void:
 	victim.ability_manager.revive()
 	await _ticks(2)
 	_check(not victim.is_dead() and is_equal_approx(victim.stat_manager.get_health(), 100.0), "revive: full Health, and Death ends on its next tick")
+	# Claude 2026-11-23: orders given while dead are ignored and let go of (netcode spec 19.10), so the walk is given again, as the AI's
+	# next decision would.
+	await _ticks(15)
+	_check(Vector2(victim.velocity.x, victim.velocity.z).length() < 0.2, "the walk it was told while dead was let go of")
+	ai.move_in_direction(Vector3(1, 0, 0))
 	await _ticks(15)
 	_check(victim.velocity.x > 1.0, "alive again, it follows its input")
 	# On a client, hits are ignored: only the server decides them.

@@ -12,8 +12,14 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
+| A test-only swap | `TickDriver.replace_store` | Only `tick_state_selftest` calls it, to compare the C++ store with its twin; a test helper keeps it out of the shipping autoload | S |
 | Move the load ladder's rule to a GameMode module | `_note_tick_cost()`, the ladder's settings and `get_match_options()` in `TickDriver.gd` | A policy for shedding AI work, with its own tuning and match options, inside the universal tick driver. The owner wants autoloads to hold only what every game needs: the driver could report each tick's cost, and a module beside `AIActivationManager` own the rule | M |
 | One timing tool | `profile_enabled`, `profile`, `_profile_phase()` in `TickDriver.gd` | A second way of timing work beside diagnostics' `PerfScopes`, with its own names and its own switch | S |
+
+## 2026-11-23
+
+- **Script warnings:** locals named `owner` in `TickDriver` renamed (they shadowed `Node.owner`).
+- **The code and documentation pass:** `NetworkSession.snapshot_rate` no longer calls every entity when set (that feature was gone); `COUNTING_STATS` says diagnostics reads some by name; a silent drop got its reason; the class doc points to this README. `TickDriver.replace_store` flagged `REFACTOR:` (row above). README: the tick order includes the store's commit and due ticks, the driver's store settings are listed, the net test's path fixed. `REFERENCE.md` regenerated.
 
 ## 2026-11-19
 

@@ -75,7 +75,7 @@ func _ready() -> void:
 	if pawn == null:
 		return
 	# Dying ends every effect on it (pawn spec 8.11).
-	var abilities := _sibling_ability_manager()
+	var abilities := pawn.ability_manager
 	if abilities:
 		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: remove_all())
 	var entries: Array[String] = ["%s:active_effects" % String(pawn.get_path_to(self))]
@@ -403,10 +403,7 @@ func _apply_stat_changes() -> void:
 
 # What the list keeps for a source: its entity id online (the same on every machine), else its instance id. -1: none.
 func _source_key(source: Pawn) -> int:
-	if not is_instance_valid(source):
-		return -1
-	var entity := source.get_network_entity()
-	return entity.entity_id if entity and entity.entity_id >= 0 else source.get_instance_id()
+	return HitInfo.key_of(source) if is_instance_valid(source) else -1
 
 
 func _source_pawn(key: int) -> Pawn:
@@ -425,12 +422,3 @@ func _warn_once(key: String, message: String) -> void:
 		return
 	_warned[key] = true
 	push_warning(message)
-
-# The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
-func _sibling_ability_manager() -> AbilityManager:
-	if pawn == null:
-		return null
-	for child in pawn.get_children():
-		if child is AbilityManager:
-			return child
-	return null

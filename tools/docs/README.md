@@ -51,7 +51,7 @@ Entries come from the dated notes taken out of the code and from `git log -- <fo
 
 ## Comments in code
 
-The wiki is the documentation: each system's README is its guide page, and its `##` comments are its reference page. So comments are written to be read as reference, short and plain. `tools/docs/check_comment_style.py` measures every file against this section.
+The wiki is the documentation: each system's README is its guide page, and its `##` comments are its reference page. So comments are written to be read as reference, short and plain. `tools/docs/check_comment_style.py` measures every GDScript file under `assets/scripts/` against this section (C++ comments are checked by review).
 
 **The header.** A plain `#` line first, so it stays out of the reference:
 ```gdscript

@@ -17,6 +17,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-23
 
+- **Persistent orders and dead pawns** (netcode spec 19.10): `AIController.follow` and `keep_distance` are given once and carried out at every input from the followed node's real position (standing within a band, repathing on age or distance); a move order ends them, a freed node too. A dead pawn's controller takes no orders (`_note` refuses them, so the order listener never hears them) and lets go of everything on its pawn's dead ticks (`AIController.let_go`, from `Pawn._tick_input` through `ControllerManager.let_go_of_ai_orders`), so a revived pawn has no orders left from before. Test: `controller_manager_selftest`.
+- **Documentation pass:** `ControllerManager` reaches the ability manager as `pawn.ability_manager`; `look_pitch` documented on `InputCommand` and `ControllerManager`; a comment in `ControllerBase.take_input_command` moved into the function it explains.
 - **The order stream's tap** (netcode spec 19.3 and 19.10, the owner's request: test determinism with orders only): `AIController.order_listener`, a static callable that sees every order given to any AI controller (the method and its arguments), in the order given. `look_at_point` is split into the order and the aiming itself (`_aim_at`), so following a node and building input don't count as orders. Recording these orders and playing them back with the AI off rebuilds a 1000-pawn battle exactly.
 
 ## 2026-11-21

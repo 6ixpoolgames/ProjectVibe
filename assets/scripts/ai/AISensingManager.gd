@@ -31,7 +31,7 @@ extends Node
 ## The pawn this is a part of, or null.
 var pawn: Pawn = null
 
-# The grid every pawn shares, built from Pawn's shared table, or null without the C++ library. See _shared_grid.
+# The grid every pawn shares, built from SharedPawnTable's table, or null without the C++ library. See _shared_grid.
 static var _grid: Object = null
 # The sensing job every pawn shares, or null without it (see _shared_job); the managers whose full pass is next tick, collected
 # during this tick; and the tick driver whose after_tick starts the job.
@@ -92,7 +92,7 @@ func get_senses() -> Array[AISenseBase]:
 	return _senses.duplicate()
 
 
-## [method AIContextComponent.run_ai] calls this each tick the pawn's AI runs.
+## [method AIContextComponent.think] calls this each tick the pawn's AI runs.
 func tick_sensing(tick: int) -> void:
 	if pawn == null or pawn.ai_context == null or pawn.ai_context.memory == null or _senses.is_empty():
 		return
@@ -185,7 +185,7 @@ func get_range() -> float:
 	return longest
 
 
-# The shared grid, from Pawn (which the swing hit checks share), or null without the C++ library. Pawns join its table themselves.
+# The shared grid, from SharedPawnTable (which the swing hit checks share), or null without the C++ library. Pawns join its table themselves.
 static func _shared_grid() -> Object:
 	if _grid == null:
 		_grid = SharedPawnTable.get_grid()

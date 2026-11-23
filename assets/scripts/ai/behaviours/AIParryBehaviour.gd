@@ -2,7 +2,7 @@
 ## Parries a swing coming at the pawn, some of the time ([member parry_chance]).
 ##
 ## Available when a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up (two conditions). An enemy's
-## MeleeAttackAbility tells the AI of a swing when it starts, on the server ([method AIContextComponent.note_incoming_attack]), which asks
+## A MeleeAttackAbility (or a fired projectile, FireProjectileStep) tells the AI of an attack when it starts, on the server ([method AIContextComponent.note_incoming_attack]), which asks
 ## for a decision at once: ordinary decisions come every 15 ticks, longer than a swing's windup. The roll comes from the swing's start
 ## tick and the attacker's pawn number, so each swing is rolled once and a replay rolls the same. It looks at the attacker and presses
 ## parry ([member AIBehaviourBase.presses_action], so it's skipped while the parry is cooling down or locked out), finishes two ticks
@@ -19,7 +19,8 @@ const ROLL_SALT := 0x9A44
 
 func _init() -> void:
 	super()
-	# Above every other behaviour in the samples (the heavy attack is 0.95), because a parry has to happen now or never.
+	# Above the samples' attacks (the heavy attack is 0.95), because a parry has to happen now or never. Shoot scores the same, 0.97, so
+	# a pawn with both breaks the tie by name order.
 	max_score = 0.97
 	min_score = 0.97
 	presses_action = &"parry"

@@ -69,7 +69,7 @@ static func compare(data: Dictionary) -> Dictionary:
 			shared.erase(own)
 		var text := JSON.stringify(shared, "", true, true)
 		if not brain_by_text.has(text):
-			var number: int = decider.add_brain(description)
+			var number: int = decider.add_brain(_with_words_now(description))
 			brain_by_text[text] = number
 			var names := {}
 			for slot in decider.get_behaviour_count(number):
@@ -110,7 +110,10 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 	var pawn := PackedInt64Array()
 	var random_seed := PackedInt64Array()
 	var tick := PackedInt64Array()
-	var state := PackedInt32Array()
+	var tag_words := TagRegistry.get_categories().size()
+	var owned := PackedInt64Array() # each row's owned tags, tag_words words a row, from the names it recorded
+	var modifier := PackedFloat64Array()
+	var blocked := PackedInt64Array()
 	var has_target := PackedByteArray()
 	var normal := PackedByteArray()
 	var priority := PackedInt32Array()
@@ -126,6 +129,8 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 	persistence.fill(0.0)
 	score.resize(rows * stride)
 	score.fill(NAN)
+	modifier.resize(rows * stride)
+	modifier.fill(0.0)
 	var expected_chosen := PackedInt32Array()
 	var expected_asked := PackedInt64Array()
 	# Claude 2026-11-17 (scaling spec 6.2, step 5b): each decision's AI inputs, for behaviours judged by their conditions, flattened
@@ -148,7 +153,9 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 		pawn.append(pawn_number)
 		random_seed.append(seed_of_pawn[pawn_number])
 		tick.append(int(d["tick"]))
-		state.append(decider.find_state(b, StringName(d["state"])))
+		var words := TagQuery.words_of(d.get("owned_tags", []))
+		for i in tag_words:
+			owned.append(words[i] if i < words.size() else 0)
 		has_target.append(1 if d["has_target"] else 0)
 		normal.append(1 if d["event_is_normal"] else 0)
 		priority.append(int(d["event_priority"]))
@@ -159,12 +166,16 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 		var known_mask := 0
 		var available_mask := 0
 		var asked_mask := 0
+		var blocked_mask := 0
 		for entry: Dictionary in d["behaviours"]:
 			var slot: int = names.get(entry["name"], -1)
 			if slot < 0:
 				continue
 			var bit := 1 << slot
+			modifier[r * stride + slot] = float(entry.get("modifier", 0.0))
 			match entry["rule"]:
+				"blocked", "off": # switched off can change during a run, and a recording keeps one brain: passed per decision, as a block
+					blocked_mask |= bit
 				"cooldown":
 					cooling_mask |= bit
 				"action":
@@ -179,13 +190,15 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 						asked_mask |= bit
 						if answer == 1:
 							available_mask |= bit
+		blocked.append(blocked_mask)
 		cooling.append(cooling_mask)
 		can_press.append(press_mask)
 		known.append(known_mask)
 		available.append(available_mask)
 		expected_chosen.append(names.get(d["chosen"], -1))
 		expected_asked.append(asked_mask)
-	var columns := {"brain": brain, "pawn_number": pawn, "random_seed": random_seed, "tick": tick, "state": state,
+	var columns := {"brain": brain, "pawn_number": pawn, "random_seed": random_seed, "tick": tick, "owned": owned, "tag_words": tag_words,
+		"modifier": modifier, "blocked": blocked,
 		"has_target": has_target, "event_normal": normal, "event_priority": priority, "running": running, "running_started": started,
 		"cooling": cooling, "can_press": can_press, "available_known": known, "available": available, "persistence": persistence,
 		"score": score, "inputs": inputs, "input_stride": input_stride}
@@ -226,3 +239,17 @@ static func _names(decider: Object, brain: int, mask: int) -> String:
 		if mask & (1 << slot):
 			names.append(String(decider.get_behaviour_name(brain, slot)))
 	return "[" + ", ".join(names) + "]"
+
+
+# A brain description with its tag requirements' words worked out in this run (the names stay; the bits may differ from the run that
+# recorded it).
+static func _with_words_now(description: Dictionary) -> Dictionary:
+	var out := description.duplicate(true)
+	out["tag_words"] = TagRegistry.get_categories().size()
+	for behaviour: Dictionary in out.get("behaviours", []):
+		behaviour["enabled"] = true # each decision says which were switched off (its "off" rules)
+		var described: Variant = behaviour.get("tag_requirements")
+		if described is Dictionary:
+			behaviour["tag_requirements"] = TagQuery.make(described.get("all_of", []), described.get("any_of", []),
+				described.get("none_of", [])).describe_words()
+	return out

@@ -17,6 +17,7 @@ class_name NetworkEntity
 signal role_changed(entity: NetworkEntity)
 ## Despawned while [member linger_until_tick] is still ahead: it stays until then, and its holder switches itself off (a pawn hides,
 ## stops ticking and stops colliding).
+@warning_ignore("unused_signal") # NetworkSession.despawn emits it
 signal lingering_started(entity: NetworkEntity)
 
 ## What this machine does with the entity: AUTHORITY (server or offline), LOCAL_PREDICTED (your pawn, simulated ahead), REMOTE_FOLLOWING
@@ -27,7 +28,7 @@ enum Role { AUTHORITY, LOCAL_PREDICTED, REMOTE_FOLLOWING, REMOTE_PREDICTED, LOCA
 @export var is_replicated: bool = true
 ## On: other clients simulate this ahead instead of following the server. NetworkSession.default_predicted turns it on everywhere.
 @export var is_predicted: bool = false
-## On: offline, keep state and input history every tick, for a single-player rewind. Off: nothing is saved or rounded offline (pawn spec 12.1).
+## On: offline, also keep input history, for a single-player rewind. State is recorded and rounded every tick either way (pawn spec 12.1).
 @export var keep_history_offline: bool = false:
 	set(value):
 		keep_history_offline = value

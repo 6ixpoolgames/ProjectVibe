@@ -439,6 +439,8 @@ static func _animation_usec(scopes: Dictionary) -> float:
 
 # The network part of a summary, from the frames' counts over span seconds and the connections' latest numbers. Snapshots a second
 # are those encoded on a server, received on a client; their average size counts like with like (sent and its bytes, or received and its).
+# REFACTOR: reads NetworkSession's counting stats by name, so a rename there breaks this quietly; working from
+# NetworkSession.COUNTING_STATS would keep the names in one place (diagnostics/CHANGELOG.md).
 func _net_summary(sums: Dictionary, span: float) -> Dictionary:
 	var server: bool = _session.is_server()
 	var snapshots: float = sums.net_snapshots_encoded if server else sums.net_snapshots_received

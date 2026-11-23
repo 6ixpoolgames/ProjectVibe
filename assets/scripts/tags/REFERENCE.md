@@ -29,6 +29,7 @@ query.matches(pawn.owned_tags)                  # a TagQuery: all of / any of / 
 
 - `pawn: Pawn` = `null`: The pawn it belongs to (its parent), or null outside a pawn.
 - `loose_counts: Dictionary`: Loose tags and their counts, {tag: count}: rolled back (a pushed entry in the pawn's TickStateComponent). Change them with `add()` and `remove()`; setting the whole list is for rollback and snapshots.
+- `version: int` = `0`: Goes up by one whenever a tag starts or stops being owned, so a reader that keeps a copy (the AI decider's row, a behaviour's tag requirements) knows to look again. Don't set it.
 
 ### Signals
 
@@ -71,6 +72,9 @@ if calm.matches(pawn.owned_tags): ...
 - `make(all: Array = [], any: Array = [], none: Array = []) -> TagQuery` *(static)*: A query made in code, for tests and for game code that builds one on the fly.
 - `matches(owned: OwnedTags) -> bool`: True if the owned tags pass all three lists. A null owner owns nothing: only a query with an empty all_of and any_of passes.
 - `matches_words(words: PackedInt64Array) -> bool`: The same as `matches()`, for owned tags given as one word per category, in `TagRegistry.get_categories()` order.
+- `describe_words() -> Dictionary`: The query compiled, for C++ (the AI decider) and saved records: the three lists by name, and as one word per category in `TagRegistry.get_categories()` order (all, any, none), with impossible (all_of names a tag nothing can own).
+- `words_of(tags: Array) -> PackedInt64Array` *(static)*: Owned tag names as one word per category, parents included, as `OwnedTags.get_words()` gives them: for a saved list of owned tags read back in another run, where the bits may differ.
+- `shared(all: Array = [], any: Array = [], none: Array = []) -> TagQuery` *(static)*: A query made once and shared, for a script's built-in default (every behaviour of a kind reads the same one). Don't change it: assign a new query instead.
 - `is_empty() -> bool`: True if every list is empty: the query passes for anyone.
 - `describe() -> String`: The query as text, for readouts and logs: "all of [..], any of [..], none of [..]", leaving out empty lists.
 
@@ -80,18 +84,9 @@ if calm.matches(pawn.owned_tags): ...
 
 Every tag in the game: turns names like "ability.combat.melee" into bits, so checks are one AND instead of comparing text.
 
-One registry for every kind of tag (tag spec): what an ability is, what an effect is, a pawn's status, the AI's states and stances, navigation markers. A tag's first level is its **category** (ability, effect, status, ai, nav); code writes tags as [`Tags`](#tags) constants (`Tags.ABILITY.COMBAT_MELEE`).
+One registry for every kind of tag (tag spec). A tag's first level is its **category** (ability, effect, status, ai, nav); every level gets its own bit in its category's 64-bit word, and a tag's mask holds its parents' bits too, so "ability.combat" matches ability.combat.melee (never "ability.combatant"). Masks of different categories can't be mixed. Code writes tags as [`Tags`](#tags) constants.
 
-Tag bit rules:
-- A tag is a StringName with dot-separated levels; a dot means "inside" (ability.combat is inside ability). Names only.
-- Every level gets its own bit, numbered within its category: ability, ability.combat and ability.combat.melee are three bits of the ability category's 64-bit word.
-- A tag's mask is its own bit plus its parents' bits, so a query for "ability.combat" catches ability.combat.melee with one AND, and never "ability.combatant". Matching is from the root only.
-- A mask belongs to one category: masks of different categories can't be combined or compared (a list that mixes them warns).
-- At most 64 levels per category; extras get no bit (mask 0, match nothing) with a warning.
-
-Every machine must give a tag the same bit, so tags are declared in [`TagDeclarationsRes`](../resources/REFERENCE.md#tagdeclarationsres) files (the base file, then any listed in the project setting `EXTRA_DECLARATIONS_SETTING`), merged and sorted at startup; the netcode handshake compares `content_hash()`. A tag nobody declared is added on the spot with a warning (a desync risk online). Queries never add tags.
-
-Renaming: an old name in a declarations file's redirects is read as its new name, with a warning, so old resources, saves and replays still load (tools/tags/apply_redirects.py rewrites saved files). A deprecated tag still works, with a warning. Bits are never saved: everything saved stores names. A static class, so it works in headless tests.
+Tags are declared in [`TagDeclarationsRes`](../resources/REFERENCE.md#tagdeclarationsres) files (the base file, then those in `EXTRA_DECLARATIONS_SETTING`), merged and sorted at startup so every machine gives the same bits; the netcode handshake compares `content_hash()`. An undeclared tag is added with a warning; queries never add tags. Old names are read through redirects, and bits are never saved, only names. A static class, so it works in headless tests. The full rules and corner cases: the tags README.
 
 ### Settings and properties
 

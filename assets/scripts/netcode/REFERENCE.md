@@ -40,7 +40,7 @@ Design: netcode spec 9.
 
 A client's estimate of the server's clock (netcode spec section 4).
 
-The client feeds it pongs (`add_sample()`); it estimates the server's tick from the fastest recent ping and the round trip from the average. Times are microseconds, ticks are 60 a second. Design: netcode spec 4.
+The client feeds it pongs (`add_sample()`); it estimates the server's tick from the fastest recent ping and the round trip from the average. Times are microseconds; the tick length is the match's. Design: netcode spec 4.
 
 ### Constants
 
@@ -52,7 +52,6 @@ The client feeds it pongs (`add_sample()`); it estimates the server's tick from 
 - `add_sample(sent_usec: int, received_usec: int, server_tick: int, tick_usec: float) -> void`: Records a pong: when the ping was sent and the pong received (microseconds), the server tick it carried, and the length of a tick.
 - `get_sample_count() -> int`: How many pongs are being remembered, up to `MAX_SAMPLES`.
 - `get_rtt_usec() -> float`: The average round trip in microseconds. 0 before any sample.
-- `get_jitter_usec() -> float`: How much the round trip varies, in microseconds (standard deviation).
 - `estimate_server_tick(now_usec: int, tick_usec: float) -> float`: Which tick the server is on right now, from the fastest recent ping. 0 before any sample.
 - `get_lowest_rtt_usec() -> float`: The fastest recent round trip in microseconds, which a lag spike doesn't inflate. 0 before any sample.
 - `get_lead_ticks(tick_usec: float, margin_ticks: int, from_lowest: bool = false) -> int`: How many ticks ahead of the server a client should run: half the round trip plus `margin_ticks`.
@@ -137,7 +136,7 @@ Design: netcode spec 7, 10, 13.
 
 - `is_replicated: bool` = `true`: Off: stays on this machine only, like particles or debris; not spawned anywhere else (not tested yet).
 - `is_predicted: bool` = `false`: On: other clients simulate this ahead instead of following the server. NetworkSession.default_predicted turns it on everywhere.
-- `keep_history_offline: bool` = `false`: On: offline, keep state and input history every tick, for a single-player rewind. Off: nothing is saved or rounded offline (pawn spec 12.1).
+- `keep_history_offline: bool` = `false`: On: offline, also keep input history, for a single-player rewind. State is recorded and rounded every tick either way (pawn spec 12.1).
 - `input_owner: Node` = `null`: The node that holds this entity's input, for the server's input hooks (a Pawn's ControllerManager sets itself). Null: the parent.
 - `entity_id: int` = `-1`: The same on every machine, given by NetworkSession at spawn. -1 until then.
 - `linger_until_tick: int` = `-1`: A despawn before this tick waits until the tick after it: what the entity started is still running (its projectiles in flight, whose hits need it). Until then it lingers, switched off (`lingering_started`). Server or offline. -1: no wait.
@@ -194,7 +193,7 @@ How precisely networked values are stored (netcode spec section 5.3).
 
 Every networked property has an encoding. Values are rounded to it at the end of every tick, on server and client alike, so both simulate from exactly what the network can carry. Encodings: `auto` (by type), `vector3_mm` (default for positions), `vector2_mm`, `vector3_cm`, `angle_u16`, `angle_byte`, `float`, `raw` (ints, bools, StringNames).
 
-Twin: the C++ recorder and codec round the same way (`native/src/state_encoding.h`); a change to `quantize()` goes in both. Design: netcode spec 5.3.
+Twin: the C++ state store (`StateStore::quantize_by_id`, state_store.cpp) and codec (net_codec.cpp) round the same way, with the steps in `native/src/state_encoding.h`; a change to `quantize()` goes in all three. Design: netcode spec 5.3.
 
 ### Constants
 
@@ -216,7 +215,7 @@ Twin: the C++ recorder and codec round the same way (`native/src/state_encoding.
 
 - `is_known(encoding: StringName) -> bool` *(static)*: True if this is one of the encoding names above.
 - `resolve(encoding: StringName, value: Variant) -> StringName` *(static)*: Turns auto into a concrete encoding, from the value's type.
-- `quantize(value: Variant, encoding: StringName) -> Variant` *(static)*: The value rounded to its encoding (twin of the C++ `state_encoding.h`; change both). Rounding a rounded value changes nothing.
+- `quantize(value: Variant, encoding: StringName) -> Variant` *(static)*: The value rounded to its encoding (twin of the C++ StateStore::quantize_by_id; change both). Rounding a rounded value changes nothing.
 - `as_float32(value: float) -> float` *(static)*: The float rounded to 32 bits, as engine properties like rotation store it, so it reads back exactly as written. NetPackets uses it too.
 - `blend(a: Variant, b: Variant, weight: float, encoding: StringName) -> Variant` *(static)*: A value part way between two others, for drawing between snapshots. Things that can't blend (bools) stay at the first.
 - `copy_value(value: Variant) -> Variant` *(static)*: A copy sharing nothing with the original. Gotcha: arrays, dictionaries and packed arrays are held by reference, so history slots must copy.

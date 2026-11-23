@@ -221,6 +221,7 @@ func register(participant: Object, order: int = 0) -> void:
 	_dirty = true
 
 
+# REFACTOR: only tick_state_selftest calls it, to compare the two stores (singletons/CHANGELOG.md).
 ## Swaps in a new, empty store (null: a fresh one of the kind [member use_native_store] picks), for tests comparing the two. Entities
 ## already recorded stay in the old one, so call it before they arrive.
 func replace_store(new_store: Object) -> void:
@@ -498,9 +499,9 @@ func _commit_entities(t: int, handles: PackedInt64Array) -> void:
 
 func _gather_unfinished(unfinished: PackedInt64Array, t: int) -> void:
 	for handle in unfinished:
-		var owner: Object = store.get_owner(handle)
-		if owner and owner.has_method(&"_store_gather"):
-			owner._store_gather(handle, t)
+		var owner_node: Object = store.get_owner(handle)
+		if owner_node and owner_node.has_method(&"_store_gather"):
+			owner_node._store_gather(handle, t)
 
 
 # The tripwire: the nodes at the start of a tick must hold what the last tick committed.
@@ -511,8 +512,8 @@ func _verify_store(last_tick: int) -> void:
 	store_mismatches += differ.size()
 	var names: Array = []
 	for handle in differ.slice(0, 5):
-		var owner: Object = store.get_owner(handle)
-		names.append(str(owner.get_parent().name) if owner is Node and owner.get_parent() else str(owner))
+		var owner_node: Object = store.get_owner(handle)
+		names.append(str(owner_node.get_parent().name) if owner_node is Node and owner_node.get_parent() else str(owner_node))
 	push_warning("[TickDriver] %d entities changed outside a tick since tick %d (something wrote around the store): %s" % [differ.size(), last_tick, ", ".join(names)])
 
 

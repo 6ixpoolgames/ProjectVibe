@@ -40,6 +40,7 @@ var _recorder: AIDecisionRecorder = null
 
 
 func _ready() -> void:
+	TagRegistry.declare([&"ai.state.alarm"]) # the test's own Alarm state's tag (AIStateBase.get_tag)
 	TickDriver.tick_rate = TickDriver.REFERENCE_RATE # the checks count exact ticks at 60 a second
 	print("--- AI decision recorder self-test ---")
 	_recorder = AIDecisionRecorder.new()
@@ -70,7 +71,7 @@ func _test_record_of_a_decision() -> void:
 	var hunter := _b("Hunt", 1.0)
 	hunter.needs_target = true
 	var elsewhere := _b("Elsewhere", 1.0)
-	elsewhere.allowed_states = [&"Combat"]
+	elsewhere.tag_requirements = TagQuery.make([Tags.AI.STATE_COMBAT])
 	var presser := _b("Press", 1.0)
 	presser.presses_action = &"no_such_action"
 	var pawn := _make_pawn([low, best, hunter, elsewhere, presser])
@@ -92,7 +93,7 @@ func _test_record_of_a_decision() -> void:
 	for entry in record.behaviours:
 		names.append(entry["name"])
 	_check_equal(names, [&"Alpha", &"Bravo", &"Elsewhere", &"Hunt", &"Press"], "...in the fixed order, by name")
-	_check_equal(record.entry_for(&"Elsewhere")["rule"], AIDecisionRecord.RULE_STATE, "a behaviour for another state: its rule")
+	_check_equal(record.entry_for(&"Elsewhere")["rule"], AIDecisionRecord.RULE_TAGS, "a behaviour for another state: its rule (its tag requirements)")
 	_check_equal(record.entry_for(&"Hunt")["rule"], AIDecisionRecord.RULE_NO_TARGET, "one needing a target: its rule")
 	_check_equal(record.entry_for(&"Press")["rule"], AIDecisionRecord.RULE_ACTION, "one whose action can't start: its rule")
 	var bravo := record.entry_for(&"Bravo")
@@ -172,7 +173,7 @@ func _test_ai_step() -> void:
 	alarm.priority = 10
 	var wander := _b("Wander", 0.5)
 	var react := _b("React", 0.8)
-	react.allowed_states = [&"Alarm"]
+	react.tag_requirements = TagQuery.make([&"ai.state.alarm"])
 	var pawn := _make_pawn([wander, react], [alarm])
 	pawn.ai_context.decision_interval_ticks = 1 # decides on every AI step
 	pawn.ai_context.run_ai(200)

@@ -4,7 +4,7 @@
 ## Used by behaviour persistence, memory's awareness and the target selector's current target bonus. One profile has one curve
 ## ([enum Mode]): LINEAR, HALF_LIFE (counts as nothing below 1%) or CURVE (a drawn curve). Its tick settings are written for 60 a
 ## second and used at the match's rate ([code]TickDriver.ticks_at_rate[/code]). For a fade no mode covers, extend it and override
-## [method value_at] and [method ends_after]; the C++ memory store and decider then call it instead of doing the maths themselves.
+## [method value_at] and [method ends_after]; the C++ memory store then calls it, and the C++ decider hands that pawn to GDScript.
 ## [codeblock]
 ## var fade := FadeProfile.new()  # or a .tres file made in the inspector, shared by everything that uses it
 ## fade.value_at(30)              # 1.0 at the start, falling to 0.0

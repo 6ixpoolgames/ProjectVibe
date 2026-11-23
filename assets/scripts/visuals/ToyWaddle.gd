@@ -39,8 +39,9 @@ extends Node3D
 ## The speed counted as full walking speed, in metres per second, for the amounts above. Faster (sprinting) rocks and hops a little
 ## more, up to one and a half times.
 @export_range(0.1, 20.0, 0.1, "or_greater") var walk_speed := 5.0
-## Standing still: how far it bobs up and down, in metres, and how many times a second.
+## Standing still: how far it bobs up and down, in metres.
 @export_range(0.0, 0.2, 0.005) var breathe_height := 0.015
+## Standing still: how many times a second it bobs.
 @export_range(0.0, 5.0, 0.05) var breathe_rate := 0.8
 
 @export_group("Moments")
@@ -50,7 +51,7 @@ extends Node3D
 @export_range(0.0, 80.0, 0.5) var knockback_tilt_degrees := 22.0
 ## While off the ground: how far it tilts back, in degrees.
 @export_range(0.0, 45.0, 0.5) var air_tilt_degrees := 8.0
-## When it dies: how far it falls over onto its side, in degrees (90 is flat), and how fast it settles there.
+## When it dies: how far it falls over onto its side, in degrees (90 is flat).
 @export_range(0.0, 120.0, 1.0) var death_fall_degrees := 90.0
 ## How quickly it eases toward a new lean or tilt: higher is snappier. Each frame it closes this fraction of the gap per second,
 ## roughly; 12 settles in about a quarter of a second.

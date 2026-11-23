@@ -35,12 +35,7 @@ Each landing is (tick, kind, key): a chunk published by the [`ChunkStreamer`](..
 
 The GDScript twin of the C++ `StateStore`: the central record of every gameplay entity's state, tick by tick.
 
-The tick driver holds one (`TickDriverSingleton.store`) and commits it at the end of every tick: every bound entity's gathered
-columns are read from its nodes, rounded to their encodings (what rounding changed is written back) and copied into that tick's
-frame; pushed columns take the value last pushed. Rollback, snapshots and corrections read and write the frames. Entities with the
-same columns share a layout; slots never move, and a freed slot is reused only once the history has moved past it, with a new
-generation in its handle. Same calls and same results as the C++ class: a change goes in both, and the self-test compares them.
-Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
+The tick driver holds one (`TickDriverSingleton.store`) and commits it at the end of every tick: every bound entity's gathered columns are read from its nodes, rounded to their encodings (what rounding changed is written back) and copied into that tick's frame; pushed columns take the value last pushed. Rollback, snapshots and corrections read and write the frames. Entities with the same columns share a layout; slots never move, and a freed slot is reused only once the history has moved past it, with a new generation in its handle. Same calls and same results as the C++ class: a change goes in both, and the self-test compares them. Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
 
 ### Constants
 
@@ -51,9 +46,7 @@ Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
 - `clear() -> void`: Forgets every layout and entity. The depth stays.
 - `set_depth(depth: int) -> bool`: Frames kept. Only while the store holds no entity; false otherwise.
 - `get_depth() -> int`
-- `define_layout(names: PackedStringArray, encodings: Array, pushed: PackedByteArray = PackedByteArray()) -> int`: A layout from its columns: names, encoding names and, optionally, a 1 for each pushed column. The same columns give the same
-  layout number. An "auto" column takes each entity's encoding from its binding. -1, with an error, for an unknown encoding or a size
-  mismatch.
+- `define_layout(names: PackedStringArray, encodings: Array, pushed: PackedByteArray = PackedByteArray()) -> int`: A layout from its columns: names, encoding names and, optionally, a 1 for each pushed column. The same columns give the same layout number. An "auto" column takes each entity's encoding from its binding. -1, with an error, for an unknown encoding or a size mismatch.
 - `get_layout_count() -> int`
 - `get_layout_columns(layout: int) -> PackedStringArray`
 - `add_entity(layout_index: int, owner: Object) -> int`: A new entity in a layout, owned by owner (asked to gather when the store can't; may be null). Returns its handle, or -1.
@@ -63,24 +56,14 @@ Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
 - `is_active(handle: int) -> bool`
 - `set_entity_depth(handle: int, depth: int) -> void`: How many ticks back this entity's rows count, at most the store's depth.
 - `get_owner(handle: int) -> Object`
-- `bind(handle: int, nodes: Array, properties: Array, encodings: Array, round_values: bool) -> bool`: The accessors for an entity's columns: one node, one property path and one encoding per column, in column order. An encoding must
-  be settled (never "auto") and match the layout's unless the layout's is "auto". A pushed column may have a node too (or null): its
-  value is read from it now, written back to it by `load_row()`, and checked by `verify_nodes()`, but never read by a
-  commit. round_values: round to each encoding and write back what changed. False, binding nothing, otherwise.
+- `bind(handle: int, nodes: Array, properties: Array, encodings: Array, round_values: bool) -> bool`: The accessors for an entity's columns: a node, a property path and a settled encoding per column, in column order (a pushed column's node is written by `load_row()` but never read by a commit). round_values: round and write back what changed. False if refused.
 - `unbind(handle: int) -> void`
 - `is_bound(handle: int) -> bool`
 - `push(handle: int, column: int, value: Variant) -> void`: Sets a pushed column's value; every commit from now on records it, until the next push.
-- `set_carry_forward(handle: int, on: bool) -> void`: On: a commit copies this entity's previous row forward, reading no node, unless it was marked changed since the last commit (an
-  entity that only changes when it runs, such as a pawn on a load step). Pushed columns take their pushed values either way.
-- `mark_changed(handle: int) -> void`: Something changed this entity since the last commit, so the next one reads its nodes, all of them: values written through for it
-  before this call are dropped.
-- `write_through(handles: PackedInt64Array, column: StringName, values: Array, tick: int) -> int`: Writes one column, by name, for many entities now: into each one's node (rounded first, as the commit rounds) and into the row the
-  commit for that tick records, which then skips reading that node. For a batch that moves many entities at once (the crowd mover).
-  Whatever writes the same property after this, in the same tick, must write through as well or call `mark_changed()`, or the
-  row misses it. Returns how many
-  it wrote; an entity that isn't bound, or whose layout lacks the column, is skipped.
-- `commit(tick: int) -> PackedInt64Array`: The end of a tick: every active entity's row for this tick. Returns the handles the store couldn't gather (unbound, or a node gone,
-  which unbinds it); their owners write them with `write_row()`.
+- `set_carry_forward(handle: int, on: bool) -> void`: On: a commit copies this entity's previous row forward, reading no node, unless it was marked changed since the last commit (an entity that only changes when it runs, such as a pawn on a load step). Pushed columns take their pushed values either way.
+- `mark_changed(handle: int) -> void`: Something changed this entity since the last commit, so the next one reads its nodes, all of them: values written through for it before this call are dropped.
+- `write_through(handles: PackedInt64Array, column: StringName, values: Array, tick: int) -> int`: Writes one column for many entities now, into each node (rounded) and into that tick's row, which then skips reading the node: for a batch such as the crowd mover. A later write of the same property that tick must write through too, or call `mark_changed()`. Returns how many it wrote.
+- `commit(tick: int) -> PackedInt64Array`: The end of a tick: every active entity's row for this tick. Returns the handles the store couldn't gather (unbound, or a node gone, which unbinds it); their owners write them with `write_row()`.
 - `commit_entities(tick: int, handles: PackedInt64Array) -> PackedInt64Array`: The same for some entities only (a rollback's re-run rewriting past frames).
 - `write_row(handle: int, tick: int, values: Array) -> bool`: An owner's own gather: the whole row for that tick. False for a dead handle or a size mismatch.
 - `has_row(handle: int, tick: int) -> bool`
@@ -90,13 +73,9 @@ Design: docs/state_store/STATE_STORE_SPEC.md (sections 4 to 7).
 - `load_row(handle: int, tick: int) -> bool`: Writes a held row back into a bound entity's nodes (`MISSING` values skipped) and its pushed values. False if not bound or not held.
 - `newest_tick(handle: int) -> int`: The newest tick this entity has a row for; -1 for none.
 - `get_column(layout_index: int, column: int, tick: int) -> Dictionary`: One column of a layout at a tick: {"handles": PackedInt64Array, "values": Array}, for every row held for that tick.
-- `get_vector3s(handles: PackedInt64Array, column: StringName, tick: int) -> PackedVector3Array`: One Vector3 column, by name, for each of these entities at a tick, in their order: one call for a whole crowd instead of one read
-  a node each. A NaN x where the row isn't held, the entity's layout has no such column, or the value isn't a Vector3.
-- `find_long_moves(tick: int, dt: float, allowance: float, slack: float) -> Dictionary`: The move check's first pass ([`MoveSanityCheck`](../diagnostics/REFERENCE.md#movesanitycheck)): every entity, in a layout with Vector3 "position" and "velocity" columns, whose
-  move from tick - 1 to tick is longer than max(|velocity then|, |velocity now|) * dt * allowance + slack. Returns {"handles",
-  "moved", "speeds", "checked"}: the long moves, their lengths and the speeds they were held to, and how many moves were compared.
+- `get_vector3s(handles: PackedInt64Array, column: StringName, tick: int) -> PackedVector3Array`: One Vector3 column, by name, for each of these entities at a tick, in their order: one call for a whole crowd instead of one read a node each. A NaN x where the row isn't held, the entity's layout has no such column, or the value isn't a Vector3.
+- `find_long_moves(tick: int, dt: float, allowance: float, slack: float) -> Dictionary`: The move check's first pass ([`MoveSanityCheck`](../diagnostics/REFERENCE.md#movesanitycheck)): every entity, in a layout with Vector3 "position" and "velocity" columns, whose move from tick - 1 to tick is longer than max(|velocity then|, |velocity now|) * dt * allowance + slack. Returns {"handles", "moved", "speeds", "checked"}: the long moves, their lengths and the speeds they were held to, and how many moves were compared.
 - `frame_checksum(tick: int) -> int`: A checksum of every row held for that tick, in layout and slot order. The C++ store gives the same number.
-- `verify_nodes(tick: int) -> PackedInt64Array`: The determinism tripwire: handles of bound, active entities whose nodes no longer hold (once rounded) what their row for that tick
-  says. Empty when nothing wrote around the store.
+- `verify_nodes(tick: int) -> PackedInt64Array`: The determinism tripwire: handles of bound, active entities whose nodes no longer hold (once rounded) what their row for that tick says. Empty when nothing wrote around the store.
 - `quantize(value: Variant, encoding: StringName) -> Variant`: StateEncoding.quantize, the same rounding the commit does.
 - `get_stats() -> Dictionary`: {layouts, entities, active, bound, cells_per_frame, depth, commit_usec, rows_read, rows_carried} (the last three: the last commit).

@@ -10,9 +10,9 @@
 class_name RunEnvironment
 extends RefCounted
 
+# REFACTOR: a switch only tests turn on, kept in shipping code; test code belongs in tests/. It could stay as the agreed small hook.
 ## On: visual-only parts run even with no display. Off (the default): with no display they build nothing and never run, since nothing
 ## can see them (the floating swords cost 1.4 ms a tick on a headless mass battle server).
-# REFACTOR: a switch only tests turn on, kept in shipping code; test code belongs in tests/. It could stay as the agreed small hook.
 static var visuals_without_display := false
 
 

@@ -27,7 +27,7 @@ var _shorten := 0.0 # metres taken off the next leg after one that couldn't be w
 
 func _init() -> void:
 	super()
-	allowed_states = [&"Idle"]
+	tag_requirements = TagQuery.shared([Tags.AI.STATE_IDLE])
 	max_score = 0.15
 	min_score = 0.15
 	tick_interval_ticks = 60 # the safety net: it wakes when a leg ends (wake_on_path_end)

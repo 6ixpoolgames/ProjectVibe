@@ -15,6 +15,10 @@ None in this folder yet. Related: `TerrainSettings`, which describes a terrain, 
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-23
+
+- **A terrain edit no longer lands held chunks early:** `finish_building_chunks` and `rebuild_chunks_for_log` skip a chunk waiting for its landing tick (`_finish_unless_held`), so an edit can't publish a chunk before the tick it was due. Found in the code pass; tested by `chunk_streaming_selftest`. README: held chunks and the tag file's name.
+
 ## 2026-11-22
 
 - **A held chunk's collision stays out of the scene until it's published,** rather than switched off. `SightGeometry` (line of sight, and the crowd mover's ground) leaves switched-off shapes out and never noticed them switched on, so chunks landed through the schedule were missing from it: sight saw through that ground and soldiers there fell back to physics movement. Now the body enters the scene when the chunk lands, and everything following the scene's bodies sees it arrive.

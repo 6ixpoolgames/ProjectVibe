@@ -33,8 +33,11 @@ enum Anchor {
 @export_range(0.1, 20.0, 0.05, "or_greater") var start_reach := 1.8
 
 @export_group("End")
+## Degrees from straight ahead at the end, positive to the pawn's left.
 @export_range(-360.0, 360.0, 1.0) var end_angle := 50.0
+## Metres above the pawn's feet at the end.
 @export var end_height := 1.0
+## Metres from the pawn to the far edge of the hit sphere at the end.
 @export_range(0.1, 20.0, 0.05, "or_greater") var end_reach := 1.8
 
 @export_group("")
@@ -45,6 +48,7 @@ enum Anchor {
 
 ## With a WORLD anchor: where the pawn stood and faced as the step began. Rolls back.
 var anchor_origin := Vector3.ZERO
+## With a WORLD anchor: the way the pawn faced as the step began, in radians. Rolls back.
 var anchor_yaw := 0.0
 var _sorted_keys: Array[SweepKey] = [] # keys in order of time, sorted when keys changes
 var _sorted_from: Array[SweepKey] = []

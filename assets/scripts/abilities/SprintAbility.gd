@@ -64,7 +64,6 @@ var switched_at := -1:
 		push_state(&"switched_at", value)
 
 
-## Ticks of sprinting it has now: draining while it runs, refilling while it doesn't. Worked out from the tick.
 ## Its kind's defaults: a new [SprintDefinition].
 func make_default_definition() -> AbilityDefinition:
 	return SprintDefinition.new()
@@ -75,6 +74,7 @@ func _settings_changed() -> void:
 	_sprint = settings as SprintDefinition
 
 
+## Ticks of sprinting it has now: draining while it runs, refilling while it doesn't. Worked out from the tick.
 func charge_ticks() -> int:
 	if is_running_timed():
 		return maxi(charge_at_switch - (TickDriver.tick - switched_at), 0)

@@ -15,6 +15,7 @@ Code that works but doesn't yet fit the project's goals. Each is marked `REFACTO
 
 ## 2026-11-23
 
+- **Documentation pass:** `StateStoreGD`'s long member docs trimmed to the reference style; the README's status covers steps 1 to 5 (pushed columns, carried rows, writing through).
 - **Determinism across platforms** (the owner's request; state store spec 13.11): Windows against Linux, the fingerprints split at tick 18 over a nearest-polygon tie that Detour settles in a platform-dependent order. Fixed in the nav library (native changelog: our own nearest-polygon lookup, then Recast and Detour sorting stably), after which a 603-pawn, 7200-tick match agrees on both platforms on every value.
 - **Tools for comparing machines:** `run_determinism_check.py --compare A B` compares two fingerprint files made elsewhere, without running. New run options: `--terrain-seed=N` (another floor), `--nav-dump=TICK` (every nav triangle, link and tile state, bit for bit), `--paths-to=TICK` (every pawn's path state, and the nav server's path search log), and a fuller `--trace` (the move input, the path state and every AI decision; the static decision listener is cleared on exit, since left set it crashed Godot as it quit).
 - **Under contention:** 4 copies of the check run at once on one machine, on the default floor and on another, each match the run made alone.

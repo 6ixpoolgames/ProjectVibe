@@ -2,7 +2,7 @@
 
 # Scaling Spec v0.9 (tier 1, being built)
 
-**Status:** agreed by the owner on 2026-11-09 ("Ok. Proceed") and being built, step by step (section 10). **Built:** step 1, the pawn table (3.1); step 2, the job scheduler, the table's columns and the sensing job (3.2, 4.2); step 3, the contract's exceptions (5.1); step 4, line of sight in C++ (6.1); step 6, the tick rate chosen per match (7.2). Step 5 is set aside for now (the owner's call). The groundwork it stands on is pawn spec 15.
+**Status:** agreed by the owner on 2026-11-09 ("Ok. Proceed") and being built, step by step (section 10). **Built:** step 1, the pawn table (3.1); step 2, the job scheduler, the table's columns and the sensing job (3.2, 4.2); step 3, the contract's exceptions (5.1); step 4, line of sight in C++ (6.1); step 6, the tick rate chosen per match (7.2). Step 5 is under way: 5a to 5c built, 5d in part (6.2). The groundwork it stands on is pawn spec 15.
 **Scope:** how a server runs many more pawns: a shared table of plain pawn data, worker threads with the owner's scheduler, the AI on workers, simulating far-away pawns less often, crowd movement for AI units, and per-client network work. Clients change little.
 **Why:** on the owner's PC, which is above average, about 235 fighting pawns fit in a 60 Hz tick today (pawn spec 15.6), so about **145 on the target machine** (section 0). The owner's words: "My machine is above average and 250ish units networked is far from ideal."
 **Numbers** marked "guess" are estimates until a step is built and measured.
@@ -342,7 +342,7 @@ abilities and paths, so it stays GDScript on the main thread.
 - **C++ is the main path; GDScript is a dormant backup** *(the owner, 2026-11-17: "GD script is there as a backup and should be
   dormant unless things are broken. C++ is main")*. Once the batch's answers are used (5e), every pawn's decision is made in C++ and
   GDScript's decider doesn't run at all; it takes over only without the C++ library, or when switched to by hand to find a fault.
-  Until then the batcher (`AIDecisionBatcher`) runs in shadow mode, checking C++ against GDScript.
+  Until then the batcher ran in shadow mode, checking C++ against GDScript; since 5c, `AIDecisionModule` decides in C++ and `--ai-shadow` keeps the check.
 - **Data in, data out.** C++ never calls GDScript while deciding: it reads a small set of per-pawn columns and writes its answers
   to an array. No behaviour is written in C++.
 - Shadow tests first, at normal size (does it work) and at stress (where it breaks).
@@ -514,7 +514,7 @@ Each step ends with tests passing on Windows and Linux, and the measurement it n
 | 2 | **Job system and scheduler** in `navcore`: batches, due ticks, cost estimates, the main thread's budget, late-job counting, sizing to the machine (4, 4.1). One job kind to start: the sight checks. `pawn_stress` and `net_stress` get the slower-CPU stretch and worker cap (section 0). **Built 2026-11-09 (4.2), with the table's columns (3.2); the budget moves to step 5** | The same results with 0, 1, 2, 3 and N worker threads, compared exactly; `ai_stress` main-thread time down. *Measured: identical with every worker count and in a whole fight; the AI's main-thread time 7 to 9% less (`ai_stress`); the rays, most of what's left, go in step 4* |
 | 3 | **Contract exceptions tidied** (5). **Built 2026-11-09 (5.1)** | `ai_stealth_selftest`, taunt tests unchanged. *Unchanged, and a new check of forces asked for during a tick* |
 | 4 | **Line of sight in C++, against the heightmap and props** (6). **Built 2026-11-09 (6.1), against the terrain's own triangles** | Agrees with physics rays on a map with props, in a comparison test; sensing fully off the main thread. *Agrees on 100% of 20,000 rays; the AI's main-thread time about a fifth less; recording what's seen is still on the main thread, for step 5* |
-| 5 | **Considerations as data** for the built-in behaviours (6), and the main thread's budget with deferral by count (4, 4.1; moved from step 2 in v0.6). **Set aside for now (v0.9, the owner's call).** *Revisited 2026-11-17 and agreed: AI decisions in C++ on the workers, in steps 5a to 5f (6.2); 5a and 5b built* | Scores equal to the GDScript ones on recorded situations; decisions off the main thread; ~235 → ~350 fighting pawns (guess) |
+| 5 | **Considerations as data** for the built-in behaviours (6), and the main thread's budget with deferral by count (4, 4.1; moved from step 2 in v0.6). **Set aside for now (v0.9, the owner's call).** *Revisited 2026-11-17 and agreed: AI decisions in C++ on the workers, in steps 5a to 5f (6.2); 5a to 5c built, 5d in part* | Scores equal to the GDScript ones on recorded situations; decisions off the main thread; ~235 → ~350 fighting pawns (guess) |
 | 6 | **Tick rate chosen per match** (7): the reference-rate conversion for the 38 tick settings, history sized in time, the rate in the handshake. **Built 2026-11-09 (7.2)** | Every suite and network test passes at 60 and at 30; converted settings last the same time at both |
 | 7 | **Interest management and per-client snapshots on workers** (9) | Bandwidth per client and server snapshot time in `net_stress` |
 | 8 | **Client batch placement** (9) | Client cost per remote pawn in `net_profile` |

@@ -5,8 +5,8 @@
 ## simulate from exactly what the network can carry. Encodings: [code]auto[/code] (by type), [code]vector3_mm[/code] (default for
 ## positions), [code]vector2_mm[/code], [code]vector3_cm[/code], [code]angle_u16[/code], [code]angle_byte[/code], [code]float[/code],
 ## [code]raw[/code] (ints, bools, StringNames).
-## [br]Twin: the C++ recorder and codec round the same way ([code]native/src/state_encoding.h[/code]); a change to [method quantize]
-## goes in both.
+## [br]Twin: the C++ state store ([code]StateStore::quantize_by_id[/code], state_store.cpp) and codec (net_codec.cpp) round the same
+## way, with the steps in [code]native/src/state_encoding.h[/code]; a change to [method quantize] goes in all three.
 ## Design: netcode spec 5.3.
 class_name StateEncoding
 extends RefCounted
@@ -59,7 +59,7 @@ static func resolve(encoding: StringName, value: Variant) -> StringName:
 	return RAW
 
 
-## The value rounded to its encoding (twin of the C++ [code]state_encoding.h[/code]; change both). Rounding a rounded value changes nothing.
+## The value rounded to its encoding (twin of the C++ StateStore::quantize_by_id; change both). Rounding a rounded value changes nothing.
 static func quantize(value: Variant, encoding: StringName) -> Variant:
 	match encoding:
 		VECTOR3_MM:

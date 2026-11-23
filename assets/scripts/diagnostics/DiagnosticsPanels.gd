@@ -167,6 +167,7 @@ func inspect(pawn: Pawn) -> void:
 
 
 ## The text a panel shows now, for tests.
+# REFACTOR: only tests read it (diagnostics/CHANGELOG.md).
 func get_text(key: Key) -> String:
 	var content: Control = _panels[key][1]
 	var label: Label = content if content is Label else content.get_child(0)

@@ -28,7 +28,7 @@ Measures how every frame went and what it cost, keeps session logs and captures 
 - **`DiagnosticsManager`** is a GameMode module, listed by the project setting `project_base/game_mode/modules` and its `.release` override; the base never names it. Every frame it measures physics, scripts and the rest, adds TickDriver's phases and every scope, keeps 30 s of history and the spikes, writes the session log, feeds the replay and the editor's monitors, and starts a replay when play starts if nothing else did.
 - **`DiagnosticsLogger`** catches the engine's warnings and errors from any thread, for the log and the replay.
 - **`MoveSanityCheck`**, in every build, runs after each tick (`check_moves`): from the state store alone (its first pass is `StateStore.find_long_moves`, 0.03 ms a tick at 300 pawns), it warns once about any entity that moved further than its velocity explains and didn't teleport (`Pawn.teleport`). It catches code that sets a position directly; it doesn't judge speeds.
-- **`DiagnosticsPanels`** are the on-screen panels. **`NavDebugView`** draws navigation in the world (its history is in [navigation's changelog](../navigation/CHANGELOG.md)).
+- **`DiagnosticsPanels`** are the on-screen panels. **`ProjectileTraceView`** (F5) draws each projectile's planned path and what it met. **`NavDebugView`** draws navigation in the world (its history is in [navigation's changelog](../navigation/CHANGELOG.md)).
 
 It works with `replay/` (channel 6, `ReplayDiagnosticsChannel`, and the viewer's strip), `TickDriver` (its profile and load ladder), `NetworkSession` (its counters and connections) and `AIActivationManager` (how many AI pawns run every tick, 2nd and 4th).
 
@@ -79,6 +79,7 @@ Names are dotted, general first. Name animation work `animation.something` and i
 | Setting | Where | Default | What it does |
 |---|---|---|---|
 | `history_seconds` | `DiagnosticsManager` | 30 s | How much history is kept in memory |
+| `check_moves` | `DiagnosticsManager` | on | After each tick, warns about any entity that moved further than its velocity explains (`MoveSanityCheck`) |
 | `spike_over_budget` | `DiagnosticsManager` | 1.2 | A frame over the tick's budget times this is a spike (over 20 ms at 60 ticks a second) |
 | `spikes_kept` | `DiagnosticsManager` | 50 | Spikes kept, newest last |
 | `log_every_seconds` | `DiagnosticsManager` | 5 s | How often a summary line goes into the session log |

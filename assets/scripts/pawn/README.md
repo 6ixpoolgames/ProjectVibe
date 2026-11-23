@@ -24,6 +24,7 @@ The body every character is: something a player or the AI can drive. It runs its
  ├─ OwnedTags                            the tags it owns right now, for tag queries              (tags/)
  ├─ AbilityManager ─ Walk, Jump, Sprint  steer the pawn; hits and death                           (abilities/)
  ├─ AIContextComponent and the AI parts  decide what the AI's hands do                            (ai/)
+ ├─ PawnStreamingSource                  keeps the world loaded around it while a player has it   (streaming/)
  ├─ TickStateComponent, NetworkEntity    rollback and multiplayer (in the scene)                  (netcode/)
  └─ Visual ─ Model, CameraMount          placed smoothly each frame by the VisualPlacer             (visuals/, camera/)
 ```
@@ -51,7 +52,7 @@ for node in get_tree().get_nodes_in_group(Pawn.GROUP):
     var pawn := node as Pawn
 ```
 
-**Reach a part.** `pawn.controller_manager`, `pawn.ability_manager`, `pawn.stat_manager`, `pawn.effect_manager`, `pawn.navigation_manager`, `pawn.ai_context` (null when the pawn hasn't got one).
+**Reach a part.** `pawn.controller_manager`, `pawn.ability_manager`, `pawn.stat_manager`, `pawn.effect_manager`, `pawn.owned_tags`, `pawn.navigation_manager`, `pawn.ai_context`, `pawn.streaming_source` (null when the pawn hasn't got one).
 
 ## Settings worth knowing
 

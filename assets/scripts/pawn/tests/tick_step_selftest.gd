@@ -30,7 +30,8 @@ func _ready() -> void:
 	var floor_body := _make_floor()
 	# The pawn checks set tick_step by hand, so the AIActivationManager, which would set it too, pauses its checks until its own test.
 	_activation = GameMode.ai_activation_manager
-	_activation.set_physics_process(false)
+	# Claude 2026-11-23: its checks run before each tick now, so pausing it means leaving the tick driver's before_tick.
+	TickDriver.before_tick.disconnect(_activation._on_before_tick)
 	await _test_walking()
 	await _test_spread()
 	await _test_ability_timing()
@@ -38,7 +39,7 @@ func _ready() -> void:
 	await _test_swing()
 	_test_schedules()
 	await _test_rollback()
-	_activation.set_physics_process(true)
+	TickDriver.before_tick.connect(_activation._on_before_tick)
 	await _test_steps_by_distance()
 	_test_load_ladder()
 	TickDriver.load_step_override = 0

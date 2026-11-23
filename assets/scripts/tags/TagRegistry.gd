@@ -1,26 +1,14 @@
 # Written by Claude (claude-opus-5-5), 2026-11-04. History: tags/CHANGELOG.md.
 ## Every tag in the game: turns names like "ability.combat.melee" into bits, so checks are one AND instead of comparing text.
 ##
-## One registry for every kind of tag (tag spec): what an ability is, what an effect is, a pawn's status, the AI's states and stances,
-## navigation markers. A tag's first level is its [b]category[/b] (ability, effect, status, ai, nav); code writes tags as [Tags]
-## constants ([code]Tags.ABILITY.COMBAT_MELEE[/code]).
+## One registry for every kind of tag (tag spec). A tag's first level is its [b]category[/b] (ability, effect, status, ai, nav); every
+## level gets its own bit in its category's 64-bit word, and a tag's mask holds its parents' bits too, so "ability.combat" matches
+## ability.combat.melee (never "ability.combatant"). Masks of different categories can't be mixed. Code writes tags as [Tags] constants.
 ## [br]
-## Tag bit rules:
-## [br]- A tag is a StringName with dot-separated levels; a dot means "inside" (ability.combat is inside ability). Names only.
-## [br]- Every level gets its own bit, numbered within its category: ability, ability.combat and ability.combat.melee are three bits
-##   of the ability category's 64-bit word.
-## [br]- A tag's mask is its own bit plus its parents' bits, so a query for "ability.combat" catches ability.combat.melee with one AND,
-##   and never "ability.combatant". Matching is from the root only.
-## [br]- A mask belongs to one category: masks of different categories can't be combined or compared (a list that mixes them warns).
-## [br]- At most 64 levels per category; extras get no bit (mask 0, match nothing) with a warning.
-## [br]
-## Every machine must give a tag the same bit, so tags are declared in [TagDeclarationsRes] files (the base file, then any listed in
-## the project setting [constant EXTRA_DECLARATIONS_SETTING]), merged and sorted at startup; the netcode handshake compares
-## [method content_hash]. A tag nobody declared is added on the spot with a warning (a desync risk online). Queries never add tags.
-## [br]
-## Renaming: an old name in a declarations file's redirects is read as its new name, with a warning, so old resources, saves and
-## replays still load (tools/tags/apply_redirects.py rewrites saved files). A deprecated tag still works, with a warning. Bits are
-## never saved: everything saved stores names. A static class, so it works in headless tests.
+## Tags are declared in [TagDeclarationsRes] files (the base file, then those in [constant EXTRA_DECLARATIONS_SETTING]), merged and
+## sorted at startup so every machine gives the same bits; the netcode handshake compares [method content_hash]. An undeclared tag is
+## added with a warning; queries never add tags. Old names are read through redirects, and bits are never saved, only names. A static
+## class, so it works in headless tests. The full rules and corner cases: the tags README.
 # REFACTOR: a category past 64 levels gets no more bits. The tag spec plans extra 64-bit words for such a category; the int masks
 # every caller uses today assume one word, so that waits until a category nears the limit (tags/CHANGELOG.md).
 class_name TagRegistry

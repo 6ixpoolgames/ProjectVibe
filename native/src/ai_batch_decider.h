@@ -1,14 +1,14 @@
 // Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
-// AIBatchDecider: AI behaviour decisions for many pawns in one call, in C++ (scaling spec 6.2, the "shadow" decider). It makes the
-// same decision AIBehaviourManager.decide() makes (pawn spec 10.8), from plain data, so it can later run on the worker threads.
-// For now nothing in the game uses its answers: ai/tests/ai_batch_decider_selftest checks it against decisions GDScript made
-// (AIDecisionRecorder's records), and agrees or says where it doesn't.
+// AIBatchDecider: AI behaviour decisions for many pawns, in C++ (scaling spec 6.2), the game's main path through AIDecisionModule. It
+// makes the same decision AIBehaviourManager.decide() makes (pawn spec 10.8), from plain data, so it can later run on the worker
+// threads; ai/tests/ai_batch_decider_selftest checks it against decisions GDScript made (AIDecisionRecorder's records).
+// REFACTOR: kept twice, here and in AIBehaviourManager.decide() (reusable, extensible); see the row in native/CHANGELOG.md.
 //
 // The data, as the owner sketched it: a small number of parallel arrays in, one row per decision, and arrays out.
 // - A brain (add_brain) is what every pawn using the same behaviour set shares: each behaviour's settings, in the manager's fixed
-//   order (by name), and for each state a bitmask of the behaviours allowed in it. Brains are added once, not per decision.
-// - A row is one pawn's decision: its brain, tick, state, reasons, running behaviour, and bitmasks for the hard rules (cooling down,
-//   whose action can start) and for the availability GDScript gave. Per-behaviour numbers (persistence, given scores) are in
+//   order (by name), with its tag requirements as masks over the owned tags' category words. Brains are added once, not per decision.
+// - A row is one pawn's decision: its brain, tick, owned tags (as words), reasons, running behaviour, and bitmasks for the hard rules
+//   (cooling down, whose action can start, blocked by a score modifier) and for the availability GDScript gave. Per-behaviour numbers (persistence, given scores) are in
 //   flattened arrays, `stride` values a row (get_stride()).
 // - decide() returns which behaviour each row chose, whether the interrupt rule kept the running one, and which behaviours' is_available
 //   it asked for, so a comparison can check the early stop asked exactly what GDScript asked.
@@ -18,7 +18,7 @@
 //   recorded decisions through it.
 // - Pawns (step 5c): each pawn's decision state lives here (add_pawn): its running behaviour and since when, each behaviour's last
 //   end (cooldowns) and persistence, and its own jitter and interrupt thresholds. decide_pawn() decides one pawn from that state and
-//   the tick's few facts (state, target, reason, its inputs), and applies the switch to the state itself, as
+//   the tick's few facts (owned tags, target, reason, its inputs), and applies the switch to the state itself, as
 //   AIBehaviourManager._start does to the behaviour nodes. The game's events change it (stop_running, add_persistence_ticks,
 //   set_persistence_speed, set_score_jitter, set_interrupt_threshold). This is how C++ makes the game's decisions; GDScript's
 //   decider is the dormant backup (the owner's call).
@@ -56,7 +56,8 @@ public:
 	static constexpr int MAX_BEHAVIOURS = 64;
 
 	// Adds a brain from its description (AIBehaviourManager.describe()'s shape): tie_margin, randomize_ties, tie_salt, and
-	// "behaviours", each with name, name_hash, allowed_states, max_score, min_score (null: none), needs_target, presses_action,
+	// "behaviours", each with name, name_hash, tag_requirements (TagQuery.describe_words(): all, any and none as one word per tag
+	// category, and impossible; null for none), enabled (false: never chosen), max_score, min_score (null: none), needs_target, presses_action,
 	// min_run_ticks_at_rate (else min_run_ticks), interrupt_threshold, cannot_be_interrupted, effective_jitter, and optionally
 	// scorer ("given", the default, or "conditions"), conditions and score_curves (AICondition.describe() and
 	// AIScoreCurve.describe()). Behaviours are put in the fixed order, by name. Returns the brain's number, or -1 with an error.
@@ -66,19 +67,17 @@ public:
 	int get_behaviour_count(int brain) const;
 	int find_behaviour(int brain, const StringName &name) const; // -1 if it has none by that name
 	StringName get_behaviour_name(int brain, int slot) const;
-	// The number decide()'s "state" column uses for a state name. A state no behaviour names allows only the behaviours with no
-	// allowed_states, as GDScript's is_allowed_in() does.
-	int find_state(int brain, const StringName &state) const;
 	// How many values a row takes in the flattened per-behaviour arrays: the most behaviours any brain has.
 	int get_stride() const;
 
 	// One decision per row. columns holds these arrays, all the same length (the row count), except the flattened ones:
-	//   brain (PackedInt32Array), pawn_number, random_seed, tick (PackedInt64Array), state (PackedInt32Array, from find_state),
-	//   has_target, event_normal (PackedByteArray, 0 or 1), event_priority (PackedInt32Array), running (PackedInt32Array, slot,
+	//   brain (PackedInt32Array), pawn_number, random_seed, tick (PackedInt64Array), owned (PackedInt64Array, rows * tag_words: the
+	//   owned tags' words; optional, nothing owned without it) with tag_words (int), has_target, event_normal (PackedByteArray, 0 or 1), event_priority (PackedInt32Array), running (PackedInt32Array, slot,
 	//   -1 for none), running_started (PackedInt64Array), cooling, can_press (PackedInt64Array masks: behaviours cooling down;
 	//   behaviours whose action could start), available_known, available (PackedInt64Array masks, for the "given" scorer),
 	//   persistence (PackedFloat64Array, rows * stride), and optionally score (PackedFloat64Array, rows * stride; NaN or missing
-	//   means the default score(), max_score), and inputs (PackedFloat64Array, rows * input_stride, each row's AI inputs by slot)
+	//   means the default score(), max_score), modifier (PackedFloat64Array, rows * stride, the score modifiers' sums; optional),
+	//   blocked (PackedInt64Array mask, behaviours a modifier blocks; optional), and inputs (PackedFloat64Array, rows * input_stride, each row's AI inputs by slot)
 	//   with input_stride (int). A condition reading a slot past input_stride reads 0, as AIInputs.value() does.
 	// Returns a Dictionary: chosen (PackedInt32Array, slot or -1), kept (PackedByteArray, 1 when the interrupt rule kept the
 	// running one), asked (PackedInt64Array, behaviours whose is_available it asked for), unknown (PackedInt64Array, asked but not
@@ -123,8 +122,10 @@ public:
 	// the owner's call), so a decision gathers nothing. ---
 	// The pawn's body (its instance id: its position is read from it) and its C++ memory store (AIMemoryStore).
 	void set_body(int row, int64_t body_id, Object *memory_store);
-	// Its state's number (find_state), from AIStateManager on a state change.
-	void set_state(int row, int state);
+	// Its owned tags as words (OwnedTags.get_words()), written when they change (OwnedTags.version). The AI's state is one of them.
+	void set_owned_tags(int row, const PackedInt64Array &words);
+	// The score modifiers' sum per behaviour slot and the behaviours they block, written when they change (pawn spec 10.13).
+	void set_modifiers(int row, const PackedFloat64Array &sums, int64_t blocked_mask);
 	// Its target's instance id (0: none), from AIContextComponent's current_target. A target that's gone counts as none.
 	void set_target(int row, int64_t target_id);
 	// The behaviours whose action could start (a mask by slot), from the AbilityManager's readiness after it changed.
@@ -137,7 +138,7 @@ public:
 	// The last hit's tick and attacker; the swing coming (attacker 0 when there's none), its attacker's pawn number, start and hit ticks.
 	void note_hit(int row, int64_t tick, int64_t attacker_id);
 	void note_incoming(int row, int64_t attacker_id, int64_t attacker_number, int64_t start_tick, int64_t hit_tick);
-	// The facts as written (state, target_id, can_press), for shadow mode's check that nothing was missed.
+	// The facts as written (owned, target_id, can_press, modifier, blocked), for shadow mode's check that nothing was missed.
 	Dictionary get_facts(int row) const;
 	// One decision for one pawn, from its row: its state and facts, and the reason's priority and whether it's an ordinary decision.
 	// The memory-based inputs are worked out here from its memory store (as AIInputs does), the group distances from its body, the
@@ -218,14 +219,20 @@ private:
 		double persistence = 0.0; // its amount
 		fade_math::Fade persistence_fade; // no profile: no persistence
 		bool has_persistence_fade = false;
+		// Its tag requirements (a TagQuery): one word per category for all of, any of and none of.
+		bool has_gate = false;
+		bool gate_impossible = false; // all of names a tag nothing can own
+		bool gate_needs_any = false;
+		std::vector<uint64_t> gate_all;
+		std::vector<uint64_t> gate_any;
+		std::vector<uint64_t> gate_none;
 	};
 
 	struct Brain {
 		std::vector<Behaviour> behaviours; // the fixed order, by name
 		std::vector<Condition> conditions; // every behaviour's, children before the "any" holding them
 		std::vector<Curve> curves;
-		std::vector<int64_t> state_masks; // [0]: behaviours allowed in any state (no allowed_states); then one per named state
-		std::vector<StringName> state_names; // state_names[i] is state_masks[i + 1]'s state; a short list, searched rarely
+		uint64_t gated_mask = 0; // behaviours with tag requirements
 		uint64_t needs_target_mask = 0;
 		uint64_t presses_action_mask = 0;
 		double tie_margin = 0.0001;
@@ -262,7 +269,9 @@ private:
 		// Facts (write-through), written when they change.
 		uint64_t body_id = 0;
 		Ref<RefCounted> memory_store; // an AIMemoryStore
-		int state = 0;
+		std::vector<uint64_t> owned; // its owned tags' words
+		std::vector<double> modifier; // the score modifiers' sum per slot (empty: none)
+		uint64_t blocked = 0;
 		uint64_t target_id = 0;
 		uint64_t can_press = 0;
 		std::vector<double> kept_inputs; // by slot: the inputs it keeps
@@ -290,7 +299,10 @@ private:
 		int64_t now = 0;
 		int64_t event_priority = 0;
 		bool event_normal = true;
-		int state = 0;
+		const uint64_t *owned = nullptr; // the owned tags' words, owned_count of them
+		int64_t owned_count = 0;
+		const double *modifier = nullptr; // one per behaviour, or null: none
+		uint64_t blocked = 0;
 		bool has_target = false;
 		uint64_t cooling = 0;
 		uint64_t can_press = 0;
@@ -308,6 +320,8 @@ private:
 	// AIBehaviourManager.decide(), step for step, for one decision. Both ways in use it.
 	RowResult decide_row(const Brain &brain, const RowInput &in);
 	bool row_ok(int row) const;
+	// TagQuery.matches_words(): the behaviour's tag requirements against the owned words (true with none).
+	static bool passes_gate(const Behaviour &behaviour, const uint64_t *owned, int64_t owned_count);
 
 	// is_available() once per decision, as the manager's _is_available: asked holds which were asked, answers what they said.
 	bool is_available(const Brain &brain, int slot, const RowView &row, uint64_t &asked, uint64_t &answers, uint64_t &unknown) const;

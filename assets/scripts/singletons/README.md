@@ -9,7 +9,7 @@ The project's four autoloads: the few services every game needs, reachable from 
 | Autoload | What it is | Documented in |
 |---|---|---|
 | `TickDriver` | Runs all gameplay in numbered, fixed-length ticks, in a fixed phase order, and replays ticks for rollback | Here: [CHANGELOG.md](CHANGELOG.md); design in [NETCODE_SPEC.md](../../../docs/netcode/NETCODE_SPEC.md) section 3 and [SCALING_SPEC.md](../../../docs/scaling/SCALING_SPEC.md) section 7 |
-| `NetworkSession` | Multiplayer: connecting, spawning, inputs, snapshots | [netcode/README.md](../netcode/README.md), [netcode/CHANGELOG.md](../netcode/CHANGELOG.md) |
+| `NetworkSession` | Multiplayer: connecting, spawning, inputs, snapshots | Here, "How it works" (tick order, packets, time dilation, rules); the netcode overview: [netcode/README.md](../netcode/README.md), [netcode/CHANGELOG.md](../netcode/CHANGELOG.md) |
 | `GameMode` | Holds the game's rules as optional modules | [game_mode/README.md](../game_mode/README.md), [game_mode/CHANGELOG.md](../game_mode/CHANGELOG.md) |
 | `NavMarkerManager` | Holds every nav marker and answers searches for them | [navigation/README.md](../navigation/README.md), [navigation/CHANGELOG.md](../navigation/CHANGELOG.md) |
 
@@ -17,7 +17,7 @@ Every class and function is in the generated reference (`python tools/docs/make_
 
 ## The tick driver
 
-Everything that simulates registers with `TickDriver` and gets called once a tick, in phases: input, capture input, simulate, record. A frame runs as many ticks as the time covers (usually one, at most `max_ticks_per_frame`), so the game slows down rather than freezing when overloaded. `rollback(from_tick)` puts predicted parts back and replays later ticks, which the netcode uses on clients. The rules are under "How it works" below.
+Everything that simulates registers with `TickDriver` and gets called once a tick, in phases: input, capture input, simulate, record, then the state store's commit. A frame runs as many ticks as the time covers (usually one, at most `max_ticks_per_frame`), so the game slows down rather than freezing when overloaded. `rollback(from_tick)` puts predicted parts back and replays later ticks, which the netcode uses on clients. The rules are under "How it works" below.
 
 **Take part in ticks.** Call `TickDriver.register(self)` and write any of `_tick_input`, `_tick_capture_input`, `_tick_simulate`, `_tick_record`. `dt` is always the tick's length. Pawns, `TickStateComponent` and `NetworkEntity` register themselves.
 
@@ -31,12 +31,15 @@ Everything that simulates registers with `TickDriver` and gets called once a tic
 | `max_ticks_per_frame` | 3 | Most ticks one frame may run; the rest of the time is dropped |
 | `load_ladder_enabled` | on | When overloaded, AI pawns run every 2nd or 4th tick |
 | `load_step_override` | automatic | Forces the load step (tests pin it to 1) |
+| `history_depth` | 64 | Ticks of history the state store keeps |
+| `physics_follows_tick_rate` | on | Godot's physics rate follows the tick rate, one tick per physics step |
+| `verify_store_each_tick` | off | Checks every bound entity's nodes still hold what the store recorded, and warns about writes around it |
 
 ## How it works
 
 ### TickDriver
 
-One tick runs: `before_tick`, every `_tick_input`, every `_tick_capture_input`, every `_tick_simulate`, `after_simulate`, every `_tick_record`, `after_tick`. A frame runs as many ticks as the elapsed time covers (usually one), wrapped in `before_tick_loop` and `after_tick_loop`. `dt` is always the fixed tick length, never the frame's delta. A participant only gets the calls it has.
+One tick runs: `before_tick`, every `_tick_input`, every `_tick_capture_input`, every `_tick_simulate`, `after_simulate`, every `_tick_record`, the state store's commit, `after_tick`. A participant with a `due_tick` ahead (a pawn on a load step) isn't called before it. A frame runs as many ticks as the elapsed time covers (usually one), wrapped in `before_tick_loop` and `after_tick_loop`. `dt` is always the fixed tick length, never the frame's delta. A participant only gets the calls it has.
 
 **Registering.**
 - Order within a phase: lower `order` (`register`'s second argument, default 0) first; equal order keeps registration order. Every machine registers a level's pawns in the same order, so they run in the same order.
@@ -66,7 +69,7 @@ One tick runs: `before_tick`, every `_tick_input`, every `_tick_capture_input`, 
 
 **One tick on a client.** `before_tick`: world messages, then snapshots (which may roll back), then remote entities are moved; the tick's phases; `after_tick`: inputs and snapshot acknowledgements are sent. **On the server.** `before_tick`: received inputs are queued; the phases; `after_tick`: snapshots are sent (on snapshot ticks).
 
-**Rules** (tests in `tests/net_selftest.gd`):
+**Rules** (tests in `netcode/tests/net_selftest.gd`):
 - A client with a different content hash is refused with a message saying so. The hash covers the packet format, tag sets, input actions, engine build, physics settings, every entity type's schema, and the game's files. Set the project setting `project_base/network/build_id` to name a build instead of reading its files: the normal way for a release, and also for the same project on different operating systems, since line endings can differ. The tick rate isn't in it: the server hands it over in WELCOME, after the check.
 - Input for an entity the sender doesn't own, broken packets of any kind, and too many packets from one client are dropped (`max_packets_per_second`, `max_bytes_per_second`, `max_packet_bytes`; a client that hasn't passed the handshake may only send HELLO).
 - A snapshot older than the newest one seen is dropped. Input for a tick the server has already run is dropped, and the client gets corrected. The server repeats the last input when one is missing, and never rewinds for movement.

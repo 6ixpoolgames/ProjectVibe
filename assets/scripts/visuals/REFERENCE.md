@@ -21,10 +21,10 @@ Visual only: it runs once per rendered frame and only reads the pawn (swing prog
 
 - `sword_scene: PackedScene`: The sword to show, such as Kenney's weapon-sword.glb, with its blade along +Y and its grip at its origin. Empty: a plain box blade.
 - `sword_scale: float` = `2.2`: How much bigger the sword is drawn. Kenney's is about 0.45 m long; 2.2 makes it about 1 m.
-- `hover_side: float` = `0.8`: Where it hovers, from the pawn's feet: this far to the pawn's right, and this high, in metres.
-- `hover_height: float` = `1.0`
-- `bob_height: float` = `0.06`: How far it bobs up and down, in metres, and how many times a second.
-- `bob_rate: float` = `1.1`
+- `hover_side: float` = `0.8`: Where it hovers, from the pawn's feet: this far to the pawn's right, in metres.
+- `hover_height: float` = `1.0`: And this high, in metres.
+- `bob_height: float` = `0.06`: How far it bobs up and down, in metres.
+- `bob_rate: float` = `1.1`: How many times a second it bobs.
 - `hover_lean_degrees: float` = `14.0`: How far the blade leans out from straight up, away from the pawn, in degrees.
 - `swing_pivot_height: float` = `1.1`: How high the blade's pivot is above the pawn's feet during a swing, in metres: about the chest. The blade points from here through the spot the hit checks.
 - `grip_distance: float` = `0.5`: How far out from that pivot the grip is during a swing, in metres.
@@ -32,8 +32,8 @@ Visual only: it runs once per rendered frame and only reads the pawn (swing prog
 - `settle_seconds: float` = `0.12`: How long it takes to glide to its new pose when what it shows changes at once: a swing cancelled halfway, a new swing starting before the last one settled, or the pawn dying. The rest of the time it follows the swing exactly, with no lag, so even a fast chop is drawn where the hit is.
 - `return_seconds: float` = `0.8`: Seconds with no swing before it goes back to the pawn's right from the side the last swing ended on.
 - `side_change_seconds: float` = `0.35`: How long that trip round the front takes, in seconds.
-- `guard_forward: float` = `0.6`: While a parry runs, how far in front of the pawn the guarding sword is, and how high, in metres.
-- `guard_height: float` = `1.15`
+- `guard_forward: float` = `0.6`: While a parry runs, how far in front of the pawn the guarding sword is, in metres.
+- `guard_height: float` = `1.15`: And how high, in metres.
 
 ### Functions
 
@@ -62,10 +62,10 @@ Visual only: once per rendered frame, only reads the pawn, changes nothing simul
 - `steps_per_metre: float` = `1.6`: Steps per metre walked. Each step is one rock to a side and one hop.
 - `lean_degrees: float` = `6.0`: How far it leans forward while moving at full walking speed, in degrees.
 - `walk_speed: float` = `5.0`: The speed counted as full walking speed, in metres per second, for the amounts above. Faster (sprinting) rocks and hops a little more, up to one and a half times.
-- `breathe_height: float` = `0.015`: Standing still: how far it bobs up and down, in metres, and how many times a second.
-- `breathe_rate: float` = `0.8`
+- `breathe_height: float` = `0.015`: Standing still: how far it bobs up and down, in metres.
+- `breathe_rate: float` = `0.8`: Standing still: how many times a second it bobs.
 - `dash_lean_degrees: float` = `28.0`: While dashing: how far it leans forward, in degrees.
 - `knockback_tilt_degrees: float` = `22.0`: While being knocked back: how far it tips backward, in degrees.
 - `air_tilt_degrees: float` = `8.0`: While off the ground: how far it tilts back, in degrees.
-- `death_fall_degrees: float` = `90.0`: When it dies: how far it falls over onto its side, in degrees (90 is flat), and how fast it settles there.
+- `death_fall_degrees: float` = `90.0`: When it dies: how far it falls over onto its side, in degrees (90 is flat).
 - `ease_rate: float` = `12.0`: How quickly it eases toward a new lean or tilt: higher is snappier. Each frame it closes this fraction of the gap per second, roughly; 12 settles in about a quarter of a second.

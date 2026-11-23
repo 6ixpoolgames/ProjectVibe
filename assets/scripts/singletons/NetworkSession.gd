@@ -12,7 +12,7 @@
 ## NetworkSession.host(port)   # or NetworkSession.join(address, port)
 ## NetworkSession.spawn("pawn", peer_id, Vector3(0, 1, 0))   # on the server; a joining player spawns nothing by itself
 ## [/codeblock]
-## Design: netcode spec 4, 6, 10, 11. Tick order, packet formats, time dilation and the rules: the README.
+## Design: netcode spec 4, 6, 10, 11. Tick order, packet formats, time dilation and the rules: singletons/README.md.
 extends Node
 class_name NetworkSessionSingleton
 # REFACTOR: one class doing many jobs, about 2000 lines: the connection and handshake, the entity list and spawning, the clock and
@@ -56,13 +56,8 @@ const MARGIN_SHORT_WINDOW := 30
 ## How many recent input packets count for the slow check that slows down: 5 seconds at 60 a second.
 const MARGIN_LONG_WINDOW := 300
 
-## Snapshots per second. A server's entities save state only on snapshot ticks (NetworkEntity.refresh_input_saving), so changing this tells them.
-@export var snapshot_rate: int = 30:
-	set(value):
-		snapshot_rate = value
-		for entity in _entities.values():
-			if is_instance_valid(entity):
-				entity.refresh_input_saving()
+## Snapshots per second.
+@export var snapshot_rate: int = 30
 ## How far in the past remote entities are drawn. Enough to always have two snapshots to blend between.
 @export var interpolation_seconds: float = 0.1
 ## The most the adaptive version may draw in the past. Also limits how far back a client may claim to see.
@@ -150,8 +145,8 @@ var stats := {"bytes_sent": 0, "bytes_received": 0, "packets_sent": 0, "packets_
 		"bad_packets": 0, "packets_over_limit": 0, "rejected_inputs": 0, "snapshots_encoded": 0, "schema_mismatches": 0, "interpolation_underruns": 0, "margin_total": 0, "margin_reports": 0,
 		"margin_lowest": NO_MARGIN, "speed_lowest": 1.0, "speed_highest": 1.0, "snapshots_sent": 0, "snapshot_bytes": 0, "snapshot_bytes_received": 0,
 		"snapshot_parts_received": 0, "deltas_without_baseline": 0, "largest_packet_sent": 0, "largest_packet_received": 0}
-## The stats that only ever count up, which diagnostics turns into rates and averages per frame. Renaming one here renames it there,
-## since diagnostics names none of them itself.
+## The stats that only ever count up, which diagnostics turns into rates and averages per frame. Diagnostics' network summary also
+## reads several by name (DiagnosticsManager._net_summary), so a rename goes there too.
 const COUNTING_STATS: Array[String] = ["bytes_sent", "bytes_received", "snapshots_encoded", "snapshots_sent", "snapshot_bytes", "snapshots_received",
 	"snapshot_bytes_received", "corrections", "resyncs", "interpolation_underruns"]
 # Despawned entities waiting for their linger_until_tick (entity id -> true), despawned after it.
@@ -865,7 +860,7 @@ func handle_packet(peer: int, bytes: PackedByteArray, _reliable: bool) -> void:
 		NetPackets.Type.INPUT, NetPackets.Type.SNAPSHOT:
 			var from_peer: int = _inbox_counts.get(peer, 0)
 			if not _driver.active:
-				pass
+				pass # dropped: a client whose clock isn't set yet has no tick to put them on
 			# The cap is the server's guard against a client flooding it. A client doesn't cap what its server sends: a large snapshot
 			# is many parts, and two arriving in one frame would go over the cap and lose the newest.
 			elif _mode == Mode.SERVER and from_peer >= MAX_INBOX_PER_PEER:

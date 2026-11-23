@@ -22,6 +22,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Size the lag compensation record from the rewind cap | `HIT_HISTORY_SIZE` in `NetworkEntity` | A fixed 64 ticks, while how far back lag compensation goes is a setting (`rewind_cap_seconds`). A cap above about 1 s, or a higher tick rate, silently rewinds nothing | S |
 | A public way to sync a body's collision now | `NetworkEntity.rewind_to`, `restore_after_rewind` | They call `TickStateComponent._sync_collision`, a private function of another class | S |
 
+## 2026-11-23
+
+- **Script warnings:** `NetworkEntity.lingering_started` is marked as emitted elsewhere (by `NetworkSession.despawn`), which the checker can't see.
+- **Documentation pass:** `NetClock.get_jitter_usec` removed (nothing called it) and its doc no longer assumes 60 ticks; `NetworkEntity.keep_history_offline` says what it keeps now (state is recorded either way); `StateEncoding` names its two C++ twins. README: server projectiles are built, relevancy is the netcode spec 19 direction.
+
 ## 2026-11-22
 
 - **One tag fingerprint in the handshake:** `content_hash` takes `TagRegistry.content_hash()` once, covering every category (navigation's included), in place of the ability and nav tag sets' two (tag spec step 1).

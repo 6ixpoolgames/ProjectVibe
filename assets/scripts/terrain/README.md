@@ -22,10 +22,11 @@ Generates the ground in square chunks from noise: low poly, with no visible squa
    ├── TerrainEditLog     optional child: edits outlast their chunks, reach clients, go into save files
    └── TerrainBodyLifter  optional child: bodies move up when an edit raises the ground over them
           ▲
- streaming/ChunkStreamer asks for chunks (build_chunk_step, unload_chunk)
+ streaming/ChunkStreamer asks for chunks (build_chunk_step, unload_chunk); with the tick driver a chunk is held, built up to
+ publishing, and load_chunk publishes it on its landing tick (is_chunk_ready_to_publish)
 ```
 
-- **`TerrainGenerator`** makes the ground. Each chunk is a grid of points, shifted at random (`grid_jitter`) so the squares don't show, with heights from noise. It's flat shaded by default, for the low-poly look. Ground is the same on every machine, from the settings alone. It knows nothing about nav, networks or streaming: it says when a chunk is built or removed, and others listen. It's also the example of the comment style the owner likes, with `GDScript note:` comments throughout.
+- **`TerrainGenerator`** makes the ground. Each chunk is a grid of points, shifted at random (`grid_jitter`) so the squares don't show, with heights from noise. It's flat shaded by default, for the low-poly look. Ground is the same on every machine, from the settings alone. It knows nothing about nav, networks or streaming: it says when a chunk is built or removed, and others listen.
 - **`TerrainEditLog`** remembers edits (a centre, radius, amount and tick each), so a chunk built later still has them. In multiplayer only the server edits, and clients get each edit, or the whole log when they join. It saves to a file.
 - **`TerrainBodyLifter`** moves bodies in its group up onto ground an edit raised above them, since the ground is one-sided and a body under it would fall forever.
 
@@ -61,7 +62,7 @@ The `TerrainEditLog` stores the edits themselves, not the heights they make: a c
 
 **Body lifter.** `TerrainBodyLifter` moves bodies in the group `stays_above_terrain` (a `Pawn` joins by itself) up onto raised ground. A body's position must be at its feet; digging moves nothing, because a body just falls into the hole. A body over an unbuilt chunk is left alone.
 
-**Markers per chunk.** What `_make_chunk_markers` returns: new markers every call (`get_chunk_markers` moves them into place), positioned from the terrain node, built from the chunk's numbers and not random ones so every machine gets the same list (a marker's id is its place in the list, which is also why an edit changes heights and never the list), with tags declared in `nav_tag_declarations.tres` or they're refused.
+**Markers per chunk.** What `_make_chunk_markers` returns: new markers every call (`get_chunk_markers` moves them into place), positioned from the terrain node, built from the chunk's numbers and not random ones so every machine gets the same list (a marker's id is its place in the list, which is also why an edit changes heights and never the list), with tags declared in `resources/tag_declarations.tres` or they're refused.
 
 ## Settings worth knowing
 

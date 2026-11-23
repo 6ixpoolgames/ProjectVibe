@@ -92,7 +92,6 @@ var warns_targets: bool:
 var _made_default_steps := false
 
 
-## Its attack_range: the AI shoots from within it.
 ## Its kind's defaults: a new [RangedAttackDefinition].
 func make_default_definition() -> AbilityDefinition:
 	return RangedAttackDefinition.new()
@@ -103,11 +102,14 @@ func _settings_changed() -> void:
 	_ranged = settings as RangedAttackDefinition
 
 
+## Its attack_range: the AI shoots from within it.
 func attack_reach() -> float:
 	return attack_range
 
 
 ## Finds its steps, after making the default ones from its settings if it has none of its own.
+# REFACTOR: the same pattern as the other attack's collect_steps (default steps made once, then kept in step with the settings);
+# one in AbilityBase with hooks (abilities/CHANGELOG.md).
 func collect_steps() -> void:
 	var has_own := false
 	for child in get_children():

@@ -37,7 +37,7 @@ signal possession_changed(pawn: Pawn, has_player: bool)
 var move_input := Vector3.ZERO ## the direction to go, in world space, up to length 1
 var held_actions := 0 ## which named actions are held this tick, as bits from InputActions
 var look_yaw := 0.0 ## where the player is looking, which is often not where the pawn is facing
-var look_pitch := 0.0
+var look_pitch := 0.0 ## where the player is looking, up and down
 ## How many ticks behind its own tick the controller was drawing other pawns, for lag compensation. The server limits it to what's
 ## believable (LagCompensation).
 var view_ticks_behind := 0.0
@@ -75,7 +75,7 @@ func _enter_tree() -> void:
 
 func _ready() -> void:
 	# The AI's hands let go when the pawn dies.
-	var abilities := _sibling_ability_manager()
+	var abilities := pawn.ability_manager if pawn else null
 	if abilities:
 		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void:
 			var hands := ai_controller as AIController
@@ -150,6 +150,13 @@ func was_action_pressed(action: StringName) -> bool:
 func clear_input() -> void:
 	move_input = Vector3.ZERO
 	held_actions = 0
+
+
+## The pawn calls this on each tick it's dead: its AIController lets go of every order it was given ([method AIController.let_go]).
+func let_go_of_ai_orders() -> void:
+	var hands := ai_controller as AIController
+	if hands:
+		hands.let_go()
 
 
 ## Once this tick's input has been read: what was held, so the next tick can tell a press from a hold; and a tick with real input
@@ -282,12 +289,3 @@ func _send_if_changed() -> void:
 	if now != _last_in_charge:
 		_last_in_charge = now
 		controller_changed.emit(now)
-
-# The pawn's AbilityManager, a sibling, found at _ready (every part is in the pawn by then), or null.
-func _sibling_ability_manager() -> AbilityManager:
-	if pawn == null:
-		return null
-	for child in pawn.get_children():
-		if child is AbilityManager:
-			return child
-	return null

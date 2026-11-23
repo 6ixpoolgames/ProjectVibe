@@ -13,8 +13,9 @@ extends RefCounted
 
 ## Which way to go, in world space, up to length 1. Shorter means slower, as a stick pushed halfway gives.
 var move := Vector3.ZERO
-## Where the controller is looking, in radians. Often not where the pawn faces.
+## Where the controller is looking, sideways, in radians. Often not where the pawn faces.
 var look_yaw := 0.0
+## Where the controller is looking, up and down, in radians.
 var look_pitch := 0.0
 ## Which named actions are held this tick, as bits from InputActions. A press is "held this tick, not held last tick", which the
 ## ControllerManager works out, so a press is never sent twice.

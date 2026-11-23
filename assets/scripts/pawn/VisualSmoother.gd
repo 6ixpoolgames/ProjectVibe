@@ -60,6 +60,7 @@ func add_correction(jump: Vector3) -> void:
 
 
 ## What's left of a correction, still fading.
+# REFACTOR: only a netcode test reads it; the test could ask the placer itself (pawn/CHANGELOG.md).
 func get_correction_offset() -> Vector3:
 	return _placer.placement.get_correction(slot) if slot >= 0 else Vector3.ZERO
 

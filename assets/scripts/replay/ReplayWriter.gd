@@ -14,7 +14,7 @@
 class_name ReplayWriter
 extends RefCounted
 
-## Off: blocks are compressed and written on the calling thread, at once (for tests, and platforms without threads).
+## Off: blocks are compressed and written on the calling thread, at once, for a platform without threads.
 var use_thread := true
 ## The most blocks that may wait. [method push_block] refuses more, so a slow disk never fills memory; the recorder then stops.
 var max_queued_blocks := 60 # the recorder sets it from its own max_queued_blocks

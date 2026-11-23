@@ -38,7 +38,9 @@ Who drives a pawn: a player or the AI makes one input command a tick, and the pa
 var ai := pawn.controller_manager.ai_controller as AIController
 ai.move_to(target)     # false if there's no way there
 ai.press(&"attack")    # one press, this tick
+ai.follow(target, 1.2) # keeps closing in on target until told otherwise
 ```
+`follow` and `keep_distance` are persistent orders: given once, carried out at every input from where the target really is, which every machine knows, so an order stream sends one rather than one a tick (netcode spec 19.10). A move order ends them. A dead pawn's AIController takes no orders (they're ignored, and the order listener never hears them), and lets go of what it was told on its pawn's dead ticks (`let_go`), so it comes back from a revive with no orders. While a player has the pawn but the AI keeps deciding, `move_to` only remembers the point (and returns true), so it can't overwrite the player's path.
 
 **Make a pawn players can't take.** Untick `possessable` on its ControllerManager. If the part comes from the defaults, add `parts/ControllerManager.tscn` to the pawn scene first.
 

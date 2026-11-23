@@ -50,10 +50,8 @@ enum Push {
 	set(value):
 		max_hits = value
 		_changed(&"max_hits", value)
-## On: the world can block a hit (ability spec 13.8). It's checked along the weapon's reach, not from the chest: from the attacker's
-## axis at the height the hit met the target, out to that point, then on to the target's body. So a swing doesn't hit through a wall,
-## but a low crate in front of the attacker doesn't block a swing passing over it. Two short rays per pawn hit. A projectile's flight
-## already stops at the world.
+## On: the world can block a hit (ability spec 13.8), checked along the weapon's reach rather than from the chest, so a wall stops a
+## swing but a low crate it passes over doesn't. Two short rays per pawn hit; a projectile's flight already stops at the world.
 @export var blocked_by_world: bool = true:
 	set(value):
 		blocked_by_world = value

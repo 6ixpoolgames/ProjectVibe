@@ -7,6 +7,7 @@
 //
 // Twin: pawn/VisualPlacementGD.gd does exactly the same in GDScript; a change goes in both, and pawn/tests/visual_placement_selftest
 // compares them.
+// REFACTOR: kept twice, here and in VisualPlacementGD.gd (reusable, extensible); see the row in native/CHANGELOG.md.
 #pragma once
 
 #include <godot_cpp/classes/ref_counted.hpp>

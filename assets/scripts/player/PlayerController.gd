@@ -6,10 +6,7 @@
 ## taken), and gives its pawn this tick's input when the ControllerManager asks ([method take_input_command]). Named actions come from
 ## keys through [member action_keys]. It moves nothing itself: the pawn's abilities do. To drive it from a script, extend it and
 ## override the _read functions.
-## [br]
-## [b]Spectating:[/b] PossessionCoordinator.spectate() lets go of the pawn and calls [method start_spectating]; the player then flies
-## a FreeFlyCamera ([member spectator_scene]). Taking a pawn stops it. While spectating with a pawn still attached (a client waiting
-## for the server's answer), the keys fly the spectator and the pawn gets no input from them.
+## [br]Spectating ([method start_spectating], a FreeFlyCamera): the player README.
 ## Design: pawn spec 5, 6.2, 8.18.
 # REFACTOR: the InputMap names for moving, the wheel and the mouse buttons (move_left, scrollWheel_up, left_click, middleMouse_button)
 # are written in the code, unlike action_keys; settings would let a designer remap them without code. See CHANGELOG.md.
@@ -19,10 +16,11 @@ extends ControllerBase
 enum LookMode {
 	## The mouse is captured and turns the view, as in most action games.
 	CAPTURED,
-	## The mouse stays free and the view turns when it nears the edge of the screen, as the old camera arm did.
+	## The mouse stays free and the view turns when it nears the edge of the screen, as many strategy games do.
 	SCREEN_EDGE,
 }
 
+## How the mouse turns the view: captured, or turning at the screen's edge.
 @export var look_mode := LookMode.CAPTURED
 ## Radians turned per pixel the mouse moves, in CAPTURED mode.
 @export var mouse_sensitivity := 0.0025
@@ -39,16 +37,18 @@ enum LookMode {
 ## The free-flying camera used while spectating (start_spectating()). Its root must be a FreeFlyCamera. Empty: a
 ## FreeFlyCamera with its default settings.
 @export var spectator_scene: PackedScene
-## The keys (InputMap actions) that fly the spectator straight up and down: jump and crouch by default, so flying matches walking.
+## The key (InputMap action) that flies the spectator straight up: jump by default, so flying matches walking.
 @export var fly_up_key: StringName = &"move_jump"
+## The key that flies the spectator straight down: crouch by default.
 @export var fly_down_key: StringName = &"move_crouch"
 
 ## The real camera. It holds where it is while there's no view to follow.
 var camera: PlayerCamera = null
 ## What the mouse or crosshair points at. It's off until something asks it.
 var world_cursor: WorldCursor = null
-## Where the player is looking, in radians.
+## Where the player is looking, sideways, in radians.
 var look_yaw := 0.0
+## Where the player is looking, up and down, in radians.
 var look_pitch := 0.0
 
 # Actions pressed since the last tick, as bits, so a tap shorter than a tick still counts.
@@ -341,7 +341,7 @@ func _has_actions(actions: Array[StringName]) -> bool:
 	return true
 
 
-## The old camera arm's way of turning: faster the closer the mouse is to the edge.
+## SCREEN_EDGE turning: faster the closer the mouse is to the edge.
 func _edge_turn(delta: float) -> float:
 	var width := float(get_viewport().get_visible_rect().size.x)
 	if width <= 0.0:

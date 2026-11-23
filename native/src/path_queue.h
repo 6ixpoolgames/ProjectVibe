@@ -1,6 +1,6 @@
 // Written by Claude (claude-opus-5-5), 2026-11-03. History: native/CHANGELOG.md.
 // PathQueue: budgeted, resumable path requests (nav spec 12.2, RequestQueue), behind NavServer.find_path. Not seen by GDScript.
-// v1 runs the searches on the main thread inside tick(), with an iteration budget per tick.
+// Today the searches run on the main thread inside tick(), with an iteration budget per tick.
 // The spec moves them to worker threads in phase 5; the queue API stays the same.
 #pragma once
 
