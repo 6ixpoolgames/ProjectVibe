@@ -250,6 +250,7 @@ var started_at := -1:
 		if value == started_at:
 			return
 		started_at = value
+		step_runner.started_at = value # its entries that start at a tick count from here, through delays and rollbacks
 		push_state(&"started_at", value)
 ## The tick the current timed run ends: the manager finishes it on its first run at or after this tick. -1: not running.
 var ends_at := -1:
@@ -340,25 +341,24 @@ var on_hit_self_effects: Array[Effect] = []
 var interceptors: Array[HitInterceptor] = []
 ## Its [AbilityStep] children in tree order, found by [method collect_steps]. Empty: no steps.
 var steps: Array[AbilityStep] = []
-## The step timeline it runs (ability spec 6.2): its definition's [member AbilityDefinition.step_timeline], else its kind's default
-## ([method default_timeline]), else its steps one after another in tree order; plus a manual entry for each step none names. Worked
-## out by [method collect_steps].
-var timeline: Array[TimelineEntry] = []
-## Its timeline's state, four numbers per entry: the tick it started, the tick it ended (-1: not yet), why it ended
-## ([enum TimelineEntry.Reason], 0 none) and where its step's count starts (the start, moved on by ticks that didn't count). Rolled
-## back as one value. A step that only waits out its length changes nothing while it runs.
-var timeline_state := PackedInt32Array():
+## The [StepTimeline] that runs its steps (pawn spec 16.7), built by [method collect_steps].
+var step_runner := StepTimeline.new()
+## The entries its timeline runs (ability spec 6.2): its definition's [member AbilityDefinition.step_timeline], else its kind's default
+## ([method default_timeline]), else its steps one after another in tree order; plus a manual entry for each step none names.
+var timeline: Array[TimelineEntry]:
+	get:
+		return step_runner.entries
+## Its timeline's state ([member StepTimeline.state]), rolled back as one value.
+var timeline_state: PackedInt32Array:
+	get:
+		return step_runner.state
 	set(value):
-		if value == timeline_state:
+		if value == step_runner.state:
 			return
-		timeline_state = value
+		step_runner.state = value
 		push_state(&"timeline_state", value)
 ## [member ends_at] for a run with no end of its own yet (Death, while Health is 0).
 const NEVER := 1 << 62
-## The most steps one ability may start in one tick, a guard against steps that start and stop each other in a loop. Past it, starts
-## are refused, the ability ends and it warns once.
-const MAX_STEP_STARTS_PER_TICK := 32
-var _starts_tick := -1 # the tick _starts_this_tick counts for
 ## The pawns it has hit this run, by entity id (instance id for a pawn not spawned through the session), so each is hit once across
 ## all its sweeps (ability spec 8). Rolls back (pushed). At most [constant MAX_HITS_PER_RUN]; cleared when it starts.
 var pawns_hit_this_run := PackedInt64Array():
@@ -375,8 +375,6 @@ var hit_run: HitRun = null
 var _hit_swap: HitDefinition = null # a hit definition swapped in while playing (use_hit_definition)
 var _warned_no_effects := false
 static var _shared_default_hit: HitDefinition = null
-var _starts_this_tick := 0
-var _warned_too_many_starts := false
 # Where push_state sends values: the pawn's TickStateComponent, and each pushed property's entry there ("AbilityManager/Swing:ends_at").
 # Set by the manager when it registers them.
 var _tick_state: TickStateComponent = null
@@ -744,7 +742,7 @@ func ticks_elapsed() -> int:
 
 ## True if it's built from steps.
 func is_stepped() -> bool:
-	return not steps.is_empty()
+	return step_runner.has_steps()
 
 
 ## The timeline it runs when its definition has none: none by default, so its steps run one after another. A kind that makes its own
@@ -753,96 +751,44 @@ func default_timeline() -> Array[TimelineEntry]:
 	return []
 
 
-## Starts a step from code, as a bespoke script does (ability spec 6.4): its first entry not running, started again if it already ran.
-## Steps not in the timeline have a manual entry for this.
+## Starts a step from code, as a bespoke script does (ability spec 6.4). See [method StepTimeline.start_step].
 func start_step(step: AbilityStep) -> void:
-	if step == null or step.ability != self or step.running:
-		return
-	for e in timeline.size():
-		if _entry_steps[e] == step:
-			start_entry(e)
-			return
+	step_runner.start_step(step)
 
 
-## Stops a running step, passing the reason ("done", "released", "failed", "cancelled") to its [method AbilityStep.exit].
+## Stops a running step, passing the reason ("done", "released", "failed", "cancelled") to its [method Step.exit].
 func stop_step(step: AbilityStep, reason := "cancelled") -> void:
-	var e := running_entry_of(step)
-	if e >= 0:
-		stop_entry(e, reason)
+	step_runner.stop_step(step, reason)
 
 
 ## True while this step of this ability runs.
 func is_step_running(step: AbilityStep) -> bool:
-	return step != null and step.ability == self and running_entry_of(step) >= 0
+	return step != null and step.ability == self and step_runner.running_entry_of(step) >= 0
 
 
 ## The timeline entry this step runs in now, or -1.
 func running_entry_of(step: AbilityStep) -> int:
-	for e in _entries_of_step.get(step, []):
-		if _entry_running(e):
-			return e
-	return -1
+	return step_runner.running_entry_of(step)
 
 
-## Ticks a running step has counted: since it started, less the ticks that didn't count ([method AbilityStep.counts_this_tick]).
-## Inside its own [method AbilityStep.tick], the ticks before this one. 0 when not running.
+## Ticks a running step has counted. See [method StepTimeline.step_ticks_of].
 func step_ticks_of(step: AbilityStep) -> int:
-	var e := running_entry_of(step)
-	if e < 0:
-		return 0
-	var counted: int = TickDriver.tick - timeline_state[e * _SLOTS + _ORIGIN]
-	if step == _step_before_count:
-		counted -= ticks_elapsed() # this tick isn't counted yet
-	return maxi(counted, 0)
+	return step_runner.step_ticks_of(step)
 
 
 ## Starts this timeline entry now: its values onto its step, then the step's enter(). Rules call it; code can too.
 func start_entry(e: int) -> void:
-	var step: AbilityStep = _entry_steps[e]
-	if step.running:
-		push_warning("%s: timeline entry %s can't start while step %s runs in another entry." % [name, timeline[e].get_label(), step.name])
-		return
-	# Counted per tick from the tick driver's number, so a replay counts the same way.
-	var now: int = TickDriver.tick
-	if now != _starts_tick:
-		_starts_tick = now
-		_starts_this_tick = 0
-	_starts_this_tick += 1
-	if _starts_this_tick > MAX_STEP_STARTS_PER_TICK:
-		if not _warned_too_many_starts:
-			_warned_too_many_starts = true
-			push_warning("%s: more than %d steps started in one tick, so it's stopped. Check code that starts and stops steps in enter() or exit()." % [name, MAX_STEP_STARTS_PER_TICK])
-		if _starts_this_tick == MAX_STEP_STARTS_PER_TICK + 1:
-			end_run() # the manager finishes it, stopping its steps
-		return
-	_apply_values(e)
-	_write_entry(e, now, -1, 0, now)
-	step.enter()
-	if manager:
-		manager.readiness_version += 1 # a step's cancel window can change what may start
-		manager.step_started.emit(self, step)
+	step_runner.start_entry(e)
 
 
 ## Stops this running timeline entry with this reason ("done", "released", "failed" or "cancelled").
 func stop_entry(e: int, reason := "cancelled") -> void:
-	if not _entry_running(e):
-		return
-	var base := e * _SLOTS
-	_write_entry(e, timeline_state[base + _STARTED], TickDriver.tick, _REASONS.get(reason, TimelineEntry.Reason.CANCELLED), timeline_state[base + _ORIGIN])
-	var step: AbilityStep = _entry_steps[e]
-	step.exit(reason)
-	if manager:
-		manager.readiness_version += 1
-		manager.step_finished.emit(self, step, reason)
+	step_runner.stop_entry(e, reason)
 
 
 ## The names of the steps running now, in tree order. For readouts and debug tools.
 func get_running_step_names() -> PackedStringArray:
-	var names := PackedStringArray()
-	for step in steps:
-		if step.running:
-			names.append(String(step.name))
-	return names
+	return step_runner.get_running_step_names()
 
 
 ## Its interrupt_threshold now, before effects add: the strictest of its running steps' own, or its own when none has one.
@@ -935,7 +881,8 @@ func make_default_interceptors() -> void:
 	pass
 
 
-## Called once by the manager: finds the [AbilityStep] children and works out its [member timeline].
+## Called once by the manager: finds the [AbilityStep] children and builds its timeline from its definition's entries, else its kind's
+## default ([method default_timeline]), else its steps one after another.
 func collect_steps() -> void:
 	steps.clear()
 	for child in get_children():
@@ -945,316 +892,67 @@ func collect_steps() -> void:
 			steps.append(child)
 	for step in steps:
 		step.setup_hold() # which action it watches, before its own setup
-	_build_timeline()
-	for step in steps:
-		step.setup()
+	var as_steps: Array[Step] = []
+	as_steps.assign(steps)
+	step_runner.host = self
+	step_runner.owner_name = name
+	step_runner.build(as_steps, settings.step_timeline if settings and not settings.step_timeline.is_empty() else default_timeline())
 
 
 ## Called by the manager when the ability starts: clears the timeline's state and starts the entries due at its start.
 func begin_steps() -> void:
-	var cleared := PackedInt32Array()
-	cleared.resize(timeline.size() * _SLOTS)
-	for e in timeline.size():
-		var base := e * _SLOTS
-		cleared[base + _STARTED] = -1
-		cleared[base + _ENDED] = -1
-		cleared[base + _ORIGIN] = -1
-	timeline_state = cleared
-	_capture_base_values()
-	_start_due_entries()
+	step_runner.begin(started_at)
 
 
-var _running_now: Array[int] = [] # run_steps' working list, kept between ticks so it isn't made anew every tick
-
-## Called by the manager every tick the ability runs, after [method tick]: ticks each running step (in timeline order), then starts the
-## entries whose rules now hold. A step done or released starts what follows it; one that fails ends them all. The ability ends when
-## no step that keeps it running runs and no entry is due.
+## Called by the manager every tick the ability runs, after [method tick]: runs its timeline ([method StepTimeline.run]). The ability
+## ends when no step that keeps it running runs and no entry is due, or when a step fails.
 func run_steps(dt: float) -> void:
-	# The entries running as this tick began. Those started during it get their first tick on the next one.
-	_running_now.clear()
-	for e in timeline.size():
-		if _entry_running(e):
-			_running_now.append(e)
-	var now: int = TickDriver.tick
-	var elapsed := ticks_elapsed()
-	for e in _running_now:
-		if not _entry_running(e):
-			continue # an earlier step stopped it this tick
-		var step: AbilityStep = _entry_steps[e]
-		_step_before_count = step # its step_ticks don't include this tick yet
-		# Let go, it ends before its tick, with "released" (which starts what follows it, as done does).
-		if step.ends_when_released and step.hold_bit != 0 and not step.is_held() and step.can_end_on_release():
-			_step_before_count = null
-			stop_entry(e, "released")
-			continue
-		var status := step.tick(dt)
-		var counts := step.counts_this_tick()
-		_step_before_count = null
-		if not counts:
-			# This tick didn't count: its count starts later. A deadline, moved on only while it waits.
-			var base := e * _SLOTS
-			_write_entry(e, timeline_state[base + _STARTED], -1, 0, timeline_state[base + _ORIGIN] + elapsed)
-		var length := step.length() # asked once: it converts for the tick rate each time
-		if status == AbilityStep.Status.RUNNING and length > 0 and now - timeline_state[e * _SLOTS + _ORIGIN] >= length:
-			status = AbilityStep.Status.DONE
-		if status == AbilityStep.Status.DONE:
-			stop_entry(e, "done")
-		elif status == AbilityStep.Status.FAILED:
-			stop_entry(e, "failed")
-			end_steps("failed")
-			end_run()
-			return
-	_start_due_entries()
-	# Running while a step that keeps it running does, or an entry is still due; steps that only go along stop then.
-	for e in timeline.size():
-		if _entry_running(e) and _entry_steps[e].keeps_ability_running:
-			return
-		if _entry_due(e):
-			return
-	end_steps("done")
-	end_run() # no step left: the ability is over, and the manager finishes it
+	if step_runner.run(dt, ticks_elapsed()) != StepTimeline.Result.RUNNING:
+		end_run() # no step left, or one failed: the ability is over, and the manager finishes it
 
 
 ## Stops every running step with this reason, and puts back the step values its entries changed. The manager calls it when the
 ## ability finishes or is cancelled.
 func end_steps(reason := "cancelled") -> void:
-	for e in timeline.size():
-		if _entry_running(e):
-			stop_entry(e, reason)
-	_restore_base_values()
+	step_runner.end(reason)
 
 
 ## After a rollback loads its state: the running entries' values go back onto their steps.
 func timeline_loaded() -> void:
-	if timeline_state.size() != timeline.size() * _SLOTS:
-		return
-	for e in timeline.size():
-		if _entry_running(e):
-			_apply_values(e)
+	step_runner.loaded()
 
 
 ## The steps whose entries start when an entry of this step ends: what comes after it, for visuals (a windup's sweep).
 func steps_after(step: AbilityStep) -> Array[AbilityStep]:
 	var out: Array[AbilityStep] = []
-	for e in _entries_of_step.get(step, []):
-		for f in timeline.size():
-			if _entry_after[f] == e and timeline[f].after_event == TimelineEntry.After.ENDS and not out.has(_entry_steps[f]):
-				out.append(_entry_steps[f])
+	out.assign(step_runner.steps_after(step))
 	return out
 
 
 ## The step whose end starts this step's first entry, or null: what came before it, for visuals (a recovery's sweep).
 func step_before(step: AbilityStep) -> AbilityStep:
-	for e in _entries_of_step.get(step, []):
-		var before := _entry_after[e]
-		if before >= 0 and timeline[e].after_event == TimelineEntry.After.ENDS:
-			return _entry_steps[before]
-	return null
+	return step_runner.step_before(step) as AbilityStep
 
 
-# The slots of an entry in timeline_state.
-const _SLOTS := 4
-const _STARTED := 0
-const _ENDED := 1
-const _REASON := 2
-const _ORIGIN := 3
-const _REASONS := {"done": TimelineEntry.Reason.DONE, "released": TimelineEntry.Reason.RELEASED, "failed": TimelineEntry.Reason.FAILED, "cancelled": TimelineEntry.Reason.CANCELLED}
-# Worked out by _build_timeline, never state: each entry's step, the entry its "after" names (-1), and its at_tick in this match's ticks.
-var _entry_steps: Array[AbilityStep] = []
-var _entry_after := PackedInt32Array()
-var _entry_at := PackedInt32Array()
-var _entry_delay := PackedInt32Array()
-var _entries_of_step := {} # step -> its entries
-var _value_keys := {} # step -> the properties any entry changes on it
-var _base_values := {} # step -> {property: its own value}, captured as a run begins
-var _step_before_count: AbilityStep = null # the step whose tick is in progress, so its step_ticks leave this tick out
+# What its timeline tells it (StepTimeline's host methods).
+func _timeline_state_written() -> void:
+	push_state(&"timeline_state", step_runner.state)
 
 
-func _entry_running(e: int) -> bool:
-	var base := e * _SLOTS
-	return timeline_state[base + _STARTED] >= 0 and timeline_state[base + _ENDED] < 0
+func _timeline_step_started(step: Step) -> void:
+	if manager:
+		manager.readiness_version += 1 # a step's cancel window can change what may start
+		manager.step_started.emit(self, step)
 
 
-# Writes an entry's four numbers and pushes the array once.
-func _write_entry(e: int, started: int, ended: int, reason: int, origin: int) -> void:
-	var base := e * _SLOTS
-	if timeline_state[base + _STARTED] == started and timeline_state[base + _ENDED] == ended and timeline_state[base + _REASON] == reason \
-			and timeline_state[base + _ORIGIN] == origin:
-		return
-	# GDScript doesn't call a property's setter for an element write, so the array is changed here and pushed once.
-	timeline_state[base + _STARTED] = started
-	timeline_state[base + _ENDED] = ended
-	timeline_state[base + _REASON] = reason
-	timeline_state[base + _ORIGIN] = origin
-	push_state(&"timeline_state", timeline_state)
+func _timeline_step_finished(step: Step, reason: String) -> void:
+	if manager:
+		manager.readiness_version += 1
+		manager.step_finished.emit(self, step, reason)
 
 
-# Starts, in list order, the entries not yet started whose rule holds; one started can start others in the same pass.
-func _start_due_entries() -> void:
-	var started_any := true
-	var passes := 0
-	while started_any and passes <= timeline.size():
-		started_any = false
-		passes += 1
-		for e in timeline.size():
-			if timeline_state[e * _SLOTS + _STARTED] < 0 and _rule_holds(e):
-				start_entry(e)
-				started_any = started_any or _entry_running(e)
-
-
-func _rule_holds(e: int) -> bool:
-	var entry := timeline[e]
-	if entry.manual:
-		return false
-	if entry.starts_with_ability():
-		return true
-	var now: int = TickDriver.tick
-	if _entry_at[e] >= 0 and now >= started_at + _entry_at[e]:
-		return true
-	var other := _entry_after[e]
-	if other >= 0:
-		var base := other * _SLOTS
-		if entry.after_event == TimelineEntry.After.STARTS:
-			if timeline_state[base + _STARTED] >= 0 and now >= timeline_state[base + _STARTED] + _entry_delay[e]:
-				return true
-		elif timeline_state[base + _ENDED] >= 0 and timeline_state[base + _REASON] & entry.end_reasons != 0 \
-				and now >= timeline_state[base + _ENDED] + _entry_delay[e]:
-			return true
-	return entry.condition != null and entry.condition.holds(self)
-
-
-# True if a rule will start this entry later without anything else happening first: a time not reached, an entry it follows still to
-# run or end, or a delay still running. A condition alone doesn't keep the ability going.
-func _entry_due(e: int) -> bool:
-	if timeline_state[e * _SLOTS + _STARTED] >= 0 or timeline[e].manual:
-		return false
-	if _entry_at[e] >= 0:
-		return true # not started, so its time hasn't come
-	var other := _entry_after[e]
-	if other < 0:
-		return false
-	var base := other * _SLOTS
-	if timeline[e].after_event == TimelineEntry.After.STARTS:
-		return timeline_state[base + _STARTED] >= 0 or _entry_due(other)
-	if timeline_state[base + _ENDED] >= 0:
-		return timeline_state[base + _REASON] & timeline[e].end_reasons != 0 # ended the right way, its delay still running
-	return _entry_running(other) or _entry_due(other)
-
-
-# Works out the timeline from the definition, the kind's default or the steps' order, and checks it once: entries naming a step it
-# doesn't have, an "after" naming no entry, labels used twice, and entries that follow each other round in a loop.
-func _build_timeline() -> void:
-	var source: Array[TimelineEntry] = []
-	if settings and not settings.step_timeline.is_empty():
-		source = settings.step_timeline
-	else:
-		source = default_timeline()
-	if source.is_empty():
-		for i in steps.size():
-			source.append(TimelineEntry.at(steps[i].name) if i == 0 else TimelineEntry.after_end_of(steps[i].name, steps[i - 1].name))
-	var by_name := {}
-	for step in steps:
-		by_name[step.name] = step
-	timeline.clear()
-	_entry_steps.clear()
-	for entry in source:
-		if entry == null:
-			continue
-		if not by_name.has(entry.step):
-			push_warning("%s: its step timeline names step '%s', which it doesn't have; that entry is left out." % [name, entry.step])
-			continue
-		timeline.append(entry)
-		_entry_steps.append(by_name[entry.step])
-	# Every step can be started from code, so one none of the entries names gets a manual entry.
-	for step in steps:
-		if not _entry_steps.has(step):
-			var manual := TimelineEntry.new()
-			manual.step = step.name
-			manual.manual = true
-			timeline.append(manual)
-			_entry_steps.append(step)
-	var by_label := {}
-	for e in timeline.size():
-		var label := timeline[e].get_label()
-		if by_label.has(label):
-			push_warning("%s: two timeline entries are called '%s'; give one a label. \"after\" finds the first." % [name, label])
-		else:
-			by_label[label] = e
-	var count := timeline.size()
-	_entry_after.resize(count)
-	_entry_at.resize(count)
-	_entry_delay.resize(count)
-	_entries_of_step.clear()
-	_value_keys.clear()
-	for e in count:
-		var entry := timeline[e]
-		_entry_after[e] = -1
-		if entry.after != &"":
-			if by_label.has(entry.after) and by_label[entry.after] != e:
-				_entry_after[e] = by_label[entry.after]
-			else:
-				push_warning("%s: timeline entry '%s' follows '%s', which isn't another entry; it won't start after it." % [name, entry.get_label(), entry.after])
-		_entry_at[e] = TickDriver.ticks_at_rate(entry.at_tick) if entry.at_tick > 0 else entry.at_tick
-		_entry_delay[e] = TickDriver.ticks_at_rate(entry.delay_ticks) if entry.delay_ticks > 0 else 0
-		var step: AbilityStep = _entry_steps[e]
-		if not _entries_of_step.has(step):
-			_entries_of_step[step] = []
-		_entries_of_step[step].append(e)
-		for key in entry.values:
-			if not _value_keys.has(step):
-				_value_keys[step] = []
-			if not _value_keys[step].has(key):
-				_value_keys[step].append(key)
-	for e in count:
-		if _follows_round(e):
-			push_warning("%s: timeline entry '%s' follows entries that lead back to it, so they can't start by their \"after\" rules." % [name, timeline[e].get_label()])
-	var cleared := PackedInt32Array()
-	cleared.resize(count * _SLOTS)
-	for e in count:
-		cleared[e * _SLOTS + _STARTED] = -1
-		cleared[e * _SLOTS + _ENDED] = -1
-		cleared[e * _SLOTS + _ORIGIN] = -1
-	timeline_state = cleared
-
-
-# True if following "after" from this entry comes back to it.
-func _follows_round(e: int) -> bool:
-	var at := _entry_after[e]
-	var steps_taken := 0
-	while at >= 0 and steps_taken <= timeline.size():
-		if at == e:
-			return true
-		at = _entry_after[at]
-		steps_taken += 1
-	return false
-
-
-# The values its step had before this run's entries changed any, so an entry without a value for a property gets the step's own.
-func _capture_base_values() -> void:
-	_base_values.clear()
-	for step in _value_keys:
-		var own := {}
-		for key in _value_keys[step]:
-			own[key] = step.get(key)
-		_base_values[step] = own
-
-
-func _apply_values(e: int) -> void:
-	var step: AbilityStep = _entry_steps[e]
-	if not _value_keys.has(step):
-		return
-	var own: Dictionary = _base_values.get(step, {})
-	for key in _value_keys[step]:
-		if timeline[e].values.has(key):
-			step.set(key, timeline[e].values[key])
-		elif own.has(key):
-			step.set(key, own[key])
-
-
-func _restore_base_values() -> void:
-	for step in _base_values:
-		for key in _base_values[step]:
-			step.set(key, _base_values[step][key])
+func _timeline_runaway() -> void:
+	end_run() # the manager finishes it, stopping its steps
 
 
 ## Where its weapon is now, from the first running step that says, as an offset from the pawn's feet for this facing in radians; null if

@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 187 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 189 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -11,7 +11,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [AbilityDefinition](../assets/scripts/abilities/REFERENCE.md#abilitydefinition) | [abilities](../assets/scripts/abilities/README.md) | Definition | The settings one variant of an ability has, shared by every pawn that uses it, such as "Goblin Swing": a Resource an ability node points at (ability spec 3). |
 | [AbilityManager](../assets/scripts/abilities/REFERENCE.md#abilitymanager) | [abilities](../assets/scripts/abilities/README.md) | Node | Starts, runs and stops a pawn's abilities, and takes the hits that land on it. |
 | [AbilityPriorityPart](../assets/scripts/effects/REFERENCE.md#abilityprioritypart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes one of a group of abilities' priority numbers while its effect lasts. A held part ([EffectPart]). |
-| [AbilityStep](../assets/scripts/abilities/REFERENCE.md#abilitystep) | [abilities](../assets/scripts/abilities/README.md) | Node | One step of an ability, such as a windup, a turn or a swing: a child node of the ability. |
+| [AbilityStep](../assets/scripts/abilities/REFERENCE.md#abilitystep) | [abilities](../assets/scripts/abilities/README.md) | Step | One step of an ability, such as a windup, a turn or a swing: a child node of the ability, run by its [StepTimeline]. |
 | [AIActivationManager](../assets/scripts/game_mode/REFERENCE.md#aiactivationmanager) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Switches AI pawns off when the ground around them isn't loaded, back on when it is, and sets how often the rest run. |
 | [AIAnyCondition](../assets/scripts/ai/REFERENCE.md#aianycondition) | [ai](../assets/scripts/ai/README.md) | AICondition | A condition that passes if any one of its conditions passes: "this, or that". |
 | [AIAttackBehaviour](../assets/scripts/ai/REFERENCE.md#aiattackbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Attacks the current target once it's close enough: a swing, a shot, any attack on its action. |
@@ -164,6 +164,8 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [StateStoreGD](../assets/scripts/state_store/REFERENCE.md#statestoregd) | [state_store](../assets/scripts/state_store/README.md) | RefCounted | The GDScript twin of the C++ [code]StateStore[/code]: the central record of every gameplay entity's state, tick by tick. |
 | [StatManager](../assets/scripts/stats/REFERENCE.md#statmanager) | [stats](../assets/scripts/stats/README.md) | Node | Holds a pawn's stats, one [Stat] node each, and finds them by name. |
 | [StatModifierPart](../assets/scripts/effects/REFERENCE.md#statmodifierpart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes a stat's value while its effect lasts, such as MoveSpeed x0.7 for a slow. A held part ([EffectPart]). |
+| [Step](../assets/scripts/steps/REFERENCE.md#step) | [steps](../assets/scripts/steps/README.md) | Node | One step on a timeline, such as a windup, a turn or a swing: a child node of what owns the timeline (pawn spec 16.7). |
+| [StepTimeline](../assets/scripts/steps/REFERENCE.md#steptimeline) | [steps](../assets/scripts/steps/README.md) | RefCounted | Runs an owner's [Step] children on a timeline of [TimelineEntry] rules (pawn spec 16.7, ability spec 6.2). |
 | [StreamingSource](../assets/scripts/streaming/REFERENCE.md#streamingsource) | [streaming](../assets/scripts/streaming/README.md) | Node3D | Marks something as keeping the world loaded around it. |
 | [SweepKey](../assets/scripts/abilities/REFERENCE.md#sweepkey) | [abilities](../assets/scripts/abilities/README.md) | Resource | One point on a swing's path: where the hit sphere is at one moment of the hit window (ability spec 7). |
 | [TagDeclarationsRes](../assets/scripts/resources/REFERENCE.md#tagdeclarationsres) | [resources](../assets/scripts/resources/README.md) | Resource | A declarations file: the tags a game declares up front, each with a one-line description, plus renames and deprecations. |

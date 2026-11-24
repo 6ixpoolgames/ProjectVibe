@@ -19,7 +19,7 @@ extends AbilityStep
 
 func _init() -> void:
 	super()
-	keeps_ability_running = false
+	keeps_owner_running = false
 	ends_when_released = true
 
 

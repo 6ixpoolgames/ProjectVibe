@@ -109,8 +109,9 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `on_hit_self_effects: Effect[]` = `[]`: Effects on its own pawn when it hits, handed over by `land_hit()` like `on_hit_effects`.
 - `interceptors: HitInterceptor[]` = `[]`: Its [`HitInterceptor`](#hitinterceptor)s, under it or its steps, found by the manager (pawn spec 8.23).
 - `steps: AbilityStep[]` = `[]`: Its [`AbilityStep`](#abilitystep) children in tree order, found by `collect_steps()`. Empty: no steps.
-- `timeline: TimelineEntry[]` = `[]`: The step timeline it runs (ability spec 6.2): its definition's `AbilityDefinition.step_timeline`, else its kind's default (`default_timeline()`), else its steps one after another in tree order; plus a manual entry for each step none names. Worked out by `collect_steps()`.
-- `timeline_state: PackedInt32Array` = `PackedInt32Array()`: Its timeline's state, four numbers per entry: the tick it started, the tick it ended (-1: not yet), why it ended (`TimelineEntry.Reason`, 0 none) and where its step's count starts (the start, moved on by ticks that didn't count). Rolled back as one value. A step that only waits out its length changes nothing while it runs.
+- `step_runner: StepTimeline` = `<unknown>`: The [`StepTimeline`](../steps/REFERENCE.md#steptimeline) that runs its steps (pawn spec 16.7), built by `collect_steps()`.
+- `timeline: TimelineEntry[]`: The entries its timeline runs (ability spec 6.2): its definition's `AbilityDefinition.step_timeline`, else its kind's default (`default_timeline()`), else its steps one after another in tree order; plus a manual entry for each step none names.
+- `timeline_state: PackedInt32Array`: Its timeline's state (`StepTimeline.state`), rolled back as one value.
 - `pawns_hit_this_run: PackedInt64Array` = `PackedInt64Array()`: The pawns it has hit this run, by entity id (instance id for a pawn not spawned through the session), so each is hit once across all its sweeps (ability spec 8). Rolls back (pushed). At most `MAX_HITS_PER_RUN`; cleared when it starts.
 - `hit_run: HitRun` = `null`: Its swing's hit run (`get_hit_run()`); null until first used.
 
@@ -126,7 +127,6 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `Kind.LOCOMOTION = 0`
 - `Kind.ACTION = 1`
 - `NEVER = 4611686018427387904`: `ends_at` for a run with no end of its own yet (Death, while Health is 0).
-- `MAX_STEP_STARTS_PER_TICK = 32`: The most steps one ability may start in one tick, a guard against steps that start and stop each other in a loop. Past it, starts are refused, the ability ends and it warns once.
 - `MAX_HITS_PER_RUN = 32`: The most pawns one run can hit. Past it a swing hits no one new, with a warning once: a fixed size keeps the rolled-back list small.
 
 ### Functions
@@ -169,11 +169,11 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `ticks_elapsed() -> int`: The ticks this run covers: 1, or more for a pawn running every Nth tick (pawn spec 8.21). Timers and step counts advance by it.
 - `is_stepped() -> bool`: True if it's built from steps.
 - `default_timeline() -> TimelineEntry[]`: The timeline it runs when its definition has none: none by default, so its steps run one after another. A kind that makes its own steps (MeleeAttack, RangedAttack) returns the timeline for them.
-- `start_step(step: AbilityStep) -> void`: Starts a step from code, as a bespoke script does (ability spec 6.4): its first entry not running, started again if it already ran. Steps not in the timeline have a manual entry for this.
-- `stop_step(step: AbilityStep, reason: String = "cancelled") -> void`: Stops a running step, passing the reason ("done", "released", "failed", "cancelled") to its `AbilityStep.exit()`.
+- `start_step(step: AbilityStep) -> void`: Starts a step from code, as a bespoke script does (ability spec 6.4). See `StepTimeline.start_step()`.
+- `stop_step(step: AbilityStep, reason: String = "cancelled") -> void`: Stops a running step, passing the reason ("done", "released", "failed", "cancelled") to its `Step.exit()`.
 - `is_step_running(step: AbilityStep) -> bool`: True while this step of this ability runs.
 - `running_entry_of(step: AbilityStep) -> int`: The timeline entry this step runs in now, or -1.
-- `step_ticks_of(step: AbilityStep) -> int`: Ticks a running step has counted: since it started, less the ticks that didn't count (`AbilityStep.counts_this_tick()`). Inside its own `AbilityStep.tick()`, the ticks before this one. 0 when not running.
+- `step_ticks_of(step: AbilityStep) -> int`: Ticks a running step has counted. See `StepTimeline.step_ticks_of()`.
 - `start_entry(e: int) -> void`: Starts this timeline entry now: its values onto its step, then the step's enter(). Rules call it; code can too.
 - `stop_entry(e: int, reason: String = "cancelled") -> void`: Stops this running timeline entry with this reason ("done", "released", "failed" or "cancelled").
 - `get_running_step_names() -> PackedStringArray`: The names of the steps running now, in tree order. For readouts and debug tools.
@@ -185,9 +185,9 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo`: Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [`HitInfo`](#hitinfo) carrying the hit definition's effects and its own on-hit EffectApplier children, delivered to the target (its interceptors, then effects), then `hit_landed`. The one place a hit is applied; override it for an ability's own rules (damage falling off with distance), calling `super()`.
 - `get_hit_run() -> HitRun`: Its swing's record of this run: whom it hit and what it met. Made the first time it's asked for; cleared as the ability starts.
 - `make_default_interceptors() -> void`: Called by the manager when the ability has no [`HitInterceptor`](#hitinterceptor), so it can make its defaults (Dash, Parry). Nothing by default.
-- `collect_steps() -> void`: Called once by the manager: finds the [`AbilityStep`](#abilitystep) children and works out its `timeline`.
+- `collect_steps() -> void`: Called once by the manager: finds the [`AbilityStep`](#abilitystep) children and builds its timeline from its definition's entries, else its kind's default (`default_timeline()`), else its steps one after another.
 - `begin_steps() -> void`: Called by the manager when the ability starts: clears the timeline's state and starts the entries due at its start.
-- `run_steps(dt: float) -> void`: Called by the manager every tick the ability runs, after `tick()`: ticks each running step (in timeline order), then starts the entries whose rules now hold. A step done or released starts what follows it; one that fails ends them all. The ability ends when no step that keeps it running runs and no entry is due.
+- `run_steps(dt: float) -> void`: Called by the manager every tick the ability runs, after `tick()`: runs its timeline (`StepTimeline.run()`). The ability ends when no step that keeps it running runs and no entry is due, or when a step fails.
 - `end_steps(reason: String = "cancelled") -> void`: Stops every running step with this reason, and puts back the step values its entries changed. The manager calls it when the ability finishes or is cancelled.
 - `timeline_loaded() -> void`: After a rollback loads its state: the running entries' values go back onto their steps.
 - `steps_after(step: AbilityStep) -> AbilityStep[]`: The steps whose entries start when an entry of this step ends: what comes after it, for visuals (a windup's sweep).
@@ -1072,46 +1072,27 @@ STAT "Health" AT_MOST  20
 
 ## AbilityStep
 
-`res://assets/scripts/abilities/steps/AbilityStep.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
+`res://assets/scripts/abilities/steps/AbilityStep.gd`, extends [`Step`](../steps/REFERENCE.md#step)
 
-One step of an ability, such as a windup, a turn or a swing: a child node of the ability.
+One step of an ability, such as a windup, a turn or a swing: a child node of the ability, run by its [`StepTimeline`](../steps/REFERENCE.md#steptimeline).
 
-When steps start is the ability's step timeline ([`TimelineEntry`](#timelineentry)): at a tick, when another step starts or ends, or on a condition, so several can run at once and one step can run in several entries. Extend it and override `enter()`, `tick()` (RUNNING, DONE or FAILED) and `exit()`; the ability ends when no step with `keeps_ability_running` is left and nothing is due. A step started during a tick enters at once and gets its first tick on the next.
-Rollback: whether it runs and its count live in its ability's timeline_state and roll back; any other state must be listed in `get_rollback_properties()`, because a rollback restores values without calling `enter()` or `exit()`. Design: ability spec 6, pawn spec 8.20.
+A [`Step`](../steps/REFERENCE.md#step) with what abilities add: a cancel window (`interrupt_threshold`) and ending when its action is let go (`ends_when_released`). When steps start is the ability's step timeline ([`TimelineEntry`](#timelineentry)); see [`Step`](../steps/REFERENCE.md#step) for what to override and how rollback works. Design: ability spec 6, pawn spec 8.20 and 16.7.
 
 ### Settings and properties
 
-- `length_ticks: int` = `0`: How long it runs, in ticks at 60 a second (converted for the match's tick rate). 0: until tick() says DONE.
 - `interrupt_threshold: int` = `-1`: While it runs, how strong a starting ability (or a hit's knockback) must be to cancel its ability. -1: the ability's own interrupt_threshold. With several steps running, the strictest counts.
 - `ends_when_released: bool` = `false`: On: it ends on the first tick its action isn't held (reason "released"), which starts what follows it as done does (unless an entry says otherwise). Held input is rolled-back input, so server, prediction and replay agree.
 - `while_held: StringName` = `&""`: The action that must stay held. Empty: its ability's trigger_action. With neither, it's never released.
-- `keeps_ability_running: bool` = `true`: On: its ability keeps running while this step does. Off for a step that only goes along (a turn through a swing): once only such steps are left, the ability ends and they stop with "done".
-- `running: bool`: True while it runs.
-- `step_ticks: int`: Ticks counted since it started (those `counts_this_tick()` allowed); in `tick()`, the ticks before this one. 0 when not running.
 - `ability: AbilityBase` = `null`: Set by its ability.
-- `pawn: Pawn` = `null`
 - `hold_bit: int` = `0`: while_held's input bit (or its ability's trigger_action's), worked out once by setup_hold(). 0: no action to hold.
-
-### Constants
-
-- `Status.RUNNING = 0`: still going
-- `Status.DONE = 1`: finished: the timeline entries that follow its end start
-- `Status.FAILED = 2`: couldn't do its job: the whole ability ends
 
 ### Functions
 
-- `get_rollback_properties() -> String[]`: The properties on this step that roll back: none by default. A step that keeps more lists them here.
-- `length() -> int`: How long it runs, in this match's ticks; 0 if it runs until it says it's done.
-- `enter() -> void`: Once, when it starts.
-- `tick(_dt: float) -> int`: Every tick it runs: RUNNING to go on, DONE when finished (what follows it in the timeline starts), FAILED to end the whole ability.
-- `exit(_reason: String) -> void`: Once, when it stops; reason is "done", "released", "failed" or "cancelled" (its ability ended, an interrupt, or another step).
-- `counts_this_tick() -> bool`: Whether this tick counts toward length_ticks. Always by default; a windup waiting for a turn says no.
-- `setup() -> void`: Once, when its ability finds it: for working out settings (an input bit, say), not for state.
+- `released_now() -> bool`: With `ends_when_released`, it ends once its action is let go, if `can_end_on_release()` allows.
 - `can_end_on_release() -> bool`: With ends_when_released, whether letting go may end it now. Yes by default; TurnToFace says no until its minimum turn.
 - `is_held() -> bool`: True while its action is held this tick (always false with no action to hold).
 - `setup_hold() -> void`: Its ability calls this once, before setup(): which input bit to watch.
 - `weapon_point(_facing: float) -> Variant`: Where the weapon is during this step, as an offset from the pawn's feet for this facing in radians; null: this step doesn't say. `AbilityBase.weapon_point()` collects them, so visuals need no work for a new pattern.
-- `progress() -> float`: How far through its length it is, 0 to 1, with how far the tick driver is toward the next tick, for smooth visuals. 0 with no length.
 
 ## ApplyEffectStep
 

@@ -36,10 +36,10 @@ signal player_respawned(peer: int, pawn: Pawn)
 ## itself. 2 covers a frame that runs two ticks.
 @export_range(1, 60, 1) var claim_ticks := 2
 
-## The most pawns spawners ([PawnSpawner]) may spawn in one tick; the rest wait for the next ticks, so a wave or a burst of
-## replacements is spread out instead of landing in one frame (a pawn costs about 10 ms to spawn). 0: no limit. Players' pawns
-## ([method spawn_player]) are never held back, but count towards it.
-@export_range(0, 64, 1, "or_greater") var max_spawns_per_tick := 1
+## The most pawns spawners ([PawnSpawner]) may spawn in one tick; the rest wait for the next ticks, so a big wave is spread out
+## instead of landing in one frame (a pawn costs about 10 ms to spawn). Lower is smoother, higher fills faster. 0: no limit. Players'
+## pawns ([method spawn_player]) are never held back, but count towards it.
+@export_range(0, 64, 1, "or_greater") var max_spawns_per_tick := 8
 
 ## Separates these rolls from other users of the same tick's random numbers (DeterministicRandom).
 const RANDOM_SALT := 7151

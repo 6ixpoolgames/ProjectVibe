@@ -1,96 +1,38 @@
 # Written by Claude (claude-opus-5-5), 2026-11-16. History: abilities/CHANGELOG.md.
-## One step of an ability, such as a windup, a turn or a swing: a child node of the ability.
+## One step of an ability, such as a windup, a turn or a swing: a child node of the ability, run by its [StepTimeline].
 ##
-## When steps start is the ability's step timeline ([TimelineEntry]): at a tick, when another step starts or ends, or on a condition,
-## so several can run at once and one step can run in several entries. Extend it and override [method enter], [method tick] (RUNNING,
-## DONE or FAILED) and [method exit]; the ability ends when no step with [member keeps_ability_running] is left and nothing is due. A
-## step started during a tick enters at once and gets its first tick on the next.
-## [br][br]Rollback: whether it runs and its count live in its ability's timeline_state and roll back; any other state must be listed
-## in [method get_rollback_properties], because a rollback restores values without calling [method enter] or [method exit].
-## Design: ability spec 6, pawn spec 8.20.
+## A [Step] with what abilities add: a cancel window ([member interrupt_threshold]) and ending when its action is let go
+## ([member ends_when_released]). When steps start is the ability's step timeline ([TimelineEntry]); see [Step] for what to override
+## and how rollback works.
+## Design: ability spec 6, pawn spec 8.20 and 16.7.
 class_name AbilityStep
-extends Node
+extends Step
 
-enum Status {
-	RUNNING, ## still going
-	DONE, ## finished: the timeline entries that follow its end start
-	FAILED, ## couldn't do its job: the whole ability ends
-}
-
-## How long it runs, in ticks at 60 a second (converted for the match's tick rate). 0: until tick() says DONE.
-@export_range(0, 600, 1, "or_greater") var length_ticks := 0
 ## While it runs, how strong a starting ability (or a hit's knockback) must be to cancel its ability. -1: the ability's own
 ## interrupt_threshold. With several steps running, the strictest counts.
 @export var interrupt_threshold := -1
 # For a step during which hits can't land, give it an InvulnerabilityInterceptor child (pawn spec 8.23).
 ## On: it ends on the first tick its action isn't held (reason "released"), which starts what follows it as done does (unless an entry
 ## says otherwise). Held input is rolled-back input, so server, prediction and replay agree.
-@export var ends_when_released := false
+@export var ends_when_released := false:
+	set(value):
+		ends_when_released = value
+		checks_release = value and hold_bit != 0 # timeline entries can change it for a run
 ## The action that must stay held. Empty: its ability's trigger_action. With neither, it's never released.
 @export var while_held: StringName = &""
-## On: its ability keeps running while this step does. Off for a step that only goes along (a turn through a swing): once only such
-## steps are left, the ability ends and they stop with "done".
-@export var keeps_ability_running := true
-
-# Worked out from its ability's timeline_state, which rolls back.
-## True while it runs.
-var running: bool:
-	get:
-		return ability != null and ability.running_entry_of(self) >= 0
-## Ticks counted since it started (those [method counts_this_tick] allowed); in [method tick], the ticks before this one. 0 when not running.
-var step_ticks: int:
-	get:
-		return ability.step_ticks_of(self) if ability else 0
 
 ## Set by its ability.
 var ability: AbilityBase = null
-var pawn: Pawn = null
 ## while_held's input bit (or its ability's trigger_action's), worked out once by setup_hold(). 0: no action to hold.
-var hold_bit := 0
+var hold_bit := 0:
+	set(value):
+		hold_bit = value
+		checks_release = ends_when_released and value != 0
 
 
-func _init() -> void:
-	# Steps do nothing on their own; the ability runs them on the pawn's tick.
-	set_process(false)
-	set_physics_process(false)
-
-
-## The properties on this step that roll back: none by default. A step that keeps more lists them here.
-func get_rollback_properties() -> Array[String]:
-	return []
-
-
-## How long it runs, in this match's ticks; 0 if it runs until it says it's done.
-func length() -> int:
-	return TickDriver.ticks_at_rate(length_ticks) if length_ticks > 0 else 0
-
-
-# --- Override these ---
-
-
-## Once, when it starts.
-func enter() -> void:
-	pass
-
-
-## Every tick it runs: RUNNING to go on, DONE when finished (what follows it in the timeline starts), FAILED to end the whole ability.
-func tick(_dt: float) -> Status:
-	return Status.RUNNING
-
-
-## Once, when it stops; reason is "done", "released", "failed" or "cancelled" (its ability ended, an interrupt, or another step).
-func exit(_reason: String) -> void:
-	pass
-
-
-## Whether this tick counts toward length_ticks. Always by default; a windup waiting for a turn says no.
-func counts_this_tick() -> bool:
-	return true
-
-
-## Once, when its ability finds it: for working out settings (an input bit, say), not for state.
-func setup() -> void:
-	pass
+## With [member ends_when_released], it ends once its action is let go, if [method can_end_on_release] allows.
+func released_now() -> bool:
+	return ends_when_released and hold_bit != 0 and not is_held() and can_end_on_release()
 
 
 ## With ends_when_released, whether letting go may end it now. Yes by default; TurnToFace says no until its minimum turn.
@@ -113,12 +55,3 @@ func setup_hold() -> void:
 ## [method AbilityBase.weapon_point] collects them, so visuals need no work for a new pattern.
 func weapon_point(_facing: float) -> Variant:
 	return null
-
-
-## How far through its length it is, 0 to 1, with how far the tick driver is toward the next tick, for smooth visuals. 0 with no length.
-func progress() -> float:
-	var total := length()
-	if total <= 0:
-		return 0.0
-	var frac: float = TickDriver.get_interpolation_fraction() if counts_this_tick() else 0.0
-	return clampf((float(step_ticks) + frac) / float(total), 0.0, 1.0)

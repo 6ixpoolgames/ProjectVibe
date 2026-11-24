@@ -15,6 +15,7 @@ Code that works but doesn't yet fit the project's goals. Each is marked `REFACTO
 
 ## 2026-11-24
 
+- **`max_spawns_per_tick` 1 → 8** (the owner's call: fill faster, still spread out; the internal build accepts the cost of bigger spawn frames).
 - **One pawn a tick:** `PawnSpawner` spawns at most what `SpawnManager.spawns_left_this_tick()` allows (`max_spawns_per_tick`, 1 by default), shared by every spawner, so a wave is spread over ticks; `refill_now` fills up as fast as that allows.
 - **Ticks at 60 a second** (the pawn redesign's build step 1, foundations (pawn spec 16.10)): `PawnSpawner.respawn_seconds` (5) and `body_seconds` (3) are now `respawn_ticks` (300) and `body_ticks` (180); the mass battle's hero spawners were converted (30 s → 1800). Body removal goes through `SpawnManager.after_ticks`, booked with the tick scheduler.
 

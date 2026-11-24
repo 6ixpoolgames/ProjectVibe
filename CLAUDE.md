@@ -40,6 +40,7 @@ Each system's README has the detail. Specs are in `docs/` (pawn, netcode, naviga
 | `pawn/` | The body every character is; runs its parts in a fixed order each tick |
 | `controllers/` | Who drives a pawn: input commands, the controller manager, the AI's hands |
 | `player/`, `camera/` | The player's side: input, the world cursor, one camera per player, the spectator |
+| `steps/` | The step core: `Step` and `StepTimeline`, which abilities (and later AI behaviours) run their steps on |
 | `abilities/` | Everything a pawn does, started by named actions: definitions (shared settings with variants), steps on timelines, combos, hits, interceptors, projectiles |
 | `effects/` | What abilities and hits do to pawns: damage, heals, pushes, boosts, resistances |
 | `stats/` | A pawn's numbers (Health, speeds) as nodes |

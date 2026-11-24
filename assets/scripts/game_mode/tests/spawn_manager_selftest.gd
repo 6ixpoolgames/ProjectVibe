@@ -119,6 +119,8 @@ func _test_pawn_spawner() -> void:
 	spawner.rotation.y = PI
 	var spawn_yaws := [] # at the moment each spawns: the goblins' AI turns them soon after
 	var spawn_ticks := [] # Claude 2026-11-24: the tick each one spawned on, for the per-tick budget
+	var budget_before := _manager.max_spawns_per_tick
+	_manager.max_spawns_per_tick = 1 # one a tick here, to see the budget spread a wave
 	spawner.spawned.connect(func(p: Pawn) -> void:
 		spawn_yaws.append(p.yaw)
 		spawn_ticks.append(TickDriver.tick))
@@ -126,7 +128,8 @@ func _test_pawn_spawner() -> void:
 	await _until(func() -> bool: return spawner.get_alive().size() == 3, 10)
 	var alive := spawner.get_alive()
 	_check(alive.size() == 3, "a spawner fills up to keep_alive (%d)" % alive.size())
-	_check(_manager.max_spawns_per_tick == 1 and spawn_ticks.size() == 3 and spawn_ticks[0] < spawn_ticks[1] and spawn_ticks[1] < spawn_ticks[2], "one a tick, max_spawns_per_tick, so a wave is spread out (ticks %s)" % str(spawn_ticks))
+	_check(spawn_ticks.size() == 3 and spawn_ticks[0] < spawn_ticks[1] and spawn_ticks[1] < spawn_ticks[2], "with max_spawns_per_tick 1, one a tick, so a wave is spread out (ticks %s)" % str(spawn_ticks))
+	_manager.max_spawns_per_tick = budget_before
 	_check(alive.all(func(p: Pawn) -> bool: return p.global_position.distance_to(spawner.global_position) <= 4.01), "within its scatter_radius")
 	_check(spawn_yaws.size() == 3 and spawn_yaws.all(func(yaw: float) -> bool: return is_equal_approx(absf(yaw), PI)), "facing its way when they spawn (%s)" % str(spawn_yaws.map(func(yaw: float) -> float: return snappedf(rad_to_deg(yaw), 0.1))))
 	var victim := alive[0]

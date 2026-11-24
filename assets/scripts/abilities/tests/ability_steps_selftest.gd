@@ -279,12 +279,12 @@ func _test_loop_in_one_tick() -> void:
 	_ai(pawn).press(&"primary")
 	await _ticks(3)
 	var starts := _count(log, "Loop", "enter")
-	_check(starts <= AbilityBase.MAX_STEP_STARTS_PER_TICK and not attack.is_running_timed(),
-			"steps started from code in a loop within one tick are stopped at %d starts, and the ability ends (%d)" % [AbilityBase.MAX_STEP_STARTS_PER_TICK, starts])
+	_check(starts <= StepTimeline.MAX_STARTS_PER_TICK and not attack.is_running_timed(),
+			"steps started from code in a loop within one tick are stopped at %d starts, and the ability ends (%d)" % [StepTimeline.MAX_STARTS_PER_TICK, starts])
 	pawn.free()
 
 
-# Along runs forever beside Main (3 ticks), but has keeps_ability_running off: the ability ends with Main, and Along stops with "done".
+# Along runs forever beside Main (3 ticks), but has keeps_owner_running off: the ability ends with Main, and Along stops with "done".
 func _test_going_along() -> void:
 	var log: Array = []
 	var attack := StepAttack.new()
@@ -292,14 +292,14 @@ func _test_going_along() -> void:
 	var main := _step(attack, "Main", log)
 	main.length_ticks = 3
 	var along := _step(attack, "Along", log)
-	along.keeps_ability_running = false
+	along.keeps_owner_running = false # Claude 2026-11-24: was keeps_ability_running (Step)
 	attack.step_timeline = [TimelineEntry.at(&"Main"), TimelineEntry.at(&"Along")]
 	var pawn := _make_pawn([attack])
 	await _ticks(10)
 	_ai(pawn).press(&"primary")
 	await _ticks(6)
 	_check(not attack.is_running_timed() and _count(log, "Along", "exit:done") == 1 and _count(log, "Along", "tick") == 3,
-			"a step with keeps_ability_running off doesn't keep it going: it ends with the main step, and stops with done")
+			"a step with keeps_owner_running off doesn't keep it going: it ends with the main step, and stops with done")
 	pawn.free()
 
 

@@ -61,7 +61,7 @@ Place `SpawnPoint` nodes in the level; a point says which teams and group it ser
 | `every_4th_tick_beyond_chunks` | `AIActivationManager` | 4 | Beyond this, AI runs every 4th tick; between, every 2nd |
 | `respawn_players` | `SpawnManager` | on | Players' pawns come back after dying |
 | `player_respawn_ticks` | `SpawnManager` | 180 (3 s) | How long a player's pawn stays dead, in ticks at 60 a second |
-| `max_spawns_per_tick` | `SpawnManager` | 1 | The most pawns spawners may spawn in one tick; the rest wait for the next ticks. 0: no limit |
+| `max_spawns_per_tick` | `SpawnManager` | 8 | The most pawns spawners may spawn in one tick; the rest wait for the next ticks. 0: no limit |
 | `clearance_radius` | `SpawnManager` | 0.6 m | How far another pawn must be for a spot to count as free |
 | `ai_brain` | `pawn_defaults.tres` | none | The behaviours a pawn without its own gets |
 
