@@ -29,12 +29,12 @@ enum Push {
 	set(value):
 		hits_enemies = value
 		_changed(&"hits_enemies", value)
-## Effects on a pawn it hits, as well as the ability's own on-hit EffectApplier children.
+## Effects on a pawn it hits, in order: damage, knockback, a slow (pawn spec 16.7).
 @export var target_effects: Array[Effect] = []:
 	set(value):
 		target_effects = value
 		_changed(&"target_effects", value)
-## Effects on the attacker when it lands, as well as the ability's own.
+## Effects on the attacker when it lands (a boost for landing a blow).
 @export var attacker_effects: Array[Effect] = []:
 	set(value):
 		attacker_effects = value

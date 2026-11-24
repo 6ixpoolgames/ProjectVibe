@@ -80,9 +80,9 @@ Made by the [`StatusManager`](../status/REFERENCE.md#statusmanager) on the autho
 
 `res://assets/scripts/effects/EffectApplier.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
-Applies effects when its ability does something: a child node of an ability, or of a [`HitInterceptor`](../abilities/REFERENCE.md#hitinterceptor).
+What a [`HitInterceptor`](../abilities/REFERENCE.md#hitinterceptor) does when it stops a hit: a child node of the interceptor, on the ON_INTERCEPT trigger.
 
-The ability itself carries no damage or knockback; its EffectApplier children say what it does to whom. An ability can have any number; the AbilityManager collects them at startup, so nothing searches for them while playing. See `Trigger` for when each runs. Design: pawn spec 8.11, 8.23.
+Effects an ability applies on start or on a hit live in its definition (`AbilityDefinition.start_effects`, its hit's `HitDefinition.target_effects` and `HitDefinition.attacker_effects`); one left directly under an ability does nothing. Design: pawn spec 8.23, 16.7.
 
 ### Settings and properties
 

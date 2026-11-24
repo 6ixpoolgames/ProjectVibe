@@ -1,9 +1,11 @@
 [gd_resource type="Resource" script_class="MeleeAttackDefinition" format=3 uid="uid://dbete4eghdf1r"]
 
+[ext_resource type="Resource" path="res://assets/scripts/resources/hits/heavy.tres" id="h_heavy"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd" id="1_e4aw8"]
 
 [resource]
 script = ExtResource("1_e4aw8")
+hit = ExtResource("h_heavy")
 windup_ticks = 20
 hit_ticks = 5
 recovery_ticks = 22

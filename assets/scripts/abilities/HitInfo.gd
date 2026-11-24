@@ -1,8 +1,8 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: abilities/CHANGELOG.md.
 ## What one hit was, handed from the attacker to the target's [method AbilityManager.receive_hit].
 ##
-## Plain data, made on the server only, where hits are decided. A hit carries effects, not numbers: the attacking ability's on-hit
-## effects say what it does, and the target's StatusManager applies them. A hit made in code gives its own, such as
+## Plain data, made on the server only, where hits are decided. A hit carries effects, not numbers: the attacking ability's hit
+## definition's effects say what it does, and the target's StatusManager applies them. A hit made in code gives its own, such as
 ## [code]Effect.make_damage(20)[/code].
 ## Design: pawn spec 8.6, 8.11.
 class_name HitInfo
@@ -23,7 +23,7 @@ var tick := 0
 var direction := Vector3.ZERO
 ## The effects that go on the target, in order.
 var effects: Array[Effect] = []
-## The effects that go on the attacker once the hit lands (an on-hit EffectApplier that applies to itself).
+## The effects that go on the attacker once the hit lands (its hit definition's attacker_effects).
 var attacker_effects: Array[Effect] = []
 ## Filled in when the hit lands: how much Health it took, after resistances. 0 before then.
 var damage_dealt := 0.0

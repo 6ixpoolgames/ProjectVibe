@@ -236,7 +236,7 @@ func _label(pawn: Node, node: Node) -> String:
 
 
 # Claude 2026-11-10: on a's swing, an on-hit slow for the target and an on-hit boost to its own dash. Added before the pawn's first
-# tick, and collected again by the manager, as a scene's EffectApplier children would be.
+# tick. Claude 2026-11-24: as a hit definition of its own (its swing's effects plus these), now that effects live in definitions.
 func _add_test_effects(pawn: Pawn) -> void:
 	var melee: AbilityBase = pawn.ability_manager.get_node("MeleeAttack")
 	var slow := Effect.new()
@@ -255,14 +255,14 @@ func _add_test_effects(pawn: Pawn) -> void:
 	stronger.number = AbilityModifier.Number.INTERRUPT_PRIORITY
 	stronger.amount = 5
 	boost.modifiers = [stronger]
-	var on_target := EffectApplier.new()
-	on_target.effects = [slow]
-	var on_self := EffectApplier.new()
-	on_self.applies_to = EffectApplier.AppliesTo.SELF
-	on_self.effects = [boost]
-	melee.add_child(on_target)
-	melee.add_child(on_self)
-	pawn.ability_manager._collect_effects(melee)
+	var hit: HitDefinition = melee.hit_definition().duplicate()
+	var target_effects: Array[Effect] = melee.hit_definition().target_effects.duplicate()
+	target_effects.append(slow)
+	hit.target_effects = target_effects
+	hit.attacker_effects = [boost]
+	slow.register()
+	boost.register()
+	melee.use_hit_definition(hit)
 
 
 func _same(x: Variant, y: Variant) -> bool:

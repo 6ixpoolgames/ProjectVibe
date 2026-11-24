@@ -47,12 +47,11 @@ func _init(list_holder: Object = null, list_property: StringName = &"") -> void:
 	_list = list_property
 
 
-## Keeps what a hit needs if its source goes before it lands (the hit definition's lands_without_source): the ability's on-hit effects
-## and the hit definition's, and the attacker's id. A projectile calls it as it sets off.
+## Keeps what a hit needs if its source goes before it lands (the hit definition's lands_without_source): the hit definition's
+## effects and the attacker's id. A projectile calls it as it sets off.
 func remember_source(source: AbilityBase) -> void:
 	_kept_effects.clear()
 	if source:
-		_kept_effects.append_array(source.on_hit_effects)
 		_attacker_key = source.pawn.entity_number() if source.pawn else EntityNumber.NONE
 	if hit:
 		for effect in hit.target_effects:

@@ -16,8 +16,8 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
 ## The pieces
 
 ```
- an ability ─► EffectApplier (child): ON_START ─► its own pawn
-                                      ON_HIT ───► HitInfo ─► the target
+ an ability's definition: start_effects ─────────► its own pawn
+                          its hit's target_effects ─► HitInfo ─► the target (attacker_effects: the attacker)
  a HitInterceptor ─► EffectApplier: ON_INTERCEPT ─► the attacker (or itself)
  an ApplyEffectStep, or code ──────────────────────► a pawn
                                                        │
@@ -29,7 +29,7 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
 
 - **`Effect`** is a Resource, saved in `resources/effects/`: instant (its effectors fire once) or over time (`duration_ticks`, with an optional `period_ticks` and a `stacking` rule, in ticks at 60 a second). Its `tags` say what kind it is; `is_harmful` decides whether resistances and invulnerability apply.
 - **Modifiers and effectors** (pawn spec 16.8) are what an effect does, in two lists by timing. **Modifiers** (`EffectModifier`, in `modifiers/`) hold while the effect lasts, on every machine: `StatModifier` (a stat's multiply and add, or an override), `AbilityModifier` (an ability group's priority numbers), `ResistanceModifier`. **Effectors** (`EffectEffector`, in `effectors/`) fire when it's applied and at each period, on the authority only, in list order: `StatChangeEffector` (damage, heals), `KnockbackEffector`, `LifestealEffector`. On application the modifiers take hold first, then the effectors fire. A stat with modifiers is base × every multiply + every add (multiply, then add, for everything), or the last override's value.
-- **`EffectApplier`** is a child node of an ability (or of a HitInterceptor) that says which effects it applies, when (ON_START, ON_HIT, ON_INTERCEPT) and to whom (TARGET or SELF).
+- **Which effects apply when** lives in definitions (pawn spec 16.7): an ability definition's `start_effects` go on its own pawn when it starts; its hit definition's (`hit`) `target_effects` go on a pawn it hits and `attacker_effects` on the attacker. `EffectApplier` is left only under a HitInterceptor (ON_INTERCEPT: what a parry does back), until parrying becomes an effect.
 - **`StatusManager`** is a part on every pawn. It applies effects to its own pawn with its resistances, keeps over-time ones in `active_effects` (rolled back and sent in snapshots), keeps their deadlines and runs them down each tick and clears them when the pawn dies.
 - **Effect tags** say what kind of effect something is (`effect.damage.elemental.fire`): the `effect` category of the one tag registry (`tags/TagRegistry`), declared in `resources/tag_declarations.tres`. Code uses the constants in `Tags.EFFECT` (`Tags.EFFECT.DAMAGE_PHYSICAL`).
 - `EffectApplication` (one application, handed to each effector) and `ModifierTotals` (what the modifiers add up to) are plumbing a new modifier or effector works with.
@@ -38,7 +38,7 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
 
 **Make damage or a heal.** New Resource > `Effect`, saved in `resources/effects/`. Add a `StatChangeEffector` with stat Health and amount -20 (damage) or +15 (a heal; untick `is_harmful` so resistances don't touch it). Give it a tag such as `effect.damage.physical`.
 
-**Make an ability's hit do it.** Add an `EffectApplier` under the ability, trigger ON_HIT, applies_to TARGET, and put the effect in its list. Add a `KnockbackEffector` to the effect for a push (and a hop), a `LifestealEffector` after the damage to heal the attacker. Applies_to SELF on ON_HIT rewards the attacker only when the hit connects.
+**Make an ability's hit do it.** Put the effect in the `target_effects` of the ability definition's hit definition (`hit`; the samples keep theirs in `resources/hits/`, such as `hits/swing.tres`). Add a `KnockbackEffector` to the effect for a push (and a hop), a `LifestealEffector` after the damage to heal the attacker. `attacker_effects` reward the attacker only when the hit connects; `start_effects` on the ability definition go on its own pawn when it starts.
 
 **Make a poison or a heal over time.** Set `duration_ticks` (180, 3 s) and `period_ticks` (60, 1 s): its effectors run when it lands and every period while it lasts. `stacking` ADD_STACK with `max_stacks` makes repeated hits stack.
 
@@ -86,7 +86,8 @@ var hurt := Effect.make_damage(20)                        # a quick instant dama
 | `is_harmful` | `Effect` | on | Resistances and invulnerability apply to it |
 | `tags` | `Effect` | empty | What kind of effect it is, for resistances and removing by tag |
 | `effect_name` | `Effect` | empty | A name for readouts; needed for an over-time effect made in code to be recognised online |
-| `trigger`, `applies_to` | `EffectApplier` | ON_HIT, TARGET | When it applies its effects, and to whom |
+| `start_effects` | `AbilityDefinition` | empty | Effects on its own pawn when it starts |
+| `target_effects`, `attacker_effects` | `HitDefinition` | empty | What a hit does to the pawn hit, and to the attacker |
 | `resistances` | `StatusManager` | empty | The pawn's own resistances, by effect tag |
 | `max_active_effects` | `StatusManager` | 16 | The most over-time effects a pawn can have at once |
 

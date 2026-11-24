@@ -1,9 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
-## Applies effects when its ability does something: a child node of an ability, or of a [HitInterceptor].
+## What a [HitInterceptor] does when it stops a hit: a child node of the interceptor, on the ON_INTERCEPT trigger.
 ##
-## The ability itself carries no damage or knockback; its EffectApplier children say what it does to whom. An ability can have any
-## number; the AbilityManager collects them at startup, so nothing searches for them while playing. See [enum Trigger] for when each runs.
-## Design: pawn spec 8.11, 8.23.
+## Effects an ability applies on start or on a hit live in its definition ([member AbilityDefinition.start_effects], its hit's
+## [member HitDefinition.target_effects] and [member HitDefinition.attacker_effects]); one left directly under an ability does nothing.
+## Design: pawn spec 8.23, 16.7.
+# REFACTOR: goes with the interceptors, when parrying becomes an effect whose reply is part of the effect (pawn spec 16.10, step 4).
 class_name EffectApplier
 extends Node
 

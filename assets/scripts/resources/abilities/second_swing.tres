@@ -1,9 +1,11 @@
 [gd_resource type="Resource" script_class="MeleeAttackDefinition" format=3 uid="uid://cidtw0r5blp1f"]
 
+[ext_resource type="Resource" path="res://assets/scripts/resources/hits/second_swing.tres" id="h_second_swing"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd" id="1_exxn0"]
 
 [resource]
 script = ExtResource("1_exxn0")
+hit = ExtResource("h_second_swing")
 windup_ticks = 5
 recovery_ticks = 10
 sweep_from_left = true

@@ -208,6 +208,7 @@ func _test_lands_without_source() -> void:
 		rules.max_hits = 1
 		rules.lands_without_source = keeps
 		var ranged: AbilityBase = shooter.ability_manager.get_node("MeleeAttack")
+		rules.target_effects = ranged.hit_definition().target_effects # Claude 2026-11-24: a hit named on its own carries its own effects
 		Projectile.fire(ranged, Vector3(x, 1.3, -0.5), Vector3.FORWARD, BOLT, null, rules)
 		shooter.free()
 		await _ticks(30)

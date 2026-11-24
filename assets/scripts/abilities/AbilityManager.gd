@@ -675,10 +675,11 @@ func _start(ability: AbilityBase) -> void:
 	if ability.kind == AbilityBase.Kind.ACTION and ability.is_running_timed():
 		_locked_mask |= ability.locks_out_mask # later abilities this tick respect it at once
 	ability.start()
-	# On-start effects go on its own pawn on every machine that runs it, replays too, so an over-time one (a combo boost) is
-	# predicted; their do-once parts run only on the authority (StatusManager). Pawn spec 8.11.
-	if not ability.on_start_effects.is_empty() and pawn.status_manager:
-		pawn.status_manager.apply_effects(ability.on_start_effects, pawn, ability)
+	# Start effects go on its own pawn on every machine that runs it, replays too, so an over-time one (a combo boost) is predicted;
+	# their effectors fire only on the authority (StatusManager). Pawn spec 16.7.
+	var start_effects := ability.settings.start_effects
+	if not start_effects.is_empty() and pawn.status_manager:
+		pawn.status_manager.apply_effects(start_effects, pawn, ability)
 	ability_started.emit(ability)
 	if ability.is_stepped() and ability.is_running_timed():
 		ability.begin_steps() # after ability_started, so a replay lists the ability before its steps
@@ -857,29 +858,17 @@ func _note_start_requirements() -> void:
 				break
 
 
-# The ability's EffectApplier children, into its three effect lists (pawn spec 8.11). Each effect is registered so an over-time one in
-# the active list is recognised by id on every machine (Effect.register).
+# Registers the effects its definition can apply (its start effects, its hit's), so an over-time one in the active list is recognised
+# by id on every machine (Effect.register). Effects live in definitions (pawn spec 16.7); an EffectApplier left under an ability does
+# nothing, so it gets a warning.
 func _collect_effects(ability: AbilityBase) -> void:
-	ability.on_start_effects.clear()
-	ability.on_hit_effects.clear()
-	ability.on_hit_self_effects.clear()
-	for child in ability.get_children():
-		var applier := child as EffectApplier
-		if applier == null:
-			continue
-		for effect in applier.effects:
-			if effect == null:
-				continue
+	var hit := ability.hit_definition()
+	for effect in ability.settings.start_effects + hit.target_effects + hit.attacker_effects:
+		if effect:
 			effect.register()
-			if applier.trigger == EffectApplier.Trigger.ON_START:
-				ability.on_start_effects.append(effect)
-			elif applier.trigger == EffectApplier.Trigger.ON_INTERCEPT:
-				# These belong under a HitInterceptor, which collects its own.
-				push_warning("AbilityManager: %s has an ON_INTERCEPT EffectApplier directly under it; put it under one of its HitInterceptors." % ability.name)
-			elif applier.applies_to == EffectApplier.AppliesTo.SELF:
-				ability.on_hit_self_effects.append(effect)
-			else:
-				ability.on_hit_effects.append(effect)
+	for child in ability.get_children():
+		if child is EffectApplier:
+			push_warning("AbilityManager: %s has an EffectApplier child, which does nothing now: put its effects in the ability's definition (start_effects, or its hit's target_effects and attacker_effects)." % ability.name)
 
 
 # An ability's HitInterceptors (pawn spec 8.23), under it and its steps (its defaults are made first if it has none), into the two

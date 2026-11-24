@@ -13,7 +13,8 @@
 ## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_pushed_properties] (its setter calls
 ## [method push_state]) or [method get_rollback_properties] (read at every commit); the base already covers its own timers and step
 ## state. It can also be built from [AbilityStep] children (a windup, a turn, a swing) and carry [HitInterceptor] children that stop
-## hits while it runs.
+## hits while it runs. What it does to pawns is effects in its definition: [member AbilityDefinition.start_effects] on itself, and its
+## hit's target_effects and attacker_effects.
 ## Design: pawn spec 8, 8.20, 8.23.
 class_name AbilityBase
 extends Node
@@ -141,12 +142,6 @@ var locks_out_mask := 0
 var cancelled_by_mask := 0
 ## trigger_action's input bit ([InputActions]), or 0 with none. Worked out once by the manager (pawn spec 15.2).
 var trigger_bit := 0
-## Effects on its own pawn when it starts, from its EffectApplier children, collected once by the manager (pawn spec 8.11).
-var on_start_effects: Array[Effect] = []
-## Effects on a pawn it hits, handed to the [HitInfo] by [method land_hit] (a sweep's hit or a projectile's).
-var on_hit_effects: Array[Effect] = []
-## Effects on its own pawn when it hits, handed over by [method land_hit] like [member on_hit_effects].
-var on_hit_self_effects: Array[Effect] = []
 ## Its [HitInterceptor]s, under it or its steps, found by the manager (pawn spec 8.23).
 var interceptors: Array[HitInterceptor] = []
 ## Its [AbilityStep] children in tree order, found by [method collect_steps]. Empty: no steps.
@@ -688,27 +683,20 @@ func use_hit_definition(hit: HitDefinition) -> void:
 	_hit_swap = hit.resolved() as HitDefinition if hit else null
 
 
-## Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [HitInfo] carrying the hit definition's effects and its
-## own on-hit EffectApplier children, delivered to the target (its interceptors, then effects), then [signal hit_landed]. The one place
-## a hit is applied; override it for an ability's own rules (damage falling off with distance), calling [code]super()[/code].
+## Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [HitInfo] carrying the hit definition's effects
+## (with: the one its step or projectile names; null: [method hit_definition]), delivered to the target (its interceptors, then
+## effects), then [signal hit_landed]. The one place a hit is applied; override it for an ability's own rules (damage falling off with
+## distance), calling [code]super()[/code].
 func land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo:
 	var using := with if with else hit_definition()
-	var target_effects := on_hit_effects
-	var self_effects := on_hit_self_effects
-	if not using.target_effects.is_empty() or not using.attacker_effects.is_empty():
-		target_effects = on_hit_effects.duplicate()
-		self_effects = on_hit_self_effects.duplicate()
-		for effect in using.target_effects:
-			if effect:
-				effect.register() # so an over-time one is recognised by id on every machine
-				target_effects.append(effect)
-		for effect in using.attacker_effects:
-			if effect:
-				effect.register()
-				self_effects.append(effect)
+	var target_effects := using.target_effects
+	var self_effects := using.attacker_effects
+	for effect in target_effects + self_effects:
+		if effect:
+			effect.register() # so an over-time one is recognised by id on every machine
 	if target_effects.is_empty() and self_effects.is_empty() and not _warned_no_effects:
 		_warned_no_effects = true
-		push_warning("%s hit %s but has no on-hit effects (EffectApplier children or its hit definition's), so the hit does nothing." % [name, target.name])
+		push_warning("%s hit %s but its hit definition has no effects (target_effects, attacker_effects), so the hit does nothing." % [name, target.name])
 	var hit := HitInfo.make(pawn, self, target, direction, at_tick, target_effects, self_effects)
 	hit.deliver()
 	return hit

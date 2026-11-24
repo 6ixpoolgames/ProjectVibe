@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="MeleeAttackDefinition" load_steps=4 format=3 uid="uid://mu5zto5qh4nz"]
+
+[ext_resource type="Resource" path="res://assets/scripts/resources/abilities/heavy_attack.tres" id="1_base"]
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd" id="2_melee"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/hits/hero_heavy.tres" id="3_hit"]
+
+[resource]
+script = ExtResource("2_melee")
+hit = ExtResource("3_hit")
+changed_values = PackedStringArray("hit")
+based_on = ExtResource("1_base")

@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="MeleeAttackDefinition" load_steps=3 format=3 uid="uid://pofvox8ls3kl"]
+
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd" id="1_melee"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/hits/swing.tres" id="2_hit"]
+
+[resource]
+script = ExtResource("1_melee")
+hit = ExtResource("2_hit")

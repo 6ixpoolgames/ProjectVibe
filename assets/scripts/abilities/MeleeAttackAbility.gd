@@ -5,7 +5,7 @@
 ## [WaitStep] for recovery. With no [AbilityStep] children of its own it makes those from the settings below, about 0.4 s with the
 ## defaults; place steps of your own for another pattern (these settings then only matter for [member attack_range], the AI's reach, and
 ## [member warns_targets]). It locks out movement and other combat; Dash cancels it, Sprint and Jump don't. Hits happen on the server
-## only, during the sweep, and a replay never hits again. What a hit does comes from its EffectApplier children, not the swing itself.
+## only, during the sweep, and a replay never hits again. What a hit does is its hit definition's effects ([member AbilityDefinition.hit]), not the swing itself.
 ## Design: pawn spec 8.6, 8.9, 8.20.
 class_name MeleeAttackAbility
 extends AbilityBase

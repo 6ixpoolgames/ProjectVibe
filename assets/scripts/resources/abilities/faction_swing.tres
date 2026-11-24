@@ -1,9 +1,11 @@
 [gd_resource type="Resource" script_class="MeleeAttackDefinition" format=3 uid="uid://csr3r2mkgmypj"]
 
+[ext_resource type="Resource" path="res://assets/scripts/resources/hits/swing.tres" id="h_swing"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/definitions/MeleeAttackDefinition.gd" id="1_o62wr"]
 
 [resource]
 script = ExtResource("1_o62wr")
+hit = ExtResource("h_swing")
 height_at_sweep_start = 0.6
 height_at_sweep_end = -0.3
 trigger_action = &"primary"

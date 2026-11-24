@@ -1,15 +1,11 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_goblin.tscn" id="1_goblin"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/StatusManager.tscn" id="2_stats"]
-[ext_resource type="Resource" path="res://assets/scripts/resources/effects/hero_swing_hit.tres" id="3_swing"]
-[ext_resource type="Resource" path="res://assets/scripts/resources/effects/hero_second_swing_hit.tres" id="4_second"]
-[ext_resource type="Resource" path="res://assets/scripts/resources/effects/hero_finisher_hit.tres" id="5_finisher"]
-[ext_resource type="Resource" path="res://assets/scripts/resources/effects/hero_heavy_hit.tres" id="6_heavy"]
-[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="7_effect"]
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/PawnStreamingSource.tscn" id="8_source"]
 [ext_resource type="Resource" uid="uid://bxydvyeunbmht" path="res://assets/scripts/resources/abilities/hero_red_swing.tres" id="d_hero_red_swing"]
 [ext_resource type="Resource" uid="uid://dlcggrw6my558" path="res://assets/scripts/resources/abilities/hero_red_second_swing.tres" id="d_hero_red_second_swing"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/abilities/hero_red_heavy_attack.tres" id="d_hero_red_heavy_attack"]
 [ext_resource type="Resource" uid="uid://b4m8uo6birdyf" path="res://assets/scripts/resources/abilities/hero_red_finisher_swing.tres" id="d_hero_red_finisher_swing"]
 
 [sub_resource type="CapsuleShape3D" id="Hero_capsule"]
@@ -36,23 +32,14 @@ base_value = 1000.0
 [node name="MeleeAttack" parent="AbilityManager"]
 definition = ExtResource("d_hero_red_swing")
 
-[node name="OnHit" parent="AbilityManager/MeleeAttack" index="0"]
-effects = Array[ExtResource("7_effect")]([ExtResource("3_swing")])
-
 [node name="SecondSwing" parent="AbilityManager"]
 definition = ExtResource("d_hero_red_second_swing")
-
-[node name="OnHit" parent="AbilityManager/SecondSwing" index="0"]
-effects = Array[ExtResource("7_effect")]([ExtResource("4_second")])
 
 [node name="FinisherSwing" parent="AbilityManager"]
 definition = ExtResource("d_hero_red_finisher_swing")
 
-[node name="OnHit" parent="AbilityManager/FinisherSwing" index="0"]
-effects = Array[ExtResource("7_effect")]([ExtResource("5_finisher")])
-
-[node name="OnHit" parent="AbilityManager/HeavyAttack" index="0"]
-effects = Array[ExtResource("7_effect")]([ExtResource("6_heavy")])
+[node name="HeavyAttack" parent="AbilityManager"]
+definition = ExtResource("d_hero_red_heavy_attack")
 
 [node name="Waddle" parent="Visual/Model" index="2"]
 toy_scale = 3.96

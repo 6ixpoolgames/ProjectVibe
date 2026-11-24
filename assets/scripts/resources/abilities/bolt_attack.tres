@@ -1,10 +1,12 @@
 [gd_resource type="Resource" script_class="RangedAttackDefinition" format=3 uid="uid://bxfhtcb8d3wsl"]
 
+[ext_resource type="Resource" path="res://assets/scripts/resources/hits/bolt.tres" id="h_bolt"]
 [ext_resource type="Resource" uid="uid://bnpvgfe6pvji" path="res://assets/scripts/resources/abilities/bolt.tres" id="1_vk6gp"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/definitions/RangedAttackDefinition.gd" id="2_sk38w"]
 
 [resource]
 script = ExtResource("2_sk38w")
+hit = ExtResource("h_bolt")
 projectile_definition = ExtResource("1_vk6gp")
 trigger_action = &"ability_3"
 category = &"ability.combat.ranged"

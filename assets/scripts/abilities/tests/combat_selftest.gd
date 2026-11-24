@@ -333,7 +333,7 @@ func _test_melee_multi_hit() -> void:
 	var hit_both := landed.any(func(hit): return hit.target == left) and landed.any(func(hit): return hit.target == right)
 	_check(landed.size() == 2 and hit_both, "multi-hit: one swing hits both enemies inside its sphere, each once (%d hits)" % landed.size())
 	# Claude 2026-11-10: the damage is the swing's on-hit effect now (swing_hit.tres, 20), not a number on the swing.
-	var damage := -melee.on_hit_effects[0].planned_change(&"Health")
+	var damage := -melee.hit_definition().target_effects[0].planned_change(&"Health") # Claude 2026-11-24: its hit definition's now
 	_check(damage == 20.0 and left.status_manager.get_health() == 100.0 - damage and right.status_manager.get_health() == 100.0 - damage, "and each takes the damage from the swing's on-hit effect (%d and %d HP)" % [int(left.status_manager.get_health()), int(right.status_manager.get_health())])
 	_check(left.global_position.x < 29.45 and right.global_position.x > 30.55, "and each is knocked back away from the attacker, to its own side (%.2f and %.2f m sideways)" % [left.global_position.x - 29.5, right.global_position.x - 30.5])
 	attacker.free()

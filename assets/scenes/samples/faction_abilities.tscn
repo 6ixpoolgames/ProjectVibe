@@ -1,17 +1,13 @@
-[gd_scene load_steps=20 format=3]
+[gd_scene load_steps=15 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AbilityManager.tscn" id="1_abilities"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/MeleeAttackAbility.gd" id="3_melee"]
 [ext_resource type="Script" path="res://assets/scripts/effects/EffectApplier.gd" id="4_applier"]
 [ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="5_effect"]
-[ext_resource type="Resource" path="res://assets/scripts/resources/effects/second_swing_hit.tres" id="8_second_hit"]
-[ext_resource type="Resource" path="res://assets/scripts/resources/effects/finisher_hit.tres" id="9_finisher_hit"]
-[ext_resource type="Resource" path="res://assets/scripts/resources/effects/heavy_hit.tres" id="10_heavy_hit"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/ParryAbility.gd" id="11_parry"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/parry_knockback.tres" id="12_parry_knockback"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/interceptors/ParryInterceptor.gd" id="13_parry_front"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/RangedAttackAbility.gd" id="14_ranged"]
-[ext_resource type="Resource" path="res://assets/scripts/resources/effects/bolt_hit.tres" id="16_bolt_hit"]
 [ext_resource type="Resource" uid="uid://csr3r2mkgmypj" path="res://assets/scripts/resources/abilities/faction_swing.tres" id="d_faction_swing"]
 [ext_resource type="Resource" uid="uid://cidtw0r5blp1f" path="res://assets/scripts/resources/abilities/second_swing.tres" id="d_second_swing"]
 [ext_resource type="Resource" uid="uid://c01fre6xqoh38" path="res://assets/scripts/resources/abilities/finisher_swing.tres" id="d_finisher_swing"]
@@ -28,33 +24,17 @@ definition = ExtResource("d_faction_swing")
 script = ExtResource("3_melee")
 definition = ExtResource("d_second_swing")
 
-[node name="OnHit" type="Node" parent="SecondSwing"]
-script = ExtResource("4_applier")
-effects = Array[ExtResource("5_effect")]([ExtResource("8_second_hit")])
-
 [node name="FinisherSwing" type="Node" parent="."]
 script = ExtResource("3_melee")
 definition = ExtResource("d_finisher_swing")
-
-[node name="OnHit" type="Node" parent="FinisherSwing"]
-script = ExtResource("4_applier")
-effects = Array[ExtResource("5_effect")]([ExtResource("9_finisher_hit")])
 
 [node name="HeavyAttack" type="Node" parent="."]
 script = ExtResource("3_melee")
 definition = ExtResource("d_heavy_attack")
 
-[node name="OnHit" type="Node" parent="HeavyAttack"]
-script = ExtResource("4_applier")
-effects = Array[ExtResource("5_effect")]([ExtResource("10_heavy_hit")])
-
 [node name="HeavySmash" type="Node" parent="."]
 script = ExtResource("3_melee")
 definition = ExtResource("d_heavy_smash")
-
-[node name="OnHit" type="Node" parent="HeavySmash"]
-script = ExtResource("4_applier")
-effects = Array[ExtResource("5_effect")]([ExtResource("10_heavy_hit")])
 
 [node name="Parry" type="Node" parent="."]
 script = ExtResource("11_parry")
@@ -71,6 +51,3 @@ effects = Array[ExtResource("5_effect")]([ExtResource("12_parry_knockback")])
 script = ExtResource("14_ranged")
 definition = ExtResource("d_bolt_attack")
 
-[node name="OnHit" type="Node" parent="RangedAttack"]
-script = ExtResource("4_applier")
-effects = Array[ExtResource("5_effect")]([ExtResource("16_bolt_hit")])

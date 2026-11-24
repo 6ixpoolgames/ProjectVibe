@@ -136,8 +136,15 @@ extends Definition
 	set(value):
 		has_charges_tag = value
 		_changed(&"has_charges_tag", value)
-## Who its hits may hit and what they do (ability spec 13.2), for its swings and its projectiles. Empty: its kind's default (a swing
-## hits enemies; a ranged attack's projectile stops at the first). A sweep step or a timeline entry can name another.
+## Effects on its own pawn when it starts (a combo boost), on every machine that runs it, rollback replays included, so an over-time
+## one is predicted; their effectors fire on the authority only (pawn spec 16.7).
+@export var start_effects: Array[Effect] = []:
+	set(value):
+		start_effects = value
+		_changed(&"start_effects", value)
+## Who its hits may hit and what they do (ability spec 13.2), for its swings and its projectiles: its target_effects and
+## attacker_effects are what a hit does. Empty: its kind's default (a swing hits enemies, doing nothing; a ranged attack's projectile
+## stops at the first). A sweep step or a timeline entry can name another.
 @export var hit: HitDefinition:
 	set(value):
 		hit = value

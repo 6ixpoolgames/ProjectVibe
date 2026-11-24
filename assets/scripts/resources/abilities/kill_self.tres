@@ -1,7 +1,10 @@
 [gd_resource type="Resource" script_class="AbilityDefinition" format=3 uid="uid://devpuawhgo7u0"]
 
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="e_effect"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/kill_self.tres" id="e_kill_self"]
 [ext_resource type="Script" path="res://assets/scripts/abilities/definitions/AbilityDefinition.gd" id="1_dgtt7"]
 
 [resource]
 script = ExtResource("1_dgtt7")
+start_effects = Array[ExtResource("e_effect")]([ExtResource("e_kill_self")])
 trigger_action = &"kill_self"

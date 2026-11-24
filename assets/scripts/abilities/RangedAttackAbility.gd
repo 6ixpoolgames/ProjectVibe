@@ -3,10 +3,10 @@
 ##
 ## A shot is a [WindupStep] with a [TurnToFaceStep] beside it, a [FireProjectileStep], then a [WaitStep] for recovery. With no
 ## [AbilityStep] children of its own it makes those from the settings below; place steps of your own for another pattern (a volley is
-## several fire steps). It locks out movement and other combat while it runs; Dash cancels it. What a hit does comes from its
-## EffectApplier children, carried by the projectile. Design: pawn spec 8.24.
+## several fire steps). It locks out movement and other combat while it runs; Dash cancels it. What a hit does is its hit
+## definition's effects ([member AbilityDefinition.hit]), carried by the projectile. Design: pawn spec 8.24.
 ## [codeblock]
-## # in a pawn's AbilityManager: a RangedAttack whose definition names a ProjectileDefinition, and an EffectApplier child (on hit)
+## # in a pawn's AbilityManager: a RangedAttack whose definition names a ProjectileDefinition and a hit with effects
 ## pawn.ability_manager.can_start(&"primary")
 ## [/codeblock]
 class_name RangedAttackAbility
