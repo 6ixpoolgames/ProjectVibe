@@ -9,11 +9,17 @@
 # The runner itself exits 0 only if every suite it ran passed.
 #
 # Use, from Git Bash, anywhere:
-#   bash tools/run_tests.sh full                 every local suite (before a commit or push)
+#   bash tools/run_tests.sh commit               the commit set: the fewest suites that check every system works (before a commit;
+#                                                about 1.5 minutes). It says how many commits ago the full suite last passed.
+#   bash tools/run_tests.sh full                 every local suite (every few commits, and before a push; about 5 minutes)
 #   bash tools/run_tests.sh full net             the same, plus the shorter network suites (net_pawn, net_streaming, net_projectile)
 #   bash tools/run_tests.sh <name> [<name>...]   only suites whose file name contains one of these, e.g. replay kill_floor
 #                                                (a slow suite such as net_selftest runs when it's named like this)
+# Suites run with --fixed-fps 60: frames as fast as the machine allows, each counted as 1/60 s, so the game plays out the same in a
+# third of the time. Those in REAL_TIME (they count real seconds) run in real time. REAL_TIME_ALL=1 runs every suite in real time,
+# which also checks real frame pacing (dropped ticks, worker threads finishing between frames); worth doing now and then.
 # Godot is looked for beside the project folder. To use another one:  GODOT="/path/to/godot" bash tools/run_tests.sh full
+# Extra arguments for every Godot it starts: TEST_GODOT_ARGS="...".
 # Legacy tests (assets/legacy/) are never run.
 
 cd "$(dirname "$0")/.." || exit 2
@@ -25,6 +31,18 @@ fi
 
 # Suites "full" leaves out: slow ones (run by name, or with "net"), and scenes that are helpers or print numbers, not tests.
 SLOW='net_selftest|net_streaming_selftest|net_pawn_selftest|net_projectile_selftest'
+# The commit set (the owner's call, 2026-11-24): one or two suites per system, the ones that exercise it end to end, plus the
+# twin comparisons that are cheap. Everything else runs with "full".
+COMMIT_SUITES='tick_driver_selftest foundations_selftest state_store_selftest tick_state_selftest net_session_selftest
+  pawn_selftest tick_step_selftest rollback_coverage_selftest ability_selftest ability_steps_selftest combat_selftest
+  hit_system_selftest effect_selftest ai_behaviour_manager_selftest ai_perception_selftest ai_batch_decider_selftest
+  controller_manager_selftest navigation_manager_selftest chunk_streaming_selftest world_coordinator_selftest
+  game_mode_selftest spawn_manager_selftest replay_selftest owned_tags_selftest arena_sample_selftest mass_battle_sample_selftest'
+# Suites that count real seconds, so they always run in real time.
+REAL_TIME='world_cursor_selftest'
+# Where a passing full run notes its commit, and after how many commits "commit" asks for a full run again.
+FULL_STAMP=".git/last_full_test_run"
+FULL_EVERY=5
 NET_SUITES="assets/scripts/pawn/tests/net_pawn_selftest.tscn assets/scripts/streaming/tests/net_streaming_selftest.tscn assets/scripts/abilities/tests/net_projectile_selftest.tscn"
 
 failed_suites=()
@@ -35,8 +53,9 @@ ran=0
 run_suite() {
   local name="$1" limit="$2"
   shift 2
-  local started=$(date +%s) out code
-  out=$(timeout "$limit" "$GODOT" --headless --path . "$@" 2>&1)
+  local started=$(date +%s) out code pace="--fixed-fps 60"
+  if [ "$REAL_TIME_ALL" = "1" ] || echo "$name" | grep -qE "^($REAL_TIME)$"; then pace=""; fi
+  out=$(timeout "$limit" "$GODOT" --headless $pace $TEST_GODOT_ARGS --path . "$@" 2>&1)
   code=$?
   local passed=$(echo "$out" | grep -cE "^ *(ok|PASS) ")
   local failed=$(echo "$out" | grep -cE "^ *FAIL")
@@ -65,7 +84,20 @@ run_scene() {
 
 mapfile -t every < <(find assets/scripts addons -name '*_selftest.tscn' -not -path 'assets/legacy/*' | sort)
 
-if [ "$1" = "full" ]; then
+if [ "$1" = "commit" ]; then
+  for scene in "${every[@]}"; do
+    for wanted in $COMMIT_SUITES; do
+      if [ "$(basename "$scene" .tscn)" = "$wanted" ]; then run_scene "$scene"; break; fi
+    done
+  done
+  if [ -f "$FULL_STAMP" ]; then
+    since=$(git rev-list --count "$(cat "$FULL_STAMP")"..HEAD 2>/dev/null || echo "?")
+    echo "The full suite last passed $since commit(s) ago."
+    if [ "$since" != "?" ] && [ "$since" -ge "$FULL_EVERY" ]; then echo "That's $FULL_EVERY or more: run 'bash tools/run_tests.sh full' soon."; fi
+  else
+    echo "No passing full run on record: run 'bash tools/run_tests.sh full' soon."
+  fi
+elif [ "$1" = "full" ]; then
   for scene in "${every[@]}"; do
     if ! echo "$scene" | grep -qE "$SLOW"; then run_scene "$scene"; fi
   done
@@ -91,13 +123,14 @@ elif [ $# -gt 0 ]; then
     exit 2
   fi
 else
-  sed -n '2,18p' "$0"
+  sed -n '2,24p' "$0"
   exit 2
 fi
 
 echo
 if [ "${#failed_suites[@]}" -eq 0 ]; then
   echo "=== all $ran suites passed ==="
+  if [ "$1" = "full" ]; then git rev-parse HEAD > "$FULL_STAMP" 2>/dev/null; fi
   exit 0
 fi
 echo "=== ${#failed_suites[@]} of $ran suites FAILED: ${failed_suites[*]} ==="
