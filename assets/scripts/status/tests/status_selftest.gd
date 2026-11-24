@@ -1,5 +1,6 @@
 # Written by Claude (claude-opus-5-5), 2026-11-24: headless self-test for the status manager's step 3a (pawn spec 16.8): stat thresholds
-# and the events they send through the pawn, Death and AI threat started by events, and over-time effects kept as deadlines.
+# and the events they send through the pawn, Death and AI threat started by events, and over-time effects kept as deadlines; step 3b:
+# modifiers and effectors, multiply then add, overrides.
 # Exits 0 on success, 1 on failure. Run from the project folder:
 #   godot --headless --path . "res://assets/scripts/status/tests/status_selftest.tscn"
 extends SelfTest
@@ -22,6 +23,7 @@ func _ready() -> void:
 	await _test_thresholds()
 	await _test_death_and_threat()
 	await _test_deadlines()
+	await _test_modifier_rule()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
@@ -78,9 +80,9 @@ func _test_deadlines() -> void:
 	poison.effect_name = &"status test poison"
 	poison.duration_ticks = 30
 	poison.period_ticks = 10
-	var tick_damage := StatChangePart.new()
+	var tick_damage := StatChangeEffector.new()
 	tick_damage.amount = -1.0
-	poison.parts = [tick_damage]
+	poison.effectors = [tick_damage]
 	var applied_at: int = TickDriver.tick
 	a.status_manager.apply_effect(poison, null)
 	var entry: Dictionary = a.status_manager.get_active_effects()[0]
@@ -90,6 +92,39 @@ func _test_deadlines() -> void:
 	_check(a.status_manager.active_effects == list_before, "nothing in the list changes between deadlines")
 	await _until(func() -> bool: return not a.status_manager.has_effect(poison), 40)
 	_check(a.status_manager.get_health() == 97.0, "once when applied, then at 10 and 20 ticks, none on the tick it ends at 30: 3 damage (%.0f)" % (100.0 - a.status_manager.get_health()))
+	a.free()
+
+
+func _test_modifier_rule() -> void:
+	var a := _pawn(Vector3(0, 0, 0), NO_AI)
+	await _ticks(2)
+	var status := a.status_manager
+	var base: float = status.get_value(&"MoveSpeed")
+	var both := Effect.new()
+	both.effect_name = &"status test add and multiply"
+	both.duration_ticks = 600
+	var change := StatModifier.new()
+	change.stat = &"MoveSpeed"
+	change.add = 2.0
+	change.multiply = 0.5
+	both.modifiers = [change]
+	status.apply_effect(both, null)
+	_check(is_equal_approx(status.get_value(&"MoveSpeed"), base * 0.5 + 2.0), "multiply, then add: %.1f x0.5 + 2 = %.2f" % [base, status.get_value(&"MoveSpeed")])
+	var freeze := Effect.new()
+	freeze.effect_name = &"status test freeze"
+	freeze.duration_ticks = 600
+	var stop := StatModifier.new()
+	stop.stat = &"MoveSpeed"
+	stop.overrides = true
+	stop.override_value = 0.0
+	freeze.modifiers = [stop]
+	status.apply_effect(freeze, null)
+	_check(status.get_value(&"MoveSpeed") == 0.0, "an override sets the value whatever the base and the other modifiers")
+	status.remove_effect(freeze)
+	_check(is_equal_approx(status.get_value(&"MoveSpeed"), base * 0.5 + 2.0), "and without it, the other modifiers hold again")
+	status.remove_effect(both)
+	_check(status.get_value(&"MoveSpeed") == base, "with none, the base value")
+	_check(both.has_modifiers() and not Effect.make_damage(5).has_modifiers() and Effect.make_damage(5).effectors.size() == 1, "an effect's modifiers and effectors are two lists")
 	a.free()
 
 

@@ -26,7 +26,7 @@ extends Definition
 		extra_categories = value
 		_changed(&"extra_categories", value)
 ## Which ability a press picks among those on one action: the highest that can start wins, then the first in the tree. Locomotion
-## with a held action works the same. Effects can add to it (AbilityPriorityPart, pawn spec 8.11).
+## with a held action works the same. Effects can add to it (AbilityModifier, pawn spec 8.11).
 @export var priority: int = 0:
 	set(value):
 		priority = value

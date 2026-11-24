@@ -4,7 +4,7 @@
 ## Stats are [Stat] child nodes, found by name; a missing stat is never an error ([method get_value] gives the fallback). Effects
 ## ([Effect]) are applied with [method apply_effect]: instant ones run at once; over-time ones go in a rolled-back active list that
 ## keeps the tick each ends and the tick of its next period (deadlines: nothing counts down), and all end when the pawn dies. Do-once
-## parts run on the authority only; held parts work on every machine. Every change to a stat's current value goes through
+## parts run on the authority only; modifiers work on every machine. Every change to a stat's current value goes through
 ## [method change_current], which sends the stat's threshold events through the pawn ([method Pawn.send_event]) when a change crosses
 ## one: Health at 0 sends [code]event.health.depleted[/code]. Health taken by an effect sends [code]event.damage.taken[/code] with its source.
 ## [codeblock]
@@ -16,7 +16,7 @@
 class_name StatusManager
 extends Node
 
-## Sent when an effect is applied, on every machine that applies it (do-once parts only ran if this is the authority).
+## Sent when an effect is applied, on every machine that applies it (effectors only ran if this is the authority).
 signal effect_applied(effect: Effect, application: EffectApplication)
 ## Sent when an over-time effect ends or is removed.
 signal effect_ended(effect: Effect)
@@ -31,7 +31,7 @@ const DETECTABILITY := &"Detectability"
 const STRIDE := 5
 const ID := 0
 const ENDS_AT := 1 ## the tick it ends
-const NEXT_PERIOD_AT := 2 ## the tick its do-once parts run again; -1 without a period
+const NEXT_PERIOD_AT := 2 ## the tick its effectors run again; -1 without a period
 const STACKS := 3
 const SOURCE := 4
 const _NO_DEADLINE := 0x7FFFFFFFFFFFFFFF
@@ -43,7 +43,7 @@ const _NO_DEADLINE := 0x7FFFFFFFFFFFFFFF
 @export_range(1, 64, 1, "or_greater") var max_active_effects := 16
 
 # The getter and setter make this a window onto _entries: the setter notices a rollback loading a list. Running periods changes _entries
-# in place, skipping the setter, so the held parts are only worked out again when the list really changes.
+# in place, skipping the setter, so the modifiers are only worked out again when the list really changes.
 ## The active list, five numbers per effect (see [constant STRIDE]); rolled back and sent in snapshots. Read it with [method get_active_effects].
 var active_effects: PackedInt64Array:
 	get:
@@ -61,13 +61,13 @@ var version := 1
 
 var _stats := {} # StringName -> Stat
 var _entries := PackedInt64Array()
-var _dirty := true # the list changed: what the held parts add up to is worked out again before it's next used
+var _dirty := true # the list changed: what the modifiers add up to is worked out again before it's next used
 var _soonest := _NO_DEADLINE # the soonest end or period in the list, worked out when it changes
-# What the held parts add up to, worked out from the list (see _refresh):
+# What the modifiers add up to, worked out from the list (see _refresh):
 var _stat_changes := {} # stat name -> [added, multiplied]
-var _touched_stats := {} # stat names the held parts have changed, so they go back to their base when the parts end
-var _ability_bonuses: Array = [[], [], []] # per AbilityPriorityPart.Number: [ability tag bit, amount] pairs
-var _resistance_bits: Array = [] # [effect tag bit, amount] pairs, from resistances and held ResistanceParts
+var _touched_stats := {} # stat names the modifiers have changed, so they go back to their base when the parts end
+var _ability_bonuses: Array = [[], [], []] # per AbilityModifier.Number: [ability tag bit, amount] pairs
+var _resistance_bits: Array = [] # [effect tag bit, amount] pairs, from resistances and held ResistanceModifiers
 var _warned := {}
 
 
@@ -246,8 +246,8 @@ func apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBa
 	application.hit = hit
 	application.resistance = resistance
 	if effect.is_instant():
-		if effect.has_held_parts():
-			_warn_once("held:" + effect.describe(), "StatusManager: '%s' is instant, so its held parts do nothing. Give it a duration." % effect.describe())
+		if effect.has_modifiers():
+			_warn_once("held:" + effect.describe(), "StatusManager: '%s' is instant, so its modifiers do nothing. Give it a duration." % effect.describe())
 		effect_applied.emit(effect, application)
 		_run_once(application)
 		return true
@@ -335,7 +335,7 @@ func tick_effects() -> void:
 	for effect in ended:
 		effect_ended.emit(effect)
 	if not pawn.is_authority():
-		return # do-once parts are the authority's
+		return # effectors are the authority's
 	due.reverse() # in list order, oldest first
 	for entry in due:
 		if pawn.is_dead():
@@ -430,7 +430,7 @@ func resistance_to(effect: Effect) -> float:
 	return total
 
 
-## What held AbilityPriorityParts add to this ability's number now (AbilityPriorityPart.Number). The AbilityManager asks.
+## What held AbilityModifiers add to this ability's number now (AbilityModifier.Number). The AbilityManager asks.
 func ability_bonus(ability: AbilityBase, number: int) -> int:
 	if _dirty:
 		_refresh()
@@ -441,7 +441,7 @@ func ability_bonus(ability: AbilityBase, number: int) -> int:
 	return total
 
 
-## True if any held AbilityPriorityPart changes ability numbers now. Lets the AbilityManager skip asking.
+## True if any held AbilityModifier changes ability numbers now. Lets the AbilityManager skip asking.
 func has_ability_bonuses() -> bool:
 	if _dirty:
 		_refresh()
@@ -451,15 +451,15 @@ func has_ability_bonuses() -> bool:
 # --- Internals -----------------------------------------------------------------------------------
 
 
-# The do-once parts, in order. On the authority only. Stops when the pawn dies (Health crossing 0 sends event.health.depleted, which
+# The effectors, in order. On the authority only. Stops when the pawn dies (Health crossing 0 sends event.health.depleted, which
 # starts Death). Health taken goes out as event.damage.taken, with its source, once the parts are done.
 func _run_once(application: EffectApplication) -> void:
 	if not pawn.is_authority():
 		return
-	for part in application.effect.parts:
-		if part == null or part.is_held():
+	for effector in application.effect.effectors:
+		if effector == null:
 			continue
-		part.apply_once(application)
+		effector.fire(application)
 		if pawn.is_dead():
 			break
 	if application.damage_dealt > 0.0:
@@ -498,19 +498,19 @@ func _soonest_deadline() -> int:
 func _refresh() -> void:
 	_dirty = false
 	_soonest = _soonest_deadline()
-	# Each held part adds itself to the totals (EffectPart.add_held), so a new kind of held part needs no change here.
-	var totals := EffectHeldTotals.new()
+	# Each modifier adds itself to the totals (EffectModifier.add_held), so a new kind of modifier needs no change here.
+	var totals := ModifierTotals.new()
 	for tag: StringName in resistances:
 		totals.resistance_bits.append([TagRegistry.own_bit(tag), resistances[tag]])
 	for at in range(0, _entries.size(), STRIDE):
 		var effect := Effect.find(_entries[at + ID])
 		if effect == null:
-			_warn_once("unknown:%d" % _entries[at + ID], "StatusManager: an effect on %s isn't known on this machine (id %d), so its held parts do nothing here. Give an effect made in code an effect_name." % [String(pawn.name) if pawn else "?", _entries[at + ID]]) # String(): both sides of the if must be text
+			_warn_once("unknown:%d" % _entries[at + ID], "StatusManager: an effect on %s isn't known on this machine (id %d), so its modifiers do nothing here. Give an effect made in code an effect_name." % [String(pawn.name) if pawn else "?", _entries[at + ID]]) # String(): both sides of the if must be text
 			continue
 		var stacks := int(_entries[at + STACKS])
-		for part in effect.parts:
-			if part and part.is_held():
-				part.add_held(totals, stacks)
+		for modifier in effect.modifiers:
+			if modifier:
+				modifier.add_held(totals, stacks)
 	_ability_bonuses = totals.ability_bonuses
 	if pawn and pawn.ability_manager:
 		pawn.ability_manager.readiness_changed() # priority boosts can change what may start (AIInputs.action_ready)
@@ -540,8 +540,8 @@ func _apply_stat_changes() -> void:
 		var stat := get_stat(stat_name)
 		if stat == null:
 			continue
-		var change: Array = _stat_changes.get(stat_name, [0.0, 1.0])
-		stat.set_modifiers(change[0], change[1]) # the stat works its value out, and keeps it through a new base_value
+		var change: Array = _stat_changes.get(stat_name, [0.0, 1.0, false, 0.0])
+		stat.set_modifiers(change[0], change[1], change[2], change[3]) # the stat works its value out, and keeps it through a new base_value
 		if stat.changes_during_play and stat.current > stat.value:
 			stat.current = stat.value # a lower max takes the current down with it, without events
 		if not _stat_changes.has(stat_name):

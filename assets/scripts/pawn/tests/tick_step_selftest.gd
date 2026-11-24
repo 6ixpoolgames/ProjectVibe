@@ -125,10 +125,10 @@ func _test_effect_over_time() -> void:
 	poison.effect_name = &"test poison"
 	poison.duration_ticks = 60
 	poison.period_ticks = 15
-	var part := StatChangePart.new()
+	var part := StatChangeEffector.new()
 	part.stat = &"Health"
 	part.amount = -5.0
-	poison.parts = [part]
+	poison.effectors = [part]
 	var lost := {}
 	for step in [1, 4]:
 		var pawn := _pawn(Vector3(60, 0.1, step * 5), step)

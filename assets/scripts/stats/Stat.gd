@@ -4,8 +4,8 @@
 ## Pawn spec section 9. The stat's name is this node's name, such as MoveSpeed or JumpVelocity. Abilities and behaviours ask the
 ## StatusManager for a stat by that name, and use a fallback of their own if there's none, so a missing stat is never a crash.
 ## [br]
-## Its [member value] is [member base_value] plus what held effects add, times what they multiply ([method set_modifiers], from the
-## StatusManager).
+## Its [member value] is [member base_value] times what modifiers multiply, plus what they add (multiply, then add, for everything), or
+## an override's value ([method set_modifiers], from the StatusManager).
 ## [br]
 ## A stat that changes during play, such as Health, has [member changes_during_play] on. Then it also has a [member current] value,
 ## from 0 up to its value, which starts full, rolls back (the StatusManager lists it with the pawn's TickStateComponent) and reaches
@@ -19,7 +19,7 @@ extends Node
 @export var base_value := 0.0:
 	set(new_value):
 		base_value = new_value
-		value = (base_value + _added) * _multiplied
+		value = _worked_out()
 
 ## The value right now: [member base_value] with effects. A change tells the StatusManager (its [member StatusManager.version] goes up),
 ## so abilities that keep stat values read them again, and copies it into [member table_column] if there is one.
@@ -60,17 +60,27 @@ var _tick_state: TickStateComponent = null
 var _state_key := ""
 
 
-# What effects add to and multiply this stat by right now (set_modifiers). Kept here so a new base_value keeps them.
+# What modifiers add to and multiply this stat by right now (set_modifiers). Kept here so a new base_value keeps them.
 var _added := 0.0
 var _multiplied := 1.0
+var _overrides := false
+var _override_value := 0.0
 
 
-## The effects on this stat, all together: [member value] becomes (base_value + added) x multiplied. 0 and 1 mean none. The pawn's
-## StatusManager calls this whenever its held effects change.
-func set_modifiers(added: float, multiplied: float) -> void:
+## The modifiers on this stat, all together: [member value] becomes base_value x multiplied + added, or override_value when overrides
+## is on. 0, 1 and off mean none. The pawn's StatusManager calls this whenever its effects change.
+# The order is fixed (multiply, then add), the owner's call: it curbs stat inflation. A designer-chosen order (a game-wide default,
+# per stat) may be a feature later (pawn spec 16.9).
+func set_modifiers(added: float, multiplied: float, overrides := false, override_value := 0.0) -> void:
 	_added = added
 	_multiplied = multiplied
-	value = (base_value + _added) * _multiplied
+	_overrides = overrides
+	_override_value = override_value
+	value = _worked_out()
+
+
+func _worked_out() -> float:
+	return _override_value if _overrides else base_value * _multiplied + _added
 
 
 func _init() -> void:

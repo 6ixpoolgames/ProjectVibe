@@ -56,7 +56,7 @@ func deliver() -> void:
 		ability.hit_landed.emit(self)
 
 
-## The Health this hit's effects take before resistances, from their StatChangeParts. For readouts that show a hit before it lands.
+## The Health this hit's effects take before resistances, from their StatChangeEffectors. For readouts that show a hit before it lands.
 func planned_damage() -> float:
 	var total := 0.0
 	for effect in effects:

@@ -4,7 +4,7 @@
 
 A pawn's status in one component (pawn spec 16.8): its stats and the effects on it. `StatusManager` merges the old `StatManager` and `EffectManager`; the `Stat` and `Effect` classes still live in `stats/` and `effects/`, whose READMEs describe them.
 
-**Status:** built, tier 0 (pawn redesign step 3a): the merge, effects on deadlines, stat thresholds and their events. Next (step 3b): effects' parts split into modifiers and effectors, one modifier rule (multiply, then add), effect lists into definitions.
+**Status:** built, tier 0 (pawn redesign step 3): the merge, effects on deadlines, stat thresholds and their events, modifiers and effectors, one modifier rule (multiply, then add). Next: effect lists into definitions, with the hit ability (step 4).
 
 ```
  Pawn
@@ -30,4 +30,5 @@ A pawn's status in one component (pawn spec 16.8): its stats and the effects on 
 - **Events, not calls.** Health reaching 0 sends `event.health.depleted`; the ability manager listens and starts Death. Health an effect takes sends `event.damage.taken` with its source and amount; the AI's memory listens and adds threat. Neither the status manager nor the effects know about abilities' Death or the AI. A value a snapshot or rollback restores sends nothing, since only `change_current` checks thresholds.
 - **Deadlines.** An over-time effect keeps the tick it ends and the tick of its next period. `tick_effects` returns at once until the soonest deadline in the list, then ends what's over and runs the periods that came due (a pawn running every Nth tick gets each period it missed). The tick it ends on runs no period.
 - **Rollback.** The active list (`active_effects`, five numbers per effect) and each changing stat's `current` roll back; everything else is worked out from them.
-- **Modifier order (today):** a stat's value is (base + adds) × multiplies. Step 3b changes it to multiply, then add, for everything; a designer-chosen order may be a feature later.
+- **One modifier rule:** a stat's value is base × every multiply + every add (multiply, then add, for everything: it curbs stat inflation), or the value of the last override applied. A designer-chosen order may be a feature later.
+- **Modifiers first:** an effect's modifiers take hold before its effectors fire, so a hit that slows and damages works out its damage with the slow already on.

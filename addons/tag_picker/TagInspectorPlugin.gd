@@ -5,7 +5,7 @@
 ##
 ## To give another class tag dropdowns: add its script and its tag properties to HANDLED.
 ## Claude 2026-11-10 (pawn spec 8.11): effects too. HANDLED lists each script with its tag properties and which categories each
-## offers. An Effect's tags and a ResistancePart's tag are effect tags; an AbilityPriorityPart's ability_tag is an ability tag.
+## offers. An Effect's tags and a ResistanceModifier's tag are effect tags; an AbilityModifier's ability_tag is an ability tag.
 ## Claude 2026-11-22 (tag spec 2): one registry; each property names the categories its dropdown offers. Nav markers get dropdowns too. Parts are edited inside their Effect in the inspector, and get dropdowns there.
 extends EditorInspectorPlugin
 
@@ -25,8 +25,8 @@ const ANY: Array[StringName] = []
 const HANDLED := {
 	ABILITY_DEFINITION_PATH: {"category": [false, ABILITY], "extra_categories": [true, ABILITY], "locks_out": [true, ABILITY], "cancelled_by": [true, ABILITY]},
 	"res://assets/scripts/effects/Effect.gd": {"tags": [true, EFFECT]},
-	"res://assets/scripts/effects/parts/ResistancePart.gd": {"tag": [false, EFFECT]},
-	"res://assets/scripts/effects/parts/AbilityPriorityPart.gd": {"ability_tag": [false, ABILITY]},
+	"res://assets/scripts/effects/modifiers/ResistanceModifier.gd": {"tag": [false, EFFECT]},
+	"res://assets/scripts/effects/modifiers/AbilityModifier.gd": {"ability_tag": [false, ABILITY]},
 	"res://assets/scripts/navigation/markers/NavMarker.gd": {"tag": [false, NAV]},
 	"res://assets/scripts/tags/TagQuery.gd": {"all_of": [true, ANY], "any_of": [true, ANY], "none_of": [true, ANY]},
 	"res://assets/scripts/ai/AIStateBase.gd": {"tag": [false, AI]},

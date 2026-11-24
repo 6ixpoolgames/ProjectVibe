@@ -40,7 +40,7 @@ class ABILITY:
 	const UTILITY_INTERACT := &"ability.utility.interact"
 
 	## Combo steps (pawn spec 8.11). A swing boosts the abilities tagged ability.combo.second for a moment, and the second swing
-	## boosts ability.combo.finisher, so the next press picks them (AbilityPriorityPart).
+	## boosts ability.combo.finisher, so the next press picks them (AbilityModifier).
 	const COMBO := &"ability.combo"
 	const COMBO_SECOND := &"ability.combo.second"
 	const COMBO_FINISHER := &"ability.combo.finisher"

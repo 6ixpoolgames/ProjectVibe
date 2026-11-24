@@ -1,8 +1,9 @@
-[gd_resource type="Resource" script_class="Effect" load_steps=5 format=3]
+[gd_resource type="Resource" script_class="Effect" load_steps=6 format=3]
 
-[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_part"]
-[ext_resource type="Script" path="res://assets/scripts/effects/parts/StatChangePart.gd" id="2_damage"]
-[ext_resource type="Script" path="res://assets/scripts/effects/parts/KnockbackPart.gd" id="3_knockback"]
+[ext_resource type="Script" path="res://assets/scripts/effects/effectors/EffectEffector.gd" id="eff_base_1"]
+[ext_resource type="Script" path="res://assets/scripts/effects/modifiers/EffectModifier.gd" id="1_part"]
+[ext_resource type="Script" path="res://assets/scripts/effects/effectors/StatChangeEffector.gd" id="2_damage"]
+[ext_resource type="Script" path="res://assets/scripts/effects/effectors/KnockbackEffector.gd" id="3_knockback"]
 [ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="4_effect"]
 
 [sub_resource type="Resource" id="Damage"]
@@ -19,4 +20,4 @@ hop_speed = 5.25
 script = ExtResource("4_effect")
 effect_name = &"hero heavy hit"
 tags = Array[StringName]([&"effect.damage.physical"])
-parts = Array[ExtResource("1_part")]([SubResource("Damage"), SubResource("Knockback")])
+effectors = Array[ExtResource("eff_base_1")]([SubResource("Damage"), SubResource("Knockback")])

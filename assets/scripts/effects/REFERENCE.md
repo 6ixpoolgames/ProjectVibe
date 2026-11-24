@@ -7,14 +7,15 @@ Every class in `assets/scripts/effects/`, from its doc comments. The overview is
 - [Effect](#effect)
 - [EffectApplication](#effectapplication)
 - [EffectApplier](#effectapplier)
-- [EffectHeldTotals](#effectheldtotals)
-- [EffectPart](#effectpart)
-- [AbilityPriorityPart](#abilityprioritypart)
-- [KnockbackPart](#knockbackpart)
-- [LifestealPart](#lifestealpart)
-- [ResistancePart](#resistancepart)
-- [StatChangePart](#statchangepart)
-- [StatModifierPart](#statmodifierpart)
+- [EffectEffector](#effecteffector)
+- [KnockbackEffector](#knockbackeffector)
+- [LifestealEffector](#lifestealeffector)
+- [StatChangeEffector](#statchangeeffector)
+- [AbilityModifier](#abilitymodifier)
+- [EffectModifier](#effectmodifier)
+- [ModifierTotals](#modifiertotals)
+- [ResistanceModifier](#resistancemodifier)
+- [StatModifier](#statmodifier)
 
 ## Effect
 
@@ -30,10 +31,11 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 - `tags: StringName[]` = `[]`: What kind of effect it is, as effect tags (`Tags.EFFECT`) such as effect.damage.elemental.fire. Resistances and removing by tag go by these.
 - `is_harmful: bool` = `true`: On: resistances apply and invulnerability (a dash) stops it. Off: it helps, and gets through both.
 - `duration_ticks: int` = `0`: Ticks at 60 a second it lasts. 0: instant.
-- `period_ticks: int` = `0`: Over time: its do-once parts run when first applied, then every this many ticks at 60 a second. 0: only when first applied.
+- `period_ticks: int` = `0`: Over time: its effectors fire when first applied, then every this many ticks at 60 a second. 0: only when first applied.
 - `stacking: int` = `0`: What a second application on the same pawn does.
 - `max_stacks: int` = `1`: With ADD_STACK: the most stacks it can have.
-- `parts: EffectPart[]` = `[]`: What it does, in order.
+- `modifiers: EffectModifier[]` = `[]`: What it holds while it lasts (slows, boosts, resistances), on every machine. They take hold before the effectors fire.
+- `effectors: EffectEffector[]` = `[]`: What it does when applied and at each period (damage, heals, pushes), in order, on the authority only.
 
 ### Constants
 
@@ -46,8 +48,8 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 - `is_instant() -> bool`: True if it's instant: it does its parts once and isn't kept.
 - `get_tag_mask() -> int`: Its tags as one mask, parents included (`TagRegistry.full_mask_of_list()`), worked out once.
 - `has_tag(tag: StringName) -> bool`: True if it has this tag, or a tag inside it: an effect tagged effect.damage.elemental.fire has effect.damage.elemental.
-- `has_held_parts() -> bool`: True if any of its parts hold while it lasts.
-- `planned_change(stat: StringName) -> float`: How much its StatChangeParts change a stat in one go, before resistances; damage is negative. For readouts before a hit lands.
+- `has_modifiers() -> bool`: True if it has modifiers, which hold while it lasts.
+- `planned_change(stat: StringName) -> float`: How much its StatChangeEffectors change a stat in one go, before resistances; damage is negative. For readouts before a hit lands.
 - `get_id() -> int`: The number a pawn's active list stores for this effect, the same on every machine: a hash of its file path, else its effect_name. Never 0.
 - `register() -> void`: Makes this effect findable by its id on this machine. Two different effects with the same id is an error: rename one. The AbilityManager registers every effect its abilities can apply; the StatusManager registers any other it's given.
 - `find(id: int) -> Effect` *(static)*: The registered effect with this id, or null.
@@ -61,7 +63,7 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 
 One effect being applied once: what, to whom, from whom, and what came of it.
 
-Made by the [`StatusManager`](../status/REFERENCE.md#statusmanager) on the authority, handed to each do-once part in turn (`EffectPart.apply_once()`), then thrown away. Design: pawn spec 8.11.
+Made by the [`StatusManager`](../status/REFERENCE.md#statusmanager) on the authority, handed to each effector in turn (`EffectEffector.fire()`), then thrown away. Design: pawn spec 8.11.
 
 ### Settings and properties
 
@@ -71,8 +73,8 @@ Made by the [`StatusManager`](../status/REFERENCE.md#statusmanager) on the autho
 - `source_ability: AbilityBase` = `null`: The ability that applied it, or null.
 - `hit: HitInfo` = `null`: The hit it came with, or null (an ability's start, a period of a poison, or code).
 - `stacks: int` = `1`: How many stacks it has (Effect.Stacking.ADD_STACK). Parts multiply their amounts by this.
-- `resistance: float` = `0.0`: The target's resistance to it, from 0 (none) to just under 1; below 0 is a weakness. A StatChangePart takes this fraction off harmful changes. Always 0 for an effect that isn't harmful.
-- `damage_dealt: float` = `0.0`: Health this application has taken so far, filled in by StatChangeParts; LifestealPart reads it.
+- `resistance: float` = `0.0`: The target's resistance to it, from 0 (none) to just under 1; below 0 is a weakness. A StatChangeEffector takes this fraction off harmful changes. Always 0 for an effect that isn't harmful.
+- `damage_dealt: float` = `0.0`: Health this application has taken so far, filled in by StatChangeEffectors; LifestealEffector reads it.
 
 ## EffectApplier
 
@@ -96,43 +98,75 @@ The ability itself carries no damage or knockback; its EffectApplier children sa
 - `AppliesTo.TARGET = 0`
 - `AppliesTo.SELF = 1`
 
-## EffectHeldTotals
+## EffectEffector
 
-`res://assets/scripts/effects/EffectHeldTotals.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+`res://assets/scripts/effects/effectors/EffectEffector.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
-What all the held parts on one pawn add up to right now.
+Something an [`Effect`](#effect) does at a moment, such as damage: the base for the entries in `Effect.effectors` (pawn spec 16.8).
 
-The pawn's [`StatusManager`](../status/REFERENCE.md#statusmanager) makes one whenever its list of effects changes and asks every held part to add itself (`EffectPart.add_held()`), so a new kind of held part needs no change to the manager.
+An effector overrides `fire()`. It fires when its effect is applied and, for an over-time effect with a period, at each period; on the authority only, after the effect's modifiers have taken hold. One keeps no state while playing: it's shared by every pawn its effect lands on.
+
+### Functions
+
+- `fire(_application: EffectApplication) -> void`: Fires on the pawn the effect landed on. application says who, from whom, how many stacks and what resistance applies, and collects results such as the damage dealt.
+
+## KnockbackEffector
+
+`res://assets/scripts/effects/effectors/KnockbackEffector.gd`, extends [`EffectEffector`](#effecteffector)
+
+Pushes the pawn, once, through its own KnockbackAbility. An effector ([`EffectEffector`](#effecteffector)).
+
+The pawn being hit starts its own Knockback ability, so its own interrupt rules decide what the push cancels; a pawn with no KnockbackAbility isn't pushed. The push goes along the hit's direction, or straight back from the way the pawn faces if there's no hit. Design: pawn spec 8.11.
 
 ### Settings and properties
 
-- `stat_changes: Dictionary` = `{}`: Stat name -> [added, multiplied]: the stat's value becomes (base_value + added) x multiplied.
-- `ability_bonuses: Array` = `[...]`: One list per AbilityPriorityPart.Number, of [ability tag bit, amount] pairs.
-- `resistance_bits: Array` = `[]`: [effect tag bit, amount] pairs: how much of each kind of effect the pawn shrugs off.
+- `speed: float` = `6.0`: How fast the push is at its start, in metres per second. It fades to nothing over its ticks.
+- `ticks: int` = `10`: How many ticks the push lasts, written for 60 a second (converted with `TickDriver.ticks_at_rate()`).
+- `hop_speed: float` = `0.0`: How fast it lifts the pawn upward, in metres per second, for a small hop. 0: stays on the ground. A pawn already airborne isn't lifted.
 
 ### Functions
 
-- `change_stat(stat: StringName, added: float, multiplied: float, stacks: int) -> void`: Adds to a stat: added counts once per stack, multiplied is applied once per stack.
+- `fire(application: EffectApplication) -> void`
 
-## EffectPart
+## LifestealEffector
 
-`res://assets/scripts/effects/EffectPart.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+`res://assets/scripts/effects/effectors/LifestealEffector.gd`, extends [`EffectEffector`](#effecteffector)
 
-One thing an [`Effect`](#effect) does: the base for the parts in an Effect's parts list.
+Gives whoever applied the effect a share of the damage it just dealt, once. An effector ([`EffectEffector`](#effecteffector)).
 
-Do-once parts override `apply_once()` and run on the authority only. Held parts override `is_held()` (return true) and `add_held()`, and work on every machine. A part keeps no state while playing: one is shared by every pawn its effect lands on. Design: pawn spec 8.11.
+Put it after the effect's StatChangeEffector: effectors fire in order, and this reads the damage taken so far in this application (after resistances). Nothing happens with no source, a dead source, or no damage. Design: pawn spec 8.11.
+
+### Settings and properties
+
+- `fraction: float` = `0.3`: The share of the damage dealt that comes back, such as 0.3 for 30%.
+- `stat: StringName` = `&"Health"`: The stat the source gets it back in.
 
 ### Functions
 
-- `is_held() -> bool`: True for a part that holds while its effect lasts, instead of running once.
-- `add_held(_totals: EffectHeldTotals, _stacks: int) -> void`: A held part adds what it does to the pawn's totals, stacks times. Called whenever the pawn's list of effects changes, on every machine. Override it in a held part; the base does nothing.
-- `apply_once(_application: EffectApplication) -> void`: Runs a do-once part on the pawn the effect landed on. application says who, from whom, how many stacks and what resistance applies, and collects results such as the damage dealt.
+- `fire(application: EffectApplication) -> void`
 
-## AbilityPriorityPart
+## StatChangeEffector
 
-`res://assets/scripts/effects/parts/AbilityPriorityPart.gd`, extends [`EffectPart`](#effectpart)
+`res://assets/scripts/effects/effectors/StatChangeEffector.gd`, extends [`EffectEffector`](#effecteffector)
 
-Changes one of a group of abilities' priority numbers while its effect lasts. A held part ([`EffectPart`](#effectpart)).
+Changes how much of a stat a pawn has, once: Health -20 is damage, Health +15 a heal. An effector ([`EffectEffector`](#effecteffector)).
+
+Kept between 0 and the stat's value; a stat the pawn doesn't have is ignored. The amount is multiplied by the stacks, and a harmful negative amount is reduced by the pawn's resistance. Health taken is added to the application's damage_dealt. Design: pawn spec 8.11.
+
+### Settings and properties
+
+- `stat: StringName` = `&"Health"`: The stat, by name, such as &"Health".
+- `amount: float` = `-10.0`: How much to add. Negative takes away.
+
+### Functions
+
+- `fire(application: EffectApplication) -> void`
+
+## AbilityModifier
+
+`res://assets/scripts/effects/modifiers/AbilityModifier.gd`, extends [`EffectModifier`](#effectmodifier)
+
+Changes one of a group of abilities' priority numbers while its effect lasts. A modifier ([`EffectModifier`](#effectmodifier)).
 
 Such as boosting abilities tagged ability.combo.second so the next press picks the second swing. `ability_tag` picks the group (every ability whose category or extra_categories is that tag or inside it); `number` picks which of three numbers changes. The AbilityManager adds the totals when it compares numbers, on every machine, so a client's prediction agrees. Design: pawn spec 8.11.
 
@@ -150,49 +184,44 @@ Such as boosting abilities tagged ability.combo.second so the next press picks t
 
 ### Functions
 
-- `is_held() -> bool`
-- `add_held(totals: EffectHeldTotals, stacks: int) -> void`
+- `add_held(totals: ModifierTotals, stacks: int) -> void`
 
-## KnockbackPart
+## EffectModifier
 
-`res://assets/scripts/effects/parts/KnockbackPart.gd`, extends [`EffectPart`](#effectpart)
+`res://assets/scripts/effects/modifiers/EffectModifier.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
-Pushes the pawn, once, through its own KnockbackAbility. A do-once part ([`EffectPart`](#effectpart)).
+Something an [`Effect`](#effect) holds while it lasts, such as a slow: the base for the entries in `Effect.modifiers` (pawn spec 16.8).
 
-The pawn being hit starts its own Knockback ability, so its own interrupt rules decide what the push cancels; a pawn with no KnockbackAbility isn't pushed. The push goes along the hit's direction, or straight back from the way the pawn faces if there's no hit. Design: pawn spec 8.11.
-
-### Settings and properties
-
-- `speed: float` = `6.0`: How fast the push is at its start, in metres per second. It fades to nothing over its ticks.
-- `ticks: int` = `10`: How many ticks the push lasts, written for 60 a second (converted with `TickDriver.ticks_at_rate()`).
-- `hop_speed: float` = `0.0`: How fast it lifts the pawn upward, in metres per second, for a small hop. 0: stays on the ground. A pawn already airborne isn't lifted.
+A modifier overrides `add_held()`, adding what it does to the pawn's [`ModifierTotals`](#modifiertotals), stacks times. Modifiers work on every machine, and take hold before the effect's effectors fire. One keeps no state while playing: it's shared by every pawn its effect lands on.
 
 ### Functions
 
-- `apply_once(application: EffectApplication) -> void`
+- `add_held(_totals: ModifierTotals, _stacks: int) -> void`: Adds what it does to the pawn's totals, stacks times. Called whenever the pawn's list of effects changes, on every machine.
 
-## LifestealPart
+## ModifierTotals
 
-`res://assets/scripts/effects/parts/LifestealPart.gd`, extends [`EffectPart`](#effectpart)
+`res://assets/scripts/effects/modifiers/ModifierTotals.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-Gives whoever applied the effect a share of the damage it just dealt, once. A do-once part ([`EffectPart`](#effectpart)).
+What all the modifiers on one pawn add up to right now.
 
-Put it after the effect's StatChangePart: parts run in order, and this reads the damage taken so far in this application (after resistances). Nothing happens with no source, a dead source, or no damage. Design: pawn spec 8.11.
+The pawn's [`StatusManager`](../status/REFERENCE.md#statusmanager) makes one whenever its list of effects changes and asks every modifier to add itself (`EffectModifier.add_held()`), so a new kind of modifier needs no change to the manager.
 
 ### Settings and properties
 
-- `fraction: float` = `0.3`: The share of the damage dealt that comes back, such as 0.3 for 30%.
-- `stat: StringName` = `&"Health"`: The stat the source gets it back in.
+- `stat_changes: Dictionary` = `{}`: Stat name -> [added, multiplied, overrides, override value]: the stat's value becomes base_value x multiplied + added, or the override value when one overrides (the last added wins).
+- `ability_bonuses: Array` = `[...]`: One list per AbilityModifier.Number, of [ability tag bit, amount] pairs.
+- `resistance_bits: Array` = `[]`: [effect tag bit, amount] pairs: how much of each kind of effect the pawn shrugs off.
 
 ### Functions
 
-- `apply_once(application: EffectApplication) -> void`
+- `change_stat(stat: StringName, added: float, multiplied: float, stacks: int) -> void`: Adds to a stat: added counts once per stack, multiplied is applied once per stack.
+- `override_stat(stat: StringName, value: float) -> void`: Sets a stat to a value whatever its base and other modifiers. A later call wins over an earlier one.
 
-## ResistancePart
+## ResistanceModifier
 
-`res://assets/scripts/effects/parts/ResistancePart.gd`, extends [`EffectPart`](#effectpart)
+`res://assets/scripts/effects/modifiers/ResistanceModifier.gd`, extends [`EffectModifier`](#effectmodifier)
 
-Adds to the pawn's resistance to a kind of effect while its effect lasts. A held part ([`EffectPart`](#effectpart)).
+Adds to the pawn's resistance to a kind of effect while its effect lasts. A modifier ([`EffectModifier`](#effectmodifier)).
 
 Such as +0.5 against effect.damage.elemental.fire for a fire ward. Added to the pawn's `StatusManager.resistances`, which explains how they count. Design: pawn spec 8.11.
 
@@ -203,41 +232,24 @@ Such as +0.5 against effect.damage.elemental.fire for a fire ward. Added to the 
 
 ### Functions
 
-- `is_held() -> bool`
-- `add_held(totals: EffectHeldTotals, stacks: int) -> void`
+- `add_held(totals: ModifierTotals, stacks: int) -> void`
 
-## StatChangePart
+## StatModifier
 
-`res://assets/scripts/effects/parts/StatChangePart.gd`, extends [`EffectPart`](#effectpart)
+`res://assets/scripts/effects/modifiers/StatModifier.gd`, extends [`EffectModifier`](#effectmodifier)
 
-Changes how much of a stat a pawn has, once: Health -20 is damage, Health +15 a heal. A do-once part ([`EffectPart`](#effectpart)).
+Changes a stat's value while its effect lasts, such as MoveSpeed x0.7 for a slow. A modifier ([`EffectModifier`](#effectmodifier)).
 
-Kept between 0 and the stat's value; a stat the pawn doesn't have is ignored. The amount is multiplied by the stacks, and a harmful negative amount is reduced by the pawn's resistance. Health taken is added to the application's damage_dealt. Design: pawn spec 8.11.
-
-### Settings and properties
-
-- `stat: StringName` = `&"Health"`: The stat, by name, such as &"Health".
-- `amount: float` = `-10.0`: How much to add. Negative takes away.
-
-### Functions
-
-- `apply_once(application: EffectApplication) -> void`
-
-## StatModifierPart
-
-`res://assets/scripts/effects/parts/StatModifierPart.gd`, extends [`EffectPart`](#effectpart)
-
-Changes a stat's value while its effect lasts, such as MoveSpeed x0.7 for a slow. A held part ([`EffectPart`](#effectpart)).
-
-The stat becomes (base_value + every add) x every multiply over all held parts on the pawn, and returns to base_value when they end. Per stack, add counts once and multiply applies once (x0.7 twice is x0.49). Worked out on every machine, so a client's predicted movement agrees with the server. Design: pawn spec 8.11.
+The stat becomes base_value x every multiply + every add, over all modifiers on the pawn (multiply, then add, for everything), or an override's value when one overrides (the last applied wins); it returns to base_value when they end. Per stack, add counts once and multiply applies once (x0.7 twice is x0.49). Worked out on every machine, so a client's predicted movement agrees with the server. Design: pawn spec 8.11 and 16.8.
 
 ### Settings and properties
 
 - `stat: StringName` = `&"MoveSpeed"`: The stat, by name, such as &"MoveSpeed".
-- `add: float` = `0.0`: Added to the stat's base value. 0: nothing.
-- `multiply: float` = `1.0`: Then the stat is multiplied by this. 1: nothing. 0.7 is 30% less.
+- `add: float` = `0.0`: Added after the multiplies. 0: nothing.
+- `multiply: float` = `1.0`: The stat's base value is multiplied by this, before the adds. 1: nothing. 0.7 is 30% less.
+- `overrides: bool` = `false`: On: the stat takes `override_value`, whatever its base and the other modifiers (a freeze sets MoveSpeed to 0).
+- `override_value: float` = `0.0`: With `overrides`, the stat's value.
 
 ### Functions
 
-- `is_held() -> bool`
-- `add_held(totals: EffectHeldTotals, stacks: int) -> void`
+- `add_held(totals: ModifierTotals, stacks: int) -> void`

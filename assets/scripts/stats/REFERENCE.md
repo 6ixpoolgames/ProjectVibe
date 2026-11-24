@@ -14,7 +14,7 @@ One number about a pawn, such as how fast it walks. A child of the pawn's Status
 
 Pawn spec section 9. The stat's name is this node's name, such as MoveSpeed or JumpVelocity. Abilities and behaviours ask the StatusManager for a stat by that name, and use a fallback of their own if there's none, so a missing stat is never a crash.
 
-Its `value` is `base_value` plus what held effects add, times what they multiply (`set_modifiers()`, from the StatusManager).
+Its `value` is `base_value` times what modifiers multiply, plus what they add (multiply, then add, for everything), or an override's value (`set_modifiers()`, from the StatusManager).
 
 A stat that changes during play, such as Health, has `changes_during_play` on. Then it also has a `current` value, from 0 up to its value, which starts full, rolls back (the StatusManager lists it with the pawn's TickStateComponent) and reaches clients in snapshots. Only the server changes it: `StatusManager.change_current()`, which also sends its `thresholds`' events.
 
@@ -31,4 +31,4 @@ With a `table_column`, the value is also copied into that column of the pawn tab
 
 ### Functions
 
-- `set_modifiers(added: float, multiplied: float) -> void`: The effects on this stat, all together: `value` becomes (base_value + added) x multiplied. 0 and 1 mean none. The pawn's StatusManager calls this whenever its held effects change.
+- `set_modifiers(added: float, multiplied: float, overrides: bool = false, override_value: float = 0.0) -> void`

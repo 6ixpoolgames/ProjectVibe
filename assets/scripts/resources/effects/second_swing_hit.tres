@@ -1,8 +1,9 @@
 [gd_resource type="Resource" script_class="Effect" format=3]
 
-[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_cuhta"]
-[ext_resource type="Script" path="res://assets/scripts/effects/parts/StatChangePart.gd" id="2_qgp6v"]
-[ext_resource type="Script" path="res://assets/scripts/effects/parts/KnockbackPart.gd" id="3_2u0yg"]
+[ext_resource type="Script" path="res://assets/scripts/effects/effectors/EffectEffector.gd" id="eff_base_1"]
+[ext_resource type="Script" path="res://assets/scripts/effects/modifiers/EffectModifier.gd" id="1_cuhta"]
+[ext_resource type="Script" path="res://assets/scripts/effects/effectors/StatChangeEffector.gd" id="2_qgp6v"]
+[ext_resource type="Script" path="res://assets/scripts/effects/effectors/KnockbackEffector.gd" id="3_2u0yg"]
 [ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="4_3griu"]
 
 [sub_resource type="Resource" id="Resource_df8cp"]
@@ -18,4 +19,4 @@ hop_speed = 1.5
 script = ExtResource("4_3griu")
 effect_name = &"second swing hit"
 tags = Array[StringName]([&"effect.damage.physical"])
-parts = Array[ExtResource("1_cuhta")]([SubResource("Resource_df8cp"), SubResource("Resource_ffr0u")])
+effectors = Array[ExtResource("eff_base_1")]([SubResource("Resource_df8cp"), SubResource("Resource_ffr0u")])

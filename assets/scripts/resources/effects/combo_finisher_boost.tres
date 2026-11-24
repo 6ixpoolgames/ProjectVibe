@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="Effect" format=3]
 
-[ext_resource type="Script" path="res://assets/scripts/effects/EffectPart.gd" id="1_m0ulu"]
-[ext_resource type="Script" path="res://assets/scripts/effects/parts/AbilityPriorityPart.gd" id="2_fyloq"]
+[ext_resource type="Script" path="res://assets/scripts/effects/modifiers/EffectModifier.gd" id="1_m0ulu"]
+[ext_resource type="Script" path="res://assets/scripts/effects/modifiers/AbilityModifier.gd" id="2_fyloq"]
 [ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="3_s51qy"]
 
 [sub_resource type="Resource" id="Resource_7ixa1"]
@@ -15,4 +15,4 @@ effect_name = &"combo finisher boost"
 tags = Array[StringName]([&"effect.buff.combo"])
 is_harmful = false
 duration_ticks = 36
-parts = Array[ExtResource("1_m0ulu")]([SubResource("Resource_7ixa1")])
+modifiers = Array[ExtResource("1_m0ulu")]([SubResource("Resource_7ixa1")])

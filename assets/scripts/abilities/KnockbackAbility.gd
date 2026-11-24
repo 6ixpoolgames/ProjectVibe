@@ -1,5 +1,5 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: abilities/CHANGELOG.md.
-## Being pushed by a hit: an action with no trigger action, started by a KnockbackPart through [method push].
+## Being pushed by a hit: an action with no trigger action, started by a KnockbackEffector through [method push].
 ##
 ## It lives on the pawn being hit. For the push's duration it sets the pawn's horizontal velocity to the push, fading in a straight line
 ## to nothing, and locks out movement and combat. A push with a hop speed lifts a grounded pawn on its first tick (not one already in the

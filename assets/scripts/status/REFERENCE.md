@@ -31,7 +31,7 @@ A [`Stat`](../stats/REFERENCE.md#stat) lists its thresholds (`Stat.thresholds`);
 
 A pawn's status: its stats and the effects on it, in one component (pawn spec 16.8).
 
-Stats are [`Stat`](../stats/REFERENCE.md#stat) child nodes, found by name; a missing stat is never an error (`get_value()` gives the fallback). Effects ([`Effect`](../effects/REFERENCE.md#effect)) are applied with `apply_effect()`: instant ones run at once; over-time ones go in a rolled-back active list that keeps the tick each ends and the tick of its next period (deadlines: nothing counts down), and all end when the pawn dies. Do-once parts run on the authority only; held parts work on every machine. Every change to a stat's current value goes through `change_current()`, which sends the stat's threshold events through the pawn (`Pawn.send_event()`) when a change crosses one: Health at 0 sends `event.health.depleted`. Health taken by an effect sends `event.damage.taken` with its source.
+Stats are [`Stat`](../stats/REFERENCE.md#stat) child nodes, found by name; a missing stat is never an error (`get_value()` gives the fallback). Effects ([`Effect`](../effects/REFERENCE.md#effect)) are applied with `apply_effect()`: instant ones run at once; over-time ones go in a rolled-back active list that keeps the tick each ends and the tick of its next period (deadlines: nothing counts down), and all end when the pawn dies. Do-once parts run on the authority only; modifiers work on every machine. Every change to a stat's current value goes through `change_current()`, which sends the stat's threshold events through the pawn (`Pawn.send_event()`) when a change crosses one: Health at 0 sends `event.health.depleted`. Health taken by an effect sends `event.damage.taken` with its source.
 
 ```gdscript
 pawn.status_manager.get_value(&"MoveSpeed", 5.0)         # a stat's value, or the fallback without it
@@ -52,7 +52,7 @@ pawn.status_manager.remove_with_tag(Tags.EFFECT.DEBUFF)  # a cleanse
 
 ### Signals
 
-- `effect_applied(effect: Effect, application: EffectApplication)`: Sent when an effect is applied, on every machine that applies it (do-once parts only ran if this is the authority).
+- `effect_applied(effect: Effect, application: EffectApplication)`: Sent when an effect is applied, on every machine that applies it (effectors only ran if this is the authority).
 - `effect_ended(effect: Effect)`: Sent when an over-time effect ends or is removed.
 
 ### Constants
@@ -62,7 +62,7 @@ pawn.status_manager.remove_with_tag(Tags.EFFECT.DEBUFF)  # a cleanse
 - `STRIDE = 5`: Numbers per entry in `active_effects`; ID, ENDS_AT, NEXT_PERIOD_AT, STACKS and SOURCE are their positions in an entry.
 - `ID = 0`
 - `ENDS_AT = 1`: the tick it ends
-- `NEXT_PERIOD_AT = 2`: the tick its do-once parts run again; -1 without a period
+- `NEXT_PERIOD_AT = 2`: the tick its effectors run again; -1 without a period
 - `STACKS = 3`
 - `SOURCE = 4`
 
@@ -91,5 +91,5 @@ pawn.status_manager.remove_with_tag(Tags.EFFECT.DEBUFF)  # a cleanse
 - `remove_with_tag(tag: StringName) -> void`: Removes every active effect with this effect tag, or a tag inside it: remove_with_tag(Tags.EFFECT.DEBUFF) is a cleanse.
 - `remove_all() -> void`: Removes everything. Done when the pawn dies (it listens for the AbilityManager's died).
 - `resistance_to(effect: Effect) -> float`: This pawn's resistance to an effect (see `resistances`), not capped: 1 or more means immune.
-- `ability_bonus(ability: AbilityBase, number: int) -> int`: What held AbilityPriorityParts add to this ability's number now (AbilityPriorityPart.Number). The AbilityManager asks.
-- `has_ability_bonuses() -> bool`: True if any held AbilityPriorityPart changes ability numbers now. Lets the AbilityManager skip asking.
+- `ability_bonus(ability: AbilityBase, number: int) -> int`: What held AbilityModifiers add to this ability's number now (AbilityModifier.Number). The AbilityManager asks.
+- `has_ability_bonuses() -> bool`: True if any held AbilityModifier changes ability numbers now. Lets the AbilityManager skip asking.

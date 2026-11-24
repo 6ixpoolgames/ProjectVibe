@@ -66,7 +66,7 @@ const NOT_ROLLED_BACK := {
 	"StatusManager:_touched_stats": "worked out from active_effects",
 	"StatusManager:_ability_bonuses": "worked out from active_effects",
 	"StatusManager:_resistance_bits": "worked out from active_effects",
-	# A stat's value, while a held StatModifierPart changes it: base_value with the parts' changes, worked out the same way.
+	# A stat's value, while a held StatModifier changes it: base_value with the parts' changes, worked out the same way.
 	"Stat:value": "worked out from active_effects",
 	# Claude 2026-11-16 (wider audit): the totals the StatusManager hands a stat (Stat.set_modifiers), which value is worked out from.
 	"Stat:_added": "worked out from the effects list, like Stat:value",
@@ -242,19 +242,19 @@ func _add_test_effects(pawn: Pawn) -> void:
 	var slow := Effect.new()
 	slow.effect_name = &"coverage slow"
 	slow.duration_ticks = 60
-	var slower := StatModifierPart.new()
+	var slower := StatModifier.new()
 	slower.stat = &"MoveSpeed"
 	slower.multiply = 0.5
-	slow.parts = [slower]
+	slow.modifiers = [slower]
 	var boost := Effect.new()
 	boost.effect_name = &"coverage dash boost"
 	boost.is_harmful = false
 	boost.duration_ticks = 60
-	var stronger := AbilityPriorityPart.new()
+	var stronger := AbilityModifier.new()
 	stronger.ability_tag = Tags.ABILITY.MOVEMENT_DASH
-	stronger.number = AbilityPriorityPart.Number.INTERRUPT_PRIORITY
+	stronger.number = AbilityModifier.Number.INTERRUPT_PRIORITY
 	stronger.amount = 5
-	boost.parts = [stronger]
+	boost.modifiers = [stronger]
 	var on_target := EffectApplier.new()
 	on_target.effects = [slow]
 	var on_self := EffectApplier.new()

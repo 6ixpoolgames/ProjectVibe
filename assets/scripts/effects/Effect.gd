@@ -24,14 +24,16 @@ enum Stacking {
 @export var is_harmful := true
 ## Ticks at 60 a second it lasts. 0: instant.
 @export_range(0, 36000, 1, "or_greater") var duration_ticks := 0
-## Over time: its do-once parts run when first applied, then every this many ticks at 60 a second. 0: only when first applied.
+## Over time: its effectors fire when first applied, then every this many ticks at 60 a second. 0: only when first applied.
 @export_range(0, 3600, 1, "or_greater") var period_ticks := 0
 ## What a second application on the same pawn does.
 @export var stacking := Stacking.REFRESH
 ## With ADD_STACK: the most stacks it can have.
 @export_range(1, 99, 1, "or_greater") var max_stacks := 1
-## What it does, in order.
-@export var parts: Array[EffectPart] = []
+## What it holds while it lasts (slows, boosts, resistances), on every machine. They take hold before the effectors fire.
+@export var modifiers: Array[EffectModifier] = []
+## What it does when applied and at each period (damage, heals, pushes), in order, on the authority only.
+@export var effectors: Array[EffectEffector] = []
 
 # Every over-time effect seen on this machine, by id, so an id a rollback or snapshot loads into a pawn's active list finds its effect.
 static var _by_id := {}
@@ -56,20 +58,20 @@ func has_tag(tag: StringName) -> bool:
 	return TagRegistry.has_tag(tag) and get_tag_mask() & TagRegistry.own_bit(tag) != 0
 
 
-## True if any of its parts hold while it lasts.
-func has_held_parts() -> bool:
-	for part in parts:
-		if part and part.is_held():
+## True if it has modifiers, which hold while it lasts.
+func has_modifiers() -> bool:
+	for modifier in modifiers:
+		if modifier:
 			return true
 	return false
 
 
-## How much its StatChangeParts change a stat in one go, before resistances; damage is negative. For readouts before a hit lands.
+## How much its StatChangeEffectors change a stat in one go, before resistances; damage is negative. For readouts before a hit lands.
 func planned_change(stat: StringName) -> float:
 	var total := 0.0
-	for part in parts:
-		if part is StatChangePart and part.stat == stat:
-			total += part.amount
+	for effector in effectors:
+		if effector is StatChangeEffector and effector.stat == stat:
+			total += effector.amount
 	return total
 
 
@@ -113,10 +115,10 @@ static func make_damage(amount: float, damage_tags: Array[StringName] = [Tags.EF
 	var effect := Effect.new()
 	effect.effect_name = &"damage"
 	effect.tags = damage_tags
-	var part := StatChangePart.new()
-	part.stat = StatusManager.HEALTH
-	part.amount = -absf(amount)
-	effect.parts = [part]
+	var damage := StatChangeEffector.new()
+	damage.stat = StatusManager.HEALTH
+	damage.amount = -absf(amount)
+	effect.effectors = [damage]
 	return effect
 
 
@@ -124,9 +126,9 @@ static func make_damage(amount: float, damage_tags: Array[StringName] = [Tags.EF
 static func make_knockback(speed: float, ticks: int, hop := 0.0) -> Effect:
 	var effect := Effect.new()
 	effect.effect_name = &"knockback"
-	var part := KnockbackPart.new()
-	part.speed = speed
-	part.ticks = ticks
-	part.hop_speed = hop
-	effect.parts = [part]
+	var push := KnockbackEffector.new()
+	push.speed = speed
+	push.ticks = ticks
+	push.hop_speed = hop
+	effect.effectors = [push]
 	return effect

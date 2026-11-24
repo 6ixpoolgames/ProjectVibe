@@ -26,11 +26,11 @@ func _ready() -> void:
 
 	# Claude 2026-11-10 (pawn spec 8.11): effects and their parts get dropdowns too, each from the right tag set.
 	var effect := Effect.new()
-	var priority_part := AbilityPriorityPart.new()
-	var resistance_part := ResistancePart.new()
+	var priority_part := AbilityModifier.new()
+	var resistance_part := ResistanceModifier.new()
 	var effect_props: Dictionary = inspector.properties_of(effect)
 	_check(effect_props.has("tags") and effect_props["tags"] == [true, inspector.EFFECT], "an Effect's tags: a list of effect tags")
-	_check(inspector.properties_of(priority_part).get("ability_tag") == [false, inspector.ABILITY] and inspector.properties_of(resistance_part).get("tag") == [false, inspector.EFFECT], "an AbilityPriorityPart names an ability tag, a ResistancePart an effect tag")
+	_check(inspector.properties_of(priority_part).get("ability_tag") == [false, inspector.ABILITY] and inspector.properties_of(resistance_part).get("tag") == [false, inspector.EFFECT], "an AbilityModifier names an ability tag, a ResistanceModifier an effect tag")
 	_check(inspector.properties_of(plain).is_empty() and inspector.properties_of(dash).has("locks_out"), "a plain node gets none, and ability definitions keep theirs")
 	_check(TagRegistry.read_declared_tags(inspector.EFFECT).has(Tags.EFFECT.DAMAGE_ELEMENTAL) and not TagRegistry.read_declared_tags(inspector.EFFECT).has(Tags.ABILITY.COMBAT), "the effect tag dropdown offers parent levels too (effect.damage.elemental), and only effect tags")
 

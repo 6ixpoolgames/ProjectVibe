@@ -19,6 +19,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-24
 
+- **Multiply, then add** (the pawn redesign's build step 3b): `value` is base × multiplied + added, or the override's value (`set_modifiers(added, multiplied, overrides, override_value)`); the order is fixed for now, with a comment that a designer-chosen order may come later.
 - **Merged into the status manager** (the pawn redesign's build step 3a, pawn spec 16.8): `StatManager` is gone; its job is `status/StatusManager.gd` (`pawn.status_manager`). `Stat` gains `thresholds` (`StatThreshold`), and its `current` is changed only through `StatusManager.change_current` or `fill_current` (REFACTOR resolved). History from here: [status/CHANGELOG.md](../status/CHANGELOG.md).
 
 ## 2026-11-23

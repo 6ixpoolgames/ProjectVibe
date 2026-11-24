@@ -334,7 +334,7 @@ func get_abilities() -> Array[AbilityBase]:
 	return _abilities.duplicate()
 
 
-## This pawn's Knockback ability, or null. A KnockbackPart asks on every push.
+## This pawn's Knockback ability, or null. A KnockbackEffector asks on every push.
 func get_knockback() -> KnockbackAbility:
 	return _knockback
 
@@ -461,19 +461,19 @@ func _priority_now(ability: AbilityBase) -> float:
 	return press_priority_now(ability) + ability.settings.priority_jitter * DeterministicRandom.signed(pawn.entity_number(), TickDriver.tick, ability.jitter_salt)
 
 
-## An ability's priority now: its own plus what effects add (AbilityPriorityPart, pawn spec 8.11), without the jitter offset.
+## An ability's priority now: its own plus what effects add (AbilityModifier, pawn spec 8.11), without the jitter offset.
 func press_priority_now(ability: AbilityBase) -> int:
-	return ability.settings.priority + _bonus(ability, AbilityPriorityPart.Number.PRESS_PRIORITY)
+	return ability.settings.priority + _bonus(ability, AbilityModifier.Number.PRESS_PRIORITY)
 
 
 ## Its interrupt_priority right now, with what effects add.
 func interrupt_priority_now(ability: AbilityBase) -> int:
-	return ability.settings.interrupt_priority + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_PRIORITY)
+	return ability.settings.interrupt_priority + _bonus(ability, AbilityModifier.Number.INTERRUPT_PRIORITY)
 
 
 ## Its interrupt_threshold now, with what effects add; for a stepped ability, the strictest of its running steps'.
 func interrupt_threshold_now(ability: AbilityBase) -> int:
-	return ability.current_interrupt_threshold() + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD)
+	return ability.current_interrupt_threshold() + _bonus(ability, AbilityModifier.Number.INTERRUPT_THRESHOLD)
 
 
 # What the pawn's effects add to one of an ability's numbers; 0 with no StatusManager or nothing held.

@@ -179,7 +179,7 @@ func _test_stacking_and_removing() -> void:
 	stacking.max_stacks = 2
 	for i in 3:
 		a.status_manager.apply_effect(stacking, null)
-	_check(a.status_manager.get_stacks(stacking) == 2 and is_equal_approx(a.status_manager.get_value(&"MoveSpeed"), 1.0), "ADD_STACK: up to max_stacks, each stack counting again ((5 - 1) x0.5 x0.5 = %.2f)" % a.status_manager.get_value(&"MoveSpeed"))
+	_check(a.status_manager.get_stacks(stacking) == 2 and is_equal_approx(a.status_manager.get_value(&"MoveSpeed"), 0.25), "ADD_STACK: up to max_stacks, each stack counting again (5 x0.5 x0.5 - 1 = %.2f: multiply, then add; Claude 2026-11-24)" % a.status_manager.get_value(&"MoveSpeed"))
 	var ignore := _effect(&"test ignore", true, 0.5, [])
 	ignore.stacking = Effect.Stacking.IGNORE
 	_check(a.status_manager.apply_effect(ignore, null) and not a.status_manager.apply_effect(ignore, null), "IGNORE: the second application is refused")
@@ -203,7 +203,7 @@ func _test_ability_numbers() -> void:
 	var manager := a.ability_manager
 	var melee: MeleeAttackAbility = manager.get_node("MeleeAttack")
 	var sprint: AbilityBase = manager.get_node("Sprint")
-	var frail := _effect(&"test easy to interrupt", true, 3.0, [_number(Tags.ABILITY.COMBAT, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD, -10)])
+	var frail := _effect(&"test easy to interrupt", true, 3.0, [_number(Tags.ABILITY.COMBAT, AbilityModifier.Number.INTERRUPT_THRESHOLD, -10)])
 	a.status_manager.apply_effect(frail, null)
 	_check(manager.interrupt_threshold_now(melee) == 5 and manager.interrupt_threshold_now(sprint) == sprint.interrupt_threshold, "an interrupt threshold change reaches the group it names and nothing else (swing 15 - 10 = %d)" % manager.interrupt_threshold_now(melee))
 	_ai(a).press(&"primary")
@@ -216,7 +216,7 @@ func _test_ability_numbers() -> void:
 	var rows := manager.get_interrupt_table()
 	var swing_row: Dictionary = rows.filter(func(row): return row["running"] == &"MeleeAttack")[0]
 	_check(swing_row["threshold"] == 5 and swing_row["cells"][&"Sprint"]["result"] == "cancels", "and the interrupt table shows it")
-	var strong := _effect(&"test strong dash", false, 1.0, [_number(Tags.ABILITY.MOVEMENT_DASH, AbilityPriorityPart.Number.INTERRUPT_PRIORITY, 5)])
+	var strong := _effect(&"test strong dash", false, 1.0, [_number(Tags.ABILITY.MOVEMENT_DASH, AbilityModifier.Number.INTERRUPT_PRIORITY, 5)])
 	a.status_manager.apply_effect(strong, null)
 	var dash: AbilityBase = manager.get_node("Dash")
 	_check(manager.interrupt_priority_now(dash) == dash.interrupt_priority + 5 and manager.press_priority_now(dash) == dash.priority, "an interrupt priority change is kept apart from press priority")
@@ -258,38 +258,43 @@ func _pawn(at: Vector3) -> Pawn:
 	return pawn
 
 
-func _effect(effect_name: StringName, harmful: bool, seconds: float, parts: Array[EffectPart]) -> Effect:
+# Claude 2026-11-24 (pawn spec 16.8): parts go into the effect's modifiers or effectors by their kind.
+func _effect(effect_name: StringName, harmful: bool, seconds: float, parts: Array) -> Effect:
 	var effect := Effect.new()
 	effect.effect_name = effect_name
 	effect.is_harmful = harmful
 	effect.duration_ticks = roundi(seconds * 60.0) # Claude 2026-11-24: effects last ticks at 60 a second
-	effect.parts = parts
+	for part in parts:
+		if part is EffectModifier:
+			effect.modifiers.append(part)
+		else:
+			effect.effectors.append(part)
 	return effect
 
 
-func _change(stat: StringName, amount: float) -> StatChangePart:
-	var part := StatChangePart.new()
+func _change(stat: StringName, amount: float) -> StatChangeEffector:
+	var part := StatChangeEffector.new()
 	part.stat = stat
 	part.amount = amount
 	return part
 
 
-func _lifesteal(fraction: float) -> LifestealPart:
-	var part := LifestealPart.new()
+func _lifesteal(fraction: float) -> LifestealEffector:
+	var part := LifestealEffector.new()
 	part.fraction = fraction
 	return part
 
 
-func _modifier(stat: StringName, add: float, multiply: float) -> StatModifierPart:
-	var part := StatModifierPart.new()
+func _modifier(stat: StringName, add: float, multiply: float) -> StatModifier:
+	var part := StatModifier.new()
 	part.stat = stat
 	part.add = add
 	part.multiply = multiply
 	return part
 
 
-func _number(tag: StringName, number: AbilityPriorityPart.Number, amount: int) -> AbilityPriorityPart:
-	var part := AbilityPriorityPart.new()
+func _number(tag: StringName, number: AbilityModifier.Number, amount: int) -> AbilityModifier:
+	var part := AbilityModifier.new()
 	part.ability_tag = tag
 	part.number = number
 	part.amount = amount

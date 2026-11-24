@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## One effect being applied once: what, to whom, from whom, and what came of it.
 ##
-## Made by the [StatusManager] on the authority, handed to each do-once part in turn ([method EffectPart.apply_once]), then thrown away.
+## Made by the [StatusManager] on the authority, handed to each effector in turn ([method EffectEffector.fire]), then thrown away.
 ## Design: pawn spec 8.11.
 class_name EffectApplication
 extends RefCounted
@@ -18,8 +18,8 @@ var source_ability: AbilityBase = null
 var hit: HitInfo = null
 ## How many stacks it has (Effect.Stacking.ADD_STACK). Parts multiply their amounts by this.
 var stacks := 1
-## The target's resistance to it, from 0 (none) to just under 1; below 0 is a weakness. A StatChangePart takes this fraction off
+## The target's resistance to it, from 0 (none) to just under 1; below 0 is a weakness. A StatChangeEffector takes this fraction off
 ## harmful changes. Always 0 for an effect that isn't harmful.
 var resistance := 0.0
-## Health this application has taken so far, filled in by StatChangeParts; LifestealPart reads it.
+## Health this application has taken so far, filled in by StatChangeEffectors; LifestealEffector reads it.
 var damage_dealt := 0.0
