@@ -28,7 +28,8 @@ SOURCE = os.path.join(BUILD, "docs") # MkDocs' input folder
 NOT_PRODUCTION = {"tests", "debug", "samples"}
 # The design specs, in the order they're listed, with a title each. docs/legacy is the old code's and stays out.
 SPECS = [
-    ("pawn/PAWN_SPEC.md", "Pawn"), ("pawn/PLAYER_AND_CAMERA.md", "Player and camera"), ("navigation/NAV_SPEC.md", "Navigation"),
+    ("pawn/PAWN_SPEC.md", "Pawn"), ("pawn/REDESIGN_LOG.md", "Pawn redesign log"), ("pawn/PLAYER_AND_CAMERA.md", "Player and camera"),
+    ("navigation/NAV_SPEC.md", "Navigation"),
     ("netcode/NETCODE_SPEC.md", "Netcode"), ("scaling/SCALING_SPEC.md", "Scaling"), ("streaming/STREAMING_SPEC.md", "Streaming"),
     ("world/WORLD_SPEC.md", "World"), ("replay/REPLAY_SPEC.md", "Replay"), ("diagnostics/DIAGNOSTICS_SPEC.md", "Diagnostics"),
     ("TEST_AND_DEBUG_CODE.md", "Test and debug code"), ("wiki/WIKI_SPEC.md", "Wiki"),

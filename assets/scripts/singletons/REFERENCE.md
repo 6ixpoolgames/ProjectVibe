@@ -337,6 +337,9 @@ One tick: `before_tick`, input, capture input, simulate, `after_simulate`, recor
 - `saving_measured_after_ticks: int` = `30`: Ticks after a step up before the load is measured to work out what it saved, at 60 a second. About three times what the average takes to settle.
 - `smallest_believable_saving: float` = `0.05`: A measured saving under this share of the budget counts as not measured (the load likely rose for another reason), so stepping down assumes the load doubles; this stops the ladder bouncing.
 - `lower_after_ticks: int` = `180`: Ticks in a row under `lower_below` (or with the lower step predicted to fit) before it steps down, at 60 a second. 180: three seconds.
+- `probe_after_ticks: int` = `600`: After this many ticks comfortably loaded (under `raise_above` less `step_down_headroom`), at 60 a second, it tries the lower step even if its prediction says no; a failed try doubles the wait, up to `probe_wait_max_ticks`. 0: never (README).
+- `probe_wait_max_ticks: int` = `9600`: The longest wait between tries of the lower step, at 60 a second.
+- `frame_overrun_margin: float` = `0.1`: A rendered frame longer than a tick by more than this share counts as overloaded, at its length, whatever the ticks in it cost (drawing, Godot's own physics and per-frame scripts aren't in a tick's cost). Below it, a frame is taken to be waiting for vsync.
 - `load_step: int` = `1`: The most every AI pawn may run, as a step: 1 every tick, 2 every 2nd, 4 every 4th. Read it; set `load_step_override` to force it.
 - `load_average: float` = `0.0`: How much of its budget a tick has used lately, smoothed over about ten ticks: 1.0 is the whole tick's length.
 - `profile_enabled: bool` = `false`: On, each tick phase adds up its time in microseconds into `profile`, for finding what's slow. Off, it costs a few flag checks per tick.
@@ -357,6 +360,8 @@ One tick: `before_tick`, input, capture input, simulate, `after_simulate`, recor
 
 - `TICK_RATE_SETTING = "project_base/network/tick_rate"`: The project setting for the tick rate. 0 or missing: the project's physics rate.
 - `REFERENCE_RATE = 60`: Settings counted in ticks are written for 60 ticks a second, whatever rate a game runs at. `ticks_at_rate()` turns one into ticks at this match's rate.
+- `FRAME_SHARE_CAP = 1.5`
+- `SLOW_AVERAGE_WEIGHT = 0.01`
 - `PROFILE_COUNTS = Array[String](["ticks", "rollbacks", "rollback_ticks"])`: The entries of `profile` that count things. The rest are times in microseconds.
 
 ### Functions

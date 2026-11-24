@@ -282,6 +282,45 @@ func _test_load_ladder() -> void:
 		else:
 			_check(ladder.load_step == 2, "one that saved a lot (95% to 45%) stays up at 50%% (%d, saving %.2f)" % [ladder.load_step, float(ladder._saving_at.get(2, -1.0))])
 		ladder.free()
+	_test_ladder_tries_lower_step(budget, dt)
+
+
+# Claude 2026-11-24 (the owner: the mass battle stayed at step 2 after spawning, at 50% load, though step 1 fit at about 66%): a saving
+# measured while a spawn burst ended predicts too much. After probe_after_ticks of comfortable load the ladder tries the lower step;
+# one that doesn't fit steps up again and the next try waits twice as long.
+func _test_ladder_tries_lower_step(budget: int, dt: float) -> void:
+	var ladder := TickDriverSingleton.new()
+	ladder.active = false
+	ladder.tick_rate = 60
+	add_child(ladder)
+	var run_load := func(share: float, ticks: int) -> void:
+		for i in ticks:
+			ladder._note_tick_cost(int(budget * share), dt)
+	run_load.call(0.95, 60) # a spawn burst steps it up...
+	run_load.call(0.45, 40) # ...and ends as the step lands, so the saving looks huge
+	run_load.call(0.5, 300)
+	_check(ladder.load_step == 2, "at 50%% with a saving that predicts step 1 won't fit, it stays at 2 for now (%d)" % ladder.load_step)
+	run_load.call(0.5, 300) # 600 comfortable ticks in all
+	_check(ladder.load_step == 1, "after 10 s comfortably loaded it tries step 1 (%d)" % ladder.load_step)
+	run_load.call(0.66, 700)
+	_check(ladder.load_step == 1, "step 1 fits at 66%%, so it stays there (%d)" % ladder.load_step)
+	# A try that doesn't fit: overloaded at step 1, it steps up again, and waits twice as long before the next try.
+	run_load.call(0.95, 60)
+	run_load.call(0.45, 40)
+	run_load.call(0.5, 600)
+	_check(ladder.load_step == 1, "the next comfortable 10 s try step 1 again (%d)" % ladder.load_step)
+	run_load.call(0.95, 60)
+	_check(ladder.load_step == 2, "where it's overloaded, so it steps back up (%d)" % ladder.load_step)
+	run_load.call(0.5, 700)
+	_check(ladder.load_step == 2, "and doesn't try again after only 10 s (%d)" % ladder.load_step)
+	run_load.call(0.5, 600)
+	_check(ladder.load_step == 1, "but does after 20 s (%d)" % ladder.load_step)
+	ladder.probe_after_ticks = 0
+	run_load.call(0.95, 60)
+	run_load.call(0.45, 40)
+	run_load.call(0.5, 3000)
+	_check(ladder.load_step == 2, "probe_after_ticks 0: it never tries (%d)" % ladder.load_step)
+	ladder.free()
 
 
 # --- Helpers ---

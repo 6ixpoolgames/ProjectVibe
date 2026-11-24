@@ -16,6 +16,14 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move the load ladder's rule to a GameMode module | `_note_tick_cost()`, the ladder's settings and `get_match_options()` in `TickDriver.gd` | A policy for shedding AI work, with its own tuning and match options, inside the universal tick driver. The owner wants autoloads to hold only what every game needs: the driver could report each tick's cost, and a module beside `AIActivationManager` own the rule | M |
 | One timing tool | `profile_enabled`, `profile`, `_profile_phase()` in `TickDriver.gd` | A second way of timing work beside diagnostics' `PerfScopes`, with its own names and its own switch | S |
 
+## 2026-11-24
+
+- **The load ladder tries the lower step, and counts frames that overrun** (the owner asked for the fix after a profiling pass).
+  - *Stuck step:* measuring the mass battle headless (`--size=35`, about 130 pawns), the spawn burst stepped the ladder up to 2, and it stayed there at 50% load although step 1 fit at about 66%: the saving it measured after stepping up included the burst ending, so it predicted step 1 at about 95%. Now, after `probe_after_ticks` (600, 10 s) comfortably loaded (a slower average, over about 2 s, under `raise_above` less `step_down_headroom`), it tries the lower step anyway and forgets the stale saving. A try that has to step up again within the same time doubles the wait before the next (up to `probe_wait_max_ticks`, 160 s); one that holds resets it. The deadlines count on the ladder's own clock (ticks it has measured), which keeps working in a driver that isn't running.
+  - *Rendering:* the headful pass showed a tick's cost leaves out the rest of the frame (Godot's physics step, drawing, per-frame scripts): windowed at `--size=50`, trying step 2 kept ticks at 67% of their budget while frames went from about 26 ms to 44 ms (22 fps). Now a rendered frame longer than a tick by more than `frame_overrun_margin` (10%: a lighter frame is taken to be waiting for vsync) counts at its length, capped at 1.5 ticks so one hitch only nudges the average; only the autoload measures frames.
+  - *Measured after (headless 60 s runs and windowed ones):* headless 35 back to step 1 at 66%; windowed 35 settles between steps 1 and 2 at 58-59 fps (it ran at step 1 at 49-53 fps before); windowed 50 holds step 4 at 37-45 fps (34-39 before, 22 with the try alone).
+  - Tested in `pawn/tests/tick_step_selftest` (tries, back-off, switching tries off); the frame part is checked by the measurements, since only the autoload hears frames.
+
 ## 2026-11-23
 
 - **Script warnings:** locals named `owner` in `TickDriver` renamed (they shadowed `Node.owner`).

@@ -2,7 +2,7 @@
 
 *Written by Claude (claude-opus-5-5), 2026-11-19, at the end of the code audit, from the owner's request for one doc showing every module and how they connect.*
 
-**What this is:** a map of the framework, today and after the coming refactor, with diagrams. Each system's README has the detail; the refactor's design is in [STATE_STORE_SPEC.md](state_store/STATE_STORE_SPEC.md) and [ABILITY_SPEC.md](abilities/ABILITY_SPEC.md). The plan is in [ROADMAP.md](ROADMAP.md).
+**What this is:** a map of the framework, today and after the coming refactor, with diagrams. Each system's README has the detail; the refactor's design is in [STATE_STORE_SPEC.md](state_store/STATE_STORE_SPEC.md), [ABILITY_SPEC.md](abilities/ABILITY_SPEC.md) and, for the pawn, its components, the AI, abilities and effects, [pawn spec 16](pawn/PAWN_SPEC.md) (the pawn redesign, agreed 2026-11-24). The plan is in [ROADMAP.md](ROADMAP.md).
 
 **Status:** today's map is checked against the code (the audit, 2026-11-19); the problems it lists are as found then. The map after the refactor is the agreed direction, built in part on `refactor/tick-core` (the store and its commit, pushed columns, the landing schedule, the one pass that places what's drawn; state store spec 13.4-13.12): it changes as the specs do.
 
@@ -126,18 +126,22 @@ flowchart LR
     SLOT[Slot map: entity ids and generations]
   end
   subgraph core[Simulation core]
-    BODY[Pawn: body and general flags]
+    BODY[Pawn: body, facing, tick order, flags]
     MOVE[Movement pass + crowd mover]
-    AB[Abilities: kind, definition, state]
-    FX[Effects]
-    ST[Stats]
+    AB[Abilities: definitions, step timelines, events]
+    STAT[Status: stats, effects, thresholds]
   end
   subgraph directors[Directors]
-    CTRL[Controllers: player, AI]
-    AI[AI: batched decisions, central schedule]
-    SPN[Spawning]
-    ACT[Activation and tick steps]
+    CTRL[Controllers: player, AI; input only]
+    AI[AI: a brain per pawn; opt-in batch runner]
+    SPN[Spawning: pawn definitions, factions]
+    SIG[Significance manager: activation, steps, load ladder]
     WORLD[Streaming, terrain edits, nav commits]
+  end
+  subgraph shared[Shared services]
+    SCHED[Tick scheduler]
+    REG[Entity registry + entity table]
+    RND[Deterministic random]
   end
   subgraph readers[Readers, mostly on workers]
     RB[Rollback]
@@ -151,6 +155,8 @@ flowchart LR
     DRAW[Place-what's-drawn pass, visuals LOD, shader waddle]
   end
   TD --> core
+  SCHED --> core
+  REG --> core
   directors -->|recorded inputs| core
   core -->|gather at tick end| store
   store --> readers
@@ -183,6 +189,7 @@ sequenceDiagram
 - **Directors' outputs are recorded.** Replays play back frames; a branch re-runs from a keyframe with directors off until the branch point.
 - **Gameplay drives presentation,** never the reverse. Visuals read frames.
 - **Definitions are shared, state is per entity.** Abilities, behaviours and stats keep their settings in shared definitions and their state in columns.
+- **Deadlines and version counters.** Every timer is the tick it ends; a reader copies again only when an owner's version counter has moved.
 
 ### 3.4 On the network
 
@@ -200,16 +207,52 @@ flowchart LR
   client -->|inputs only, one packet a tick| server
 ```
 
+### 3.5 The pawn after the redesign (pawn spec 16)
+
+```mermaid
+flowchart TB
+  subgraph P[Pawn: the body, facing, tick order]
+    CM[ControllerManager: input, blocked by tags]
+    AM[AbilityManager: abilities, each with a StepTimeline]
+    SM[StatusManager: stats, effects, thresholds]
+    OT[OwnedTags]
+    PSS[PawnStreamingSource]
+    subgraph AI[AIManager: the AI step, request inbox]
+      AIC[AIController: hands over input]
+      SEN[AISensingManager: senses send stimuli]
+      MEM[AIMemory: fact tables, sources, queries]
+      STA[AIStateManager: states as conditions]
+      BEH[AIBehaviourManager + AIDecider: behaviours, each with a StepTimeline]
+    end
+  end
+  SEN -->|stimuli| MEM
+  MEM -->|selectors| STA & BEH
+  BEH -->|steps write input| AIC
+  AIC -->|take_input_command| CM
+  PC[PlayerController: devices, click-to-move step] -->|take_input_command| CM
+  CM -->|input| AM
+  AM -->|hit ability applies effects| SM
+  SM -->|events: hit taken, health depleted| AM
+  SM -->|damage-taken events| AI
+```
+
+- **Six components:** the controller manager, the ability manager, the status manager (stats and effects merged), owned tags, the AI tree, the streaming source. Gone: the navigation manager (paths are found by `NavServer` and followed inside movement steps), the target selector (a memory query), the decision module and `AIInputs`, the "hands" AI controller, hit interceptors and effect appliers.
+- **One step system:** abilities and behaviours each own a `StepTimeline`; behaviour steps write input and run on every machine, so the order stream sends behaviour and step starts.
+- **One modifier rule** for stats, abilities and behaviours, in an order designers choose (multiply, then add, by default).
+- **Hits** are booked with the tick scheduler and resolved by a hit ability on the target; reactions are abilities started by events.
+- **Memory** is a fact table that senses write stimuli into, read through selectors; awareness and certainty are separate.
+
 ## 4. Where things live
 
 | Folder (`assets/scripts/`) | Today | After |
 |---|---|---|
 | `singletons/` | TickDriver, NetworkSession, GameMode, NavMarkerManager | TickDriver v2; NetworkSession split into connection, clock, snapshot sending and receiving |
 | `netcode/` | TickStateComponent, NetworkEntity, lag compensation | The store's GDScript side and twin; lag compensation reading the history |
-| `pawn/` | The pawn hub (about 720 lines) | The body and general flags (about 150–200 lines) |
-| `abilities/` | Abilities and steps as nodes with their own settings and state | Thin nodes, definitions, step timelines, deadlines |
-| `ai/` | Managers, senses, states, behaviours; C++ decides per pawn | Batched decisions, central schedule, entity ids |
-| `movement/` | The crowd mover | The movement pass |
+| `pawn/` | The pawn hub (about 630 lines) | The body, facing, tick order and general flags; one join point with the entity registry |
+| `abilities/` | Abilities and steps as nodes with their own settings and state | Thin nodes, definitions, step timelines (the shared step core), deadlines, the hit ability, abilities started by events |
+| `ai/` | Managers, senses, states, behaviours; C++ decides per pawn | One AI tree per pawn (`AIManager`), fact-table memory fed by stimuli, behaviours built from steps, an `AIDecider` per pawn; an opt-in batch runner |
+| `movement/` | The crowd mover | The movement pass; the path follower in movement steps |
+| `effects/`, `stats/` | The effect manager, the stat manager | One status manager: stats, effects (modifiers and effectors), thresholds |
 | `replay/` | Channels gathering per pawn | Keyframes and deltas of frames |
 | `diagnostics/` | Frame timing, session log, panels | Plus the store inspector, game speed, worker time |
 | `visuals/` | Per-pawn scripts | One batched pass, LOD, shader waddle |
@@ -219,4 +262,5 @@ flowchart LR
 
 1. The measurements (state store spec 13) and these docs, on master.
 2. Branch from master. Rewrite in place (the owner's call, 2026-11-19): the tick driver and the store, the pawn and the movement pass, abilities v2, the AI on the store, netcode on the store, replay and diagnostics, the directors onto ticks.
-3. The shader waddle A/B (state store spec 12.5) is independent of the core.
+3. The pawn redesign, in the build order of pawn spec 16.10: foundations, the step core, the status manager, hits, input and controllers, AI decisions, behaviour steps, memory and senses, entities, units, content.
+4. The shader waddle A/B (state store spec 12.5) is independent of the core.

@@ -108,6 +108,14 @@ signal load_step_changed(step: int)
 ## Ticks in a row under [member lower_below] (or with the lower step predicted to fit) before it steps down, at 60 a second. 180: three
 ## seconds.
 @export_range(1, 3600, 1) var lower_after_ticks := 180
+## After this many ticks comfortably loaded (under [member raise_above] less [member step_down_headroom]), at 60 a second, it tries the
+## lower step even if its prediction says no; a failed try doubles the wait, up to [member probe_wait_max_ticks]. 0: never (README).
+@export_range(0, 36000, 1, "or_greater") var probe_after_ticks := 600
+## The longest wait between tries of the lower step, at 60 a second.
+@export_range(1, 72000, 1, "or_greater") var probe_wait_max_ticks := 9600
+## A rendered frame longer than a tick by more than this share counts as overloaded, at its length, whatever the ticks in it cost
+## (drawing, Godot's own physics and per-frame scripts aren't in a tick's cost). Below it, a frame is taken to be waiting for vsync.
+@export_range(0.0, 2.0, 0.05) var frame_overrun_margin := 0.1
 ## The most every AI pawn may run, as a step: 1 every tick, 2 every 2nd, 4 every 4th. Read it; set [member load_step_override] to force it.
 var load_step := 1
 ## How much of its budget a tick has used lately, smoothed over about ten ticks: 1.0 is the whole tick's length.
@@ -119,6 +127,17 @@ var _load_before_raise := 0.0
 var _measure_ticks_left := 0
 var _over_ticks := 0
 var _under_ticks := 0
+var _comfortable_ticks := 0 # ticks in a row comfortably loaded at a step above 1, towards trying the lower step
+var _probe_wait := -1 # comfortable ticks a try waits for now; -1: probe_after_ticks
+# The ladder's own clock: ticks it has measured. Deadlines count on it rather than on tick, which doesn't move during a rollback or in
+# a driver that isn't running.
+var _ladder_tick := 0
+var _probe_until := -1 # a step up before this ladder tick means the last try of the lower step failed; -1: no try pending
+var _last_frame_usec := 0 # when the last rendered frame's _process ran, for its length
+var _frame_share := 0.0 # the last rendered frame's length as a share of a tick, when it ran clearly over one; else 0
+const FRAME_SHARE_CAP := 1.5 # the most one overrunning frame counts as, as a share of a tick
+var _slow_load_average := 0.0 # load_average's slower twin, over about 2 s, for judging when to try the lower step
+const SLOW_AVERAGE_WEIGHT := 0.01
 var _physics_steps_this_frame := 0 # physics steps since the last rendered frame
 # REFACTOR: profile is a second way of timing work beside diagnostics' PerfScopes, with its own names and its own switch. One timing
 # tool would be one place to look and one thing to learn (reusable).
@@ -191,6 +210,7 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	var steps := _physics_steps_this_frame
 	_physics_steps_this_frame = 0
+	_note_frame_length()
 	if not active or steps < max_ticks_per_frame or not (is_inside_tree() and get_parent() == get_tree().root):
 		return
 	var dt := get_tick_dt()
@@ -615,7 +635,9 @@ func get_match_options() -> PackedStringArray:
 # REFACTOR: the ladder is a policy for shedding AI work, with its own tuning and match options, inside the universal tick driver. The
 # driver could just report each tick's cost, and a GameMode module (beside AIActivationManager) own the rule (few autoloads).
 func _note_tick_cost(microseconds: int, dt: float) -> void:
-	var share := float(microseconds) / maxf(dt * 1000000.0, 1.0)
+	# A tick's own cost leaves out what the rest of the frame costs (Godot's physics step, drawing, per-frame scripts). A rendered frame
+	# that ran clearly longer than a tick is overloaded whatever the ticks cost, so its length counts instead.
+	var share := maxf(float(microseconds) / maxf(dt * 1000000.0, 1.0), _frame_share)
 	load_average = lerpf(load_average, share, 0.1)
 	if load_step_override > 0:
 		_set_load_step(load_step_override)
@@ -632,18 +654,58 @@ func _note_tick_cost(microseconds: int, dt: float) -> void:
 				_saving_at[_measuring_step] = saving
 			else:
 				_saving_at.erase(_measuring_step) # not believable; assume the load doubles
+	_ladder_tick += 1
 	_over_ticks = _over_ticks + 1 if load_average > raise_above else 0
 	_under_ticks = _under_ticks + 1 if _lower_step_fits() else 0
+	# Judged on the slow average: respawns and other hitches every few seconds would break a run of comfortable ticks on the fast one.
+	_slow_load_average = lerpf(_slow_load_average, share, SLOW_AVERAGE_WEIGHT)
+	var comfortable := load_step > 1 and _slow_load_average < raise_above - step_down_headroom
+	_comfortable_ticks = _comfortable_ticks + 1 if comfortable else 0
+	var base_wait := ticks_at_rate(probe_after_ticks)
+	if _probe_wait < 0:
+		_probe_wait = base_wait
+	# A try of the lower step that held for its whole window worked: the next waits only the base time again.
+	if _probe_until >= 0 and _ladder_tick >= _probe_until:
+		_probe_until = -1
+		_probe_wait = base_wait
 	if _over_ticks >= ticks_at_rate(raise_after_ticks) and load_step < max_load_step:
+		if _probe_until >= 0: # stepping up right after trying the lower step: it didn't fit, so wait longer before the next try
+			_probe_wait = mini(_probe_wait * 2, ticks_at_rate(probe_wait_max_ticks))
+			_probe_until = -1
 		_over_ticks = 0
 		_under_ticks = 0
+		_comfortable_ticks = 0
 		_load_before_raise = load_average
 		_set_load_step(load_step * 2)
 		_measuring_step = load_step
 		_measure_ticks_left = ticks_at_rate(saving_measured_after_ticks)
 	elif _under_ticks >= ticks_at_rate(lower_after_ticks) and load_step > 1:
 		_under_ticks = 0
+		_comfortable_ticks = 0
 		_set_load_step(load_step >> 1)
+	elif base_wait > 0 and _comfortable_ticks >= _probe_wait:
+		# The prediction says no, but the load has been comfortable for a long while: try the lower step. Its saving is forgotten, since
+		# it no longer explains the load; if the step has to go up again, that step up measures a fresh one.
+		_saving_at.erase(load_step)
+		_under_ticks = 0
+		_comfortable_ticks = 0
+		_probe_until = _ladder_tick + base_wait
+		_set_load_step(load_step >> 1)
+
+
+# Measures each rendered frame's length, wall clock, for the ladder. With vsync a frame lasts a whole refresh even when it's light, so
+# only a frame clearly longer than a tick (by frame_overrun_margin, as a missed refresh is) counts. Only the autoload: test drivers get
+# frames too, and their ladders must hear only the costs a test feeds them.
+func _note_frame_length() -> void:
+	var now := Time.get_ticks_usec()
+	var length := now - _last_frame_usec if _last_frame_usec > 0 else 0
+	_last_frame_usec = now
+	if not (is_inside_tree() and get_parent() == get_tree().root):
+		return
+	var share := float(length) / maxf(get_tick_dt() * 1000000.0, 1.0)
+	# Capped, so one long frame (a hitch) only nudges the average, and doesn't break a comfortable run the ladder needs before trying a
+	# lower step; frames that keep running over still lift it past raise_above.
+	_frame_share = minf(share, FRAME_SHARE_CAP) if share > 1.0 + frame_overrun_margin else 0.0
 
 
 ## True if the next step down looks safe now: load under [member lower_below], or the predicted load for the lower step (load now plus

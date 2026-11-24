@@ -1,6 +1,6 @@
 <!-- Written by Claude (claude-opus-5-5), 2026-11-07: the new pawn spec, from the owner's 2026-11-07 decisions on the pawn rebuild. A first shape to work from, not finished. Replaces docs/legacy/PAWN_ARCHITECTURE.md, which stays as a guide. -->
 
-# Pawn Spec v0.19
+# Pawn Spec v0.40
 
 **Revisions:**
 - v0.1 (2026-11-07): first shape, from the owner's decisions that day.
@@ -29,6 +29,27 @@
 - v0.19 (2026-11-09): tick foundations for tier 1 (15): the per-tick contract, gates and channels in abilities, resting pawns, hits delivered after simulate. The owner asked for the prep work.
 - v0.18 (2026-11-09): rollback recording in C++ (`TickStateRecorder`) and saved only where it's read (`history_interval_ticks`), measured in 12.1. Open question 16 settled.
 - v0.17 (2026-11-09): debug shapes for swings and dashes (`AbilityDebugDraw`), `MeleeAttackAbility.hit_window_started`, Chase's `dash_to_close`, and the arena readout's last ability (8.6, 10.7, 12).
+- v0.20 (2026-11-23): units from ability sets, behaviour sets and factions, agreed with the owner (16).
+- v0.21 (2026-11-24): units built through the pawn initializer from a pawn definition that hands each part its own; parts, abilities and behaviours may be scenes or definitions; ids from the DefinitionRegistry (16).
+- v0.22 (2026-11-24): the AI becomes one part, a tree with `AIManager` at its root (16.0); the pawn goes from 13 default parts to 8.
+- v0.23 (2026-11-24): the behaviour manager reviewed (16.8): generic behaviour modifiers, persistence replaced by start and end modifiers, behaviours swappable in play in tier 0.
+- v0.24 (2026-11-24): the AI manager reviewed (16.8); one pawn number, one game-wide deterministic random service, pawns called through standard entry points.
+- v0.25 (2026-11-24): the state manager reviewed (16.8): one priority hold, one request inbox on the AI manager, states use the behaviours' conditions.
+- v0.26 (2026-11-24): the target selector reviewed (16.8): one copy of the target, ties by pawn number, a switch margin, scoring as data later.
+- v0.27 (2026-11-24): memory and senses redesigned (16.8): a fact table fed by stimuli, awareness and certainty apart, interaction labels, per-sense weights, t0 hearing.
+- v0.28 (2026-11-24): the AI's direction (16.8): a brain per pawn as the core, batching as a per-game extension, twins kept, hearing measured in t0.
+- v0.29 (2026-11-24): a worked squad-shooter example (16.8): the decision module parted out, forcing replaced, roles as status effects, flexible memory sources, orders and steps named.
+- v0.30 (2026-11-24): naming and consolidation pass (16.8): data and scripted scoring, version counters, order names, `AIInputs` parted into a `self` source and selectors, column types.
+- v0.31 (2026-11-24): behaviour steps on a shared step timeline, run on every machine; the AI controller gives only input; one eye height; "component" for the pawn's pieces (16.8).
+- v0.32 (2026-11-24): effects split into modifiers (held) and effectors (fire on application and each period), modifiers first (16.8).
+- v0.33 (2026-11-24): input blocked by tags; the AI tree's root is the `AIController`; navigation split into `NavServer` and a path follower in movement steps; targets as memory query results (16.8).
+- v0.34 (2026-11-24): the AI tree's root is the `AIManager` again, with a thin `AIController` inside; a `MoveStep` base holds the path follower; `StatManager` and `EffectManager` merge into a `StatusManager`; 6 pawn components (16.8).
+- v0.35 (2026-11-24): hits blocked (received, payload stopped: parry, invulnerable, dead) versus ignored (`status.hit_immune`); reactions chosen by the hit (16.8).
+- v0.36 (2026-11-24): the ability manager reviewed (16.8): a `StepTimeline` per owner, typed reads and generic writes, interrupts unchanged, hits resolved by a scheduled hit ability, reactions started by events, charges on abilities, ticks at 60 everywhere.
+- v0.37 (2026-11-24): the status manager (16.8): base, max and current; deadlines only; one modifier rule with a designer-chosen order (multiply then add by default); thresholds fired from `change_current`; `EntityTable`; one column architecture with memory.
+- v0.38 (2026-11-24): owned tags on any entity; the streaming source's features, its off switch included (16.8).
+- v0.39 (2026-11-24): the pawn, player controller and spawning reviewed (16.8): sleeping until the next deadline, one join point, `facing` as a unit vector, general linger, a significance manager. The review is complete.
+- v0.40 (2026-11-24): section 16 rewritten as the consolidated design of the pawn redesign, with a revised build order; the review's dated record moved to [REDESIGN_LOG.md](REDESIGN_LOG.md).
 
 **Status:** a first shape to work from, written 2026-11-07. Nothing in it is built yet, except what's marked **(built)**. Code sketches are GDScript outlines, not final signatures. Class names are working names. Each one differs from the legacy class names, so new systems sit beside the legacy ones.
 
@@ -1949,3 +1970,177 @@ The recorder already reads every pawn's hot values once a tick, in C++. In tier 
 - Built: the ability loops test precomputed input bits (`AbilityBase.trigger_bit`) instead of looking each trigger's name up every tick, and the action step keeps what started as bits instead of building a Dictionary every tick. At 400 fighting pawns, abilities went from 10.0 to 8.3 µs per pawn, and simulate from 23.8 to 22.1.
 - Tried on paper and left out: skipping Walk on ticks where it would change nothing. A moving pawn's velocity is rounded to 1 mm/s after every tick, and Walk sets it back to the exact target speed, so a moving Walk always has real work and would almost never skip. Making it skip would mean Walk aiming at already-rounded speeds, a behaviour change for about 2 µs.
 - What's left in a fighting pawn's simulate (about 22 µs) is mostly `move_and_slide` (about 14), which can't be skipped for a moving pawn at full detail. Tier 1 takes it on: `docs/scaling/SCALING_SPEC.md`, sections 7 and 8.
+
+---
+
+## 16. The pawn redesign *(agreed with the owner 2026-11-23 and 2026-11-24, component by component; the decisions and how they were reached are in [REDESIGN_LOG.md](REDESIGN_LOG.md). Nothing built yet)*
+
+The pawn, its components and the AI, abilities and effects that run on them, rebuilt around data definitions, one shared step system, one modifier rule and a handful of shared services. This section is the design as decided; where it says **Today**, that's the code as it stands before the refactor.
+
+### 16.1 Principles
+
+- **The base is a toolkit:** a stable scaffold for the owner's games, so features stay general. It builds the machinery and its dials; how a game feels is tuned when there's a game. A working mechanism stays unless it blocks the design.
+- **A brain per pawn is the core,** plug and play, with as little infrastructure as possible. Optimizations that bypass it (batching many pawns' AI in C++) are opt-in extensions the base provides and builds well, never required.
+- **Designer-first:** settings in definitions, edited in the inspector, with variants (`based_on`); code where it's needed, data where it's cheap.
+- **Every timer is a tick deadline** (the tick it ends); remaining time is the deadline minus the current tick. **Version counters** say what changed (a number raised at each change; a reader copies again only when it differs; they only go up, so higher is newer, and a rollback can't confuse them). Deadlines say when; counters say whether.
+- **Settings are ticks at 60 a second** everywhere (AI, abilities, effects), converted once to the match's rate; a designer helper converts to and from seconds, and the inspector shows the seconds beside each value.
+- **Standard entry points:** no system reaches into another entity's components; it calls the entity's public entry points or sends an event, whether the caller is the entity itself or another.
+- **C++ and GDScript twins stay** as long as they don't misbehave or cost too much of the development cycle (the aim: the base's tier 1 or 2 with them intact).
+- **Names:** Unreal's terms first where one fits; "component", never "part"; short class names where clear.
+
+### 16.2 The pawn and its components
+
+**The body** (`Pawn`, a `CharacterBody3D`): the body never rotates (rotating it caused local-versus-global mistakes); **`facing`** is a normalized Vector3 (replacing `yaw`), used for looking and everything else, a flyer's full 3D direction included, and sent compactly (yaw and pitch, or an octahedral encoding). Only the visual turns. It keeps its tick order, its general flags and references to its components:
+- **Input phase:** the AI step, then the controller manager's input. **Simulate phase:** the status manager's due deadlines, abilities, gravity, one move (the crowd mover's, or `move_and_slide`). Hits are delivered after every pawn has simulated (16.7).
+- **Load step** (`tick_step` 1, 2 or 4, staggered by entity number, `ticks_elapsed`, `due_tick`): as today.
+- **Sleeping until the next deadline:** components report their next deadline and the pawn sets `due_tick` to the earliest, so cooldowns and buffs no longer keep a pawn awake every tick (today any running timer does).
+- **Freezing** (`set_frozen`), **teleporting** (`teleport`), the **rollback floor rebuild** (`rebuild_floor_on_rollback`): as today.
+- **Linger is general:** a despawned entity lingers, hidden, not ticking and not colliding, until everything that still needs it ends (projectiles, effects it applied, sounds, scheduled actions it booked); `linger_until(tick)` keeps the latest.
+- **One join point:** the pawn registers once with an **entity registry**, which tells the services subscribed to it (entity table, crowd mover, tick driver, significance manager), instead of reaching five services itself.
+
+**Its components (6):**
+
+| Component | What it does |
+|---|---|
+| `ControllerManager` | Who's in charge (this machine's player, a remote player, the AI, or nobody) and this tick's input, which rolls back (16.4) |
+| `AbilityManager` | Starts, runs and cancels abilities, from input actions and gameplay events (16.7) |
+| `StatusManager` | Stats and the effects acting on them, resistances, stat thresholds (16.8); today's `StatManager` and `EffectManager` merged |
+| `OwnedTags` | The tags the entity owns now, counted; on any entity, not only pawns |
+| The AI tree | `AIManager` with the thin `AIController` and the AI's sub-managers (16.5) |
+| `PawnStreamingSource` | Keeps the world loaded around the pawn while a player has it, or always with `keeps_world_loaded` (a hero); an off switch, `active`; joins the streaming group only while it might count; its load and nav distances handed to it from the pawn definition |
+
+Also in the scene, as today: `TickStateComponent`, `NetworkEntity`, `Visual`, the collision shape.
+
+**Gone:** `NavigationManager` (16.6), `AITargetSelector` (16.6), `AIDecisionModule` and `AIInputs` (16.5), the "hands" `AIController` that held orders, `HitInterceptor` and `EffectApplier` nodes, behaviour persistence, forcing.
+
+### 16.3 Building pawns: definitions, sets and spawning
+
+**The pawn initializer builds each component** in a fixed order, from the game's defaults plus a **`PawnDefinition`** per pawn kind. For each component it may give:
+
+| It gives | How the component is made | When |
+|---|---|---|
+| a premade scene | instantiated | a component a designer built and tuned in the editor |
+| a definition | the component's script made in code and handed the definition (`apply_definition`) | a component fully described by data |
+| nothing | the game's default, or the pawn scene's own | the component doesn't vary for this kind |
+
+- **Precedence:** the pawn scene's own node, then the pawn definition's, then the game's default, so a pawn built by hand in the editor still works. `fill_in_default_components` and `skip_default_components` as today (renamed); the `ai_brain` special case goes.
+- The same choice holds inside components: an ability or behaviour in a set is a scene or a definition. A definition names the script it makes; names come from the scene's root or the definition, never build order (names set the decider's order, random numbers and rollback paths). If spawning in code is slow, each pawn definition is built once and kept as a packed scene in memory.
+- **Settings: typed reads, generic writes.** Code reads `settings.<name>` directly; writes from outside (`ability.cooldown = x`) go through one generic `_set` (and `_get`) routed to the node's own variant, with the "no writes to a shared definition in play" error; `_get_property_list` can show a node's settings as overrides. No hand-written forwarders.
+- **Ids** come from the `DefinitionRegistry` (Godot resource UIDs, a small index on the wire), extended to every definition folder; premade scenes have UIDs too.
+
+**Resources:**
+
+| Resource | Holds | Examples |
+|---|---|---|
+| `PawnDefinition` (an archetype) | the body scene; per component a scene, a definition or nothing; tags given at spawn; the eye height | swordsman, archer |
+| `AbilitySet` | abilities, each a scene or a definition | movement, sword, bow |
+| `AIBehaviourDefinition` | a behaviour's settings, with variants; a subclass per kind with settings of its own | Chase, Attack |
+| `BehaviourSet` | behaviours, each a scene or a definition | melee fighter, ranged |
+| `Faction` | name, team, colours or looks, its spawn list | red goblins, the players' soldiers |
+| `SpawnList` | pawn definitions with weights or shares | three quarters swordsmen, a quarter archers |
+
+- **Combining sets:** behaviours are kept sorted by name, so set order doesn't change decisions; two entries with the same name: the later replaces the earlier (set order, then entry order).
+- **Granting and revoking, keyed by source:** `grant_set(set, source)` and `revoke_set(source)` on the ability manager and the behaviour manager; a unit's own sets come from its pawn definition, a pickup's from the pickup. **Behaviours can be swapped in play in tier 0** (the AI is server-only and never rolls back): changes wait for the pawn's next AI step, the name order is kept, C++ gets the new brain. **Ability grants in play are tier 1:** rolled-back granted lists, a scheduled tick, and the AI gaining a behaviour for the ability (named by the ability definition's `ai_behaviour`) if none of its behaviours carries the ability's tag.
+- **Spawning** takes a pawn definition or a spawn list, and a faction (one spawner makes a mixed squad); a spawn message says "pawn definition, faction, sets" by id. The faction sets team and look. Delays (respawn, body removal, `after_seconds`) are actions booked with the tick scheduler.
+
+### 16.4 Input and controllers
+
+- **The controller manager** holds this tick's input (move direction, look direction, held buttons, view lag; rolled back), checks a client's input on the server, and covers missing input. **Input is controller-agnostic and blocked by tags:** while the entity owns a tag matching `input_blocked_by` (`status.dead`, `status.stunned`, a cutscene's tag) it forwards none (Unreal GAS's blocking tags). With **no controller registered, input is cleared** (today the last input stays). UI input (menus, inventory, diagnostics, save and load) never goes through the pawn. `possessable` stays a flag.
+- **Controllers only give input,** through `take_input_command`, exactly alike: the `PlayerController` (devices, look modes, spectating; a small **step host** runs click-to-move as a `MoveTo` step on the owner's machine and sends the result as input) and the thin **`AIController`** (a child of the AI manager; registers with the controller manager; hands over the input command the running behaviour's steps write). A pawn without AI has no AI controller. Other drivers (cutscenes, scripted sequences, replay playback) register controllers of their own.
+- **Later:** camera handling moves out of the player controller into a player camera component (Unreal's `PlayerCameraManager`); input mapping contexts (switchable binding sets, Unreal's Enhanced Input) when a game needs them.
+
+### 16.5 The AI
+
+```
+AIManager                    the AI step, this AI's working state, the request inbox; pawn.ai
+├─ AIController              hands over the input the steps write
+├─ AISensingManager
+│  └─ SightSense, HearingSense, DamageSense, ...
+├─ AIMemory                  this AI's fact table, plus the sources it may read
+├─ AIStateManager
+│  └─ Idle, Alert, Combat, ...
+└─ AIBehaviourManager        owns its AIDecider
+   └─ Chase, Attack, KeepDistance, ...   (each with its steps)
+```
+
+- **The AI step, in separable phases** (so a batch runner can drive them for many pawns): apply the request inbox; senses send stimuli and memory applies them and forgets; a decision when due or woken; selectors and queries (the target among them); the state; the behaviour decision; the running behaviour's steps. The decision runs on the server only; on a client the AI manager runs the steps only. `while_possessed` decides how far it runs while a player has the pawn.
+- **The request inbox:** every request from outside the AI (add or remove a behaviour or modifier, a game's writes) is queued and applied at the start of the pawn's AI step, in the order asked. Waking a decision is `request_decision(priority, normal)`; stimuli carry an urgency that calls it (a grenade breaks `min_run_ticks`). **No forcing:** a taunt is an interaction label and threat in memory; a scripted state is a tag a state's conditions accept.
+- **Behaviours** (data on `AIBehaviourDefinition`s): tag gates (`tags`, `tag_requirements`, `enabled`), conditions and score curves over selectors (data, scored in C++), or **scripted** (their own `is_available()` or `score()` code; GDScript answers for that behaviour only, C++ scores the rest). `cooldown_ticks`, `min_run_ticks`, `interrupt_threshold`, `cannot_be_interrupted`, jitter as today. **No persistence:** a behaviour applies modifiers to itself (`modifier_on_start`, `modifier_on_end`); if flip-flopping shows up, a `switch_margin` on the AI manager (hysteresis). Behaviours run queries over memory and expose results as the fewest values and tags a decision needs (cached with deadlines when expensive), and choose which action to press (melee within reach, fire otherwise). Branching is decisions, not steps (Chase seen, and walking to the last known position, are two behaviours).
+- **Behaviour modifiers** (`AIBehaviourModifier`): the generic modifier (16.9) targeting behaviours by tag, plus `blocks`, `ongoing_requirements`, `granted_tags`, `wakes_decision`, a deadline, keyed by source. Statuses like confusion (jitter ×10) or berserk (threshold overridden) need no code of their own.
+- **States** pick one mutually exclusive tag (`ai.state.*`) by priority: each state is a priority, a tag and conditions over selectors (the same condition system as behaviours); Idle has none. A state may still use code.
+- **Deciding in C++:** each behaviour manager owns an **`AIDecider`** (today's `AIBatchDecider`) with one row; compiled brains are shared through a static cache keyed by the list of definition ids; facts reach it through version counters read before deciding; C++ or GDScript is a setting on the AI definition and a project setting; shadow mode, the stale-fact check and the all-GDScript switch live in diagnostics and tests. The **opt-in batch runner** holds many rows when a game turns it on.
+- **Roles and squad assignments are status effects** (16.8): tags plus an `AIBehaviourModifier`; a squad coordinator is game code using the inbox, tags, modifiers and memory sources.
+
+### 16.6 Memory, senses, selectors and queries
+
+- **Memory is a fact table** (a knowledge base): a row per entity the AI knows, keyed by entity number (pawns, structures, hazards, objectives, pickups); a column per property, as parallel arrays. Columns have a type (number, ticks, position, true or false, tags, entity), a default, an optional fade (worked out when read), and a **write rule** (add up to a cap, keep the larger, overwrite, add tags). Default columns come from the AI definition on the same machinery as a game's own; forgetting is a rule as data.
+- **Sources are flexible:** each AI's own table, plus the sources it's given (a squad's, the world's, a game's own), registered by name; map knowledge every AI has (cover markers, fixed stations, objectives) lives in a shared source, not copied. The AI's own facts (game-written values, `action_ready`, query results) live in its **`self` source**, a one-row table: the blackboard.
+- **Awareness and certainty are two numbers,** each 0 to 1 and fading: awareness (does it know the entity is around; drives states) and certainty (how sure of the details: true position, what it's doing; drives targeting and responses). **Observed tags** (the entity's tags as last sensed, such as `status.powered_up`) count above a certainty threshold. **Interaction labels** (`interaction.attacked_me`, `interaction.taunted_me`) with optional lifetimes.
+- **Senses send stimuli; memory applies them** (Unreal's AI perception split). A stimulus: the entity, awareness and certainty gains, a position and its precision, observed tags, interaction labels, an urgency. Strength = the source's strength × a distance falloff × the sense's multiplier. Senses are nodes, any number per pawn, each with a definition (range, cone, interval, weights, distance curves), adjusted by modifiers ("blinded": sight's certainty gain ×0); how a sense detects is code. **Polled** (sight, batched in C++ beside `AISensingJob`) or **event-driven** (hearing, damage). Humanoid defaults: sight gives high awareness and certainty; sound moderate awareness, low certainty.
+- **Tier 0: sight, hearing and a damage sense.** Moving pawns make footstep sounds at set tick intervals, louder and more often with move speed, heard by pawns in range (measured at crowd scale: the reason hearing is in tier 0). The damage sense turns hits into stimuli (the attacker, where it came from), replacing the AI manager's last-hit facts.
+- **What can be sensed:** an `AIStimulusSource` component on any entity, with its kind as tags and the senses that can detect it; pawns get one by default.
+- **Selectors** name what conditions, steps and queries read: `<source>:<what>/<column>` (`target/certainty`, `max/awareness`, `count/hazard.grenade`, `nearest/cover/distance`, `squad:target/threat`, `self/action_ready/primary`), backed by a few operators (a row, max, count, nearest with a tag, a computed distance), each written once in C++ and once in GDScript. Each brain lists the selectors it reads; they're worked out once per decision. Replaces `AIInputs`.
+- **Queries** score memory rows with weighted terms and write their result to a `self` key: an entity, entities, a location or locations (Unreal's blackboard keys set by EQS queries). **The current target is a query** (awareness, nearness, threat, game terms, ties by entity number, a switch margin for the current target), replacing `AITargetSelector`. Attack slots and attack tokens are examples of what a game might keep in a shared source.
+- **Cost:** costs follow the columns touched, not how many exist; 100 number columns are about 800 bytes a row. Packed arrays grouped by type, never a dictionary per row. Memory isn't in the state store.
+
+### 16.7 Steps, abilities and hits
+
+**One step system, two users.** A `Step` base and a `StepTimeline` (today's ability timeline, lifted out of `AbilityBase`): entries start at a tick, after another entry starts or ends (with a delay), or on a condition; steps end on a duration or when they say done; several run at once; the timeline's state rolls back. **Each ability and each behaviour owns its own timeline;** there's no shared per-pawn timeline. `AbilityStep` extends `Step` with its interrupt threshold (cancel windows) and ending when its action is released.
+- **Behaviour steps** are child nodes of behaviours; a running behaviour's timeline runs until the behaviour is overruled or completes, and its steps write the AI controller's input (one writer per channel: move, look, buttons; the later step on the timeline wins an overlap). **They run on every machine,** like ability steps: which behaviour runs and its timeline's state are shared, rolled-back state, so the **order stream** sends behaviour and step starts with their values (positions, entity numbers, tags; never references into memory), and its keyframe is the timeline state.
+- **The step library:** `MoveTo`, `Follow`, `KeepAwayFrom`, `StopMoving`; `LookAt`, `LookInDirection`, `StopLooking`; `Press`, `Hold`, `Release`; `Wait`, `WaitUntil`, `Repeat`, `RunQuery`, `GrantTag`; background steps (Unreal's behaviour-tree services) that run alongside ("press dash when the target is 4 to 8 m away"). Values are selectors. Bespoke steps are code nodes. Today's behaviours become definitions built from library steps where they can.
+- **Movement:** `NavServer` (C++) finds paths, with its queue and per-tick budget. A **path follower** class, held by a `MoveStep` base that `MoveTo`, `Follow` and `KeepAwayFrom` extend, keeps the waypoints, gives the direction to the next, presses a link's action, holds its deadlines, and rolls back with its step. Paths are refreshed from `NavServer` on a deadline, and at once when the pawn is off its path past a threshold (knockback, push, teleport), the goal moved past a threshold, or a link timed out. `LookAt` aims from the body's single **eye height** (sight looks from it; a ranged muzzle is an offset from it). Later: multimodal movement (walking and flying) needs more than one path domain.
+
+**Abilities** (`AbilityManager`, `AbilityBase`):
+- Starting, cancelling, press priority, combos and rollback as today. **Interrupts as today** (the dials exist; feel is tuned in a game): `category` and `extra_categories`, `locks_out`, `interrupt_priority` against `interrupt_threshold`, `cancelled_by`, per-step thresholds, and modifiers adding to priority and threshold. Hyper armour is a higher threshold; Death (1000) cancels everything.
+- **Abilities start from input actions or gameplay events** (`event.hit.taken`, `event.health.depleted`), through the same start rules; an event carries a payload (the hit, the reaction's start values).
+- **Charges belong to each ability** (spending, restore deadlines, refilling on a revive event), exposed as a tag (`status.has_ammo.ranged`) and an observable count with a version counter.
+- Which effects apply when lives in definitions: `HitDefinition.effects` (to the target on a hit), `AbilityDefinition.start_effects` (to the pawn itself on start).
+- The interrupt table's text dump lives in diagnostics.
+
+**Hits:**
+1. The attacker's step books the hit with the **tick scheduler**: delivered after simulate, ordered by attacker, target and queue order.
+2. On delivery the target's **hit ability** runs, instantly, in the hit ability's own category, which no ability locks out. Its start requirements decide whether the hit counts at all: **ignored** with `status.hit_immune` (set pieces, environments, entities that react only to particular abilities).
+3. **Blocked** hits are received (the AI notes the attack, records see it) but their payload stops: parrying (a status effect granting `status.parrying`; the parry's cone and reply come from that effect; it reflects the hit to the attacker, and a reply can itself be parried), `status.invulnerable`, `status.dead`.
+4. Otherwise the status manager applies the hit's effects, and events go out: the reaction named by the hit's definition, with its start values (a strong blow's long knockback, a quick strike's flinch), and Death when Health crosses 0. Resolution runs on the server; reactions are ordinary abilities on every machine.
+
+### 16.8 Status: stats and effects
+
+- **Stats** (nodes for now): **base** (the designer's number), **max** (base with modifiers; `value` on a stat that doesn't run down), **current** (for stats that run down, such as Health: rolled back, changed only on the server). A version counter. With the entity table in use, a stat with no column asks for one when it initializes.
+- **Every change to a current value goes through `change_current(stat, amount, source)`,** which checks the stat's thresholds (data: Health at or below 0 sends `event.health.depleted`, at or below 25% `event.health.low`) and sends an event at once when a change crosses one, carrying its source. A value restored by a snapshot or rollback fires nothing.
+- **Effects** (resources) hold two lists, by timing: **modifiers**, held while the effect lasts (`StatModifier`, `ResistanceModifier`, `AbilityModifier`, `AIBehaviourModifier`), and **effectors**, fired on application and at each period, on the server (`StatChangeEffector` for damage and heals, `KnockbackEffector`, `LifestealEffector`). On application the modifiers take hold first, then the effectors fire.
+- **Active effects:** a compact rolled-back list, each entry the effect's id, the tick it ends, the tick of its next period, stacks and its source's entity number; **no countdowns**, nothing done between deadlines; a "lasts until removed" duration. A harmful effect's periodic tick is blocked by the same tags as a hit. Stacking and removal by tag as today.
+- **Resistances:** base values from the status manager's definition, resistance modifiers on top.
+- **Damage taken** goes out as an event with its source (how the AI notes threat).
+
+### 16.9 Shared machinery
+
+- **One entity number** for every entity (the network id, or a hash of the name): AI, hits, effect sources, ties, staggers. Replaces `number_of`, `HitInfo.key_of` and instance-id fallbacks.
+- **The entity registry and the entity table:** entities join once; `PawnTable` becomes **`EntityTable`** (`SharedEntityTable`), keyed by entity number, holding any entity, with columns added, switched on and off at any time; `team` and `dead` become columns. **One column architecture** for the entity table and memory's fact tables, and the same column types and registration for the state store (which fixes an entity's columns at creation: a column granted in play is a tier 1 gap).
+- **One modifier shape and rule** for stats, abilities and behaviours: a target (a stat by name, abilities by tag, behaviours by tag), a number (any number setting), multiply, add and an optional override (the last added wins). **The order is the designer's:** a game-wide default in the game mode, overridable per stat or target; the base default is multiply, then add (`base × multiplies + adds`), which curbs stat inflation; multiplies combine.
+- **The tick scheduler** (netcode spec 19.4): actions booked for a tick and a point in it, in a fixed order: hit delivery, spawns and despawns, respawn and body-removal delays, possession hand-offs, terrain edits.
+- **One deterministic random service:** a stateless, counter-based generator (a hash of seed, key, tick and salt), a static class with no autoload (`unit`, `signed`, `range`, `int_range`, `pick`), the match seed from the game mode, twinned in C++. Debug tools meant to be random and terrain noise stay apart.
+- **Tags on any entity;** events are tags with payloads.
+- **The significance manager** (Unreal's idea): AI activation (freezing where the ground isn't loaded, stepping by distance) and the load ladder's overload rule in one game mode module, out of the tick driver. The ladder tries a lower step after comfortable load and counts overrunning frames (built 2026-11-24, singletons changelog).
+
+### 16.10 Build order (tier 0)
+
+Each step keeps behaviour the same where it isn't meant to change, passes the affected suites plus the arena smoke tests, and is measured at a size that stays on load step 1 (`--size=25` on the owner's machine) headless and windowed, reporting the ladder step.
+
+1. **Foundations:** one entity number; the deterministic random service; ticks at 60 everywhere with the seconds helper; the tick scheduler (v0: hit delivery and delays).
+2. **The step core:** `Step` and `StepTimeline` lifted out of `AbilityBase` (ability tests unchanged); generic `_set` and `_get` settings for abilities.
+3. **The status manager:** the merge; deadlines; modifiers and effectors; one modifier rule with the designer's order; `change_current` thresholds and events; effects lists into definitions.
+4. **Hits and reactions:** the hit ability through the scheduler; blocked versus ignored; parry and invulnerability as tag-granting effects; abilities started by events with payloads; charges on abilities. `HitInterceptor`, `EffectApplier` and the static hit queue go.
+5. **Input and controllers:** `input_blocked_by`; input cleared with no controller; the AI tree (`AIManager` root, thin `AIController`); the player controller's step host; `NavServer` plus the path follower in `MoveStep`; `NavigationManager` goes.
+6. **AI decisions:** the decision module parted out (`AIDecider` per behaviour manager, the brain cache, version counters, scripted behaviours mixed with data ones); behaviour definitions; generic behaviour modifiers with on start and on end; persistence and forcing go; states as conditions; the request inbox.
+7. **Behaviour steps:** the step library; today's behaviours rebuilt from steps; the order stream's hooks on the behaviour timeline.
+8. **Memory and senses:** fact tables and sources; selectors (`AIInputs` goes); stimuli; the sight sense out of memory; the damage sense; hearing with footsteps; `AIStimulusSource`; the target as a query (`AITargetSelector` goes).
+9. **Entities:** `EntityTable` and the shared column architecture; the entity registry; owned tags on any entity; `team` and `dead` columns; `facing`; general linger; sleeping until the next deadline; the significance manager.
+10. **Units:** `PawnDefinition` in the pawn initializer; sets with grant and revoke; behaviours swapped in play; factions and spawn lists; spawning by definition with delays on the scheduler.
+11. **Content and tests:** swordsman and archer, four factions, the four-faction battle on one body scene; the eight role scenes go. Tests: pawns from definitions match the scenes they replace; precedence; grant and revoke by source; the archer switch, determinism and order-only replay checks; spawn cost.
+
+### 16.11 Later
+
+- **Tier 1:** ability sets granted in play; a column granted to a live entity in the state store. The order stream itself is netcode work (netcode spec 19.3), its keyframe the behaviour timeline state.
+- **The stats pass:** stats as state store columns instead of nodes; whether max becomes its own stat.
+- **Scoring:** more curve shapes (quadratic, logistic, step), score terms that add or subtract from an input, target scoring with game terms, a place for a game to plug in its own inputs.
+- Multimodal movement; input mapping contexts; the player camera component and controller tuning; a squad layer; attack slots and tokens; tuning the batch runner for 1000 pawns; relevancy (netcode spec 19.5).
