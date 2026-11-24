@@ -24,7 +24,7 @@ Who drives a pawn: a player or the AI makes one input command a tick, and the pa
 - **`InputCommand`**: one tick's input as plain values: a move direction, a look, and held actions as bits. Nothing else carries what a pawn wants between ticks.
 - **`InputActions`**: action names (`jump`, `sprint`...) to bits, from the list in `resources/input_actions.tres`, the same on every machine.
 - **`ControllerBase`**: what every controller extends. Its one job is `take_input_command(tick)`.
-- **`ControllerManager`**: a part on every pawn. Picks who's in charge (this machine's player, else nobody if a remote player has it, else the AI), copies their command into the pawn's input, tells presses from holds, and holds whether a player has the pawn. On the server it cleans a client's input and covers missing input.
+- **`ControllerManager`**: a part on every pawn. Picks who's in charge (this machine's player, else nobody if a remote player has it, else the AI), copies their command into the pawn's input, tells presses from holds, and holds whether a player has the pawn. Input is blocked by tags: while the pawn owns a tag `input_blocked_by` matches (`status.dead` by default) its input is cleared, whoever is in charge; with nobody in charge (no controller here, no player elsewhere) it's cleared too, rather than the last input repeating (pawn spec 16.4). On the server it cleans a client's input and covers missing input.
 - **`AIController`**: the AI's hands, a child of the ControllerManager. The AI's behaviours tell it to walk somewhere, press or hold an action, or look at a point, and it builds the command. These calls are the AI's **orders**: `AIController.order_listener` sees each one, and the same orders at the same point of the same ticks give the same input, which is what lets a recorded order stream rebuild a battle (netcode spec 19.10).
 
 ## How to use it
@@ -40,7 +40,7 @@ ai.move_to(target)     # false if there's no way there
 ai.press(&"attack")    # one press, this tick
 ai.follow(target, 1.2) # keeps closing in on target until told otherwise
 ```
-`follow` and `keep_distance` are persistent orders: given once, carried out at every input from where the target really is, which every machine knows, so an order stream sends one rather than one a tick (netcode spec 19.10). A move order ends them. A dead pawn's AIController takes no orders (they're ignored, and the order listener never hears them), and lets go of what it was told on its pawn's dead ticks (`let_go`), so it comes back from a revive with no orders. While a player has the pawn but the AI keeps deciding, `move_to` only remembers the point (and returns true), so it can't overwrite the player's path.
+`follow` and `keep_distance` are persistent orders: given once, carried out at every input from where the target really is, which every machine knows, so an order stream sends one rather than one a tick (netcode spec 19.10). A move order ends them. A dead pawn's AIController takes no orders (they're ignored, and the order listener never hears them), and lets go of what it was told as its pawn dies (`let_go`, on `died`), so it comes back from a revive with no orders. While a player has the pawn but the AI keeps deciding, `move_to` only remembers the point (and returns true), so it can't overwrite the player's path.
 
 **Make a pawn players can't take.** Untick `possessable` on its ControllerManager. If the part comes from the defaults, add `parts/ControllerManager.tscn` to the pawn scene first.
 
@@ -51,6 +51,7 @@ ai.follow(target, 1.2) # keeps closing in on target until told otherwise
 | Setting | Where | Default | What it does |
 |---|---|---|---|
 | `possessable` | `ControllerManager` | on | Whether a player may take this pawn |
+| `input_blocked_by` | `ControllerManager` | any of `status.dead` | Owned tags that clear the pawn's input (a stun, a cutscene) |
 | `missing_input_hold_ticks` | `ControllerManager` | -1 (NetworkSession's, 3) | On the server, how long a client's last input repeats when one goes missing |
 | `missing_input_fade_ticks` | `ControllerManager` | -1 (NetworkSession's, 6) | Then how long its direction takes to fade out |
 
@@ -58,7 +59,7 @@ ai.follow(target, 1.2) # keeps closing in on target until told otherwise
 
 - **While the AI isn't in charge** (a player has the pawn, but the AI keeps deciding: `AIContextComponent.while_possessed` FULL), `AIController.move_to()` only remembers the point and returns true, so it can't overwrite the player's path. The walk starts when the AI is in charge again. `stop()`, `move_in_direction()` and `release_all()` forget it. `is_following_order()` says whether its own last `move_to` is still under way.
 - **The input rolls back.** The pawn's `TickStateComponent` lists `ControllerManager:move_input` and the others as input, and `previous_held_actions` as state. The ControllerManager is its NetworkEntity's `input_owner`, so the server's checks on a client's input (`sanitize_network_input`, `_network_input_missing`) live here.
-- **Odd cases** (`tests/controller_manager_selftest.gd`): a parent that isn't a Pawn warns and nobody is in charge; no AIController child leaves an unpossessed pawn with nobody in charge; a freed player controller is ignored; control changing hands drops the pawn's path. A pawn without a ControllerManager has no input and can't be possessed.
+- **Odd cases** (`tests/controller_manager_selftest.gd`): a parent that isn't a Pawn warns and nobody is in charge; no AIController child leaves an unpossessed pawn with nobody in charge, and its input cleared; a tag `input_blocked_by` matches clears the input; a freed player controller is ignored; control changing hands drops the pawn's path. A pawn without a ControllerManager has no input and can't be possessed.
 - **Unlisted input actions** (`tests/input_actions_selftest.gd`): with no list file the list starts empty and each action is added as first seen, with a warning. Offline, an unlisted action is added at the end with a one-time warning; in a network session it gets no bit (never held), because machines adding names in a different order would disagree. A blank name has no bit; past 64 actions the extras get none.
 
 ## Tests

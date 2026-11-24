@@ -4,7 +4,9 @@
 ## A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child. This machine's player controller is in
 ## charge when it has the pawn; nobody is when a player elsewhere has it (the input arrives over the network); otherwise the AI is, so
 ## it takes over the moment a player lets go. The pawn calls [method tick_input] once per tick, which asks the controller in charge
-## and writes its command into the input. Controllers never write to the pawn themselves.
+## and writes its command into the input. Controllers never write to the pawn themselves. Input is blocked by tags: while the pawn
+## owns a tag [member input_blocked_by] matches (status.dead by default; a stun, a cutscene's tag) it's cleared, whoever is in charge,
+## and with nobody in charge here it's cleared too (pawn spec 16.4).
 ## [br]
 ## The input rolls back (the pawn's TickStateComponent lists it, with [member previous_held_actions] as state). The server's checks on
 ## a client's input are here too ([method sanitize_network_input]), as the NetworkEntity's input_owner.
@@ -12,7 +14,7 @@
 ## pawn.controller_manager.get_controller_in_charge()   # a ControllerBase, or null
 ## pawn.controller_manager.was_action_pressed(&"jump")  # held this tick, not last tick
 ## [/codeblock]
-## Only PlayerController calls [method attach_player] and [method detach_player]. Design: pawn spec 6.4, 8.17.
+## Only PlayerController calls [method attach_player] and [method detach_player]. Design: pawn spec 6.4, 8.17, 16.4.
 class_name ControllerManager
 extends Node
 
@@ -26,6 +28,9 @@ signal possession_changed(pawn: Pawn, has_player: bool)
 ## Whether a player may take control of this pawn. Turn it off on pawns players should never control. To change it where the
 ## ControllerManager comes from the game's defaults, add parts/ControllerManager.tscn to the pawn scene first.
 @export var possessable := true
+## While the pawn owns tags this matches, its input is cleared (nothing held, no direction; the look stays), whoever is in charge: the
+## pattern of Unreal GAS's blocking tags. By default any of status.dead; add status.stunned or a cutscene's tag. Empty: never blocked.
+@export var input_blocked_by: TagQuery = TagQuery.make([], [Tags.STATUS.DEAD], [])
 
 ## On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's
 ## setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own.
@@ -74,13 +79,6 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
-	# The AI's hands let go when the pawn dies.
-	var abilities := pawn.ability_manager if pawn else null
-	if abilities:
-		abilities.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void:
-			var hands := ai_controller as AIController
-			if hands:
-				hands.release_all())
 	for child in get_children():
 		if child is ControllerBase:
 			ai_controller = child
@@ -116,14 +114,27 @@ func take_input_command(tick: int) -> InputCommand:
 # --- The input ---
 
 
-## The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input.
+## The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. While
+## the input is blocked ([member input_blocked_by]) it's cleared instead, on every machine; with nobody in charge (no controller here,
+## and no player elsewhere) it's cleared too.
 ## A script that writes input later in the same phase wins.
 func tick_input(tick: int) -> void:
+	if is_input_blocked():
+		clear_input()
+		return
 	if not decides_own_input():
 		return
 	var command := take_input_command(tick)
 	if command:
 		apply_input(command)
+	elif not _has_player:
+		clear_input() # nobody in charge: the last input doesn't repeat (a player elsewhere sends theirs over the network)
+
+
+## True while the pawn owns a tag [member input_blocked_by] matches, such as status.dead.
+func is_input_blocked() -> bool:
+	return input_blocked_by != null and not input_blocked_by.is_empty() and pawn != null and pawn.owned_tags != null \
+		and input_blocked_by.matches(pawn.owned_tags)
 
 
 ## Writes a command into this tick's input.
@@ -146,17 +157,11 @@ func was_action_pressed(action: StringName) -> bool:
 	return held_actions & bit != 0 and previous_held_actions & bit == 0
 
 
-## Nothing pressed, no direction. Keeps where it looks. The pawn calls this when it dies, or when nobody drives it any more.
+## Nothing pressed, no direction. Keeps where it looks. Done while the input is blocked, with nobody in charge, and when a player lets
+## go.
 func clear_input() -> void:
 	move_input = Vector3.ZERO
 	held_actions = 0
-
-
-## The pawn calls this on each tick it's dead: its AIController lets go of every order it was given ([method AIController.let_go]).
-func let_go_of_ai_orders() -> void:
-	var hands := ai_controller as AIController
-	if hands:
-		hands.let_go()
 
 
 ## Once this tick's input has been read: what was held, so the next tick can tell a press from a hold; and a tick with real input

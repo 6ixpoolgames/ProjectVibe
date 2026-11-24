@@ -25,7 +25,7 @@ ai.press(&"jump")                        # held for one tick, so the pawn sees o
 ai.follow(target, 1.2)                   # a persistent order: closes in on target until a move order (netcode spec 19.10)
 ```
 
-A dead pawn's controller takes no orders and lets go of everything; the controllers README has the rest. Design: pawn spec 6.3, 10.3.
+A dead pawn's controller takes no orders, and lets go of everything as the pawn dies; the controllers README has the rest. Design: pawn spec 6.3, 10.3.
 
 ### Settings and properties
 
@@ -87,7 +87,7 @@ How to make one: extend this, and override `take_input_command()`.
 
 Picks whose input a pawn follows, and holds that input and whether a player has the pawn.
 
-A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child. This machine's player controller is in charge when it has the pawn; nobody is when a player elsewhere has it (the input arrives over the network); otherwise the AI is, so it takes over the moment a player lets go. The pawn calls `tick_input()` once per tick, which asks the controller in charge and writes its command into the input. Controllers never write to the pawn themselves.
+A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child. This machine's player controller is in charge when it has the pawn; nobody is when a player elsewhere has it (the input arrives over the network); otherwise the AI is, so it takes over the moment a player lets go. The pawn calls `tick_input()` once per tick, which asks the controller in charge and writes its command into the input. Controllers never write to the pawn themselves. Input is blocked by tags: while the pawn owns a tag `input_blocked_by` matches (status.dead by default; a stun, a cutscene's tag) it's cleared, whoever is in charge, and with nobody in charge here it's cleared too (pawn spec 16.4).
 
 The input rolls back (the pawn's TickStateComponent lists it, with `previous_held_actions` as state). The server's checks on a client's input are here too (`sanitize_network_input()`), as the NetworkEntity's input_owner.
 
@@ -96,11 +96,12 @@ pawn.controller_manager.get_controller_in_charge()   # a ControllerBase, or null
 pawn.controller_manager.was_action_pressed(&"jump")  # held this tick, not last tick
 ```
 
-Only PlayerController calls `attach_player()` and `detach_player()`. Design: pawn spec 6.4, 8.17.
+Only PlayerController calls `attach_player()` and `detach_player()`. Design: pawn spec 6.4, 8.17, 16.4.
 
 ### Settings and properties
 
 - `possessable: bool` = `true`: Whether a player may take control of this pawn. Turn it off on pawns players should never control. To change it where the ControllerManager comes from the game's defaults, add parts/ControllerManager.tscn to the pawn scene first.
+- `input_blocked_by: TagQuery` = `<unknown>`: While the pawn owns tags this matches, its input is cleared (nothing held, no direction; the look stays), whoever is in charge: the pattern of Unreal GAS's blocking tags. By default any of status.dead; add status.stunned or a cutscene's tag. Empty: never blocked.
 - `missing_input_hold_ticks: int` = `-1`: On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own.
 - `missing_input_fade_ticks: int` = `-1`: Then its direction fades to nothing over this many ticks. -1 uses NetworkSession's setting.
 - `move_input: Vector3` = `Vector3(0, 0, 0)`: the direction to go, in world space, up to length 1
@@ -122,12 +123,12 @@ Only PlayerController calls `attach_player()` and `detach_player()`. Design: paw
 
 - `get_controller_in_charge() -> ControllerBase`: Who the pawn follows right now, or null. See the rule in the class description.
 - `take_input_command(tick: int) -> InputCommand`: This tick's input from the controller in charge, or null when nobody here is.
-- `tick_input(tick: int) -> void`: The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. A script that writes input later in the same phase wins.
+- `tick_input(tick: int) -> void`: The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. While the input is blocked (`input_blocked_by`) it's cleared instead, on every machine; with nobody in charge (no controller here, and no player elsewhere) it's cleared too. A script that writes input later in the same phase wins.
+- `is_input_blocked() -> bool`: True while the pawn owns a tag `input_blocked_by` matches, such as status.dead.
 - `apply_input(command: InputCommand) -> void`: Writes a command into this tick's input.
 - `is_action_held(action: StringName) -> bool`: True if a named action is held this tick.
 - `was_action_pressed(action: StringName) -> bool`: True if a named action is held this tick but wasn't last tick: a press.
-- `clear_input() -> void`: Nothing pressed, no direction. Keeps where it looks. The pawn calls this when it dies, or when nobody drives it any more.
-- `let_go_of_ai_orders() -> void`: The pawn calls this on each tick it's dead: its AIController lets go of every order it was given (`AIController.let_go()`).
+- `clear_input() -> void`: Nothing pressed, no direction. Keeps where it looks. Done while the input is blocked, with nobody in charge, and when a player lets go.
 - `finish_tick() -> void`: Once this tick's input has been read: what was held, so the next tick can tell a press from a hold; and a tick with real input ends a run of missing ones. The pawn calls this in its simulate step, after its abilities, before it moves.
 - `decides_own_input() -> bool`: True where this pawn's input is decided: offline, its owner's machine, or the server for a pawn nobody owns. False on the server for a client's pawn, whose input arrives over the network, and on a client for anyone else's pawn.
 - `has_player() -> bool`: True if a player controls this pawn. On a client, that's any player, not only this machine's.

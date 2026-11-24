@@ -10,7 +10,7 @@
 ## ai.press(&"jump")                        # held for one tick, so the pawn sees one press
 ## ai.follow(target, 1.2)                   # a persistent order: closes in on target until a move order (netcode spec 19.10)
 ## [/codeblock]
-## A dead pawn's controller takes no orders and lets go of everything; the controllers README has the rest. Design: pawn spec 6.3, 10.3.
+## A dead pawn's controller takes no orders, and lets go of everything as the pawn dies; the controllers README has the rest. Design: pawn spec 6.3, 10.3.
 class_name AIController
 extends ControllerBase
 
@@ -48,6 +48,14 @@ var _follow_goal := Vector3.ZERO
 var _follow_path_tick := -1000000
 var _follow_standing := false
 var _let_go := false # it let go of everything (its pawn died) and has taken no order since
+
+
+func _ready() -> void:
+	# As its pawn dies it lets go of every order, once, so it comes back from a revive holding nothing. Its parent is the pawn's
+	# ControllerManager; the pawn's parts have all entered the tree by now.
+	var body := get_parent().get_parent() as Pawn if get_parent() else null
+	if body and body.ability_manager:
+		body.ability_manager.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: let_go())
 
 
 ## Closes in on a node and stops stop_distance away (flat), looking at it offset above its origin; walks again once it's further than

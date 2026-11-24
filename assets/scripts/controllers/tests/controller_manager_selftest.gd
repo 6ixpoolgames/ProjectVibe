@@ -140,7 +140,16 @@ func _test_odd_cases() -> void:
 	_check(manager.get_controller_in_charge() == null, "no AI controller: nobody is in charge of an unpossessed pawn")
 	pawn.controller_manager.apply_input(InputCommand.make(Vector3(1, 0, 0)))
 	await _ticks(1)
-	_check(pawn.controller_manager.move_input.is_equal_approx(Vector3(1, 0, 0)), "and its input stays as it is")
+	# Claude 2026-11-25 (pawn spec 16.4): cleared now; before, the last input stayed.
+	_check(pawn.controller_manager.move_input == Vector3.ZERO, "and its input is cleared, not left as it was")
+	# Blocked by a tag of the game's choosing: here status.hit_immune stands in for a stun.
+	manager.input_blocked_by = TagQuery.make([], [Tags.STATUS.HIT_IMMUNE], [])
+	pawn.owned_tags.add(Tags.STATUS.HIT_IMMUNE)
+	manager.apply_input(InputCommand.make(Vector3(1, 0, 0), [&"jump"]))
+	manager.tick_input(TickDriver.tick)
+	_check(manager.is_input_blocked() and manager.move_input == Vector3.ZERO and manager.held_actions == 0, "while the pawn owns a tag input_blocked_by matches, its input is cleared")
+	pawn.owned_tags.remove(Tags.STATUS.HIT_IMMUNE)
+	_check(not manager.is_input_blocked(), "and not once the tag goes")
 	# A player's controller freed while attached.
 	var player := FixedController.new()
 	add_child(player)
@@ -192,13 +201,15 @@ func _test_dead_pawn_takes_no_orders() -> void:
 	target.free()
 	await _ticks(2)
 	_check(ai.get_followed_node() == null, "its node gone, the persistent order ends")
-	pawn.dead = true # as the Death ability sets it
+	# Claude 2026-11-25 (pawn spec 16.4): dies through Death (was pawn.dead set by hand), so died tells the controller to let go.
+	pawn.ability_manager.health_ran_out(null)
 	heard.clear()
 	ai.press(&"primary")
 	ai.move_in_direction(Vector3(1, 0, 0))
-	_check(heard.is_empty(), "a dead pawn's controller takes no orders, so none are heard")
-	await _ticks(2) # the pawn's dead ticks have its controller let go
-	pawn.dead = false
+	_check(pawn.is_dead() and heard.is_empty(), "a dead pawn's controller takes no orders, so none are heard")
+	_check(pawn.controller_manager.is_input_blocked(), "and its input is blocked (it owns status.dead)")
+	await _ticks(3) # Health is full, so Death ends on its next tick
+	_check(not pawn.is_dead() and not pawn.controller_manager.is_input_blocked(), "(alive again; input no longer blocked)")
 	var command := ai.take_input_command(TickDriver.tick)
 	_check(command.held_actions == 0 and command.move == Vector3.ZERO, "and it comes back from death holding nothing it was told before (sprint)")
 	ai.hold(&"sprint", true)

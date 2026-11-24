@@ -337,14 +337,9 @@ func _tick_input(_dt: float, tick: int) -> void:
 	_prepare_run(tick)
 	if not _runs_this_tick:
 		return
-	if is_dead():
-		if controller_manager:
-			controller_manager.clear_input() # a dead pawn ignores its controllers and its AI
-			controller_manager.let_go_of_ai_orders() # and the AI's hands forget theirs, so it comes back from a revive with none
-		return
 	# The AI first (step 1 of pawn spec section 4), before the controller in charge is asked for input. Its ordered step is in its
-	# core part, AIContextComponent.run_ai.
-	if ai_context:
+	# core part, AIContextComponent.run_ai. A dead pawn's AI doesn't run; its input is blocked by status.dead (ControllerManager).
+	if ai_context and not is_dead():
 		var ai_started := PerfScopes.begin() # timed for diagnostics (PerfScopes)
 		ai_context.run_ai(tick)
 		PerfScopes.end(&"ai", ai_started)

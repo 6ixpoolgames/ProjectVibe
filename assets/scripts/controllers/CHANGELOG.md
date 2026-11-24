@@ -15,6 +15,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move the test hooks out of `InputActions` | `reset()`, `use_list()` in `InputActions.gd` | Test hooks in a shipping class; the owner's rule keeps test code in `tests/` | S |
 | Share the missing-input defaults | `_network_input_missing()` in `ControllerManager.gd` | 3 and 6 copy `NetworkSession`'s defaults by hand, so the two can drift apart | S |
 
+## 2026-11-25
+
+- **Input blocked by tags; cleared with nobody in charge** (pawn spec 16.4, 16.10 step 5a). `ControllerManager.input_blocked_by` (a `TagQuery`, any of `status.dead` by default) clears the input while the pawn owns a matching tag, on every machine, whoever is in charge, as Unreal GAS's blocking tags do. It replaces the three death paths: the manager's `died` hook (`release_all`, which did nothing on a dead pawn), `ControllerManager.let_go_of_ai_orders` and the pawn clearing input on its dead ticks. The AIController lets go of its orders once, as its pawn dies. With nobody in charge (no controller here and no player elsewhere) the input is cleared each tick; before, the last input stayed. Test: `controller_manager_selftest`.
+
 ## 2026-11-23
 
 - **Persistent orders and dead pawns** (netcode spec 19.10): `AIController.follow` and `keep_distance` are given once and carried out at every input from the followed node's real position (standing within a band, repathing on age or distance); a move order ends them, a freed node too. A dead pawn's controller takes no orders (`_note` refuses them, so the order listener never hears them) and lets go of everything on its pawn's dead ticks (`AIController.let_go`, from `Pawn._tick_input` through `ControllerManager.let_go_of_ai_orders`), so a revived pawn has no orders left from before. Test: `controller_manager_selftest`.

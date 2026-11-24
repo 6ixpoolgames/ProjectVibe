@@ -15,6 +15,10 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 |---|---|---|---|
 | A test-only read | `VisualSmoother.get_correction_offset` | Only `netcode/tests/net_test_node` calls it; the test can read `VisualPlacer.current.placement.get_correction(slot)` itself | S |
 
+## 2026-11-25
+
+- **Dead ticks** (pawn spec 16.4): `_tick_input` no longer clears a dead pawn's input or has its AI let go; it skips only the AI. The controller manager blocks the input (`input_blocked_by`, `status.dead`).
+
 ## 2026-11-24
 
 - **One status component and gameplay events** (the pawn redesign's build step 3a, pawn spec 16.8): `stat_manager` and `effect_manager` are one `status_manager`. `send_event(tag, data)` and `gameplay_event_received` carry gameplay events (Unreal's "send gameplay event to actor"; the owner's call).
