@@ -10,12 +10,12 @@ extends EffectPart
 ## The share of the damage dealt that comes back, such as 0.3 for 30%.
 @export_range(0.0, 1.0, 0.01, "or_greater") var fraction := 0.3
 ## The stat the source gets it back in.
-@export var stat: StringName = StatManager.HEALTH
+@export var stat: StringName = StatusManager.HEALTH
 
 
 func apply_once(application: EffectApplication) -> void:
 	var source := application.source
-	if not is_instance_valid(source) or source.is_dead() or source.stat_manager == null:
+	if not is_instance_valid(source) or source.is_dead() or source.status_manager == null:
 		return
 	if application.damage_dealt > 0.0:
-		source.stat_manager.change_current(stat, application.damage_dealt * fraction)
+		source.status_manager.change_current(stat, application.damage_dealt * fraction, source)

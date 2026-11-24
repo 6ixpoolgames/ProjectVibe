@@ -59,7 +59,7 @@ func _test_hit() -> void:
 		"it's the shooter's, on its team, flying at 30 m/s along its look")
 	await _ticks(30)
 	_check(hits.size() == 1 and hits[0].ability == ranged, "it hits the target once (%d hits), carrying the ability" % hits.size())
-	_check_equal(target.stat_manager.get_health(), 85.0, "bolt_hit takes 15 Health")
+	_check_equal(target.status_manager.get_health(), 85.0, "bolt_hit takes 15 Health")
 	_check(_bolts().is_empty(), "and the bolt is gone")
 	await _free(shooter, target)
 
@@ -99,7 +99,7 @@ func _test_wall() -> void:
 	await _ticks(10)
 	shooter.ability_manager.start_ability(_ranged_of(shooter))
 	await _ticks(50)
-	_check_equal(target.stat_manager.get_health(), 100.0, "a wall stops the bolt: the target behind it is untouched")
+	_check_equal(target.status_manager.get_health(), 100.0, "a wall stops the bolt: the target behind it is untouched")
 	_check(_bolts().is_empty(), "and the bolt is gone")
 	wall.queue_free()
 	await _free(shooter, target)
@@ -113,8 +113,8 @@ func _test_own_team() -> void:
 	await _ticks(10)
 	shooter.ability_manager.start_ability(_ranged_of(shooter))
 	await _ticks(50)
-	_check_equal(friend.stat_manager.get_health(), 100.0, "a bolt flies through its own team")
-	_check_equal(enemy.stat_manager.get_health(), 85.0, "and hits the enemy behind")
+	_check_equal(friend.status_manager.get_health(), 100.0, "a bolt flies through its own team")
+	_check_equal(enemy.status_manager.get_health(), 85.0, "and hits the enemy behind")
 	await _free(shooter, friend, enemy)
 
 
@@ -131,8 +131,8 @@ func _test_parry() -> void:
 	await _ticks(14) # the shot is out; it arrives about 10 ticks later
 	target.ability_manager.start_ability(_parry_of(target))
 	await _ticks(30)
-	_check(parried.size() == 1 and target.stat_manager.get_health() == 100.0,
-		"a parry from the front turns a bolt away (%d parried, Health %d)" % [parried.size(), target.stat_manager.get_health()])
+	_check(parried.size() == 1 and target.status_manager.get_health() == 100.0,
+		"a parry from the front turns a bolt away (%d parried, Health %d)" % [parried.size(), target.status_manager.get_health()])
 	await _free(shooter, target)
 
 
@@ -147,7 +147,7 @@ func _test_dash() -> void:
 	_check(target.ability_manager.is_invulnerable(), "and is invulnerable")
 	Projectile.fire(_ranged_of(shooter), shooter.global_position + Vector3(0, 1.3, -0.5), Vector3.FORWARD, BOLT)
 	await _ticks(8)
-	_check_equal(target.stat_manager.get_health(), 100.0, "a bolt flies through a dashing pawn")
+	_check_equal(target.status_manager.get_health(), 100.0, "a bolt flies through a dashing pawn")
 	await _ticks(60)
 	await _free(shooter, target)
 
@@ -181,7 +181,7 @@ func _test_shooter_gone() -> void:
 	await _ticks(30)
 	# Claude 2026-11-22 (ability spec 13.5, the owner's call): a hit needs its ability, so a removed shooter's bolt meets the target
 	# but lands nothing. It was "still lands" before.
-	_check(met == [[target, false]] and is_equal_approx(target.stat_manager.get_health(), 100.0),
+	_check(met == [[target, false]] and is_equal_approx(target.status_manager.get_health(), 100.0),
 			"a bolt whose shooter is gone flies on and meets its target, but lands no hit (%s)" % str(met))
 	await _free(target)
 
@@ -241,7 +241,7 @@ func _test_ai_shoots() -> void:
 			print("    shoot conditions=%s threshold=%s can_start=%s" % [shoot.all_conditions().size(), condition.get("value") if condition else "-",
 				goblin.ability_manager.can_start(&"ability_3")])
 	var by_bolt := hits.filter(func(hit: HitInfo) -> bool: return hit.ability is RangedAttackAbility)
-	_check(by_bolt.size() >= 2, "an AI goblin shoots its target (%d bolt hits in 10 s, Health %d)" % [by_bolt.size(), target.stat_manager.get_health()])
+	_check(by_bolt.size() >= 2, "an AI goblin shoots its target (%d bolt hits in 10 s, Health %d)" % [by_bolt.size(), target.status_manager.get_health()])
 	_check(by_bolt.size() == hits.size(), "with melee off, every hit is a bolt (%d of %d)" % [by_bolt.size(), hits.size()])
 	await _free(goblin, target)
 
@@ -255,7 +255,7 @@ func _test_keep_distance() -> void:
 	add_child(goblin)
 	var keep: AIKeepDistanceBehaviour = goblin.get_node("AIBehaviourManager/KeepDistance")
 	var target := _make_pawn(Vector3(-360, 0.1, -10), 1) # close enough to be seen quickly: sight fills slower with distance
-	var health := target.stat_manager.get_stat(&"Health")
+	var health := target.status_manager.get_stat(&"Health")
 	health.base_value = 100000.0 # never dies here
 	health.current = 100000.0
 	var hits := _count_hits(target)

@@ -279,7 +279,7 @@ func _visibility(eye: Vector3, facing: Vector2, aim: Vector3, target: Node3D) ->
 			return 0.0
 		if cosine < _cos_central:
 			angle_factor = _periphery_multiplier
-	return distance_factor * angle_factor * StatManager.detectability_of(target)
+	return distance_factor * angle_factor * StatusManager.detectability_of(target)
 
 
 func _clear_line(space: PhysicsDirectSpaceState3D, observer: Node3D, target: Node3D, from: Vector3, to: Vector3) -> bool:

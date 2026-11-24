@@ -65,6 +65,18 @@ What an effect is. Resistances, immunities and removing effects by kind go by th
 | &nbsp;&nbsp;&nbsp;&nbsp;`effect.debuff.slow` | Slowing the pawn down. | `debuff.slow` |
 | `effect.heal` | Restoring health. | `heal` |
 
+## `event`
+
+What happened to an entity: gameplay events, sent with Pawn.send_event and a payload (GameplayEventData).
+
+| Tag | What it is | Old names |
+|---|---|---|
+| `event.damage` | Damage happened. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`event.damage.taken` | The pawn lost Health to an effect; the payload has the source and the amount. |  |
+| `event.health` | The pawn's Health crossed a threshold. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`event.health.depleted` | Health reached 0: Death starts. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`event.health.low` | Health fell to a quarter of its max or below. |  |
+
 ## `nav`
 
 Navigation: what a place, link or marker is, so pawns and the AI can find and use it.

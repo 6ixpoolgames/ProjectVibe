@@ -16,6 +16,8 @@ extends CharacterBody3D
 
 ## Sent when this pawn's team changes, for the TeamRegistry (GameMode.team_registry), which keeps the counts.
 signal team_changed(pawn: Pawn, old_team: int, new_team: int)
+## Sent for each gameplay event this pawn receives ([method send_event]): Health running out, damage taken, and a game's own.
+signal gameplay_event_received(event: GameplayEventData)
 
 ## On, GameMode's PawnInitializer adds every default part this pawn's scene doesn't already have. Off, the pawn gets only what its
 ## scene has.
@@ -73,11 +75,9 @@ var _tick_state: TickStateComponent = null # its part in the state store, if it 
 
 ## Runs this pawn's abilities, which steer it. Null if it has none.
 var ability_manager: AbilityManager = null
-## This pawn's stats, which abilities read. Null if it has none, and then abilities use their fallbacks.
-var stat_manager: StatManager = null
-## Applies effects to this pawn and keeps the over-time ones (pawn spec 8.11). Null if it has none, and then hits and effects do
-## nothing to it.
-var effect_manager: EffectManager = null
+## This pawn's status: its stats, which abilities read, and the effects on it (pawn spec 16.8). Null if it has none: abilities then
+## use their fallbacks, and hits and effects do nothing to it.
+var status_manager: StatusManager = null
 ## Picks whose input this pawn follows, and holds that input. Null if the pawn has none, and then nothing writes its input for it.
 var controller_manager: ControllerManager = null
 ## Finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
@@ -306,6 +306,16 @@ func get_network_entity() -> NetworkEntity:
 	return _entity
 
 
+## Sends a gameplay event to this pawn (pawn spec 16.9; Unreal's "send gameplay event to actor"): [param tag] is an event tag
+## ([code]Tags.EVENT[/code]), [param data] what goes with it. Listeners connect to [signal gameplay_event_received]; the ability manager
+## starts Death on [code]event.health.depleted[/code], and the AI notes threat from [code]event.damage.taken[/code].
+func send_event(tag: StringName, data: GameplayEventData = null) -> void:
+	var event := data if data else GameplayEventData.new()
+	event.tag = tag
+	event.target = self
+	gameplay_event_received.emit(event)
+
+
 ## This pawn's entity number (pawn spec 16.9), the same on every machine and in every replay: its network entity id, or else a hash of
 ## its path in the scene tree ([method EntityNumber.from_path]). For AI rolls, stagger, hit lists and hit order, effect sources.
 func entity_number() -> int:
@@ -369,10 +379,10 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	# Abilities steer, then gravity, then one move_and_slide. Gravity goes by whether it was on the ground when the tick began, so a
 	# jump that starts this tick isn't pulled down in the same tick.
 	var was_grounded := grounded
-	# Over-time effects count down first, so this tick's abilities see this tick's slows and boosts (pawn spec 8.11).
+	# Over-time effects come first, so this tick's abilities see this tick's slows and boosts (pawn spec 8.11).
 	var abilities_started := PerfScopes.begin()
-	if effect_manager:
-		effect_manager.tick_effects()
+	if status_manager:
+		status_manager.tick_effects()
 	if ability_manager:
 		ability_manager.tick_abilities(dt)
 	PerfScopes.end(&"pawn.abilities", abilities_started)
@@ -488,7 +498,7 @@ func _can_sleep(tick: int) -> bool:
 		return false
 	if _is_check_tick(tick): # shared with skip_move_when_still
 		return false
-	if effect_manager and not effect_manager.can_sleep():
+	if status_manager and not status_manager.can_sleep():
 		return false
 	return ability_manager == null or ability_manager.can_sleep()
 

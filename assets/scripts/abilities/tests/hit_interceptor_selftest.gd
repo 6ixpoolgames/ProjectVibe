@@ -65,16 +65,16 @@ func _test_turn_away_and_response() -> void:
 	var stopped: Array = []
 	guard.ability_manager.hit_intercepted.connect(func(hit: HitInfo, by: HitInterceptor) -> void: stopped.append(by))
 	guard.ability_manager.receive_hit(_hit(attacker, guard, 20))
-	_check_near(guard.stat_manager.get_health(), 80.0, 0.01, "with its ability not running, an interceptor stops nothing")
+	_check_near(guard.status_manager.get_health(), 80.0, 0.01, "with its ability not running, an interceptor stops nothing")
 	_check_equal(big.asked, 0, "and isn't even asked")
 	guard.ability_manager.start_ability(stance)
 	await _ticks(1)
 	guard.ability_manager.receive_hit(_hit(attacker, guard, 10))
-	_check_near(guard.stat_manager.get_health(), 70.0, 0.01, "running, it lets through the hits intercept() passes (10 damage)")
+	_check_near(guard.status_manager.get_health(), 70.0, 0.01, "running, it lets through the hits intercept() passes (10 damage)")
 	guard.ability_manager.receive_hit(_hit(attacker, guard, 20))
-	_check_near(guard.stat_manager.get_health(), 70.0, 0.01, "and stops the ones it doesn't (20 damage): none of its effects land")
+	_check_near(guard.status_manager.get_health(), 70.0, 0.01, "and stops the ones it doesn't (20 damage): none of its effects land")
 	_check(stopped == [big], "hit_intercepted goes out once, naming the interceptor (%d)" % stopped.size())
-	_check_near(attacker.stat_manager.get_health(), 95.0, 0.01, "its ON_INTERCEPT effect goes back to the attacker in a hit of its own")
+	_check_near(attacker.status_manager.get_health(), 95.0, 0.01, "its ON_INTERCEPT effect goes back to the attacker in a hit of its own")
 	# A reply can't be turned away in its turn: give the attacker the same stance and send it a reply-hit.
 	var back := _hit(guard, attacker, 20)
 	back.from_interception = true
@@ -127,8 +127,8 @@ func _test_miss() -> void:
 	await _ticks(1)
 	_check(guard.ability_manager.is_invulnerable(), "a MISS interceptor that's on makes the pawn invulnerable")
 	guard.ability_manager.receive_hit(_hit(attacker, guard, 20))
-	_check(guard.stat_manager.get_health() == 100.0 and arrived.is_empty(), "the hit never arrives: no damage, and no hit_arrived, so the AI doesn't notice")
-	_check(not guard.effect_manager.apply_effect(Effect.make_damage(10), attacker), "and harmful effects are refused too")
+	_check(guard.status_manager.get_health() == 100.0 and arrived.is_empty(), "the hit never arrives: no damage, and no hit_arrived, so the AI doesn't notice")
+	_check(not guard.status_manager.apply_effect(Effect.make_damage(10), attacker), "and harmful effects are refused too")
 	guard.free()
 	attacker.free()
 

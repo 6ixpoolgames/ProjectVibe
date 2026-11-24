@@ -77,15 +77,15 @@ func _check_pawns(tick: int) -> void:
 
 
 ## Gives a pawn the kill effect. Public, so a test or a game rule can use the same way of dying. True if it got the effect, false if
-## it couldn't (no effect set, or a pawn with no Health or EffectManager).
+## it couldn't (no effect set, or a pawn with no Health or StatusManager).
 func kill(pawn: Pawn) -> bool:
 	if kill_effect == null:
 		_warn_once("no effect", "KillFloor %s has no kill_effect, so pawns that fall below it carry on falling." % name)
 		return false
-	if pawn.effect_manager == null or pawn.stat_manager == null or not pawn.stat_manager.has_stat(StatManager.HEALTH):
-		_warn_once(String(pawn.name), "KillFloor: %s fell below it but has no Health or no EffectManager, so it can't die there." % pawn.name)
+	if pawn.status_manager == null or not pawn.status_manager.has_stat(StatusManager.HEALTH):
+		_warn_once(String(pawn.name), "KillFloor: %s fell below it but has no Health or no StatusManager, so it can't die there." % pawn.name)
 		return false
-	pawn.effect_manager.apply_effect(kill_effect, null)
+	pawn.status_manager.apply_effect(kill_effect, null)
 	return true
 
 

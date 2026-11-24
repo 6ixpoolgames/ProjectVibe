@@ -81,7 +81,7 @@ func _build() -> void:
 		pawn.rotation.y = 0.0 if row % 2 == 1 else PI # team 1 faces -Z (toward the row before), team 0 faces +Z
 		add_child(pawn)
 		_pawns.append(pawn)
-		var health := pawn.stat_manager.get_stat(StatManager.HEALTH) if pawn.stat_manager else null
+		var health := pawn.status_manager.get_stat(StatusManager.HEALTH) if pawn.status_manager else null
 		if health:
 			health.base_value = 1.0e9
 			health.current = 1.0e9

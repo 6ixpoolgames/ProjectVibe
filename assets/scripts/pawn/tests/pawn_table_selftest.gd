@@ -72,11 +72,11 @@ func _test_stat_columns() -> void:
 	var table: Object = SharedPawnTable.get_table()
 	table.enable_column(&"detectability")
 	table.refresh(200)
-	var stat: Stat = pawn.stat_manager.get_stat(StatManager.DETECTABILITY) if pawn.stat_manager else null
+	var stat: Stat = pawn.status_manager.get_stat(StatusManager.DETECTABILITY) if pawn.status_manager else null
 	_check(stat != null and stat.table_column == &"detectability", "the default stats have Detectability, mirrored into the table's detectability column")
 	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 1.0), "it starts at 1")
-	StatManager.set_detectability(pawn, 0.5)
-	_check(is_equal_approx(stat.value, 0.5) and is_equal_approx(StatManager.detectability_of(pawn), 0.5), "StatManager.set_detectability writes the stat, and detectability_of reads it")
+	StatusManager.set_detectability(pawn, 0.5)
+	_check(is_equal_approx(stat.value, 0.5) and is_equal_approx(StatusManager.detectability_of(pawn), 0.5), "StatusManager.set_detectability writes the stat, and detectability_of reads it")
 	table.refresh(200)
 	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 1.0), "the table takes the change at its next tick, not mid-tick")
 	table.refresh(201)
@@ -85,7 +85,7 @@ func _test_stat_columns() -> void:
 	table.refresh(202)
 	_check(is_equal_approx(table.get_row(table.get_slot(pawn))["detectability"], 0.25), "an effect on the stat reaches the table too (%.2f)" % table.get_row(table.get_slot(pawn))["detectability"])
 	stat.set_modifiers(0.0, 1.0)
-	StatManager.set_detectability(pawn, 1.0)
+	StatusManager.set_detectability(pawn, 1.0)
 	_check(table.add_pushed_column(&"armour", TYPE_FLOAT, &"no_such_property", 0.0) and table.enable_column(&"armour"), "a game's own pushed column")
 	_check(table.set_value(pawn, &"armour", 3.0), "takes a value")
 	table.refresh(203)
@@ -101,7 +101,7 @@ func _test_once_a_tick() -> void:
 	pawn.team = 3
 	pawn.velocity = Vector3(1, 0, 2)
 	pawn.yaw = 0.5
-	StatManager.set_detectability(pawn, 0.25)
+	StatusManager.set_detectability(pawn, 0.25)
 	var table: Object = SharedPawnTable.get_table()
 	for column in [&"velocity", &"yaw", &"detectability"]: # Claude 2026-11-09 (step 2): optional columns are off until switched on
 		table.enable_column(column)

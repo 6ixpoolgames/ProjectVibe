@@ -342,11 +342,11 @@ func _health_multiplier() -> float:
 ## and fills it. Health's most is the same on every machine this way; how much it has now rolls back and comes in snapshots anyway.
 func _scale_health(pawn: Pawn) -> void:
 	var multiplier := _health_multiplier()
-	var health := pawn.stat_manager.get_stat(StatManager.HEALTH) if pawn.stat_manager else null
+	var health := pawn.status_manager.get_stat(StatusManager.HEALTH) if pawn.status_manager else null
 	if health == null or is_equal_approx(multiplier, 1.0):
 		return
 	health.base_value *= multiplier # GDScript note: base_value's setter sets value too
-	health.current = health.value
+	pawn.status_manager.fill_current(StatusManager.HEALTH)
 
 
 ## Claude 2026-11-10: this level's cooldowns, DEBUG_COOLDOWNS. A sample that extends this one can return its own.
@@ -496,7 +496,7 @@ func _readout_text(pawn: Pawn) -> String:
 		else:
 			lines.append("last: —")
 	lines.append_array(_effect_lines(pawn)) # Claude 2026-11-10
-	lines.append("HP %d" % int(pawn.stat_manager.get_health()))
+	lines.append("HP %d" % int(pawn.status_manager.get_health()))
 	return "\n".join(lines)
 
 
@@ -506,7 +506,7 @@ func _player_readout_text(pawn: Pawn) -> String:
 	var last: AbilityBase = _last_ability.get(pawn)
 	lines.append("last: %s%s" % [last.name, " (running)" if last.is_running_timed() else ""] if is_instance_valid(last) else "last: —")
 	lines.append_array(_effect_lines(pawn))
-	lines.append("HP %d" % int(pawn.stat_manager.get_health()))
+	lines.append("HP %d" % int(pawn.status_manager.get_health()))
 	return "\n".join(lines)
 
 
@@ -514,10 +514,10 @@ func _player_readout_text(pawn: Pawn) -> String:
 ## one, such as "combo second boost 0.4 s". On a client these come from snapshots, or from its own prediction for its own pawn.
 func _effect_lines(pawn: Pawn) -> PackedStringArray:
 	var lines := PackedStringArray()
-	if pawn.effect_manager == null:
+	if pawn.status_manager == null:
 		return lines
 	var rate := float(TickDriver.get_tick_rate())
-	for entry in pawn.effect_manager.get_active_effects():
+	for entry in pawn.status_manager.get_active_effects():
 		var effect: Effect = entry["effect"]
 		var stacks: int = entry["stacks"]
 		lines.append("+ %s %.1f s%s" % [effect.describe() if effect else "?", entry["ticks_left"] / rate, " x%d" % stacks if stacks > 1 else ""])
@@ -568,7 +568,7 @@ func _status_text() -> String:
 	if recorder and recorder.is_recording():
 		lines.append("recording %s (%.1f MB)" % [recorder.get_recording_path().get_file(), recorder.get_bytes_written() / 1048576.0])
 	if pawn:
-		lines.append("HP %d%s    speed %.1f m/s" % [int(pawn.stat_manager.get_health()), "  (dead: reviving)" if pawn.is_dead() else "", Vector2(pawn.velocity.x, pawn.velocity.z).length()])
+		lines.append("HP %d%s    speed %.1f m/s" % [int(pawn.status_manager.get_health()), "  (dead: reviving)" if pawn.is_dead() else "", Vector2(pawn.velocity.x, pawn.velocity.z).length()])
 	lines.append("goblins %d    kills %d    deaths %d" % [alive, _kills, _deaths])
 	lines.append(_keys_text()) # Claude 2026-11-09: a function, so faction_arena_sample can add its special attack
 	if not TickDriver.active:

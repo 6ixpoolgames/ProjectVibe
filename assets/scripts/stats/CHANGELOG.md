@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | A test-only helper | `StatManager.set_detectability` | Only AI and pawn-table tests call it; a helper in `tests/` keeps test code out of the shipping class | S |
 | One place for the "current stays between 0 and value" rule | `Stat.current`; written directly by `abilities/AbilityManager.revive`, `effects/EffectManager`, `samples/ArenaSample` | Refilling and capping a current value is done by hand in several places. A refill and a cap on `Stat` or `StatManager`, beside `change_current`, would keep the rule in one place | S |
 
+## 2026-11-24
+
+- **Merged into the status manager** (the pawn redesign's build step 3a, pawn spec 16.8): `StatManager` is gone; its job is `status/StatusManager.gd` (`pawn.status_manager`). `Stat` gains `thresholds` (`StatThreshold`), and its `current` is changed only through `StatusManager.change_current` or `fill_current` (REFACTOR resolved). History from here: [status/CHANGELOG.md](../status/CHANGELOG.md).
+
 ## 2026-11-23
 
 - **Script warnings:** the static detectability helpers' parameter renamed `of_pawn` (it shadowed `pawn`).

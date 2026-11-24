@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 189 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 190 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -67,7 +67,6 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [EffectApplication](../assets/scripts/effects/REFERENCE.md#effectapplication) | [effects](../assets/scripts/effects/README.md) | RefCounted | One effect being applied once: what, to whom, from whom, and what came of it. |
 | [EffectApplier](../assets/scripts/effects/REFERENCE.md#effectapplier) | [effects](../assets/scripts/effects/README.md) | Node | Applies effects when its ability does something: a child node of an ability, or of a [HitInterceptor]. |
 | [EffectHeldTotals](../assets/scripts/effects/REFERENCE.md#effectheldtotals) | [effects](../assets/scripts/effects/README.md) | RefCounted | What all the held parts on one pawn add up to right now. |
-| [EffectManager](../assets/scripts/effects/REFERENCE.md#effectmanager) | [effects](../assets/scripts/effects/README.md) | Node | Applies effects to its pawn and keeps the over-time ones. |
 | [EffectPart](../assets/scripts/effects/REFERENCE.md#effectpart) | [effects](../assets/scripts/effects/README.md) | Resource | One thing an [Effect] does: the base for the parts in an Effect's parts list. |
 | [EntityNumber](../assets/scripts/entities/REFERENCE.md#entitynumber) | [entities](../assets/scripts/entities/README.md) | RefCounted | One number for every entity, the same on every machine and in every replay (pawn spec 16.9). |
 | [FadeProfile](../assets/scripts/ai/REFERENCE.md#fadeprofile) | [ai](../assets/scripts/ai/README.md) | Resource | How a value fades over ticks, from full to nothing, as a Resource designers tune in the inspector. |
@@ -76,6 +75,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [FreeFlyCamera](../assets/scripts/camera/REFERENCE.md#freeflycamera) | [camera](../assets/scripts/camera/README.md) | Node3D | A camera that flies freely, for a player with no pawn: the spectator. |
 | [GameModeModule](../assets/scripts/game_mode/REFERENCE.md#gamemodemodule) | [game_mode](../assets/scripts/game_mode/README.md) | Node | The base for one optional piece of a game's rules, added to GameMode. |
 | [GameModeSingleton](../assets/scripts/singletons/REFERENCE.md#gamemodesingleton) | [singletons](../assets/scripts/singletons/README.md) | Node | The shell of the game's rules: holds the game's modules. Autoload "GameMode". |
+| [GameplayEventData](../assets/scripts/entities/REFERENCE.md#gameplayeventdata) | [entities](../assets/scripts/entities/README.md) | RefCounted | What a gameplay event carries: its tag, who caused it, who it's for, a number and an object (pawn spec 16.9). |
 | [HitDefinition](../assets/scripts/abilities/REFERENCE.md#hitdefinition) | [abilities](../assets/scripts/abilities/README.md) | Definition | Who a hit may hit and what it does, for a swing and a projectile alike (ability spec 13.2). |
 | [HitInfo](../assets/scripts/abilities/REFERENCE.md#hitinfo) | [abilities](../assets/scripts/abilities/README.md) | RefCounted | What one hit was, handed from the attacker to the target's [method AbilityManager.receive_hit]. |
 | [HitInterceptor](../assets/scripts/abilities/REFERENCE.md#hitinterceptor) | [abilities](../assets/scripts/abilities/README.md) | Node | Something that can stop a hit before it lands, while its ability or step runs (pawn spec 8.23). |
@@ -158,12 +158,13 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [SpawnPoint](../assets/scripts/spawning/REFERENCE.md#spawnpoint) | [spawning](../assets/scripts/spawning/README.md) | Node3D | A place where pawns can appear, like Unreal's PlayerStart. |
 | [SprintAbility](../assets/scripts/abilities/REFERENCE.md#sprintability) | [abilities](../assets/scripts/abilities/README.md) | WalkAbility | Running faster while a charge lasts: a locomotion ability bound to &"sprint". |
 | [SprintDefinition](../assets/scripts/abilities/REFERENCE.md#sprintdefinition) | [abilities](../assets/scripts/abilities/README.md) | WalkDefinition | Sprint's settings: Walk's, plus its charge. |
-| [Stat](../assets/scripts/stats/REFERENCE.md#stat) | [stats](../assets/scripts/stats/README.md) | Node | One number about a pawn, such as how fast it walks. A child of the pawn's StatManager. |
+| [Stat](../assets/scripts/stats/REFERENCE.md#stat) | [stats](../assets/scripts/stats/README.md) | Node | One number about a pawn, such as how fast it walks. A child of the pawn's StatusManager. |
 | [StatChangePart](../assets/scripts/effects/REFERENCE.md#statchangepart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes how much of a stat a pawn has, once: Health -20 is damage, Health +15 a heal. A do-once part ([EffectPart]). |
 | [StateEncoding](../assets/scripts/netcode/REFERENCE.md#stateencoding) | [netcode](../assets/scripts/netcode/README.md) | RefCounted | How precisely networked values are stored (netcode spec section 5.3). |
 | [StateStoreGD](../assets/scripts/state_store/REFERENCE.md#statestoregd) | [state_store](../assets/scripts/state_store/README.md) | RefCounted | The GDScript twin of the C++ [code]StateStore[/code]: the central record of every gameplay entity's state, tick by tick. |
-| [StatManager](../assets/scripts/stats/REFERENCE.md#statmanager) | [stats](../assets/scripts/stats/README.md) | Node | Holds a pawn's stats, one [Stat] node each, and finds them by name. |
 | [StatModifierPart](../assets/scripts/effects/REFERENCE.md#statmodifierpart) | [effects](../assets/scripts/effects/README.md) | EffectPart | Changes a stat's value while its effect lasts, such as MoveSpeed x0.7 for a slow. A held part ([EffectPart]). |
+| [StatThreshold](../assets/scripts/status/REFERENCE.md#statthreshold) | [status](../assets/scripts/status/README.md) | Resource | A level on a stat that sends an event when the stat's current value falls to it or below (pawn spec 16.8). |
+| [StatusManager](../assets/scripts/status/REFERENCE.md#statusmanager) | [status](../assets/scripts/status/README.md) | Node | A pawn's status: its stats and the effects on it, in one component (pawn spec 16.8). |
 | [Step](../assets/scripts/steps/REFERENCE.md#step) | [steps](../assets/scripts/steps/README.md) | Node | One step on a timeline, such as a windup, a turn or a swing: a child node of what owns the timeline (pawn spec 16.7). |
 | [StepTimeline](../assets/scripts/steps/REFERENCE.md#steptimeline) | [steps](../assets/scripts/steps/README.md) | RefCounted | Runs an owner's [Step] children on a timeline of [TimelineEntry] rules (pawn spec 16.7, ability spec 6.2). |
 | [StreamingSource](../assets/scripts/streaming/REFERENCE.md#streamingsource) | [streaming](../assets/scripts/streaming/README.md) | Node3D | Marks something as keeping the world loaded around it. |

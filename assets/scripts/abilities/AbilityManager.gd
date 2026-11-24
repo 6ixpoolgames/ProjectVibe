@@ -123,6 +123,8 @@ func _ready() -> void:
 	_driver = driver
 	_collect_abilities()
 	_register_rollback_state()
+	if pawn:
+		pawn.gameplay_event_received.connect(_on_gameplay_event)
 
 
 ## The pawn calls this once a tick; dt is the fixed tick length. Order: deadlines passed, locomotion, then actions (see the README).
@@ -185,7 +187,7 @@ func _note_tags_changed() -> void:
 		readiness_version += 1
 
 
-## Moves [member readiness_version] on for a change made outside the abilities; the EffectManager calls it when effects change.
+## Moves [member readiness_version] on for a change made outside the abilities; the StatusManager calls it when effects change.
 func readiness_changed() -> void:
 	readiness_version += 1
 
@@ -474,9 +476,9 @@ func interrupt_threshold_now(ability: AbilityBase) -> int:
 	return ability.current_interrupt_threshold() + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD)
 
 
-# What the pawn's effects add to one of an ability's numbers; 0 with no EffectManager or nothing held.
+# What the pawn's effects add to one of an ability's numbers; 0 with no StatusManager or nothing held.
 func _bonus(ability: AbilityBase, number: int) -> int:
-	var effects := pawn.effect_manager if pawn else null
+	var effects := pawn.status_manager if pawn else null
 	if effects == null or not effects.has_ability_bonuses():
 		return 0
 	return effects.ability_bonus(ability, number)
@@ -674,9 +676,9 @@ func _start(ability: AbilityBase) -> void:
 		_locked_mask |= ability.locks_out_mask # later abilities this tick respect it at once
 	ability.start()
 	# On-start effects go on its own pawn on every machine that runs it, replays too, so an over-time one (a combo boost) is
-	# predicted; their do-once parts run only on the authority (EffectManager). Pawn spec 8.11.
-	if not ability.on_start_effects.is_empty() and pawn.effect_manager:
-		pawn.effect_manager.apply_effects(ability.on_start_effects, pawn, ability)
+	# predicted; their do-once parts run only on the authority (StatusManager). Pawn spec 8.11.
+	if not ability.on_start_effects.is_empty() and pawn.status_manager:
+		pawn.status_manager.apply_effects(ability.on_start_effects, pawn, ability)
 	ability_started.emit(ability)
 	if ability.is_stepped() and ability.is_running_timed():
 		ability.begin_steps() # after ability_started, so a replay lists the ability before its steps
@@ -712,8 +714,8 @@ func receive_hit(hit: HitInfo) -> void:
 	_take_hit(hit)
 
 
-## The EffectManager calls this on the authority when an effect took Health to 0: Death starts and [signal died] goes out. hit is the
-## hit that did it, or null (a poison's tick). Nothing if already dead.
+## Death starts and [signal died] goes out, on the authority: called when the pawn's Health reaches 0 ([code]event.health.depleted[/code],
+## sent by the status manager). hit is the hit that did it, or null (a poison's tick). Nothing if already dead.
 func health_ran_out(hit: HitInfo) -> void:
 	if pawn and pawn.is_authority() and not pawn.is_dead():
 		_die(hit)
@@ -721,13 +723,17 @@ func health_ran_out(hit: HitInfo) -> void:
 
 ## Brings a dead pawn back with full Health, on the server. Death ends on its next tick.
 func revive() -> void:
-	if pawn == null or not pawn.is_authority() or pawn.stat_manager == null:
+	if pawn == null or not pawn.is_authority() or pawn.status_manager == null:
 		return
-	var stat := pawn.stat_manager.get_stat(StatManager.HEALTH)
-	if stat and stat.changes_during_play:
-		stat.current = stat.value
+	pawn.status_manager.fill_current(StatusManager.HEALTH)
 	for ability in _charged:
 		ability.refill_charges()
+
+
+# Gameplay events this pawn receives. Abilities started by events in general come with the hit ability (pawn spec 16.10, step 4).
+func _on_gameplay_event(event: GameplayEventData) -> void:
+	if event.tag == Tags.EVENT.HEALTH_DEPLETED:
+		health_ran_out(event.optional_object as HitInfo)
 
 
 # The hit itself. Checked again here: a queued hit can arrive after another killed this pawn, and a dash started in the same tick
@@ -739,12 +745,12 @@ func _take_hit(hit: HitInfo) -> void:
 	# An active interceptor can turn it away. The AI above still notes it was attacked.
 	if intercept_hit(hit):
 		return
-	if pawn.effect_manager:
-		pawn.effect_manager.take_hit(hit)
+	if pawn.status_manager:
+		pawn.status_manager.take_hit(hit)
 	hit_received.emit(hit)
 	var attacker := hit.attacker
-	if not hit.attacker_effects.is_empty() and is_instance_valid(attacker) and attacker.effect_manager:
-		attacker.effect_manager.apply_effects(hit.attacker_effects, attacker, hit.ability, hit)
+	if not hit.attacker_effects.is_empty() and is_instance_valid(attacker) and attacker.status_manager:
+		attacker.status_manager.apply_effects(hit.attacker_effects, attacker, hit.ability, hit)
 
 
 # Health reached 0: Death starts (it locks out everything), then died goes out and the parts that care clean up.

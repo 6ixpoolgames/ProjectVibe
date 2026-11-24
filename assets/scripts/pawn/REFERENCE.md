@@ -37,8 +37,7 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 - `grounded: bool` = `false`: Our own copy of "on the floor", because rollback has to restore it, and is_on_floor() can't be set.
 - `last_teleport_tick: int` = `-1`: The tick it last moved instantly (`teleport()`), or -1. The MoveSanityCheck lets that move through.
 - `ability_manager: AbilityManager` = `null`: Runs this pawn's abilities, which steer it. Null if it has none.
-- `stat_manager: StatManager` = `null`: This pawn's stats, which abilities read. Null if it has none, and then abilities use their fallbacks.
-- `effect_manager: EffectManager` = `null`: Applies effects to this pawn and keeps the over-time ones (pawn spec 8.11). Null if it has none, and then hits and effects do nothing to it.
+- `status_manager: StatusManager` = `null`: This pawn's status: its stats, which abilities read, and the effects on it (pawn spec 16.8). Null if it has none: abilities then use their fallbacks, and hits and effects do nothing to it.
 - `controller_manager: ControllerManager` = `null`: Picks whose input this pawn follows, and holds that input. Null if the pawn has none, and then nothing writes its input for it.
 - `navigation_manager: NavigationManager` = `null`: Finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
 - `ai_context: AIContextComponent` = `null`: Shared data and settings for this pawn's AI (pawn spec 10), and the AI's core. Null if the pawn has no AI.
@@ -52,6 +51,7 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 ### Signals
 
 - `team_changed(pawn: Pawn, old_team: int, new_team: int)`: Sent when this pawn's team changes, for the TeamRegistry (GameMode.team_registry), which keeps the counts.
+- `gameplay_event_received(event: GameplayEventData)`: Sent for each gameplay event this pawn receives (`send_event()`): Health running out, damage taken, and a game's own.
 
 ### Constants
 
@@ -72,6 +72,7 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 - `mark_state_changed() -> void`: Something changed this pawn between its own runs (an effect landed on it), so the state store reads it at the next commit instead of copying its last row forward. Its runs mark it themselves.
 - `teleport(to: Vector3) -> void`: Moves this pawn instantly, for a respawn, a blink or a debug move: the crowd mover, its Visual, the state store and the MoveSanityCheck all take it as a jump, not a glide. Its velocity and yaw stay as they are.
 - `get_network_entity() -> NetworkEntity`: This pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
+- `send_event(tag: StringName, data: GameplayEventData = null) -> void`: Sends a gameplay event to this pawn (pawn spec 16.9; Unreal's "send gameplay event to actor"): `tag` is an event tag (`Tags.EVENT`), `data` what goes with it. Listeners connect to `gameplay_event_received`; the ability manager starts Death on `event.health.depleted`, and the AI notes threat from `event.damage.taken`.
 - `entity_number() -> int`: This pawn's entity number (pawn spec 16.9), the same on every machine and in every replay: its network entity id, or else a hash of its path in the scene tree (`EntityNumber.from_path()`). For AI rolls, stagger, hit lists and hit order, effect sources.
 - `_tick_input(_dt: float, tick: int) -> void`: The input phase: runs the AI, then asks the controller in charge for this tick's input, where this pawn's input is decided here. A script that writes input itself, such as a test brain, can still do so later in the same phase and win.
 - `finish_move(at: Vector3, seconds: float) -> void`: Its mover moved this pawn to at, over seconds: it stands there on the ground, its velocity is what it really moved (as move_and_slide leaves it), and its tick finishes (pawn spec 8.22). The position is rounded as the state store will round it (TickStateComponent.round_position), so the commit changes nothing afterwards and a still pawn is exactly still, and sleeps.

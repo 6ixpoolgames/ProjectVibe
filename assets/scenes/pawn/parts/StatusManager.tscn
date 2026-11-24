@@ -1,9 +1,20 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=6 format=3]
 
-[ext_resource type="Script" path="res://assets/scripts/stats/StatManager.gd" id="1_manager"]
+[ext_resource type="Script" path="res://assets/scripts/status/StatusManager.gd" id="1_manager"]
 [ext_resource type="Script" path="res://assets/scripts/stats/Stat.gd" id="2_stat"]
+[ext_resource type="Script" path="res://assets/scripts/status/StatThreshold.gd" id="3_threshold"]
 
-[node name="StatManager" type="Node"]
+[sub_resource type="Resource" id="Threshold_depleted"]
+script = ExtResource("3_threshold")
+event = &"event.health.depleted"
+
+[sub_resource type="Resource" id="Threshold_low"]
+script = ExtResource("3_threshold")
+event = &"event.health.low"
+at_or_below = 0.25
+fraction_of_max = true
+
+[node name="StatusManager" type="Node"]
 script = ExtResource("1_manager")
 
 [node name="MoveSpeed" type="Node" parent="."]
@@ -42,6 +53,7 @@ base_value = 100.0
 script = ExtResource("2_stat")
 base_value = 100.0
 changes_during_play = true
+thresholds = Array[ExtResource("3_threshold")]([SubResource("Threshold_depleted"), SubResource("Threshold_low")])
 
 [node name="Detectability" type="Node" parent="."]
 script = ExtResource("2_stat")

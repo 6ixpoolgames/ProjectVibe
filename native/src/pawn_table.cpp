@@ -35,7 +35,7 @@ PawnTable::PawnTable() :
 	built_in("yaw", Variant::FLOAT, 0.0);
 	built_in("grounded", Variant::BOOL, false);
 	built_in("detectability", Variant::FLOAT, 1.0);
-	// Detectability is a stat (StatManager.DETECTABILITY), pushed here when it changes instead of read from
+	// Detectability is a stat (StatusManager.DETECTABILITY), pushed here when it changes instead of read from
 	// every pawn at every refresh.
 	_columns.back().pushed = true;
 }

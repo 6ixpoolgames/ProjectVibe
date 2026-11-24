@@ -31,16 +31,16 @@ func _test_health_and_death() -> void:
 	var attacker := _make_pawn(Vector3(0, 0.1, 0), 1)
 	var victim := _make_pawn(Vector3(0, 0.1, -2), 0)
 	await _ticks(10)
-	_check(is_equal_approx(victim.stat_manager.get_health(), 100.0), "Health is a stat that starts full (100)")
+	_check(is_equal_approx(victim.status_manager.get_health(), 100.0), "Health is a stat that starts full (100)")
 	var listed: Array[String] = (victim.get_node("TickState") as TickStateComponent).state_properties
-	_check(listed.has("StatManager/Health:current pushed") and listed.has("AbilityManager/Death:ends_at pushed"), "Health's current value and the Death ability roll back")
+	_check(listed.has("StatusManager/Health:current pushed") and listed.has("AbilityManager/Death:ends_at pushed"), "Health's current value and the Death ability roll back")
 	var deaths := []
 	victim.ability_manager.died.connect(func(who, hit): deaths.append([who, hit]))
 	for i in 4:
 		victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
-	_check(is_equal_approx(victim.stat_manager.get_health(), 20.0) and not victim.is_dead(), "four hits of 20: 20 left, alive")
+	_check(is_equal_approx(victim.status_manager.get_health(), 20.0) and not victim.is_dead(), "four hits of 20: 20 left, alive")
 	victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
-	_check(victim.stat_manager.get_health() == 0.0 and victim.is_dead(), "the fifth: Health 0, and the Death ability runs")
+	_check(victim.status_manager.get_health() == 0.0 and victim.is_dead(), "the fifth: Health 0, and the Death ability runs")
 	_check(deaths.size() == 1 and deaths[0][0] == victim, "died goes out once")
 	victim.ability_manager.receive_hit(_hit(attacker, victim, 20))
 	_check(deaths.size() == 1, "a hit on a dead pawn does nothing")
@@ -53,7 +53,7 @@ func _test_health_and_death() -> void:
 	_check(not pressed_dash, "and no ability can start")
 	victim.ability_manager.revive()
 	await _ticks(2)
-	_check(not victim.is_dead() and is_equal_approx(victim.stat_manager.get_health(), 100.0), "revive: full Health, and Death ends on its next tick")
+	_check(not victim.is_dead() and is_equal_approx(victim.status_manager.get_health(), 100.0), "revive: full Health, and Death ends on its next tick")
 	# Claude 2026-11-23: orders given while dead are ignored and let go of (netcode spec 19.10), so the walk is given again, as the AI's
 	# next decision would.
 	await _ticks(15)
@@ -67,7 +67,7 @@ func _test_health_and_death() -> void:
 	client_entity.role = NetworkEntity.Role.REMOTE_FOLLOWING
 	victim._entity = client_entity
 	victim.ability_manager.receive_hit(_hit(attacker, victim, 50))
-	_check(is_equal_approx(victim.stat_manager.get_health(), 100.0), "on a client, receive_hit does nothing")
+	_check(is_equal_approx(victim.status_manager.get_health(), 100.0), "on a client, receive_hit does nothing")
 	victim._entity = real_entity
 	client_entity.free()
 	attacker.free()
@@ -184,7 +184,7 @@ func _test_kill_self() -> void:
 	var dodging := pawn.ability_manager.is_invulnerable()
 	ai.press(&"kill_self")
 	await _ticks(3)
-	_check(dodging and pawn.is_dead() and pawn.stat_manager.get_health() == 0.0, "pressing it kills the pawn at once, even mid-dash")
+	_check(dodging and pawn.is_dead() and pawn.status_manager.get_health() == 0.0, "pressing it kills the pawn at once, even mid-dash")
 	pawn.free()
 
 

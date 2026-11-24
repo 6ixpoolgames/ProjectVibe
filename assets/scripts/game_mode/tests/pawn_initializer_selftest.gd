@@ -1,16 +1,16 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for PawnInitializer. Checks the odd cases at the top of
 ## PawnInitializer.gd, and every way out: per pawn, per part, and for the whole game.
-## Claude 2026-11-07: GroundMovement is gone; the defaults are now ControllerManager, StatManager and AbilityManager.
+## Claude 2026-11-07: GroundMovement is gone; the defaults are now ControllerManager, StatusManager and AbilityManager.
 ## Claude 2026-11-08: NavigationManager added, second in the list.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/game_mode/tests/pawn_initializer_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-const STATS_PART := "res://assets/scenes/pawn/parts/StatManager.tscn"
+const STATS_PART := "res://assets/scenes/pawn/parts/StatusManager.tscn"
 # Claude 2026-11-09: the AI parts joined the defaults (pawn spec steps 8a and 8b).
-# Claude 2026-11-10: EffectManager is a default part now (pawn spec 8.11).
-const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatManager", &"OwnedTags", &"EffectManager", &"AbilityManager", &"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3); Claude 2026-11-22: owned tags (tag spec step 2)
+# Claude 2026-11-10: StatusManager is a default part now (pawn spec 8.11).
+const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatusManager", &"OwnedTags", &"AbilityManager", &"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3); Claude 2026-11-22: owned tags (tag spec step 2)
 
 
 func _ready() -> void:
@@ -49,16 +49,16 @@ func _test_default_parts() -> void:
 	_check(pawn.get_node_or_null(^"ControllerManager") is ControllerManager, "entering the tree, the pawn gets a ControllerManager")
 	_check(pawn.get_node_or_null(^"ControllerManager/AIController") is AIController, "with its AIController")
 	_check(pawn.get_node_or_null(^"NavigationManager") is NavigationManager and pawn.navigation_manager == pawn.get_node(^"NavigationManager"), "a NavigationManager, which the pawn knows") # Claude 2026-11-08
-	_check(pawn.get_node_or_null(^"StatManager") is StatManager and pawn.stat_manager.has_stat(&"MoveSpeed"), "a StatManager with movement stats")
+	_check(pawn.get_node_or_null(^"StatusManager") is StatusManager and pawn.status_manager.has_stat(&"MoveSpeed"), "a StatusManager with movement stats")
 	var abilities := pawn.get_node_or_null(^"AbilityManager") as AbilityManager
 	_check(abilities != null and pawn.ability_manager == abilities, "and an AbilityManager, which the pawn uses")
 	_check(abilities.get_node_or_null(^"Walk") is WalkAbility and abilities.get_node_or_null(^"Sprint") is SprintAbility and abilities.get_node_or_null(^"Jump") is JumpAbility,
 			"with Walk, Sprint and Jump")
 	_check(pawn.controller_manager == pawn.get_node(^"ControllerManager"), "and the pawn knows its ControllerManager")
 	var first := pawn.get_node(^"ControllerManager").get_index()
-	# Claude 2026-11-08: NavigationManager is second now. Claude 2026-11-10: and EffectManager between StatManager and AbilityManager.
-	# Claude 2026-11-22: OwnedTags between StatManager and EffectManager.
-	_check(pawn.get_node(^"NavigationManager").get_index() == first + 1 and pawn.get_node(^"StatManager").get_index() == first + 2 and pawn.get_node(^"OwnedTags").get_index() == first + 3 and pawn.get_node(^"EffectManager").get_index() == first + 4 and abilities.get_index() == first + 5,
+	# Claude 2026-11-08: NavigationManager is second now. Claude 2026-11-10: and the effect manager between the stats and AbilityManager.
+	# Claude 2026-11-22: OwnedTags after the stats. Claude 2026-11-24: one StatusManager for stats and effects (pawn spec 16.8).
+	_check(pawn.get_node(^"NavigationManager").get_index() == first + 1 and pawn.get_node(^"StatusManager").get_index() == first + 2 and pawn.get_node(^"OwnedTags").get_index() == first + 3 and abilities.get_index() == first + 4,
 			"in the list's order, after the scene's own children")
 	_check(pawn.get_node_or_null(^"TickState") != null and pawn.get_node_or_null(^"NetworkEntity") != null, "TickState and NetworkEntity stay in the scene")
 	pawn.free()
@@ -66,17 +66,17 @@ func _test_default_parts() -> void:
 
 func _test_a_designer_override() -> void:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
-	var own := StatManager.new()
-	own.name = "StatManager"
+	var own := StatusManager.new()
+	own.name = "StatusManager"
 	var speed := Stat.new()
 	speed.name = "MoveSpeed"
 	speed.base_value = 2.0
 	own.add_child(speed)
 	pawn.add_child(own)
 	add_child(pawn)
-	var all_stat_managers := pawn.get_children().filter(func(child): return child is StatManager)
-	_check(all_stat_managers.size() == 1 and all_stat_managers[0] == own and pawn.stat_manager == own, "a part with the same name in the pawn is kept, and no default is added")
-	_check(pawn.stat_manager.get_value(&"MoveSpeed") == 2.0 and not pawn.stat_manager.has_stat(&"SprintSpeed"), "so the pawn has only its own stats")
+	var all_stat_managers := pawn.get_children().filter(func(child): return child is StatusManager)
+	_check(all_stat_managers.size() == 1 and all_stat_managers[0] == own and pawn.status_manager == own, "a part with the same name in the pawn is kept, and no default is added")
+	_check(pawn.status_manager.get_value(&"MoveSpeed") == 2.0 and not pawn.status_manager.has_stat(&"SprintSpeed"), "so the pawn has only its own stats")
 	_check(pawn.has_node(^"ControllerManager") and pawn.has_node(^"AbilityManager"), "the other defaults still are")
 	pawn.free()
 
@@ -85,12 +85,12 @@ func _test_ways_out() -> void:
 	var skipping: Pawn = load(PAWN_SCENE).instantiate()
 	skipping.skip_default_parts = [&"AbilityManager"]
 	add_child(skipping)
-	_check(not skipping.has_node(^"AbilityManager") and skipping.has_node(^"ControllerManager") and skipping.has_node(^"StatManager"), "skip_default_parts leaves out just those parts")
+	_check(not skipping.has_node(^"AbilityManager") and skipping.has_node(^"ControllerManager") and skipping.has_node(^"StatusManager"), "skip_default_parts leaves out just those parts")
 	skipping.free()
 	var bare: Pawn = load(PAWN_SCENE).instantiate()
 	bare.fill_in_default_parts = false
 	add_child(bare)
-	_check(bare.controller_manager == null and bare.stat_manager == null and bare.ability_manager == null, "fill_in_default_parts off: no defaults at all")
+	_check(bare.controller_manager == null and bare.status_manager == null and bare.ability_manager == null, "fill_in_default_parts off: no defaults at all")
 	bare.free()
 
 
@@ -117,7 +117,7 @@ func _test_odd_defaults() -> void:
 	var parts: Array[PackedScene] = [null, load(STATS_PART)]
 	initializer.defaults.parts = parts
 	initializer.initialize(pawn)
-	_check(pawn.get_child_count() == before + 1 and pawn.has_node(^"StatManager"), "an empty slot in the list is skipped")
+	_check(pawn.get_child_count() == before + 1 and pawn.has_node(^"StatusManager"), "an empty slot in the list is skipped")
 	initializer.initialize(null) # nothing to do, and nothing breaks
 	# The wrong kind of file, or none, through the project setting.
 	var had_setting := ProjectSettings.has_setting(PawnInitializer.DEFAULTS_SETTING)

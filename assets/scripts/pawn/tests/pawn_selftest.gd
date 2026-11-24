@@ -50,8 +50,8 @@ func _test_running_and_stopping() -> void:
 	var floor_body := _make_floor()
 	var pawn := _make_pawn(Vector3(0.0, 0.1, 0.0))
 	# Claude 2026-11-07: the speeds come from the pawn's stats now, which Walk and Sprint read.
-	var walk_speed := pawn.stat_manager.get_value(&"MoveSpeed")
-	var sprint_speed := pawn.stat_manager.get_value(&"SprintSpeed")
+	var walk_speed := pawn.status_manager.get_value(&"MoveSpeed")
+	var sprint_speed := pawn.status_manager.get_value(&"SprintSpeed")
 	await _ticks(20)
 	_drive(pawn, Vector3(1.0, 0.0, 0.0))
 	await _ticks(1)

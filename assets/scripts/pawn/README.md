@@ -20,7 +20,7 @@ The body every character is: something a player or the AI can drive. It runs its
  Pawn (CharacterBody3D, pawn.tscn)
  ├─ ControllerManager ─ AIController     input: who's in charge, this tick's input, has_player   (controllers/)
  ├─ NavigationManager                    paths                                                    (navigation/)
- ├─ StatManager, EffectManager           numbers, and effects on them                             (stats/, effects/)
+ ├─ StatusManager           numbers, and effects on them                             (stats/, effects/)
  ├─ OwnedTags                            the tags it owns right now, for tag queries              (tags/)
  ├─ AbilityManager ─ Walk, Jump, Sprint  steer the pawn; hits and death                           (abilities/)
  ├─ AIContextComponent and the AI parts  decide what the AI's hands do                            (ai/)
@@ -52,7 +52,7 @@ for node in get_tree().get_nodes_in_group(Pawn.GROUP):
     var pawn := node as Pawn
 ```
 
-**Reach a part.** `pawn.controller_manager`, `pawn.ability_manager`, `pawn.stat_manager`, `pawn.effect_manager`, `pawn.owned_tags`, `pawn.navigation_manager`, `pawn.ai_context`, `pawn.streaming_source` (null when the pawn hasn't got one).
+**Reach a part.** `pawn.controller_manager`, `pawn.ability_manager`, `pawn.status_manager`, `pawn.status_manager`, `pawn.owned_tags`, `pawn.navigation_manager`, `pawn.ai_context`, `pawn.streaming_source` (null when the pawn hasn't got one).
 
 ## Settings worth knowing
 
@@ -66,13 +66,13 @@ for node in get_tree().get_nodes_in_group(Pawn.GROUP):
 | `sleep_when_idle` | `Pawn` | on | A still pawn with nothing to do skips its tick |
 | `crowd_movement` | `Pawn` | on | An AI pawn walking on the ground moves with the crowd, not by physics |
 | `skip_move_when_still` | `Pawn` | on | A still pawn that's awake skips its physics move |
-| Detectability | the pawn's StatManager | 1 | How easy it is for AI to see (0 invisible) |
+| Detectability | the pawn's StatusManager | 1 | How easy it is for AI to see (0 invisible) |
 
 ## How it works
 
 - **Scene.** All optional: an `AbilityManager` (with none, nothing steers it and it only falls), a `TickStateComponent` and `NetworkEntity` (rollback and multiplayer; they stay in the scene because `NetworkSession` reads them before the pawn joins the tree) and a `Node3D` called `Visual`. `pawn.tscn` puts bodies on collision layer 2, colliding with layers 1 and 2; the ground is on layer 1, so a camera arm can tell the ground from a pawn walking past.
 - **Visual exists** because the body moves in ticks and gets corrected, which looks jerky. Visual follows it smoothly per rendered frame and fades corrections out, so anything on screen hangs from it.
-- **Where things live** (they used to be on the pawn): input, presses and whether a player has the pawn on `ControllerManager` (`move_input`, `has_player()`, `possessable`); hits, death and their signals on `AbilityManager` (`died`); camera pieces on `CameraMount`; team counts in `TeamRegistry`; Health on `StatManager`.
+- **Where things live** (they used to be on the pawn): input, presses and whether a player has the pawn on `ControllerManager` (`move_input`, `has_player()`, `possessable`); hits, death and their signals on `AbilityManager` (`died`); camera pieces on `CameraMount`; team counts in `TeamRegistry`; Health on `StatusManager`.
 - **Odd cases** (`tests/pawn_selftest.gd`): with no `TickDriver` it ticks itself from `_physics_process`; an AI pawn in unloaded ground is frozen by `AIActivationManager` and keeps all its state.
 
 ## Tests

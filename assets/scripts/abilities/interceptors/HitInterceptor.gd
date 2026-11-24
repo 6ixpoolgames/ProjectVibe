@@ -87,5 +87,5 @@ func respond(hit: HitInfo) -> void:
 		back.direction = away.normalized() if away.length_squared() > 0.0001 else Vector3(-sin(pawn.yaw), 0.0, -cos(pawn.yaw))
 		back.effects = on_intercept_effects
 		attacker.ability_manager.receive_hit(back)
-	if not on_intercept_self_effects.is_empty() and pawn.effect_manager:
-		pawn.effect_manager.apply_effects(on_intercept_self_effects, pawn, ability, hit)
+	if not on_intercept_self_effects.is_empty() and pawn.status_manager:
+		pawn.status_manager.apply_effects(on_intercept_self_effects, pawn, ability, hit)

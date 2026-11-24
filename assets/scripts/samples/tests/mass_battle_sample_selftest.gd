@@ -65,7 +65,7 @@ func _test_filling() -> void:
 			break
 	_check(_alive(1) == 5 and _alive(2) == 5 and _alive(0) == 4, "the teams fill up: red %d, blue %d, soldiers %d (each with a hero)" % [_alive(1), _alive(2), _alive(0)])
 	var heroes: Array[Pawn] = _arena.get_heroes()
-	_check(heroes.size() == 3 and heroes.all(func(h: Pawn) -> bool: return h.is_keeping_world_loaded() and h.stat_manager.get_health() == 1000.0), "three heroes, each a chunk source, with 1000 Health")
+	_check(heroes.size() == 3 and heroes.all(func(h: Pawn) -> bool: return h.is_keeping_world_loaded() and h.status_manager.get_health() == 1000.0), "three heroes, each a chunk source, with 1000 Health")
 	# Claude 2026-11-16 (pawn M2): sources are flags on pawns now, with the level's distance as the game's setting.
 	var player: Pawn = GameMode.possession_coordinator.get_pawn_of()
 	_check(player.is_keeping_world_loaded() and is_equal_approx(player.streaming_source.load_distance, 160.0) and player.global_position.x > 270.0, "the player starts at the players' spawner, loading 160 m like the rest")

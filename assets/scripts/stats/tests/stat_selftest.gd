@@ -1,5 +1,5 @@
-## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for StatManager and Stat. Checks the odd cases at the top of
-## StatManager.gd.
+## Written by Claude (claude-opus-5-5), 2026-11-07: headless self-test for StatusManager and Stat. Checks the odd cases at the top of
+## StatusManager.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/stats/tests/stat_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
@@ -15,7 +15,7 @@ func _ready() -> void:
 
 
 func _test_values_and_fallbacks() -> void:
-	var manager := StatManager.new()
+	var manager := StatusManager.new()
 	var speed := Stat.new()
 	speed.name = "MoveSpeed"
 	speed.base_value = 6.5
@@ -39,7 +39,7 @@ func _test_values_and_fallbacks() -> void:
 
 
 func _test_adding_and_removing() -> void:
-	var manager := StatManager.new()
+	var manager := StatusManager.new()
 	add_child(manager)
 	var health := Stat.new()
 	health.name = "Health"
@@ -56,8 +56,8 @@ func _test_adding_and_removing() -> void:
 func _test_the_default_stats() -> void:
 	var pawn: Pawn = load("res://assets/scenes/pawn/pawn.tscn").instantiate()
 	add_child(pawn)
-	var stats := pawn.stat_manager
-	_check(stats != null, "a pawn gets a StatManager by default")
+	var stats := pawn.status_manager
+	_check(stats != null, "a pawn gets a StatusManager by default")
 	var wanted := {&"MoveSpeed": 5.0, &"SprintSpeed": 9.0, &"Acceleration": 30.0, &"Deceleration": 40.0, &"AirControl": 0.3,
 			&"TurnRate": 540.0, &"JumpVelocity": 5.0} # Claude 2026-11-16: TurnRate 540 (was 720), the owner's call, so turning can be tested more
 	var all_there := true

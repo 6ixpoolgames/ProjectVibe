@@ -124,27 +124,27 @@ func _test_ability_run() -> void:
 func _test_effects() -> void:
 	var p := _pawn(Vector3(5, 0.1, 0))
 	await _ticks(3)
-	var before := p.effect_manager.active_effects.duplicate()
+	var before := p.status_manager.active_effects.duplicate()
 	var slow := Effect.new()
 	slow.effect_name = &"owned tags test slow"
 	slow.duration_ticks = 30
 	slow.tags = [Tags.EFFECT.DEBUFF_SLOW] as Array[StringName]
-	p.effect_manager.apply_effect(slow, null)
+	p.status_manager.apply_effect(slow, null)
 	_check(p.owned_tags.has(Tags.EFFECT.DEBUFF_SLOW) and p.owned_tags.has(Tags.EFFECT.DEBUFF), "a held effect's tags are owned while it's on the pawn")
-	var during := p.effect_manager.active_effects.duplicate()
-	p.effect_manager.active_effects = before
+	var during := p.status_manager.active_effects.duplicate()
+	p.status_manager.active_effects = before
 	_check(not p.owned_tags.has(Tags.EFFECT.DEBUFF_SLOW), "loading the list from before it (a rollback) takes them away at once")
-	p.effect_manager.active_effects = during
+	p.status_manager.active_effects = during
 	_check(p.owned_tags.has(Tags.EFFECT.DEBUFF_SLOW), "loading it back puts them back")
 	await _ticks(40)
-	_check(not p.effect_manager.has_effect(slow) and not p.owned_tags.has(Tags.EFFECT.DEBUFF), "the tags go when it runs out")
+	_check(not p.status_manager.has_effect(slow) and not p.owned_tags.has(Tags.EFFECT.DEBUFF), "the tags go when it runs out")
 	p.free()
 
 
 func _test_death() -> void:
 	var p := _pawn(Vector3(10, 0.1, 0))
 	await _ticks(3)
-	p.effect_manager.apply_effect(Effect.make_damage(100000.0), null)
+	p.status_manager.apply_effect(Effect.make_damage(100000.0), null)
 	await _ticks(2)
 	_check(p.is_dead() and p.owned_tags.has(Tags.STATUS.DEAD) and p.owned_tags.has(Tags.ABILITY.DEATH), "a dead pawn owns status.dead, and ability.death while Death runs")
 	_check(TagQuery.make([], [], [Tags.STATUS.DEAD]).matches(p.owned_tags) == false, "a 'not when dead' query fails for it")

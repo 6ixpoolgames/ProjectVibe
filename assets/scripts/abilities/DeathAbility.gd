@@ -1,11 +1,11 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: abilities/CHANGELOG.md.
 ## Being dead: an action with no trigger action, started when the pawn's Health reaches 0.
 ##
-## The EffectManager calls [method AbilityManager.health_ran_out] when an effect takes Health to 0, and the AbilityManager starts this
+## The StatusManager calls [method AbilityManager.health_ran_out] when an effect takes Health to 0, and the AbilityManager starts this
 ## and sends [signal AbilityManager.died]. While it runs it locks out movement, combat and utility, nothing cancels it, and
 ## [method Pawn.is_dead] is true (the pawn ignores its input and AI, and other pawns' sensing ignores it). It keeps running while Health
 ## is 0; [method AbilityManager.revive] ends it. The body stays where it falls: removing it or respawning is game code's job.
-## [br][br]Rollback: its timer rolls back with Health, so clients see the pawn dead from snapshots. It watches [constant StatManager.HEALTH].
+## [br][br]Rollback: its timer rolls back with Health, so clients see the pawn dead from snapshots. It watches [constant StatusManager.HEALTH].
 ## Design: pawn spec 8.7, 8.16.
 class_name DeathAbility
 extends AbilityBase
@@ -49,7 +49,7 @@ func can_sleep_while_running() -> bool:
 
 
 func _health_is_gone() -> bool:
-	var stats := pawn.stat_manager if pawn else null
+	var stats := pawn.status_manager if pawn else null
 	return stats == null or stats.get_health() <= 0.0
 
 

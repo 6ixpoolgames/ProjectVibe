@@ -23,7 +23,7 @@ A Godot 4.7 base for real-time 3D games (GDScript, with hot paths in a C++ GDExt
 
 ## Working
 
-- **Tests:** `bash tools/run_tests.sh <parts of suite names>`, `commit`, `full`, or `full net` (`net_selftest` runs only when named; about 8 minutes). A suite passes only on exit 0, `ALL PASSED`, and no `FAIL` or `SCRIPT ERROR`. Per change: the affected suites plus the arena smoke tests (`arena`). Before a commit: `commit` (26 suites, one or two per system, about 2 minutes). Every 5 commits and before a push: `full` (about 5 minutes; `commit` says how many commits ago it last passed). The network tests when netcode changes. Suites run with `--fixed-fps 60` (the game plays out the same, faster) except those listed in the runner's `REAL_TIME`; `REAL_TIME_ALL=1` runs everything in real time, worth doing now and then. After adding a `class_name`, run `--headless --import --path .` once. Tests extend `tests/SelfTest.gd`. The project runs on Jolt; `-- --tick-rate=30` runs anything at 30 ticks a second.
+- **Tests:** `bash tools/run_tests.sh <parts of suite names>`, `commit`, `full`, or `full net` (`net_selftest` runs only when named; about 8 minutes). A suite passes only on exit 0, `ALL PASSED`, and no `FAIL` or `SCRIPT ERROR`. Per change: the affected suites plus the arena smoke tests (`arena`). Before a commit: `commit` (27 suites, one or two per system, about 2 minutes). Every 5 commits and before a push: `full` (about 5 minutes; `commit` says how many commits ago it last passed). The network tests when netcode changes. Suites run with `--fixed-fps 60` (the game plays out the same, faster) except those listed in the runner's `REAL_TIME`; `REAL_TIME_ALL=1` runs everything in real time, worth doing now and then. After adding a `class_name`, run `--headless --import --path .` once. Tests extend `tests/SelfTest.gd`. The project runs on Jolt; `-- --tick-rate=30` runs anything at 30 ticks a second.
 - **Godot:** the editor binary beside the project folder (`../Godot_v4.7.2-stable_win64_console.exe`). Never run two Godot processes at once, and don't edit `project.godot` while the editor is open.
 - **C++ library:** `python -m SCons -j8` in `native/` (godot-cpp 10, Godot 4.7's API), with the editor closed (it holds the DLL). Linux builds in WSL (see `CLAUDE.local.md`); the Linux `.so` isn't committed.
 - **Docs:** each system folder has a `README.md`, a generated `REFERENCE.md` (`python tools/docs/make_reference.py <system>`) and a `CHANGELOG.md`. Tags: `tools/tags/apply_redirects.py` (rewrites renamed tags in saved files) and `make_tag_reference.py` (`docs/tags/TAGS.md`). Also `make_class_index.py`, `check_links.py`, `check_comments_only.py` (proves a cleanup changed only comments) and `build_wiki.py` (the wiki, published by GitHub Actions on push). Rules: `tools/docs/README.md`.
@@ -42,8 +42,9 @@ Each system's README has the detail. Specs are in `docs/` (pawn, netcode, naviga
 | `player/`, `camera/` | The player's side: input, the world cursor, one camera per player, the spectator |
 | `steps/` | The step core: `Step` and `StepTimeline`, which abilities (and later AI behaviours) run their steps on |
 | `abilities/` | Everything a pawn does, started by named actions: definitions (shared settings with variants), steps on timelines, combos, hits, interceptors, projectiles |
+| `status/` | The status manager: a pawn's stats and the effects on it in one component; thresholds and their events |
 | `effects/` | What abilities and hits do to pawns: damage, heals, pushes, boosts, resistances |
-| `stats/` | A pawn's numbers (Health, speeds) as nodes |
+| `stats/` | A pawn's numbers (Health, speeds) as nodes, under the status manager |
 | `ai/` | Sensing, memory, target, states, behaviours; decisions in C++ (`AIDecisionModule`) |
 | `movement/` | The crowd mover: AI pawns moved together once a tick |
 | `navigation/` | The pawn's nav part, nav markers and links |

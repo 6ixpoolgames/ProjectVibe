@@ -17,26 +17,26 @@ The numbers about a pawn, such as how fast it walks or how much Health it has, k
 
 ```
  Pawn
- └── StatManager            pawn.stat_manager: finds stats by name, counts changes (version)
+ └── StatusManager            pawn.status_manager: finds stats by name, counts changes (version)
      ├── MoveSpeed (Stat)   base_value, with effects on top = value
      ├── Health (Stat)      changes_during_play: a current value that rolls back
      └── Detectability (Stat)  table_column: copied into the pawn table for C++
 ```
 
-- **`StatManager`** is a default pawn part (`assets/scenes/pawn/parts/StatManager.tscn`, added by `game_mode/PawnInitializer`). It holds one `Stat` child per stat, finds them by name, and raises its `version` whenever a value changes, so abilities that keep stat values know to read them again.
-- **`Stat`** is one number. Its `value` is its `base_value` plus what held effects add, times what they multiply (`effects/EffectManager` calls `set_modifiers`). A stat with `changes_during_play`, such as Health, also has a `current` amount from 0 to its value, which rolls back through the pawn's `TickStateComponent` and reaches clients in snapshots.
-- Health has one name, `StatManager.HEALTH`, read by Death, hits (`abilities/AbilityManager`), the kill floor and the readouts. Detectability is a stat (`StatManager.DETECTABILITY`, read with `StatManager.detectability_of(pawn)`), copied into the pawn table's `detectability` column for the AI's sensing job.
+- **`StatusManager`** is a default pawn part (`assets/scenes/pawn/parts/StatusManager.tscn`, added by `game_mode/PawnInitializer`). It holds one `Stat` child per stat, finds them by name, and raises its `version` whenever a value changes, so abilities that keep stat values know to read them again.
+- **`Stat`** is one number. Its `value` is its `base_value` plus what held effects add, times what they multiply (`status/StatusManager` calls `set_modifiers`). A stat with `changes_during_play`, such as Health, also has a `current` amount from 0 to its value, which rolls back through the pawn's `TickStateComponent` and reaches clients in snapshots.
+- Health has one name, `StatusManager.HEALTH`, read by Death, hits (`abilities/AbilityManager`), the kill floor and the readouts. Detectability is a stat (`StatusManager.DETECTABILITY`, read with `StatusManager.detectability_of(pawn)`), copied into the pawn table's `detectability` column for the AI's sensing job.
 
 ## How to use it
 
-**Change a pawn's stats.** In the pawn scene, add `parts/StatManager.tscn` (or open the default one) and set each stat's `base_value`. The defaults are MoveSpeed, SprintSpeed, Acceleration, Deceleration, AirControl, TurnRate, JumpVelocity, DashAcceleration, Health and Detectability.
+**Change a pawn's stats.** In the pawn scene, add `parts/StatusManager.tscn` (or open the default one) and set each stat's `base_value`. The defaults are MoveSpeed, SprintSpeed, Acceleration, Deceleration, AirControl, TurnRate, JumpVelocity, DashAcceleration, Health and Detectability.
 
-**Add a stat.** Add a `Stat` node under the StatManager; its node name is the stat's name. Code reads it with a fallback, so a pawn without it still works:
+**Add a stat.** Add a `Stat` node under the StatusManager; its node name is the stat's name. Code reads it with a fallback, so a pawn without it still works:
 ```gdscript
-var speed := pawn.stat_manager.get_value(&"MoveSpeed", 5.0)
+var speed := pawn.status_manager.get_value(&"MoveSpeed", 5.0)
 ```
 
-**Hurt or heal.** On the server, `pawn.stat_manager.change_current(StatManager.HEALTH, -20)`, kept between 0 and the stat's value. Usually an effect does this (`effects/parts/StatChangePart`), not code.
+**Hurt or heal.** On the server, `pawn.status_manager.change_current(StatusManager.HEALTH, -20)`, kept between 0 and the stat's value. Usually an effect does this (`effects/parts/StatChangePart`), not code.
 
 **Let C++ read a stat.** Set its `table_column` to a pushed column of the pawn table (`PawnTable.add_pushed_column`). The column gets the value whenever it changes.
 
@@ -51,7 +51,7 @@ var speed := pawn.stat_manager.get_value(&"MoveSpeed", 5.0)
 ## How it works
 
 - A stat that isn't there is never an error: `get_value` gives the fallback and `get_stat` gives null. A child that isn't a `Stat` is ignored; Godot renames a second child of the same name, so two stats can't share one.
-- **Health** has one name, `StatManager.HEALTH`, which everything that means "the pawn's health" reads (Death, hits, the kill floor, the readouts). A fuller stats pass comes with the game mechanics.
+- **Health** has one name, `StatusManager.HEALTH`, which everything that means "the pawn's health" reads (Death, hits, the kill floor, the readouts). A fuller stats pass comes with the game mechanics.
 
 ## Tests
 

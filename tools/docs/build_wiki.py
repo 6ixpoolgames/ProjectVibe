@@ -168,7 +168,7 @@ ICONS = {
     "diagnostics": "chart-timeline-variant", "effects": "auto-fix", "entities": "identifier", "game_mode": "chess-king", "jobs": "cogs",
     "movement": "run-fast", "native": "language-cpp", "navigation": "map-marker-path", "netcode": "lan", "pawn": "account-outline",
     "platform": "laptop", "player": "account-cog-outline", "replay": "replay", "resources": "file-cog-outline",
-    "singletons": "cog-outline", "spawning": "account-plus-outline", "steps": "timeline-outline", "stats": "chart-bar", "streaming": "transfer",
+    "singletons": "cog-outline", "spawning": "account-plus-outline", "status": "heart-pulse", "steps": "timeline-outline", "stats": "chart-bar", "streaming": "transfer",
     "tags": "tag-multiple-outline", "terrain": "terrain", "ui": "monitor-dashboard", "visuals": "palette-outline",
     "world": "earth",
 }

@@ -41,7 +41,7 @@ const NOT_ROLLED_BACK := {
 	# Claude 2026-11-22 (ability spec 13.3): the swing's hit run, made on first use. Its hit list is the ability's pawns_hit_this_run,
 	# which rolls back; its intersect log is for hooks and debugging, and is cleared as each run starts.
 	"MeleeAttackAbility:hit_run": "made on first use; its hit list is pawns_hit_this_run, which rolls back, and its log is cleared each run",
-	# Walk's and Sprint's copies of their stats, read again whenever the StatManager's version changes (pawn spec 15.2). Sprint fills
+	# Walk's and Sprint's copies of their stats, read again whenever the StatusManager's version changes (pawn spec 15.2). Sprint fills
 	# them the first time it runs; Walk already has by the time play starts here, but the same holds for it.
 	"SprintAbility:_acceleration": "a cache of stats",
 	"SprintAbility:_air_control": "a cache of stats",
@@ -57,22 +57,23 @@ const NOT_ROLLED_BACK := {
 	"WalkAbility:_stats_speed_stat": "a cache of stats",
 	"WalkAbility:_stats_version": "a cache of stats",
 	"WalkAbility:_turn_rate": "a cache of stats",
-	# Claude 2026-11-10 (pawn spec 8.11): the EffectManager's active list rolls back as active_effects, which is a window onto
+	# Claude 2026-11-10 (pawn spec 8.11): the StatusManager's active list rolls back as active_effects, which is a window onto
 	# _entries; the rest is what its held parts add up to, worked out from that list whenever it changes, rollback loads included.
-	"EffectManager:_entries": "the storage behind active_effects, which rolls back",
-	"EffectManager:_dirty": "worked out from active_effects",
-	"EffectManager:_stat_changes": "worked out from active_effects",
-	"EffectManager:_touched_stats": "worked out from active_effects",
-	"EffectManager:_ability_bonuses": "worked out from active_effects",
-	"EffectManager:_resistance_bits": "worked out from active_effects",
+	"StatusManager:_entries": "the storage behind active_effects, which rolls back",
+	"StatusManager:_dirty": "worked out from active_effects",
+	"StatusManager:_soonest": "the soonest deadline in active_effects, worked out whenever it changes",
+	"StatusManager:_stat_changes": "worked out from active_effects",
+	"StatusManager:_touched_stats": "worked out from active_effects",
+	"StatusManager:_ability_bonuses": "worked out from active_effects",
+	"StatusManager:_resistance_bits": "worked out from active_effects",
 	# A stat's value, while a held StatModifierPart changes it: base_value with the parts' changes, worked out the same way.
 	"Stat:value": "worked out from active_effects",
-	# Claude 2026-11-16 (wider audit): the totals the EffectManager hands a stat (Stat.set_modifiers), which value is worked out from.
+	# Claude 2026-11-16 (wider audit): the totals the StatusManager hands a stat (Stat.set_modifiers), which value is worked out from.
 	"Stat:_added": "worked out from the effects list, like Stat:value",
 	"Stat:_multiplied": "worked out from the effects list, like Stat:value",
 	# Goes up whenever a stat's value changes, so abilities that keep stat values read them again (pawn spec 15.2). A rollback that
 	# puts a value back changes it again, so it never needs to go back itself.
-	"StatManager:version": "a change counter for caches",
+	"StatusManager:version": "a change counter for caches",
 	# Claude 2026-11-21 (ability spec 4): the soonest cooldown, buffer or combo window end, worked out again whenever a deadline is set,
 	# a rollback load included.
 	"AbilityManager:_next_deadline": "worked out from the deadlines, which roll back",
@@ -86,8 +87,6 @@ const NOT_ROLLED_BACK := {
 	"Pawn:_runs_this_tick": "worked out each tick from _last_run_tick, which rolls back",
 	"Pawn:ticks_elapsed": "worked out each tick from _last_run_tick, which rolls back",
 	# The safeguard's count of step starts this tick: reset from the tick's own number, so a replay counts the same way.
-	"MeleeAttackAbility:_starts_tick": "counted per tick from the tick number",
-	"MeleeAttackAbility:_starts_this_tick": "counted per tick from the tick number",
 }
 
 
@@ -108,7 +107,7 @@ func _ready() -> void:
 	# effects, a changed stat and a changed ability number are part of the fight.
 	_add_test_effects(a)
 	var applied_to_a: Array[StringName] = []
-	a.effect_manager.effect_applied.connect(func(effect: Effect, _application: EffectApplication) -> void: applied_to_a.append(effect.effect_name))
+	a.status_manager.effect_applied.connect(func(effect: Effect, _application: EffectApplication) -> void: applied_to_a.append(effect.effect_name))
 	await _ticks(20) # parts settle: one-off setup and caches filled on the first ticks aren't play
 	var watched: Array[Node] = []
 	for pawn in [a, b]:
@@ -164,7 +163,7 @@ func _ready() -> void:
 	print("    (listed but not seen changing this run: %s)" % ", ".join(stale) if not stale.is_empty() else "    (every listed variable was seen changing)")
 	_check(changed.size() > 10, "the run exercised the pawns: %d variables changed" % changed.size())
 	_check(applied_to_a.has(&"coverage dash boost"), "a's swing put its on-hit boost on a (%s)" % [applied_to_a])
-	_check(changed.has("EffectManager:_entries") and changed.has("Stat:value"), "and over-time effects were on them, changing a stat (Claude 2026-11-10)")
+	_check(changed.has("StatusManager:_entries") and changed.has("Stat:value"), "and over-time effects were on them, changing a stat (Claude 2026-11-10)")
 	a.free()
 	b.free()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
@@ -174,9 +173,9 @@ func _ready() -> void:
 # The pawn, and its parts that simulate during a rollback: abilities and stats. Not AI, not visuals. Claude 2026-11-10: and effects.
 func _watched_nodes(pawn: Pawn) -> Array[Node]:
 	var out: Array[Node] = [pawn]
-	if pawn.effect_manager:
-		out.append(pawn.effect_manager)
-	for part in [pawn.ability_manager, pawn.stat_manager]:
+	if pawn.status_manager:
+		out.append(pawn.status_manager)
+	for part in [pawn.ability_manager, pawn.status_manager]:
 		if part == null:
 			continue
 		out.append(part)

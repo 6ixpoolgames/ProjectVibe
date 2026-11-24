@@ -19,8 +19,8 @@ func setup() -> void:
 
 
 func enter() -> void:
-	if pawn.effect_manager and not effects.is_empty():
-		pawn.effect_manager.apply_effects(effects, pawn, ability)
+	if pawn.status_manager and not effects.is_empty():
+		pawn.status_manager.apply_effects(effects, pawn, ability)
 
 
 func tick(_dt: float) -> Status:

@@ -8,19 +8,19 @@ class_name StatChangePart
 extends EffectPart
 
 ## The stat, by name, such as &"Health".
-@export var stat: StringName = StatManager.HEALTH
+@export var stat: StringName = StatusManager.HEALTH
 ## How much to add. Negative takes away.
 @export var amount := -10.0
 
 
 func apply_once(application: EffectApplication) -> void:
-	var stats := application.target.stat_manager
+	var stats := application.target.status_manager
 	if stats == null or not stats.has_stat(stat):
 		return
 	var change := amount * application.stacks
 	if change < 0.0 and application.effect.is_harmful:
 		change *= 1.0 - application.resistance
 	var before := stats.get_current(stat)
-	var after := stats.change_current(stat, change)
-	if stat == StatManager.HEALTH and after < before:
+	var after := stats.change_current(stat, change, application.source, application.hit)
+	if stat == StatusManager.HEALTH and after < before:
 		application.damage_dealt += before - after

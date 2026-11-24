@@ -35,7 +35,7 @@ SLOW='net_selftest|net_streaming_selftest|net_pawn_selftest|net_projectile_selft
 # twin comparisons that are cheap. Everything else runs with "full".
 COMMIT_SUITES='tick_driver_selftest foundations_selftest state_store_selftest tick_state_selftest net_session_selftest
   pawn_selftest tick_step_selftest rollback_coverage_selftest ability_selftest ability_steps_selftest combat_selftest
-  hit_system_selftest effect_selftest ai_behaviour_manager_selftest ai_perception_selftest ai_batch_decider_selftest
+  hit_system_selftest effect_selftest status_selftest ai_behaviour_manager_selftest ai_perception_selftest ai_batch_decider_selftest
   controller_manager_selftest navigation_manager_selftest chunk_streaming_selftest world_coordinator_selftest
   game_mode_selftest spawn_manager_selftest replay_selftest owned_tags_selftest arena_sample_selftest mass_battle_sample_selftest'
 # Suites that count real seconds, so they always run in real time.

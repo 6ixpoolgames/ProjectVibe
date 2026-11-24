@@ -212,7 +212,7 @@ func _test_invulnerable() -> void:
 	await _ticks(2)
 	_check(shield.is_running_timed() and target.ability_manager.is_invulnerable(), "an ability with an InvulnerabilityInterceptor makes its pawn invulnerable while it runs")
 	await _swing(attacker, origin + Vector3(0, 1, -10))
-	_check(hits.is_empty() and target.stat_manager.get_health() == 100.0, "a swing doesn't hit an invulnerable pawn (HP %d)" % int(target.stat_manager.get_health()))
+	_check(hits.is_empty() and target.status_manager.get_health() == 100.0, "a swing doesn't hit an invulnerable pawn (HP %d)" % int(target.status_manager.get_health()))
 	attacker.free()
 	target.free()
 	# Dashing: a hit straight to receive_hit does nothing.
@@ -226,7 +226,7 @@ func _test_invulnerable() -> void:
 	var hit := _hit(dasher, 2.0)
 	hit.effects.append(Effect.make_damage(30)) # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	dasher.ability_manager.receive_hit(hit)
-	_check(dash.is_running_timed() and received.is_empty() and dasher.stat_manager.get_health() == 100.0, "a dashing pawn takes no hit: no damage and no hit_received (dashing %s, %d received, HP %d, grounded %s)" % [dash.is_running_timed(), received.size(), int(dasher.stat_manager.get_health()), dasher.grounded])
+	_check(dash.is_running_timed() and received.is_empty() and dasher.status_manager.get_health() == 100.0, "a dashing pawn takes no hit: no damage and no hit_received (dashing %s, %d received, HP %d, grounded %s)" % [dash.is_running_timed(), received.size(), int(dasher.status_manager.get_health()), dasher.grounded])
 	dasher.free()
 
 

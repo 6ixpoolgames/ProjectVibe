@@ -334,7 +334,7 @@ func _test_melee_multi_hit() -> void:
 	_check(landed.size() == 2 and hit_both, "multi-hit: one swing hits both enemies inside its sphere, each once (%d hits)" % landed.size())
 	# Claude 2026-11-10: the damage is the swing's on-hit effect now (swing_hit.tres, 20), not a number on the swing.
 	var damage := -melee.on_hit_effects[0].planned_change(&"Health")
-	_check(damage == 20.0 and left.stat_manager.get_health() == 100.0 - damage and right.stat_manager.get_health() == 100.0 - damage, "and each takes the damage from the swing's on-hit effect (%d and %d HP)" % [int(left.stat_manager.get_health()), int(right.stat_manager.get_health())])
+	_check(damage == 20.0 and left.status_manager.get_health() == 100.0 - damage and right.status_manager.get_health() == 100.0 - damage, "and each takes the damage from the swing's on-hit effect (%d and %d HP)" % [int(left.status_manager.get_health()), int(right.status_manager.get_health())])
 	_check(left.global_position.x < 29.45 and right.global_position.x > 30.55, "and each is knocked back away from the attacker, to its own side (%.2f and %.2f m sideways)" % [left.global_position.x - 29.5, right.global_position.x - 30.5])
 	attacker.free()
 	left.free()
@@ -370,7 +370,7 @@ func _test_hits_after_simulate() -> void:
 		for i in 30:
 			await _ticks(1)
 			path.append(target.global_position)
-		results.append({"seen": seen.map(func(e): return [e[0], e[1] - pressed_at] + e.slice(2)), "path": path, "health": target.stat_manager.get_health()})
+		results.append({"seen": seen.map(func(e): return [e[0], e[1] - pressed_at] + e.slice(2)), "path": path, "health": target.status_manager.get_health()})
 		attacker.free()
 		target.free()
 	var first: Dictionary = results[0]

@@ -8,6 +8,8 @@ What every entity shares, whatever it is (pawn spec 16.9).
 
 - **`EntityNumber`**: one number for every entity, the same on every machine and in every replay. Its network entity id when it has one, else a hash of its path in the scene tree (a level's own pawns, offline). `Pawn.entity_number()` keeps a pawn's own; `EntityNumber.of(node)` works it out for anything, -1 (`EntityNumber.NONE`) for none.
 
+- **`GameplayEventData`**: what a gameplay event carries: its tag, instigator, target, magnitude and an optional object (Unreal's FGameplayEventData). Send one with `pawn.send_event(tag, data)`; listen on `pawn.gameplay_event_received`.
+
 ## How to use it
 
 **Name an entity across machines.** `pawn.entity_number()`, or `EntityNumber.of(thing)`. Use it for anything another machine or a replay must agree on: random rolls (`DeterministicRandom`), stagger, hit lists, hit order, ties. Instance ids differ between runs, so keep them for bookkeeping that stays on one machine.

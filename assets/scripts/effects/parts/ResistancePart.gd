@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## Adds to the pawn's resistance to a kind of effect while its effect lasts. A held part ([EffectPart]).
 ##
-## Such as +0.5 against effect.damage.elemental.fire for a fire ward. Added to the pawn's [member EffectManager.resistances], which explains how
+## Such as +0.5 against effect.damage.elemental.fire for a fire ward. Added to the pawn's [member StatusManager.resistances], which explains how
 ## they count.
 ## Design: pawn spec 8.11.
 class_name ResistancePart

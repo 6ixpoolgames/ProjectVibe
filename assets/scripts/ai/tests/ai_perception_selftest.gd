@@ -132,6 +132,9 @@ func _test_sight() -> void:
 	_check(memory.is_certain_at(i), "after 20 ticks in front, close: certain (basically instant)")
 	front.free()
 	memory.clear()
+	# Claude 2026-11-24: no scheduled passes from here on (the passes below are made by hand): which ticks they'd land on depends on
+	# the pawns' entity numbers, so one could see a pawn while the test sets it up.
+	observer.ai_context.sensing_manager.sense_interval_ticks = NEVER
 
 	var behind := await _make_pawn(0, Vector3(0, 0, 5))
 	observer.ai_context.sensing_manager.full_pass(5100)
@@ -145,18 +148,18 @@ func _test_sight() -> void:
 	side.global_position = Vector3(0, 0, -26)
 	_check(sight.visibility_of(side) == 0.0, "beyond sight_range: nothing")
 	side.global_position = Vector3(0, 0, -5)
-	StatManager.set_detectability(side, 0.5)
+	StatusManager.set_detectability(side, 0.5)
 	_check(is_equal_approx(sight.visibility_of(side), 0.5), "detectability 0.5: half")
-	StatManager.set_detectability(side, 0.0)
+	StatusManager.set_detectability(side, 0.0)
 	observer.ai_context.sensing_manager.full_pass(5200)
 	_check(memory.find(side) < 0, "detectability 0: invisible")
-	StatManager.set_detectability(side, 0.2)
+	StatusManager.set_detectability(side, 0.2)
 	observer.ai_context.sensing_manager.full_pass(5300)
 	var faded_before := memory.awareness_at(memory.find(side), 5800) # what's left 500 ticks later, before the next pass
 	observer.ai_context.sensing_manager.full_pass(5800)
 	var gained := memory.awareness_at(memory.find(side), 5800) - faded_before
 	_check(absf(gained - 0.2) < 0.001, "a long gap counts as max_gain_ticks (30) at most: +0.2, not +3.3 (%.3f)" % gained)
-	StatManager.set_detectability(side, 1.0)
+	StatusManager.set_detectability(side, 1.0)
 	memory.clear()
 
 	var wall := _make_box(Vector3(0, 1, -2.5), Vector3(4, 2, 0.5))

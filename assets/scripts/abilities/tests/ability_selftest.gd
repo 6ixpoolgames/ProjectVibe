@@ -261,12 +261,12 @@ func _test_one_press_one_ability() -> void:
 
 func _test_no_stats() -> void:
 	var floor_body := _make_floor(400.0)
-	var pawn := _make_pawn(Vector3(0, 0.1, 0), [&"StatManager"])
+	var pawn := _make_pawn(Vector3(0, 0.1, 0), [&"StatusManager"])
 	var ai := _ai(pawn)
 	await _ticks(20)
 	ai.move_in_direction(Vector3(1, 0, 0))
 	await _ticks(40)
-	_check(pawn.stat_manager == null and absf(pawn.velocity.x - 5.0) < 0.05, "with no StatManager, Walk uses its fallback speed (%.2f m/s)" % pawn.velocity.x)
+	_check(pawn.status_manager == null and absf(pawn.velocity.x - 5.0) < 0.05, "with no StatusManager, Walk uses its fallback speed (%.2f m/s)" % pawn.velocity.x)
 	pawn.free()
 	floor_body.free()
 
@@ -317,7 +317,7 @@ func _test_gates() -> void:
 	ai.move_in_direction(Vector3(1, 0, 0))
 	await _ticks(40)
 	var normal_speed := pawn.velocity.x
-	(pawn.stat_manager.get_stat(&"MoveSpeed") as Stat).value = 2.0
+	(pawn.status_manager.get_stat(&"MoveSpeed") as Stat).value = 2.0
 	await _ticks(40)
 	_check(absf(normal_speed - 5.0) < 0.05 and absf(pawn.velocity.x - 2.0) < 0.05, "Walk keeps its stats, and picks up a changed one (%.2f, then %.2f m/s)" % [normal_speed, pawn.velocity.x])
 	pawn.free()

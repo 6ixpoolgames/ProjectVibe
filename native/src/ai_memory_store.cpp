@@ -24,9 +24,9 @@ using namespace godot;
 
 namespace {
 
-// How easy a target is to see: its Detectability stat's value, 1 without one, as StatManager.detectability_of does in GDScript.
+// How easy a target is to see: its Detectability stat's value, 1 without one, as StatusManager.detectability_of does in GDScript.
 double detectability_of(Object *target) {
-	Object *manager = Object::cast_to<Object>(target->get("stat_manager").operator Object *());
+	Object *manager = Object::cast_to<Object>(target->get("status_manager").operator Object *());
 	if (manager == nullptr) {
 		return 1.0;
 	}

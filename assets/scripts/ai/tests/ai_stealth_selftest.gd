@@ -117,7 +117,7 @@ func _test_never_alerted() -> void:
 	var goblin := _make_goblin(Vector3(50, 0, 0))
 	var friend := _make_pawn(1, Vector3(50, 0, -50))
 	var ghost := _make_pawn(0, Vector3(50, 0, -50))
-	StatManager.set_detectability(ghost, 0.0)
+	StatusManager.set_detectability(ghost, 0.0)
 	await _ticks(10)
 	for i in 120:
 		_put_in_front(friend, goblin, 4.0)

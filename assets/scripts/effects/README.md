@@ -22,7 +22,7 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
  an ApplyEffectStep, or code ──────────────────────► a pawn
                                                        │
                                                        ▼
-                         the pawn's EffectManager: resistances, active list (rolls back)
+                         the pawn's StatusManager: resistances, active list (rolls back)
                               ├─ do-once parts (authority only): StatChangePart, KnockbackPart, LifestealPart
                               └─ held parts (every machine):    StatModifierPart, AbilityPriorityPart, ResistancePart
 ```
@@ -30,7 +30,7 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
 - **`Effect`** is a Resource, saved in `resources/effects/`: instant (its parts run once) or over time (`duration_ticks`, with an optional `period_ticks` and a `stacking` rule, in ticks at 60 a second). Its `tags` say what kind it is; `is_harmful` decides whether resistances and invulnerability apply.
 - **Parts** (`EffectPart`, in `parts/`) are what an effect does, run in list order. Do-once parts run on the authority only (the server, or offline): damage, heals, pushes, lifesteal. Held parts hold while an over-time effect lasts, on every machine, so a client predicting its own pawn agrees: stat changes, ability number boosts, resistances.
 - **`EffectApplier`** is a child node of an ability (or of a HitInterceptor) that says which effects it applies, when (ON_START, ON_HIT, ON_INTERCEPT) and to whom (TARGET or SELF).
-- **`EffectManager`** is a part on every pawn. It applies effects to its own pawn with its resistances, keeps over-time ones in `active_effects` (rolled back and sent in snapshots), counts them down each tick and clears them when the pawn dies.
+- **`StatusManager`** is a part on every pawn. It applies effects to its own pawn with its resistances, keeps over-time ones in `active_effects` (rolled back and sent in snapshots), counts them down each tick and clears them when the pawn dies.
 - **Effect tags** say what kind of effect something is (`effect.damage.elemental.fire`): the `effect` category of the one tag registry (`tags/TagRegistry`), declared in `resources/tag_declarations.tres`. Code uses the constants in `Tags.EFFECT` (`Tags.EFFECT.DAMAGE_PHYSICAL`).
 - `EffectApplication` (one application, handed to each do-once part) and `EffectHeldTotals` (what the held parts add up to) are plumbing a new part works with.
 
@@ -44,12 +44,12 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
 
 **Make a slow, a buff or a ward.** An over-time effect with held parts: a `StatModifierPart` (MoveSpeed, multiply 0.7) for a slow, a `ResistancePart` (`effect.damage.elemental.fire`, 0.5) for a fire ward, an `AbilityPriorityPart` to boost a group of abilities' priority or interrupt numbers.
 
-**Give a pawn resistances.** On its EffectManager, `resistances`: effect tag -> amount. 0.25 takes a quarter off, 1 or more ignores those effects, negative is a weakness. A resistance to `effect.damage.elemental` covers fire and frost.
+**Give a pawn resistances.** On its StatusManager, `resistances`: effect tag -> amount. 0.25 takes a quarter off, 1 or more ignores those effects, negative is a weakness. A resistance to `effect.damage.elemental` covers fire and frost.
 
 **From code:**
 ```gdscript
-pawn.effect_manager.apply_effect(effect, source)          # source: who applied it, or null
-pawn.effect_manager.remove_with_tag(Tags.EFFECT.DEBUFF)    # a cleanse
+pawn.status_manager.apply_effect(effect, source)          # source: who applied it, or null
+pawn.status_manager.remove_with_tag(Tags.EFFECT.DEBUFF)    # a cleanse
 var hurt := Effect.make_damage(20)                        # a quick instant damage effect, for traps and tests
 ```
 
@@ -57,9 +57,9 @@ var hurt := Effect.make_damage(20)                        # a quick instant dama
 
 ## How it works
 
-**Applying.** `EffectManager.apply_effect` refuses a dead pawn, and a harmful effect while the pawn is invulnerable (a dash) or has 1 or more resistance. An instant effect runs its do-once parts now. An over-time one goes in the active list (or, if it's there, its `stacking` rule decides); the first time its do-once parts run too, and its held parts hold from then on, on every machine. Do-once parts run in order on the authority only; once Health reaches 0 the pawn dies (`AbilityManager.health_ran_out`) and the rest are skipped. Health taken from a source adds threat in this pawn's AI memory for it.
+**Applying.** `StatusManager.apply_effect` refuses a dead pawn, and a harmful effect while the pawn is invulnerable (a dash) or has 1 or more resistance. An instant effect runs its do-once parts now. An over-time one goes in the active list (or, if it's there, its `stacking` rule decides); the first time its do-once parts run too, and its held parts hold from then on, on every machine. Do-once parts run in order on the authority only; once Health reaches 0 the pawn dies (`AbilityManager.health_ran_out`) and the rest are skipped. Health taken from a source adds threat in this pawn's AI memory for it.
 
-**Each tick** (`tick_effects`, called by the pawn before its abilities): every active effect counts down and ends at 0, and one with a period runs its do-once parts again when it comes round (3 s with a 1 s period runs at 0, 1 and 2 s). A pawn with effects on it doesn't rest.
+**Each tick** (`tick_effects`, called by the pawn before its abilities): nothing counts down. Each active effect keeps the tick it ends and the tick of its next period (deadlines); the status manager does nothing until the soonest comes, then ends what's over and runs the periods that came due (3 s with a 1 s period runs at 0, 1 and 2 s; a pawn running every Nth tick gets every period it missed). A pawn with effects on it doesn't rest.
 
 **Rollback.** The active list is one `PackedInt64Array`, `active_effects`, five numbers per effect: its id (`Effect.get_id`, from its file path or `effect_name`), ticks left, ticks to its next period, stacks, and its source (an entity id online, else an instance id). The pawn's `TickStateComponent` rolls it back and sends it in snapshots. What the held parts add up to (stat values, ability numbers, resistances) is worked out from the list whenever it changes, including when a rollback loads it, so it needn't roll back itself.
 
@@ -72,7 +72,7 @@ var hurt := Effect.make_damage(20)                        # a quick instant dama
 - Held parts on an instant effect do nothing; a warning says so once.
 - A saved over-time effect is recognised on every machine by its file path; one made in code needs an `effect_name` to be recognised on a client, or it works offline only.
 - The list is full (`max_active_effects`): a new over-time effect is refused, with a warning once.
-- An id in the list this machine doesn't know: it counts down, its held parts do nothing here, with a warning once.
+- An id in the list this machine doesn't know: it still ends on time, its held parts do nothing here, with a warning once.
 - The pawn dies: everything in the list is removed.
 - An empty or blank tag has no bit and matches nothing. An undeclared tag is added on the spot with a one-time warning (machines may disagree online, which the warning is for); asking with `has_tag` never adds one. More than 64 levels: the extras get no bit and warn once. With no declarations file everything works and every tag counts as undeclared.
 
@@ -87,9 +87,9 @@ var hurt := Effect.make_damage(20)                        # a quick instant dama
 | `tags` | `Effect` | empty | What kind of effect it is, for resistances and removing by tag |
 | `effect_name` | `Effect` | empty | A name for readouts; needed for an over-time effect made in code to be recognised online |
 | `trigger`, `applies_to` | `EffectApplier` | ON_HIT, TARGET | When it applies its effects, and to whom |
-| `resistances` | `EffectManager` | empty | The pawn's own resistances, by effect tag |
-| `max_active_effects` | `EffectManager` | 16 | The most over-time effects a pawn can have at once |
+| `resistances` | `StatusManager` | empty | The pawn's own resistances, by effect tag |
+| `max_active_effects` | `StatusManager` | 16 | The most over-time effects a pawn can have at once |
 
 ## Tests
 
-`effects/tests/effect_selftest`: effect tags, instant effects (damage, resistances, immunity, lifesteal, invulnerability), over-time effects (slows, poisons that tick and kill, stacking, cleanses, dying), boosts to ability numbers, a rollback loading the active list, and the odd cases in `EffectManager` and `Effect`. Hits carrying effects are also covered by the abilities' tests (`combat_selftest`, `fight_selftest`, `hit_interceptor_selftest`). Run them with `bash tools/run_tests.sh <name>`.
+`effects/tests/effect_selftest`: effect tags, instant effects (damage, resistances, immunity, lifesteal, invulnerability), over-time effects (slows, poisons that tick and kill, stacking, cleanses, dying), boosts to ability numbers, a rollback loading the active list, and the odd cases in `StatusManager` and `Effect`. Hits carrying effects are also covered by the abilities' tests (`combat_selftest`, `fight_selftest`, `hit_interceptor_selftest`). Run them with `bash tools/run_tests.sh <name>`.

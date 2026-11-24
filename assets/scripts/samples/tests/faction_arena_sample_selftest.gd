@@ -35,7 +35,7 @@ func _ready() -> void:
 			soldiers.append(pawn)
 	_check(player != null and player.team == 0 and player.ability_manager.has_node("HeavyAttack") and player.ability_manager.has_node("SecondSwing") and player.ability_manager.has_node("FinisherSwing"), "the player is on team 0, with the heavy attack and the combo's swings") # Claude 2026-11-10
 	# Claude 2026-11-13: the usual Health again (it was ten times that from 2026-11-12), and teams of team_size (8).
-	_check(player.stat_manager.get_health() == 100.0 and red[0].stat_manager.get_health() == 100.0 and red[0].stat_manager.get_value(&"Health") == 100.0, "every pawn has the usual Health (%d)" % red[0].stat_manager.get_health())
+	_check(player.status_manager.get_health() == 100.0 and red[0].status_manager.get_health() == 100.0 and red[0].status_manager.get_value(&"Health") == 100.0, "every pawn has the usual Health (%d)" % red[0].status_manager.get_health())
 	_check(arena.team_size == 8 and red.size() == 8 and blue.size() == 8, "the spawners fill up: %d red goblins on team 1 and %d blue on team 2" % [red.size(), blue.size()])
 	# Claude 2026-11-13: soldiers fill the players' team up to team_size: 7, with the one player.
 	_check(soldiers.size() == 7 and soldiers.all(func(p: Pawn) -> bool: return p.scene_file_path == arena.ALLY_SCENE.resource_path), "and %d soldiers on the players' team (team_size less 1 player)" % soldiers.size())
@@ -56,10 +56,10 @@ func _ready() -> void:
 	var swing: AbilityBase = player.ability_manager.get_node("MeleeAttack")
 	var boost: Effect = load("res://assets/scripts/resources/effects/combo_second_boost.tres")
 	boost.register()
-	player.effect_manager.apply_effects([boost] as Array[Effect], player, swing)
+	player.status_manager.apply_effects([boost] as Array[Effect], player, swing)
 	var player_text: String = arena._player_readout_text(player)
 	_check(arena._player_readouts.has(player) and player_text.contains("combo second boost") and arena._readout_text(red[0]).contains("HP"), "the player's pawn has a readout, listing its effects (%s)" % player_text.replace("\n", " | "))
-	player.effect_manager.remove_all()
+	player.status_manager.remove_all()
 	# The player stands far away, so the goblins find each other; bring the two groups close.
 	# Claude 2026-11-12: everyone placed on the ground under them, so nobody starts inside a hill and falls through the world.
 	var terrain: TerrainGenerator = arena.get_node("World/Terrain")

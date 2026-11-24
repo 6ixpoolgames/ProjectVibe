@@ -13,7 +13,7 @@ var _walk: WalkDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
 
-# The five stats, read again only when the StatManager's version changes (pawn spec 15.2); every tick was a third of the cost.
+# The five stats, read again only when the StatusManager's version changes (pawn spec 15.2); every tick was a third of the cost.
 var _stats_version := -1
 var _stats_speed_stat: StringName = &""
 var _speed := 0.0
@@ -63,9 +63,9 @@ func tick(dt: float) -> void:
 		pawn.yaw = rotate_toward(pawn.yaw, target_yaw, turn_rate * dt)
 
 
-# Reads the five stats again if a stat changed (or there was no StatManager before and there is now), or if speed_stat was changed.
+# Reads the five stats again if a stat changed (or there was no StatusManager before and there is now), or if speed_stat was changed.
 func _refresh_stats() -> void:
-	var version: int = pawn.stat_manager.version if pawn and pawn.stat_manager else 0
+	var version: int = pawn.status_manager.version if pawn and pawn.status_manager else 0
 	if version == _stats_version and _walk and _walk.speed_stat == _stats_speed_stat: # _walk, not the property: this runs every tick
 		return
 	_stats_version = version

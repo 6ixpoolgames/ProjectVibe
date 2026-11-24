@@ -16,6 +16,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-24
 
+- **Merged into the status manager** (the pawn redesign's build step 3a, pawn spec 16.8): `EffectManager` is gone; its job is `status/StatusManager.gd`, with the active list on deadlines. Damage taken goes out as `event.damage.taken`. History from here: [status/CHANGELOG.md](../status/CHANGELOG.md).
 - **Ticks at 60 a second** (the pawn redesign's build step 1, foundations (pawn spec 16.10)): `Effect.duration_seconds` and `period_seconds` are now `duration_ticks` and `period_ticks`; the two combo boosts were converted (0.6 s → 36). Offline effect sources are still kept by instance id until the entity registry can find an entity by number (REFACTOR).
 
 ## 2026-11-23

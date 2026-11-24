@@ -175,7 +175,7 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `view_ticks_behind() -> float`: How many ticks behind its own the controller drew other pawns, for lag compensation.
 - `held_actions() -> int`: The held actions this tick, as InputActions bits.
 - `previous_held_actions() -> int`: The held actions last tick, as InputActions bits, so a press can be told from a hold.
-- `read_stat(stat_name: StringName, fallback: float) -> float`: A stat from the pawn's StatManager, or fallback if there's no such stat or no StatManager.
+- `read_stat(stat_name: StringName, fallback: float) -> float`: A stat from the pawn's StatusManager, or fallback if there's no such stat or no StatusManager.
 - `can_start() -> bool`: Extra conditions for starting, such as being on the ground. Cooldowns, lockouts and combos are already checked.
 - `start() -> void`: Once, when it starts.
 - `tick(_dt: float) -> void`: Every tick it runs.
@@ -225,7 +225,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 - `tick_abilities(dt: float) -> void`: The pawn calls this once a tick; dt is the fixed tick length. Order: deadlines passed, locomotion, then actions (see the README).
 - `timers_changed() -> void`: The abilities' timers call this when one is set (pawn spec 15.2).
 - `state_loaded() -> void`: After a rollback loads this pawn's state: what's worked out from the deadlines is worked out again. A loaded deadline equal to the one it replaces calls no setter, but the soonest one still ahead depends on the tick, which went back.
-- `readiness_changed() -> void`: Moves `readiness_version` on for a change made outside the abilities; the EffectManager calls it when effects change.
+- `readiness_changed() -> void`: Moves `readiness_version` on for a change made outside the abilities; the StatusManager calls it when effects change.
 - `ready_follows_body(action: StringName) -> bool`: True if an ability on this action has its own `AbilityBase.can_start()`, which can change without telling the manager (Jump needs the ground). The AI asks such an action at every decision, whatever `readiness_version` says.
 - `can_sleep() -> bool`: True if the pawn can sleep as far as its abilities go (pawn spec 15.3): no timer running (unless that ability can wait), no combo window open, and every every_tick() ability agrees.
 - `can_start(action: StringName) -> bool`: True if pressing this action now would start something, counting abilities it would cancel. Changes nothing; looks only at the abilities on that action.
@@ -255,7 +255,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 - `get_interrupt_table() -> Dictionary[]`: The interrupt table (pawn spec 8.10): a row per ability that can run (timed ones and locomotion), in run order, with an `interrupt_rule()` answer per other ability. Instant actions such as Jump have no row.
 - `get_interrupt_table_text() -> String`: The interrupt table as text, a line per ability with what cancels it and what it blocks.
 - `receive_hit(hit: HitInfo) -> void`: Something hit this pawn; the server's attacker calls it, such as a [`MeleeSweepStep`](#meleesweepstep). Dead or invulnerable pawns ignore it. During simulate it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (attacker's entity number, target's, booking order), so it never depends on who simulated first (pawn spec 15.4); otherwise it takes effect at once. Steps: see the README.
-- `health_ran_out(hit: HitInfo) -> void`: The EffectManager calls this on the authority when an effect took Health to 0: Death starts and `died` goes out. hit is the hit that did it, or null (a poison's tick). Nothing if already dead.
+- `health_ran_out(hit: HitInfo) -> void`: Death starts and `died` goes out, on the authority: called when the pawn's Health reaches 0 (`event.health.depleted`, sent by the status manager). hit is the hit that did it, or null (a poison's tick). Nothing if already dead.
 - `revive() -> void`: Brings a dead pawn back with full Health, on the server. Death ends on its next tick.
 - `settings_changed() -> void`: An ability's settings changed while playing (`AbilityBase.use_definition()`): its masks, priority order and lists are worked out again.
 
@@ -289,8 +289,8 @@ It cancels a swing, and it's invulnerable for its first 0.18 s (an [`Invulnerabi
 
 Being dead: an action with no trigger action, started when the pawn's Health reaches 0.
 
-The EffectManager calls `AbilityManager.health_ran_out()` when an effect takes Health to 0, and the AbilityManager starts this and sends `AbilityManager.died`. While it runs it locks out movement, combat and utility, nothing cancels it, and `Pawn.is_dead()` is true (the pawn ignores its input and AI, and other pawns' sensing ignores it). It keeps running while Health is 0; `AbilityManager.revive()` ends it. The body stays where it falls: removing it or respawning is game code's job.
-Rollback: its timer rolls back with Health, so clients see the pawn dead from snapshots. It watches `StatManager.HEALTH`. Design: pawn spec 8.7, 8.16.
+The StatusManager calls `AbilityManager.health_ran_out()` when an effect takes Health to 0, and the AbilityManager starts this and sends `AbilityManager.died`. While it runs it locks out movement, combat and utility, nothing cancels it, and `Pawn.is_dead()` is true (the pawn ignores its input and AI, and other pawns' sensing ignores it). It keeps running while Health is 0; `AbilityManager.revive()` ends it. The body stays where it falls: removing it or respawning is game code's job.
+Rollback: its timer rolls back with Health, so clients see the pawn dead from snapshots. It watches `StatusManager.HEALTH`. Design: pawn spec 8.7, 8.16.
 
 ### Constants
 
@@ -311,7 +311,7 @@ Rollback: its timer rolls back with Health, so clients see the pawn dead from sn
 
 What one hit was, handed from the attacker to the target's `AbilityManager.receive_hit()`.
 
-Plain data, made on the server only, where hits are decided. A hit carries effects, not numbers: the attacking ability's on-hit effects say what it does, and the target's EffectManager applies them. A hit made in code gives its own, such as `Effect.make_damage(20)`. Design: pawn spec 8.6, 8.11.
+Plain data, made on the server only, where hits are decided. A hit carries effects, not numbers: the attacking ability's on-hit effects say what it does, and the target's StatusManager applies them. A hit made in code gives its own, such as `Effect.make_damage(20)`. Design: pawn spec 8.6, 8.11.
 
 ### Settings and properties
 

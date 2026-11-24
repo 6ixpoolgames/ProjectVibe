@@ -17,6 +17,7 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 
 ## 2026-11-24
 
+- **One status component and gameplay events** (the pawn redesign's build step 3a, pawn spec 16.8): `stat_manager` and `effect_manager` are one `status_manager`. `send_event(tag, data)` and `gameplay_event_received` carry gameplay events (Unreal's "send gameplay event to actor"; the owner's call).
 - **`Pawn.entity_number()`** (the pawn redesign's build step 1, foundations (pawn spec 16.10)): the pawn's one number (its network id, else a hash of its path, kept until it enters the tree again). It replaces the stagger's instance-id fallback, so a level's own pawns spread their runs the same way on every run.
 
 ## 2026-11-23

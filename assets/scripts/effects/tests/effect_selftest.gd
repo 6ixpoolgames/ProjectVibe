@@ -1,7 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-10: headless self-test for effects (pawn spec 8.11): effect tags, instant effects
 ## (damage, resistances and weaknesses, immunity, lifesteal, invulnerability), over-time effects (slows that hold and end, poisons
 ## that tick and can kill, stacking, cleanses, dying clearing them), boosts to ability numbers, a rollback loading the active list,
-## and the odd cases at the top of EffectManager.gd and Effect.gd.
+## and the odd cases at the top of StatusManager.gd and Effect.gd.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/effects/tests/effect_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
@@ -55,31 +55,31 @@ func _test_instant() -> void:
 	var a := _pawn(Vector3(0, 0.1, 0))
 	var b := _pawn(Vector3(3, 0.1, 0))
 	await _ticks(3)
-	_check(a.effect_manager != null and a.effect_manager.name == &"EffectManager", "a pawn gets an EffectManager as a default part")
-	a.effect_manager.apply_effect(Effect.make_damage(20), b)
-	_check(a.stat_manager.get_health() == 80.0, "damage takes Health (%d)" % a.stat_manager.get_health())
-	a.effect_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL] = 0.2
-	a.effect_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL_FIRE] = 0.3
-	a.effect_manager.active_effects = a.effect_manager.active_effects # the inspector's resistances are read when the list changes
+	_check(a.status_manager != null and a.status_manager.name == &"StatusManager", "a pawn gets an StatusManager as a default part")
+	a.status_manager.apply_effect(Effect.make_damage(20), b)
+	_check(a.status_manager.get_health() == 80.0, "damage takes Health (%d)" % a.status_manager.get_health())
+	a.status_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL] = 0.2
+	a.status_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL_FIRE] = 0.3
+	a.status_manager.active_effects = a.status_manager.active_effects # the inspector's resistances are read when the list changes
 	var fire := Effect.make_damage(20, [Tags.EFFECT.DAMAGE_ELEMENTAL_FIRE])
-	_check(is_equal_approx(a.effect_manager.resistance_to(fire), 0.5), "resistances to a tag and its parent add up (0.2 + 0.3 = %.2f)" % a.effect_manager.resistance_to(fire))
-	a.effect_manager.apply_effect(fire, b)
-	_check(a.stat_manager.get_health() == 70.0, "and take that share off (20 fire damage takes 10: %d)" % a.stat_manager.get_health())
-	a.effect_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL_FROST] = -0.5
-	a.effect_manager.active_effects = a.effect_manager.active_effects
-	a.effect_manager.apply_effect(Effect.make_damage(10, [Tags.EFFECT.DAMAGE_ELEMENTAL_FROST]), b)
-	_check(a.stat_manager.get_health() == 57.0, "a weakness adds to it (10 frost with 0.2 - 0.5 takes 13: %d)" % a.stat_manager.get_health())
-	a.effect_manager.resistances[Tags.EFFECT.DAMAGE_POISON] = 1.0
-	a.effect_manager.active_effects = a.effect_manager.active_effects
-	_check(not a.effect_manager.apply_effect(Effect.make_damage(10, [Tags.EFFECT.DAMAGE_POISON]), b) and a.stat_manager.get_health() == 57.0, "1 or more: immune, the effect is refused")
+	_check(is_equal_approx(a.status_manager.resistance_to(fire), 0.5), "resistances to a tag and its parent add up (0.2 + 0.3 = %.2f)" % a.status_manager.resistance_to(fire))
+	a.status_manager.apply_effect(fire, b)
+	_check(a.status_manager.get_health() == 70.0, "and take that share off (20 fire damage takes 10: %d)" % a.status_manager.get_health())
+	a.status_manager.resistances[Tags.EFFECT.DAMAGE_ELEMENTAL_FROST] = -0.5
+	a.status_manager.active_effects = a.status_manager.active_effects
+	a.status_manager.apply_effect(Effect.make_damage(10, [Tags.EFFECT.DAMAGE_ELEMENTAL_FROST]), b)
+	_check(a.status_manager.get_health() == 57.0, "a weakness adds to it (10 frost with 0.2 - 0.5 takes 13: %d)" % a.status_manager.get_health())
+	a.status_manager.resistances[Tags.EFFECT.DAMAGE_POISON] = 1.0
+	a.status_manager.active_effects = a.status_manager.active_effects
+	_check(not a.status_manager.apply_effect(Effect.make_damage(10, [Tags.EFFECT.DAMAGE_POISON]), b) and a.status_manager.get_health() == 57.0, "1 or more: immune, the effect is refused")
 	var heal := _effect(&"test heal", false, 0.0, [_change(&"Health", 15.0)])
-	a.effect_manager.apply_effect(heal, a)
-	_check(a.stat_manager.get_health() == 72.0, "a heal adds Health, and resistances don't touch it (%d)" % a.stat_manager.get_health())
+	a.status_manager.apply_effect(heal, a)
+	_check(a.status_manager.get_health() == 72.0, "a heal adds Health, and resistances don't touch it (%d)" % a.status_manager.get_health())
 	# Lifesteal: b hits a for 20 physical and gets 30% back.
-	b.stat_manager.change_current(&"Health", -50.0)
+	b.status_manager.change_current(&"Health", -50.0)
 	var vampire := _effect(&"vampire hit", true, 0.0, [_change(&"Health", -20.0), _lifesteal(0.3)])
-	a.effect_manager.apply_effect(vampire, b)
-	_check(a.stat_manager.get_health() == 52.0 and is_equal_approx(b.stat_manager.get_health(), 56.0), "lifesteal gives the source a share of the damage just dealt (a %d, b %.1f)" % [a.stat_manager.get_health(), b.stat_manager.get_health()])
+	a.status_manager.apply_effect(vampire, b)
+	_check(a.status_manager.get_health() == 52.0 and is_equal_approx(b.status_manager.get_health(), 56.0), "lifesteal gives the source a share of the damage just dealt (a %d, b %.1f)" % [a.status_manager.get_health(), b.status_manager.get_health()])
 	# A hit's damage_dealt, and the attacker's own on-hit effects.
 	var hit := HitInfo.new()
 	hit.attacker = b
@@ -88,26 +88,26 @@ func _test_instant() -> void:
 	hit.effects = [Effect.make_damage(10)]
 	hit.attacker_effects = [heal]
 	a.ability_manager.receive_hit(hit)
-	_check(hit.damage_dealt == 10.0 and a.stat_manager.get_health() == 42.0 and is_equal_approx(b.stat_manager.get_health(), 71.0), "a hit fills in damage_dealt, and its attacker effects go on the attacker (dealt %d, b %.1f)" % [hit.damage_dealt, b.stat_manager.get_health()])
+	_check(hit.damage_dealt == 10.0 and a.status_manager.get_health() == 42.0 and is_equal_approx(b.status_manager.get_health(), 71.0), "a hit fills in damage_dealt, and its attacker effects go on the attacker (dealt %d, b %.1f)" % [hit.damage_dealt, b.status_manager.get_health()])
 	# Invulnerability stops harmful effects and lets helpful ones through.
 	_ai(a).move_in_direction(Vector3(0, 0, 1))
 	await _ticks(2)
 	_ai(a).press(&"dash")
 	await _ticks(2)
 	_check(a.ability_manager.is_invulnerable(), "(a is dashing)")
-	_check(not a.effect_manager.apply_effect(Effect.make_damage(10), b) and a.stat_manager.get_health() == 42.0, "a dashing pawn refuses harmful effects")
-	_check(a.effect_manager.apply_effect(heal, a) and a.stat_manager.get_health() == 57.0, "and takes helpful ones (%d)" % a.stat_manager.get_health())
+	_check(not a.status_manager.apply_effect(Effect.make_damage(10), b) and a.status_manager.get_health() == 42.0, "a dashing pawn refuses harmful effects")
+	_check(a.status_manager.apply_effect(heal, a) and a.status_manager.get_health() == 57.0, "and takes helpful ones (%d)" % a.status_manager.get_health())
 	_ai(a).stop()
 	await _ticks(30)
 	# Instant effects with held parts warn and do nothing.
 	var held_on_instant := _effect(&"held on instant", false, 0.0, [_modifier(&"MoveSpeed", 0.0, 2.0)])
-	a.effect_manager.apply_effect(held_on_instant, a)
-	_check(a.stat_manager.get_value(&"MoveSpeed") == 5.0, "held parts on an instant effect do nothing")
+	a.status_manager.apply_effect(held_on_instant, a)
+	_check(a.status_manager.get_value(&"MoveSpeed") == 5.0, "held parts on an instant effect do nothing")
 	# Death: an effect that takes the last Health kills, and the parts after it are skipped.
 	var after_death := _effect(&"overkill", true, 0.0, [_change(&"Health", -1000.0), _change(&"Health", 50.0)])
-	a.effect_manager.apply_effect(after_death, b)
-	_check(a.is_dead() and a.stat_manager.get_health() == 0.0, "an effect that takes the last Health kills the pawn, and the parts after it don't run")
-	_check(not a.effect_manager.apply_effect(heal, a), "a dead pawn takes no effects")
+	a.status_manager.apply_effect(after_death, b)
+	_check(a.is_dead() and a.status_manager.get_health() == 0.0, "an effect that takes the last Health kills the pawn, and the parts after it don't run")
+	_check(not a.status_manager.apply_effect(heal, a), "a dead pawn takes no effects")
 	a.free()
 	b.free()
 
@@ -117,11 +117,11 @@ func _test_over_time() -> void:
 	await _ticks(3)
 	var slow := _effect(&"test slow", true, 0.5, [_modifier(&"MoveSpeed", 0.0, 0.6)])
 	slow.tags = [Tags.EFFECT.DEBUFF_SLOW]
-	a.effect_manager.apply_effect(slow, null)
-	_check(a.effect_manager.has_effect(slow) and is_equal_approx(a.stat_manager.get_value(&"MoveSpeed"), 3.0), "a slow holds while it lasts: MoveSpeed 5 x0.6 = %.2f" % a.stat_manager.get_value(&"MoveSpeed"))
-	_check(not a.effect_manager.can_sleep() and a.effect_manager.get_ticks_left(slow) == 30, "a pawn with an effect on it doesn't rest; 0.5 s is 30 ticks (%d)" % a.effect_manager.get_ticks_left(slow))
+	a.status_manager.apply_effect(slow, null)
+	_check(a.status_manager.has_effect(slow) and is_equal_approx(a.status_manager.get_value(&"MoveSpeed"), 3.0), "a slow holds while it lasts: MoveSpeed 5 x0.6 = %.2f" % a.status_manager.get_value(&"MoveSpeed"))
+	_check(not a.status_manager.can_sleep() and a.status_manager.get_ticks_left(slow) == 30, "a pawn with an effect on it doesn't rest; 0.5 s is 30 ticks (%d)" % a.status_manager.get_ticks_left(slow))
 	# Claude 2026-11-16 (wider audit): a new base value while the slow holds keeps the slow.
-	var move_speed := a.stat_manager.get_stat(&"MoveSpeed")
+	var move_speed := a.status_manager.get_stat(&"MoveSpeed")
 	move_speed.base_value = 10.0
 	_check(is_equal_approx(move_speed.value, 6.0), "a new base_value while an effect holds keeps the effect: 10 x0.6 = %.2f" % move_speed.value)
 	move_speed.base_value = 5.0
@@ -130,15 +130,15 @@ func _test_over_time() -> void:
 	var slowed_speed := Vector2(a.velocity.x, a.velocity.z).length()
 	_check(slowed_speed < 3.05 and slowed_speed > 2.5, "and the pawn walks slower (%.2f m/s)" % slowed_speed)
 	await _ticks(15)
-	_check(not a.effect_manager.has_effect(slow) and a.stat_manager.get_value(&"MoveSpeed") == 5.0, "it ends at its deadline, and MoveSpeed goes back to its base (%.2f)" % a.stat_manager.get_value(&"MoveSpeed"))
+	_check(not a.status_manager.has_effect(slow) and a.status_manager.get_value(&"MoveSpeed") == 5.0, "it ends at its deadline, and MoveSpeed goes back to its base (%.2f)" % a.status_manager.get_value(&"MoveSpeed"))
 	_ai(a).stop()
 	# Max Health lowered below what the pawn has: what it has falls too.
 	var frailty := _effect(&"test less health", true, 0.2, [_modifier(&"Health", -40.0, 1.0)])
-	a.effect_manager.apply_effect(frailty, null)
+	a.status_manager.apply_effect(frailty, null)
 	await _ticks(1)
-	_check(a.stat_manager.get_value(&"Health") == 60.0 and a.stat_manager.get_health() == 60.0, "a lower most Health brings what it has down with it (%d of %d)" % [a.stat_manager.get_health(), a.stat_manager.get_value(&"Health")])
+	_check(a.status_manager.get_value(&"Health") == 60.0 and a.status_manager.get_health() == 60.0, "a lower most Health brings what it has down with it (%d of %d)" % [a.status_manager.get_health(), a.status_manager.get_value(&"Health")])
 	await _ticks(20)
-	_check(a.stat_manager.get_value(&"Health") == 100.0 and a.stat_manager.get_health() == 60.0, "and when it ends, the most goes back, and what it has stays (%d of %d)" % [a.stat_manager.get_health(), a.stat_manager.get_value(&"Health")])
+	_check(a.status_manager.get_value(&"Health") == 100.0 and a.status_manager.get_health() == 60.0, "and when it ends, the most goes back, and what it has stays (%d of %d)" % [a.status_manager.get_health(), a.status_manager.get_value(&"Health")])
 	a.free()
 
 
@@ -149,19 +149,19 @@ func _test_poison() -> void:
 	var poison := _effect(&"test poison", true, 0.5, [_change(&"Health", -5.0)])
 	poison.period_ticks = 6
 	poison.tags = [Tags.EFFECT.DAMAGE_POISON]
-	a.effect_manager.apply_effect(poison, b)
-	_check(a.stat_manager.get_health() == 95.0, "a poison runs once when first applied (%d)" % a.stat_manager.get_health())
+	a.status_manager.apply_effect(poison, b)
+	_check(a.status_manager.get_health() == 95.0, "a poison runs once when first applied (%d)" % a.status_manager.get_health())
 	await _ticks(40)
-	_check(a.stat_manager.get_health() == 75.0 and not a.effect_manager.has_effect(poison), "then every period while it lasts: 0.5 s at 0.1 s is 5 times, 25 Health (%d)" % a.stat_manager.get_health())
+	_check(a.status_manager.get_health() == 75.0 and not a.status_manager.has_effect(poison), "then every period while it lasts: 0.5 s at 0.1 s is 5 times, 25 Health (%d)" % a.status_manager.get_health())
 	var source: Array = []
-	a.effect_manager.apply_effect(poison, b)
-	source.append(a.effect_manager.get_active_effects()[0]["source"])
+	a.status_manager.apply_effect(poison, b)
+	source.append(a.status_manager.get_active_effects()[0]["source"])
 	_check(source[0] == b, "the active list remembers who applied it")
-	a.effect_manager.remove_all()
-	a.stat_manager.change_current(&"Health", -62.0) # 8 left
-	a.effect_manager.apply_effect(poison, b)
+	a.status_manager.remove_all()
+	a.status_manager.change_current(&"Health", -62.0) # 8 left
+	a.status_manager.apply_effect(poison, b)
 	await _ticks(10)
-	_check(a.is_dead() and a.effect_manager.get_active_effects().is_empty(), "a poison's tick can kill, and dying ends every effect")
+	_check(a.is_dead() and a.status_manager.get_active_effects().is_empty(), "a poison's tick can kill, and dying ends every effect")
 	a.free()
 	b.free()
 
@@ -170,30 +170,30 @@ func _test_stacking_and_removing() -> void:
 	var a := _pawn(Vector3(0, 0.1, 0))
 	await _ticks(3)
 	var refresh := _effect(&"test refresh", true, 0.5, [_modifier(&"MoveSpeed", -1.0, 1.0)])
-	a.effect_manager.apply_effect(refresh, null)
+	a.status_manager.apply_effect(refresh, null)
 	await _ticks(10)
-	a.effect_manager.apply_effect(refresh, null)
-	_check(a.effect_manager.get_ticks_left(refresh) == 30 and a.effect_manager.get_stacks(refresh) == 1 and a.stat_manager.get_value(&"MoveSpeed") == 4.0, "REFRESH: its time starts again, still one stack")
+	a.status_manager.apply_effect(refresh, null)
+	_check(a.status_manager.get_ticks_left(refresh) == 30 and a.status_manager.get_stacks(refresh) == 1 and a.status_manager.get_value(&"MoveSpeed") == 4.0, "REFRESH: its time starts again, still one stack")
 	var stacking := _effect(&"test stacks", true, 0.5, [_modifier(&"MoveSpeed", 0.0, 0.5)])
 	stacking.stacking = Effect.Stacking.ADD_STACK
 	stacking.max_stacks = 2
 	for i in 3:
-		a.effect_manager.apply_effect(stacking, null)
-	_check(a.effect_manager.get_stacks(stacking) == 2 and is_equal_approx(a.stat_manager.get_value(&"MoveSpeed"), 1.0), "ADD_STACK: up to max_stacks, each stack counting again ((5 - 1) x0.5 x0.5 = %.2f)" % a.stat_manager.get_value(&"MoveSpeed"))
+		a.status_manager.apply_effect(stacking, null)
+	_check(a.status_manager.get_stacks(stacking) == 2 and is_equal_approx(a.status_manager.get_value(&"MoveSpeed"), 1.0), "ADD_STACK: up to max_stacks, each stack counting again ((5 - 1) x0.5 x0.5 = %.2f)" % a.status_manager.get_value(&"MoveSpeed"))
 	var ignore := _effect(&"test ignore", true, 0.5, [])
 	ignore.stacking = Effect.Stacking.IGNORE
-	_check(a.effect_manager.apply_effect(ignore, null) and not a.effect_manager.apply_effect(ignore, null), "IGNORE: the second application is refused")
+	_check(a.status_manager.apply_effect(ignore, null) and not a.status_manager.apply_effect(ignore, null), "IGNORE: the second application is refused")
 	stacking.tags = [Tags.EFFECT.DEBUFF_SLOW]
 	stacking._mask = -1
-	a.effect_manager.remove_with_tag(Tags.EFFECT.DEBUFF)
-	_check(not a.effect_manager.has_effect(stacking) and a.effect_manager.has_effect(refresh) and a.stat_manager.get_value(&"MoveSpeed") == 4.0, "remove_with_tag(debuff) removes what's tagged debuff.slow and leaves the rest")
-	a.effect_manager.max_active_effects = 3
+	a.status_manager.remove_with_tag(Tags.EFFECT.DEBUFF)
+	_check(not a.status_manager.has_effect(stacking) and a.status_manager.has_effect(refresh) and a.status_manager.get_value(&"MoveSpeed") == 4.0, "remove_with_tag(debuff) removes what's tagged debuff.slow and leaves the rest")
+	a.status_manager.max_active_effects = 3
 	var extra := _effect(&"test extra", true, 0.5, [])
 	var another := _effect(&"test another", true, 0.5, [])
-	_check(a.effect_manager.apply_effect(extra, null) and not a.effect_manager.apply_effect(another, null), "a full list refuses a new effect")
-	a.effect_manager.remove_all()
+	_check(a.status_manager.apply_effect(extra, null) and not a.status_manager.apply_effect(another, null), "a full list refuses a new effect")
+	a.status_manager.remove_all()
 	await _ticks(1)
-	_check(a.effect_manager.can_sleep() and a.stat_manager.get_value(&"MoveSpeed") == 5.0, "remove_all empties the list, and the stats go back")
+	_check(a.status_manager.can_sleep() and a.status_manager.get_value(&"MoveSpeed") == 5.0, "remove_all empties the list, and the stats go back")
 	a.free()
 
 
@@ -204,7 +204,7 @@ func _test_ability_numbers() -> void:
 	var melee: MeleeAttackAbility = manager.get_node("MeleeAttack")
 	var sprint: AbilityBase = manager.get_node("Sprint")
 	var frail := _effect(&"test easy to interrupt", true, 3.0, [_number(Tags.ABILITY.COMBAT, AbilityPriorityPart.Number.INTERRUPT_THRESHOLD, -10)])
-	a.effect_manager.apply_effect(frail, null)
+	a.status_manager.apply_effect(frail, null)
 	_check(manager.interrupt_threshold_now(melee) == 5 and manager.interrupt_threshold_now(sprint) == sprint.interrupt_threshold, "an interrupt threshold change reaches the group it names and nothing else (swing 15 - 10 = %d)" % manager.interrupt_threshold_now(melee))
 	_ai(a).press(&"primary")
 	await _ticks(2)
@@ -217,7 +217,7 @@ func _test_ability_numbers() -> void:
 	var swing_row: Dictionary = rows.filter(func(row): return row["running"] == &"MeleeAttack")[0]
 	_check(swing_row["threshold"] == 5 and swing_row["cells"][&"Sprint"]["result"] == "cancels", "and the interrupt table shows it")
 	var strong := _effect(&"test strong dash", false, 1.0, [_number(Tags.ABILITY.MOVEMENT_DASH, AbilityPriorityPart.Number.INTERRUPT_PRIORITY, 5)])
-	a.effect_manager.apply_effect(strong, null)
+	a.status_manager.apply_effect(strong, null)
 	var dash: AbilityBase = manager.get_node("Dash")
 	_check(manager.interrupt_priority_now(dash) == dash.interrupt_priority + 5 and manager.press_priority_now(dash) == dash.priority, "an interrupt priority change is kept apart from press priority")
 	a.free()
@@ -227,23 +227,23 @@ func _test_ability_numbers() -> void:
 func _test_rollback_load() -> void:
 	var a := _pawn(Vector3(0, 0.1, 0))
 	await _ticks(3)
-	var before := a.effect_manager.active_effects.duplicate()
+	var before := a.status_manager.active_effects.duplicate()
 	var slow := _effect(&"test rollback slow", true, 1.0, [_modifier(&"MoveSpeed", 0.0, 0.5)])
-	a.effect_manager.apply_effect(slow, null)
-	var during := a.effect_manager.active_effects.duplicate()
+	a.status_manager.apply_effect(slow, null)
+	var during := a.status_manager.active_effects.duplicate()
 	await _ticks(1)
-	_check(a.stat_manager.get_value(&"MoveSpeed") == 2.5, "(slowed)")
-	a.effect_manager.active_effects = before
+	_check(a.status_manager.get_value(&"MoveSpeed") == 2.5, "(slowed)")
+	a.status_manager.active_effects = before
 	await _ticks(1)
-	_check(a.stat_manager.get_value(&"MoveSpeed") == 5.0 and not a.effect_manager.has_effect(slow), "loading the list from before the slow removes it and its change")
-	a.effect_manager.active_effects = during
+	_check(a.status_manager.get_value(&"MoveSpeed") == 5.0 and not a.status_manager.has_effect(slow), "loading the list from before the slow removes it and its change")
+	a.status_manager.active_effects = during
 	await _ticks(1)
-	_check(a.stat_manager.get_value(&"MoveSpeed") == 2.5 and a.effect_manager.has_effect(slow), "loading it back puts them back")
+	_check(a.status_manager.get_value(&"MoveSpeed") == 2.5 and a.status_manager.has_effect(slow), "loading it back puts them back")
 	var tick_state: TickStateComponent = null
 	for child in a.get_children():
 		if child is TickStateComponent:
 			tick_state = child
-	_check(tick_state != null and Array(tick_state.state_properties).any(func(entry): return String(entry).begins_with("EffectManager:active_effects")), "the active list is in the pawn's rolled-back state")
+	_check(tick_state != null and Array(tick_state.state_properties).any(func(entry): return String(entry).begins_with("StatusManager:active_effects")), "the active list is in the pawn's rolled-back state")
 	a.free()
 
 

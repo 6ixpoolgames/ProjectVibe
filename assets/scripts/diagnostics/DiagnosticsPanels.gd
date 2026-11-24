@@ -296,7 +296,7 @@ func _inspector_text() -> String:
 	lines.append("  at (%.1f, %.1f, %.1f)   moving %.1f m/s   facing %.0f°" % [at.x, at.y, at.z, pawn.velocity.length(), rad_to_deg(pawn.yaw)])
 	lines.append("  flags: %s%s%s%s%s%s   Health %.0f" % ["grounded " if pawn.grounded else "", "DEAD " if pawn.is_dead() else "",
 		"FROZEN " if pawn.is_frozen() else "", "sleeping " if pawn.is_sleeping else "", "source " if pawn.is_keeping_world_loaded() else "",
-		"player" if pawn.controller_manager and pawn.controller_manager.has_player() else "", pawn.stat_manager.get_health() if pawn.stat_manager else 0.0])
+		"player" if pawn.controller_manager and pawn.controller_manager.has_player() else "", pawn.status_manager.get_health() if pawn.status_manager else 0.0])
 	var controllers := pawn.controller_manager # the pawn's input is its ControllerManager's
 	if controllers:
 		lines.append("  input: move (%.2f, %.2f), look %.0f°, held %d" % [controllers.move_input.x, controllers.move_input.z, rad_to_deg(controllers.look_yaw), controllers.held_actions])
@@ -326,9 +326,9 @@ func _inspector_text() -> String:
 		lines.append("  cooling down: %s" % (", ".join(cooling) if not cooling.is_empty() else "-"))
 		if not to_check.is_empty(): # settings not from a definition file: a prototype tweak, or a definition of the wrong kind
 			lines.append("  definitions to check: %s" % ", ".join(to_check))
-	if pawn.effect_manager:
+	if pawn.status_manager:
 		var effects := PackedStringArray()
-		for entry: Dictionary in pawn.effect_manager.get_active_effects():
+		for entry: Dictionary in pawn.status_manager.get_active_effects():
 			var effect: Effect = entry.effect
 			effects.append("%s x%d (%d)" % [String(effect.effect_name) if effect else "?", entry.stacks, entry.ticks_left])
 		lines.append("  effects: %s" % (", ".join(effects) if not effects.is_empty() else "-"))

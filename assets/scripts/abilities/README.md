@@ -27,7 +27,7 @@ Everything a pawn does, from walking to a three-hit combo: abilities started by 
 
  a Sweep step's hit ─┐
  a Fire step ─► Projectile (a networked entity, flown by the server) ─┴─► HitInfo ─► target's AbilityManager.receive_hit
-                                                                           ─► its interceptors ─► its EffectManager (effects/)
+                                                                           ─► its interceptors ─► its StatusManager (effects/)
 ```
 
 - **`AbilityManager`** is a part on every pawn, with the abilities as its children. Each tick it runs one locomotion ability, then the actions: a press starts the ready ability on that action with the highest priority. It owns the cancelling rules, the combo counter, and the hit path (`receive_hit`), including death.
@@ -92,7 +92,7 @@ pawn.ability_manager.receive_hit(hit)
 
 **Swing hits.** A `MeleeSweepStep` checks every spot its sphere passes through each tick, no more than half the radius apart, so a fast sweep or a 30 Hz match leaves no gaps. In a session it checks through lag compensation (against where the player saw others); when nothing would be rewound (AI swings, offline play) through the C++ pawn grid; without the C++ library, through physics. Each pawn is hit once per ability run, an invulnerable pawn isn't hit or marked (a later tick can catch it), and nothing is decided in a rollback replay. `TurnToFaceStep` turns toward the look only while the attack's action is held and at least `min_turn_degrees` first; the windup's timer waits until the pawn is within 90 degrees of the look.
 
-**Hits.** `receive_hit` runs on the server. During simulate a hit is queued and delivered after every pawn has simulated, sorted by the attacker's entity id, then the target's, then queue order, so the result never depends on who simulated first (pawn spec 15.4). Delivery: a dead or invulnerable pawn ignores it; `hit_arrived` goes out (the AI notes it); an active TURN_AWAY interceptor, highest `priority` first, may stop it and its response goes out instead; otherwise the `EffectManager` applies the hit's effects (damage, knockback, threat) and `hit_received` goes out and the attacker gets its `attacker_effects`. At 0 Health the Death ability starts and `died` goes out.
+**Hits.** `receive_hit` runs on the server. During simulate a hit is queued and delivered after every pawn has simulated, sorted by the attacker's entity id, then the target's, then queue order, so the result never depends on who simulated first (pawn spec 15.4). Delivery: a dead or invulnerable pawn ignores it; `hit_arrived` goes out (the AI notes it); an active TURN_AWAY interceptor, highest `priority` first, may stop it and its response goes out instead; otherwise the `StatusManager` applies the hit's effects (damage, knockback, threat) and `hit_received` goes out and the attacker gets its `attacker_effects`. At 0 Health the Death ability starts and `died` goes out.
 
 **Dash numbers.** It adds 100 m/s^2 for 0.1 s (+10 m/s), then takes 50 m/s^2 off for 0.2 s, never below 0 along the dash. Left alone the pawn ends at its starting speed: standing it peaks at 10 m/s over about 1.5 m, walking about 15 m/s and 3 m, sprinting about 19 m/s and 4.2 m.
 

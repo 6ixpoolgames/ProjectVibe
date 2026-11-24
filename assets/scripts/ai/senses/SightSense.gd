@@ -178,7 +178,7 @@ func _visibility(target: Pawn) -> float:
 			return 0.0
 		if cosine < _cos_central:
 			angle_factor = periphery_multiplier
-	return distance_factor * angle_factor * StatManager.detectability_of(target)
+	return distance_factor * angle_factor * StatusManager.detectability_of(target)
 
 
 # Hands the checks to memory's store, then lets memory wake a decision and send its signals.

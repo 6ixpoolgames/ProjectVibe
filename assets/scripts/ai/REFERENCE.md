@@ -452,7 +452,7 @@ Design: pawn spec 10.5 and 10.11.
 - `certain_fade_delay_ticks: int` = `0`: The same delay for certain entries. Longer keeps a pawn searching longer after losing sight of an enemy.
 - `certain_fade: FadeProfile`: How awareness fades for certain entries after the delay. Empty: a straight line to nothing over 1200 ticks (20 s).
 - `continuous_sighting_ticks: int` = `30`: Two sightings no more than this many ticks apart, with no unseen check between, count as one continuous look, so awareness doesn't fade between them. Keep it at least as long as the senses' gap between checks.
-- `threat_per_damage: float` = `0.01`: Threat added to an attacker's entry per health point of damage it does to this pawn (the EffectManager adds it); target selection weighs threat.
+- `threat_per_damage: float` = `0.01`: Threat added to an attacker's entry per health point of damage it does to this pawn (the StatusManager adds it); target selection weighs threat.
 - `use_native: bool` = `true`: Off, every AIMemory made from now on uses the GDScript store, even with the C++ library. For tests comparing the two. Read once, when each memory is made.
 - `pawn: Pawn` = `null`: The pawn this is a part of, or null.
 

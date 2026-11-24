@@ -1,15 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: stats/CHANGELOG.md.
-## One number about a pawn, such as how fast it walks. A child of the pawn's StatManager.
+## One number about a pawn, such as how fast it walks. A child of the pawn's StatusManager.
 ##
 ## Pawn spec section 9. The stat's name is this node's name, such as MoveSpeed or JumpVelocity. Abilities and behaviours ask the
-## StatManager for a stat by that name, and use a fallback of their own if there's none, so a missing stat is never a crash.
+## StatusManager for a stat by that name, and use a fallback of their own if there's none, so a missing stat is never a crash.
 ## [br]
 ## Its [member value] is [member base_value] plus what held effects add, times what they multiply ([method set_modifiers], from the
-## EffectManager).
+## StatusManager).
 ## [br]
 ## A stat that changes during play, such as Health, has [member changes_during_play] on. Then it also has a [member current] value,
-## from 0 up to its value, which starts full, rolls back (the StatManager lists it with the pawn's TickStateComponent) and reaches
-## clients in snapshots. Only the server changes it: [method StatManager.change_current].
+## from 0 up to its value, which starts full, rolls back (the StatusManager lists it with the pawn's TickStateComponent) and reaches
+## clients in snapshots. Only the server changes it: [method StatusManager.change_current], which also sends its [member thresholds]' events.
 ## [br]
 ## With a [member table_column], the value is also copied into that column of the pawn table, for C++ to read.
 class_name Stat
@@ -21,13 +21,13 @@ extends Node
 		base_value = new_value
 		value = (base_value + _added) * _multiplied
 
-## The value right now: [member base_value] with effects. A change tells the StatManager (its [member StatManager.version] goes up),
+## The value right now: [member base_value] with effects. A change tells the StatusManager (its [member StatusManager.version] goes up),
 ## so abilities that keep stat values read them again, and copies it into [member table_column] if there is one.
 var value := 0.0:
 	set(new_value):
 		var changed := new_value != value # worked out before the assignment, for the table copy below
 		if changed:
-			var manager := get_parent() as StatManager
+			var manager := get_parent() as StatusManager
 			if manager:
 				manager.version += 1
 		value = new_value
@@ -42,10 +42,11 @@ var value := 0.0:
 ## On, this stat also has a [member current] value that goes up and down during play, such as Health. [member value] is then its
 ## most.
 @export var changes_during_play := false
+## With [member changes_during_play], levels that send an event when [member current] falls to them ([StatThreshold]), checked by
+## [method StatusManager.change_current]. Health's: at 0 [code]event.health.depleted[/code], at 25% [code]event.health.low[/code].
+@export var thresholds: Array[StatThreshold] = []
 ## With [member changes_during_play], how much there is now, from 0 to [member value]. Starts full. Rolls back: pushed to the state
-## store when it changes.
-# REFACTOR: other code writes current directly to refill or cap it (AbilityManager.revive, EffectManager, ArenaSample), so the
-# "0 to value" rule lives in several places. A refill and cap on Stat or StatManager would keep it in one (reusable).
+## store when it changes. Change it with [method StatusManager.change_current] or [method StatusManager.fill_current].
 var current := 0.0:
 	set(new_value):
 		if current == new_value:
@@ -54,7 +55,7 @@ var current := 0.0:
 		if _tick_state:
 			_tick_state.push_value(_state_key, new_value)
 
-# Where current is recorded: the pawn's TickStateComponent and this stat's entry there. Set by the StatManager.
+# Where current is recorded: the pawn's TickStateComponent and this stat's entry there. Set by the StatusManager.
 var _tick_state: TickStateComponent = null
 var _state_key := ""
 
@@ -65,7 +66,7 @@ var _multiplied := 1.0
 
 
 ## The effects on this stat, all together: [member value] becomes (base_value + added) x multiplied. 0 and 1 mean none. The pawn's
-## EffectManager calls this whenever its held effects change.
+## StatusManager calls this whenever its held effects change.
 func set_modifiers(added: float, multiplied: float) -> void:
 	_added = added
 	_multiplied = multiplied
@@ -86,7 +87,7 @@ func _ready() -> void:
 # This stat's value into the pawn table's table_column, for the pawn it belongs to. Nothing happens without the C++ library (no
 # table) or outside a pawn.
 func _push_to_table() -> void:
-	var manager := get_parent() as StatManager
+	var manager := get_parent() as StatusManager
 	var table := SharedPawnTable.get_table()
 	if manager and manager.pawn and table:
 		table.set_value(manager.pawn, table_column, value)

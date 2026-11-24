@@ -851,10 +851,10 @@ func previous_held_actions() -> int:
 	return pawn.controller_manager.previous_held_actions if pawn and pawn.controller_manager else 0
 
 
-## A stat from the pawn's StatManager, or fallback if there's no such stat or no StatManager.
+## A stat from the pawn's StatusManager, or fallback if there's no such stat or no StatusManager.
 func read_stat(stat_name: StringName, fallback: float) -> float:
-	if pawn and pawn.stat_manager:
-		return pawn.stat_manager.get_value(stat_name, fallback)
+	if pawn and pawn.status_manager:
+		return pawn.status_manager.get_value(stat_name, fallback)
 	return fallback
 
 

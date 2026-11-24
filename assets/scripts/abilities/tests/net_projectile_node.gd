@@ -98,7 +98,7 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 	if pawn == null:
 		return
 	pawn.team = 1 if entity.owner_peer == 0 else 0
-	var health := pawn.stat_manager.get_stat(&"Health") if pawn.stat_manager else null
+	var health := pawn.status_manager.get_stat(&"Health") if pawn.status_manager else null
 	if health:
 		health.base_value = HEALTH
 		health.current = HEALTH
@@ -173,7 +173,7 @@ func _on_after_tick(_dt: float, tick: int) -> void:
 			result["positions"][id] = {}
 		var at := pawn.global_position
 		result["positions"][id][str(tick)] = [at.x, at.y, at.z]
-		result["health"][id] = pawn.stat_manager.get_health() # the latest, kept after the pawn is gone
+		result["health"][id] = pawn.status_manager.get_health() # the latest, kept after the pawn is gone
 
 
 func _nearest_player(shooter: Pawn) -> Pawn:

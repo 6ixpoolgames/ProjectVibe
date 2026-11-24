@@ -8,7 +8,6 @@ Every class in `assets/scripts/effects/`, from its doc comments. The overview is
 - [EffectApplication](#effectapplication)
 - [EffectApplier](#effectapplier)
 - [EffectHeldTotals](#effectheldtotals)
-- [EffectManager](#effectmanager)
 - [EffectPart](#effectpart)
 - [AbilityPriorityPart](#abilityprioritypart)
 - [KnockbackPart](#knockbackpart)
@@ -23,7 +22,7 @@ Every class in `assets/scripts/effects/`, from its doc comments. The overview is
 
 One effect, such as a sword hit, a poison or a combo boost: what it does to the pawn it's applied to.
 
-A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) runs its `parts` once; over time stays on the pawn for `duration_ticks`, its held parts holding and its do-once parts repeating each period. Parts run in list order. Apply one with `EffectManager.apply_effect()`; do-once parts run on the authority only, held parts on every machine. Design: pawn spec 8.11.
+A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) runs its `parts` once; over time stays on the pawn for `duration_ticks`, its held parts holding and its do-once parts repeating each period. Parts run in list order. Apply one with `StatusManager.apply_effect()`; do-once parts run on the authority only, held parts on every machine. Design: pawn spec 8.11.
 
 ### Settings and properties
 
@@ -50,7 +49,7 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 - `has_held_parts() -> bool`: True if any of its parts hold while it lasts.
 - `planned_change(stat: StringName) -> float`: How much its StatChangeParts change a stat in one go, before resistances; damage is negative. For readouts before a hit lands.
 - `get_id() -> int`: The number a pawn's active list stores for this effect, the same on every machine: a hash of its file path, else its effect_name. Never 0.
-- `register() -> void`: Makes this effect findable by its id on this machine. Two different effects with the same id is an error: rename one. The AbilityManager registers every effect its abilities can apply; the EffectManager registers any other it's given.
+- `register() -> void`: Makes this effect findable by its id on this machine. Two different effects with the same id is an error: rename one. The AbilityManager registers every effect its abilities can apply; the StatusManager registers any other it's given.
 - `find(id: int) -> Effect` *(static)*: The registered effect with this id, or null.
 - `describe() -> String`: A short name for readouts: effect_name, or the file's name.
 - `make_damage(amount: float, damage_tags: StringName[] = [...]) -> Effect` *(static)*: An instant effect that takes this much Health, for hits made in code (a trap, a test). Tagged effect.damage.physical unless given tags.
@@ -62,7 +61,7 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 
 One effect being applied once: what, to whom, from whom, and what came of it.
 
-Made by the [`EffectManager`](#effectmanager) on the authority, handed to each do-once part in turn (`EffectPart.apply_once()`), then thrown away. Design: pawn spec 8.11.
+Made by the [`StatusManager`](../status/REFERENCE.md#statusmanager) on the authority, handed to each do-once part in turn (`EffectPart.apply_once()`), then thrown away. Design: pawn spec 8.11.
 
 ### Settings and properties
 
@@ -103,7 +102,7 @@ The ability itself carries no damage or knockback; its EffectApplier children sa
 
 What all the held parts on one pawn add up to right now.
 
-The pawn's [`EffectManager`](#effectmanager) makes one whenever its list of effects changes and asks every held part to add itself (`EffectPart.add_held()`), so a new kind of held part needs no change to the manager.
+The pawn's [`StatusManager`](../status/REFERENCE.md#statusmanager) makes one whenever its list of effects changes and asks every held part to add itself (`EffectPart.add_held()`), so a new kind of held part needs no change to the manager.
 
 ### Settings and properties
 
@@ -114,63 +113,6 @@ The pawn's [`EffectManager`](#effectmanager) makes one whenever its list of effe
 ### Functions
 
 - `change_stat(stat: StringName, added: float, multiplied: float, stacks: int) -> void`: Adds to a stat: added counts once per stack, multiplied is applied once per stack.
-
-## EffectManager
-
-`res://assets/scripts/effects/EffectManager.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
-
-Applies effects to its pawn and keeps the over-time ones.
-
-A part on the pawn, added by PawnInitializer. Whatever hits a pawn hands it effects, and the pawn applies them to itself, with its own resistances. Instant effects run at once; over-time ones go in a rolled-back active list, count down in `tick_effects()` and all end when the pawn dies. Do-once parts run on the authority only; held parts work on every machine.
-
-```gdscript
-pawn.effect_manager.apply_effect(effect, source)   # source: who applied it (for memory, lifesteal), or null
-pawn.effect_manager.has_effect(effect)              # is an over-time effect on the pawn now?
-pawn.effect_manager.remove_with_tag(Tags.EFFECT.DEBUFF)   # a cleanse
-```
-
-Design: pawn spec 8.11.
-
-### Settings and properties
-
-- `resistances: Dictionary[StringName, float]` = `{}`: This pawn's resistances by effect tag: 0.25 takes a quarter off harmful effects, 1 or more ignores them, negative is a weakness.
-  
-  A tag counts for every effect inside it, and they add up (0.2 effect.damage.elemental + 0.3 effect.damage.elemental.fire = 0.5 against fire).
-- `max_active_effects: int` = `16`: The most over-time effects this pawn can have at once. A new one past this is refused.
-- `active_effects: PackedInt64Array`: The active list, five numbers per effect (see `STRIDE`); rolled back and sent in snapshots. Read it with `get_active_effects()`.
-- `pawn: Pawn` = `null`: The pawn it belongs to (its parent).
-
-### Signals
-
-- `effect_applied(effect: Effect, application: EffectApplication)`: Sent when an effect is applied, on every machine that applies it (do-once parts only ran if this is the authority).
-- `effect_ended(effect: Effect)`: Sent when an over-time effect ends or is removed.
-
-### Constants
-
-- `STRIDE = 5`: Numbers per entry in `active_effects`; ID, TICKS_LEFT, PERIOD_LEFT, STACKS and SOURCE are their positions in an entry.
-- `ID = 0`
-- `TICKS_LEFT = 1`
-- `PERIOD_LEFT = 2`
-- `STACKS = 3`
-- `SOURCE = 4`
-
-### Functions
-
-- `apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> bool`: Applies an effect to this pawn. source is who applied it, or null; source_ability and hit are handed to its parts. Returns false if refused: dead, invulnerable, immune, the list full, or IGNORE stacking.
-- `apply_effects(effects: Effect[], source: Pawn = null, source_ability: AbilityBase = null, hit: HitInfo = null) -> void`: Applies several, in order, stopping if the pawn dies.
-- `take_hit(hit: HitInfo) -> void`: Called by the AbilityManager when a hit lands, on the authority: the hit's effects, from its attacker. Fills in hit.damage_dealt.
-- `tick_effects() -> void`: The pawn calls this once per tick, before its abilities run, while the list has something in it: counts down, runs periods, ends effects.
-- `can_sleep() -> bool`: True if the pawn can sleep (pawn spec 15.3): nothing in the list to count down, and nothing waiting to be worked out.
-- `has_effect(effect: Effect) -> bool`: True while this over-time effect is on the pawn.
-- `get_stacks(effect: Effect) -> int`: How many stacks of it the pawn has: 0 if none.
-- `get_ticks_left(effect: Effect) -> int`: Ticks it has left: 0 if it isn't on the pawn.
-- `get_active_effects() -> Dictionary[]`: Every active effect, for readouts: [{"effect": Effect or null, "ticks_left", "stacks", "source": Pawn or null}], oldest first.
-- `remove_effect(effect: Effect) -> void`: Removes an over-time effect, if it's on the pawn.
-- `remove_with_tag(tag: StringName) -> void`: Removes every active effect with this effect tag, or a tag inside it: remove_with_tag(Tags.EFFECT.DEBUFF) is a cleanse.
-- `remove_all() -> void`: Removes everything. Done when the pawn dies (it listens for the AbilityManager's died).
-- `resistance_to(effect: Effect) -> float`: This pawn's resistance to an effect (see `resistances`), not capped: 1 or more means immune.
-- `ability_bonus(ability: AbilityBase, number: int) -> int`: What held AbilityPriorityParts add to this ability's number now (AbilityPriorityPart.Number). The AbilityManager asks.
-- `has_ability_bonuses() -> bool`: True if any held AbilityPriorityPart changes ability numbers now. Lets the AbilityManager skip asking.
 
 ## EffectPart
 
@@ -252,7 +194,7 @@ Put it after the effect's StatChangePart: parts run in order, and this reads the
 
 Adds to the pawn's resistance to a kind of effect while its effect lasts. A held part ([`EffectPart`](#effectpart)).
 
-Such as +0.5 against effect.damage.elemental.fire for a fire ward. Added to the pawn's `EffectManager.resistances`, which explains how they count. Design: pawn spec 8.11.
+Such as +0.5 against effect.damage.elemental.fire for a fire ward. Added to the pawn's `StatusManager.resistances`, which explains how they count. Design: pawn spec 8.11.
 
 ### Settings and properties
 

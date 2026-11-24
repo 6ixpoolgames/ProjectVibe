@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## One effect being applied once: what, to whom, from whom, and what came of it.
 ##
-## Made by the [EffectManager] on the authority, handed to each do-once part in turn ([method EffectPart.apply_once]), then thrown away.
+## Made by the [StatusManager] on the authority, handed to each do-once part in turn ([method EffectPart.apply_once]), then thrown away.
 ## Design: pawn spec 8.11.
 class_name EffectApplication
 extends RefCounted

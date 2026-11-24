@@ -35,7 +35,7 @@ func _ready() -> void:
 		if falling.is_dead():
 			break
 	_check(falling.is_dead() and falling.global_position.y < -20.0 and falling.global_position.y > -40.0, "a pawn that falls below it dies soon after (at %.1f m)" % falling.global_position.y)
-	_check(not standing.is_dead() and standing.stat_manager.get_health() == 100.0, "one standing on the ground above it is left alone")
+	_check(not standing.is_dead() and standing.status_manager.get_health() == 100.0, "one standing on the ground above it is left alone")
 	await _ticks(60)
 	_check(deaths.size() == 1, "a dead pawn below it isn't hit again (%d deaths)" % deaths.size())
 	falling.ability_manager.revive()

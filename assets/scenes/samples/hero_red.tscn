@@ -1,7 +1,7 @@
 [gd_scene load_steps=12 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/samples/faction_goblin.tscn" id="1_goblin"]
-[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/StatManager.tscn" id="2_stats"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/StatusManager.tscn" id="2_stats"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/hero_swing_hit.tres" id="3_swing"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/hero_second_swing_hit.tres" id="4_second"]
 [ext_resource type="Resource" path="res://assets/scripts/resources/effects/hero_finisher_hit.tres" id="5_finisher"]
@@ -22,15 +22,15 @@ height = 2.7
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.35, 0)
 shape = SubResource("Hero_capsule")
 
-[node name="StatManager" parent="." instance=ExtResource("2_stats")]
+[node name="StatusManager" parent="." instance=ExtResource("2_stats")]
 
-[node name="MoveSpeed" parent="StatManager" index="0"]
+[node name="MoveSpeed" parent="StatusManager" index="0"]
 base_value = 4.25
 
-[node name="SprintSpeed" parent="StatManager" index="1"]
+[node name="SprintSpeed" parent="StatusManager" index="1"]
 base_value = 7.65
 
-[node name="Health" parent="StatManager" index="8"]
+[node name="Health" parent="StatusManager" index="8"]
 base_value = 1000.0
 
 [node name="MeleeAttack" parent="AbilityManager"]

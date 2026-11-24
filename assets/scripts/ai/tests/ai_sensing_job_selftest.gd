@@ -59,7 +59,7 @@ func _test_same_answers() -> void:
 		pawn.team = i % 3
 		pawn.position = Vector3(pick.randf_range(-22, 22), 0.1, pick.randf_range(-22, 22))
 		add_child(pawn)
-		StatManager.set_detectability(pawn, [1.0, 0.5, 0.0, 1.0][i % 4]) # Claude 2026-11-19: through the stat, once the pawn has its parts
+		StatusManager.set_detectability(pawn, [1.0, 0.5, 0.0, 1.0][i % 4]) # Claude 2026-11-19: through the stat, once the pawn has its parts
 		pawns.append(pawn)
 	for i in 3:
 		await get_tree().physics_frame # the walls and pawns join the physics world
@@ -212,7 +212,7 @@ func _run_fight(use_job: bool, workers: int) -> Dictionary:
 		var entries := []
 		for e in memory.entry_count():
 			entries.append([String(memory.get_store().entity_at(e).name), memory.get_store().awareness_at(e, 5240), memory.get_store().last_known_position_at(e)])
-		state.append([goblin.global_position, goblin.stat_manager.get_health(), entries])
+		state.append([goblin.global_position, goblin.status_manager.get_health(), entries])
 	var stats: Dictionary = job.get_stats() if job else {"requests": 0, "taken": 0, "last_requests": 0}
 	for goblin in goblins:
 		goblin.free()

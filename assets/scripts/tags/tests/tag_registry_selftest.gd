@@ -128,7 +128,7 @@ func _test_redirects_and_deprecation() -> void:
 func _test_declarations_file() -> void:
 	TagRegistry.reset() # reads res://assets/scripts/resources/tag_declarations.tres
 	_check(TagRegistry.get_tags().has(&"ability.movement.walk") and TagRegistry.get_tags().has(&"ability.movement"), "declarations file is read at first use")
-	_check(TagRegistry.get_categories() == [&"ability", &"ai", &"effect", &"nav", &"status"], "the base categories (%s)" % [TagRegistry.get_categories()])
+	_check(TagRegistry.get_categories() == [&"ability", &"ai", &"effect", &"event", &"nav", &"status"], "the base categories (%s)" % [TagRegistry.get_categories()]) # Claude 2026-11-24: event (gameplay events, pawn spec 16.9)
 	_check(TagRegistry.normalize(&"combat.melee") == &"ability.combat.melee" and TagRegistry.normalize(&"point.cover") == &"nav.point.cover", "the file's redirects read the old names")
 	var undescribed: Array[StringName] = []
 	for tag in TagRegistry.get_tags():

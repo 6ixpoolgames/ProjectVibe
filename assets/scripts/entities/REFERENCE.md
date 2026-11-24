@@ -5,6 +5,7 @@
 Every class in `assets/scripts/entities/`, from its doc comments. The overview is in [README.md](README.md).
 
 - [EntityNumber](#entitynumber)
+- [GameplayEventData](#gameplayeventdata)
 
 ## EntityNumber
 
@@ -22,3 +23,26 @@ An entity's number is its network entity id when it has one, or else a hash of i
 
 - `of(entity: Variant) -> int` *(static)*: The entity number of `entity` (a pawn or any node), or `NONE`. Untyped, so a freed object can be passed.
 - `from_path(node: Node) -> int` *(static)*: A hash of the node's path in the scene tree (its name if it isn't in one), from 0 to 2^31 - 1. The same scene gives the same paths on every machine; two nodes never share a path, as they can share a name.
+
+## GameplayEventData
+
+`res://assets/scripts/entities/GameplayEventData.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+What a gameplay event carries: its tag, who caused it, who it's for, a number and an object (pawn spec 16.9).
+
+Events are tags with payloads, sent to an entity with `Pawn.send_event()`, after Unreal's "send gameplay event to actor" and its FGameplayEventData. The status manager sends `event.health.depleted` and `event.damage.taken`; listeners connect to `Pawn.gameplay_event_received`.
+
+```gdscript
+var data := GameplayEventData.new()
+data.instigator = attacker
+data.magnitude = 20.0
+pawn.send_event(Tags.EVENT.DAMAGE_TAKEN, data)
+```
+
+### Settings and properties
+
+- `tag: StringName` = `&""`: The event's tag (`Tags.EVENT`), set by `Pawn.send_event()`.
+- `instigator: Node` = `null`: Who or what caused it (the attacker, the healer), or null.
+- `target: Node` = `null`: The entity it was sent to, set by `Pawn.send_event()`.
+- `magnitude: float` = `0.0`: A number that goes with it: the damage taken, the Health left.
+- `optional_object: Object` = `null`: Anything else it needs: the hit that caused it, say. Null when nothing goes with it.

@@ -98,7 +98,7 @@ func _test_player_respawn() -> void:
 	_check(pawn.is_dead(), "and stays dead until its respawn time")
 	await _until(func() -> bool: return not pawn.is_dead(), 40)
 	await _ticks(2)
-	_check(not pawn.is_dead() and pawn.stat_manager.get_health() == 100.0, "then comes back, with full Health")
+	_check(not pawn.is_dead() and pawn.status_manager.get_health() == 100.0, "then comes back, with full Health")
 	_check(Vector2(pawn.global_position.x, pawn.global_position.z).length() < 0.5, "at PlayerStart, not where it fell")
 	_check(GameMode.possession_coordinator.get_pawn_of() == pawn, "and still possessed by its player")
 	GameMode.possession_coordinator.release()

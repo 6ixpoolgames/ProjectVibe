@@ -65,6 +65,16 @@ class EFFECT:
 	const DEBUFF_SLOW := &"effect.debuff.slow"
 
 
+## What happened to an entity: gameplay events, sent with Pawn.send_event (pawn spec 16.9).
+class EVENT:
+	const ALL := &"event"
+	const DAMAGE := &"event.damage"
+	const DAMAGE_TAKEN := &"event.damage.taken" # StatusManager, when an effect takes Health
+	const HEALTH := &"event.health"
+	const HEALTH_DEPLETED := &"event.health.depleted" # Health's threshold at 0
+	const HEALTH_LOW := &"event.health.low" # Health's threshold at 25%
+
+
 ## A condition a pawn is in right now.
 class STATUS:
 	const ALL := &"status"

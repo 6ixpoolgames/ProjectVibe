@@ -12,4 +12,5 @@ This folder holds what every entity shares (pawn spec 16.9). Overview: [README.m
 
 ## 2026-11-24
 
+- **`GameplayEventData`** (new, the pawn redesign's build step 3a, pawn spec 16.8): what a gameplay event carries (tag, instigator, target, magnitude, optional object), after Unreal's FGameplayEventData; sent with `Pawn.send_event`.
 - **`EntityNumber`** (new, the pawn redesign's build step 1, foundations (pawn spec 16.10)): one entity number. It replaces `AIContextComponent.pawn_number` and `number_of`, `HitInfo.key_of`, the abilities' hit-order key and the pawn's stagger, which each worked it out their own way (a name hash, an instance id). Offline pawns now hash their path, not their name, so two pawns with one name under different parents no longer share a number.

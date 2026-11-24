@@ -2,7 +2,7 @@
 ## What one hit was, handed from the attacker to the target's [method AbilityManager.receive_hit].
 ##
 ## Plain data, made on the server only, where hits are decided. A hit carries effects, not numbers: the attacking ability's on-hit
-## effects say what it does, and the target's EffectManager applies them. A hit made in code gives its own, such as
+## effects say what it does, and the target's StatusManager applies them. A hit made in code gives its own, such as
 ## [code]Effect.make_damage(20)[/code].
 ## Design: pawn spec 8.6, 8.11.
 class_name HitInfo
@@ -61,5 +61,5 @@ func planned_damage() -> float:
 	var total := 0.0
 	for effect in effects:
 		if effect:
-			total -= effect.planned_change(StatManager.HEALTH)
+			total -= effect.planned_change(StatusManager.HEALTH)
 	return maxf(total, 0.0)

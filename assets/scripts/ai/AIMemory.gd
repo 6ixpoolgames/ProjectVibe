@@ -51,7 +51,7 @@ signal entity_forgotten(entity: Node3D)
 		continuous_sighting_ticks = value
 		_configure()
 
-## Threat added to an attacker's entry per health point of damage it does to this pawn (the EffectManager adds it); target selection
+## Threat added to an attacker's entry per health point of damage it does to this pawn (the StatusManager adds it); target selection
 ## weighs threat.
 @export var threat_per_damage := 0.01
 
@@ -92,6 +92,8 @@ func _ready() -> void:
 	if certain_fade == null:
 		certain_fade = _straight_line(1200)
 	_configure()
+	if pawn:
+		pawn.gameplay_event_received.connect(_on_gameplay_event)
 
 
 ## True when the C++ store runs.
@@ -158,6 +160,12 @@ func record_sighting(entity: Node3D, gain: float, tick: int, position: Vector3) 
 ## A sense checked this entity at this tick and didn't see it.
 func record_check(entity: Object, tick: int) -> void:
 	_store.record_check(entity, tick)
+
+
+# Damage taken from someone else adds threat to them (threat_per_damage for each point of Health), if they're remembered.
+func _on_gameplay_event(event: GameplayEventData) -> void:
+	if event.tag == Tags.EVENT.DAMAGE_TAKEN and is_instance_valid(event.instigator) and event.instigator != pawn:
+		add_threat(event.instigator, event.magnitude * threat_per_damage)
 
 
 ## Adds threat to an entity's entry, if it's remembered; threat never goes below 0. Game mechanics call this, such as damage dealt.

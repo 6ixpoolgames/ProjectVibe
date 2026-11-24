@@ -14,6 +14,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 |---|---|---|---|
 | More than 64 levels in a category | `TagRegistry` | The tag spec gives a category that outgrows its word a second one. Every caller's mask is one int today, so that waits until a category nears 64 levels; past it, tags get no bit with a warning | M |
 
+## 2026-11-24
+
+- **An `event` category** (the pawn redesign's build step 3a, pawn spec 16.8): `event.damage.taken`, `event.health.depleted`, `event.health.low` (and their parents), with `Tags.EVENT` constants. Gameplay events are tags (pawn spec 16.9).
+
 ## 2026-11-23
 
 - **`TagQuery.describe_words`, `words_of`, `shared`**, for the C++ decider, saved records and built-in defaults; `OwnedTags.version` goes up whenever ownership changes. New tags: `ai.stance.melee`, `ai.stance.ranged`, `status.has_ammo.ranged`.

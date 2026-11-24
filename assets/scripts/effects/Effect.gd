@@ -3,7 +3,7 @@
 ##
 ## A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) runs its [member parts] once;
 ## over time stays on the pawn for [member duration_ticks], its held parts holding and its do-once parts repeating each period.
-## Parts run in list order. Apply one with [method EffectManager.apply_effect]; do-once parts run on the authority only, held parts on
+## Parts run in list order. Apply one with [method StatusManager.apply_effect]; do-once parts run on the authority only, held parts on
 ## every machine.
 ## Design: pawn spec 8.11.
 class_name Effect
@@ -86,7 +86,7 @@ func get_id() -> int:
 
 
 ## Makes this effect findable by its id on this machine. Two different effects with the same id is an error: rename one.
-## The AbilityManager registers every effect its abilities can apply; the EffectManager registers any other it's given.
+## The AbilityManager registers every effect its abilities can apply; the StatusManager registers any other it's given.
 func register() -> void:
 	var id := get_id()
 	var known: Effect = _by_id.get(id)
@@ -114,7 +114,7 @@ static func make_damage(amount: float, damage_tags: Array[StringName] = [Tags.EF
 	effect.effect_name = &"damage"
 	effect.tags = damage_tags
 	var part := StatChangePart.new()
-	part.stat = StatManager.HEALTH
+	part.stat = StatusManager.HEALTH
 	part.amount = -absf(amount)
 	effect.parts = [part]
 	return effect
