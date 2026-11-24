@@ -29,6 +29,7 @@ What an ability is: its category and groups. Lockouts, cancels and the AI's acti
 | &nbsp;&nbsp;&nbsp;&nbsp;`ability.movement.jump` | Jumping. | `movement.jump` |
 | &nbsp;&nbsp;&nbsp;&nbsp;`ability.movement.sprint` | Sprinting. | `movement.sprint` |
 | &nbsp;&nbsp;&nbsp;&nbsp;`ability.movement.walk` | Walking. | `movement.walk` |
+| `ability.receive_hit` | Taking a hit: the ability that decides what a hit does to its pawn. Nothing locks it out. |  |
 | `ability.utility` | Doing something other than moving or fighting. | `utility` |
 | &nbsp;&nbsp;&nbsp;&nbsp;`ability.utility.heal` | Healing. | `utility.heal` |
 | &nbsp;&nbsp;&nbsp;&nbsp;`ability.utility.interact` | Using something in the world: a door, a lever, an item. | `utility.interact` |
@@ -76,6 +77,11 @@ What happened to an entity: gameplay events, sent with Pawn.send_event and a pay
 | `event.health` | The pawn's Health crossed a threshold. |  |
 | &nbsp;&nbsp;&nbsp;&nbsp;`event.health.depleted` | Health reached 0: Death starts. |  |
 | &nbsp;&nbsp;&nbsp;&nbsp;`event.health.low` | Health fell to a quarter of its max or below. |  |
+| `event.hit` | A hit happened. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`event.hit.taken` | A hit was delivered to the pawn; the payload has the hit (HitInfo). The hit ability starts. |  |
+| `event.reaction` | A reaction to a hit should start. |  |
+| &nbsp;&nbsp;&nbsp;&nbsp;`event.reaction.knockback` | A push: Knockback starts, with the push in the payload (KnockbackEventData). |  |
+| `event.revived` | The pawn came back to life: its charges refill. |  |
 
 ## `nav`
 
@@ -115,3 +121,6 @@ A condition a pawn is in right now.
 | `status.dead` | The pawn is dead. |  |
 | `status.has_ammo` | An ability with limited uses has some left. |  |
 | &nbsp;&nbsp;&nbsp;&nbsp;`status.has_ammo.ranged` | A ranged attack has shots left. |  |
+| `status.hit_immune` | Hits are ignored completely, not even noticed: set pieces, scenery. |  |
+| `status.invulnerable` | Hits are blocked (the AI still notes them) and harmful effects refused. |  |
+| `status.parrying` | Parrying: hits from the front are blocked and answered. |  |

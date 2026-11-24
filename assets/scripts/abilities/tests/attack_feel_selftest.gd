@@ -1,8 +1,8 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-10: headless self-test for the attack game feel pass (the owner's request): the swing's
 ## hit sphere sweeps across an arc, right to left (or left to right), so it hits to the side where a sphere held still doesn't; the
 ## swing turns toward where the pawn looks during its windup; a hit lifts the target in a small hop, but not one already in the air;
-## and invulnerability: a pawn whose running ability has an InvulnerabilityInterceptor isn't hit by a swing, and a dashing pawn takes no
-## hit at all.
+## and invulnerability: a pawn whose running ability makes it invulnerable isn't hit by a swing, and a dashing pawn takes no hit at
+## all.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/abilities/tests/attack_feel_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
@@ -19,10 +19,11 @@ class Shield extends AbilityBase:
 		self.trigger_action = &"secondary"
 		self.category = &"ability.utility.interact"
 		self.duration_ticks = 120
-		# Claude 2026-11-17 (pawn spec 8.23): invulnerable while it runs, through an interceptor (was invulnerable_while_running)
-		var dodge := InvulnerabilityInterceptor.new()
-		dodge.name = "Invulnerable"
-		add_child(dodge)
+		# Claude 2026-11-24 (pawn spec 16.7): invulnerable while it runs, through a running effect (was an interceptor)
+		var dodge := Effect.make_invulnerable(600)
+		dodge.effect_name = &"test shield invulnerable"
+		var running: Array[Effect] = [dodge]
+		self.running_effects = running
 
 
 func _ready() -> void:
@@ -210,7 +211,7 @@ func _test_invulnerable() -> void:
 	await _ticks(5)
 	_ai(target).press(&"secondary")
 	await _ticks(2)
-	_check(shield.is_running_timed() and target.ability_manager.is_invulnerable(), "an ability with an InvulnerabilityInterceptor makes its pawn invulnerable while it runs")
+	_check(shield.is_running_timed() and target.ability_manager.is_invulnerable(), "an ability with an invulnerable running effect makes its pawn invulnerable while it runs")
 	await _swing(attacker, origin + Vector3(0, 1, -10))
 	_check(hits.is_empty() and target.status_manager.get_health() == 100.0, "a swing doesn't hit an invulnerable pawn (HP %d)" % int(target.status_manager.get_health()))
 	attacker.free()
@@ -226,7 +227,7 @@ func _test_invulnerable() -> void:
 	var hit := _hit(dasher, 2.0)
 	hit.effects.append(Effect.make_damage(30)) # Claude 2026-11-10: hits carry effects now (pawn spec 8.11)
 	dasher.ability_manager.receive_hit(hit)
-	_check(dash.is_running_timed() and received.is_empty() and dasher.status_manager.get_health() == 100.0, "a dashing pawn takes no hit: no damage and no hit_received (dashing %s, %d received, HP %d, grounded %s)" % [dash.is_running_timed(), received.size(), int(dasher.status_manager.get_health()), dasher.grounded])
+	_check(dash.is_running_timed() and received.is_empty() and dasher.status_manager.get_health() == 100.0, "a dashing pawn's hit is blocked: no damage and no hit_received (dashing %s, %d received, HP %d, grounded %s)" % [dash.is_running_timed(), received.size(), int(dasher.status_manager.get_health()), dasher.grounded])
 	dasher.free()
 
 

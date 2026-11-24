@@ -4,15 +4,15 @@
 ## A part on the pawn, added by PawnInitializer, with the abilities as its children. The pawn calls [method tick_abilities] once a tick,
 ## after its input arrives and before [code]move_and_slide[/code]: one locomotion ability runs, then pressed actions start the ready
 ## ability with the highest priority. Timers are tick deadlines (ability spec 4), so nothing counts down. It owns the cancelling rules,
-## the combo counter and the hit path. Everything that persists between ticks lives on the abilities (and the combo counter here) and
-## rolls back. Outside code only talks to the manager:
+## the combo counter and the hit path; abilities also start from gameplay events ([member AbilityDefinition.trigger_event]). Everything that persists
+## between ticks lives on the abilities (and the combo counter here) and rolls back. Outside code only talks to the manager:
 ## [codeblock]
 ## pawn.ability_manager.can_start(&"jump")      # could a press start something now? (the AI asks)
 ## pawn.ability_manager.action_for_tag(tag)     # the action to press for a kind of ability, such as ability.movement.advanced
 ## pawn.ability_manager.start_ability(ability)  # starts one with no trigger action, such as Knockback, by the same rules
 ## pawn.ability_manager.receive_hit(hit)        # something hit this pawn (server)
 ## [/codeblock]
-## Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
+## Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 15.2, 16.7.
 class_name AbilityManager
 extends Node
 
@@ -20,8 +20,9 @@ extends Node
 # anew every tick.
 var _started_later: Array[AbilityBase] = []
 
-## A [HitInterceptor] stopped a hit, on the server, after its response went out (pawn spec 8.23).
-signal hit_intercepted(hit: HitInfo, interceptor: HitInterceptor)
+## A hit arrived but was blocked, on the server: reason is dead, invulnerable or parried ([ReceiveHitAbility]; a parry's reply has
+## been booked). Sent after [signal hit_arrived]; none of its effects land.
+signal hit_blocked(hit: HitInfo, reason: StringName)
 
 ## An ability started.
 signal ability_started(ability: AbilityBase)
@@ -35,18 +36,15 @@ signal step_started(ability: AbilityBase, step: AbilityStep)
 ## A step stopped; reason is "done", "released", "failed" or "cancelled". Sent by [method AbilityBase.stop_step].
 @warning_ignore("unused_signal")
 signal step_finished(ability: AbilityBase, step: AbilityStep, reason: String)
-## A hit reached this pawn, on the server (not dead or invulnerable). Sent before an interceptor can turn it away and before its effects
-## land, so the AI notes every attack.
+## A hit reached this pawn, on the server: every hit that counts (not one ignored with status.hit_immune), blocked ones too, before
+## its effects land, so the AI notes every attack. Sent by the hit ability ([ReceiveHitAbility]).
 signal hit_arrived(hit: HitInfo)
 ## A hit landed, on the server, after its effects were applied (pawn spec 8.11); hit.damage_dealt is the Health it took. Not sent for a
-## hit an interceptor stopped.
+## blocked hit.
 signal hit_received(hit: HitInfo)
 ## This pawn died, once, on the server, after its Death ability started. hit is what did it, or null. Parts clean up by listening.
 signal died(pawn: Pawn, hit: HitInfo)
 
-# Every ability's HitInterceptors by stage, highest priority first (pawn spec 8.23).
-var _miss_interceptors: Array[HitInterceptor] = []
-var _turn_away_interceptors: Array[HitInterceptor] = []
 var _full_movement_abilities: Array[AbilityBase] = [] # those with needs_full_movement (pawn spec 8.22)
 var _locomotion_pausers: Array[AbilityBase] = [] # those with pauses_locomotion, usually just Dash
 
@@ -64,6 +62,7 @@ var _locked_mask := 0 # categories locked right now, as bits
 var _timed: Array[AbilityBase] = [] # abilities with a timer running (a run, a cooldown or a buffered press)
 var _next_deadline := -1 # the soonest cooldown, buffer or combo window end still ahead, when _timed was built; -1: none
 var _by_action := {} # trigger action -> Array[AbilityBase] answering to it, in run order, so can_start() looks only at those
+var _by_event := {} # trigger event -> Array[AbilityBase] it starts, in run order
 const _NONE: Array[AbilityBase] = [] # what _by_action gives for an action nothing answers to
 
 # The combo counter, shared by every ability with combo_positions (pawn spec 8.20). Both values roll back.
@@ -264,25 +263,25 @@ func start_ability(ability: AbilityBase) -> bool:
 	return true
 
 
-## The first active TURN_AWAY interceptor that stops this hit, or null (pawn spec 8.23). Its response and [signal hit_intercepted] have
-## gone out. A reply to an interception isn't turned away.
-func intercept_hit(hit: HitInfo) -> HitInterceptor:
-	if hit.from_interception:
-		return null
-	for interceptor in _turn_away_interceptors:
-		if interceptor.is_active() and interceptor.intercept(hit) == HitInterceptor.Result.STOP:
-			interceptor.respond(hit)
-			hit_intercepted.emit(hit, interceptor)
-			return interceptor
-	return null
+## Starts an ability from a gameplay event, by the same rules as a press: the event is its [member AbilityBase.trigger_data] while it
+## starts, and [method AbilityBase.prepare_from_event] sees it first. The manager calls it for each ability whose trigger_event the
+## pawn receives; Death starts only on the authority and only once, then [signal died] goes out. Returns false if it couldn't start.
+func start_from_event(ability: AbilityBase, event: GameplayEventData) -> bool:
+	if ability == _death and (not pawn.is_authority() or pawn.is_dead()):
+		return false
+	ability.trigger_data = event
+	ability.prepare_from_event(event)
+	var started := start_ability(ability)
+	ability.trigger_data = null
+	if started and ability == _death:
+		died.emit(pawn, event.optional_object as HitInfo)
+	return started
 
 
-## True while a MISS-stage interceptor is on, such as a Dash's first 0.18 s. Hits don't arrive and harmful effects are refused.
+## True while the pawn owns status.invulnerable (a Dash's first 11 ticks): hits are blocked, a swing passes it by, and harmful effects
+## are refused.
 func is_invulnerable() -> bool:
-	for interceptor in _miss_interceptors:
-		if interceptor.is_active():
-			return true
-	return false
+	return pawn != null and pawn.owned_tags != null and pawn.owned_tags.has(Tags.STATUS.INVULNERABLE)
 
 
 ## True while a timed action is running, such as an attack's swing.
@@ -334,7 +333,7 @@ func get_abilities() -> Array[AbilityBase]:
 	return _abilities.duplicate()
 
 
-## This pawn's Knockback ability, or null. A KnockbackEffector asks on every push.
+## This pawn's Knockback ability, or null. For code that pushes it directly ([method KnockbackAbility.push]).
 func get_knockback() -> KnockbackAbility:
 	return _knockback
 
@@ -657,7 +656,8 @@ func _actions_have_work() -> bool:
 
 
 func _start(ability: AbilityBase) -> void:
-	readiness_version += 1
+	if _moves_readiness(ability):
+		readiness_version += 1
 	ability.buffer_until = 0
 	ability.spend_charge()
 	ability.pawns_hit_this_run = PackedInt64Array()
@@ -680,6 +680,11 @@ func _start(ability: AbilityBase) -> void:
 	var start_effects := ability.settings.start_effects
 	if not start_effects.is_empty() and pawn.status_manager:
 		pawn.status_manager.apply_effects(start_effects, pawn, ability)
+	# Running effects (a parry's stance, a dash's invulnerability) hold while it runs; _finish takes them off.
+	if ability.is_running_timed() and pawn.status_manager:
+		var running := ability.running_effects_now()
+		if not running.is_empty():
+			pawn.status_manager.apply_effects(running, pawn, ability)
 	ability_started.emit(ability)
 	if ability.is_stepped() and ability.is_running_timed():
 		ability.begin_steps() # after ability_started, so a replay lists the ability before its steps
@@ -688,9 +693,15 @@ func _start(ability: AbilityBase) -> void:
 
 
 func _finish(ability: AbilityBase) -> void:
-	readiness_version += 1
+	if _moves_readiness(ability):
+		readiness_version += 1
 	ability.end_steps("cancelled") # steps still running when it ends early; none when they finished
+	var was_running := ability.is_running_timed()
 	ability.ends_at = -1
+	if was_running and pawn.status_manager:
+		for effect in ability.running_effects_now():
+			if effect:
+				pawn.status_manager.remove_effect(effect)
 	if ability.settings.cooldown_ticks > 0:
 		ability.ready_at = TickDriver.tick + TickDriver.ticks_at_rate(ability.settings.cooldown_ticks)
 	ability.stop()
@@ -700,72 +711,69 @@ func _finish(ability: AbilityBase) -> void:
 # --- Hits and death (pawn spec 8.16: hits and death are abilities' business) ---
 
 
-## Something hit this pawn; the server's attacker calls it, such as a [MeleeSweepStep]. Dead or invulnerable pawns ignore it. During
-## simulate it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (attacker's entity
-## number, target's, booking order), so it never depends on who simulated first (pawn spec 15.4); otherwise it takes effect at once.
-## Steps: see the README.
-func receive_hit(hit: HitInfo) -> void:
-	if pawn == null or not pawn.is_authority() or hit == null or pawn.is_dead():
+## Something hit this pawn; the server's attacker calls it, such as a [MeleeSweepStep]. During simulate, or with a delay (a parry's
+## reply, a tick later), it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (attacker's
+## entity number, target's, booking order), so it never depends on who simulated first (pawn spec 15.4); otherwise at once. Delivery
+## sends [code]event.hit.taken[/code], which starts the hit ability ([ReceiveHitAbility]): it decides whether the hit is ignored,
+## blocked or lands. Steps: see the README.
+func receive_hit(hit: HitInfo, delay_ticks := 0) -> void:
+	if pawn == null or not pawn.is_authority() or hit == null:
 		return
-	if _driver and _driver.is_in_simulate():
+	if _driver and (delay_ticks > 0 or _driver.is_in_simulate()):
 		# Entity numbers are below 2^31, so attacker then target fit one order number.
 		var order := (maxi(EntityNumber.of(hit.attacker), 0) << 31) | maxi(pawn.entity_number(), 0)
-		_driver.scheduler.book(_driver.tick, _take_hit.bind(hit), TickScheduler.Point.AFTER_SIMULATE, order)
+		_driver.scheduler.book(_driver.tick + maxi(delay_ticks, 0), _take_hit.bind(hit), TickScheduler.Point.AFTER_SIMULATE, order)
 		return
 	_take_hit(hit)
 
 
-## Death starts and [signal died] goes out, on the authority: called when the pawn's Health reaches 0 ([code]event.health.depleted[/code],
-## sent by the status manager). hit is the hit that did it, or null (a poison's tick). Nothing if already dead.
+## Death starts and [signal died] goes out, on the authority, as if Health had reached 0: for code that kills a pawn some other way.
+## hit is what did it, or null. Nothing if already dead. Health reaching 0 sends [code]event.health.depleted[/code], which does the same.
 func health_ran_out(hit: HitInfo) -> void:
-	if pawn and pawn.is_authority() and not pawn.is_dead():
-		_die(hit)
+	if _death == null:
+		return
+	var data := GameplayEventData.new()
+	data.optional_object = hit
+	start_from_event(_death, data)
 
 
-## Brings a dead pawn back with full Health, on the server. Death ends on its next tick.
+## Brings a dead pawn back with full Health, on the server, and sends [code]event.revived[/code] (charges refill). Death ends on its
+## next tick.
 func revive() -> void:
 	if pawn == null or not pawn.is_authority() or pawn.status_manager == null:
 		return
 	pawn.status_manager.fill_current(StatusManager.HEALTH)
-	for ability in _charged:
-		ability.refill_charges()
+	pawn.send_event(Tags.EVENT.REVIVED)
 
 
-# Gameplay events this pawn receives. Abilities started by events in general come with the hit ability (pawn spec 16.10, step 4).
+# Gameplay events this pawn receives: a revive refills charges, and each ability whose trigger_event it is starts (pawn spec 16.7).
 func _on_gameplay_event(event: GameplayEventData) -> void:
-	if event.tag == Tags.EVENT.HEALTH_DEPLETED:
-		health_ran_out(event.optional_object as HitInfo)
+	if event.tag == Tags.EVENT.REVIVED:
+		for ability in _charged:
+			ability.refill_charges()
+	for ability: AbilityBase in _by_event.get(event.tag, _NONE):
+		start_from_event(ability, event)
 
 
-# The hit itself. Checked again here: a queued hit can arrive after another killed this pawn, and a dash started in the same tick
-# dodges it.
+# A hit's delivery: event.hit.taken, which starts the hit ability with the hit. Sent even to a dead pawn, whose hit ability blocks it.
 func _take_hit(hit: HitInfo) -> void:
-	if not pawn.is_authority() or pawn.is_dead() or is_invulnerable():
+	if not pawn.is_authority():
 		return
-	hit_arrived.emit(hit)
-	# An active interceptor can turn it away. The AI above still notes it was attacked.
-	if intercept_hit(hit):
-		return
-	if pawn.status_manager:
-		pawn.status_manager.take_hit(hit)
-	hit_received.emit(hit)
-	var attacker := hit.attacker
-	if not hit.attacker_effects.is_empty() and is_instance_valid(attacker) and attacker.status_manager:
-		attacker.status_manager.apply_effects(hit.attacker_effects, attacker, hit.ability, hit)
+	var data := GameplayEventData.new()
+	data.instigator = hit.attacker if is_instance_valid(hit.attacker) else null
+	data.optional_object = hit
+	pawn.send_event(Tags.EVENT.HIT_TAKEN, data)
 
 
-# Health reached 0: Death starts (it locks out everything), then died goes out and the parts that care clean up.
-func _die(hit: HitInfo) -> void:
-	if _death == null:
-		return
-	start_ability(_death)
-	died.emit(pawn, hit)
+# Whether starting or ending it can change what the AI may start: an ability on an action, one that locks something out, or one with
+# charges. The hit ability, started on every hit, does neither, so the AI keeps its answers.
+func _moves_readiness(ability: AbilityBase) -> bool:
+	return ability.trigger_bit != 0 or ability.locks_out_mask != 0 or ability.uses_charges()
 
 
 func _collect_abilities() -> void:
 	_abilities.clear()
-	_miss_interceptors.clear() # filled as each ability is collected below
-	_turn_away_interceptors.clear()
+	_add_default_hit_ability()
 	for child in get_children():
 		if child is AbilityBase:
 			child.manager = self
@@ -775,9 +783,8 @@ func _collect_abilities() -> void:
 			child.category_mask |= TagRegistry.full_mask_of_list(child.settings.extra_categories)
 			child.locks_out_mask = TagRegistry.mask_of_list(child.settings.locks_out)
 			child.cancelled_by_mask = TagRegistry.mask_of_list(child.settings.cancelled_by)
-			_collect_effects(child)
 			child.collect_steps()
-			_collect_interceptors(child) # after its steps, which can hold them too
+			_collect_effects(child) # after its steps, which can carry running effects too
 			_abilities.append(child)
 	# Highest priority first, then tree order.
 	_abilities.sort_custom(func(a: AbilityBase, b: AbilityBase) -> bool:
@@ -822,8 +829,14 @@ func _collect_abilities() -> void:
 		ability.update_charges_tag()
 	_timers_dirty = true
 	_by_action.clear()
+	_by_event.clear()
 	_follows_body.clear()
 	for ability in _abilities:
+		if ability.settings.trigger_event != &"":
+			if not _by_event.has(ability.settings.trigger_event):
+				var answering: Array[AbilityBase] = []
+				_by_event[ability.settings.trigger_event] = answering
+			_by_event[ability.settings.trigger_event].append(ability)
 		if ability.settings.trigger_action != &"":
 			if not _by_action.has(ability.settings.trigger_action):
 				var list: Array[AbilityBase] = []
@@ -842,8 +855,8 @@ func settings_changed() -> void:
 	_collect_abilities()
 
 
-# Which abilities have start requirements (so owned-tag changes move readiness_version), with a warning for a query that names the
-# AI's own tags, which clients never own.
+# Which abilities on an action have start requirements (so owned-tag changes move readiness_version: the AI only presses actions),
+# with a warning for a query that names the AI's own tags, which clients never own.
 func _note_start_requirements() -> void:
 	_has_start_requirements = false
 	_tags_version_seen = -1
@@ -851,67 +864,42 @@ func _note_start_requirements() -> void:
 		var query := ability.settings.start_requirements
 		if query == null or query.is_empty():
 			continue
-		_has_start_requirements = true
+		if ability.settings.trigger_action != &"":
+			_has_start_requirements = true
 		for tag in query.all_of + query.any_of + query.none_of:
 			if String(tag).begins_with("ai.") or String(tag) == "ai":
 				push_warning("AbilityManager: %s's start requirements name %s, an AI tag only the server owns, so a client predicts its start wrong. Use ability, effect or status tags." % [ability.name, tag])
 				break
 
 
-# Registers the effects its definition can apply (its start effects, its hit's), so an over-time one in the active list is recognised
-# by id on every machine (Effect.register). Effects live in definitions (pawn spec 16.7); an EffectApplier left under an ability does
-# nothing, so it gets a warning.
+# Registers the effects its definition can apply (its start and running effects, a parry's reply, its hit's), so an over-time one in
+# the active list is recognised by id on every machine (Effect.register). Effects live in definitions (pawn spec 16.7).
 func _collect_effects(ability: AbilityBase) -> void:
 	var hit := ability.hit_definition()
 	for effect in ability.settings.start_effects + hit.target_effects + hit.attacker_effects:
 		if effect:
 			effect.register()
-	for child in ability.get_children():
-		if child is EffectApplier:
-			push_warning("AbilityManager: %s has an EffectApplier child, which does nothing now: put its effects in the ability's definition (start_effects, or its hit's target_effects and attacker_effects)." % ability.name)
+	var held: Array = ability.running_effects_now().duplicate() # its own and its steps': a copy, as its kind's default is shared
+	for step in ability.steps:
+		held.append_array(step.running_effects)
+	for effect: Effect in held:
+		if effect:
+			effect.register()
+		for modifier in effect.modifiers if effect else []:
+			if modifier is ParryModifier:
+				for reply: Effect in modifier.reply_effects:
+					if reply:
+						reply.register()
 
 
-# An ability's HitInterceptors (pawn spec 8.23), under it and its steps (its defaults are made first if it has none), into the two
-# lists, highest priority first. sort_custom isn't stable, so the order found is kept as the tie-break.
-func _collect_interceptors(ability: AbilityBase) -> void:
-	var found: Array[HitInterceptor] = []
-	_find_interceptors(ability, null, ability, found)
-	if found.is_empty():
-		ability.make_default_interceptors()
-		_find_interceptors(ability, null, ability, found)
-	ability.interceptors = found
-	for interceptor in found:
-		interceptor.ability = ability
-		interceptor.pawn = pawn
-		interceptor.on_intercept_effects.clear()
-		interceptor.on_intercept_self_effects.clear()
-		for child in interceptor.get_children():
-			var applier := child as EffectApplier
-			if applier == null or applier.trigger != EffectApplier.Trigger.ON_INTERCEPT:
-				continue
-			for effect in applier.effects:
-				if effect:
-					effect.register()
-					if applier.applies_to == EffectApplier.AppliesTo.SELF:
-						interceptor.on_intercept_self_effects.append(effect)
-					else:
-						interceptor.on_intercept_effects.append(effect)
-		var into := _miss_interceptors if interceptor.stage == HitInterceptor.Stage.MISS else _turn_away_interceptors
-		interceptor.set_meta(&"found_order", into.size())
-		into.append(interceptor)
-	for list: Array[HitInterceptor] in [_miss_interceptors, _turn_away_interceptors]:
-		list.sort_custom(func(a: HitInterceptor, b: HitInterceptor) -> bool:
-			return a.priority > b.priority or (a.priority == b.priority and int(a.get_meta(&"found_order")) < int(b.get_meta(&"found_order"))))
-
-
-# The interceptors directly under node (an ability or a step), and under its steps.
-func _find_interceptors(node: Node, step: AbilityStep, ability: AbilityBase, found: Array[HitInterceptor]) -> void:
-	for child in node.get_children():
-		if child is HitInterceptor:
-			child.step = step
-			found.append(child)
-		elif child is AbilityStep and node == ability:
-			_find_interceptors(child, child, ability, found)
+# Every pawn takes hits through its hit ability (pawn spec 16.7), so one without gets a ReceiveHitAbility: hits work by default.
+func _add_default_hit_ability() -> void:
+	for child in get_children():
+		if child is ReceiveHitAbility:
+			return
+	var receive := ReceiveHitAbility.new()
+	receive.name = "ReceiveHit"
+	add_child(receive)
 
 
 # Tells the pawn's TickStateComponent which ability properties roll back, before the first tick is recorded.

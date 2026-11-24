@@ -27,8 +27,6 @@ var effects: Array[Effect] = []
 var attacker_effects: Array[Effect] = []
 ## Filled in when the hit lands: how much Health it took, after resistances. 0 before then.
 var damage_dealt := 0.0
-## True for a hit an interceptor sends back after stopping one (a parry's push-back); it can't be turned away in turn (pawn spec 8.23).
-var from_interception := false
 
 
 ## A hit by this ability on this target, carrying the ability's on-hit effects (or those given): what a swing and a projectile both

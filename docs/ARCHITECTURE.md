@@ -236,7 +236,7 @@ flowchart TB
   SM -->|damage-taken events| AI
 ```
 
-- **Six components:** the controller manager, the ability manager, the status manager (stats and effects merged), owned tags, the AI tree, the streaming source. Gone: the navigation manager (paths are found by `NavServer` and followed inside movement steps), the target selector (a memory query), the decision module and `AIInputs`, the "hands" AI controller, hit interceptors and effect appliers.
+- **Six components:** the controller manager, the ability manager, the status manager (stats and effects merged), owned tags, the AI tree, the streaming source. Gone: the navigation manager (paths are found by `NavServer` and followed inside movement steps), the target selector (a memory query), the decision module and `AIInputs`, the "hands" AI controller, hit interceptors and effect appliers (both gone since step 4).
 - **One step system:** abilities and behaviours each own a `StepTimeline`; behaviour steps write input and run on every machine, so the order stream sends behaviour and step starts.
 - **One modifier rule** for stats, abilities and behaviours, in an order designers choose (multiply, then add, by default).
 - **Hits** are booked with the tick scheduler and resolved by a hit ability on the target; reactions are abilities started by events.

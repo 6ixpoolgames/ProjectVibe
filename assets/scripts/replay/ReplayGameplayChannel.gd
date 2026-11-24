@@ -2,10 +2,10 @@
 ## Replay channel 5, "gameplay": what happened, as events.
 ##
 ## The same events the AI debug timeline lists, for every pawn, plus freezes, possession and falls; each event's id is the pawn it
-## happened to. The kinds: hit, hit_intercepted, died, ability_started, ability_cancelled, step_started, step_finished, ai_state,
+## happened to. The kinds: hit, hit_blocked, died, ability_started, ability_cancelled, step_started, step_finished, ai_state,
 ## ai_behaviour, ai_target, frozen, unfrozen, possessed, released and fell. The data of each is listed in the replay README.
 ## Reading: only [code]state["events"][/code], this tick's events; nothing lasts.
-## Design: replay spec 3, pawn spec 8.20 and 8.23.
+## Design: replay spec 3, pawn spec 8.20 and 16.7.
 class_name ReplayGameplayChannel
 extends ReplayEventChannel
 
@@ -59,14 +59,15 @@ func pawn_added(pawn: Pawn, id: int) -> void:
 		_connect(connections, pawn.ability_manager.hit_received, func(hit: HitInfo) -> void:
 			add_event("hit", id, {"attacker": recorder.get_replay_id(hit.attacker) if recorder else 0, "ability": _name_of(hit.ability),
 				"damage": hit.damage_dealt}))
-		# A hit a HitInterceptor stopped (a parry, say), with who sent it and what stopped it.
-		_connect(connections, pawn.ability_manager.hit_intercepted, func(hit: HitInfo, interceptor: HitInterceptor) -> void:
-			add_event("hit_intercepted", id, {"by": recorder.get_replay_id(hit.attacker) if recorder and is_instance_valid(hit.attacker) else 0,
-				"interceptor": _name_of(interceptor)}))
+		# A hit that arrived but was blocked (parried, invulnerable, dead), with who sent it and why.
+		_connect(connections, pawn.ability_manager.hit_blocked, func(hit: HitInfo, reason: StringName) -> void:
+			add_event("hit_blocked", id, {"by": recorder.get_replay_id(hit.attacker) if recorder and is_instance_valid(hit.attacker) else 0,
+				"reason": String(reason)}))
 		_connect(connections, pawn.ability_manager.died, func(_who: Pawn, hit: HitInfo) -> void:
 			add_event("died", id, {"killer": recorder.get_replay_id(hit.attacker) if recorder and hit else 0}))
 		_connect(connections, pawn.ability_manager.ability_started, func(ability: AbilityBase) -> void:
-			add_event("ability_started", id, {"ability": _name_of(ability)}))
+			if not ability is ReceiveHitAbility: # it starts on every hit, which the hit events already record
+				add_event("ability_started", id, {"ability": _name_of(ability)}))
 		_connect(connections, pawn.ability_manager.ability_cancelled, func(ability: AbilityBase, by: AbilityBase) -> void:
 			add_event("ability_cancelled", id, {"ability": _name_of(ability), "by": _name_of(by)}))
 		# Steps of a stepped ability (pawn spec 8.20).

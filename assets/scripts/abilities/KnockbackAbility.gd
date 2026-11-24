@@ -1,5 +1,6 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: abilities/CHANGELOG.md.
-## Being pushed by a hit: an action with no trigger action, started by a KnockbackEffector through [method push].
+## Being pushed by a hit: an action with no trigger action, started by [code]event.reaction.knockback[/code], which a
+## [KnockbackEffector] sends with the push ([KnockbackEventData]); code can push with [method push].
 ##
 ## It lives on the pawn being hit. For the push's duration it sets the pawn's horizontal velocity to the push, fading in a straight line
 ## to nothing, and locks out movement and combat. A push with a hop speed lifts a grounded pawn on its first tick (not one already in the
@@ -45,7 +46,15 @@ func run_length_ticks() -> int:
 	return push_ticks
 
 
-## Starts a push; hop is the upward speed in metres per second (0: none). Returns false if something stronger is running.
+## Takes the push from its event before it starts (its length decides how long it runs).
+func prepare_from_event(event: GameplayEventData) -> void:
+	var push_data := event as KnockbackEventData
+	if push_data:
+		push_velocity = Vector3(push_data.push_velocity.x, maxf(push_data.hop_speed, 0.0), push_data.push_velocity.z)
+		push_ticks = push_data.push_ticks
+
+
+## Starts a push from code; hop is the upward speed in metres per second (0: none). Returns false if something stronger is running.
 func push(velocity: Vector3, ticks: int, hop: float = 0.0) -> bool:
 	if ticks <= 0 or velocity.length_squared() < 0.0001:
 		return false

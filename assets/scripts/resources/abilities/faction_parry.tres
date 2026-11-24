@@ -1,0 +1,9 @@
+[gd_resource type="Resource" script_class="ParryDefinition" load_steps=4 format=3 uid="uid://1ibyyurl76b5"]
+
+[ext_resource type="Script" path="res://assets/scripts/abilities/definitions/ParryDefinition.gd" id="1_parry"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="2_effect"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/parry_stance.tres" id="3_stance"]
+
+[resource]
+script = ExtResource("1_parry")
+running_effects = Array[ExtResource("2_effect")]([ExtResource("3_stance")])

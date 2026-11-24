@@ -4,7 +4,8 @@
 ## It adds acceleration along the dash direction for [member speed_up_ticks], then takes speed off for [member slow_down_ticks], so
 ## left alone the pawn ends at the speed it started with. Speed gained some other way during a dash stays. Walking, sprinting and jumping
 ## are locked out while it runs, and it works on the ground and in the air ([member usable_in_air]). The pawn turns to face the dash.
-## [br][br]It cancels a swing, and it's invulnerable for its first 0.18 s (an [InvulnerabilityInterceptor], pawn spec 8.23). Rollback:
+## [br][br]It cancels a swing, and it's invulnerable for its first 11 ticks (its default running effect grants status.invulnerable,
+## pawn spec 16.7). Rollback:
 ## [member dash_direction] rolls back with its timer and cooldown; its phase comes from [method AbilityBase.ticks_before_this_run].
 ## Design: pawn spec 8.6, 8.9.
 class_name DashAbility
@@ -12,6 +13,8 @@ extends AbilityBase
 
 # Its settings with their own type: the same object as settings.
 var _dash: DashDefinition = null
+# The default running effect, made once and shared: an effect made in code is recognised by its name, so there's one.
+static var _default_effects: Array[Effect] = []
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
 
@@ -34,12 +37,11 @@ func _settings_changed() -> void:
 	_dash = settings as DashDefinition
 
 
-## With no interceptor of its own, a Dash is invulnerable for its first 0.18 s, so the end of its slow-down can be hit.
-func make_default_interceptors() -> void:
-	var dodge := InvulnerabilityInterceptor.new()
-	dodge.name = "Invulnerable"
-	dodge.active_seconds = 0.18
-	add_child(dodge)
+## With no running effects of its own, a Dash is invulnerable for its first 11 ticks, so the end of its slow-down can be hit.
+func default_running_effects_now() -> Array[Effect]:
+	if _default_effects.is_empty():
+		_default_effects.append(Effect.make_invulnerable(11))
+	return _default_effects
 
 
 func get_pushed_properties() -> Array[String]:

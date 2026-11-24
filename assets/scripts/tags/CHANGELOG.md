@@ -16,6 +16,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-24
 
+- **Hit tags** (pawn spec 16.7): `ability.receive_hit`; `event.hit`, `event.hit.taken`, `event.reaction`, `event.reaction.knockback`, `event.revived`; `status.parrying`, `status.invulnerable`, `status.hit_immune`. Declared in `resources/tag_declarations.tres`, with constants in `Tags`.
+
 - **An `event` category** (the pawn redesign's build step 3a, pawn spec 16.8): `event.damage.taken`, `event.health.depleted`, `event.health.low` (and their parents), with `Tags.EVENT` constants. Gameplay events are tags (pawn spec 16.9).
 
 ## 2026-11-23

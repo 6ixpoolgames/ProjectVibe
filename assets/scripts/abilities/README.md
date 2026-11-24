@@ -4,14 +4,14 @@
 
 Everything a pawn does, from walking to a three-hit combo: abilities started by named actions (the same for a player's keys and the AI), the rules for what cancels what, attacks built from steps, and the hits that land on a pawn.
 
-**Status:** built, tier 0. Not yet: attacks that move while they swing (`moving_attack`), interceptors switched on by state tags with no ability running, and a stats pass for the numbers.
+**Status:** built, tier 0. Not yet: attacks that move while they swing (`moving_attack`), and a stats pass for the numbers.
 
 | File | What it's for |
 |---|---|
 | [README.md](README.md) | This overview: what's here and how to use it |
 | [REFERENCE.md](REFERENCE.md) | Every class, setting and function, generated from the code's doc comments (`python tools/docs/make_reference.py abilities`) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed and why, newest first, and the refactor candidates |
-| [PAWN_SPEC.md](../../../docs/pawn/PAWN_SPEC.md) | The design: section 8 (abilities 8.3 to 8.6, attack requests 8.8, tags 8.10, parry 8.15, hits and death 8.16, steps 8.20, interceptors 8.23) and section 15 (tick rules) |
+| [PAWN_SPEC.md](../../../docs/pawn/PAWN_SPEC.md) | The design: section 8 (abilities 8.3 to 8.6, attack requests 8.8, tags 8.10, parry 8.15, hits and death 8.16, steps 8.20), section 15 (tick rules) and 16.7 (the redesign's hits and reactions) |
 
 ## The pieces
 
@@ -19,24 +19,23 @@ Everything a pawn does, from walking to a three-hit combo: abilities started by 
  player keys / AI ─► ControllerManager (held actions, move, look)
                               │ read every tick
                               ▼
- AbilityManager ──► abilities (its children): Walk, Sprint, Jump, Dash, MeleeAttack, RangedAttack, Parry, Knockback, Death
+ AbilityManager ──► abilities (its children): Walk, Sprint, Jump, Dash, MeleeAttack, RangedAttack, Parry, Knockback, Death, ReceiveHit
                         │
-                        ├─► steps (children of an ability): Windup ─► TurnToFace, Sweep ─► OpenCombo, Recovery
-                        │                                    or Windup ─► TurnToFace, Fire ─► Recovery
-                        └─► HitInterceptors (under an ability or a step): Invulnerability, Parry
+                        └─► steps (children of an ability): Windup ─► TurnToFace, Sweep ─► OpenCombo, Recovery
+                                                             or Windup ─► TurnToFace, Fire ─► Recovery
 
  a Sweep step's hit ─┐
  a Fire step ─► Projectile (a networked entity, flown by the server) ─┴─► HitInfo ─► target's AbilityManager.receive_hit
-                                                                           ─► its interceptors ─► its StatusManager (effects/)
+     ─► (after simulate) event.hit.taken ─► its ReceiveHit ability: ignored, blocked, or its StatusManager applies the effects (effects/)
 ```
 
 - **`AbilityManager`** is a part on every pawn, with the abilities as its children. Each tick it runs one locomotion ability, then the actions: a press starts the ready ability on that action with the highest priority. It owns the cancelling rules, the combo counter, and the hit path (`receive_hit`), including death.
 - **Definitions** (`definitions/`): an ability's settings live in an `AbilityDefinition` Resource (`MeleeAttackDefinition` and the like for each kind), shared by every pawn that uses it. The node holds the reference (`definition`) and its state, and reads each setting from it. Empty, it runs with its kind's defaults. A definition can be a variant of another (`based_on`): what it hasn't changed follows its base. `DefinitionRegistry` gives each definition file an id. Design: [ability spec](../../../docs/abilities/ABILITY_SPEC.md) 3.
 - **`AbilityBase`** is one thing a pawn can do. LOCOMOTION moves the pawn every tick (Walk by default, Sprint while held and charged); ACTION starts on a press, at once (Jump) or for a while (Dash, a swing). Its timers roll back.
-- **The t0 abilities:** `WalkAbility`, `SprintAbility`, `JumpAbility`, `DashAbility`, `MeleeAttackAbility`, `RangedAttackAbility`, `ParryAbility`, and two with no key: `KnockbackAbility` (on the pawn being hit) and `DeathAbility` (runs while Health is 0).
+- **The t0 abilities:** `WalkAbility`, `SprintAbility`, `JumpAbility`, `DashAbility`, `MeleeAttackAbility`, `RangedAttackAbility`, `ParryAbility`, and three started by gameplay events (`trigger_event`) rather than keys: `ReceiveHitAbility` (the hit ability, `event.hit.taken`; the manager adds one to a pawn without), `KnockbackAbility` (`event.reaction.knockback`, with the push) and `DeathAbility` (`event.health.depleted`; runs while Health is 0).
 - **Steps** (`steps/`): an ability can be built from `AbilityStep` children that start each other and run side by side. A swing is Windup (which starts TurnToFace), then Sweep (the hit window), then OpenCombo and Recovery. MeleeAttack makes these from its settings if it has none.
 - **Projectiles** (`projectiles/`): one built-in `Projectile`, a networked entity per shot, fired by a `FireProjectileStep` with a `ProjectileDefinition`. Its state is a launch record, and its flight (speed curve, gravity scale) is worked out from it, so clients draw it themselves and nothing is sent in flight. The server sweeps each tick's stretch for hits, up to `max_hits`, with a whitelist and an intersect log; a hit goes the same way as a swing's (`HitInfo.make`, `deliver`). The shooter's client draws a `PredictedProjectile` at once. F5 traces them. Design: ability spec 9.
-- **Hit interceptors** (`interceptors/`): a `HitInterceptor` under an ability or a step can stop hits while it runs. MISS: the hit never arrives (`InvulnerabilityInterceptor`, a dash's first 0.18 s). TURN_AWAY: the hit arrives, then is stopped (`ParryInterceptor`, hits from the front).
+- **Ignored, blocked, landed** (pawn spec 16.7): the hit ability's start requirements decide whether a hit counts at all (a pawn owning `status.hit_immune` ignores it). One that counts arrives (`hit_arrived`, so the AI notes it), then is blocked (`hit_blocked`, with the reason) if the pawn is dead, owns `status.invulnerable`, or owns `status.parrying` with the attacker in its parry's front; otherwise it lands. Parrying and invulnerability are effects that grant those tags: an ability's (or a step's) `running_effects` hold them while it runs, such as a dash's first 11 ticks or a parry's stance with its `ParryModifier` (front and reply).
 - **Hits** (ability spec 13): one system for swings and projectiles. Each tick a hit volume is active, `HitQuery` finds the pawns it touches (as the attacker saw them, in a session), its `HitRun` meets each once, logs it, and checks the `HitDefinition` (who it may hit, its effects, the push, `max_hits` and `max_intersects`), and `AbilityBase.land_hit` applies the hit. A swing's run belongs to its ability's run; each projectile owns one. An ability's definition holds its hit definition (`hit`); a sweep step can name its own, and `use_hit_definition()` swaps it while playing. A sweep's path can go through `SweepKey`s, measured from the pawn or left in the world (`anchor`). A projectile can be `hitscan` (its whole line checked as it's fired, then a tracer). A pawn despawned while its projectiles fly lingers until they end; a hit definition with `lands_without_source` lands even when its source is gone outright.
 - **`HitInfo`** is one hit: attacker, target, direction, and the effects it carries. What a hit does is the effects system's job ([effects/README.md](../effects/README.md)).
 - Tags (`tags/TagRegistry`, `Tags` constants) name ability categories; `controllers/InputActions` turns action names into bits. `abilities/debug/AbilityDebugDraw` draws swing spheres and dash trails for samples and tests.
@@ -57,7 +56,9 @@ Everything a pawn does, from walking to a three-hit combo: abilities started by 
 
 **Make a combo.** Set `combo_positions` on each attack: `[1]` for an opener, `[2]` for a second hit, `[2, 3]` for one that fits either. Put an `OpenComboStep` after the hit, and give follow-ups a higher `priority` than the opener on the same key, so they win while the window is open.
 
-**Make a parry, a block or i-frames.** Add a `ParryInterceptor` or an `InvulnerabilityInterceptor` under the ability (on while it runs) or under a step (on while that step runs); `active_seconds` limits it to the start. Under a parry, an `EffectApplier` with `ON_INTERCEPT` says what the attacker gets (`parry_knockback.tres`). A Dash or a Parry with none makes its default.
+**Make a parry, a block or i-frames.** Give the ability's definition (or a step) a running effect that grants `status.invulnerable` or `status.parrying`: it holds while the ability (or step) runs. For i-frames at the start only, give the effect a duration (a dash's: 11 ticks); for the whole run, `lasts_until_removed`. A parry's effect holds a `ParryModifier` (`front_degrees`, and `reply_effects` for what the attacker gets, a tick later), such as `resources/effects/parry_stance.tres`, which `faction_parry.tres` runs. A Dash or a Parry with no running effects uses its default.
+
+**Start an ability from an event.** Set its definition's `trigger_event` (`Tags.EVENT`, such as `event.damage.taken` for a flinch); it starts by the same rules as a press when the pawn receives the event, and reads the event in `start()` through `trigger_data` (override `prepare_from_event` for values its run length needs).
 
 **Decide what cancels what.** Two abilities conflict when either one's `locks_out` covers the other's category. The starting one cancels the running one if its `interrupt_priority` is at least the running one's `interrupt_threshold`; `cancelled_by` lists exceptions. `pawn.ability_manager.get_interrupt_table_text()` prints the result for a pawn.
 
@@ -92,7 +93,7 @@ pawn.ability_manager.receive_hit(hit)
 
 **Swing hits.** A `MeleeSweepStep` checks every spot its sphere passes through each tick, no more than half the radius apart, so a fast sweep or a 30 Hz match leaves no gaps. In a session it checks through lag compensation (against where the player saw others); when nothing would be rewound (AI swings, offline play) through the C++ pawn grid; without the C++ library, through physics. Each pawn is hit once per ability run, an invulnerable pawn isn't hit or marked (a later tick can catch it), and nothing is decided in a rollback replay. `TurnToFaceStep` turns toward the look only while the attack's action is held and at least `min_turn_degrees` first; the windup's timer waits until the pawn is within 90 degrees of the look.
 
-**Hits.** `receive_hit` runs on the server. During simulate a hit is queued and delivered after every pawn has simulated, sorted by the attacker's entity id, then the target's, then queue order, so the result never depends on who simulated first (pawn spec 15.4). Delivery: a dead or invulnerable pawn ignores it; `hit_arrived` goes out (the AI notes it); an active TURN_AWAY interceptor, highest `priority` first, may stop it and its response goes out instead; otherwise the `StatusManager` applies the hit's effects (damage, knockback, threat) and `hit_received` goes out and the attacker gets its `attacker_effects`. At 0 Health the Death ability starts and `died` goes out.
+**Hits.** `receive_hit` runs on the server. During simulate a hit is booked with the tick scheduler and delivered after every pawn has simulated, sorted by the attacker's entity number, then the target's, then booking order, so the result never depends on who simulated first (pawn spec 15.4). Delivery sends `event.hit.taken`, which starts the target's hit ability (`ReceiveHitAbility`) with the hit: a pawn owning `status.hit_immune` ignores it; otherwise `hit_arrived` goes out (the AI notes it), and a dead, invulnerable or parrying pawn blocks it (`hit_blocked`; a parry's reply is booked for the next tick, and can be parried in turn); otherwise the `StatusManager` applies the hit's effects (damage; a push sends `event.reaction.knockback`, which starts Knockback), `hit_received` goes out and the attacker gets its `attacker_effects`. At 0 Health `event.health.depleted` starts Death and `died` goes out. `revive()` sends `event.revived`, which refills charges.
 
 **Dash numbers.** It adds 100 m/s^2 for 0.1 s (+10 m/s), then takes 50 m/s^2 off for 0.2 s, never below 0 along the dash. Left alone the pawn ends at its starting speed: standing it peaks at 10 m/s over about 1.5 m, walking about 15 m/s and 3 m, sprinting about 19 m/s and 4.2 m.
 
@@ -114,7 +115,9 @@ Ability settings are in its definition (`AbilityDefinition` and each kind's own 
 | `combo_positions` | `AbilityDefinition` | empty | Which combo positions it can fill |
 | `max_charges`, `recharges`, `charge_restore_ticks`, `charges_restored`, `restore_all_charges` | `AbilityDefinition` | 0 (no limit), off, 600, 1, off | Limited uses, whether they come back on their own, and how |
 | `has_charges_tag` | `AbilityDefinition` | empty (a ranged attack: `status.has_ammo.ranged`) | A tag owned while charges are left |
-| `start_requirements` | `AbilityDefinition` | empty | Owned tags it needs, or that block it, to start |
+| `start_requirements` | `AbilityDefinition` | empty (the hit ability: none of `status.hit_immune`) | Owned tags it needs, or that block it, to start |
+| `trigger_event` | `AbilityDefinition` | empty (Death, Knockback and the hit ability have theirs) | The gameplay event that starts it |
+| `running_effects` | `AbilityDefinition`, `AbilityStep` | empty (Dash: invulnerable 11 ticks; Parry: parrying 120°) | Effects on its pawn while it (or the step) runs |
 | `max_charge_ticks`, `recharge_rate`, `recharge_delay_ticks`, `min_start_charge_ticks` | `SprintDefinition` | 180 (3 s), 0.5, 60, 30 | Sprint's charge: how long, how fast it refills, after how long, and what it needs to start |
 | `speed`, `speed_curve`, `gravity_scale` | `ProjectileDefinition` | 30 m/s, steady, 0 | A projectile's flight |
 | `hits_self`, `hits_allies`, `hits_enemies` | `HitDefinition` | off, off, on | Who a swing or projectile may hit |
@@ -122,9 +125,8 @@ Ability settings are in its definition (`AbilityDefinition` and each kind's own 
 | `anchor`, `keys` | `MeleeSweepStep` | the pawn, none | What its path is measured from, and the points it goes through |
 | `windup_ticks`, `hit_ticks`, `recovery_ticks` | `MeleeAttackDefinition` | 8, 4, 12 | The default swing's timing, at 60 ticks a second |
 | `attack_range`, `hit_radius`, `sweep_degrees` | `MeleeAttackDefinition` | 1.8 m, 0.8 m, 100° | The default swing's reach and arc; attack_range is also the AI's reach |
-| `active_seconds` | `HitInterceptor` | 0 (whole run) | How long it's on from the start |
-| `front_degrees` | `ParryInterceptor` | 120° | How wide the parried front is |
+| `front_degrees`, `reply_effects` | `ParryModifier` | 120°, none | How wide the parried front is; what the attacker gets |
 
 ## Tests
 
-`abilities/tests/`: `ability_selftest` (the manager's rules, Walk, Sprint, Jump, rollback), `ability_charges_selftest` (charges spent, restored on deadlines, refilled, changes to the most, the tag, rollback; start requirements), `ability_definition_selftest` (kind defaults, variants and their files, fallback, settings written on a node, the sample definitions, the registry), `hit_system_selftest` (the hit definition's whitelist and log, swapping, a cap, a step's own, swing keys, the world anchor, a projectile's end worked out at launch), `ability_steps_selftest` (steps in order and side by side, failing, the safety limit, cancel windows, step rollback), `combat_selftest` (Dash, MeleeAttack, Knockback, the interrupt rules, hits on the server), `fight_selftest` (Health, damage, Death, revive), `attack_request_selftest` (presses as requests, jitter, combos), `attack_feel_selftest` (sweeps, turning, the hop, invulnerability), `hit_interceptor_selftest` (interceptor rules), `parry_selftest` (the parry and the AI's parry), `projectile_selftest` (bolts offline: hits, misses, walls, teams, parry, dash, gravity, piercing, the whitelist and intersect log, a speed curve, the hooks, impact and F5 trace, the predicted copy, an AI shooting, an AI keeping its distance and switching to melee up close), and `net_projectile_selftest` (bolts between processes at several network conditions, hits once on the server, hit rollback; about a minute, run by name or with `full net`). Run them with `bash tools/run_tests.sh <name>`.
+`abilities/tests/`: `ability_selftest` (the manager's rules, Walk, Sprint, Jump, rollback), `ability_charges_selftest` (charges spent, restored on deadlines, refilled, changes to the most, the tag, rollback; start requirements), `ability_definition_selftest` (kind defaults, variants and their files, fallback, settings written on a node, the sample definitions, the registry), `hit_system_selftest` (the hit definition's whitelist and log, swapping, a cap, a step's own, swing keys, the world anchor, a projectile's end worked out at launch), `ability_steps_selftest` (steps in order and side by side, failing, the safety limit, cancel windows, step rollback), `combat_selftest` (Dash, MeleeAttack, Knockback, the interrupt rules, hits on the server), `fight_selftest` (Health, damage, Death, revive), `attack_request_selftest` (presses as requests, jitter, combos), `attack_feel_selftest` (sweeps, turning, the hop, invulnerability), `hit_ability_selftest` (the hit ability: ignored, blocked, parried and replies; abilities started by events; charges refilled by a revive), `parry_selftest` (the parry and the AI's parry), `projectile_selftest` (bolts offline: hits, misses, walls, teams, parry, dash, gravity, piercing, the whitelist and intersect log, a speed curve, the hooks, impact and F5 trace, the predicted copy, an AI shooting, an AI keeping its distance and switching to melee up close), and `net_projectile_selftest` (bolts between processes at several network conditions, hits once on the server, hit rollback; about a minute, run by name or with `full net`). Run them with `bash tools/run_tests.sh <name>`.

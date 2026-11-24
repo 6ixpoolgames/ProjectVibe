@@ -13,6 +13,8 @@ var stat_changes: Dictionary = {}
 var ability_bonuses: Array = [[], [], []]
 ## [effect tag bit, amount] pairs: how much of each kind of effect the pawn shrugs off.
 var resistance_bits: Array = []
+## The parries held now ([ParryModifier]), which the hit ability asks.
+var parries: Array[ParryModifier] = []
 
 
 ## Adds to a stat: added counts once per stack, multiplied is applied once per stack.

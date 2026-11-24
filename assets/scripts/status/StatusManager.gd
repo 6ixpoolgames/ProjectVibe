@@ -35,6 +35,8 @@ const NEXT_PERIOD_AT := 2 ## the tick its effectors run again; -1 without a peri
 const STACKS := 3
 const SOURCE := 4
 const _NO_DEADLINE := 0x7FFFFFFFFFFFFFFF
+## What ENDS_AT holds for an effect that lasts until removed ([member Effect.lasts_until_removed]).
+const UNTIL_REMOVED := _NO_DEADLINE
 
 ## This pawn's resistances by effect tag: 0.25 takes a quarter off harmful effects, 1 or more ignores them, negative is a weakness.
 ## [br]A tag counts for every effect inside it, and they add up (0.2 effect.damage.elemental + 0.3 effect.damage.elemental.fire = 0.5 against fire).
@@ -68,6 +70,7 @@ var _stat_changes := {} # stat name -> [added, multiplied]
 var _touched_stats := {} # stat names the modifiers have changed, so they go back to their base when the parts end
 var _ability_bonuses: Array = [[], [], []] # per AbilityModifier.Number: [ability tag bit, amount] pairs
 var _resistance_bits: Array = [] # [effect tag bit, amount] pairs, from resistances and held ResistanceModifiers
+var _parries: Array[ParryModifier] = [] # held ParryModifiers, for the hit ability
 var _warned := {}
 
 
@@ -233,7 +236,7 @@ func apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBa
 		return false
 	var resistance := 0.0
 	if effect.is_harmful:
-		if pawn.ability_manager and pawn.ability_manager.is_invulnerable():
+		if _is_invulnerable():
 			return false
 		resistance = resistance_to(effect)
 		if resistance >= 1.0:
@@ -261,14 +264,14 @@ func apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBa
 				return false
 			Effect.Stacking.ADD_STACK:
 				_entries[at + STACKS] = mini(_entries[at + STACKS] + 1, effect.max_stacks)
-		_entries[at + ENDS_AT] = now + TickDriver.ticks_at_rate(effect.duration_ticks)
+		_entries[at + ENDS_AT] = _ends_at(effect, now)
 		_entries[at + SOURCE] = _source_key(source)
 	else:
 		if _entries.size() >= max_active_effects * STRIDE: # a multiply, not an integer division, which the editor warns about
 			_warn_once("full", "StatusManager: %s already has %d effects on it (max_active_effects), so '%s' was refused." % [pawn.name, max_active_effects, effect.describe()])
 			return false
 		var period := TickDriver.ticks_at_rate(effect.period_ticks)
-		_entries.append_array([effect.get_id(), now + TickDriver.ticks_at_rate(effect.duration_ticks),
+		_entries.append_array([effect.get_id(), _ends_at(effect, now),
 				now + period if period > 0 else -1, 1, _source_key(source)])
 		at = _entries.size() - STRIDE
 		first_time = true
@@ -341,7 +344,7 @@ func tick_effects() -> void:
 		if pawn.is_dead():
 			return
 		var effect: Effect = entry[0]
-		if effect.is_harmful and pawn.ability_manager and pawn.ability_manager.is_invulnerable():
+		if effect.is_harmful and _is_invulnerable():
 			continue # a dash dodges a poison's tick too
 		var application := EffectApplication.new()
 		application.effect = effect
@@ -441,6 +444,13 @@ func ability_bonus(ability: AbilityBase, number: int) -> int:
 	return total
 
 
+## The parries held now ([ParryModifier]), for the hit ability to ask. Don't change the list.
+func get_parries() -> Array[ParryModifier]:
+	if _dirty:
+		_refresh()
+	return _parries
+
+
 ## True if any held AbilityModifier changes ability numbers now. Lets the AbilityManager skip asking.
 func has_ability_bonuses() -> bool:
 	if _dirty:
@@ -468,6 +478,16 @@ func _run_once(application: EffectApplication) -> void:
 		data.magnitude = application.damage_dealt
 		data.optional_object = application.hit
 		pawn.send_event(Tags.EVENT.DAMAGE_TAKEN, data)
+
+
+# The tick an effect applied now ends: never, for one that lasts until removed.
+func _ends_at(effect: Effect, now: int) -> int:
+	return UNTIL_REMOVED if effect.lasts_until_removed else now + TickDriver.ticks_at_rate(effect.duration_ticks)
+
+
+# The pawn owns status.invulnerable (a dash's first ticks): harmful effects are refused, and their periods skipped.
+func _is_invulnerable() -> bool:
+	return pawn.owned_tags != null and pawn.owned_tags.has(Tags.STATUS.INVULNERABLE)
 
 
 # Where this effect's id is in the list (the index of its first number), or -1.
@@ -515,12 +535,13 @@ func _refresh() -> void:
 	if pawn and pawn.ability_manager:
 		pawn.ability_manager.readiness_changed() # priority boosts can change what may start (AIInputs.action_ready)
 	_resistance_bits = totals.resistance_bits
+	_parries = totals.parries
 	_stat_changes = totals.stat_changes
 	_apply_stat_changes()
 	_set_owned_tags()
 
 
-# The pawn owns every active effect's tags, once per effect whatever its stacks (tag spec 3).
+# The pawn owns every active effect's tags and granted tags, once per effect whatever its stacks (tag spec 3).
 func _set_owned_tags() -> void:
 	if pawn == null or pawn.owned_tags == null:
 		return
@@ -529,6 +550,7 @@ func _set_owned_tags() -> void:
 		var effect := Effect.find(_entries[at + ID])
 		if effect:
 			tags.append_array(effect.tags)
+			tags.append_array(effect.granted_tags)
 	pawn.owned_tags.set_source(self, tags)
 
 

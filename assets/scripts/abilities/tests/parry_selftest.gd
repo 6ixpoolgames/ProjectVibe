@@ -1,12 +1,13 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-15: headless self-test for ParryAbility, the owner's request: while it runs, a hit from
 ## the front does nothing and pushes the attacker back; hits from behind still land; it ends, then cools down; a real swing into a
-## parry is turned away and its swing cancelled; and a parry's own push can't be parried back. Also the AI's parry (AIParryBehaviour):
+## parry is turned away and its swing cancelled; and a parry's own push is parried back by a parrying attacker (Claude 2026-11-24:
+## replies can be parried now, pawn spec 16.7). Also the AI's parry (AIParryBehaviour):
 ## told a swing is coming, it parries as often as its parry_chance says.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/abilities/tests/parry_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
-# The faction samples' pawn: its abilities (faction_abilities.tscn) include Parry, with parry_knockback.tres on its ParryInterceptor's ON_INTERCEPT applier (Claude 2026-11-17, pawn spec 8.23).
+# The faction samples' pawn: its abilities (faction_abilities.tscn) include Parry, whose definition (faction_parry.tres) runs parry_stance.tres, replying with parry_knockback.tres (Claude 2026-11-24, pawn spec 16.7).
 const PAWN_SCENE := "res://assets/scenes/samples/faction_player.tscn"
 const GOBLIN_SCENE := "res://assets/scenes/samples/faction_goblin.tscn" # with AI, including AIParryBehaviour
 const NO_AI: Array[StringName] = [&"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
@@ -25,7 +26,7 @@ func _ready() -> void:
 	add_child(floor_body)
 	await _test_front_and_back()
 	await _test_real_swing()
-	await _test_no_parry_back()
+	await _test_parry_back()
 	await _test_ai_parries(1.0)
 	await _test_ai_parries(0.0)
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
@@ -39,16 +40,19 @@ func _test_front_and_back() -> void:
 	var behind := _make_pawn(Vector3(0, 0.1, 1.5), 1)
 	await _ticks(10)
 	var parry := _parry_of(defender)
-	_check(parry != null and parry.trigger_action == &"parry" and parry.guard() != null and parry.guard().on_intercept_effects.size() == 1,
-		"the faction pawns have Parry, on the parry action, with a ParryInterceptor carrying its push-back effect")
+	_check(parry != null and parry.trigger_action == &"parry" and parry.guard() != null and parry.guard().reply_effects.size() == 1,
+		"the faction pawns have Parry, on the parry action, with a ParryModifier carrying its push-back effect")
 	var parried := []
-	defender.ability_manager.hit_intercepted.connect(func(hit: HitInfo, _by: HitInterceptor) -> void: parried.append(hit))
+	defender.ability_manager.hit_blocked.connect(func(hit: HitInfo, reason: StringName) -> void:
+		if reason == ReceiveHitAbility.BLOCKED_PARRIED:
+			parried.append(hit))
 	_check(defender.ability_manager.start_ability(parry), "it starts")
 	await _ticks(1)
 	var before := front.global_position.distance_to(defender.global_position)
 	defender.ability_manager.receive_hit(_hit(front, defender, 20))
 	var knockback: AbilityBase = front.ability_manager.get_node("Knockback")
-	_check(defender.status_manager.get_health() == 100.0 and parried.size() == 1, "a hit from the front does nothing to it (Health %d), and hit_intercepted goes out" % defender.status_manager.get_health())
+	_check(defender.status_manager.get_health() == 100.0 and parried.size() == 1, "a hit from the front does nothing to it (Health %d), and hit_blocked goes out" % defender.status_manager.get_health())
+	await _ticks(2) # Claude 2026-11-24: the reply lands on the next tick
 	_check(knockback.is_running_timed(), "the attacker is knocked back")
 	await _ticks(10)
 	var after := front.global_position.distance_to(defender.global_position)
@@ -85,8 +89,9 @@ func _test_real_swing() -> void:
 	await _ticks(2)
 
 
-# Two pawns parrying, facing each other: the first parry's push lands on the other, rather than being parried back.
-func _test_no_parry_back() -> void:
+# Two pawns parrying, facing each other: the first parry's push is parried back (Claude 2026-11-24: replies can be parried, pawn
+# spec 16.7), a tick at a time, until a stance ends and a push lands.
+func _test_parry_back() -> void:
 	var one := _make_pawn(Vector3(-20, 0.1, 0), 0)
 	var two := _make_pawn(Vector3(-20, 0.1, -1.5), 1)
 	await _ticks(10)
@@ -95,9 +100,20 @@ func _test_no_parry_back() -> void:
 	one.ability_manager.start_ability(_parry_of(one))
 	two.ability_manager.start_ability(_parry_of(two))
 	await _ticks(1)
+	var parried_back := []
+	two.ability_manager.hit_blocked.connect(func(hit: HitInfo, reason: StringName) -> void:
+		if reason == ReceiveHitAbility.BLOCKED_PARRIED:
+			parried_back.append(hit))
+	var pushed := []
+	for pawn: Pawn in [one, two]:
+		pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void:
+			if ability is KnockbackAbility:
+				pushed.append(pawn))
 	one.ability_manager.receive_hit(_hit(two, one, 20))
-	var knockback: AbilityBase = two.ability_manager.get_node("Knockback")
-	_check(one.status_manager.get_health() == 100.0 and knockback.is_running_timed(), "a parry's push can't be parried back: it lands on the parrying attacker")
+	await _ticks(2)
+	_check(one.status_manager.get_health() == 100.0 and not parried_back.is_empty() and pushed.is_empty(), "a parry's push is parried back by the parrying attacker")
+	await _ticks(30)
+	_check(pushed.size() == 1, "until a stance ends and a push lands (%d pushed)" % pushed.size())
 	one.queue_free()
 	two.queue_free()
 	await _ticks(2)
@@ -119,7 +135,9 @@ func _test_ai_parries(chance: float) -> void:
 	var attacker := _make_pawn(Vector3(40, 0.1, -1.4), 1)
 	await _ticks(10)
 	var parries := []
-	goblin.ability_manager.hit_intercepted.connect(func(hit: HitInfo, _by: HitInterceptor) -> void: parries.append(hit))
+	goblin.ability_manager.hit_blocked.connect(func(hit: HitInfo, reason: StringName) -> void:
+		if reason == ReceiveHitAbility.BLOCKED_PARRIED:
+			parries.append(hit))
 	var swing: AbilityBase = attacker.ability_manager.get_node("MeleeAttack")
 	for i in 4:
 		attacker.global_position = Vector3(40, 0.1, -1.4)

@@ -11,7 +11,9 @@ extends Step
 ## While it runs, how strong a starting ability (or a hit's knockback) must be to cancel its ability. -1: the ability's own
 ## interrupt_threshold. With several steps running, the strictest counts.
 @export var interrupt_threshold := -1
-# For a step during which hits can't land, give it an InvulnerabilityInterceptor child (pawn spec 8.23).
+## Effects on its pawn while it runs: applied as it starts, removed as it ends (pawn spec 16.7). For a step during which hits can't
+## land, an effect granting status.invulnerable that lasts until removed.
+@export var running_effects: Array[Effect] = []
 ## On: it ends on the first tick its action isn't held (reason "released"), which starts what follows it as done does (unless an entry
 ## says otherwise). Held input is rolled-back input, so server, prediction and replay agree.
 @export var ends_when_released := false:

@@ -1,9 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## Pushes the pawn, once, through its own KnockbackAbility. An effector ([EffectEffector]).
 ##
-## The pawn being hit starts its own Knockback ability, so its own interrupt rules decide what the push cancels; a pawn with no
-## KnockbackAbility isn't pushed. The push goes along the hit's direction, or straight back from the way the pawn faces if there's no hit.
-## Design: pawn spec 8.11.
+## It sends the pawn [code]event.reaction.knockback[/code] with the push ([KnockbackEventData]), and the pawn's Knockback ability
+## starts from it, so its own interrupt rules decide what the push cancels; a pawn with nothing answering the event isn't pushed. The
+## push goes along the hit's direction, or straight back from the way the pawn faces if there's no hit.
+## Design: pawn spec 8.11, 16.7.
 class_name KnockbackEffector
 extends EffectEffector
 
@@ -24,6 +25,10 @@ func fire(application: EffectApplication) -> void:
 		direction = application.hit.direction
 	else:
 		direction = Vector3(sin(target.yaw), 0.0, cos(target.yaw)) # back: a pawn faces -Z at yaw 0
-	var knockback := target.ability_manager.get_knockback() # found once by the manager, when it collects its abilities
-	if knockback:
-		knockback.push(direction * speed, TickDriver.ticks_at_rate(ticks), hop_speed)
+	var data := KnockbackEventData.new()
+	data.instigator = application.source
+	data.optional_object = application.hit
+	data.push_velocity = direction * speed
+	data.push_ticks = TickDriver.ticks_at_rate(ticks)
+	data.hop_speed = hop_speed
+	target.send_event(Tags.EVENT.REACTION_KNOCKBACK, data)

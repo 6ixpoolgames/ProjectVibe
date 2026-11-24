@@ -1,0 +1,18 @@
+[gd_resource type="Resource" script_class="Effect" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/effects/modifiers/EffectModifier.gd" id="1_modifier"]
+[ext_resource type="Script" path="res://assets/scripts/effects/modifiers/ParryModifier.gd" id="2_parry"]
+[ext_resource type="Script" path="res://assets/scripts/effects/Effect.gd" id="3_effect"]
+[ext_resource type="Resource" path="res://assets/scripts/resources/effects/parry_knockback.tres" id="4_push_back"]
+
+[sub_resource type="Resource" id="Front"]
+script = ExtResource("2_parry")
+reply_effects = Array[ExtResource("3_effect")]([ExtResource("4_push_back")])
+
+[resource]
+script = ExtResource("3_effect")
+effect_name = &"parry stance"
+granted_tags = Array[StringName]([&"status.parrying"])
+is_harmful = false
+lasts_until_removed = true
+modifiers = Array[ExtResource("1_modifier")]([SubResource("Front")])

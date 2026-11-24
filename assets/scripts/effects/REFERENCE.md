@@ -6,7 +6,6 @@ Every class in `assets/scripts/effects/`, from its doc comments. The overview is
 
 - [Effect](#effect)
 - [EffectApplication](#effectapplication)
-- [EffectApplier](#effectapplier)
 - [EffectEffector](#effecteffector)
 - [KnockbackEffector](#knockbackeffector)
 - [LifestealEffector](#lifestealeffector)
@@ -14,6 +13,7 @@ Every class in `assets/scripts/effects/`, from its doc comments. The overview is
 - [AbilityModifier](#abilitymodifier)
 - [EffectModifier](#effectmodifier)
 - [ModifierTotals](#modifiertotals)
+- [ParryModifier](#parrymodifier)
 - [ResistanceModifier](#resistancemodifier)
 - [StatModifier](#statmodifier)
 
@@ -23,14 +23,16 @@ Every class in `assets/scripts/effects/`, from its doc comments. The overview is
 
 One effect, such as a sword hit, a poison or a combo boost: what it does to the pawn it's applied to.
 
-A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) runs its `parts` once; over time stays on the pawn for `duration_ticks`, its held parts holding and its do-once parts repeating each period. Parts run in list order. Apply one with `StatusManager.apply_effect()`; do-once parts run on the authority only, held parts on every machine. Design: pawn spec 8.11.
+A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) fires its `effectors` once; over time stays on the pawn for `duration_ticks` (or until removed), its `modifiers` holding, its `granted_tags` owned and its effectors firing again each period. Apply one with `StatusManager.apply_effect()`; effectors fire on the authority only, modifiers and tags hold on every machine. Design: pawn spec 8.11.
 
 ### Settings and properties
 
 - `effect_name: StringName` = `&""`: A name for readouts and the debug timeline; also how a client recognises an effect made in code (a saved one goes by its path).
 - `tags: StringName[]` = `[]`: What kind of effect it is, as effect tags (`Tags.EFFECT`) such as effect.damage.elemental.fire. Resistances and removing by tag go by these.
+- `granted_tags: StringName[]` = `[]`: Tags the pawn owns while it lasts, such as status.parrying: what it puts the pawn in, where `tags` say what it is. Over time only.
 - `is_harmful: bool` = `true`: On: resistances apply and invulnerability (a dash) stops it. Off: it helps, and gets through both.
-- `duration_ticks: int` = `0`: Ticks at 60 a second it lasts. 0: instant.
+- `duration_ticks: int` = `0`: Ticks at 60 a second it lasts. 0: instant (unless it lasts until removed).
+- `lasts_until_removed: bool` = `false`: On: it lasts until removed (its ability ending, a cleanse, death), whatever duration_ticks says: a parry's stance.
 - `period_ticks: int` = `0`: Over time: its effectors fire when first applied, then every this many ticks at 60 a second. 0: only when first applied.
 - `stacking: int` = `0`: What a second application on the same pawn does.
 - `max_stacks: int` = `1`: With ADD_STACK: the most stacks it can have.
@@ -45,7 +47,7 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 
 ### Functions
 
-- `is_instant() -> bool`: True if it's instant: it does its parts once and isn't kept.
+- `is_instant() -> bool`: True if it's instant: its effectors fire once and it isn't kept.
 - `get_tag_mask() -> int`: Its tags as one mask, parents included (`TagRegistry.full_mask_of_list()`), worked out once.
 - `has_tag(tag: StringName) -> bool`: True if it has this tag, or a tag inside it: an effect tagged effect.damage.elemental.fire has effect.damage.elemental.
 - `has_modifiers() -> bool`: True if it has modifiers, which hold while it lasts.
@@ -55,6 +57,8 @@ A Resource, saved as a .tres and tuned in one place however many abilities use i
 - `find(id: int) -> Effect` *(static)*: The registered effect with this id, or null.
 - `describe() -> String`: A short name for readouts: effect_name, or the file's name.
 - `make_damage(amount: float, damage_tags: StringName[] = [...]) -> Effect` *(static)*: An instant effect that takes this much Health, for hits made in code (a trap, a test). Tagged effect.damage.physical unless given tags.
+- `make_invulnerable(ticks: int) -> Effect` *(static)*: An effect that makes the pawn invulnerable for this many ticks (at 60 a second): it grants status.invulnerable. A Dash's default.
+- `make_parrying(front_degrees: float = 120.0, reply: Effect[] = []) -> Effect` *(static)*: An effect that parries until removed, with this front and reply: it grants status.parrying and holds a [`ParryModifier`](#parrymodifier). A Parry's default (120 degrees, no reply). Effects made in code are recognised by name, so make one per front and reply, and keep it.
 - `make_knockback(speed: float, ticks: int, hop: float = 0.0) -> Effect` *(static)*: An instant effect that pushes the pawn along the hit's direction, for hits made in code. ticks are written for 60 a second.
 
 ## EffectApplication
@@ -76,28 +80,6 @@ Made by the [`StatusManager`](../status/REFERENCE.md#statusmanager) on the autho
 - `resistance: float` = `0.0`: The target's resistance to it, from 0 (none) to just under 1; below 0 is a weakness. A StatChangeEffector takes this fraction off harmful changes. Always 0 for an effect that isn't harmful.
 - `damage_dealt: float` = `0.0`: Health this application has taken so far, filled in by StatChangeEffectors; LifestealEffector reads it.
 
-## EffectApplier
-
-`res://assets/scripts/effects/EffectApplier.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
-
-What a [`HitInterceptor`](../abilities/REFERENCE.md#hitinterceptor) does when it stops a hit: a child node of the interceptor, on the ON_INTERCEPT trigger.
-
-Effects an ability applies on start or on a hit live in its definition (`AbilityDefinition.start_effects`, its hit's `HitDefinition.target_effects` and `HitDefinition.attacker_effects`); one left directly under an ability does nothing. Design: pawn spec 8.23, 16.7.
-
-### Settings and properties
-
-- `trigger: int` = `1`: When it applies its effects.
-- `applies_to: int` = `0`: With ON_HIT or ON_INTERCEPT: who gets the effects. Ignored with ON_START (there is no target yet).
-- `effects: Effect[]` = `[]`: The effects, applied in this order.
-
-### Constants
-
-- `Trigger.ON_START = 0`
-- `Trigger.ON_HIT = 1`
-- `Trigger.ON_INTERCEPT = 2`
-- `AppliesTo.TARGET = 0`
-- `AppliesTo.SELF = 1`
-
 ## EffectEffector
 
 `res://assets/scripts/effects/effectors/EffectEffector.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
@@ -116,7 +98,7 @@ An effector overrides `fire()`. It fires when its effect is applied and, for an 
 
 Pushes the pawn, once, through its own KnockbackAbility. An effector ([`EffectEffector`](#effecteffector)).
 
-The pawn being hit starts its own Knockback ability, so its own interrupt rules decide what the push cancels; a pawn with no KnockbackAbility isn't pushed. The push goes along the hit's direction, or straight back from the way the pawn faces if there's no hit. Design: pawn spec 8.11.
+It sends the pawn `event.reaction.knockback` with the push ([`KnockbackEventData`](../abilities/REFERENCE.md#knockbackeventdata)), and the pawn's Knockback ability starts from it, so its own interrupt rules decide what the push cancels; a pawn with nothing answering the event isn't pushed. The push goes along the hit's direction, or straight back from the way the pawn faces if there's no hit. Design: pawn spec 8.11, 16.7.
 
 ### Settings and properties
 
@@ -211,11 +193,30 @@ The pawn's [`StatusManager`](../status/REFERENCE.md#statusmanager) makes one whe
 - `stat_changes: Dictionary` = `{}`: Stat name -> [added, multiplied, overrides, override value]: the stat's value becomes base_value x multiplied + added, or the override value when one overrides (the last added wins).
 - `ability_bonuses: Array` = `[...]`: One list per AbilityModifier.Number, of [ability tag bit, amount] pairs.
 - `resistance_bits: Array` = `[]`: [effect tag bit, amount] pairs: how much of each kind of effect the pawn shrugs off.
+- `parries: ParryModifier[]` = `[]`: The parries held now ([`ParryModifier`](#parrymodifier)), which the hit ability asks.
 
 ### Functions
 
 - `change_stat(stat: StringName, added: float, multiplied: float, stacks: int) -> void`: Adds to a stat: added counts once per stack, multiplied is applied once per stack.
 - `override_stat(stat: StringName, value: float) -> void`: Sets a stat to a value whatever its base and other modifiers. A later call wins over an earlier one.
+
+## ParryModifier
+
+`res://assets/scripts/effects/modifiers/ParryModifier.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+Parrying: while its effect lasts, hits from the front are blocked and the attacker gets a reply. An [`EffectModifier`](#effectmodifier).
+
+Put it in an effect that grants status.parrying, such as a parry's running effect (`AbilityDefinition.running_effects`). The hit ability ([`ReceiveHitAbility`](../abilities/REFERENCE.md#receivehitability)) asks it whether the attacker is within `front_degrees` of where the pawn faces; if so the hit is blocked, and `reply_effects` go to the attacker in a hit of their own on the next tick (a push-back), which can be parried in turn. A hit with no attacker (a trap) or from the pawn itself isn't parried. Pawn spec 16.7.
+
+### Settings and properties
+
+- `front_degrees: float` = `120.0`: How wide the front is, in degrees, centred on where the pawn faces. 120: an attacker up to 60 degrees to either side is parried.
+- `reply_effects: Effect[]` = `[]`: What the attacker gets when a hit is parried, in a hit from this pawn (a push-back). Empty: the hit is only blocked.
+
+### Functions
+
+- `add_held(totals: ModifierTotals, _stacks: int) -> void`
+- `faces(pawn: Pawn, point: Vector3) -> bool`: True if a point is in front of the pawn, within the front. A point right on top of the pawn counts as in front.
 
 ## ResistanceModifier
 

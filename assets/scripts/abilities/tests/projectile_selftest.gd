@@ -118,7 +118,7 @@ func _test_own_team() -> void:
 	await _free(shooter, friend, enemy)
 
 
-# A target facing the shooter and parrying: the bolt is turned away (no damage) and hit_intercepted goes out.
+# A target facing the shooter and parrying: the bolt is parried (no damage) and hit_blocked goes out.
 func _test_parry() -> void:
 	var shooter := _make_pawn(Vector3(160, 0.1, 0), 0)
 	var target := _make_pawn(Vector3(160, 0.1, -6), 1)
@@ -126,7 +126,9 @@ func _test_parry() -> void:
 	target.yaw = PI # facing +Z, toward the shooter
 	target.controller_manager.look_yaw = PI
 	var parried := []
-	target.ability_manager.hit_intercepted.connect(func(hit: HitInfo, _by: HitInterceptor) -> void: parried.append(hit))
+	target.ability_manager.hit_blocked.connect(func(hit: HitInfo, reason: StringName) -> void:
+		if reason == ReceiveHitAbility.BLOCKED_PARRIED:
+			parried.append(hit))
 	shooter.ability_manager.start_ability(_ranged_of(shooter))
 	await _ticks(14) # the shot is out; it arrives about 10 ticks later
 	target.ability_manager.start_ability(_parry_of(target))
@@ -136,7 +138,7 @@ func _test_parry() -> void:
 	await _free(shooter, target)
 
 
-# A dash is invulnerable for its first 0.18 s: a bolt fired into a dashing pawn flies through it.
+# A dash is invulnerable for its first 11 ticks: a bolt fired into a dashing pawn flies through it.
 func _test_dash() -> void:
 	var shooter := _make_pawn(Vector3(200, 0.1, 0), 0)
 	var target := _make_pawn(Vector3(200, 0.1, -3), 1)

@@ -14,6 +14,13 @@ extends Definition
 	set(value):
 		trigger_action = value
 		_changed(&"trigger_action", value)
+## The gameplay event that starts it ([code]Tags.EVENT[/code]), by the same rules as a press: event.health.depleted for Death,
+## event.hit.taken for the hit ability. The event's data is the ability's [member AbilityBase.trigger_data] as it starts (the hit, a
+## push). Empty: no event starts it.
+@export var trigger_event: StringName = &"":
+	set(value):
+		trigger_event = value
+		_changed(&"trigger_event", value)
 ## What it is, as a tag such as &"ability.movement.jump". Used for lockouts. Empty: nothing can lock it out.
 @export var category: StringName = &"":
 	set(value):
@@ -77,7 +84,6 @@ extends Definition
 	set(value):
 		interrupt_threshold = value
 		_changed(&"interrupt_threshold", value)
-# For invulnerability while it runs, give it an InvulnerabilityInterceptor child (HitInterceptor); Dash makes one by default.
 ## Categories that can always cancel it while it runs, whatever the interrupt numbers say, such as &"ability.movement.jump". A category covers
 ## its children, as in locks_out.
 @export var cancelled_by: Array[StringName] = []:
@@ -142,6 +148,13 @@ extends Definition
 	set(value):
 		start_effects = value
 		_changed(&"start_effects", value)
+## Effects on its own pawn while it runs: applied as it starts (after start_effects) and removed as it ends, whatever their duration
+## (a parry's stance, a dash's invulnerability). One meant to last the whole run has lasts_until_removed on. Empty: its kind's default
+## (Dash: invulnerable for its first 11 ticks; Parry: parrying, 120 degrees wide). Only for an ability that runs for a while.
+@export var running_effects: Array[Effect] = []:
+	set(value):
+		running_effects = value
+		_changed(&"running_effects", value)
 ## Who its hits may hit and what they do (ability spec 13.2), for its swings and its projectiles: its target_effects and
 ## attacker_effects are what a hit does. Empty: its kind's default (a swing hits enemies, doing nothing; a ranged attack's projectile
 ## stops at the first). A sweep step or a timeline entry can name another.

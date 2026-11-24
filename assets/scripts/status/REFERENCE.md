@@ -65,6 +65,7 @@ pawn.status_manager.remove_with_tag(Tags.EFFECT.DEBUFF)  # a cleanse
 - `NEXT_PERIOD_AT = 2`: the tick its effectors run again; -1 without a period
 - `STACKS = 3`
 - `SOURCE = 4`
+- `UNTIL_REMOVED = 9223372036854775807`: What ENDS_AT holds for an effect that lasts until removed (`Effect.lasts_until_removed`).
 
 ### Functions
 
@@ -92,4 +93,5 @@ pawn.status_manager.remove_with_tag(Tags.EFFECT.DEBUFF)  # a cleanse
 - `remove_all() -> void`: Removes everything. Done when the pawn dies (it listens for the AbilityManager's died).
 - `resistance_to(effect: Effect) -> float`: This pawn's resistance to an effect (see `resistances`), not capped: 1 or more means immune.
 - `ability_bonus(ability: AbilityBase, number: int) -> int`: What held AbilityModifiers add to this ability's number now (AbilityModifier.Number). The AbilityManager asks.
+- `get_parries() -> ParryModifier[]`: The parries held now ([`ParryModifier`](../effects/REFERENCE.md#parrymodifier)), for the hit ability to ask. Don't change the list.
 - `has_ability_bonuses() -> bool`: True if any held AbilityModifier changes ability numbers now. Lets the AbilityManager skip asking.

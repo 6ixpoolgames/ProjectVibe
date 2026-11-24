@@ -13,9 +13,11 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [HitRun](#hitrun)
 - [JumpAbility](#jumpability)
 - [KnockbackAbility](#knockbackability)
+- [KnockbackEventData](#knockbackeventdata)
 - [MeleeAttackAbility](#meleeattackability)
 - [ParryAbility](#parryability)
 - [RangedAttackAbility](#rangedattackability)
+- [ReceiveHitAbility](#receivehitability)
 - [SprintAbility](#sprintability)
 - [WalkAbility](#walkability)
 - [AbilityDefinition](#abilitydefinition)
@@ -30,11 +32,9 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [ParryDefinition](#parrydefinition)
 - [ProjectileDefinition](#projectiledefinition)
 - [RangedAttackDefinition](#rangedattackdefinition)
+- [ReceiveHitDefinition](#receivehitdefinition)
 - [SprintDefinition](#sprintdefinition)
 - [WalkDefinition](#walkdefinition)
-- [HitInterceptor](#hitinterceptor)
-- [InvulnerabilityInterceptor](#invulnerabilityinterceptor)
-- [ParryInterceptor](#parryinterceptor)
 - [PredictedProjectile](#predictedprojectile)
 - [Projectile](#projectile)
 - [AbilityCondition](#abilitycondition)
@@ -57,7 +57,7 @@ One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn'
 
 Its settings come from its `definition`, a Resource every pawn using it shares (ability spec 3): the node holds that reference and its state, and reads each setting from the definition. Empty, it runs with its kind's defaults.
 Extend it, override `make_default_definition()` for a kind with settings of its own, and override `can_start()`, `start()`, `tick()`, `stop()` and, for counters that run all the time, `every_tick()` (with `can_sleep()`). A quick ability can instead set base settings in `_init()` (`self.duration_ticks = 30`): they go into a definition of its own. Any setting reads and writes by name on the node (`ability.cooldown_ticks`); code inside an ability reads `settings` directly. LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities start on a press of their `AbilityDefinition.trigger_action`, at once or for `AbilityDefinition.duration_ticks`. Players' keys and AI behaviours press the same actions. Times are set in ticks at 60 a second and converted to the match's rate.
-Rollback: whatever an ability keeps between ticks must be named in `get_pushed_properties()` (its setter calls `push_state()`) or `get_rollback_properties()` (read at every commit); the base already covers its own timers and step state. It can also be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a swing) and carry [`HitInterceptor`](#hitinterceptor) children that stop hits while it runs. What it does to pawns is effects in its definition: `AbilityDefinition.start_effects` on itself, and its hit's target_effects and attacker_effects. Design: pawn spec 8, 8.20, 8.23.
+Rollback: whatever an ability keeps between ticks must be named in `get_pushed_properties()` (its setter calls `push_state()`) or `get_rollback_properties()` (read at every commit); the base already covers its own timers and step state. It can also be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a swing). What it does to pawns is effects in its definition: `AbilityDefinition.start_effects` and `AbilityDefinition.running_effects` on itself, and its hit's target_effects and attacker_effects. Besides an action, a gameplay event can start it (`AbilityDefinition.trigger_event`). Design: pawn spec 8, 8.20, 16.7.
 
 ### Settings and properties
 
@@ -80,7 +80,8 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `locks_out_mask: int` = `0`: locks_out as bits. Worked out once by the manager.
 - `cancelled_by_mask: int` = `0`: cancelled_by as bits. Worked out once by the manager, so the check while playing is one bit test.
 - `trigger_bit: int` = `0`: trigger_action's input bit ([`InputActions`](../controllers/REFERENCE.md#inputactions)), or 0 with none. Worked out once by the manager (pawn spec 15.2).
-- `interceptors: HitInterceptor[]` = `[]`: Its [`HitInterceptor`](#hitinterceptor)s, under it or its steps, found by the manager (pawn spec 8.23).
+- `trigger_data: GameplayEventData` = `null`: The event starting it, while it starts from its trigger event (`AbilityDefinition.trigger_event`): read it in `start()` (the hit, a push). Null otherwise.
+- `charges_version: int` = `0`: Goes up by one whenever its charges change (spent, back, refilled, its most changed), so a readout or the AI can tell without asking every tick.
 - `steps: AbilityStep[]` = `[]`: Its [`AbilityStep`](#abilitystep) children in tree order, found by `collect_steps()`. Empty: no steps.
 - `step_runner: StepTimeline` = `<unknown>`: The [`StepTimeline`](../steps/REFERENCE.md#steptimeline) that runs its steps (pawn spec 16.7), built by `collect_steps()`.
 - `timeline: TimelineEntry[]`: The entries its timeline runs (ability spec 6.2): its definition's `AbilityDefinition.step_timeline`, else its kind's default (`default_timeline()`), else its steps one after another in tree order; plus a manual entry for each step none names.
@@ -155,9 +156,11 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `note_hit_key(key: int) -> bool`: Notes that this run hit the pawn with this key (`Pawn.entity_number()`). False, with a warning once, if the run has hit `MAX_HITS_PER_RUN` already: then the pawn isn't hit.
 - `hit_definition() -> HitDefinition`: Who its hits may hit and what they do now: one swapped in while playing, else its definition's, else a hit on enemies.
 - `use_hit_definition(hit: HitDefinition) -> void`: Swaps who its hits may hit and what they do, while playing (an empowered state); null goes back to its definition's.
-- `land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo`: Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [`HitInfo`](#hitinfo) carrying the hit definition's effects (with: the one its step or projectile names; null: `hit_definition()`), delivered to the target (its interceptors, then effects), then `hit_landed`. The one place a hit is applied; override it for an ability's own rules (damage falling off with distance), calling `super()`.
+- `land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo`: Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [`HitInfo`](#hitinfo) carrying the hit definition's effects (with: the one its step or projectile names; null: `hit_definition()`), delivered to the target (its hit ability decides what it does), then `hit_landed`. The one place a hit is applied; override it for an ability's own rules (damage falling off with distance), calling `super()`.
 - `get_hit_run() -> HitRun`: Its swing's record of this run: whom it hit and what it met. Made the first time it's asked for; cleared as the ability starts.
-- `make_default_interceptors() -> void`: Called by the manager when the ability has no [`HitInterceptor`](#hitinterceptor), so it can make its defaults (Dash, Parry). Nothing by default.
+- `prepare_from_event(_event: GameplayEventData) -> void`: Called by the manager just before it starts from its trigger event, with the event: keep what its run needs before it starts (a push's length decides how long Knockback runs). `trigger_data` is set too. Nothing by default.
+- `running_effects_now() -> Effect[]`: The effects on its own pawn while it runs (`AbilityDefinition.running_effects`), or its kind's default with none.
+- `default_running_effects_now() -> Effect[]`: Its kind's running effects when its definition names none (Dash, Parry). None by default.
 - `collect_steps() -> void`: Called once by the manager: finds the [`AbilityStep`](#abilitystep) children and builds its timeline from its definition's entries, else its kind's default (`default_timeline()`), else its steps one after another.
 - `begin_steps() -> void`: Called by the manager when the ability starts: clears the timeline's state and starts the entries due at its start.
 - `run_steps(dt: float) -> void`: Called by the manager every tick the ability runs, after `tick()`: runs its timeline (`StepTimeline.run()`). The ability ends when no step that keeps it running runs and no entry is due, or when a step fails.
@@ -187,7 +190,7 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 
 Starts, runs and stops a pawn's abilities, and takes the hits that land on it.
 
-A part on the pawn, added by PawnInitializer, with the abilities as its children. The pawn calls `tick_abilities()` once a tick, after its input arrives and before `move_and_slide`: one locomotion ability runs, then pressed actions start the ready ability with the highest priority. Timers are tick deadlines (ability spec 4), so nothing counts down. It owns the cancelling rules, the combo counter and the hit path. Everything that persists between ticks lives on the abilities (and the combo counter here) and rolls back. Outside code only talks to the manager:
+A part on the pawn, added by PawnInitializer, with the abilities as its children. The pawn calls `tick_abilities()` once a tick, after its input arrives and before `move_and_slide`: one locomotion ability runs, then pressed actions start the ready ability with the highest priority. Timers are tick deadlines (ability spec 4), so nothing counts down. It owns the cancelling rules, the combo counter and the hit path; abilities also start from gameplay events (`AbilityDefinition.trigger_event`). Everything that persists between ticks lives on the abilities (and the combo counter here) and rolls back. Outside code only talks to the manager:
 
 ```gdscript
 pawn.ability_manager.can_start(&"jump")      # could a press start something now? (the AI asks)
@@ -196,7 +199,7 @@ pawn.ability_manager.start_ability(ability)  # starts one with no trigger action
 pawn.ability_manager.receive_hit(hit)        # something hit this pawn (server)
 ```
 
-Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
+Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 15.2, 16.7.
 
 ### Settings and properties
 
@@ -207,14 +210,14 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 
 ### Signals
 
-- `hit_intercepted(hit: HitInfo, interceptor: HitInterceptor)`: A [`HitInterceptor`](#hitinterceptor) stopped a hit, on the server, after its response went out (pawn spec 8.23).
+- `hit_blocked(hit: HitInfo, reason: StringName)`: A hit arrived but was blocked, on the server: reason is dead, invulnerable or parried ([`ReceiveHitAbility`](#receivehitability); a parry's reply has been booked). Sent after `hit_arrived`; none of its effects land.
 - `ability_started(ability: AbilityBase)`: An ability started.
 - `ability_finished(ability: AbilityBase)`: An ability stopped, finished or cancelled.
 - `ability_cancelled(ability: AbilityBase, by: AbilityBase)`: An ability was cancelled by another starting, sent after `ability_finished` for it.
 - `step_started(ability: AbilityBase, step: AbilityStep)`: A step of a stepped ability started (pawn spec 8.20). Sent by `AbilityBase.start_step()`.
 - `step_finished(ability: AbilityBase, step: AbilityStep, reason: String)`: A step stopped; reason is "done", "released", "failed" or "cancelled". Sent by `AbilityBase.stop_step()`.
-- `hit_arrived(hit: HitInfo)`: A hit reached this pawn, on the server (not dead or invulnerable). Sent before an interceptor can turn it away and before its effects land, so the AI notes every attack.
-- `hit_received(hit: HitInfo)`: A hit landed, on the server, after its effects were applied (pawn spec 8.11); hit.damage_dealt is the Health it took. Not sent for a hit an interceptor stopped.
+- `hit_arrived(hit: HitInfo)`: A hit reached this pawn, on the server: every hit that counts (not one ignored with status.hit_immune), blocked ones too, before its effects land, so the AI notes every attack. Sent by the hit ability ([`ReceiveHitAbility`](#receivehitability)).
+- `hit_received(hit: HitInfo)`: A hit landed, on the server, after its effects were applied (pawn spec 8.11); hit.damage_dealt is the Health it took. Not sent for a blocked hit.
 - `died(pawn: Pawn, hit: HitInfo)`: This pawn died, once, on the server, after its Death ability started. hit is what did it, or null. Parts clean up by listening.
 
 ### Functions
@@ -228,8 +231,8 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 - `can_start(action: StringName) -> bool`: True if pressing this action now would start something, counting abilities it would cancel. Changes nothing; looks only at the abilities on that action.
 - `action_for_tag(tag: StringName) -> StringName`: The action to press to start an ability in this group (a category or extra_category such as &"ability.movement.advanced"): the highest-priority one that could start now, boosts included; &"" if none. For the AI, so a behaviour asks for a kind of ability, not one by name. It answers with an action because everything a pawn does goes through its (rolled back) input. Changes nothing.
 - `start_ability(ability: AbilityBase) -> bool`: Starts an ability by the same rules as a press (cooldown, can_start, cancelling what conflicts). For abilities started by code, such as Knockback. One already running starts again from the beginning. Returns false if it couldn't start.
-- `intercept_hit(hit: HitInfo) -> HitInterceptor`: The first active TURN_AWAY interceptor that stops this hit, or null (pawn spec 8.23). Its response and `hit_intercepted` have gone out. A reply to an interception isn't turned away.
-- `is_invulnerable() -> bool`: True while a MISS-stage interceptor is on, such as a Dash's first 0.18 s. Hits don't arrive and harmful effects are refused.
+- `start_from_event(ability: AbilityBase, event: GameplayEventData) -> bool`: Starts an ability from a gameplay event, by the same rules as a press: the event is its `AbilityBase.trigger_data` while it starts, and `AbilityBase.prepare_from_event()` sees it first. The manager calls it for each ability whose trigger_event the pawn receives; Death starts only on the authority and only once, then `died` goes out. Returns false if it couldn't start.
+- `is_invulnerable() -> bool`: True while the pawn owns status.invulnerable (a Dash's first 11 ticks): hits are blocked, a swing passes it by, and harmful effects are refused.
 - `is_busy() -> bool`: True while a timed action is running, such as an attack's swing.
 - `has_action(action: StringName) -> bool`: True if any ability answers to this action.
 - `stop_all() -> void`: Stops every running ability, which starts their cooldowns.
@@ -237,7 +240,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 - `is_locked(ability: AbilityBase) -> bool`: True if this ability's category is locked out right now.
 - `needs_full_movement() -> bool`: True while an ability with needs_full_movement runs (Dash, Knockback), so the pawn moves by physics, not the CrowdMover (pawn spec 8.22).
 - `get_abilities() -> AbilityBase[]`: Every ability, in run order.
-- `get_knockback() -> KnockbackAbility`: This pawn's Knockback ability, or null. A KnockbackEffector asks on every push.
+- `get_knockback() -> KnockbackAbility`: This pawn's Knockback ability, or null. For code that pushes it directly (`KnockbackAbility.push()`).
 - `is_action_running(action: StringName) -> bool`: True while any ability on this action runs. Cheap, for asking every tick: looks only at abilities with a timer going.
 - `press_priority_now(ability: AbilityBase) -> int`: An ability's priority now: its own plus what effects add (AbilityModifier, pawn spec 8.11), without the jitter offset.
 - `interrupt_priority_now(ability: AbilityBase) -> int`: Its interrupt_priority right now, with what effects add.
@@ -251,9 +254,9 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
   Returns {"result": "alongside" | "cancels" | "blocked", "reason": text}: alongside (no lockout between them), cancels (priority at least the threshold, or cancelled_by), blocked (a locomotion ability stops steering instead).
 - `get_interrupt_table() -> Dictionary[]`: The interrupt table (pawn spec 8.10): a row per ability that can run (timed ones and locomotion), in run order, with an `interrupt_rule()` answer per other ability. Instant actions such as Jump have no row.
 - `get_interrupt_table_text() -> String`: The interrupt table as text, a line per ability with what cancels it and what it blocks.
-- `receive_hit(hit: HitInfo) -> void`: Something hit this pawn; the server's attacker calls it, such as a [`MeleeSweepStep`](#meleesweepstep). Dead or invulnerable pawns ignore it. During simulate it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (attacker's entity number, target's, booking order), so it never depends on who simulated first (pawn spec 15.4); otherwise it takes effect at once. Steps: see the README.
-- `health_ran_out(hit: HitInfo) -> void`: Death starts and `died` goes out, on the authority: called when the pawn's Health reaches 0 (`event.health.depleted`, sent by the status manager). hit is the hit that did it, or null (a poison's tick). Nothing if already dead.
-- `revive() -> void`: Brings a dead pawn back with full Health, on the server. Death ends on its next tick.
+- `receive_hit(hit: HitInfo, delay_ticks: int = 0) -> void`: Something hit this pawn; the server's attacker calls it, such as a [`MeleeSweepStep`](#meleesweepstep). During simulate, or with a delay (a parry's reply, a tick later), it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (attacker's entity number, target's, booking order), so it never depends on who simulated first (pawn spec 15.4); otherwise at once. Delivery sends `event.hit.taken`, which starts the hit ability ([`ReceiveHitAbility`](#receivehitability)): it decides whether the hit is ignored, blocked or lands. Steps: see the README.
+- `health_ran_out(hit: HitInfo) -> void`: Death starts and `died` goes out, on the authority, as if Health had reached 0: for code that kills a pawn some other way. hit is what did it, or null. Nothing if already dead. Health reaching 0 sends `event.health.depleted`, which does the same.
+- `revive() -> void`: Brings a dead pawn back with full Health, on the server, and sends `event.revived` (charges refill). Death ends on its next tick.
 - `settings_changed() -> void`: An ability's settings changed while playing (`AbilityBase.use_definition()`): its masks, priority order and lists are worked out again.
 
 ## DashAbility
@@ -263,7 +266,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 8.23, 15.2.
 A short, fast burst toward the movement input: an action bound to &"dash".
 
 It adds acceleration along the dash direction for `speed_up_ticks`, then takes speed off for `slow_down_ticks`, so left alone the pawn ends at the speed it started with. Speed gained some other way during a dash stays. Walking, sprinting and jumping are locked out while it runs, and it works on the ground and in the air (`usable_in_air`). The pawn turns to face the dash.
-It cancels a swing, and it's invulnerable for its first 0.18 s (an [`InvulnerabilityInterceptor`](#invulnerabilityinterceptor), pawn spec 8.23). Rollback: `dash_direction` rolls back with its timer and cooldown; its phase comes from `AbilityBase.ticks_before_this_run()`. Design: pawn spec 8.6, 8.9.
+It cancels a swing, and it's invulnerable for its first 11 ticks (its default running effect grants status.invulnerable, pawn spec 16.7). Rollback: `dash_direction` rolls back with its timer and cooldown; its phase comes from `AbilityBase.ticks_before_this_run()`. Design: pawn spec 8.6, 8.9.
 
 ### Settings and properties
 
@@ -272,7 +275,7 @@ It cancels a swing, and it's invulnerable for its first 0.18 s (an [`Invulnerabi
 ### Functions
 
 - `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`DashDefinition`](#dashdefinition).
-- `make_default_interceptors() -> void`: With no interceptor of its own, a Dash is invulnerable for its first 0.18 s, so the end of its slow-down can be hit.
+- `default_running_effects_now() -> Effect[]`: With no running effects of its own, a Dash is invulnerable for its first 11 ticks, so the end of its slow-down can be hit.
 - `get_pushed_properties() -> String[]`
 - `is_timed() -> bool`: Timed, by its two phases rather than duration.
 - `run_length_ticks() -> int`: The speed-up's ticks plus the slow-down's.
@@ -286,7 +289,7 @@ It cancels a swing, and it's invulnerable for its first 0.18 s (an [`Invulnerabi
 
 Being dead: an action with no trigger action, started when the pawn's Health reaches 0.
 
-The StatusManager calls `AbilityManager.health_ran_out()` when an effect takes Health to 0, and the AbilityManager starts this and sends `AbilityManager.died`. While it runs it locks out movement, combat and utility, nothing cancels it, and `Pawn.is_dead()` is true (the pawn ignores its input and AI, and other pawns' sensing ignores it). It keeps running while Health is 0; `AbilityManager.revive()` ends it. The body stays where it falls: removing it or respawning is game code's job.
+The StatusManager sends `event.health.depleted` when Health reaches 0; this starts from it (its definition's trigger_event) and the AbilityManager sends `AbilityManager.died`. While it runs it locks out movement, combat and utility, nothing cancels it, and `Pawn.is_dead()` is true (the pawn ignores its input and AI, and other pawns' sensing ignores it). It keeps running while Health is 0; `AbilityManager.revive()` ends it. The body stays where it falls: removing it or respawning is game code's job.
 Rollback: its timer rolls back with Health, so clients see the pawn dead from snapshots. It watches `StatusManager.HEALTH`. Design: pawn spec 8.7, 8.16.
 
 ### Constants
@@ -321,7 +324,6 @@ Plain data, made on the server only, where hits are decided. A hit carries effec
 - `effects: Effect[]` = `[]`: The effects that go on the target, in order.
 - `attacker_effects: Effect[]` = `[]`: The effects that go on the attacker once the hit lands (its hit definition's attacker_effects).
 - `damage_dealt: float` = `0.0`: Filled in when the hit lands: how much Health it took, after resistances. 0 before then.
-- `from_interception: bool` = `false`: True for a hit an interceptor sends back after stopping one (a parry's push-back); it can't be turned away in turn (pawn spec 8.23).
 
 ### Functions
 
@@ -406,9 +408,9 @@ It starts from the ground, or within `coyote_ticks` of walking off an edge. A pr
 
 ## KnockbackAbility
 
-`res://assets/scripts/abilities/KnockbackAbility.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
+`res://assets/scripts/abilities/KnockbackAbility.gd`, extends [`AbilityBase`](#abilitybase)
 
-Being pushed by a hit: an action with no trigger action, started by a KnockbackEffector through `push()`.
+Being pushed by a hit: an action with no trigger action, started by `event.reaction.knockback`, which a [`KnockbackEffector`](../effects/REFERENCE.md#knockbackeffector) sends with the push ([`KnockbackEventData`](#knockbackeventdata)); code can push with `push()`.
 
 It lives on the pawn being hit. For the push's duration it sets the pawn's horizontal velocity to the push, fading in a straight line to nothing, and locks out movement and combat. A push with a hop speed lifts a grounded pawn on its first tick (not one already in the air); the hop can outlast the push. A second hit while it runs starts it again with the new push. Only Dash cancels it.
 Rollback: `push_velocity` and `push_ticks` roll back with its timer, so a corrected client replays the push. Design: pawn spec 8.6, 8.9.
@@ -424,8 +426,23 @@ Rollback: `push_velocity` and `push_ticks` roll back with its timer, so a correc
 - `get_pushed_properties() -> String[]`
 - `is_timed() -> bool`: Timed, by its push's length rather than duration.
 - `run_length_ticks() -> int`
-- `push(velocity: Vector3, ticks: int, hop: float = 0.0) -> bool`: Starts a push; hop is the upward speed in metres per second (0: none). Returns false if something stronger is running.
+- `prepare_from_event(event: GameplayEventData) -> void`: Takes the push from its event before it starts (its length decides how long it runs).
+- `push(velocity: Vector3, ticks: int, hop: float = 0.0) -> bool`: Starts a push from code; hop is the upward speed in metres per second (0: none). Returns false if something stronger is running.
 - `tick(_dt: float) -> void`
+
+## KnockbackEventData
+
+`res://assets/scripts/abilities/KnockbackEventData.gd`, extends [`GameplayEventData`](../entities/REFERENCE.md#gameplayeventdata)
+
+What a knockback event carries: the push's start values (pawn spec 16.7).
+
+A [`KnockbackEffector`](../effects/REFERENCE.md#knockbackeffector) sends it to the pawn it pushes as `event.reaction.knockback`, and the pawn's [`KnockbackAbility`](#knockbackability) starts from it, reading the push before it starts. instigator is who pushed; optional_object is the hit, if one did it.
+
+### Settings and properties
+
+- `push_velocity: Vector3` = `Vector3(0, 0, 0)`: The push at its start, flat, in metres per second.
+- `push_ticks: int` = `0`: How many ticks the push lasts, at the match's rate.
+- `hop_speed: float` = `0.0`: How fast it lifts a grounded pawn, in metres per second. 0: no hop.
 
 ## MeleeAttackAbility
 
@@ -456,14 +473,14 @@ A swing is a [`WindupStep`](#windupstep) with a [`TurnToFaceStep`](#turntofacest
 
 A parry stance: while it runs, a hit from the front does nothing to this pawn, and the attacker is pushed back instead.
 
-This ability is the stance: it runs for duration (0.35 s, then a 1.5 s cooldown), turns the pawn toward where it looks and holds it still. Turning hits away is its [`ParryInterceptor`](#parryinterceptor) child's job (made by default with the 120 degree front), and what the attacker gets is that interceptor's ON_INTERCEPT EffectApplier children. Hits from the sides and back land as usual, and a knockback or a dash cancels the stance. A client sees its own stance at once; the parried hit's result arrives in snapshots. Design: pawn spec 8.15, 8.23.
+This ability is the stance: it runs for duration (21 ticks, then a 90-tick cooldown), turns the pawn toward where it looks and holds it still. Parrying is its running effect's job: an effect granting status.parrying, holding a [`ParryModifier`](../effects/REFERENCE.md#parrymodifier) with the front's width and what the attacker gets (by default 120 degrees and nothing back), on the pawn while the stance lasts. Hits from the sides and back land as usual, and a knockback or a dash cancels the stance. A client sees its own stance at once; the parried hit's result arrives in snapshots. Design: pawn spec 8.15, 16.7.
 
 ### Functions
 
 - `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`ParryDefinition`](#parrydefinition).
 - `tick(dt: float) -> void`
-- `guard() -> ParryInterceptor`: Its [`ParryInterceptor`](#parryinterceptor), or null. The debug drawing reads the front's width from it.
-- `make_default_interceptors() -> void`: With no interceptor of its own, a ParryInterceptor with the default front (120 degrees).
+- `guard() -> ParryModifier`: Its parry: the first [`ParryModifier`](../effects/REFERENCE.md#parrymodifier) in its running effects, or null. The debug drawing reads the front's width from it.
+- `default_running_effects_now() -> Effect[]`: With no running effects of its own, a Parry parries 120 degrees wide, with nothing back.
 
 ## RangedAttackAbility
 
@@ -485,6 +502,27 @@ pawn.ability_manager.can_start(&"primary")
 - `collect_steps() -> void`
 - `start() -> void`
 - `default_timeline() -> TimelineEntry[]`: The timeline for the steps it made: Windup and TurnToFace together, Fire when the windup is done, then Recovery. With steps of its own and no timeline in its definition, they run one after another.
+
+## ReceiveHitAbility
+
+`res://assets/scripts/abilities/ReceiveHitAbility.gd`, extends [`AbilityBase`](#abilitybase)
+
+Taking a hit: an instant action, started by `event.hit.taken`, that decides what a hit does to its pawn (pawn spec 16.7).
+
+The AbilityManager sends the event as a hit is delivered (on the server, after simulate), and this starts with the hit as its trigger data, in its own category, which nothing locks out. Its start requirements decide whether a hit counts at all: by default a pawn that owns status.hit_immune ignores it. Otherwise the hit arrives (`AbilityManager.hit_arrived`, so the AI notes the attack) and is either blocked (`AbilityManager.hit_blocked`: the pawn is dead, invulnerable, or parrying and facing the attacker, whose reply goes back on the next tick) or lands: the status manager applies its effects, `AbilityManager.hit_received` goes out, then the attacker gets its effects. A game changes what hits do by extending it. The manager adds one to a pawn without.
+
+### Constants
+
+- `BLOCKED_DEAD = &"dead"`: Why a hit was blocked, as `AbilityManager.hit_blocked` gives it.
+- `BLOCKED_INVULNERABLE = &"invulnerable"`
+- `BLOCKED_PARRIED = &"parried"`
+
+### Functions
+
+- `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`ReceiveHitDefinition`](#receivehitdefinition).
+- `start() -> void`
+- `resolve(hit: HitInfo) -> void`: Resolves one hit on this pawn, on the server: it arrives, then it's blocked or it lands (see the class description).
+- `blocked_by(hit: HitInfo) -> StringName`: Why this hit is blocked (one of the BLOCKED_ names), or &"" if it lands. A parry that blocks it sends its reply from here.
 
 ## SprintAbility
 
@@ -535,6 +573,7 @@ Each kind of ability has its own class with its settings added ([`MeleeAttackDef
 ### Settings and properties
 
 - `trigger_action: StringName` = `&""`: The named action that starts it, such as &"jump". Empty: only the manager starts it, as the default locomotion.
+- `trigger_event: StringName` = `&""`: The gameplay event that starts it (`Tags.EVENT`), by the same rules as a press: event.health.depleted for Death, event.hit.taken for the hit ability. The event's data is the ability's `AbilityBase.trigger_data` as it starts (the hit, a push). Empty: no event starts it.
 - `category: StringName` = `&""`: What it is, as a tag such as &"ability.movement.jump". Used for lockouts. Empty: nothing can lock it out.
 - `extra_categories: StringName[]` = `[]`: More groups it belongs to besides category, such as &"ability.movement.advanced" for a dash. Lockouts, cancels and `AbilityManager.action_for_tag()` answer to all of them. They share one 64-bit mask with every other ability tag.
 - `priority: int` = `0`: Which ability a press picks among those on one action: the highest that can start wins, then the first in the tree. Locomotion with a held action works the same. Effects can add to it (AbilityModifier, pawn spec 8.11).
@@ -557,6 +596,7 @@ Each kind of ability has its own class with its settings added ([`MeleeAttackDef
 - `restore_all_charges: bool` = `false`: On: each restore gives back every spent charge, a full magazine.
 - `has_charges_tag: StringName` = `&""`: A tag the pawn owns while this ability has charges left (always, with no limit), such as status.has_ammo.ranged: what the AI's Keep Distance asks for. Empty: none.
 - `start_effects: Effect[]` = `[]`: Effects on its own pawn when it starts (a combo boost), on every machine that runs it, rollback replays included, so an over-time one is predicted; their effectors fire on the authority only (pawn spec 16.7).
+- `running_effects: Effect[]` = `[]`: Effects on its own pawn while it runs: applied as it starts (after start_effects) and removed as it ends, whatever their duration (a parry's stance, a dash's invulnerability). One meant to last the whole run has lasts_until_removed on. Empty: its kind's default (Dash: invulnerable for its first 11 ticks; Parry: parrying, 120 degrees wide). Only for an ability that runs for a while.
 - `hit: HitDefinition`: Who its hits may hit and what they do (ability spec 13.2), for its swings and its projectiles: its target_effects and attacker_effects are what a hit does. Empty: its kind's default (a swing hits enemies, doing nothing; a ranged attack's projectile stops at the first). A sweep step or a timeline entry can name another.
 - `step_timeline: TimelineEntry[]` = `[]`: For a stepped ability: when each step runs (ability spec 6.2), as entries in ticks from its start. Empty: its kind's default (a swing's windup, sweep and recovery), or its steps one after another.
 - `max_steps_ticks: int` = `600`: For a stepped ability, the longest it can run, in ticks at 60 a second. It ends when no step runs, or at this. Ignored without steps.
@@ -680,7 +720,7 @@ A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydef
 
 ## KnockbackDefinition
 
-`res://assets/scripts/abilities/definitions/KnockbackDefinition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+`res://assets/scripts/abilities/definitions/KnockbackDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
 
 Knockback's settings: the base ones, with its defaults.
 
@@ -778,6 +818,14 @@ A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydef
 - `windup_turn_degrees_per_second: float` = `-1.0`: How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnRate stat.
 - `warns_targets: bool` = `true`: On: the first enemy on the projectile's path hears it's coming, so its AI can parry.
 
+## ReceiveHitDefinition
+
+`res://assets/scripts/abilities/definitions/ReceiveHitDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+
+The hit ability's settings: the base ones, with its defaults.
+
+A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The ReceiveHit node reads it. It starts on event.hit.taken; its start requirements decide whether a hit counts at all (by default, not while the pawn owns status.hit_immune).
+
 ## SprintDefinition
 
 `res://assets/scripts/abilities/definitions/SprintDefinition.gd`, extends [`WalkDefinition`](#walkdefinition)
@@ -805,67 +853,6 @@ A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydef
 
 - `speed_stat: StringName` = `&"MoveSpeed"`: The stat for top speed, in metres per second. Sprint uses its own.
 - `fallback_speed: float` = `5.0`: Top speed when the pawn has no such stat.
-
-## HitInterceptor
-
-`res://assets/scripts/abilities/interceptors/HitInterceptor.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
-
-Something that can stop a hit before it lands, while its ability or step runs (pawn spec 8.23).
-
-Add one as a child of an ability (on while it runs) or of one of its steps (on while the step runs), with [`EffectApplier`](../effects/REFERENCE.md#effectapplier) children on the ON_INTERCEPT trigger for what happens when it stops a hit: TARGET effects go on the attacker in a hit of their own (a parry's push-back), SELF effects on this pawn. At `stage` MISS the hit never arrives (invulnerability frames, harmful effects refused too); at TURN_AWAY it arrives and `intercept()` decides (a parry, a block). A new kind overrides `intercept()`.
-Hits are decided on the server, so this runs there (or offline). The manager asks active TURN_AWAY interceptors from the highest `priority` down; the first to stop the hit ends it. A reply to an interception (`HitInfo.from_interception`) can't be turned away, so two parrying pawns don't bounce hits back and forth.
-
-### Settings and properties
-
-- `stage: int` = `1`: When it acts: MISS (the hit never arrives) or TURN_AWAY (`intercept()` decides).
-- `priority: int` = `0`: Asked before those with a lower number. Equal numbers go in tree order.
-- `active_seconds: float` = `0.0`: How long it's on from the start of its ability's run (or its step's), in seconds. 0: the whole time its parent runs.
-- `ability: AbilityBase` = `null`: Set by the AbilityManager when it collects its abilities. step is null for one directly under its ability.
-- `step: AbilityStep` = `null`
-- `pawn: Pawn` = `null`
-- `on_intercept_effects: Effect[]` = `[]`: From its ON_INTERCEPT EffectApplier children, collected by the manager: what the attacker gets (in a hit from this pawn) and what this pawn gets, when it stops a hit.
-- `on_intercept_self_effects: Effect[]` = `[]`
-- `debug_label: String` = `"STOPPED"`: What the debug drawing shows over an attacker whose hit this stopped.
-
-### Constants
-
-- `Stage.MISS = 0`
-- `Stage.TURN_AWAY = 1`
-- `Result.PASS = 0`
-- `Result.STOP = 1`
-
-### Functions
-
-- `is_active() -> bool`: True while it's on: its parent runs and it's within active_seconds of the run's start. Read from rolled-back timers, so a replay agrees about what was stopped.
-- `window_ticks() -> int`: Ticks it stays on from the start (active_seconds at the match's rate); 0: the whole run.
-- `intercept(_hit: HitInfo) -> int`: TURN_AWAY only: whether to stop this hit. The base stops every hit (a plain block); a parry only those from the front. Server, only while `is_active()`.
-- `respond(hit: HitInfo) -> void`: Called by the manager after this stopped a hit: the attacker gets a hit of its own with the TARGET effects (through its usual hit path, so its AI notices and a knockback cancels its swing), and this pawn gets the SELF effects.
-
-## InvulnerabilityInterceptor
-
-`res://assets/scripts/abilities/interceptors/InvulnerabilityInterceptor.gd`, extends [`HitInterceptor`](#hitinterceptor)
-
-Invulnerability frames: while it's on, no hit reaches the pawn and harmful effects are refused.
-
-A MISS-stage [`HitInterceptor`](#hitinterceptor) (pawn spec 8.23). A [`DashAbility`](#dashability) with none of its own makes one for its first 0.18 s. Under a step it's on while the step runs.
-
-## ParryInterceptor
-
-`res://assets/scripts/abilities/interceptors/ParryInterceptor.gd`, extends [`HitInterceptor`](#hitinterceptor)
-
-Turns away hits from the front: a parry.
-
-A TURN_AWAY [`HitInterceptor`](#hitinterceptor) (pawn spec 8.23): the hit arrives, so the AI notices it, then none of its effects land if the attacker is within `front_degrees` of where the pawn faces. Its ON_INTERCEPT EffectApplier children say what happens next. A hit with no attacker (a trap, a poison tick) or from the pawn itself isn't turned away. A [`ParryAbility`](#parryability) with none of its own makes one.
-
-### Settings and properties
-
-- `front_degrees: float` = `120.0`: How wide the front is, in degrees, centred on where the pawn faces. 120: an attacker up to 60 degrees to either side is turned away.
-
-### Functions
-
-- `intercept(hit: HitInfo) -> int`
-- `front_degrees_now() -> float`: The front's width now. One place to read it, so it can come from a stat later.
-- `faces(point: Vector3) -> bool`: True if a point is in front of the pawn, within the front. A point right on top of the pawn counts as in front.
 
 ## PredictedProjectile
 
@@ -1006,6 +993,7 @@ A [`Step`](../steps/REFERENCE.md#step) with what abilities add: a cancel window 
 ### Settings and properties
 
 - `interrupt_threshold: int` = `-1`: While it runs, how strong a starting ability (or a hit's knockback) must be to cancel its ability. -1: the ability's own interrupt_threshold. With several steps running, the strictest counts.
+- `running_effects: Effect[]` = `[]`: Effects on its pawn while it runs: applied as it starts, removed as it ends (pawn spec 16.7). For a step during which hits can't land, an effect granting status.invulnerable that lasts until removed.
 - `ends_when_released: bool` = `false`: On: it ends on the first tick its action isn't held (reason "released"), which starts what follows it as done does (unless an entry says otherwise). Held input is rolled-back input, so server, prediction and replay agree.
 - `while_held: StringName` = `&""`: The action that must stay held. Empty: its ability's trigger_action. With neither, it's never released.
 - `ability: AbilityBase` = `null`: Set by its ability.

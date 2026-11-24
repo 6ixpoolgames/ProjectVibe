@@ -71,9 +71,9 @@ func watch(pawn: Pawn) -> void:
 	# A parry's shield is drawn when it starts.
 	if not _parries.is_empty() and not pawn.ability_manager.ability_started.is_connected(_on_ability_started):
 		pawn.ability_manager.ability_started.connect(_on_ability_started.bind(pawn))
-	# Any interceptor stopping a hit flashes over the attacker (pawn spec 8.23).
-	if not pawn.ability_manager.hit_intercepted.is_connected(_on_hit_intercepted):
-		pawn.ability_manager.hit_intercepted.connect(_on_hit_intercepted)
+	# A hit parried or dodged flashes over the attacker (pawn spec 16.7).
+	if not pawn.ability_manager.hit_blocked.is_connected(_on_hit_blocked):
+		pawn.ability_manager.hit_blocked.connect(_on_hit_blocked)
 
 
 func _physics_process(_delta: float) -> void:
@@ -177,10 +177,10 @@ func _on_ability_started(ability: AbilityBase, pawn: Pawn) -> void:
 	if visual == null:
 		return
 	var holder: Node3D = visual.get_node_or_null("Model") if visual.has_node("Model") else visual
-	var guard := parry.guard() # the front's width is its interceptor's (pawn spec 8.23)
+	var guard := parry.guard() # the front's width is its running effect's ParryModifier (pawn spec 16.7)
 	if guard == null:
 		return
-	var shape := _add_shape("ParryShield", _shield_mesh(guard.front_degrees_now()), parry_colour, maxf(parry.settings.duration_ticks / 60.0, 0.05))
+	var shape := _add_shape("ParryShield", _shield_mesh(guard.front_degrees), parry_colour, maxf(parry.settings.duration_ticks / 60.0, 0.05))
 	# keep_global_transform false puts it at the new parent's origin.
 	shape.reparent(holder, false)
 	shape.top_level = false
@@ -188,16 +188,17 @@ func _on_ability_started(ability: AbilityBase, pawn: Pawn) -> void:
 	shape.rotation = Vector3.ZERO
 
 
-# A hit was stopped (pawn spec 8.23): a flash on the attacker, in the world where it was, labelled with the interceptor's debug_label.
-func _on_hit_intercepted(hit: HitInfo, interceptor: HitInterceptor) -> void:
-	if not visible or hit == null or not is_instance_valid(hit.attacker):
+# A hit was parried or dodged (pawn spec 16.7): a flash on the attacker, in the world where it was, labelled PARRIED or DODGED. A hit
+# on a dead pawn shows nothing.
+func _on_hit_blocked(hit: HitInfo, reason: StringName) -> void:
+	if not visible or hit == null or not is_instance_valid(hit.attacker) or reason == ReceiveHitAbility.BLOCKED_DEAD:
 		return
 	var flash := _add_shape("ParryFlash", _sphere_mesh, parry_flash_colour, parry_flash_seconds)
 	flash.global_position = hit.attacker.global_position + Vector3(0.0, 1.0, 0.0)
 	flash.scale = Vector3.ONE * 0.9
 	var label := Label3D.new()
 	label.name = "Hits" # faded with its shape in _process, like a swing's hit labels
-	label.text = interceptor.debug_label
+	label.text = "PARRIED" if reason == ReceiveHitAbility.BLOCKED_PARRIED else "DODGED"
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
 	label.font_size = 48

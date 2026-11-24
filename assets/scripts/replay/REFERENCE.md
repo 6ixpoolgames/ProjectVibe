@@ -126,7 +126,7 @@ Reading: `state["events"]` holds this tick's events as `{tick, kind, id, data}`.
 
 Replay channel 5, "gameplay": what happened, as events.
 
-The same events the AI debug timeline lists, for every pawn, plus freezes, possession and falls; each event's id is the pawn it happened to. The kinds: hit, hit_intercepted, died, ability_started, ability_cancelled, step_started, step_finished, ai_state, ai_behaviour, ai_target, frozen, unfrozen, possessed, released and fell. The data of each is listed in the replay README. Reading: only `state["events"]`, this tick's events; nothing lasts. Design: replay spec 3, pawn spec 8.20 and 8.23.
+The same events the AI debug timeline lists, for every pawn, plus freezes, possession and falls; each event's id is the pawn it happened to. The kinds: hit, hit_blocked, died, ability_started, ability_cancelled, step_started, step_finished, ai_state, ai_behaviour, ai_target, frozen, unfrozen, possessed, released and fell. The data of each is listed in the replay README. Reading: only `state["events"]`, this tick's events; nothing lasts. Design: replay spec 3, pawn spec 8.20 and 16.7.
 
 ### Constants
 

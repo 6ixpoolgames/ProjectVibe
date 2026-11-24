@@ -12,10 +12,10 @@
 ## to the match's rate.
 ## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_pushed_properties] (its setter calls
 ## [method push_state]) or [method get_rollback_properties] (read at every commit); the base already covers its own timers and step
-## state. It can also be built from [AbilityStep] children (a windup, a turn, a swing) and carry [HitInterceptor] children that stop
-## hits while it runs. What it does to pawns is effects in its definition: [member AbilityDefinition.start_effects] on itself, and its
-## hit's target_effects and attacker_effects.
-## Design: pawn spec 8, 8.20, 8.23.
+## state. It can also be built from [AbilityStep] children (a windup, a turn, a swing). What it does to pawns is effects in its
+## definition: [member AbilityDefinition.start_effects] and [member AbilityDefinition.running_effects] on itself, and its hit's
+## target_effects and attacker_effects. Besides an action, a gameplay event can start it ([member AbilityDefinition.trigger_event]).
+## Design: pawn spec 8, 8.20, 16.7.
 class_name AbilityBase
 extends Node
 
@@ -142,8 +142,12 @@ var locks_out_mask := 0
 var cancelled_by_mask := 0
 ## trigger_action's input bit ([InputActions]), or 0 with none. Worked out once by the manager (pawn spec 15.2).
 var trigger_bit := 0
-## Its [HitInterceptor]s, under it or its steps, found by the manager (pawn spec 8.23).
-var interceptors: Array[HitInterceptor] = []
+## The event starting it, while it starts from its trigger event ([member AbilityDefinition.trigger_event]): read it in
+## [method start] (the hit, a push). Null otherwise.
+var trigger_data: GameplayEventData = null
+## Goes up by one whenever its charges change (spent, back, refilled, its most changed), so a readout or the AI can tell without
+## asking every tick.
+var charges_version := 0
 ## Its [AbilityStep] children in tree order, found by [method collect_steps]. Empty: no steps.
 var steps: Array[AbilityStep] = []
 ## The [StepTimeline] that runs its steps (pawn spec 16.7), built by [method collect_steps].
@@ -179,6 +183,7 @@ var _warned_hit_cap := false
 var hit_run: HitRun = null
 var _hit_swap: HitDefinition = null # a hit definition swapped in while playing (use_hit_definition)
 var _warned_no_effects := false
+const _NO_EFFECTS: Array[Effect] = []
 static var _shared_default_hit: HitDefinition = null
 # Where push_state sends values: the pawn's TickStateComponent, and each pushed property's entry there ("AbilityManager/Swing:ends_at").
 # Set by the manager when it registers them.
@@ -466,6 +471,7 @@ func update_charges_tag() -> void:
 
 
 func _charges_changed() -> void:
+	charges_version += 1
 	update_charges_tag()
 	if manager:
 		manager.readiness_changed()
@@ -684,8 +690,8 @@ func use_hit_definition(hit: HitDefinition) -> void:
 
 
 ## Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [HitInfo] carrying the hit definition's effects
-## (with: the one its step or projectile names; null: [method hit_definition]), delivered to the target (its interceptors, then
-## effects), then [signal hit_landed]. The one place a hit is applied; override it for an ability's own rules (damage falling off with
+## (with: the one its step or projectile names; null: [method hit_definition]), delivered to the target (its hit ability decides
+## what it does), then [signal hit_landed]. The one place a hit is applied; override it for an ability's own rules (damage falling off with
 ## distance), calling [code]super()[/code].
 func land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo:
 	var using := with if with else hit_definition()
@@ -712,9 +718,20 @@ func get_hit_run() -> HitRun:
 	return hit_run
 
 
-## Called by the manager when the ability has no [HitInterceptor], so it can make its defaults (Dash, Parry). Nothing by default.
-func make_default_interceptors() -> void:
+## Called by the manager just before it starts from its trigger event, with the event: keep what its run needs before it starts (a
+## push's length decides how long Knockback runs). [member trigger_data] is set too. Nothing by default.
+func prepare_from_event(_event: GameplayEventData) -> void:
 	pass
+
+
+## The effects on its own pawn while it runs ([member AbilityDefinition.running_effects]), or its kind's default with none.
+func running_effects_now() -> Array[Effect]:
+	return settings.running_effects if not settings.running_effects.is_empty() else default_running_effects_now()
+
+
+## Its kind's running effects when its definition names none (Dash, Parry). None by default.
+func default_running_effects_now() -> Array[Effect]:
+	return _NO_EFFECTS
 
 
 ## Called once by the manager: finds the [AbilityStep] children and builds its timeline from its definition's entries, else its kind's
@@ -780,12 +797,19 @@ func _timeline_state_written() -> void:
 func _timeline_step_started(step: Step) -> void:
 	if manager:
 		manager.readiness_version += 1 # a step's cancel window can change what may start
+		var effects: Array[Effect] = (step as AbilityStep).running_effects if step is AbilityStep else _NO_EFFECTS
+		if not effects.is_empty() and pawn.status_manager:
+			pawn.status_manager.apply_effects(effects, pawn, self)
 		manager.step_started.emit(self, step)
 
 
 func _timeline_step_finished(step: Step, reason: String) -> void:
 	if manager:
 		manager.readiness_version += 1
+		if step is AbilityStep and pawn.status_manager:
+			for effect in (step as AbilityStep).running_effects:
+				if effect:
+					pawn.status_manager.remove_effect(effect)
 		manager.step_finished.emit(self, step, reason)
 
 

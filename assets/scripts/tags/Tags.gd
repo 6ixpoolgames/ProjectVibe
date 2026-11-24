@@ -48,6 +48,9 @@ class ABILITY:
 	## The ability that plays out a pawn's death (DeathAbility).
 	const DEATH := &"ability.death"
 
+	## The hit ability (ReceiveHitAbility): its own category, which nothing locks out (pawn spec 16.7).
+	const RECEIVE_HIT := &"ability.receive_hit"
+
 
 ## What an effect is: resistances, immunities and removing effects by kind go by these.
 class EFFECT:
@@ -73,6 +76,11 @@ class EVENT:
 	const HEALTH := &"event.health"
 	const HEALTH_DEPLETED := &"event.health.depleted" # Health's threshold at 0
 	const HEALTH_LOW := &"event.health.low" # Health's threshold at 25%
+	const HIT := &"event.hit"
+	const HIT_TAKEN := &"event.hit.taken" # AbilityManager, as a hit is delivered: the hit ability starts
+	const REACTION := &"event.reaction"
+	const REACTION_KNOCKBACK := &"event.reaction.knockback" # KnockbackEffector: Knockback starts, with the push
+	const REVIVED := &"event.revived" # AbilityManager.revive: charges refill
 
 
 ## A condition a pawn is in right now.
@@ -82,6 +90,12 @@ class STATUS:
 	## An ability with limited uses has some left (AbilityDefinition.has_charges_tag).
 	const HAS_AMMO := &"status.has_ammo"
 	const HAS_AMMO_RANGED := &"status.has_ammo.ranged"
+	## Parrying: hits from the front are blocked and answered (a ParryModifier on the effect says how).
+	const PARRYING := &"status.parrying"
+	## Hits are blocked (they arrive, so the AI notes them) and harmful effects refused: a dash's first ticks.
+	const INVULNERABLE := &"status.invulnerable"
+	## Hits are ignored completely, not even noticed: set pieces, scenery.
+	const HIT_IMMUNE := &"status.hit_immune"
 
 
 ## The AI's own tags: its states and stances.

@@ -282,7 +282,9 @@ func _on_entity_spawned(entity: NetworkEntity) -> void:
 	# Claude 2026-11-09: remember what each pawn last started, for its readout. Walk never "starts": it's what runs when nothing else
 	# does. Claude 2026-11-10: players' pawns too, for their own readout.
 	if pawn.ability_manager:
-		pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void: _last_ability[pawn] = ability)
+		pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void:
+			if not ability is ReceiveHitAbility: # Claude 2026-11-24: taking a hit isn't something the pawn did
+				_last_ability[pawn] = ability)
 	# Claude 2026-11-13: _is_npc, not team != PLAYER_TEAM, so the faction arena's NPCs on the players' team get an NPC's readout too.
 	if _is_npc(pawn): # Claude 2026-11-09: was team 1; any AI team now
 		if _records_timeline(): # Claude 2026-11-15

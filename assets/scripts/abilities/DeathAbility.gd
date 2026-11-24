@@ -1,8 +1,8 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: abilities/CHANGELOG.md.
 ## Being dead: an action with no trigger action, started when the pawn's Health reaches 0.
 ##
-## The StatusManager calls [method AbilityManager.health_ran_out] when an effect takes Health to 0, and the AbilityManager starts this
-## and sends [signal AbilityManager.died]. While it runs it locks out movement, combat and utility, nothing cancels it, and
+## The StatusManager sends [code]event.health.depleted[/code] when Health reaches 0; this starts from it (its definition's
+## trigger_event) and the AbilityManager sends [signal AbilityManager.died]. While it runs it locks out movement, combat and utility, nothing cancels it, and
 ## [method Pawn.is_dead] is true (the pawn ignores its input and AI, and other pawns' sensing ignores it). It keeps running while Health
 ## is 0; [method AbilityManager.revive] ends it. The body stays where it falls: removing it or respawning is game code's job.
 ## [br][br]Rollback: its timer rolls back with Health, so clients see the pawn dead from snapshots. It watches [constant StatusManager.HEALTH].

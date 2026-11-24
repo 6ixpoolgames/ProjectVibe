@@ -1,10 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-10. History: effects/CHANGELOG.md.
 ## One effect, such as a sword hit, a poison or a combo boost: what it does to the pawn it's applied to.
 ##
-## A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) runs its [member parts] once;
-## over time stays on the pawn for [member duration_ticks], its held parts holding and its do-once parts repeating each period.
-## Parts run in list order. Apply one with [method StatusManager.apply_effect]; do-once parts run on the authority only, held parts on
-## every machine.
+## A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) fires its
+## [member effectors] once; over time stays on the pawn for [member duration_ticks] (or until removed), its [member modifiers] holding,
+## its [member granted_tags] owned and its effectors firing again each period. Apply one with [method StatusManager.apply_effect];
+## effectors fire on the authority only, modifiers and tags hold on every machine.
 ## Design: pawn spec 8.11.
 class_name Effect
 extends Resource
@@ -20,10 +20,15 @@ enum Stacking {
 @export var effect_name: StringName = &""
 ## What kind of effect it is, as effect tags ([code]Tags.EFFECT[/code]) such as effect.damage.elemental.fire. Resistances and removing by tag go by these.
 @export var tags: Array[StringName] = []
+## Tags the pawn owns while it lasts, such as status.parrying: what it puts the pawn in, where [member tags] say what it is. Over
+## time only.
+@export var granted_tags: Array[StringName] = []
 ## On: resistances apply and invulnerability (a dash) stops it. Off: it helps, and gets through both.
 @export var is_harmful := true
-## Ticks at 60 a second it lasts. 0: instant.
+## Ticks at 60 a second it lasts. 0: instant (unless it lasts until removed).
 @export_range(0, 36000, 1, "or_greater") var duration_ticks := 0
+## On: it lasts until removed (its ability ending, a cleanse, death), whatever duration_ticks says: a parry's stance.
+@export var lasts_until_removed := false
 ## Over time: its effectors fire when first applied, then every this many ticks at 60 a second. 0: only when first applied.
 @export_range(0, 3600, 1, "or_greater") var period_ticks := 0
 ## What a second application on the same pawn does.
@@ -41,9 +46,9 @@ var _id := 0
 var _mask := -1 # its tags as one mask, parents included; -1 until first worked out
 
 
-## True if it's instant: it does its parts once and isn't kept.
+## True if it's instant: its effectors fire once and it isn't kept.
 func is_instant() -> bool:
-	return duration_ticks <= 0
+	return duration_ticks <= 0 and not lasts_until_removed
 
 
 ## Its tags as one mask, parents included ([method TagRegistry.full_mask_of_list]), worked out once.
@@ -119,6 +124,31 @@ static func make_damage(amount: float, damage_tags: Array[StringName] = [Tags.EF
 	damage.stat = StatusManager.HEALTH
 	damage.amount = -absf(amount)
 	effect.effectors = [damage]
+	return effect
+
+
+## An effect that makes the pawn invulnerable for this many ticks (at 60 a second): it grants status.invulnerable. A Dash's default.
+static func make_invulnerable(ticks: int) -> Effect:
+	var effect := Effect.new()
+	effect.effect_name = StringName("invulnerable_%d" % ticks) # one id per length, the same on every machine
+	effect.is_harmful = false
+	effect.duration_ticks = ticks
+	effect.granted_tags = [Tags.STATUS.INVULNERABLE]
+	return effect
+
+
+## An effect that parries until removed, with this front and reply: it grants status.parrying and holds a [ParryModifier]. A Parry's
+## default (120 degrees, no reply). Effects made in code are recognised by name, so make one per front and reply, and keep it.
+static func make_parrying(front_degrees := 120.0, reply: Array[Effect] = []) -> Effect:
+	var effect := Effect.new()
+	effect.effect_name = StringName("parrying_%d" % roundi(front_degrees))
+	effect.is_harmful = false
+	effect.lasts_until_removed = true
+	effect.granted_tags = [Tags.STATUS.PARRYING]
+	var parry := ParryModifier.new()
+	parry.front_degrees = front_degrees
+	parry.reply_effects = reply
+	effect.modifiers = [parry]
 	return effect
 
 

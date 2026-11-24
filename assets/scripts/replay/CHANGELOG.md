@@ -19,6 +19,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-24
 
+- **`hit_blocked` replaces `hit_intercepted`** (pawn spec 16.7): a hit that arrived but was blocked, with who sent it and why (parried, invulnerable, dead). The hit ability's start isn't recorded as `ability_started`: the hit events already say it.
+
 - **`keep_recordings` 10 → 100** (the owner's call, for now): enough sessions to look back over a profiling round. `max_folder_megabytes` (4096) still caps each role's folder; the mass battle at size 25 records about 4.4 MB a minute.
 
 ## 2026-11-23

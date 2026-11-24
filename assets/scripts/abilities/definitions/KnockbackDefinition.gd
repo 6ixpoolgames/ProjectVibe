@@ -11,6 +11,7 @@ func _init() -> void:
 	super()
 	# Tags are constants, so a misspelling is an error, not a warning while playing.
 	category = Tags.ABILITY.COMBAT_KNOCKBACK
+	trigger_event = Tags.EVENT.REACTION_KNOCKBACK # sent by a KnockbackEffector, with the push
 	needs_full_movement = true # a push should collide properly, and may lift (pawn spec 8.22)
 	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 30
