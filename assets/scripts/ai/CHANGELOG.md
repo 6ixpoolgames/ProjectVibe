@@ -22,6 +22,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-24
 
+- **Fix: sight read a freed AI controller.** `SightSense._eye_yaw` cast the controller manager's `ai_controller` without checking it was still there, a script error when a pass landed after the controller was taken off (seen in `controller_manager_selftest`, once entity numbers moved the passes).
 - **One entity number, one random service** (the pawn redesign's build step 1, foundations (pawn spec 16.10)): `AIContextComponent.pawn_number()` and `number_of()` are gone; the AI uses `Pawn.entity_number()` and `EntityNumber.of()`, which hash a pawn's path rather than its name when it has no network id. `random_unit_at` goes through `DeterministicRandom.unit_seeded` with `effective_seed()` (the AI's `random_seed` plus the match seed), which the C++ decider is also given; the C++ hash moved to `native/src/deterministic_random.h`, and the comparison test checks the shared service too.
 
 ## 2026-11-23

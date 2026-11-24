@@ -12,14 +12,6 @@ extends AbilityBase
 var _jump: JumpDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
-## From the definition: [member JumpDefinition.coyote_ticks].
-var coyote_ticks: int:
-	get:
-		if _jump == null:
-			prepare_settings()
-		return _jump.coyote_ticks
-	set(value):
-		_write_setting(&"coyote_ticks", value)
 
 ## The last tick the pawn was known to be on the ground before it left it; [constant ON_GROUND] while it's there. Rolls back (pushed).
 var left_ground_at := ON_GROUND:
@@ -72,7 +64,7 @@ func can_start() -> bool:
 	if pawn.grounded:
 		return true
 	# Walked off an edge a moment ago, and not already going up.
-	return ticks_off_ground() <= TickDriver.ticks_at_rate(coyote_ticks) and pawn.velocity.y <= 0.0
+	return ticks_off_ground() <= TickDriver.ticks_at_rate(_jump.coyote_ticks) and pawn.velocity.y <= 0.0
 
 
 func start() -> void:

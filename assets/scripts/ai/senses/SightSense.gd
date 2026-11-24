@@ -237,7 +237,8 @@ func _eye_yaw() -> float:
 	var controllers := pawn.controller_manager
 	if controllers and controllers.has_player():
 		return controllers.look_yaw # where the player looks
-	var hands := pawn.controller_manager.ai_controller as AIController if pawn.controller_manager else null
+	# The AI controller may have been freed (taken off the pawn) since the manager last looked.
+	var hands := controllers.ai_controller as AIController if controllers and is_instance_valid(controllers.ai_controller) else null
 	if hands and hands.is_looking_at_point():
 		return controllers.look_yaw if controllers else pawn.yaw # the AI looks where it was told to
 	return pawn.yaw # otherwise, the way the body faces

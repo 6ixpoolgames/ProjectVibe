@@ -56,7 +56,7 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's [`AbilityManager`](#abilitymanager).
 
 Its settings come from its `definition`, a Resource every pawn using it shares (ability spec 3): the node holds that reference and its state, and reads each setting from the definition. Empty, it runs with its kind's defaults.
-Extend it, override `make_default_definition()` for a kind with settings of its own, and override `can_start()`, `start()`, `tick()`, `stop()` and, for counters that run all the time, `every_tick()` (with `can_sleep()`). A quick ability can instead set base settings in `_init()`: they go into a definition of its own. LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities start on a press of their `trigger_action`, at once or for a `duration_ticks`. Players' keys and AI behaviours press the same actions. Times are set in ticks at 60 a second and converted to the match's rate.
+Extend it, override `make_default_definition()` for a kind with settings of its own, and override `can_start()`, `start()`, `tick()`, `stop()` and, for counters that run all the time, `every_tick()` (with `can_sleep()`). A quick ability can instead set base settings in `_init()` (`self.duration_ticks = 30`): they go into a definition of its own. Any setting reads and writes by name on the node (`ability.cooldown_ticks`); code inside an ability reads `settings` directly. LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities start on a press of their `AbilityDefinition.trigger_action`, at once or for `AbilityDefinition.duration_ticks`. Players' keys and AI behaviours press the same actions. Times are set in ticks at 60 a second and converted to the match's rate.
 Rollback: whatever an ability keeps between ticks must be named in `get_pushed_properties()` (its setter calls `push_state()`) or `get_rollback_properties()` (read at every commit); the base already covers its own timers and step state. It can also be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a swing) and carry [`HitInterceptor`](#hitinterceptor) children that stop hits while it runs. Design: pawn spec 8, 8.20, 8.23.
 
 ### Settings and properties
@@ -65,30 +65,6 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `definition: AbilityDefinition`: The settings it runs with (ability spec 3): a file shared by every pawn that uses it, or one embedded in this node while prototyping. Empty: its kind's defaults. One of another kind falls back to the defaults, with a warning.
 - `settings: AbilityDefinition` = `null`: The settings it runs with: `definition` worked out (`AbilityDefinition.resolved()`), or its kind's defaults. Read-only while playing. Set by `prepare_settings()`.
 - `definition_fell_back: bool` = `false`: True if its definition was of another kind, so it runs with its kind's defaults (diagnostics lists these).
-- `trigger_action: StringName`: From the definition: `AbilityDefinition.trigger_action`.
-- `category: StringName`: From the definition: `AbilityDefinition.category`.
-- `extra_categories: StringName[]`: From the definition: `AbilityDefinition.extra_categories`.
-- `max_charges: int`: From the definition: `AbilityDefinition.max_charges`.
-- `recharges: bool`: From the definition: `AbilityDefinition.recharges`.
-- `charge_restore_ticks: int`: From the definition: `AbilityDefinition.charge_restore_ticks`.
-- `charges_restored: int`: From the definition: `AbilityDefinition.charges_restored`.
-- `restore_all_charges: bool`: From the definition: `AbilityDefinition.restore_all_charges`.
-- `has_charges_tag: StringName`: From the definition: `AbilityDefinition.has_charges_tag`.
-- `start_requirements: TagQuery`: From the definition: `AbilityDefinition.start_requirements`.
-- `priority: int`: From the definition: `AbilityDefinition.priority`.
-- `combo_positions: int[]`: From the definition: `AbilityDefinition.combo_positions`.
-- `priority_jitter: float`: From the definition: `AbilityDefinition.priority_jitter`.
-- `duration_ticks: int`: From the definition: `AbilityDefinition.duration_ticks`.
-- `cooldown_ticks: int`: From the definition: `AbilityDefinition.cooldown_ticks`.
-- `locks_out: StringName[]`: From the definition: `AbilityDefinition.locks_out`.
-- `buffer_window_ticks: int`: From the definition: `AbilityDefinition.buffer_window_ticks`.
-- `interrupt_priority: int`: From the definition: `AbilityDefinition.interrupt_priority`.
-- `interrupt_threshold: int`: From the definition: `AbilityDefinition.interrupt_threshold`.
-- `cancelled_by: StringName[]`: From the definition: `AbilityDefinition.cancelled_by`.
-- `pauses_locomotion: bool`: From the definition: `AbilityDefinition.pauses_locomotion`.
-- `needs_full_movement: bool`: From the definition: `AbilityDefinition.needs_full_movement`.
-- `step_timeline: TimelineEntry[]`: From the definition: `AbilityDefinition.step_timeline`.
-- `max_steps_ticks: int`: From the definition: `AbilityDefinition.max_steps_ticks`.
 - `started_at: int` = `-1`: The tick the current (or last) timed run started.
 - `ends_at: int` = `-1`: The tick the current timed run ends: the manager finishes it on its first run at or after this tick. -1: not running.
 - `ready_at: int` = `0`: The tick it can start again: ready from this tick on.
@@ -294,12 +270,6 @@ It cancels a swing, and it's invulnerable for its first 0.18 s (an [`Invulnerabi
 
 ### Settings and properties
 
-- `acceleration_stat: StringName`: From the definition: `DashDefinition.acceleration_stat`.
-- `fallback_acceleration: float`: From the definition: `DashDefinition.fallback_acceleration`.
-- `speed_up_ticks: int`: From the definition: `DashDefinition.speed_up_ticks`.
-- `slow_down_deceleration: float`: From the definition: `DashDefinition.slow_down_deceleration`.
-- `slow_down_ticks: int`: From the definition: `DashDefinition.slow_down_ticks`.
-- `usable_in_air: bool`: From the definition: `DashDefinition.usable_in_air`.
 - `dash_direction: Vector3` = `Vector3(0, 0, 0)`: The way it's dashing, flat and length 1. Rolls back (pushed).
 
 ### Functions
@@ -420,7 +390,6 @@ It starts from the ground, or within `coyote_ticks` of walking off an edge. A pr
 
 ### Settings and properties
 
-- `coyote_ticks: int`: From the definition: `JumpDefinition.coyote_ticks`.
 - `left_ground_at: int` = `-4611686018427387904`: The last tick the pawn was known to be on the ground before it left it; `ON_GROUND` while it's there. Rolls back (pushed).
 
 ### Constants
@@ -469,23 +438,6 @@ A melee swing: an action bound to &"primary", built from steps.
 
 A swing is a [`WindupStep`](#windupstep) with a [`TurnToFaceStep`](#turntofacestep) beside it, a [`MeleeSweepStep`](#meleesweepstep) (the hit window), then an [`OpenComboStep`](#opencombostep) and a [`WaitStep`](#waitstep) for recovery. With no [`AbilityStep`](#abilitystep) children of its own it makes those from the settings below, about 0.4 s with the defaults; place steps of your own for another pattern (these settings then only matter for `attack_range`, the AI's reach, and `warns_targets`). It locks out movement and other combat; Dash cancels it, Sprint and Jump don't. Hits happen on the server only, during the sweep, and a replay never hits again. What a hit does comes from its EffectApplier children, not the swing itself. Design: pawn spec 8.6, 8.9, 8.20.
 
-### Settings and properties
-
-- `windup_ticks: int`: From the definition: `MeleeAttackDefinition.windup_ticks`.
-- `hit_ticks: int`: From the definition: `MeleeAttackDefinition.hit_ticks`.
-- `recovery_ticks: int`: From the definition: `MeleeAttackDefinition.recovery_ticks`.
-- `attack_range: float`: From the definition: `MeleeAttackDefinition.attack_range`.
-- `hit_radius: float`: From the definition: `MeleeAttackDefinition.hit_radius`.
-- `hit_height: float`: From the definition: `MeleeAttackDefinition.hit_height`.
-- `sweep_degrees: float`: From the definition: `MeleeAttackDefinition.sweep_degrees`.
-- `sweep_from_left: bool`: From the definition: `MeleeAttackDefinition.sweep_from_left`.
-- `height_at_sweep_start: float`: From the definition: `MeleeAttackDefinition.height_at_sweep_start`.
-- `height_at_sweep_end: float`: From the definition: `MeleeAttackDefinition.height_at_sweep_end`.
-- `sweep_keys: SweepKey[]`: From the definition: `MeleeAttackDefinition.sweep_keys`.
-- `windup_turn_degrees_per_second: float`: From the definition: `MeleeAttackDefinition.windup_turn_degrees_per_second`.
-- `combo_window_ticks: int`: From the definition: `MeleeAttackDefinition.combo_window_ticks`.
-- `warns_targets: bool`: From the definition: `MeleeAttackDefinition.warns_targets`.
-
 ### Functions
 
 - `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`MeleeAttackDefinition`](#meleeattackdefinition).
@@ -509,10 +461,6 @@ A parry stance: while it runs, a hit from the front does nothing to this pawn, a
 
 This ability is the stance: it runs for duration (0.35 s, then a 1.5 s cooldown), turns the pawn toward where it looks and holds it still. Turning hits away is its [`ParryInterceptor`](#parryinterceptor) child's job (made by default with the 120 degree front), and what the attacker gets is that interceptor's ON_INTERCEPT EffectApplier children. Hits from the sides and back land as usual, and a knockback or a dash cancels the stance. A client sees its own stance at once; the parried hit's result arrives in snapshots. Design: pawn spec 8.15, 8.23.
 
-### Settings and properties
-
-- `turn_degrees_per_second: float`: From the definition: `ParryDefinition.turn_degrees_per_second`.
-
 ### Functions
 
 - `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`ParryDefinition`](#parrydefinition).
@@ -533,18 +481,6 @@ A shot is a [`WindupStep`](#windupstep) with a [`TurnToFaceStep`](#turntofaceste
 pawn.ability_manager.can_start(&"primary")
 ```
 
-### Settings and properties
-
-- `projectile_definition: ProjectileDefinition`: From the definition: `RangedAttackDefinition.projectile_definition`.
-- `projectile_scene: PackedScene`: From the definition: `RangedAttackDefinition.projectile_scene`.
-- `windup_ticks: int`: From the definition: `RangedAttackDefinition.windup_ticks`.
-- `recovery_ticks: int`: From the definition: `RangedAttackDefinition.recovery_ticks`.
-- `attack_range: float`: From the definition: `RangedAttackDefinition.attack_range`.
-- `muzzle_height: float`: From the definition: `RangedAttackDefinition.muzzle_height`.
-- `muzzle_forward: float`: From the definition: `RangedAttackDefinition.muzzle_forward`.
-- `windup_turn_degrees_per_second: float`: From the definition: `RangedAttackDefinition.windup_turn_degrees_per_second`.
-- `warns_targets: bool`: From the definition: `RangedAttackDefinition.warns_targets`.
-
 ### Functions
 
 - `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`RangedAttackDefinition`](#rangedattackdefinition).
@@ -564,10 +500,6 @@ The charge is worked out from two values set only when it starts or stops (`char
 
 ### Settings and properties
 
-- `max_charge_ticks: int`: From the definition: `SprintDefinition.max_charge_ticks`.
-- `recharge_rate: float`: From the definition: `SprintDefinition.recharge_rate`.
-- `recharge_delay_ticks: int`: From the definition: `SprintDefinition.recharge_delay_ticks`.
-- `min_start_charge_ticks: int`: From the definition: `SprintDefinition.min_start_charge_ticks`.
 - `charge_at_switch: int` = `0`: Ticks of charge when it last started or stopped. Rolls back (pushed).
 - `switched_at: int` = `-1`: The tick it last started or stopped; -1: never, so the charge is full. Rolls back (pushed).
 
@@ -589,11 +521,6 @@ The charge is worked out from two values set only when it starts or stops (`char
 Walking on the ground: accelerating, slowing, steering in the air and turning to face where it's going. The default locomotion.
 
 Its numbers come from the pawn's stats, so a buff or a different pawn changes them: `speed_stat` (MoveSpeed), Acceleration, Deceleration, AirControl and TurnRate (degrees per second), each with a fallback for a pawn without it. The pawn adds gravity. While its category is locked out (an attack that roots the pawn) it stops steering and the pawn slows to a stop. Design: pawn spec 8.5.
-
-### Settings and properties
-
-- `speed_stat: StringName`: From the definition: `WalkDefinition.speed_stat`.
-- `fallback_speed: float`: From the definition: `WalkDefinition.fallback_speed`.
 
 ### Functions
 
@@ -755,7 +682,7 @@ A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydef
 
 ## KnockbackDefinition
 
-`res://assets/scripts/abilities/definitions/KnockbackDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+`res://assets/scripts/abilities/definitions/KnockbackDefinition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
 Knockback's settings: the base ones, with its defaults.
 

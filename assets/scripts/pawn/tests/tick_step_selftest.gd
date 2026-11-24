@@ -18,9 +18,9 @@ class HalfSecond extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"ability_1"
-		duration_ticks = 30
-		cooldown_ticks = 30
+		self.trigger_action = &"ability_1"
+		self.duration_ticks = 30
+		self.cooldown_ticks = 30
 
 
 func _ready() -> void:

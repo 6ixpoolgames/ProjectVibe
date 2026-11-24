@@ -49,12 +49,12 @@ class StepAttack extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"primary"
-		category = Tags.ABILITY.COMBAT_MELEE
-		locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
-		cooldown_ticks = 30
-		interrupt_priority = 15
-		interrupt_threshold = 50
+		self.trigger_action = &"primary"
+		self.category = Tags.ABILITY.COMBAT_MELEE
+		self.locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
+		self.cooldown_ticks = 30
+		self.interrupt_priority = 15
+		self.interrupt_threshold = 50
 
 	func start() -> void:
 		starts += 1
@@ -68,10 +68,10 @@ class Canceller extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"dash"
-		category = Tags.ABILITY.MOVEMENT_DASH
-		duration_ticks = 12
-		interrupt_priority = 20
+		self.trigger_action = &"dash"
+		self.category = Tags.ABILITY.MOVEMENT_DASH
+		self.duration_ticks = 12
+		self.interrupt_priority = 20
 
 
 func _ready() -> void:

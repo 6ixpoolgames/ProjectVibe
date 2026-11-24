@@ -19,8 +19,8 @@ class Marker extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"ability_1"
-		duration_ticks = 6
+		self.trigger_action = &"ability_1"
+		self.duration_ticks = 6
 	func start() -> void:
 		starts += 1
 

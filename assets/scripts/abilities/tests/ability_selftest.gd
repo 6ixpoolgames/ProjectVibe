@@ -16,11 +16,11 @@ class RootingAttack extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"primary"
-		category = &"ability.combat.melee"
-		duration_ticks = 30
-		cooldown_ticks = 30
-		locks_out = [&"ability.movement"]
+		self.trigger_action = &"primary"
+		self.category = &"ability.combat.melee"
+		self.duration_ticks = 30
+		self.cooldown_ticks = 30
+		self.locks_out = [&"ability.movement"]
 
 	func start() -> void:
 		starts += 1
@@ -37,8 +37,8 @@ class SometimesAction extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"secondary"
-		buffer_window_ticks = 12
+		self.trigger_action = &"secondary"
+		self.buffer_window_ticks = 12
 
 	func can_start() -> bool:
 		return allowed
@@ -333,8 +333,8 @@ class CountedAction extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		category = &"ability.combat.melee"
-		duration_ticks = 30
+		self.category = &"ability.combat.melee"
+		self.duration_ticks = 30
 
 	func start() -> void:
 		starts += 1

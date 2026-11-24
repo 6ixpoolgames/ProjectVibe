@@ -5,9 +5,10 @@
 ## reference and its state, and reads each setting from the definition. Empty, it runs with its kind's defaults.
 ## [br][br]Extend it, override [method make_default_definition] for a kind with settings of its own, and override [method can_start],
 ## [method start], [method tick], [method stop] and, for counters that run all the time, [method every_tick] (with [method can_sleep]).
-## A quick ability can instead set base settings in [code]_init()[/code]: they go into a definition of its own. LOCOMOTION abilities move the pawn every tick
-## they're chosen (one runs at a time); ACTION abilities start on a press of their [member trigger_action], at once or for a
-## [member duration_ticks]. Players' keys and AI behaviours press the same actions. Times are set in ticks at 60 a second and converted
+## A quick ability can instead set base settings in [code]_init()[/code] ([code]self.duration_ticks = 30[/code]): they go into a
+## definition of its own. Any setting reads and writes by name on the node ([code]ability.cooldown_ticks[/code]); code inside an ability
+## reads [member settings] directly. LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities
+## start on a press of their [member AbilityDefinition.trigger_action], at once or for [member AbilityDefinition.duration_ticks]. Players' keys and AI behaviours press the same actions. Times are set in ticks at 60 a second and converted
 ## to the match's rate.
 ## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_pushed_properties] (its setter calls
 ## [method push_state]) or [method get_rollback_properties] (read at every commit); the base already covers its own timers and step
@@ -48,198 +49,7 @@ var definition_fell_back := false
 var _own_definition: AbilityDefinition = null
 # Each kind's defaults, made once and shared by every node of that kind: script -> definition.
 static var _kind_defaults := {}
-## From the definition: [member AbilityDefinition.trigger_action].
-var trigger_action: StringName:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.trigger_action
-	set(value):
-		_write_setting(&"trigger_action", value)
-## From the definition: [member AbilityDefinition.category].
-var category: StringName:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.category
-	set(value):
-		_write_setting(&"category", value)
-## From the definition: [member AbilityDefinition.extra_categories].
-var extra_categories: Array[StringName]:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.extra_categories
-	set(value):
-		_write_setting(&"extra_categories", value)
-## From the definition: [member AbilityDefinition.max_charges].
-var max_charges: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.max_charges
-	set(value):
-		_write_setting(&"max_charges", value)
-## From the definition: [member AbilityDefinition.recharges].
-var recharges: bool:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.recharges
-	set(value):
-		_write_setting(&"recharges", value)
-## From the definition: [member AbilityDefinition.charge_restore_ticks].
-var charge_restore_ticks: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.charge_restore_ticks
-	set(value):
-		_write_setting(&"charge_restore_ticks", value)
-## From the definition: [member AbilityDefinition.charges_restored].
-var charges_restored: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.charges_restored
-	set(value):
-		_write_setting(&"charges_restored", value)
-## From the definition: [member AbilityDefinition.restore_all_charges].
-var restore_all_charges: bool:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.restore_all_charges
-	set(value):
-		_write_setting(&"restore_all_charges", value)
-## From the definition: [member AbilityDefinition.has_charges_tag].
-var has_charges_tag: StringName:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.has_charges_tag
-	set(value):
-		_write_setting(&"has_charges_tag", value)
-## From the definition: [member AbilityDefinition.start_requirements].
-var start_requirements: TagQuery:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.start_requirements
-	set(value):
-		_write_setting(&"start_requirements", value)
-## From the definition: [member AbilityDefinition.priority].
-var priority: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.priority
-	set(value):
-		_write_setting(&"priority", value)
-## From the definition: [member AbilityDefinition.combo_positions].
-var combo_positions: Array[int]:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.combo_positions
-	set(value):
-		_write_setting(&"combo_positions", value)
-## From the definition: [member AbilityDefinition.priority_jitter].
-var priority_jitter: float:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.priority_jitter
-	set(value):
-		_write_setting(&"priority_jitter", value)
-## From the definition: [member AbilityDefinition.duration_ticks].
-var duration_ticks: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.duration_ticks
-	set(value):
-		_write_setting(&"duration_ticks", value)
-## From the definition: [member AbilityDefinition.cooldown_ticks].
-var cooldown_ticks: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.cooldown_ticks
-	set(value):
-		_write_setting(&"cooldown_ticks", value)
-## From the definition: [member AbilityDefinition.locks_out].
-var locks_out: Array[StringName]:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.locks_out
-	set(value):
-		_write_setting(&"locks_out", value)
-## From the definition: [member AbilityDefinition.buffer_window_ticks].
-var buffer_window_ticks: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.buffer_window_ticks
-	set(value):
-		_write_setting(&"buffer_window_ticks", value)
-## From the definition: [member AbilityDefinition.interrupt_priority].
-var interrupt_priority: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.interrupt_priority
-	set(value):
-		_write_setting(&"interrupt_priority", value)
-## From the definition: [member AbilityDefinition.interrupt_threshold].
-var interrupt_threshold: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.interrupt_threshold
-	set(value):
-		_write_setting(&"interrupt_threshold", value)
-## From the definition: [member AbilityDefinition.cancelled_by].
-var cancelled_by: Array[StringName]:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.cancelled_by
-	set(value):
-		_write_setting(&"cancelled_by", value)
-## From the definition: [member AbilityDefinition.pauses_locomotion].
-var pauses_locomotion: bool:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.pauses_locomotion
-	set(value):
-		_write_setting(&"pauses_locomotion", value)
-## From the definition: [member AbilityDefinition.needs_full_movement].
-var needs_full_movement: bool:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.needs_full_movement
-	set(value):
-		_write_setting(&"needs_full_movement", value)
-## From the definition: [member AbilityDefinition.step_timeline].
-var step_timeline: Array[TimelineEntry]:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.step_timeline
-	set(value):
-		_write_setting(&"step_timeline", value)
-## From the definition: [member AbilityDefinition.max_steps_ticks].
-var max_steps_ticks: int:
-	get:
-		if settings == null:
-			prepare_settings()
-		return settings.max_steps_ticks
-	set(value):
-		_write_setting(&"max_steps_ticks", value)
+static var _setting_names_by_kind := {} # script -> {setting name: true}, for _get and _set
 
 # State that rolls back, pushed to the state store when it changes (push_state). Timers are tick deadlines, which don't change while
 # they run (ability spec 4): nothing counts down, and a pawn running every Nth tick needs nothing special. Each setter tells the manager,
@@ -479,9 +289,47 @@ func _write_setting(setting: StringName, value: Variant) -> void:
 			push_error("[AbilityBase] %s: %s comes from its definition, which every pawn using it shares; give it another with use_definition(), or its own copy with make_definition_unique()." % [_describe_node(), setting])
 			return
 		_own_definition = _new_own_definition()
+	# A typed list setting (Array[StringName]) refuses a plain list through set(), so the value takes the setting's own array type.
+	var current: Variant = _own_definition.get(setting)
+	if value is Array and current is Array and (current as Array).is_typed() and not (value as Array).is_typed():
+		var typed: Array = (current as Array).duplicate()
+		typed.assign(value)
+		value = typed
 	_own_definition.set(setting, value)
 	if settings != null:
 		prepare_settings()
+
+
+# Settings by name on the node (pawn spec 16.3): any setting of its definition's class, such as ability.cooldown_ticks, reads from
+# its settings and writes into its own variant (_write_setting), for code outside the ability, scenes and quick abilities' _init()
+# ("self.duration_ticks = 30"). Code inside an ability reads settings.<name> (or its kind's typed reference), which is typed and faster.
+func _get(property: StringName) -> Variant:
+	if not _setting_names().has(property):
+		return null
+	if settings == null:
+		prepare_settings()
+	return settings.get(property)
+
+
+func _set(property: StringName, value: Variant) -> bool:
+	if not _setting_names().has(property):
+		return false
+	_write_setting(property, value)
+	return true
+
+
+# The settings its kind's definition class has, by name, worked out once per class.
+func _setting_names() -> Dictionary:
+	var script: Script = get_script()
+	var names: Variant = _setting_names_by_kind.get(script)
+	if names == null:
+		names = {}
+		for property in kind_defaults().get_property_list():
+			if property["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE and property["usage"] & PROPERTY_USAGE_EDITOR:
+				names[StringName(property["name"])] = true
+		names.erase(&"based_on") # the variant's base, not a setting
+		_setting_names_by_kind[script] = names
+	return names
 
 
 # True if the definition is of this kind's class, or a class built on it.
@@ -509,9 +357,9 @@ func get_pushed_properties() -> Array[String]:
 	if is_stepped():
 		out.append("timeline_state") # every timeline entry's state, as one value
 		out.append("pawns_hit_this_run")
-	if cooldown_ticks > 0:
+	if settings.cooldown_ticks > 0:
 		out.append("ready_at")
-	if buffer_window_ticks > 0 and trigger_action != &"":
+	if settings.buffer_window_ticks > 0 and settings.trigger_action != &"":
 		out.append("buffer_until")
 	if uses_charges():
 		out.append_array(["charges_spent", "next_restore_tick", "max_charges_base", "max_charges_changes"])
@@ -526,14 +374,14 @@ func get_rollback_properties() -> Array[String]:
 
 ## True if it has limited uses (its definition's max_charges above 0).
 func uses_charges() -> bool:
-	return max_charges > 0
+	return settings.max_charges > 0
 
 
 ## Its most charges now: its own value (the definition's, or what [method set_max_charges] set) plus the changes still running. Never
 ## below 0.
 func max_charges_now(at_tick := -1) -> int:
 	var now := TickDriver.tick if at_tick < 0 else at_tick
-	var most := max_charges_base if max_charges_base >= 0 else max_charges
+	var most := max_charges_base if max_charges_base >= 0 else settings.max_charges
 	for change: Array in max_charges_changes.values():
 		if change[1] < 0 or now < change[1]:
 			most += int(change[0])
@@ -578,17 +426,17 @@ func spend_charge() -> void:
 	if not uses_charges():
 		return
 	charges_spent += 1
-	if next_restore_tick < 0 and recharges:
-		next_restore_tick = TickDriver.tick + TickDriver.ticks_at_rate(charge_restore_ticks)
+	if next_restore_tick < 0 and settings.recharges:
+		next_restore_tick = TickDriver.tick + TickDriver.ticks_at_rate(settings.charge_restore_ticks)
 
 
 ## The manager calls this when a charge deadline passes: charges come back for every restore due by now, each counted from the last,
 ## and changes that ended are dropped.
 func apply_charge_deadlines(now: int) -> void:
 	while next_restore_tick >= 0 and now >= next_restore_tick:
-		var back := charges_spent if restore_all_charges else charges_restored
+		var back := charges_spent if settings.restore_all_charges else settings.charges_restored
 		charges_spent = maxi(charges_spent - back, 0)
-		next_restore_tick = next_restore_tick + TickDriver.ticks_at_rate(charge_restore_ticks) if charges_spent > 0 and recharges else -1
+		next_restore_tick = next_restore_tick + TickDriver.ticks_at_rate(settings.charge_restore_ticks) if charges_spent > 0 and settings.recharges else -1
 	var ended := false
 	for change: Array in max_charges_changes.values():
 		ended = ended or (change[1] >= 0 and now >= change[1])
@@ -616,10 +464,10 @@ func update_charges_tag() -> void:
 	if owned == null:
 		return
 	var source := "charges:%d" % get_instance_id()
-	if has_charges_tag == &"" or (uses_charges() and charges_left() <= 0):
+	if settings.has_charges_tag == &"" or (uses_charges() and charges_left() <= 0):
 		owned.clear_source(source)
 	else:
-		owned.set_source(source, [has_charges_tag])
+		owned.set_source(source, [settings.has_charges_tag])
 
 
 func _charges_changed() -> void:
@@ -646,14 +494,14 @@ func push_state(property: StringName, value: Variant) -> void:
 ## override it.
 func run_length_ticks() -> int:
 	if is_stepped(): # its steps decide when it ends; this is only the most it can run
-		return TickDriver.ticks_at_rate(max_steps_ticks)
-	return TickDriver.ticks_at_rate(duration_ticks)
+		return TickDriver.ticks_at_rate(settings.max_steps_ticks)
+	return TickDriver.ticks_at_rate(settings.duration_ticks)
 
 
 ## True if it runs for a while once started (a duration, steps, or a length of its own: Dash, Death, Knockback), so it keeps
 ## [member started_at] and [member ends_at]. False for one that happens at once, such as Jump.
 func is_timed() -> bool:
-	return duration_ticks > 0 or is_stepped()
+	return settings.duration_ticks > 0 or is_stepped()
 
 
 ## True while a timed run is going.
@@ -726,9 +574,9 @@ func _set_owned_tags(running: bool) -> void:
 	if not running:
 		owned.clear_source(self)
 		return
-	var tags: Array = extra_categories.duplicate()
-	if category != &"":
-		tags.push_front(category)
+	var tags: Array = settings.extra_categories.duplicate()
+	if settings.category != &"":
+		tags.push_front(settings.category)
 	owned.set_source(self, tags)
 
 
@@ -797,7 +645,7 @@ func current_interrupt_threshold() -> int:
 	for step in steps:
 		if step.running and step.interrupt_threshold >= 0:
 			strictest = maxi(strictest, step.interrupt_threshold)
-	return strictest if strictest >= 0 else interrupt_threshold
+	return strictest if strictest >= 0 else settings.interrupt_threshold
 
 
 ## True if this run of the ability has already hit this pawn.
@@ -884,6 +732,8 @@ func make_default_interceptors() -> void:
 ## Called once by the manager: finds the [AbilityStep] children and builds its timeline from its definition's entries, else its kind's
 ## default ([method default_timeline]), else its steps one after another.
 func collect_steps() -> void:
+	if settings == null:
+		prepare_settings() # its steps read them (which action they watch, its timeline)
 	steps.clear()
 	for child in get_children():
 		if child is AbilityStep:
@@ -896,7 +746,7 @@ func collect_steps() -> void:
 	as_steps.assign(steps)
 	step_runner.host = self
 	step_runner.owner_name = name
-	step_runner.build(as_steps, settings.step_timeline if settings and not settings.step_timeline.is_empty() else default_timeline())
+	step_runner.build(as_steps, settings.step_timeline if not settings.step_timeline.is_empty() else default_timeline())
 
 
 ## Called by the manager when the ability starts: clears the timeline's state and starts the entries due at its start.

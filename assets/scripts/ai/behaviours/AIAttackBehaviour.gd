@@ -105,7 +105,7 @@ func _look_at_target(context: AIContextComponent) -> void:
 func _find_attack() -> AbilityBase:
 	if _attack == null and pawn and pawn.ability_manager:
 		for ability in pawn.ability_manager.get_abilities():
-			if ability.trigger_action == presses_action and ability.attack_reach() > 0.0:
+			if ability.settings.trigger_action == presses_action and ability.attack_reach() > 0.0:
 				_attack = ability
 				break
 	return _attack

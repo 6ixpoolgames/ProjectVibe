@@ -14,54 +14,6 @@ extends AbilityBase
 var _dash: DashDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
-## From the definition: [member DashDefinition.acceleration_stat].
-var acceleration_stat: StringName:
-	get:
-		if _dash == null:
-			prepare_settings()
-		return _dash.acceleration_stat
-	set(value):
-		_write_setting(&"acceleration_stat", value)
-## From the definition: [member DashDefinition.fallback_acceleration].
-var fallback_acceleration: float:
-	get:
-		if _dash == null:
-			prepare_settings()
-		return _dash.fallback_acceleration
-	set(value):
-		_write_setting(&"fallback_acceleration", value)
-## From the definition: [member DashDefinition.speed_up_ticks].
-var speed_up_ticks: int:
-	get:
-		if _dash == null:
-			prepare_settings()
-		return _dash.speed_up_ticks
-	set(value):
-		_write_setting(&"speed_up_ticks", value)
-## From the definition: [member DashDefinition.slow_down_deceleration].
-var slow_down_deceleration: float:
-	get:
-		if _dash == null:
-			prepare_settings()
-		return _dash.slow_down_deceleration
-	set(value):
-		_write_setting(&"slow_down_deceleration", value)
-## From the definition: [member DashDefinition.slow_down_ticks].
-var slow_down_ticks: int:
-	get:
-		if _dash == null:
-			prepare_settings()
-		return _dash.slow_down_ticks
-	set(value):
-		_write_setting(&"slow_down_ticks", value)
-## From the definition: [member DashDefinition.usable_in_air].
-var usable_in_air: bool:
-	get:
-		if _dash == null:
-			prepare_settings()
-		return _dash.usable_in_air
-	set(value):
-		_write_setting(&"usable_in_air", value)
 
 ## The way it's dashing, flat and length 1. Rolls back (pushed).
 var dash_direction := Vector3.ZERO:
@@ -103,12 +55,12 @@ func is_timed() -> bool:
 
 ## The speed-up's ticks plus the slow-down's.
 func run_length_ticks() -> int:
-	return TickDriver.ticks_at_rate(speed_up_ticks) + TickDriver.ticks_at_rate(slow_down_ticks)
+	return TickDriver.ticks_at_rate(_dash.speed_up_ticks) + TickDriver.ticks_at_rate(_dash.slow_down_ticks)
 
 
 ## Anywhere with usable_in_air on (the default); on the ground only with it off.
 func can_start() -> bool:
-	return usable_in_air or pawn.grounded
+	return _dash.usable_in_air or pawn.grounded
 
 
 ## Picks the direction (the movement input, or the facing with none) and turns the pawn to face it.
@@ -123,12 +75,12 @@ func start() -> void:
 
 # Adds speed, then takes it away. dash_direction is flat, so the vertical speed (a jump, gravity) is left alone.
 func tick(dt: float) -> void:
-	if ticks_before_this_run() < TickDriver.ticks_at_rate(speed_up_ticks):
-		pawn.velocity += dash_direction * read_stat(acceleration_stat, fallback_acceleration) * dt
+	if ticks_before_this_run() < TickDriver.ticks_at_rate(_dash.speed_up_ticks):
+		pawn.velocity += dash_direction * read_stat(_dash.acceleration_stat, _dash.fallback_acceleration) * dt
 		return
 	# The speed along the dash direction, and how much of it to take off this tick: never more than there is, so never backwards.
 	var along := pawn.velocity.dot(dash_direction)
-	var slow := minf(slow_down_deceleration * dt, maxf(along, 0.0))
+	var slow := minf(_dash.slow_down_deceleration * dt, maxf(along, 0.0))
 	pawn.velocity -= dash_direction * slow
 
 # No stop(): whatever speed is left is kept, and Walk brings it back to walking speed.

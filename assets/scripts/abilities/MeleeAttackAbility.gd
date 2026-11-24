@@ -14,118 +14,6 @@ extends AbilityBase
 var _melee: MeleeAttackDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
-## From the definition: [member MeleeAttackDefinition.windup_ticks].
-var windup_ticks: int:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.windup_ticks
-	set(value):
-		_write_setting(&"windup_ticks", value)
-## From the definition: [member MeleeAttackDefinition.hit_ticks].
-var hit_ticks: int:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.hit_ticks
-	set(value):
-		_write_setting(&"hit_ticks", value)
-## From the definition: [member MeleeAttackDefinition.recovery_ticks].
-var recovery_ticks: int:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.recovery_ticks
-	set(value):
-		_write_setting(&"recovery_ticks", value)
-## From the definition: [member MeleeAttackDefinition.attack_range].
-var attack_range: float:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.attack_range
-	set(value):
-		_write_setting(&"attack_range", value)
-## From the definition: [member MeleeAttackDefinition.hit_radius].
-var hit_radius: float:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.hit_radius
-	set(value):
-		_write_setting(&"hit_radius", value)
-## From the definition: [member MeleeAttackDefinition.hit_height].
-var hit_height: float:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.hit_height
-	set(value):
-		_write_setting(&"hit_height", value)
-## From the definition: [member MeleeAttackDefinition.sweep_degrees].
-var sweep_degrees: float:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.sweep_degrees
-	set(value):
-		_write_setting(&"sweep_degrees", value)
-## From the definition: [member MeleeAttackDefinition.sweep_from_left].
-var sweep_from_left: bool:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.sweep_from_left
-	set(value):
-		_write_setting(&"sweep_from_left", value)
-## From the definition: [member MeleeAttackDefinition.height_at_sweep_start].
-var height_at_sweep_start: float:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.height_at_sweep_start
-	set(value):
-		_write_setting(&"height_at_sweep_start", value)
-## From the definition: [member MeleeAttackDefinition.height_at_sweep_end].
-var height_at_sweep_end: float:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.height_at_sweep_end
-	set(value):
-		_write_setting(&"height_at_sweep_end", value)
-## From the definition: [member MeleeAttackDefinition.sweep_keys].
-var sweep_keys: Array[SweepKey]:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.sweep_keys
-	set(value):
-		_write_setting(&"sweep_keys", value)
-## From the definition: [member MeleeAttackDefinition.windup_turn_degrees_per_second].
-var windup_turn_degrees_per_second: float:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.windup_turn_degrees_per_second
-	set(value):
-		_write_setting(&"windup_turn_degrees_per_second", value)
-## From the definition: [member MeleeAttackDefinition.combo_window_ticks].
-var combo_window_ticks: int:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.combo_window_ticks
-	set(value):
-		_write_setting(&"combo_window_ticks", value)
-## From the definition: [member MeleeAttackDefinition.warns_targets].
-var warns_targets: bool:
-	get:
-		if _melee == null:
-			prepare_settings()
-		return _melee.warns_targets
-	set(value):
-		_write_setting(&"warns_targets", value)
 
 var _made_default_steps := false # true when it made its own steps from its settings
 
@@ -146,7 +34,7 @@ func _settings_changed() -> void:
 
 ## Its attack_range: the AI swings from within it.
 func attack_reach() -> float:
-	return attack_range
+	return _melee.attack_range
 
 
 ## Finds its steps, after making the default ones from its settings if it has none of its own.
@@ -169,7 +57,7 @@ func start() -> void:
 	# No snap to the look: its TurnToFace step turns the pawn. The made steps take the settings again, in case they changed in play.
 	if _made_default_steps:
 		_sync_default_steps()
-	if warns_targets and pawn.is_authority() and not TickDriver.is_resimulating():
+	if _melee.warns_targets and pawn.is_authority() and not TickDriver.is_resimulating():
 		_warn_targets()
 
 
@@ -208,21 +96,21 @@ func _sync_default_steps() -> void:
 	var turn := get_node(^"TurnToFace") as TurnToFaceStep
 	var sweep := get_node(^"Sweep") as MeleeSweepStep
 	var recovery := get_node(^"Recovery") as WaitStep
-	windup.length_ticks = windup_ticks
-	turn.degrees_per_second = windup_turn_degrees_per_second
-	sweep.length_ticks = hit_ticks
-	sweep.hit_radius = hit_radius
+	windup.length_ticks = _melee.windup_ticks
+	turn.degrees_per_second = _melee.windup_turn_degrees_per_second
+	sweep.length_ticks = _melee.hit_ticks
+	sweep.hit_radius = _melee.hit_radius
 	# Right to left by default: the right is a negative angle. sweep_from_left turns it round.
-	var side := 1.0 if sweep_from_left else -1.0
-	sweep.start_angle = side * sweep_degrees * 0.5
-	sweep.end_angle = -side * sweep_degrees * 0.5
-	sweep.start_height = hit_height + height_at_sweep_start
-	sweep.end_height = hit_height + height_at_sweep_end
-	sweep.start_reach = attack_range
-	sweep.end_reach = attack_range
-	sweep.keys = sweep_keys # a path of its own, when it has one
-	recovery.length_ticks = recovery_ticks
-	(get_node(^"OpenCombo") as OpenComboStep).window_ticks = combo_window_ticks
+	var side := 1.0 if _melee.sweep_from_left else -1.0
+	sweep.start_angle = side * _melee.sweep_degrees * 0.5
+	sweep.end_angle = -side * _melee.sweep_degrees * 0.5
+	sweep.start_height = _melee.hit_height + _melee.height_at_sweep_start
+	sweep.end_height = _melee.hit_height + _melee.height_at_sweep_end
+	sweep.start_reach = _melee.attack_range
+	sweep.end_reach = _melee.attack_range
+	sweep.keys = _melee.sweep_keys # a path of its own, when it has one
+	recovery.length_ticks = _melee.recovery_ticks
+	(get_node(^"OpenCombo") as OpenComboStep).window_ticks = _melee.combo_window_ticks
 
 
 # Its first windup, or null. Visuals and the target warning read the swing's shape through its first windup and sweep.
@@ -265,7 +153,7 @@ func swing_phase() -> Dictionary:
 # Tells enemies the swing may reach that it's coming, and when its hit starts: within attack_range plus hit_radius, and within the
 # sweep's width (plus 30 degrees) of where the pawn will face when the hit starts, turned as far as its TurnToFace speed allows.
 func _warn_targets() -> void:
-	var reach := attack_range + hit_radius
+	var reach := _melee.attack_range + _melee.hit_radius
 	var sphere := SphereShape3D.new()
 	sphere.radius = reach
 	var query := PhysicsShapeQueryParameters3D.new()
@@ -276,7 +164,7 @@ func _warn_targets() -> void:
 	var turn := deg_to_rad(_turn_speed()) * float(windup_length()) / TickDriver.get_tick_rate()
 	var hit_yaw := rotate_toward(pawn.yaw, look_yaw(), turn)
 	var facing := Vector3(-sin(hit_yaw), 0.0, -cos(hit_yaw))
-	var widest := deg_to_rad(sweep_degrees * 0.5 + 30.0)
+	var widest := deg_to_rad(_melee.sweep_degrees * 0.5 + 30.0)
 	var now: int = TickDriver.tick
 	for found in pawn.get_world_3d().direct_space_state.intersect_shape(query, 16):
 		var other := found.collider as Pawn
@@ -307,7 +195,7 @@ func hit_centre_at(progress: float) -> Vector3:
 func hit_offset_at(progress: float, facing: float) -> Vector3:
 	var sweep := _first_sweep()
 	if sweep == null:
-		return Vector3(-sin(facing), 0.0, -cos(facing)) * maxf(attack_range - hit_radius, 0.0) + Vector3(0.0, hit_height, 0.0)
+		return Vector3(-sin(facing), 0.0, -cos(facing)) * maxf(_melee.attack_range - _melee.hit_radius, 0.0) + Vector3(0.0, _melee.hit_height, 0.0)
 	return sweep.offset_at(progress, facing)
 
 

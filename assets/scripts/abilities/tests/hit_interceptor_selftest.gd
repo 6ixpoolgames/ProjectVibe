@@ -17,8 +17,8 @@ class Stance extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		category = &"ability.utility.interact"
-		duration_ticks = 60
+		self.category = &"ability.utility.interact"
+		self.duration_ticks = 60
 
 
 ## A new kind of interceptor, made only by overriding intercept(): it stops hits that carry more than 15 damage.

@@ -17,13 +17,13 @@ class Shot extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"primary"
-		category = &"ability.combat.ranged"
-		max_charges = 3
-		recharges = true
-		charge_restore_ticks = 60
-		restore_all_charges = true
-		has_charges_tag = &"status.has_ammo.ranged"
+		self.trigger_action = &"primary"
+		self.category = &"ability.combat.ranged"
+		self.max_charges = 3
+		self.recharges = true
+		self.charge_restore_ticks = 60
+		self.restore_all_charges = true
+		self.has_charges_tag = &"status.has_ammo.ranged"
 
 	func start() -> void:
 		starts += 1
@@ -34,7 +34,7 @@ class Gated extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"secondary"
+		self.trigger_action = &"secondary"
 
 
 func _ready() -> void:

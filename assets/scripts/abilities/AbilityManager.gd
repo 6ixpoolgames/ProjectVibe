@@ -233,10 +233,10 @@ func action_for_tag(tag: StringName) -> StringName:
 		return &"" # an unknown tag matches nothing, and isn't added
 	var best: AbilityBase = null
 	for ability in _actions:
-		if ability.trigger_action != &"" and ability.category_mask & bit != 0 and not ability.is_running_timed() and _is_ready(ability):
+		if ability.settings.trigger_action != &"" and ability.category_mask & bit != 0 and not ability.is_running_timed() and _is_ready(ability):
 			if best == null or press_priority_now(ability) > press_priority_now(best):
 				best = ability
-	return best.trigger_action if best else &""
+	return best.settings.trigger_action if best else &""
 
 
 ## Starts an ability by the same rules as a press (cooldown, can_start, cancelling what conflicts). For abilities started by code,
@@ -294,7 +294,7 @@ func is_busy() -> bool:
 ## True if any ability answers to this action.
 func has_action(action: StringName) -> bool:
 	for ability in _abilities:
-		if ability.trigger_action == action:
+		if ability.settings.trigger_action == action:
 			return true
 	return false
 
@@ -310,7 +310,7 @@ func stop_all() -> void:
 ## Stops whatever is running for this action, which starts its cooldown.
 func cancel(action: StringName) -> void:
 	for ability in _abilities:
-		if ability.trigger_action == action and ability.is_running_timed():
+		if ability.settings.trigger_action == action and ability.is_running_timed():
 			_finish(ability)
 
 
@@ -342,7 +342,7 @@ func is_action_running(action: StringName) -> bool:
 	if _timers_dirty:
 		_rebuild_timed()
 	for ability in _timed:
-		if ability.trigger_action == action and ability.is_running_timed():
+		if ability.settings.trigger_action == action and ability.is_running_timed():
 			return true
 	return false
 
@@ -424,8 +424,8 @@ func _run_actions(dt: float) -> void:
 			if chosen != ability:
 				_started_later.append(chosen) # see the top of this loop
 			used_bits |= ability.trigger_bit
-		elif pressed and ability.buffer_window_ticks > 0:
-			ability.buffer_until = TickDriver.tick + TickDriver.ticks_at_rate(ability.buffer_window_ticks)
+		elif pressed and ability.settings.buffer_window_ticks > 0:
+			ability.buffer_until = TickDriver.tick + TickDriver.ticks_at_rate(ability.settings.buffer_window_ticks)
 	# A press that started something doesn't also wait in another ability on the same action.
 	if used_bits != 0: # skipped when nothing started
 		for ability in _actions:
@@ -454,19 +454,19 @@ func _best_ready(first: AbilityBase, wanted_bits: int) -> AbilityBase:
 
 # Priority plus effect boosts plus this tick's random offset, drawn from the tick's own random numbers so a replay draws the same.
 func _priority_now(ability: AbilityBase) -> float:
-	if ability.priority_jitter <= 0.0:
+	if ability.settings.priority_jitter <= 0.0:
 		return float(press_priority_now(ability))
-	return press_priority_now(ability) + ability.priority_jitter * DeterministicRandom.signed(pawn.entity_number(), TickDriver.tick, ability.jitter_salt)
+	return press_priority_now(ability) + ability.settings.priority_jitter * DeterministicRandom.signed(pawn.entity_number(), TickDriver.tick, ability.jitter_salt)
 
 
 ## An ability's priority now: its own plus what effects add (AbilityPriorityPart, pawn spec 8.11), without the jitter offset.
 func press_priority_now(ability: AbilityBase) -> int:
-	return ability.priority + _bonus(ability, AbilityPriorityPart.Number.PRESS_PRIORITY)
+	return ability.settings.priority + _bonus(ability, AbilityPriorityPart.Number.PRESS_PRIORITY)
 
 
 ## Its interrupt_priority right now, with what effects add.
 func interrupt_priority_now(ability: AbilityBase) -> int:
-	return ability.interrupt_priority + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_PRIORITY)
+	return ability.settings.interrupt_priority + _bonus(ability, AbilityPriorityPart.Number.INTERRUPT_PRIORITY)
 
 
 ## Its interrupt_threshold now, with what effects add; for a stepped ability, the strictest of its running steps'.
@@ -491,7 +491,7 @@ func _is_ready(ability: AbilityBase) -> bool:
 
 # Its start requirements against the pawn's owned tags (no requirements: yes).
 func _tags_allow(ability: AbilityBase) -> bool:
-	var query := ability.start_requirements
+	var query := ability.settings.start_requirements
 	return query == null or query.matches(pawn.owned_tags if pawn else null)
 
 
@@ -514,17 +514,17 @@ func combo_window_ticks_left() -> int:
 ## The combo position it would take if it started now: the next, if the window is open and it fits; else 1 for an opener; else 0
 ## (can't start now). 0 too with no combo_positions.
 func combo_position_for(ability: AbilityBase) -> int:
-	if ability.combo_positions.is_empty():
+	if ability.settings.combo_positions.is_empty():
 		return 0
 	var next := combo_position + 1
-	if is_combo_window_open() and ability.combo_positions.has(next):
+	if is_combo_window_open() and ability.settings.combo_positions.has(next):
 		return next
-	return 1 if ability.combo_positions.has(1) else 0
+	return 1 if ability.settings.combo_positions.has(1) else 0
 
 
 # A combo follow-up can only start where it fits; anything else isn't held back by combos.
 func _combo_allows(ability: AbilityBase) -> bool:
-	return ability.combo_positions.is_empty() or combo_position_for(ability) > 0
+	return ability.settings.combo_positions.is_empty() or combo_position_for(ability) > 0
 
 
 # Two abilities conflict when either one's locks_out covers the other's category.
@@ -688,8 +688,8 @@ func _finish(ability: AbilityBase) -> void:
 	readiness_version += 1
 	ability.end_steps("cancelled") # steps still running when it ends early; none when they finished
 	ability.ends_at = -1
-	if ability.cooldown_ticks > 0:
-		ability.ready_at = TickDriver.tick + TickDriver.ticks_at_rate(ability.cooldown_ticks)
+	if ability.settings.cooldown_ticks > 0:
+		ability.ready_at = TickDriver.tick + TickDriver.ticks_at_rate(ability.settings.cooldown_ticks)
 	ability.stop()
 	ability_finished.emit(ability)
 
@@ -764,24 +764,24 @@ func _collect_abilities() -> void:
 			child.manager = self
 			child.pawn = pawn
 			child.prepare_settings() # its definition worked out, or its kind's defaults
-			child.category_mask = TagRegistry.mask_of(child.category) if child.category != &"" else 0
-			child.category_mask |= TagRegistry.full_mask_of_list(child.extra_categories)
-			child.locks_out_mask = TagRegistry.mask_of_list(child.locks_out)
-			child.cancelled_by_mask = TagRegistry.mask_of_list(child.cancelled_by)
+			child.category_mask = TagRegistry.mask_of(child.settings.category) if child.settings.category != &"" else 0
+			child.category_mask |= TagRegistry.full_mask_of_list(child.settings.extra_categories)
+			child.locks_out_mask = TagRegistry.mask_of_list(child.settings.locks_out)
+			child.cancelled_by_mask = TagRegistry.mask_of_list(child.settings.cancelled_by)
 			_collect_effects(child)
 			child.collect_steps()
 			_collect_interceptors(child) # after its steps, which can hold them too
 			_abilities.append(child)
 	# Highest priority first, then tree order.
 	_abilities.sort_custom(func(a: AbilityBase, b: AbilityBase) -> bool:
-		return a.priority > b.priority or (a.priority == b.priority and a.get_index() < b.get_index()))
+		return a.settings.priority > b.settings.priority or (a.settings.priority == b.settings.priority and a.get_index() < b.get_index()))
 	_death = null
 	_knockback = null
 	_full_movement_abilities.clear()
 	_locomotion_pausers.clear()
 	for ability in _abilities:
 		ability.jitter_salt = hash(String(ability.name))
-		if ability.needs_full_movement:
+		if ability.settings.needs_full_movement:
 			_full_movement_abilities.append(ability)
 		# REFACTOR: Death and Knockback are found by class, so a game changes dying or staggering only by extending them. A tag
 		# (ability.death, ability.combat.knockback) would let any ability fill the role; extensible.
@@ -789,7 +789,7 @@ func _collect_abilities() -> void:
 			_death = ability
 		if ability is KnockbackAbility and _knockback == null:
 			_knockback = ability
-		if ability.pauses_locomotion and ability.kind != AbilityBase.Kind.LOCOMOTION:
+		if ability.settings.pauses_locomotion and ability.kind != AbilityBase.Kind.LOCOMOTION:
 			_locomotion_pausers.append(ability)
 	_locomotions.clear()
 	_actions.clear()
@@ -797,10 +797,10 @@ func _collect_abilities() -> void:
 	_every_tick_abilities.clear()
 	_action_bits = 0
 	for ability in _abilities:
-		ability.trigger_bit = InputActions.mask_of(ability.trigger_action) if ability.trigger_action != &"" else 0
+		ability.trigger_bit = InputActions.mask_of(ability.settings.trigger_action) if ability.settings.trigger_action != &"" else 0
 		if ability.kind == AbilityBase.Kind.LOCOMOTION:
 			_locomotions.append(ability)
-			if ability.trigger_action == &"" and _default_locomotion == null:
+			if ability.settings.trigger_action == &"" and _default_locomotion == null:
 				_default_locomotion = ability
 		else:
 			_actions.append(ability)
@@ -817,13 +817,13 @@ func _collect_abilities() -> void:
 	_by_action.clear()
 	_follows_body.clear()
 	for ability in _abilities:
-		if ability.trigger_action != &"":
-			if not _by_action.has(ability.trigger_action):
+		if ability.settings.trigger_action != &"":
+			if not _by_action.has(ability.settings.trigger_action):
 				var list: Array[AbilityBase] = []
-				_by_action[ability.trigger_action] = list
-			_by_action[ability.trigger_action].append(ability)
+				_by_action[ability.settings.trigger_action] = list
+			_by_action[ability.settings.trigger_action].append(ability)
 			if ScriptOverrides.overrides(ability.get_script(), &"can_start"):
-				_follows_body[ability.trigger_action] = true
+				_follows_body[ability.settings.trigger_action] = true
 	_timers_dirty = true
 	_locks_dirty = true
 	readiness_version += 1
@@ -841,7 +841,7 @@ func _note_start_requirements() -> void:
 	_has_start_requirements = false
 	_tags_version_seen = -1
 	for ability in _abilities:
-		var query := ability.start_requirements
+		var query := ability.settings.start_requirements
 		if query == null or query.is_empty():
 			continue
 		_has_start_requirements = true
@@ -932,7 +932,7 @@ func _register_rollback_state() -> void:
 		return
 	var entries: Array[String] = []
 	# The combo counter, when any ability takes part in combos.
-	if _abilities.any(func(ability: AbilityBase) -> bool: return not ability.combo_positions.is_empty()):
+	if _abilities.any(func(ability: AbilityBase) -> bool: return not ability.settings.combo_positions.is_empty()):
 		var own_path := String(pawn.get_path_to(self))
 		for property: String in ["combo_position", "combo_open_until"]:
 			entries.append("%s:%s pushed" % [own_path, property])

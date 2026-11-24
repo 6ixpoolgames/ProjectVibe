@@ -59,7 +59,7 @@ func read(ability: AbilityBase) -> float:
 		Reads.LOOK_ANGLE:
 			return rad_to_deg(absf(angle_difference(pawn.yaw, ability.look_yaw()))) if pawn else 0.0
 		Reads.ACTION_HELD:
-			var name := action if action != &"" else ability.trigger_action
+			var name := action if action != &"" else ability.settings.trigger_action
 			var bit := InputActions.mask_of(name) if name != &"" else 0
 			return 1.0 if bit != 0 and ability.held_actions() & bit != 0 else 0.0
 		Reads.GROUNDED:

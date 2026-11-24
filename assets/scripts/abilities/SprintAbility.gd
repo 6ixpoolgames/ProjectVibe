@@ -15,38 +15,6 @@ extends WalkAbility
 var _sprint: SprintDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
-## From the definition: [member SprintDefinition.max_charge_ticks].
-var max_charge_ticks: int:
-	get:
-		if _sprint == null:
-			prepare_settings()
-		return _sprint.max_charge_ticks
-	set(value):
-		_write_setting(&"max_charge_ticks", value)
-## From the definition: [member SprintDefinition.recharge_rate].
-var recharge_rate: float:
-	get:
-		if _sprint == null:
-			prepare_settings()
-		return _sprint.recharge_rate
-	set(value):
-		_write_setting(&"recharge_rate", value)
-## From the definition: [member SprintDefinition.recharge_delay_ticks].
-var recharge_delay_ticks: int:
-	get:
-		if _sprint == null:
-			prepare_settings()
-		return _sprint.recharge_delay_ticks
-	set(value):
-		_write_setting(&"recharge_delay_ticks", value)
-## From the definition: [member SprintDefinition.min_start_charge_ticks].
-var min_start_charge_ticks: int:
-	get:
-		if _sprint == null:
-			prepare_settings()
-		return _sprint.min_start_charge_ticks
-	set(value):
-		_write_setting(&"min_start_charge_ticks", value)
 
 ## Ticks of charge when it last started or stopped. Rolls back (pushed).
 var charge_at_switch := 0:
@@ -107,7 +75,7 @@ func stop() -> void:
 	# ends_at is already cleared, so the charge left is worked out from the start.
 	charge_at_switch = maxi(charge_at_switch - (TickDriver.tick - switched_at), 0)
 	switched_at = TickDriver.tick
-	ready_at = maxi(ready_at, _tick_charge_reaches(maxi(TickDriver.ticks_at_rate(mini(min_start_charge_ticks, max_charge_ticks)), 1)))
+	ready_at = maxi(ready_at, _tick_charge_reaches(maxi(TickDriver.ticks_at_rate(mini(_sprint.min_start_charge_ticks, _sprint.max_charge_ticks)), 1)))
 
 
 func delay_run(ticks: int) -> void:
@@ -117,20 +85,20 @@ func delay_run(ticks: int) -> void:
 
 
 func _charge_while_stopped() -> int:
-	var full := TickDriver.ticks_at_rate(max_charge_ticks)
+	var full := TickDriver.ticks_at_rate(_sprint.max_charge_ticks)
 	if switched_at < 0:
 		return full
-	var refilling := TickDriver.tick - switched_at - TickDriver.ticks_at_rate(recharge_delay_ticks)
+	var refilling := TickDriver.tick - switched_at - TickDriver.ticks_at_rate(_sprint.recharge_delay_ticks)
 	if refilling <= 0:
 		return mini(charge_at_switch, full)
-	return mini(charge_at_switch + int(refilling * recharge_rate), full)
+	return mini(charge_at_switch + int(refilling * _sprint.recharge_rate), full)
 
 
 # The first tick the stopped charge is at least this many ticks.
 func _tick_charge_reaches(wanted: int) -> int:
 	if charge_at_switch >= wanted:
 		return switched_at
-	if recharge_rate <= 0.0:
+	if _sprint.recharge_rate <= 0.0:
 		return NEVER
-	return switched_at + TickDriver.ticks_at_rate(recharge_delay_ticks) + ceili((wanted - charge_at_switch) / recharge_rate)
+	return switched_at + TickDriver.ticks_at_rate(_sprint.recharge_delay_ticks) + ceili((wanted - charge_at_switch) / _sprint.recharge_rate)
 

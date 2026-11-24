@@ -12,10 +12,10 @@ class Busy extends AbilityBase:
 	func _init() -> void:
 		super()
 		kind = Kind.ACTION
-		trigger_action = &"secondary"
-		category = &"ability.utility.interact"
-		duration_ticks = 120
-		locks_out = [&"ability.movement.walk", &"ability.movement.sprint", &"ability.movement.jump"]
+		self.trigger_action = &"secondary"
+		self.category = &"ability.utility.interact"
+		self.duration_ticks = 120
+		self.locks_out = [&"ability.movement.walk", &"ability.movement.sprint", &"ability.movement.jump"]
 
 
 func _ready() -> void:

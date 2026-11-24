@@ -47,7 +47,7 @@ func is_held() -> bool:
 
 ## Its ability calls this once, before setup(): which input bit to watch.
 func setup_hold() -> void:
-	var action := while_held if while_held != &"" else ability.trigger_action
+	var action := while_held if while_held != &"" else ability.settings.trigger_action
 	hold_bit = InputActions.mask_of(action) if action != &"" else 0
 
 

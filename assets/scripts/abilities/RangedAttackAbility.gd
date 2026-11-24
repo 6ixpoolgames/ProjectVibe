@@ -16,78 +16,6 @@ extends AbilityBase
 var _ranged: RangedAttackDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
-## From the definition: [member RangedAttackDefinition.projectile_definition].
-var projectile_definition: ProjectileDefinition:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.projectile_definition
-	set(value):
-		_write_setting(&"projectile_definition", value)
-## From the definition: [member RangedAttackDefinition.projectile_scene].
-var projectile_scene: PackedScene:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.projectile_scene
-	set(value):
-		_write_setting(&"projectile_scene", value)
-## From the definition: [member RangedAttackDefinition.windup_ticks].
-var windup_ticks: int:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.windup_ticks
-	set(value):
-		_write_setting(&"windup_ticks", value)
-## From the definition: [member RangedAttackDefinition.recovery_ticks].
-var recovery_ticks: int:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.recovery_ticks
-	set(value):
-		_write_setting(&"recovery_ticks", value)
-## From the definition: [member RangedAttackDefinition.attack_range].
-var attack_range: float:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.attack_range
-	set(value):
-		_write_setting(&"attack_range", value)
-## From the definition: [member RangedAttackDefinition.muzzle_height].
-var muzzle_height: float:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.muzzle_height
-	set(value):
-		_write_setting(&"muzzle_height", value)
-## From the definition: [member RangedAttackDefinition.muzzle_forward].
-var muzzle_forward: float:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.muzzle_forward
-	set(value):
-		_write_setting(&"muzzle_forward", value)
-## From the definition: [member RangedAttackDefinition.windup_turn_degrees_per_second].
-var windup_turn_degrees_per_second: float:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.windup_turn_degrees_per_second
-	set(value):
-		_write_setting(&"windup_turn_degrees_per_second", value)
-## From the definition: [member RangedAttackDefinition.warns_targets].
-var warns_targets: bool:
-	get:
-		if _ranged == null:
-			prepare_settings()
-		return _ranged.warns_targets
-	set(value):
-		_write_setting(&"warns_targets", value)
 
 var _made_default_steps := false
 
@@ -104,7 +32,7 @@ func _settings_changed() -> void:
 
 ## Its attack_range: the AI shoots from within it.
 func attack_reach() -> float:
-	return attack_range
+	return _ranged.attack_range
 
 
 ## Finds its steps, after making the default ones from its settings if it has none of its own.
@@ -155,12 +83,12 @@ func _make_default_steps() -> void:
 
 
 func _sync_default_steps() -> void:
-	(get_node(^"Windup") as WindupStep).length_ticks = windup_ticks
-	(get_node(^"TurnToFace") as TurnToFaceStep).degrees_per_second = windup_turn_degrees_per_second
+	(get_node(^"Windup") as WindupStep).length_ticks = _ranged.windup_ticks
+	(get_node(^"TurnToFace") as TurnToFaceStep).degrees_per_second = _ranged.windup_turn_degrees_per_second
 	var fire := get_node(^"Fire") as FireProjectileStep
-	fire.projectile_scene = projectile_scene
-	fire.projectile_definition = projectile_definition
-	fire.muzzle_height = muzzle_height
-	fire.muzzle_forward = muzzle_forward
-	fire.warns_targets = warns_targets
-	(get_node(^"Recovery") as WaitStep).length_ticks = recovery_ticks
+	fire.projectile_scene = _ranged.projectile_scene
+	fire.projectile_definition = _ranged.projectile_definition
+	fire.muzzle_height = _ranged.muzzle_height
+	fire.muzzle_forward = _ranged.muzzle_forward
+	fire.warns_targets = _ranged.warns_targets
+	(get_node(^"Recovery") as WaitStep).length_ticks = _ranged.recovery_ticks

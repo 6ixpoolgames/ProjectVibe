@@ -489,11 +489,7 @@ Design: pawn spec 10.5 and 10.11.
 
 One pawn's AI memory in GDScript, plus the loops that read and write it: the sight check, the most aware entry, target scoring.
 
-Twin of `AIMemoryStore` in the navcore C++ library: same functions, same rules, used where that library isn't available or
-`AIMemory.use_native` is off. A change to one goes in the other; ai_perception_selftest expects the same results from each
-(on this one with `-- --gdscript-store`). [`AIMemory`](#aimemory) owns one and passes the settings in; other code goes through
-[`AIMemory`](#aimemory), not this.
-Design: pawn spec 10.4, 10.5 and 10.11.
+Twin of `AIMemoryStore` in the navcore C++ library: same functions, same rules, used where that library isn't available or `AIMemory.use_native` is off. A change to one goes in the other; ai_perception_selftest expects the same results from each (on this one with `-- --gdscript-store`). [`AIMemory`](#aimemory) owns one and passes the settings in; other code goes through [`AIMemory`](#aimemory), not this. Design: pawn spec 10.4, 10.5 and 10.11.
 
 ### Functions
 
@@ -514,10 +510,8 @@ Design: pawn spec 10.4, 10.5 and 10.11.
 - `most_aware_index(from: Vector3, tick: int) -> int`: The entry with the highest awareness now, or -1. Ties go to the nearer last known position, then the lower id.
 - `clear() -> void`
 - `best_target(from: Vector3, awareness_weight: float, distance_weight: float, threat_weight: float, distance_range: float, min_awareness: float, current_id: int, current_bonus: float, tick: int) -> int`: AITargetSelector's formula over every entry. Returns the winning index, or -1.
-- `set_sight_settings(settings: PackedFloat64Array) -> void`: SightSense's settings: fill_rate, near_range, sight_range, cos of half the central cone, cos of half the periphery,
-  periphery_multiplier, max_gain_ticks, eye_height, target_height, sight_blocking_mask, sense_interval_ticks.
-- `sight_check(observer: Node3D, eye_yaw: float, candidates: Array, tick: int) -> Array`: Checks each candidate from observer's eyes, facing eye_yaw, and records what's seen. Returns [a new entry was made, entities that
-  became certain]. See SightSense for the rules.
+- `set_sight_settings(settings: PackedFloat64Array) -> void`: SightSense's settings: fill_rate, near_range, sight_range, cos of half the central cone, cos of half the periphery, periphery_multiplier, max_gain_ticks, eye_height, target_height, sight_blocking_mask, sense_interval_ticks.
+- `sight_check(observer: Node3D, eye_yaw: float, candidates: Array, tick: int) -> Array`: Checks each candidate from observer's eyes, facing eye_yaw, and records what's seen. Returns [a new entry was made, entities that became certain]. See SightSense for the rules.
 
 ## AIScoreModifier
 
@@ -1113,18 +1107,11 @@ if there's no line of sight: no gain
 gain = fill_rate × ticks_since_last_check × distance_factor × angle_factor × the target's detectability (its stat)
 ```
 
-Ticks since the last check (capped at `max_gain_ticks`) make the checking rate not matter; the distance factor is 1 inside
-`near_range` and falls to 0 at `sight_range`; the angle factor is 1 in the central cone, `periphery_multiplier`
-in the periphery, 0 outside. Line of sight is one ray from the eyes to the target, blocked only by `sight_blocking_mask`. The
-eyes face where the AI is looking, else the way the body faces (where the player looks while one has the pawn). The checks run in the
-pawn's memory store (`AIMemoryStore` in C++, else [`AIMemoryStoreGD`](#aimemorystoregd)); with C++ the ray is tested against
-[`SightGeometryFeeder`](#sightgeometryfeeder)'s geometry, on worker threads when the sensing job runs. Refreshes check only the current target.
-Design: pawn spec 10.4, scaling spec step 4.
+Ticks since the last check (capped at `max_gain_ticks`) make the checking rate not matter; the distance factor is 1 inside `near_range` and falls to 0 at `sight_range`; the angle factor is 1 in the central cone, `periphery_multiplier` in the periphery, 0 outside. Line of sight is one ray from the eyes to the target, blocked only by `sight_blocking_mask`. The eyes face where the AI is looking, else the way the body faces (where the player looks while one has the pawn). The checks run in the pawn's memory store (`AIMemoryStore` in C++, else [`AIMemoryStoreGD`](#aimemorystoregd)); with C++ the ray is tested against [`SightGeometryFeeder`](#sightgeometryfeeder)'s geometry, on worker threads when the sensing job runs. Refreshes check only the current target. Design: pawn spec 10.4, scaling spec step 4.
 
 ### Settings and properties
 
-- `fill_rate: float` = `0.03333333333333333`: Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Per tick at 60 a second; at another rate
-  it's converted to fill at the same speed.
+- `fill_rate: float` = `0.03333333333333333`: Awareness a fully visible target adds per tick: 1/30 fills it in 30 ticks, half a second. Per tick at 60 a second; at another rate it's converted to fill at the same speed.
 - `near_range: float` = `8.0`: Inside this distance, in metres, distance doesn't weaken sight at all.
 - `sight_range: float` = `25.0`: Beyond this distance, in metres, nothing is seen.
 - `central_cone_degrees: float` = `90.0`: The width of the central cone, in degrees, where sight is at full strength.
@@ -1139,13 +1126,10 @@ Design: pawn spec 10.4, scaling spec step 4.
 
 - `get_range() -> float`: Its `sight_range`.
 - `full_pass(candidates: Pawn[], tick: int) -> void`: The whole pass runs in memory's store (C++ when available, else GDScript), with this sense's settings.
-- `full_pass_prepared(job: Object, tick: int) -> void`: The full pass with the sensing job's result: the job found the candidates, how visible each is and (against SightGeometry) the
-  line of sight, on a worker thread; this records them, the same as full_pass would. AISensingManager calls it.
+- `full_pass_prepared(job: Object, tick: int) -> void`: The full pass with the sensing job's result: the job found the candidates, how visible each is and (against SightGeometry) the line of sight, on a worker thread; this records them, the same as full_pass would. AISensingManager calls it.
 - `ask_job(job: Object, reach: float, max_candidates: int) -> void`: Asks the sensing job for next tick's full pass, with where the eyes face now and this sense's settings.
-- `refresh(tick: int) -> void`: Only the current target, one ray. Refreshing every remembered entity costs more than the full passes in a crowd (measured with
-  ai_stress), and keeping a tracked target fresh is what the refresh is for.
-- `visibility_of(target: Pawn) -> float`: How strongly this pawn would see the target now, before line of sight and the time factor: distance × angle × detectability.
-  0 when it's out of range or outside the periphery. Public so tests and debug readouts can show it.
+- `refresh(tick: int) -> void`: Only the current target, one ray. Refreshing every remembered entity costs more than the full passes in a crowd (measured with ai_stress), and keeping a tracked target fresh is what the refresh is for.
+- `visibility_of(target: Pawn) -> float`: How strongly this pawn would see the target now, before line of sight and the time factor: distance × angle × detectability. 0 when it's out of range or outside the periphery. Public so tests and debug readouts can show it.
 - `has_line_of_sight(target: Pawn) -> bool`: True if nothing in sight_blocking_mask is between the eyes and the target.
 
 ## AIAwarenessState

@@ -12,22 +12,6 @@ extends AbilityBase
 var _walk: WalkDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
-## From the definition: [member WalkDefinition.speed_stat].
-var speed_stat: StringName:
-	get:
-		if _walk == null:
-			prepare_settings()
-		return _walk.speed_stat
-	set(value):
-		_write_setting(&"speed_stat", value)
-## From the definition: [member WalkDefinition.fallback_speed].
-var fallback_speed: float:
-	get:
-		if _walk == null:
-			prepare_settings()
-		return _walk.fallback_speed
-	set(value):
-		_write_setting(&"fallback_speed", value)
 
 # The five stats, read again only when the StatManager's version changes (pawn spec 15.2); every tick was a third of the cost.
 var _stats_version := -1
@@ -85,8 +69,8 @@ func _refresh_stats() -> void:
 	if version == _stats_version and _walk and _walk.speed_stat == _stats_speed_stat: # _walk, not the property: this runs every tick
 		return
 	_stats_version = version
-	_stats_speed_stat = speed_stat
-	_speed = read_stat(speed_stat, fallback_speed)
+	_stats_speed_stat = _walk.speed_stat
+	_speed = read_stat(_walk.speed_stat, _walk.fallback_speed)
 	_acceleration = read_stat(&"Acceleration", 30.0)
 	_deceleration = read_stat(&"Deceleration", 40.0)
 	_air_control = clampf(read_stat(&"AirControl", 0.3), 0.0, 1.0)

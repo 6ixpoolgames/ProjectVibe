@@ -13,14 +13,6 @@ extends AbilityBase
 var _parry: ParryDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
-## From the definition: [member ParryDefinition.turn_degrees_per_second].
-var turn_degrees_per_second: float:
-	get:
-		if _parry == null:
-			prepare_settings()
-		return _parry.turn_degrees_per_second
-	set(value):
-		_write_setting(&"turn_degrees_per_second", value)
 
 
 ## Its kind's defaults: a new [ParryDefinition].
@@ -35,8 +27,8 @@ func _settings_changed() -> void:
 
 func tick(dt: float) -> void:
 	# yaw rolls back and look_yaw is input, so a replay turns the same way.
-	if turn_degrees_per_second > 0.0:
-		pawn.yaw = rotate_toward(pawn.yaw, look_yaw(), deg_to_rad(turn_degrees_per_second) * dt)
+	if _parry.turn_degrees_per_second > 0.0:
+		pawn.yaw = rotate_toward(pawn.yaw, look_yaw(), deg_to_rad(_parry.turn_degrees_per_second) * dt)
 
 
 ## Its [ParryInterceptor], or null. The debug drawing reads the front's width from it.
