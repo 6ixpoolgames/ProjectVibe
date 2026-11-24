@@ -13,7 +13,7 @@ Every class in `assets/scripts/spawning/`, from its doc comments. The overview i
 
 Keeps a number of pawns of one type alive, replacing each that dies after a delay.
 
-Put one in a level and set it in the inspector (pawn spec 8.9). Server or offline only; it spawns through GameMode.spawn_manager, which it needs. With `spawn_group` empty, pawns appear within `scatter_radius` of the spawner; with a group, at SpawnPoints that accept the pawn's team (see the SpawnManager README). It fills up to `keep_alive` when switched on and whenever fewer are alive; a dead pawn's body goes after `body_seconds` and a fresh replacement is due `respawn_seconds` later (a pawn removed another way counts as a death). All delays count ticks, so pausing the tick driver pauses them.
+Put one in a level and set it in the inspector (pawn spec 8.9). Server or offline only; it spawns through GameMode.spawn_manager, which it needs. With `spawn_group` empty, pawns appear within `scatter_radius` of the spawner; with a group, at SpawnPoints that accept the pawn's team (see the SpawnManager README). It fills up to `keep_alive` when switched on and whenever fewer are alive; a dead pawn's body goes after `body_ticks` and a fresh replacement is due `respawn_ticks` later (a pawn removed another way counts as a death). All delays count ticks, so pausing the tick driver pauses them.
 
 ```gdscript
 spawner.active = true          # starts filling; false stops spawning and leaves its pawns where they are
@@ -26,8 +26,8 @@ spawner.get_alive()            # its living pawns
 - `active: bool` = `true`: On: it keeps its pawns topped up. A game that starts its match later (such as after a menu) can leave this off and turn it on.
 - `pawn_type: String` = `""`: The NetworkSession type name to spawn (NetworkSession.register_type). Empty, the default: it spawns nothing, and warns once.
 - `keep_alive: int` = `3`: How many living pawns it keeps.
-- `respawn_seconds: float` = `5.0`: Seconds from a death to its replacement.
-- `body_seconds: float` = `3.0`: Seconds a dead pawn's body stays before it's removed. Below 0: never removed.
+- `respawn_ticks: int` = `300`: Ticks at 60 a second from a death to its replacement (300: 5 s).
+- `body_ticks: int` = `180`: Ticks at 60 a second a dead pawn's body stays before it's removed (180: 3 s). Below 0: never removed.
 - `total_limit: int` = `0`: How many it spawns in all, then stops. 0: no limit.
 - `spawn_group: StringName` = `&""`: Spawn points to use, by group. Empty: around the spawner itself.
 - `scatter_radius: float` = `3.0`: With no group: how far from the spawner, in metres, a pawn may appear.
@@ -41,7 +41,7 @@ spawner.get_alive()            # its living pawns
 
 ### Functions
 
-- `refill_now() -> void`: Fills up now, without waiting for the replacements' delays.
+- `refill_now() -> void`: Fills up now, without waiting for the replacements' delays, as fast as `SpawnManager.max_spawns_per_tick` allows.
 - `get_alive() -> Pawn[]`: Its living pawns.
 - `get_spawned_total() -> int`: How many it has spawned in all.
 

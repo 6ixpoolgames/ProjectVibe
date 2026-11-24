@@ -8,7 +8,7 @@
 ##   - _tick_simulate: acting on it with the fixed tick dt (steer, turn, gravity, jump, move_and_slide)
 ##   - rollback: the TickState child node (TickStateComponent) lists move_dir, position, velocity and so on in the
 ##     inspector, and handles saving, rounding and replaying them. The pawn needs no rollback code. # Claude 2026-11-04
-##   - repeatable randomness with TickDriver.tick_rng, and a cosmetic effect that doesn't replay # Claude 2026-11-04
+##   - repeatable randomness with DeterministicRandom, and a cosmetic effect that doesn't replay # Claude 2026-11-04
 ##   - timers in ticks, seconds only in the inspector
 ##   - latching a key press between rendered frames and ticks, so a press is never lost or doubled
 ##   - smoothing the visible model between ticks with the interpolation fraction
@@ -60,7 +60,6 @@ var jump_effects_played := 0
 var _driver: Node = null         # the TickDriver autoload, or null (escape clause: we tick ourselves)
 var _fallback_tick := 0
 var _jump_latched := false       # set per rendered frame, consumed by the next tick
-var _rng := RandomNumberGenerator.new() # only used without the tick driver
 var _wander_key := 0
 var _next_wander_tick := 0
 var _model: Node3D = null
@@ -95,7 +94,6 @@ func _ready() -> void:
 	safe_margin = 0.0014
 	_gravity = ProjectSettings.get_setting("physics/3d/default_gravity", 9.8)
 	_wander_key = hash(String(name)) # the same pawn wanders the same way on every machine
-	_rng.seed = _wander_key
 	_model = get_node_or_null(model_path)
 	if _model:
 		_model_offset = _model.transform
@@ -119,10 +117,9 @@ func _tick_input(_dt: float, tick: int) -> void:
 			_jump_latched = false
 		Brain.WANDER:
 			if tick >= _next_wander_tick:
-				# Claude 2026-11-04: tick_rng rolls repeat on every machine and in a replay, with no generator state to save
-				var rng: RandomNumberGenerator = _driver.tick_rng(_wander_key) if _driver else _rng
-				var angle := rng.randf() * TAU
-				var walking := rng.randf() > 0.25 # sometimes stand still for a while
+				# Claude 2026-11-24: DeterministicRandom rolls repeat on every machine and in a replay, with no generator state to save
+				var angle := DeterministicRandom.unit(_wander_key, tick, 1) * TAU
+				var walking := DeterministicRandom.unit(_wander_key, tick, 2) > 0.25 # sometimes stand still for a while
 				move_dir = Vector3(cos(angle), 0.0, sin(angle)) if walking else Vector3.ZERO
 				_next_wander_tick = tick + _seconds_to_ticks(wander_change_seconds)
 			# Claude 2026-11-05: checked every tick, since one wander decision can walk about 7 m. Wandering pawns kept walking

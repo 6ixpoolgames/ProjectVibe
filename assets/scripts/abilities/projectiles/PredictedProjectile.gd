@@ -86,7 +86,7 @@ func _exit_tree() -> void:
 func _process(_delta: float) -> void:
 	var rate := float(TickDriver.get_tick_rate())
 	var age := TickDriver.tick + TickDriver.get_interpolation_fraction() - launch_tick
-	if age > flight.max_lifetime * rate + GRACE_SECONDS * rate:
+	if age > flight.lifetime_ticks() + GRACE_SECONDS * rate:
 		queue_free()
 		return
 	if _stopped:

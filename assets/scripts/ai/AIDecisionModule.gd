@@ -117,7 +117,7 @@ func place(manager: AIBehaviourManager) -> void:
 		_forget_row(manager)
 		return
 	var context := manager.pawn.ai_context
-	var row: int = _decider.add_pawn(id, brain, context.pawn_number(), context.random_seed)
+	var row: int = _decider.add_pawn(id, brain, manager.pawn.entity_number(), context.effective_seed())
 	if row < 0:
 		_forget_row(manager)
 		return
@@ -181,7 +181,7 @@ func facts_changed(manager: AIBehaviourManager) -> void:
 		context.last_attacker.get_instance_id() if is_instance_valid(context.last_attacker) else 0)
 	var attacker := context.incoming_attacker
 	var valid := is_instance_valid(attacker)
-	_decider.note_incoming(manager.cpp_row, attacker.get_instance_id() if valid else 0, AIContextComponent.number_of(attacker) if valid else -1,
+	_decider.note_incoming(manager.cpp_row, attacker.get_instance_id() if valid else 0, EntityNumber.of(attacker) if valid else EntityNumber.NONE,
 		context.incoming_start_tick, context.incoming_hit_tick)
 
 

@@ -31,7 +31,7 @@ GameMode="*res://assets/scripts/singletons/GameMode.gd"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/tag_picker/plugin.cfg")
+enabled=PackedStringArray("res://addons/tag_picker/plugin.cfg", "res://addons/tick_seconds/plugin.cfg")
 
 [input]
 

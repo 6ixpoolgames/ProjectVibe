@@ -204,7 +204,7 @@ Design: pawn spec 10, 10.7 and 10.9.
 
 - `while_possessed: int` = `1`: What the AI does while a player has the pawn. MEMORY_ONLY suits possessing an NPC and letting go: the AI already knows what's around.
 - `decision_interval_ticks: int` = `15`: How often the AI decides, in ticks at 60 a second (15: four times a second). Each pawn is offset by its own number, so a crowd doesn't all decide on one tick. Some events wake a decision early (pawn spec 10.9).
-- `random_seed: int` = `0`: Part of every random number this AI uses; pawn numbers still make two pawns differ. A game can set it from its world seed.
+- `random_seed: int` = `0`: Part of every random number this AI uses, with the match seed; entity numbers still make two pawns differ.
 - `order_source: Callable` = `Callable()`: Where every AI pawn's orders come from, if not from its own AI: called instead of `think()` in each pawn's AI step, as `order_source.call(context, tick)`, to tell `context.controller` what to do. Empty (the default): the AI thinks. For playing back an order stream (netcode spec 19.3), recorded through `AIController.order_listener`.
 - `pawn: Pawn` = `null`: The pawn this AI belongs to, or null if its parent isn't one.
 - `current_tick: int` = `0`: The tick the AI is running now. Set by `run_ai()` at the start of each AI step.
@@ -255,8 +255,7 @@ Design: pawn spec 10, 10.7 and 10.9.
 - `random_unit(salt: int) -> float`: A number from 0 up to (not including) 1 for this tick. salt says what it's for (a behaviour uses its name's hash). The same seed, pawn, tick and salt give the same number on every machine and run.
 - `random_unit_at(tick: int, salt: int) -> float`: random_unit() for a given tick.
 - `random_signed(salt: int) -> float`: A number from -1 to 1. See random_unit().
-- `pawn_number() -> int`: This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on every machine, or else a hash of its name.
-- `number_of(other: Pawn) -> int` *(static)*: Any pawn's number, as `pawn_number()` gives it, for a pawn that may have no AI of its own. 0 for null.
+- `effective_seed() -> int`: The seed this AI's rolls use: `random_seed` plus the match's (`DeterministicRandom.match_seed`). The C++ decider is given the same when the pawn joins it.
 
 ## AIDecisionModule
 

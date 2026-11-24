@@ -72,7 +72,7 @@ Add it to the reader too (`ReplayReader.add_channel`) to read it back; a reader 
 |---|---|---|---|
 | `enabled` | `ReplayRecorder` | on | Off: `start_recording()` does nothing |
 | `folder` | `ReplayRecorder` | `user://replays` | Where recordings go, a folder per role |
-| `keep_recordings` | `ReplayRecorder` | 10 | Recordings kept per role's folder; 0 keeps all (and skips the folder size limit) |
+| `keep_recordings` | `ReplayRecorder` | 100 | Recordings kept per role's folder; 0 keeps all (and skips the folder size limit) |
 | `block_seconds` | `ReplayRecorder` | 1 s | Block length: shorter seeks faster, longer makes smaller files |
 | `headless_runs_apart` | `ReplayRecorder` | on | Tests and dedicated servers record into `headless/`, so they never push out played games |
 | `max_recording_seconds` | `ReplayRecorder` | 3 hours | A recording stops at this length |

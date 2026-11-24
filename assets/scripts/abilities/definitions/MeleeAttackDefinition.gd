@@ -88,5 +88,5 @@ func _init() -> void:
 	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 15
 	interrupt_threshold = 15
-	buffer_window = 0.15 # a press near the end of a dash waits for it
+	buffer_window_ticks = 9 # a press near the end of a dash waits for it
 	combo_positions = [1] # an opener, unless a definition says it's a follow-up (pawn spec 8.20)

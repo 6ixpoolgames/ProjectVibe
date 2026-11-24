@@ -23,7 +23,7 @@ var team := 0
 ## Called with each log entry as it's made (a Dictionary, see [method entry]); the owner sends its own hook from it.
 var on_intersect: Callable
 
-# The hit list's holder and property: a PackedInt64Array of pawn keys (HitInfo.key_of).
+# The hit list's holder and property: a PackedInt64Array of entity numbers (Pawn.entity_number).
 var _holder: Object = null
 var _list: StringName = &""
 # The intersect log, one entry per thing met, in order.
@@ -53,7 +53,7 @@ func remember_source(source: AbilityBase) -> void:
 	_kept_effects.clear()
 	if source:
 		_kept_effects.append_array(source.on_hit_effects)
-		_attacker_key = HitInfo.key_of(source.pawn) if source.pawn else -1
+		_attacker_key = source.pawn.entity_number() if source.pawn else EntityNumber.NONE
 	if hit:
 		for effect in hit.target_effects:
 			if effect:
@@ -83,7 +83,7 @@ func meet_pawns(pawns: Array[Pawn], tick: int, attacker: Pawn, path_start: Vecto
 		# An invulnerable pawn isn't met or marked, so a later tick can catch it once that ends (a dash's).
 		if target.ability_manager and target.ability_manager.is_invulnerable():
 			continue
-		var key := HitInfo.key_of(target)
+		var key := target.entity_number()
 		if _keys.has(key) or _listed(key):
 			continue
 		var at := HitQuery.point_on_path(path_start, path_end, target)

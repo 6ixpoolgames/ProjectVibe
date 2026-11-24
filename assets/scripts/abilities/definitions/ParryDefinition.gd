@@ -17,8 +17,8 @@ func _init() -> void:
 	super()
 	trigger_action = &"parry"
 	category = Tags.ABILITY.COMBAT_PARRY
-	duration = 0.35
-	cooldown = 1.5
+	duration_ticks = 21
+	cooldown_ticks = 90
 	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 10
 	interrupt_threshold = 20

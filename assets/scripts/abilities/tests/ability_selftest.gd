@@ -18,8 +18,8 @@ class RootingAttack extends AbilityBase:
 		kind = Kind.ACTION
 		trigger_action = &"primary"
 		category = &"ability.combat.melee"
-		duration = 0.5
-		cooldown = 0.5
+		duration_ticks = 30
+		cooldown_ticks = 30
 		locks_out = [&"ability.movement"]
 
 	func start() -> void:
@@ -38,7 +38,7 @@ class SometimesAction extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		trigger_action = &"secondary"
-		buffer_window = 0.2
+		buffer_window_ticks = 12
 
 	func can_start() -> bool:
 		return allowed
@@ -99,9 +99,9 @@ func _test_sprint() -> void:
 	var pawn := _make_pawn(Vector3(0, 0.1, 0))
 	var sprint: SprintAbility = pawn.ability_manager.get_node("Sprint")
 	sprint.make_definition_unique() # Claude 2026-11-21: settings come from a shared definition; this pawn gets its own copy
-	sprint.max_charge = 0.5
-	sprint.recharge_delay = 0.5
-	sprint.min_start_charge = 0.25
+	sprint.max_charge_ticks = 30
+	sprint.recharge_delay_ticks = 30
+	sprint.min_start_charge_ticks = 15
 	var ai := _ai(pawn)
 	await _ticks(20)
 	_check(sprint.charge_ticks() == 30, "it starts with a full charge (%d ticks)" % sprint.charge_ticks())
@@ -334,7 +334,7 @@ class CountedAction extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		category = &"ability.combat.melee"
-		duration = 0.5
+		duration_ticks = 30
 
 	func start() -> void:
 		starts += 1
@@ -379,13 +379,13 @@ func _test_restart_and_first_tick() -> void:
 	await _ticks(5)
 	_check(manager.start_ability(coded), "restart: a running ability can be started again")
 	_check(coded.starts == 2 and coded.stops == 1 and finished == [&"Coded"], "restart: the run it had is stopped and reported finished first (%d starts, %d stops, finished %s)" % [coded.starts, coded.stops, str(finished)])
-	_check(coded.ticks_left() == coded.duration_ticks() and coded.cooldown_ticks_left() == 0, "restart: and it runs its whole length again, with no cooldown in between")
+	_check(coded.ticks_left() == coded.run_length_ticks() and coded.cooldown_ticks_left() == 0, "restart: and it runs its whole length again, with no cooldown in between")
 
 	# An ability a press starts gets its first tick on the next tick, wherever it is in the list.
 	_ai(pawn).press(&"primary")
 	await _ticks(1)
 	_check(strong.starts == 1 and weak.starts == 0, "(the press starts the one with the higher priority, later in the list)")
-	_check(strong.ticked == 0 and strong.ticks_left() == strong.duration_ticks(), "first tick: an ability started in place of an earlier one isn't also ticked on that tick (%d ticks, %d of %d left)" % [strong.ticked, strong.ticks_left(), strong.duration_ticks()])
+	_check(strong.ticked == 0 and strong.ticks_left() == strong.run_length_ticks(), "first tick: an ability started in place of an earlier one isn't also ticked on that tick (%d ticks, %d of %d left)" % [strong.ticked, strong.ticks_left(), strong.run_length_ticks()])
 	await _ticks(1)
 	_check(strong.ticked == 1, "first tick: its first tick is the next one")
 	pawn.free()

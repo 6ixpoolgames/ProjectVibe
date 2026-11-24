@@ -31,7 +31,7 @@ class Mover extends Node3D:
 		simulate_calls += 1
 		pos += want * dt
 		var driver: TickDriverSingleton = get_node("/root/TickDriver")
-		var roll := driver.tick_rng(7).randf()
+		var roll := DeterministicRandom.unit(7, driver.tick) # Claude 2026-11-24: was tick_rng
 		if rolls.has(t) and rolls[t] != roll:
 			rolls_repeat = false
 		rolls[t] = roll
@@ -485,7 +485,7 @@ func _test_rollback() -> void:
 	_check(m.effects == effects, "cosmetic effects don't replay")
 	_check(m.replay_ticks == range(from + 1, now + 1), "is_resimulating is on, and TickDriver.tick reads the replayed tick")
 	_check(not nt.is_resimulating(), "is_resimulating is off afterwards")
-	_check(m.rolls_repeat, "tick_rng gives the same rolls in a replay")
+	_check(m.rolls_repeat, "DeterministicRandom gives the same rolls in a replay")
 	_check(other.simulate_calls == bystander, "participants with no rollback state aren't replayed")
 	_check(signals == [[from, now]], "after_rollback reports the replayed range")
 

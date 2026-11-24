@@ -130,7 +130,7 @@ script = ExtResource("4_spawner")
 active = false
 pawn_type = "hero_red"
 keep_alive = 1
-respawn_seconds = 30.0
+respawn_ticks = 1800
 scatter_radius = 4.0
 
 [node name="HeroBlueSpawner" type="Node3D" parent="Spawning"]
@@ -139,7 +139,7 @@ script = ExtResource("4_spawner")
 active = false
 pawn_type = "hero_blue"
 keep_alive = 1
-respawn_seconds = 30.0
+respawn_ticks = 1800
 scatter_radius = 4.0
 
 [node name="HeroAllySpawner" type="Node3D" parent="Spawning"]
@@ -148,7 +148,7 @@ script = ExtResource("4_spawner")
 active = false
 pawn_type = "hero_ally"
 keep_alive = 1
-respawn_seconds = 30.0
+respawn_ticks = 1800
 scatter_radius = 4.0
 
 [node name="RallyPoint" type="Node3D" parent="." groups=["rally_point"]]

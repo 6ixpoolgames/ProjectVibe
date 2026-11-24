@@ -14,7 +14,7 @@ class Busy extends AbilityBase:
 		kind = Kind.ACTION
 		trigger_action = &"secondary"
 		category = &"ability.utility.interact"
-		duration = 2.0
+		duration_ticks = 120
 		locks_out = [&"ability.movement.walk", &"ability.movement.sprint", &"ability.movement.jump"]
 
 
@@ -52,7 +52,7 @@ func _test_dash() -> void:
 	await _ticks(15)
 	# Claude 2026-11-10, the owner's design: it speeds up at 100 m/s^2 for 0.1 s (+10 m/s), then slows down at 50 m/s^2 for 0.2 s
 	# (-10 m/s), so it ends at the speed it started with. These checks replace the flat 18 m/s ones (a burst at DashSpeed, about 2.7 m).
-	_check(dash.duration_ticks() == 18, "it lasts 18 ticks: 6 speeding up, 12 slowing down (%d)" % dash.duration_ticks())
+	_check(dash.run_length_ticks() == 18, "it lasts 18 ticks: 6 speeding up, 12 slowing down (%d)" % dash.run_length_ticks())
 	var start := pawn.global_position
 	ai.move_in_direction(Vector3(1, 0, 0))
 	ai.press(&"dash")

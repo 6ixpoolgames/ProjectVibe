@@ -228,7 +228,7 @@ func _work_out(slot: int) -> void:
 		Kind.INCOMING_ATTACK_TICK:
 			values[slot] = float(context.incoming_start_tick)
 		Kind.INCOMING_ATTACKER:
-			values[slot] = float(AIContextComponent.number_of(context.incoming_attacker)) if is_instance_valid(context.incoming_attacker) else -1.0
+			values[slot] = float(EntityNumber.of(context.incoming_attacker)) if is_instance_valid(context.incoming_attacker) else -1.0
 		Kind.GROUP_DISTANCE:
 			var point := nearest_in_group(_parameters[slot], tick)
 			values[slot] = _flat_distance(point.global_position) if point else FAR

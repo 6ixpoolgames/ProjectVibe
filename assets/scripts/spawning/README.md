@@ -15,7 +15,7 @@ Where pawns appear and how they're kept topped up: spawn points placed in a leve
 ## The pieces
 
 - **`SpawnPoint`**: a spot in a level with a `team`, a `group` and a `scatter_radius`, like Unreal's PlayerStart. It spawns nothing itself.
-- **`PawnSpawner`**: keeps `keep_alive` pawns of one `pawn_type` alive, on the server or offline, replacing each that dies after `respawn_seconds`.
+- **`PawnSpawner`**: keeps `keep_alive` pawns of one `pawn_type` alive, on the server or offline, replacing each that dies after `respawn_ticks`.
 - **`SpawnManager`** (`game_mode/`): the GameMode module both go through; it picks points and brings players back after dying.
 
 ## How to use it
@@ -26,7 +26,7 @@ Where pawns appear and how they're kept topped up: spawn points placed in a leve
 
 ## How it works
 
-- **PawnSpawner** fills up to `keep_alive` as soon as it's switched on, and after that whenever it has fewer living pawns and no replacement is waiting. A pawn of its own that dies has its body removed after `body_seconds` and a replacement due `respawn_seconds` after the death; the replacement is a fresh pawn, so its AI starts with no memory of the fight. A pawn removed another way counts as a death with no body to remove. `total_limit` above 0 stops it after that many in all. With `only_where_loaded` on it waits while the ground around it isn't loaded (the `AIActivationManager` rule; no terrain counts as loaded). All delays count ticks.
+- **PawnSpawner** fills up to `keep_alive` as soon as it's switched on, and after that whenever it has fewer living pawns and no replacement is waiting. A pawn of its own that dies has its body removed after `body_ticks` and a replacement due `respawn_ticks` after the death (ticks at 60 a second); spawners share the spawn manager's `max_spawns_per_tick` (1), so a wave arrives one pawn a tick; the replacement is a fresh pawn, so its AI starts with no memory of the fight. A pawn removed another way counts as a death with no body to remove. `total_limit` above 0 stops it after that many in all. With `only_where_loaded` on it waits while the ground around it isn't loaded (the `AIActivationManager` rule; no terrain counts as loaded). All delays count ticks.
 - **Where pawns appear.** With `spawn_group` empty, within `scatter_radius` of the spawner facing its way; with a group, at `SpawnPoint`s in it that accept the pawn's team. A request with no group may use any point its team may use. How a point is chosen: the game_mode README.
 
 ## Tests

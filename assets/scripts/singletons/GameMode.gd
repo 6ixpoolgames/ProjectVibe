@@ -50,6 +50,14 @@ var team_registry: TeamRegistry = null
 ## Moves AI pawns walking on the ground as one crowd (pawn spec 8.22), or null without one.
 var crowd_mover: CrowdMover = null
 
+## The match's random seed (pawn spec 16.9): every [DeterministicRandom] roll mixes it in. Set it before the match starts, the same on
+## every machine; setting it sets [member DeterministicRandom.match_seed]. 0 by default.
+# REFACTOR: nothing sends it to clients yet, so a networked game that changes it must set the same value on every machine itself.
+var match_seed := 0:
+	set(value):
+		match_seed = value
+		DeterministicRandom.match_seed = value
+
 var _modules: Array[GameModeModule] = []
 
 

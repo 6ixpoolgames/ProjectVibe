@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 184 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 187 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -59,6 +59,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [DeathDefinition](../assets/scripts/abilities/REFERENCE.md#deathdefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | Death's settings: the base ones, with its defaults. |
 | [Definition](../assets/scripts/abilities/REFERENCE.md#definition) | [abilities](../assets/scripts/abilities/README.md) | Resource | Settings shared by everything that uses them, with variants: the base of [AbilityDefinition] and [ProjectileDefinition] (ability spec 3). |
 | [DefinitionRegistry](../assets/scripts/abilities/REFERENCE.md#definitionregistry) | [abilities](../assets/scripts/abilities/README.md) | RefCounted | Gives every definition file (abilities, projectiles) an id that's the same on every machine with the same files (ability spec 3.1). |
+| [DeterministicRandom](../assets/scripts/singletons/REFERENCE.md#deterministicrandom) | [singletons](../assets/scripts/singletons/README.md) | RefCounted | Repeatable random numbers for gameplay: each roll is a hash of the match seed, a key, a tick and a salt (pawn spec 16.9). |
 | [DiagnosticsLogger](../assets/scripts/diagnostics/REFERENCE.md#diagnosticslogger) | [diagnostics](../assets/scripts/diagnostics/README.md) | Logger | Catches the engine's warnings and errors for [DiagnosticsManager]. |
 | [DiagnosticsManager](../assets/scripts/diagnostics/REFERENCE.md#diagnosticsmanager) | [diagnostics](../assets/scripts/diagnostics/README.md) | GameModeModule | Measures every frame, keeps the history, spikes and session log, feeds the replay and shows the panels. |
 | [DiagnosticsPanels](../assets/scripts/diagnostics/REFERENCE.md#diagnosticspanels) | [diagnostics](../assets/scripts/diagnostics/README.md) | CanvasLayer | The on-screen panels, one key each, for reading [DiagnosticsManager]'s numbers. |
@@ -68,6 +69,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [EffectHeldTotals](../assets/scripts/effects/REFERENCE.md#effectheldtotals) | [effects](../assets/scripts/effects/README.md) | RefCounted | What all the held parts on one pawn add up to right now. |
 | [EffectManager](../assets/scripts/effects/REFERENCE.md#effectmanager) | [effects](../assets/scripts/effects/README.md) | Node | Applies effects to its pawn and keeps the over-time ones. |
 | [EffectPart](../assets/scripts/effects/REFERENCE.md#effectpart) | [effects](../assets/scripts/effects/README.md) | Resource | One thing an [Effect] does: the base for the parts in an Effect's parts list. |
+| [EntityNumber](../assets/scripts/entities/REFERENCE.md#entitynumber) | [entities](../assets/scripts/entities/README.md) | RefCounted | One number for every entity, the same on every machine and in every replay (pawn spec 16.9). |
 | [FadeProfile](../assets/scripts/ai/REFERENCE.md#fadeprofile) | [ai](../assets/scripts/ai/README.md) | Resource | How a value fades over ticks, from full to nothing, as a Resource designers tune in the inspector. |
 | [FireProjectileStep](../assets/scripts/abilities/REFERENCE.md#fireprojectilestep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | Fires a projectile on its first tick, from the pawn's muzzle point toward where it looks. |
 | [FloatingSword](../assets/scripts/visuals/REFERENCE.md#floatingsword) | [visuals](../assets/scripts/visuals/README.md) | Node3D | A sword that floats beside the pawn and swings through each attack, exactly where the hit is checked. |
@@ -176,6 +178,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [TerrainSettings](../assets/scripts/navigation/REFERENCE.md#terrainsettings) | [navigation](../assets/scripts/navigation/README.md) | RefCounted | Where a terrain is and how big its chunks are, as plain values (nav spec 21.6). |
 | [TickDriverSingleton](../assets/scripts/singletons/REFERENCE.md#tickdriversingleton) | [singletons](../assets/scripts/singletons/README.md) | Node | Runs all gameplay in numbered, fixed-length ticks, online and offline. Autoload "TickDriver". |
 | [TickJobs](../assets/scripts/jobs/REFERENCE.md#tickjobs) | [jobs](../assets/scripts/jobs/README.md) | RefCounted | Finds the one job scheduler every job kind shares (scaling spec section 4). |
+| [TickScheduler](../assets/scripts/singletons/REFERENCE.md#tickscheduler) | [singletons](../assets/scripts/singletons/README.md) | RefCounted | Actions booked for a tick and a point in it, run in a fixed order (netcode spec 19.4, pawn spec 16.9). |
 | [TickStateComponent](../assets/scripts/netcode/REFERENCE.md#tickstatecomponent) | [netcode](../assets/scripts/netcode/README.md) | Node | Makes an entity rollback-ready without writing code (netcode spec sections 5 and 6). |
 | [TimelineEntry](../assets/scripts/abilities/REFERENCE.md#timelineentry) | [abilities](../assets/scripts/abilities/README.md) | Resource | One entry of an ability's step timeline: which step runs, the values it runs with, and when it starts (ability spec 6.2). |
 | [ToyWaddle](../assets/scripts/visuals/REFERENCE.md#toywaddle) | [visuals](../assets/scripts/visuals/README.md) | Node3D | Makes a pawn's model move like a toy being played with: rocking, hopping, leaning into a dash and falling over when it dies. |

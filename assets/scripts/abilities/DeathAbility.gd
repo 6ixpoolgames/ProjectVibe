@@ -34,7 +34,7 @@ func _running_changed(running: bool) -> void:
 
 
 # Started with one tick, then put off for as long as Health is 0 (start and tick).
-func duration_ticks() -> int:
+func run_length_ticks() -> int:
 	return 1
 
 

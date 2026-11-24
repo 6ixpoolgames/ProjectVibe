@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: abilities/CHANGELOG.md.
 ## A short, fast burst toward the movement input: an action bound to &"dash".
 ##
-## It adds acceleration along the dash direction for [member speed_up_seconds], then takes speed off for [member slow_down_seconds], so
+## It adds acceleration along the dash direction for [member speed_up_ticks], then takes speed off for [member slow_down_ticks], so
 ## left alone the pawn ends at the speed it started with. Speed gained some other way during a dash stays. Walking, sprinting and jumping
 ## are locked out while it runs, and it works on the ground and in the air ([member usable_in_air]). The pawn turns to face the dash.
 ## [br][br]It cancels a swing, and it's invulnerable for its first 0.18 s (an [InvulnerabilityInterceptor], pawn spec 8.23). Rollback:
@@ -30,14 +30,14 @@ var fallback_acceleration: float:
 		return _dash.fallback_acceleration
 	set(value):
 		_write_setting(&"fallback_acceleration", value)
-## From the definition: [member DashDefinition.speed_up_seconds].
-var speed_up_seconds: float:
+## From the definition: [member DashDefinition.speed_up_ticks].
+var speed_up_ticks: int:
 	get:
 		if _dash == null:
 			prepare_settings()
-		return _dash.speed_up_seconds
+		return _dash.speed_up_ticks
 	set(value):
-		_write_setting(&"speed_up_seconds", value)
+		_write_setting(&"speed_up_ticks", value)
 ## From the definition: [member DashDefinition.slow_down_deceleration].
 var slow_down_deceleration: float:
 	get:
@@ -46,14 +46,14 @@ var slow_down_deceleration: float:
 		return _dash.slow_down_deceleration
 	set(value):
 		_write_setting(&"slow_down_deceleration", value)
-## From the definition: [member DashDefinition.slow_down_seconds].
-var slow_down_seconds: float:
+## From the definition: [member DashDefinition.slow_down_ticks].
+var slow_down_ticks: int:
 	get:
 		if _dash == null:
 			prepare_settings()
-		return _dash.slow_down_seconds
+		return _dash.slow_down_ticks
 	set(value):
-		_write_setting(&"slow_down_seconds", value)
+		_write_setting(&"slow_down_ticks", value)
 ## From the definition: [member DashDefinition.usable_in_air].
 var usable_in_air: bool:
 	get:
@@ -102,8 +102,8 @@ func is_timed() -> bool:
 
 
 ## The speed-up's ticks plus the slow-down's.
-func duration_ticks() -> int:
-	return manager.ticks_for(speed_up_seconds) + manager.ticks_for(slow_down_seconds) if manager else 0
+func run_length_ticks() -> int:
+	return TickDriver.ticks_at_rate(speed_up_ticks) + TickDriver.ticks_at_rate(slow_down_ticks)
 
 
 ## Anywhere with usable_in_air on (the default); on the ground only with it off.
@@ -123,7 +123,7 @@ func start() -> void:
 
 # Adds speed, then takes it away. dash_direction is flat, so the vertical speed (a jump, gravity) is left alone.
 func tick(dt: float) -> void:
-	if ticks_before_this_run() < manager.ticks_for(speed_up_seconds):
+	if ticks_before_this_run() < TickDriver.ticks_at_rate(speed_up_ticks):
 		pawn.velocity += dash_direction * read_stat(acceleration_stat, fallback_acceleration) * dt
 		return
 	# The speed along the dash direction, and how much of it to take off this tick: never more than there is, so never backwards.

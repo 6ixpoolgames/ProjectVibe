@@ -3,6 +3,7 @@
 // AIBehaviourManager.decide() (assets/scripts/ai/AIBehaviourManager.gd) exactly, in the same order with the same arithmetic, so the
 // two agree to the bit: a change to one goes in both, and ai_batch_decider_selftest compares them.
 #include "ai_batch_decider.h"
+#include "deterministic_random.h"
 #include "ai_memory_store.h"
 
 #include <godot_cpp/core/class_db.hpp>
@@ -62,13 +63,7 @@ inline double input_at(const double *inputs, int64_t count, int slot) {
 } // namespace
 
 double AIBatchDecider::random_unit_at(int64_t seed, int64_t pawn_number, int64_t tick, int64_t salt) {
-	// GDScript's ints are 64-bit and wrap on overflow; unsigned arithmetic wraps the same way in C++ (signed overflow is undefined).
-	uint64_t h = (uint64_t(seed) * 83492791ULL) ^ (uint64_t(pawn_number) * 19349663ULL) ^ (uint64_t(tick) * 73856093ULL) ^ uint64_t(salt);
-	h &= 0xFFFFFFFFULL;
-	h = ((h ^ (h >> 16)) * 0x45D9F3BULL) & 0xFFFFFFFFULL;
-	h = ((h ^ (h >> 16)) * 0x45D9F3BULL) & 0xFFFFFFFFULL;
-	h = h ^ (h >> 16);
-	return double(h & 0xFFFFFFULL) / 16777216.0;
+	return deterministic_random::unit(seed, pawn_number, tick, salt);
 }
 
 double AIBatchDecider::random_unit(int64_t seed, int64_t pawn_number, int64_t tick, int64_t salt) const {

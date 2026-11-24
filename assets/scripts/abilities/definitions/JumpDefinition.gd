@@ -6,11 +6,11 @@
 class_name JumpDefinition
 extends AbilityDefinition
 
-## Seconds after leaving the ground, without jumping, that a press still jumps.
-@export_range(0.0, 1.0, 0.01) var coyote_time: float = 0.1:
+## Ticks at 60 a second after leaving the ground, without jumping, that a press still jumps.
+@export_range(0, 60, 1) var coyote_ticks: int = 6:
 	set(value):
-		coyote_time = value
-		_changed(&"coyote_time", value)
+		coyote_ticks = value
+		_changed(&"coyote_ticks", value)
 
 
 func _init() -> void:
@@ -19,5 +19,5 @@ func _init() -> void:
 	# Tags are constants, so a misspelling is an error, not a warning while playing.
 	category = Tags.ABILITY.MOVEMENT_JUMP
 	extra_categories = [Tags.ABILITY.MOVEMENT_BASIC]
-	buffer_window = 0.15
+	buffer_window_ticks = 9
 	interrupt_priority = 5 # between Walk (0) and Sprint (10)

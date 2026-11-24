@@ -27,7 +27,7 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
                               └─ held parts (every machine):    StatModifierPart, AbilityPriorityPart, ResistancePart
 ```
 
-- **`Effect`** is a Resource, saved in `resources/effects/`: instant (its parts run once) or over time (`duration_seconds`, with an optional `period_seconds` and a `stacking` rule). Its `tags` say what kind it is; `is_harmful` decides whether resistances and invulnerability apply.
+- **`Effect`** is a Resource, saved in `resources/effects/`: instant (its parts run once) or over time (`duration_ticks`, with an optional `period_ticks` and a `stacking` rule, in ticks at 60 a second). Its `tags` say what kind it is; `is_harmful` decides whether resistances and invulnerability apply.
 - **Parts** (`EffectPart`, in `parts/`) are what an effect does, run in list order. Do-once parts run on the authority only (the server, or offline): damage, heals, pushes, lifesteal. Held parts hold while an over-time effect lasts, on every machine, so a client predicting its own pawn agrees: stat changes, ability number boosts, resistances.
 - **`EffectApplier`** is a child node of an ability (or of a HitInterceptor) that says which effects it applies, when (ON_START, ON_HIT, ON_INTERCEPT) and to whom (TARGET or SELF).
 - **`EffectManager`** is a part on every pawn. It applies effects to its own pawn with its resistances, keeps over-time ones in `active_effects` (rolled back and sent in snapshots), counts them down each tick and clears them when the pawn dies.
@@ -40,7 +40,7 @@ What abilities and hits do to pawns: damage, heals, pushes, slows, poisons, resi
 
 **Make an ability's hit do it.** Add an `EffectApplier` under the ability, trigger ON_HIT, applies_to TARGET, and put the effect in its list. Add a `KnockbackPart` to the effect for a push (and a hop), a `LifestealPart` after the damage to heal the attacker. Applies_to SELF on ON_HIT rewards the attacker only when the hit connects.
 
-**Make a poison or a heal over time.** Set `duration_seconds` (3) and `period_seconds` (1): its do-once parts run when it lands and every period while it lasts. `stacking` ADD_STACK with `max_stacks` makes repeated hits stack.
+**Make a poison or a heal over time.** Set `duration_ticks` (180, 3 s) and `period_ticks` (60, 1 s): its do-once parts run when it lands and every period while it lasts. `stacking` ADD_STACK with `max_stacks` makes repeated hits stack.
 
 **Make a slow, a buff or a ward.** An over-time effect with held parts: a `StatModifierPart` (MoveSpeed, multiply 0.7) for a slow, a `ResistancePart` (`effect.damage.elemental.fire`, 0.5) for a fire ward, an `AbilityPriorityPart` to boost a group of abilities' priority or interrupt numbers.
 
@@ -80,8 +80,8 @@ var hurt := Effect.make_damage(20)                        # a quick instant dama
 
 | Setting | Where | Default | What it does |
 |---|---|---|---|
-| `duration_seconds` | `Effect` | 0 (instant) | How long it stays on the pawn |
-| `period_seconds` | `Effect` | 0 | For an over-time effect, how often its do-once parts run again |
+| `duration_ticks` | `Effect` | 0 (instant) | How long it stays on the pawn, in ticks at 60 a second |
+| `period_ticks` | `Effect` | 0 | For an over-time effect, how often its do-once parts run again, in ticks at 60 a second |
 | `stacking`, `max_stacks` | `Effect` | REFRESH, 1 | What a second application does: restart its time, add a stack, or nothing |
 | `is_harmful` | `Effect` | on | Resistances and invulnerability apply to it |
 | `tags` | `Effect` | empty | What kind of effect it is, for resistances and removing by tag |

@@ -37,7 +37,7 @@ static func make(attacker_pawn: Pawn, by: AbilityBase, target_pawn: Pawn, push_d
 		target_effects: Array[Effect], self_effects: Array[Effect]) -> HitInfo:
 	var hit := HitInfo.new()
 	hit.attacker = attacker_pawn
-	hit.attacker_id = key_of(attacker_pawn) if attacker_pawn else -1
+	hit.attacker_id = attacker_pawn.entity_number() if attacker_pawn else EntityNumber.NONE
 	hit.ability = by
 	hit.target = target_pawn
 	hit.tick = on_tick
@@ -54,12 +54,6 @@ func deliver() -> void:
 		target.ability_manager.receive_hit(self)
 	if ability and is_instance_valid(ability):
 		ability.hit_landed.emit(self)
-
-
-## A pawn's key for hit lists and ids: its entity id, the same on every machine, else its instance id.
-static func key_of(pawn: Pawn) -> int:
-	var entity := pawn.get_network_entity()
-	return entity.entity_id if entity and entity.entity_id >= 0 else pawn.get_instance_id()
 
 
 ## The Health this hit's effects take before resistances, from their StatChangeParts. For readouts that show a hit before it lands.

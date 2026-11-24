@@ -147,7 +147,7 @@ func _test_poison() -> void:
 	var b := _pawn(Vector3(3, 0.1, 0))
 	await _ticks(3)
 	var poison := _effect(&"test poison", true, 0.5, [_change(&"Health", -5.0)])
-	poison.period_seconds = 0.1
+	poison.period_ticks = 6
 	poison.tags = [Tags.EFFECT.DAMAGE_POISON]
 	a.effect_manager.apply_effect(poison, b)
 	_check(a.stat_manager.get_health() == 95.0, "a poison runs once when first applied (%d)" % a.stat_manager.get_health())
@@ -262,7 +262,7 @@ func _effect(effect_name: StringName, harmful: bool, seconds: float, parts: Arra
 	var effect := Effect.new()
 	effect.effect_name = effect_name
 	effect.is_harmful = harmful
-	effect.duration_seconds = seconds
+	effect.duration_ticks = roundi(seconds * 60.0) # Claude 2026-11-24: effects last ticks at 60 a second
 	effect.parts = parts
 	return effect
 

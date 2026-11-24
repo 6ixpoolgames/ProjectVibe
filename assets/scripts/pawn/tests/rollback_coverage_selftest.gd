@@ -245,7 +245,7 @@ func _add_test_effects(pawn: Pawn) -> void:
 	var melee: AbilityBase = pawn.ability_manager.get_node("MeleeAttack")
 	var slow := Effect.new()
 	slow.effect_name = &"coverage slow"
-	slow.duration_seconds = 1.0
+	slow.duration_ticks = 60
 	var slower := StatModifierPart.new()
 	slower.stat = &"MoveSpeed"
 	slower.multiply = 0.5
@@ -253,7 +253,7 @@ func _add_test_effects(pawn: Pawn) -> void:
 	var boost := Effect.new()
 	boost.effect_name = &"coverage dash boost"
 	boost.is_harmful = false
-	boost.duration_seconds = 1.0
+	boost.duration_ticks = 60
 	var stronger := AbilityPriorityPart.new()
 	stronger.ability_tag = Tags.ABILITY.MOVEMENT_DASH
 	stronger.number = AbilityPriorityPart.Number.INTERRUPT_PRIORITY

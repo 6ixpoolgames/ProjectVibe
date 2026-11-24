@@ -14,5 +14,5 @@ script = ExtResource("3_s51qy")
 effect_name = &"combo finisher boost"
 tags = Array[StringName]([&"effect.buff.combo"])
 is_harmful = false
-duration_seconds = 0.6
+duration_ticks = 36
 parts = Array[ExtResource("1_m0ulu")]([SubResource("Resource_7ixa1")])

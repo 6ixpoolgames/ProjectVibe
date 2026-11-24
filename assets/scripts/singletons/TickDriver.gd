@@ -7,7 +7,8 @@
 ## TickDriver.register(self)   # then write any of _tick_input(dt, tick), _tick_capture_input(tick),
 ##                             # _tick_simulate(dt, tick), _tick_record(tick); each is optional
 ## [/codeblock]
-## One tick: [signal before_tick], input, capture input, simulate, [signal after_simulate], record, commit, [signal after_tick]. Within a
+## One tick: the [member scheduler]'s actions due before it, [signal before_tick], input, capture input, simulate, the scheduler's actions
+## due after simulate (hits), [signal after_simulate], record, commit, [signal after_tick]. Within a
 ## phase, lower [code]order[/code] runs first, then registration order. The commit writes every entity's state into [member store], the
 ## record of play at tick boundaries. A participant with a [code]due_tick[/code] property (a pawn) isn't called in input or simulate
 ## before that tick, so a pawn on a load step costs nothing on the ticks it skips. Rollback and the load ladder are in the README.
@@ -21,10 +22,10 @@ signal before_tick_loop
 signal before_tick(dt: float, tick: int)
 ## Sent at the end of each tick, after every phase. A rollback from here counts this tick as finished.
 signal after_tick(dt: float, tick: int)
-## Sent after every participant has simulated, before anything is recorded (pawn spec 15.1). Queued effects, such as hits, are delivered
-## here, so they never depend on simulate order. Not sent during a replay.
+## Sent after every participant has simulated and the [member scheduler]'s actions due then (hits) have run, before anything is
+## recorded (pawn spec 15.1). Not sent during a replay.
 signal after_simulate(dt: float, tick: int)
-## Sent once a frame, after the frame's last tick. Delays counted in ticks (SpawnManager's, say) run here, between ticks.
+## Sent once a frame, after the frame's last tick.
 signal after_tick_loop
 ## Sent when a rollback's replay is over: it went back to from_tick and replayed up to to_tick.
 signal after_rollback(from_tick: int, to_tick: int)
@@ -73,6 +74,9 @@ var store: Object = null
 static var use_native_store: bool = true
 ## Entities the tripwire ([member verify_store_each_tick]) has caught, added up.
 var store_mismatches: int = 0
+
+## Actions booked for a tick and a point in it (hit delivery, delays), run in a fixed order (netcode spec 19.4). See [TickScheduler].
+var scheduler := TickScheduler.new()
 
 ## Current tick number: the last tick that ran, 0 before any. Change it only with [method set_tick].
 var tick: int = 0
@@ -157,7 +161,6 @@ var _in_tick := false
 var _in_phases := false           # inside a tick's phases; rollback isn't allowed then
 var _in_simulate := false         # inside a tick's simulate phase (not a replay's); see is_in_simulate()
 var _removed_now: Dictionary = {} # unregistered during the current tick
-var _tick_random := RandomNumberGenerator.new()
 
 # Each entry keeps its object's id and phases (worked out once, at register) and the list stays in order as entries arrive, so a pawn
 # spawning or dying costs no sort and no asking what functions it has.
@@ -371,6 +374,16 @@ func seconds_to_ticks(seconds: float) -> int:
 	return maxi(1, ceili(seconds * _rate - 0.0001))
 
 
+## Seconds as ticks at 60 a second, for writing a setting that's counted in ticks (pawn spec 16.1): 0.5 is 30.
+func reference_ticks(seconds: float) -> int:
+	return roundi(seconds * REFERENCE_RATE)
+
+
+## A setting counted in ticks at 60 a second as seconds: 30 is 0.5.
+func reference_seconds(reference_ticks_count: int) -> float:
+	return reference_ticks_count / float(REFERENCE_RATE)
+
+
 ## Ticks to seconds at this match's rate.
 func ticks_to_seconds(ticks: int) -> float:
 	return ticks * get_tick_dt()
@@ -401,13 +414,6 @@ func is_in_tick() -> bool:
 ## [signal after_simulate] (pawn spec 15.1).
 func is_in_simulate() -> bool:
 	return _in_simulate
-
-
-## Repeatable randomness for gameplay, instead of randf(): the rolls depend only on key (usually an entity id), tick and salt (separates
-## rolls in one tick), so a replayed tick rolls the same. Use it at once; the same object is returned every call.
-func tick_rng(key: int, salt: int = 0) -> RandomNumberGenerator:
-	_tick_random.seed = hash(Vector3i(key, tick, salt))
-	return _tick_random
 
 
 ## Rolls predicted participants back to how they ended from_tick, then replays every tick up to the last finished one (netcode spec 3.5).
@@ -572,6 +578,9 @@ func _run_tick(dt: float) -> void:
 		_rebuild_phases()
 	if verify_store_each_tick:
 		_verify_store(tick)
+	# On the tick, before it runs: delays such as respawns. Objects they add or remove join the phases now, between ticks.
+	if scheduler.run_due(TickScheduler.Point.BEFORE_TICK, tick + 1) > 0 and _dirty:
+		_rebuild_phases()
 	tick += 1
 	_in_tick = true
 	var mark := Time.get_ticks_usec() if profile_enabled else 0
@@ -605,7 +614,10 @@ func _run_tick(dt: float) -> void:
 		elif _removed_now.is_empty() or not _removed_now.has(p):
 			p._tick_simulate(dt, tick)
 	_in_simulate = false
-	after_simulate.emit(dt, tick) # queued effects, such as hits, are delivered here (pawn spec 15.1)
+	var hits_started := PerfScopes.begin() # timed for diagnostics, as pawn.hits
+	if scheduler.run_due(TickScheduler.Point.AFTER_SIMULATE, tick) > 0: # hits booked during simulate, in a fixed order (pawn spec 15.1)
+		PerfScopes.end(&"pawn.hits", hits_started)
+	after_simulate.emit(dt, tick)
 	mark = _profile_phase(&"simulate", mark)
 	for p in _record:
 		if not is_instance_valid(p):

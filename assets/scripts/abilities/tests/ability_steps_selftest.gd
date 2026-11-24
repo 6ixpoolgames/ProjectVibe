@@ -52,7 +52,7 @@ class StepAttack extends AbilityBase:
 		trigger_action = &"primary"
 		category = Tags.ABILITY.COMBAT_MELEE
 		locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
-		cooldown = 0.5
+		cooldown_ticks = 30
 		interrupt_priority = 15
 		interrupt_threshold = 50
 
@@ -70,7 +70,7 @@ class Canceller extends AbilityBase:
 		kind = Kind.ACTION
 		trigger_action = &"dash"
 		category = Tags.ABILITY.MOVEMENT_DASH
-		duration = 0.2
+		duration_ticks = 12
 		interrupt_priority = 20
 
 

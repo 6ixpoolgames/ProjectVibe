@@ -23,15 +23,15 @@ Every class in `assets/scripts/effects/`, from its doc comments. The overview is
 
 One effect, such as a sword hit, a poison or a combo boost: what it does to the pawn it's applied to.
 
-A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) runs its `parts` once; over time stays on the pawn for `duration_seconds`, its held parts holding and its do-once parts repeating each period. Parts run in list order. Apply one with `EffectManager.apply_effect()`; do-once parts run on the authority only, held parts on every machine. Design: pawn spec 8.11.
+A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) runs its `parts` once; over time stays on the pawn for `duration_ticks`, its held parts holding and its do-once parts repeating each period. Parts run in list order. Apply one with `EffectManager.apply_effect()`; do-once parts run on the authority only, held parts on every machine. Design: pawn spec 8.11.
 
 ### Settings and properties
 
 - `effect_name: StringName` = `&""`: A name for readouts and the debug timeline; also how a client recognises an effect made in code (a saved one goes by its path).
 - `tags: StringName[]` = `[]`: What kind of effect it is, as effect tags (`Tags.EFFECT`) such as effect.damage.elemental.fire. Resistances and removing by tag go by these.
 - `is_harmful: bool` = `true`: On: resistances apply and invulnerability (a dash) stops it. Off: it helps, and gets through both.
-- `duration_seconds: float` = `0.0`: Seconds it lasts. 0: instant.
-- `period_seconds: float` = `0.0`: Over time: its do-once parts run when first applied, then every this many seconds. 0: only when first applied.
+- `duration_ticks: int` = `0`: Ticks at 60 a second it lasts. 0: instant.
+- `period_ticks: int` = `0`: Over time: its do-once parts run when first applied, then every this many ticks at 60 a second. 0: only when first applied.
 - `stacking: int` = `0`: What a second application on the same pawn does.
 - `max_stacks: int` = `1`: With ADD_STACK: the most stacks it can have.
 - `parts: EffectPart[]` = `[]`: What it does, in order.

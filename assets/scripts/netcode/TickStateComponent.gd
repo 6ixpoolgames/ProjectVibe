@@ -501,13 +501,13 @@ func _place_between(before: int, after: int, older: Array, newer: Array, weight:
 			p.write(StateEncoding.blend(older[i], newer[i], weight, p.encoding))
 
 
-## On a new pair of snapshots, forgets what was last written once [member follow_refresh_seconds] has passed. Instance ids spread entities' turns, so they don't all refresh on one tick.
+## On a new pair of snapshots, forgets what was last written once [member follow_refresh_seconds] has passed. Entity numbers spread entities' turns, so they don't all refresh on one tick.
 func _refresh_follow_if_due(tick: int) -> void:
 	if follow_refresh_seconds <= 0.0 or _driver == null:
 		return
 	var interval: int = _driver.seconds_to_ticks(follow_refresh_seconds)
 	if _follow_refreshed < 0:
-		_follow_refreshed = tick - int(get_instance_id() % interval)
+		_follow_refreshed = tick - posmod(EntityNumber.of(get_parent()), interval)
 	# absi, so a clock that jumped back (a resync) still counts as time passed.
 	elif absi(tick - _follow_refreshed) >= interval:
 		_follow_refreshed = tick

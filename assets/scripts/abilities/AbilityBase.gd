@@ -7,7 +7,8 @@
 ## [method start], [method tick], [method stop] and, for counters that run all the time, [method every_tick] (with [method can_sleep]).
 ## A quick ability can instead set base settings in [code]_init()[/code]: they go into a definition of its own. LOCOMOTION abilities move the pawn every tick
 ## they're chosen (one runs at a time); ACTION abilities start on a press of their [member trigger_action], at once or for a
-## [member duration]. Players' keys and AI behaviours press the same actions. Times are set in seconds and kept in ticks (at the match's tick rate).
+## [member duration_ticks]. Players' keys and AI behaviours press the same actions. Times are set in ticks at 60 a second and converted
+## to the match's rate.
 ## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_pushed_properties] (its setter calls
 ## [method push_state]) or [method get_rollback_properties] (read at every commit); the base already covers its own timers and step
 ## state. It can also be built from [AbilityStep] children (a windup, a turn, a swing) and carry [HitInterceptor] children that stop
@@ -151,22 +152,22 @@ var priority_jitter: float:
 		return settings.priority_jitter
 	set(value):
 		_write_setting(&"priority_jitter", value)
-## From the definition: [member AbilityDefinition.duration].
-var duration: float:
+## From the definition: [member AbilityDefinition.duration_ticks].
+var duration_ticks: int:
 	get:
 		if settings == null:
 			prepare_settings()
-		return settings.duration
+		return settings.duration_ticks
 	set(value):
-		_write_setting(&"duration", value)
-## From the definition: [member AbilityDefinition.cooldown].
-var cooldown: float:
+		_write_setting(&"duration_ticks", value)
+## From the definition: [member AbilityDefinition.cooldown_ticks].
+var cooldown_ticks: int:
 	get:
 		if settings == null:
 			prepare_settings()
-		return settings.cooldown
+		return settings.cooldown_ticks
 	set(value):
-		_write_setting(&"cooldown", value)
+		_write_setting(&"cooldown_ticks", value)
 ## From the definition: [member AbilityDefinition.locks_out].
 var locks_out: Array[StringName]:
 	get:
@@ -175,14 +176,14 @@ var locks_out: Array[StringName]:
 		return settings.locks_out
 	set(value):
 		_write_setting(&"locks_out", value)
-## From the definition: [member AbilityDefinition.buffer_window].
-var buffer_window: float:
+## From the definition: [member AbilityDefinition.buffer_window_ticks].
+var buffer_window_ticks: int:
 	get:
 		if settings == null:
 			prepare_settings()
-		return settings.buffer_window
+		return settings.buffer_window_ticks
 	set(value):
-		_write_setting(&"buffer_window", value)
+		_write_setting(&"buffer_window_ticks", value)
 ## From the definition: [member AbilityDefinition.interrupt_priority].
 var interrupt_priority: int:
 	get:
@@ -510,9 +511,9 @@ func get_pushed_properties() -> Array[String]:
 	if is_stepped():
 		out.append("timeline_state") # every timeline entry's state, as one value
 		out.append("pawns_hit_this_run")
-	if cooldown > 0.0:
+	if cooldown_ticks > 0:
 		out.append("ready_at")
-	if buffer_window > 0.0 and trigger_action != &"":
+	if buffer_window_ticks > 0 and trigger_action != &"":
 		out.append("buffer_until")
 	if uses_charges():
 		out.append_array(["charges_spent", "next_restore_tick", "max_charges_base", "max_charges_changes"])
@@ -643,17 +644,18 @@ func push_state(property: StringName, value: Variant) -> void:
 			_tick_state.push_value(key, value)
 
 
-## How many ticks a timed run lasts: duration in ticks, or max_steps_ticks when stepped. Dash and Knockback override it.
-func duration_ticks() -> int:
+## How many ticks a timed run lasts at the match's rate: duration_ticks, or max_steps_ticks when stepped. Dash and Knockback
+## override it.
+func run_length_ticks() -> int:
 	if is_stepped(): # its steps decide when it ends; this is only the most it can run
 		return TickDriver.ticks_at_rate(max_steps_ticks)
-	return manager.ticks_for(duration) if manager else 0
+	return TickDriver.ticks_at_rate(duration_ticks)
 
 
 ## True if it runs for a while once started (a duration, steps, or a length of its own: Dash, Death, Knockback), so it keeps
 ## [member started_at] and [member ends_at]. False for one that happens at once, such as Jump.
 func is_timed() -> bool:
-	return duration > 0.0 or is_stepped()
+	return duration_ticks > 0 or is_stepped()
 
 
 ## True while a timed run is going.
@@ -854,10 +856,10 @@ func current_interrupt_threshold() -> int:
 
 ## True if this run of the ability has already hit this pawn.
 func has_hit(target: Pawn) -> bool:
-	return pawns_hit_this_run.has(HitInfo.key_of(target))
+	return pawns_hit_this_run.has(target.entity_number())
 
 
-## Notes that this run hit the pawn with this key ([method HitInfo.key_of]). False, with a warning once, if the run has hit
+## Notes that this run hit the pawn with this key ([method Pawn.entity_number]). False, with a warning once, if the run has hit
 ## [constant MAX_HITS_PER_RUN] already: then the pawn isn't hit.
 func note_hit_key(key: int) -> bool:
 	if pawns_hit_this_run.size() >= MAX_HITS_PER_RUN:

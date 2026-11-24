@@ -36,38 +36,38 @@ func _test_kind_defaults() -> void:
 
 func _test_variants() -> void:
 	var base := MeleeAttackDefinition.new()
-	base.cooldown = 1.0
+	base.cooldown_ticks = 60
 	_check(base.changed_values.is_empty(), "a definition with no base keeps no list of changes: every value is its own")
 	var variant := MeleeAttackDefinition.new()
 	variant.based_on = base
 	variant.windup_ticks = 3
 	_check(variant.changed_values == PackedStringArray(["windup_ticks"]), "a variant keeps the settings it changed (%s)" % str(variant.changed_values))
 	var resolved := variant.resolved()
-	_check(resolved.windup_ticks == 3 and resolved.cooldown == 1.0 and resolved.based_on == null and resolved.resolved_from == variant, "worked out: its own windup, its base's cooldown")
+	_check(resolved.windup_ticks == 3 and resolved.cooldown_ticks == 60 and resolved.based_on == null and resolved.resolved_from == variant, "worked out: its own windup, its base's cooldown")
 	_check(variant.resolved() == resolved, "worked out once while playing")
-	base.cooldown = 2.0
-	_check(variant.value_of(&"cooldown") == 2.0 and variant.value_of(&"windup_ticks") == 3, "a change to the base reaches the variant; its own change stays")
+	base.cooldown_ticks = 120
+	_check(variant.value_of(&"cooldown_ticks") == 120 and variant.value_of(&"windup_ticks") == 3, "a change to the base reaches the variant; its own change stays")
 	var deeper := MeleeAttackDefinition.new()
 	deeper.based_on = variant
 	deeper.attack_range = 3.0
 	var deep := deeper.resolved()
-	_check(deep.attack_range == 3.0 and deep.windup_ticks == 3 and deep.cooldown == 2.0, "a variant of a variant follows both")
+	_check(deep.attack_range == 3.0 and deep.windup_ticks == 3 and deep.cooldown_ticks == 120, "a variant of a variant follows both")
 	var sprint := SprintDefinition.new()
 	sprint.based_on = WalkDefinition.new()
-	_check(sprint.resolved().max_charge == 3.0 and sprint.resolved().trigger_action == &"", "a Sprint variant of a Walk definition: Walk's settings follow it, Sprint's own stay")
+	_check(sprint.resolved().max_charge_ticks == 180 and sprint.resolved().trigger_action == &"", "a Sprint variant of a Walk definition: Walk's settings follow it, Sprint's own stay")
 	var loop_a := MeleeAttackDefinition.new()
 	var loop_b := MeleeAttackDefinition.new()
 	loop_a.based_on = loop_b
 	loop_b.based_on = loop_a
 	print("  (an error about bases leading back to themselves is expected next)")
-	_check(loop_a.value_of(&"cooldown") == 0.0, "bases that lead back to themselves don't hang")
+	_check(loop_a.value_of(&"cooldown_ticks") == 0, "bases that lead back to themselves don't hang")
 	loop_a.based_on = null
 
 
 func _test_variant_file() -> void:
 	DirAccess.make_dir_recursive_absolute(SCRATCH)
 	var base := MeleeAttackDefinition.new()
-	base.cooldown = 1.5
+	base.cooldown_ticks = 90
 	base.attack_range = 2.2
 	ResourceSaver.save(base, SCRATCH + "base.tres")
 	var variant := MeleeAttackDefinition.new()
@@ -79,7 +79,7 @@ func _test_variant_file() -> void:
 	_check(text.contains("windup_ticks = 4") and not text.contains("cooldown") and not text.contains("attack_range") and not text.contains("category"), "a variant's file saves only what it changed")
 	var loaded: MeleeAttackDefinition = ResourceLoader.load(SCRATCH + "variant.tres", "", ResourceLoader.CACHE_MODE_IGNORE)
 	var resolved := loaded.resolved()
-	_check(resolved.windup_ticks == 4 and resolved.cooldown == 1.5 and resolved.attack_range == 2.2 and resolved.category == Tags.ABILITY.COMBAT_MELEE, "loaded: its change, its base's values, the kind's defaults")
+	_check(resolved.windup_ticks == 4 and resolved.cooldown_ticks == 90 and resolved.attack_range == 2.2 and resolved.category == Tags.ABILITY.COMBAT_MELEE, "loaded: its change, its base's values, the kind's defaults")
 	_check(loaded.changed_values.has("hit_ticks") and resolved.hit_ticks == 4, "a change equal to the kind's default isn't saved as a value but stays in the list, so it stays pinned")
 	for file in ["base.tres", "variant.tres"]:
 		DirAccess.remove_absolute(SCRATCH + file)
@@ -95,7 +95,7 @@ func _test_fallback_and_node_writes() -> void:
 	var hero := MeleeAttackAbility.new()
 	hero.definition = load(DEFINITIONS + "hero_red_swing.tres")
 	hero.windup_ticks = 3 # as a script's _init(), or an old scene value, writes it before the manager sets it up
-	_check(hero.windup_ticks == 3 and hero.attack_range == 2.1 and hero.cooldown == 1.2 and hero.definition_note() == "own settings", "a setting written on the node goes on top of its definition, for this node only")
+	_check(hero.windup_ticks == 3 and hero.attack_range == 2.1 and hero.cooldown_ticks == 72 and hero.definition_note() == "own settings", "a setting written on the node goes on top of its definition, for this node only")
 	hero.free()
 	var embedded := MeleeAttackDefinition.new()
 	embedded.resource_path = "res://somewhere/goblin.tscn::MeleeAttackDefinition_x1"
@@ -117,9 +117,9 @@ func _test_while_playing() -> void:
 	_check(walk.fallback_speed == 5.0 and walk.definition_note() == "", "while playing, a shared setting can't be written: every pawn using it would change")
 	var sprint: SprintAbility = first.ability_manager.get_node("Sprint")
 	sprint.make_definition_unique()
-	sprint.max_charge = 1.0
+	sprint.max_charge_ticks = 60
 	var other_sprint: SprintAbility = second.ability_manager.get_node("Sprint")
-	_check(sprint.max_charge == 1.0 and other_sprint.max_charge == 3.0 and sprint.definition_note() == "own settings", "after make_definition_unique it can, for that pawn only")
+	_check(sprint.max_charge_ticks == 60 and other_sprint.max_charge_ticks == 180 and sprint.definition_note() == "own settings", "after make_definition_unique it can, for that pawn only")
 	var melee: MeleeAttackAbility = first.ability_manager.get_node("MeleeAttack")
 	melee.use_definition(load(DEFINITIONS + "heavy_attack.tres"))
 	_check(melee.trigger_action == &"secondary" and melee.trigger_bit == InputActions.mask_of(&"secondary") and melee.windup_ticks == 22, "use_definition swaps its settings, and the manager works out its input bit again")

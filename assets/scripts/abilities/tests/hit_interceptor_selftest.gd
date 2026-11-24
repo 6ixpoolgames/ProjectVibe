@@ -18,7 +18,7 @@ class Stance extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		category = &"ability.utility.interact"
-		duration = 1.0
+		duration_ticks = 60
 
 
 ## A new kind of interceptor, made only by overriding intercept(): it stops hits that carry more than 15 damage.

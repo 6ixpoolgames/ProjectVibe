@@ -287,7 +287,7 @@ Mispredictions come from things the client couldn't know: being shoved, stunned 
 
 ### 6.4 Re-runnable code
 
-Predicted code must give the same result from the same state and input. That means: fixed `tick_dt`; **ticks for all gameplay timing** (cooldowns, buffer windows, durations); **seeded randomness** per entity per tick (`TickDriver.tick_rng(key, salt)`, no global `randf()`; the rolls depend only on key, tick and salt, so there's no generator state to save); no reading wall-clock time.
+Predicted code must give the same result from the same state and input. That means: fixed `tick_dt`; **ticks for all gameplay timing** (cooldowns, buffer windows, durations); **seeded randomness** per entity per tick (`DeterministicRandom.unit(key, tick, salt)`, no global `randf()`; the rolls depend only on the match seed, key, tick and salt, so there's no generator state to save); no reading wall-clock time.
 
 **Queries of outside systems** *(2026-11-05)*: anything that can give a different answer later, such as a nav path while tiles are changing, must not be asked during a replay. Ask once in the input phase, and either save the result as state or let it become inputs, which a replay reuses. The test walkers do this: they path in the input phase and send plain directions. The nav server's answers aren't tied to a tick, so one asked during a replay gets today's mesh for an old tick. Section 4.2 of the pawn spec reads as if Walk asks each update, which would break this if it ran during a replay, so that's one to settle when the pawn is designed.
 

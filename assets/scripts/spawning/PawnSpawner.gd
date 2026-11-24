@@ -4,7 +4,7 @@
 ## Put one in a level and set it in the inspector (pawn spec 8.9). Server or offline only; it spawns through GameMode.spawn_manager,
 ## which it needs. With [member spawn_group] empty, pawns appear within [member scatter_radius] of the spawner; with a group, at
 ## SpawnPoints that accept the pawn's team (see the SpawnManager README). It fills up to [member keep_alive] when switched on and
-## whenever fewer are alive; a dead pawn's body goes after [member body_seconds] and a fresh replacement is due [member respawn_seconds]
+## whenever fewer are alive; a dead pawn's body goes after [member body_ticks] and a fresh replacement is due [member respawn_ticks]
 ## later (a pawn removed another way counts as a death). All delays count ticks, so pausing the tick driver pauses them.
 ## [codeblock]
 ## spawner.active = true          # starts filling; false stops spawning and leaves its pawns where they are
@@ -29,10 +29,10 @@ signal pawn_died(pawn: Pawn)
 @export var pawn_type := ""
 ## How many living pawns it keeps.
 @export_range(0, 1000, 1, "or_greater") var keep_alive := 3
-## Seconds from a death to its replacement.
-@export_range(0.0, 600.0, 0.1, "or_greater") var respawn_seconds := 5.0
-## Seconds a dead pawn's body stays before it's removed. Below 0: never removed.
-@export_range(-1.0, 600.0, 0.1, "or_greater") var body_seconds := 3.0
+## Ticks at 60 a second from a death to its replacement (300: 5 s).
+@export_range(0, 36000, 1, "or_greater") var respawn_ticks := 300
+## Ticks at 60 a second a dead pawn's body stays before it's removed (180: 3 s). Below 0: never removed.
+@export_range(-1, 36000, 1, "or_greater") var body_ticks := 180
 ## How many it spawns in all, then stops. 0: no limit.
 @export_range(0, 100000, 1, "or_greater") var total_limit := 0
 ## Spawn points to use, by group. Empty: around the spawner itself.
@@ -58,7 +58,7 @@ func _ready() -> void:
 		_update.call_deferred()
 
 
-## Fills up now, without waiting for the replacements' delays.
+## Fills up now, without waiting for the replacements' delays, as fast as [member SpawnManager.max_spawns_per_tick] allows.
 func refill_now() -> void:
 	_waiting.clear()
 	_update()
@@ -95,7 +95,7 @@ func _update() -> void:
 	for i in range(_alive.size() - 1, -1, -1):
 		if instance_from_id(_alive[i]) == null: # removed without dying: a replacement is due as for a death
 			_alive.remove_at(i)
-			_waiting.append(now + TickDriver.seconds_to_ticks(respawn_seconds))
+			_waiting.append(now + TickDriver.ticks_at_rate(respawn_ticks))
 	# filter() keeps the replacements not due yet.
 	_waiting = _waiting.filter(func(due: int) -> bool: return due > now)
 	var missing := keep_alive - _alive.size() - _waiting.size()
@@ -108,7 +108,8 @@ func _update() -> void:
 			_warned_no_type = true
 			push_warning("PawnSpawner '%s' has no pawn_type, so it spawns nothing. Set it to a type registered with NetworkSession.register_type." % name)
 		return
-	for i in missing:
+	# The spawn manager's per-tick budget, shared by every spawner: what's left over is spawned on the next ticks.
+	for i in mini(missing, manager.spawns_left_this_tick()):
 		if total_limit > 0 and _spawned_total >= total_limit:
 			return
 		var pawn: Pawn = manager.spawn(pawn_type, spawn_group) if spawn_group != &"" else manager.spawn_near(pawn_type, self, scatter_radius)
@@ -123,11 +124,11 @@ func _update() -> void:
 
 func _on_died(pawn: Pawn, _hit: HitInfo, pawn_id: int) -> void:
 	_alive.erase(pawn_id)
-	_waiting.append(TickDriver.tick + TickDriver.seconds_to_ticks(respawn_seconds))
+	_waiting.append(TickDriver.tick + TickDriver.ticks_at_rate(respawn_ticks))
 	pawn_died.emit(pawn)
 	var manager := _manager()
-	if body_seconds >= 0.0 and manager:
-		manager.after_seconds(body_seconds, _remove_body.bind(pawn_id))
+	if body_ticks >= 0 and manager:
+		manager.after_ticks(body_ticks, _remove_body.bind(pawn_id))
 
 
 func _remove_body(pawn_id: int) -> void:

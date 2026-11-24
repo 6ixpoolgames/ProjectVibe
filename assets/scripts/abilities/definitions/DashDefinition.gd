@@ -16,21 +16,21 @@ extends AbilityDefinition
 	set(value):
 		fallback_acceleration = value
 		_changed(&"fallback_acceleration", value)
-## How long it speeds up for, in seconds.
-@export_range(0.0, 2.0, 0.01, "or_greater") var speed_up_seconds: float = 0.1:
+## How long it speeds up for, in ticks at 60 a second.
+@export_range(0, 120, 1, "or_greater") var speed_up_ticks: int = 6:
 	set(value):
-		speed_up_seconds = value
-		_changed(&"speed_up_seconds", value)
+		speed_up_ticks = value
+		_changed(&"speed_up_ticks", value)
 ## How hard it slows down after, in metres per second per second.
 @export_range(0.0, 1000.0, 1.0, "or_greater") var slow_down_deceleration: float = 50.0:
 	set(value):
 		slow_down_deceleration = value
 		_changed(&"slow_down_deceleration", value)
-## How long it slows down for, in seconds. The defaults take off what the speed-up added (50 x 0.2 against 100 x 0.1).
-@export_range(0.0, 2.0, 0.01, "or_greater") var slow_down_seconds: float = 0.2:
+## How long it slows down for, in ticks at 60 a second. The defaults take off what the speed-up added (50 x 0.2 s against 100 x 0.1 s).
+@export_range(0, 120, 1, "or_greater") var slow_down_ticks: int = 12:
 	set(value):
-		slow_down_seconds = value
-		_changed(&"slow_down_seconds", value)
+		slow_down_ticks = value
+		_changed(&"slow_down_ticks", value)
 ## On: it can start in the air as well as on the ground. Off: ground only.
 @export var usable_in_air: bool = true:
 	set(value):
@@ -45,9 +45,9 @@ func _init() -> void:
 	category = Tags.ABILITY.MOVEMENT_DASH
 	needs_full_movement = true # a dash is too fast for the crowd mover's checks (pawn spec 8.22)
 	extra_categories = [Tags.ABILITY.MOVEMENT_ADVANCED] # the AI asks for this group, not for "dash"
-	# Its length comes from its two phases (DashAbility.duration_ticks), not duration.
-	duration = 0.0
-	cooldown = 2.0
+	# Its length comes from its two phases (DashAbility.run_length_ticks), not duration_ticks.
+	duration_ticks = 0
+	cooldown_ticks = 120
 	# The basic movement group: walk, sprint and jump.
 	locks_out = [Tags.ABILITY.MOVEMENT_BASIC]
 	interrupt_priority = 40 # above knockback's threshold (35)

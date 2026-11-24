@@ -234,7 +234,7 @@ Design: replay spec 2.
 
 ## ReplayRecorder
 
-`res://assets/scripts/replay/ReplayRecorder.gd`, extends [`GameModeModule`](../game_mode/REFERENCE.md#gamemodemodule)
+`res://assets/scripts/replay/ReplayRecorder.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 Records every pawn, every tick, to a replay file.
 
@@ -249,7 +249,7 @@ Safeguards stop a recording with a warning (`get_stopped_reason()`) and leave th
 - `enabled: bool` = `true`: Off: `start_recording()` does nothing.
 - `folder: String` = `"user://replays"`: Where recordings go. Each role gets a folder of its own inside it.
 - `headless_runs_apart: bool` = `true`: On, a run with no display (a test, a dedicated server) records into folder/headless/<role> instead, with its own `keep_recordings`.
-- `keep_recordings: int` = `10`: Recordings kept per role's folder; older ones are deleted when a new one starts. 0 keeps all, and skips `max_folder_megabytes` too.
+- `keep_recordings: int` = `100`: Recordings kept per role's folder; older ones are deleted when a new one starts. 0 keeps all, and skips `max_folder_megabytes` too.
 - `block_seconds: float` = `1.0`: Block length in seconds. Seeking starts at a block's keyframe: shorter seeks faster, longer makes smaller files.
 - `max_recording_seconds: float` = `10800.0`: The longest a recording may be, in seconds (3 hours). 0 switches it off, as for the other safeguards below.
 - `max_file_megabytes: int` = `2048`: The biggest a recording's file may get, in megabytes (2 GB).

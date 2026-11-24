@@ -54,16 +54,12 @@ var pawn: Pawn = null
 var _driver: Node = null # the TickDriver, for hits during simulate
 var _death: DeathAbility = null # found with the abilities
 var _knockback: KnockbackAbility = null # likewise, for get_knockback()
-# Hits queued during simulate, for every pawn, and the tick driver that delivers them (pawn spec 15.4). Static: one queue for all managers.
-static var _queued_hits: Array = [] # [attacker's entity id, target's entity id, place in the queue, HitInfo]
-static var _hit_queue_driver: Node = null
 
 var _abilities: Array[AbilityBase] = [] # every ability, in run order: by priority, then tree order
 var _locomotions: Array[AbilityBase] = []
 var _actions: Array[AbilityBase] = []
 var _default_locomotion: AbilityBase = null
 var _locked_mask := 0 # categories locked right now, as bits
-var _tick_rate := 60.0
 # Gates and channels (pawn spec 15.2): only what has a reason to run this tick runs.
 var _timed: Array[AbilityBase] = [] # abilities with a timer running (a run, a cooldown or a buffered press)
 var _next_deadline := -1 # the soonest cooldown, buffer or combo window end still ahead, when _timed was built; -1: none
@@ -125,8 +121,6 @@ func _enter_tree() -> void:
 func _ready() -> void:
 	var driver: Node = get_node_or_null("/root/TickDriver")
 	_driver = driver
-	if driver:
-		_tick_rate = float(driver.get_tick_rate())
 	_collect_abilities()
 	_register_rollback_state()
 
@@ -325,11 +319,6 @@ func is_locked(ability: AbilityBase) -> bool:
 	return ability.category_mask & _locked_mask != 0
 
 
-## Seconds as whole ticks at the match's tick rate, at least 1 for anything above 0.
-func ticks_for(seconds: float) -> int:
-	return 0 if seconds <= 0.0 else maxi(1, roundi(seconds * _tick_rate))
-
-
 ## True while an ability with needs_full_movement runs (Dash, Knockback), so the pawn moves by physics, not the CrowdMover (pawn spec 8.22).
 func needs_full_movement() -> bool:
 	for ability in _full_movement_abilities:
@@ -435,8 +424,8 @@ func _run_actions(dt: float) -> void:
 			if chosen != ability:
 				_started_later.append(chosen) # see the top of this loop
 			used_bits |= ability.trigger_bit
-		elif pressed and ability.buffer_window > 0.0:
-			ability.buffer_until = TickDriver.tick + ticks_for(ability.buffer_window)
+		elif pressed and ability.buffer_window_ticks > 0:
+			ability.buffer_until = TickDriver.tick + TickDriver.ticks_at_rate(ability.buffer_window_ticks)
 	# A press that started something doesn't also wait in another ability on the same action.
 	if used_bits != 0: # skipped when nothing started
 		for ability in _actions:
@@ -467,8 +456,7 @@ func _best_ready(first: AbilityBase, wanted_bits: int) -> AbilityBase:
 func _priority_now(ability: AbilityBase) -> float:
 	if ability.priority_jitter <= 0.0:
 		return float(press_priority_now(ability))
-	var rng: RandomNumberGenerator = TickDriver.tick_rng(HitInfo.key_of(pawn), ability.jitter_salt)
-	return press_priority_now(ability) + rng.randf_range(-ability.priority_jitter, ability.priority_jitter)
+	return press_priority_now(ability) + ability.priority_jitter * DeterministicRandom.signed(pawn.entity_number(), TickDriver.tick, ability.jitter_salt)
 
 
 ## An ability's priority now: its own plus what effects add (AbilityPriorityPart, pawn spec 8.11), without the jitter offset.
@@ -678,7 +666,7 @@ func _start(ability: AbilityBase) -> void:
 	if taken > 0:
 		combo_position = taken
 		combo_open_until = 0
-	var length := ability.duration_ticks()
+	var length := ability.run_length_ticks()
 	if length > 0:
 		ability.started_at = TickDriver.tick
 		ability.ends_at = TickDriver.tick + length
@@ -700,8 +688,8 @@ func _finish(ability: AbilityBase) -> void:
 	readiness_version += 1
 	ability.end_steps("cancelled") # steps still running when it ends early; none when they finished
 	ability.ends_at = -1
-	if ability.cooldown > 0.0:
-		ability.ready_at = TickDriver.tick + ticks_for(ability.cooldown)
+	if ability.cooldown_ticks > 0:
+		ability.ready_at = TickDriver.tick + TickDriver.ticks_at_rate(ability.cooldown_ticks)
 	ability.stop()
 	ability_finished.emit(ability)
 
@@ -710,13 +698,16 @@ func _finish(ability: AbilityBase) -> void:
 
 
 ## Something hit this pawn; the server's attacker calls it, such as a [MeleeSweepStep]. Dead or invulnerable pawns ignore it. During
-## simulate it's queued and delivered after every pawn has simulated, in a fixed order (attacker's entity id, target's, queue order),
-## so it never depends on who simulated first (pawn spec 15.4); otherwise it takes effect at once. Steps: see the README.
+## simulate it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (attacker's entity
+## number, target's, booking order), so it never depends on who simulated first (pawn spec 15.4); otherwise it takes effect at once.
+## Steps: see the README.
 func receive_hit(hit: HitInfo) -> void:
 	if pawn == null or not pawn.is_authority() or hit == null or pawn.is_dead():
 		return
 	if _driver and _driver.is_in_simulate():
-		_queue_hit(hit)
+		# Entity numbers are below 2^31, so attacker then target fit one order number.
+		var order := (maxi(EntityNumber.of(hit.attacker), 0) << 31) | maxi(pawn.entity_number(), 0)
+		_driver.scheduler.book(_driver.tick, _take_hit.bind(hit), TickScheduler.Point.AFTER_SIMULATE, order)
 		return
 	_take_hit(hit)
 
@@ -762,45 +753,6 @@ func _die(hit: HitInfo) -> void:
 		return
 	start_ability(_death)
 	died.emit(pawn, hit)
-
-
-# Holds a hit until after simulate: one queue for all pawns, delivered on the tick driver's after_simulate (connected on first use).
-func _queue_hit(hit: HitInfo) -> void:
-	if _hit_queue_driver != _driver:
-		# The Callable is on the class, not this manager, so it keeps working after this one is freed.
-		if is_instance_valid(_hit_queue_driver) and _hit_queue_driver.after_simulate.is_connected(AbilityManager._deliver_queued_hits):
-			_hit_queue_driver.after_simulate.disconnect(AbilityManager._deliver_queued_hits)
-		_driver.after_simulate.connect(AbilityManager._deliver_queued_hits)
-		_hit_queue_driver = _driver
-	_queued_hits.append([_order_key(hit.attacker), _order_key(pawn), _queued_hits.size(), hit])
-
-
-# The entity id, the same on every machine; -1 for a pawn that isn't networked (the queue order then decides).
-static func _order_key(node: Node) -> int:
-	var target := node as Pawn
-	if target == null or not is_instance_valid(target) or target.get_network_entity() == null:
-		return -1
-	return target.get_network_entity().entity_id
-
-
-# Delivers every queued hit, sorted by attacker's entity id, then target's, then queue order.
-static func _deliver_queued_hits(_dt: float, _tick: int) -> void:
-	if _queued_hits.is_empty():
-		return
-	var hits := _queued_hits
-	_queued_hits = []
-	hits.sort_custom(func(a: Array, b: Array) -> bool:
-		if a[0] != b[0]:
-			return a[0] < b[0]
-		if a[1] != b[1]:
-			return a[1] < b[1]
-		return a[2] < b[2])
-	var hits_started := PerfScopes.begin() # timed for diagnostics (PerfScopes)
-	for entry in hits:
-		var hit: HitInfo = entry[3]
-		if is_instance_valid(hit.target) and hit.target.ability_manager:
-			hit.target.ability_manager._take_hit(hit)
-	PerfScopes.end(&"pawn.hits", hits_started)
 
 
 func _collect_abilities() -> void:

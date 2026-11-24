@@ -20,8 +20,8 @@ signal player_respawned(peer: int, pawn: Pawn)
 
 ## On: players' pawns come back after dying.
 @export var respawn_players := true
-## How long a player's pawn stays dead, in seconds.
-@export_range(0.0, 60.0, 0.1, "or_greater") var player_respawn_seconds := 3.0
+## How long a player's pawn stays dead, in ticks at 60 a second (180: 3 s).
+@export_range(0, 3600, 1, "or_greater") var player_respawn_ticks := 180
 ## On: a player's pawn comes back at a spawn point for its team. Off, or with no point: where it fell.
 @export var player_respawn_at_spawn_point := true
 ## How many spots inside a point's scatter_radius it tries before going on to the next point.
@@ -36,19 +36,25 @@ signal player_respawned(peer: int, pawn: Pawn)
 ## itself. 2 covers a frame that runs two ticks.
 @export_range(1, 60, 1) var claim_ticks := 2
 
-## Separates these rolls from other users of the same tick's random numbers.
+## The most pawns spawners ([PawnSpawner]) may spawn in one tick; the rest wait for the next ticks, so a wave or a burst of
+## replacements is spread out instead of landing in one frame (a pawn costs about 10 ms to spawn). 0: no limit. Players' pawns
+## ([method spawn_player]) are never held back, but count towards it.
+@export_range(0, 64, 1, "or_greater") var max_spawns_per_tick := 1
+
+## Separates these rolls from other users of the same tick's random numbers (DeterministicRandom).
 const RANDOM_SALT := 7151
 
 var _session: Node = null
 var _driver: Node = null
 var _game_mode: GameModeSingleton = null
-var _pending: Array = [] # [due tick, Callable], run between ticks
 var _players := {} # pawn instance id -> peer
 var _team_of_type := {} # type name -> team, read once from its scene
 # Every roll counts, spawns and respawns alike, so each one differs, even several in one tick, and players brought back in the same
 # tick don't try the same spots.
 var _roll_count := 0
 var _claimed: Array = [] # [tick, feet position] of each spot handed out lately (claim_ticks)
+var _counted_tick := -1 # the tick _spawned_in_tick counts for
+var _spawned_in_tick := 0
 
 
 func _init() -> void:
@@ -61,20 +67,15 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 	_game_mode = game_mode
 	_session = get_node_or_null("/root/NetworkSession")
 	_driver = get_node_or_null("/root/TickDriver")
-	if _driver:
-		_driver.after_tick_loop.connect(_run_due)
 
 
 func _on_module_removed(game_mode: GameModeSingleton) -> void:
 	game_mode.spawn_manager = null
-	if _driver and _driver.after_tick_loop.is_connected(_run_due):
-		_driver.after_tick_loop.disconnect(_run_due)
-	_pending.clear()
 
 
 ## The settings a start menu may offer (GameModeModule.get_match_options).
 func get_match_options() -> PackedStringArray:
-	return PackedStringArray(["respawn_players", "player_respawn_seconds"])
+	return PackedStringArray(["respawn_players", "player_respawn_ticks"])
 
 
 # --- Spawning ---
@@ -98,10 +99,9 @@ func spawn(type_name: String, group: StringName = &"", owner_peer: int = 0) -> P
 func spawn_near(type_name: String, around: Node3D, scatter_radius: float, owner_peer: int = 0) -> Pawn:
 	if not _can_spawn() or around == null:
 		return null
-	var rng := _next_rng()
-	var place := _free_spot(around, around.global_position, around.global_basis.get_euler().y, scatter_radius, rng)
+	var place := _free_spot(around, around.global_position, around.global_basis.get_euler().y, scatter_radius)
 	if place.is_empty():
-		place = _spot(around.global_position, around.global_basis.get_euler().y, scatter_radius, rng) # crowded, but it still spawns
+		place = _spot(around.global_position, around.global_basis.get_euler().y, scatter_radius) # crowded, but it still spawns
 	return _spawn_at(type_name, owner_peer, place)
 
 
@@ -136,24 +136,24 @@ func find_place(team: int, group: StringName = &"") -> Dictionary:
 	if points.is_empty():
 		return {}
 	# Tree order first, so the same points shuffle the same way for the same roll.
-	var rng := _next_rng()
-	for i in range(points.size() - 1, 0, -1): # Fisher-Yates shuffle with our own random numbers
-		var j := rng.randi_range(0, i)
+	for i in range(points.size() - 1, 0, -1): # Fisher-Yates shuffle with repeatable random numbers
+		var j := mini(int(_roll() * (i + 1)), i)
 		var swap := points[i]
 		points[i] = points[j]
 		points[j] = swap
 	for point in points:
-		var place := _free_spot(point, point.global_position, point.get_yaw(), point.scatter_radius, rng)
+		var place := _free_spot(point, point.global_position, point.get_yaw(), point.scatter_radius)
 		if not place.is_empty():
 			return place
-	return _spot(points[0].global_position, points[0].get_yaw(), points[0].scatter_radius, rng)
+	return _spot(points[0].global_position, points[0].get_yaw(), points[0].scatter_radius)
 
 
-## Runs what after this many seconds of ticks, between ticks. Pausing the tick driver pauses the count. For delays that are part of
-## the game's rules, such as respawns and body removal.
-func after_seconds(seconds: float, what: Callable) -> void:
-	var due: int = (_driver.tick + _driver.seconds_to_ticks(seconds)) if _driver else 0
-	_pending.append([due, what])
+## Runs what after this many ticks (at 60 a second, converted to the match's rate), booked with the tick scheduler: it runs just
+## before the tick it's due on, between ticks. Pausing the tick driver pauses the count. For delays that are part of the game's rules,
+## such as respawns and body removal.
+func after_ticks(ticks: int, what: Callable) -> void:
+	if _driver:
+		_driver.scheduler.book(_driver.tick + _driver.ticks_at_rate(ticks), what)
 
 
 # --- Players ---
@@ -161,7 +161,7 @@ func after_seconds(seconds: float, what: Callable) -> void:
 
 func _on_player_died(_pawn: Pawn, _hit: HitInfo, pawn_id: int) -> void:
 	if respawn_players:
-		after_seconds(player_respawn_seconds, _respawn_player.bind(pawn_id))
+		after_ticks(player_respawn_ticks, _respawn_player.bind(pawn_id))
 
 
 func _respawn_player(pawn_id: int) -> void:
@@ -194,29 +194,32 @@ func _can_spawn() -> bool:
 
 
 func _spawn_at(type_name: String, owner_peer: int, place: Dictionary) -> Pawn:
+	var started := PerfScopes.begin() # timed for diagnostics, as spawning.spawn
 	var pawn := _session.spawn(type_name, owner_peer, place["position"]) as Pawn
 	if pawn == null:
 		return null
 	pawn.yaw = place["yaw"]
 	_claim(place["position"]) # so the next pawn spawned this tick goes somewhere else
+	_count_spawn()
 	pawn_spawned.emit(pawn)
+	PerfScopes.end(&"spawning.spawn", started)
 	return pawn
 
 
 ## A free spot near this centre, or {}. The node is only for its physics world.
-func _free_spot(world_node: Node3D, centre: Vector3, yaw: float, radius: float, rng: RandomNumberGenerator) -> Dictionary:
+func _free_spot(world_node: Node3D, centre: Vector3, yaw: float, radius: float) -> Dictionary:
 	for i in tries_per_point:
 		# The first try is the point itself, so a point with no scatter still gets checked once.
-		var place := _spot(centre, yaw, radius if i > 0 else 0.0, rng)
+		var place := _spot(centre, yaw, radius if i > 0 else 0.0)
 		if _is_free(world_node, place["position"]):
 			return place
 	return {}
 
 
 ## A spot inside the circle, on the ground if there's terrain.
-func _spot(centre: Vector3, yaw: float, radius: float, rng: RandomNumberGenerator) -> Dictionary:
-	var angle := rng.randf() * TAU
-	var distance := sqrt(rng.randf()) * radius # the square root spreads spots evenly over the circle, not bunched in the middle
+func _spot(centre: Vector3, yaw: float, radius: float) -> Dictionary:
+	var angle := _roll() * TAU
+	var distance := sqrt(_roll()) * radius # the square root spreads spots evenly over the circle, not bunched in the middle
 	var at := centre + Vector3(cos(angle) * distance, 0.0, sin(angle) * distance)
 	at.y = _ground_height(at)
 	return {"position": at, "yaw": yaw}
@@ -291,23 +294,23 @@ func _team_of(type_name: String) -> int:
 	return _team_of_type[type_name]
 
 
-# One shared generator, seeded from the tick and these numbers: use it at once, never keep it. The roll count keeps two rolls in one tick different.
-func _next_rng() -> RandomNumberGenerator:
+## How many more pawns spawners may spawn this tick ([member max_spawns_per_tick]); a large number with no limit.
+func spawns_left_this_tick() -> int:
+	if max_spawns_per_tick <= 0:
+		return 1 << 30
+	var now: int = _driver.tick if _driver else 0
+	return max_spawns_per_tick - (_spawned_in_tick if _counted_tick == now else 0)
+
+
+func _count_spawn() -> void:
+	var now: int = _driver.tick if _driver else 0
+	if _counted_tick != now:
+		_counted_tick = now
+		_spawned_in_tick = 0
+	_spawned_in_tick += 1
+
+
+# The next roll, from 0 up to 1: from the tick and the roll count, which keeps two rolls in one tick different.
+func _roll() -> float:
 	_roll_count += 1
-	return _driver.tick_rng(_roll_count, RANDOM_SALT) if _driver else RandomNumberGenerator.new()
-
-
-## Between ticks: runs every delay whose tick has come, in the order they were asked for.
-func _run_due() -> void:
-	if _pending.is_empty():
-		return
-	var now: int = _driver.tick
-	var come: Array = [] # not "ready", which would clash with Node's ready signal
-	var still: Array = []
-	for entry: Array in _pending:
-		(come if entry[0] <= now else still).append(entry)
-	_pending = still
-	for entry: Array in come:
-		var what: Callable = entry[1]
-		if what.is_valid():
-			what.call()
+	return DeterministicRandom.unit(_roll_count, _driver.tick if _driver else 0, RANDOM_SALT)

@@ -1,7 +1,8 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-10: headless self-test for spawning: SpawnPoint, SpawnManager (a GameMode module) and
 ## PawnSpawner. Offline, on a flat floor with no terrain, so pawns appear at the points' own height. It checks:
 ##   - points by team and group, facing the point's way; a crowded point spreads pawns inside its scatter; no point, no pawn
-##   - after_seconds counts ticks, so pausing the tick driver pauses it
+##   - after_ticks is booked with the tick scheduler, so pausing the tick driver pauses it
+##   - spawners spawn at most max_spawns_per_tick a tick (Claude 2026-11-24)
 ##   - a player's pawn is possessed, and after dying comes back at a point for its team, alive, still possessed
 ##   - a PawnSpawner fills up, removes a body, replaces it after its delay with a fresh pawn, stops at total_limit, treats a pawn
 ##     removed some other way as a death, and refill_now skips the wait
@@ -32,7 +33,7 @@ func _ready() -> void:
 	_manager = GameMode.spawn_manager
 	_check(_manager != null and GameMode.get_module(SpawnManager) == _manager, "SpawnManager is one of GameMode's default modules")
 	await _test_points()
-	await _test_after_seconds()
+	await _test_after_ticks()
 	await _test_player_respawn()
 	await _test_same_tick() # Claude 2026-11-13
 	await _test_pawn_spawner()
@@ -71,19 +72,19 @@ func _test_points() -> void:
 	await _ticks(2)
 
 
-func _test_after_seconds() -> void:
+func _test_after_ticks() -> void:
 	var ran := {"count": 0}
-	_manager.after_seconds(0.25, func() -> void: ran["count"] += 1)
+	_manager.after_ticks(15, func() -> void: ran["count"] += 1)
 	TickDriver.active = false
 	await _ticks(40)
-	_check(ran["count"] == 0, "after_seconds counts ticks: paused, it doesn't run however long it waits")
+	_check(ran["count"] == 0, "after_ticks counts ticks: paused, it doesn't run however long it waits")
 	TickDriver.active = true
 	await _ticks(20)
 	_check(ran["count"] == 1, "and after the ticks it runs, once")
 
 
 func _test_player_respawn() -> void:
-	_manager.player_respawn_seconds = 0.5
+	_manager.player_respawn_ticks = 30
 	var pawn := _manager.spawn_player(0, "spawn_test_player")
 	_check(pawn != null and GameMode.possession_coordinator.get_pawn_of() == pawn, "spawn_player: a pawn at a point for its team, possessed for the player")
 	await _ticks(20)
@@ -102,7 +103,7 @@ func _test_player_respawn() -> void:
 	_check(GameMode.possession_coordinator.get_pawn_of() == pawn, "and still possessed by its player")
 	GameMode.possession_coordinator.release()
 	NetworkSession.despawn(pawn.get_network_entity().entity_id)
-	_manager.player_respawn_seconds = 3.0
+	_manager.player_respawn_ticks = 180
 	await _ticks(2)
 
 
@@ -111,17 +112,21 @@ func _test_pawn_spawner() -> void:
 	spawner.name = "TestSpawner"
 	spawner.pawn_type = "spawn_test_goblin"
 	spawner.keep_alive = 3
-	spawner.respawn_seconds = 0.5
-	spawner.body_seconds = 0.25
+	spawner.respawn_ticks = 30
+	spawner.body_ticks = 15
 	spawner.scatter_radius = 4.0
 	spawner.position = Vector3(0, 0, 80)
 	spawner.rotation.y = PI
 	var spawn_yaws := [] # at the moment each spawns: the goblins' AI turns them soon after
-	spawner.spawned.connect(func(p: Pawn) -> void: spawn_yaws.append(p.yaw))
+	var spawn_ticks := [] # Claude 2026-11-24: the tick each one spawned on, for the per-tick budget
+	spawner.spawned.connect(func(p: Pawn) -> void:
+		spawn_yaws.append(p.yaw)
+		spawn_ticks.append(TickDriver.tick))
 	add_child(spawner)
-	await _ticks(3)
+	await _until(func() -> bool: return spawner.get_alive().size() == 3, 10)
 	var alive := spawner.get_alive()
 	_check(alive.size() == 3, "a spawner fills up to keep_alive (%d)" % alive.size())
+	_check(_manager.max_spawns_per_tick == 1 and spawn_ticks.size() == 3 and spawn_ticks[0] < spawn_ticks[1] and spawn_ticks[1] < spawn_ticks[2], "one a tick, max_spawns_per_tick, so a wave is spread out (ticks %s)" % str(spawn_ticks))
 	_check(alive.all(func(p: Pawn) -> bool: return p.global_position.distance_to(spawner.global_position) <= 4.01), "within its scatter_radius")
 	_check(spawn_yaws.size() == 3 and spawn_yaws.all(func(yaw: float) -> bool: return is_equal_approx(absf(yaw), PI)), "facing its way when they spawn (%s)" % str(spawn_yaws.map(func(yaw: float) -> float: return snappedf(rad_to_deg(yaw), 0.1))))
 	var victim := alive[0]
@@ -129,9 +134,9 @@ func _test_pawn_spawner() -> void:
 	await _ticks(2)
 	_check(spawner.get_alive().size() == 2, "a death leaves it one short")
 	await _ticks(20)
-	_check(not is_instance_valid(victim), "the body is removed after body_seconds")
+	_check(not is_instance_valid(victim), "the body is removed after body_ticks")
 	await _until(func() -> bool: return spawner.get_alive().size() == 3, 40)
-	_check(spawner.get_alive().size() == 3 and spawner.get_spawned_total() == 4, "and a fresh pawn replaces it after respawn_seconds (%d spawned in all)" % spawner.get_spawned_total())
+	_check(spawner.get_alive().size() == 3 and spawner.get_spawned_total() == 4, "and a fresh pawn replaces it after respawn_ticks (%d spawned in all)" % spawner.get_spawned_total())
 	# Removed some other way: the same as a death, with no body.
 	var removed := spawner.get_alive()[0]
 	NetworkSession.despawn(removed.get_network_entity().entity_id)
@@ -140,14 +145,14 @@ func _test_pawn_spawner() -> void:
 	await _until(func() -> bool: return spawner.get_alive().size() == 3, 45)
 	_check(spawner.get_alive().size() == 3, "and is replaced after the delay")
 	# refill_now skips the wait.
-	spawner.respawn_seconds = 60.0
+	spawner.respawn_ticks = 3600
 	_kill(spawner.get_alive()[0])
 	await _ticks(3)
 	spawner.refill_now()
 	_check(spawner.get_alive().size() == 3, "refill_now fills up at once, without waiting for the replacement")
 	# total_limit.
 	spawner.total_limit = spawner.get_spawned_total()
-	spawner.respawn_seconds = 0.1
+	spawner.respawn_ticks = 6
 	_kill(spawner.get_alive()[0])
 	await _ticks(20)
 	_check(spawner.get_alive().size() == 2, "past total_limit, nothing more spawns")
@@ -174,7 +179,7 @@ func _test_same_tick() -> void:
 	NetworkSession.despawn(first.get_network_entity().entity_id)
 	NetworkSession.despawn(second.get_network_entity().entity_id)
 	await _ticks(2)
-	_manager.player_respawn_seconds = 0.2
+	_manager.player_respawn_ticks = 12
 	var one := _manager.spawn_player(0, "spawn_test_player")
 	var two := _manager.spawn_player(0, "spawn_test_player")
 	await _ticks(4)
@@ -188,7 +193,7 @@ func _test_same_tick() -> void:
 	GameMode.possession_coordinator.release()
 	NetworkSession.despawn(one.get_network_entity().entity_id)
 	NetworkSession.despawn(two.get_network_entity().entity_id)
-	_manager.player_respawn_seconds = 3.0
+	_manager.player_respawn_ticks = 180
 	start.scatter_radius = 0.0
 	await _ticks(2)
 

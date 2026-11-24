@@ -2,7 +2,7 @@
 ## One effect, such as a sword hit, a poison or a combo boost: what it does to the pawn it's applied to.
 ##
 ## A Resource, saved as a .tres and tuned in one place however many abilities use it. Instant (duration 0) runs its [member parts] once;
-## over time stays on the pawn for [member duration_seconds], its held parts holding and its do-once parts repeating each period.
+## over time stays on the pawn for [member duration_ticks], its held parts holding and its do-once parts repeating each period.
 ## Parts run in list order. Apply one with [method EffectManager.apply_effect]; do-once parts run on the authority only, held parts on
 ## every machine.
 ## Design: pawn spec 8.11.
@@ -22,10 +22,10 @@ enum Stacking {
 @export var tags: Array[StringName] = []
 ## On: resistances apply and invulnerability (a dash) stops it. Off: it helps, and gets through both.
 @export var is_harmful := true
-## Seconds it lasts. 0: instant.
-@export_range(0.0, 600.0, 0.05, "or_greater") var duration_seconds := 0.0
-## Over time: its do-once parts run when first applied, then every this many seconds. 0: only when first applied.
-@export_range(0.0, 60.0, 0.05, "or_greater") var period_seconds := 0.0
+## Ticks at 60 a second it lasts. 0: instant.
+@export_range(0, 36000, 1, "or_greater") var duration_ticks := 0
+## Over time: its do-once parts run when first applied, then every this many ticks at 60 a second. 0: only when first applied.
+@export_range(0, 3600, 1, "or_greater") var period_ticks := 0
 ## What a second application on the same pawn does.
 @export var stacking := Stacking.REFRESH
 ## With ADD_STACK: the most stacks it can have.
@@ -41,7 +41,7 @@ var _mask := -1 # its tags as one mask, parents included; -1 until first worked 
 
 ## True if it's instant: it does its parts once and isn't kept.
 func is_instant() -> bool:
-	return duration_seconds <= 0.0
+	return duration_ticks <= 0
 
 
 ## Its tags as one mask, parents included ([method TagRegistry.full_mask_of_list]), worked out once.

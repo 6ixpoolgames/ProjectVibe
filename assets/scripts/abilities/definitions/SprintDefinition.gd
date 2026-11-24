@@ -6,26 +6,26 @@
 class_name SprintDefinition
 extends WalkDefinition
 
-## Seconds of sprinting on a full charge.
-@export var max_charge: float = 3.0:
+## Ticks at 60 a second of sprinting on a full charge (180: 3 s).
+@export_range(0, 3600, 1, "or_greater") var max_charge_ticks: int = 180:
 	set(value):
-		max_charge = value
-		_changed(&"max_charge", value)
-## How fast the charge refills while not sprinting, in seconds of sprint per second: 0.5 refills at half the rate it drains.
+		max_charge_ticks = value
+		_changed(&"max_charge_ticks", value)
+## How fast the charge refills while not sprinting, in ticks of sprint per tick: 0.5 refills at half the rate it drains.
 @export var recharge_rate: float = 0.5:
 	set(value):
 		recharge_rate = value
 		_changed(&"recharge_rate", value)
-## Seconds after it stops before the charge starts refilling.
-@export var recharge_delay: float = 1.0:
+## Ticks at 60 a second after it stops before the charge starts refilling.
+@export_range(0, 3600, 1, "or_greater") var recharge_delay_ticks: int = 60:
 	set(value):
-		recharge_delay = value
-		_changed(&"recharge_delay", value)
-## The charge needed to start, in seconds (at most [member max_charge]).
-@export var min_start_charge: float = 0.5:
+		recharge_delay_ticks = value
+		_changed(&"recharge_delay_ticks", value)
+## The charge needed to start, in ticks at 60 a second (at most [member max_charge_ticks]).
+@export_range(0, 3600, 1, "or_greater") var min_start_charge_ticks: int = 30:
 	set(value):
-		min_start_charge = value
-		_changed(&"min_start_charge", value)
+		min_start_charge_ticks = value
+		_changed(&"min_start_charge_ticks", value)
 
 
 func _init() -> void:

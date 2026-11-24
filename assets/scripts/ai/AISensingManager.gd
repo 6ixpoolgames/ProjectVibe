@@ -101,7 +101,7 @@ func tick_sensing(tick: int) -> void:
 		_schedule_rate = rate
 		_full_interval = TickDriver.ticks_at_rate(sense_interval_ticks) # written for 60 a second
 		_refresh_interval = TickDriver.ticks_at_rate(refresh_interval_ticks)
-	var offset := pawn.ai_context.pawn_number()
+	var offset := pawn.entity_number()
 	var interval := _full_interval
 	# Pawn.fires_in_run's rule, written out: a pass fires on this run if one fell due on this tick or the ticks since its last run, so a
 	# pawn running every Nth tick still gets the passes between its runs (pawn spec 8.21). Sight's awareness already fills by the real

@@ -13,7 +13,7 @@
 # leaves it working: it follows how busy the machine is, so it differs by session). --fixed-fps runs each as fast as it can instead,
 # one tick a frame. --arg passes an argument on to the sample (--arg=--spawn-distance=40). --details N lists that many pawns at the
 # first difference. Exit code 0: the recordings agree; 1: they differ; 2: a run or a file failed. Recordings beyond the recorder's
-# keep_recordings (10 a folder) are deleted, so at most 10 sessions.
+# keep_recordings (100 a folder) are deleted, so at most 100 sessions.
 # Godot is looked for beside the project folder, as tools/run_tests.sh does; set GODOT to use another.
 import argparse
 import os

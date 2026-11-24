@@ -180,7 +180,7 @@ func _on_ability_started(ability: AbilityBase, pawn: Pawn) -> void:
 	var guard := parry.guard() # the front's width is its interceptor's (pawn spec 8.23)
 	if guard == null:
 		return
-	var shape := _add_shape("ParryShield", _shield_mesh(guard.front_degrees_now()), parry_colour, maxf(parry.duration, 0.05))
+	var shape := _add_shape("ParryShield", _shield_mesh(guard.front_degrees_now()), parry_colour, maxf(parry.duration_ticks / 60.0, 0.05))
 	# keep_global_transform false puts it at the new parent's origin.
 	shape.reparent(holder, false)
 	shape.top_level = false

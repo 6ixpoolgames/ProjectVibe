@@ -20,6 +20,12 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, and nothing parry-specific is left in the manager or the base: `ParryAbility` is a plain timed ability that makes a default `ParryInterceptor`, and `guard()` is only read by the debug drawing and tests.
 
+## 2026-11-24
+
+- **Ticks at 60 a second, and hits through the tick scheduler** (the pawn redesign's build step 1, foundations (pawn spec 16.10)):
+  - Settings in seconds are now ticks at 60 a second: `duration` → `duration_ticks`, `cooldown` → `cooldown_ticks`, `buffer_window` → `buffer_window_ticks` (`AbilityDefinition`); `speed_up_seconds`/`slow_down_seconds` → `speed_up_ticks` (6)/`slow_down_ticks` (12) (Dash); `coyote_time` → `coyote_ticks` (6) (Jump); `max_charge`, `recharge_delay`, `min_start_charge` → `max_charge_ticks` (180), `recharge_delay_ticks` (60), `min_start_charge_ticks` (30) (Sprint); `max_lifetime` → `max_lifetime_ticks` (180) (projectiles). Saved definitions were converted (bolt, faction, finisher, heavy and second swings, heavy smash). `AbilityManager.ticks_for` is gone; `AbilityBase.duration_ticks()` is now `run_length_ticks()`, so the name is free for the setting. `HitInterceptor.active_seconds` stays in seconds until interceptors go (step 4).
+  - Hits during simulate are booked with `TickDriver.scheduler` (after simulate, ordered by attacker's then target's entity number, then booking order); the static hit queue is gone. Hit lists and `HitInfo.attacker_id` use entity numbers (`HitInfo.key_of` is gone). Priority jitter rolls with `DeterministicRandom`.
+
 ## 2026-11-23
 
 - **Script warnings:** `land_hit`'s `tick` parameter is `at_tick` (it shadowed `tick()`); `PredictedProjectile.fire`'s `stops_first`; `Projectile._hit_keys` is marked as read by name (its HitRun).

@@ -20,7 +20,7 @@ class Marker extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		trigger_action = &"ability_1"
-		duration = 0.1
+		duration_ticks = 6
 	func start() -> void:
 		starts += 1
 
@@ -53,7 +53,7 @@ func _test_higher_priority_wins() -> void:
 	_check(markers[1].starts == 1 and markers[0].starts == 0 and markers[2].starts == 0, "three abilities on one action: the press starts the one with the highest priority (5)")
 	await _ticks(10)
 	markers[1].make_definition_unique() # Claude 2026-11-21: writing a setting while playing needs its own copy
-	markers[1].cooldown = 10.0 # the winner can't start for a while
+	markers[1].cooldown_ticks = 600 # the winner can't start for a while
 	markers[1].ready_at = TickDriver.tick + 600
 	_ai(pawn).press(&"ability_1")
 	await _ticks(2)

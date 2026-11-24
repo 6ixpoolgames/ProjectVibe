@@ -124,14 +124,14 @@ func apply_effect(effect: Effect, source: Pawn = null, source_ability: AbilityBa
 				return false
 			Effect.Stacking.ADD_STACK:
 				_entries[at + STACKS] = mini(_entries[at + STACKS] + 1, effect.max_stacks)
-		_entries[at + TICKS_LEFT] = TickDriver.seconds_to_ticks(effect.duration_seconds)
+		_entries[at + TICKS_LEFT] = TickDriver.ticks_at_rate(effect.duration_ticks)
 		_entries[at + SOURCE] = _source_key(source)
 	else:
 		if _entries.size() >= max_active_effects * STRIDE: # a multiply, not an integer division, which the editor warns about
 			_warn_once("full", "EffectManager: %s already has %d effects on it (max_active_effects), so '%s' was refused." % [pawn.name, max_active_effects, effect.describe()])
 			return false
-		_entries.append_array([effect.get_id(), TickDriver.seconds_to_ticks(effect.duration_seconds),
-				TickDriver.seconds_to_ticks(effect.period_seconds), 1, _source_key(source)])
+		_entries.append_array([effect.get_id(), TickDriver.ticks_at_rate(effect.duration_ticks),
+				TickDriver.ticks_at_rate(effect.period_ticks), 1, _source_key(source)])
 		at = _entries.size() - STRIDE
 		first_time = true
 	_refresh() # at once, so the slow or boost holds from this moment
@@ -180,11 +180,11 @@ func tick_effects() -> void:
 	while at >= 0: # from the end, so removing one doesn't move the ones still to come
 		var effect := Effect.find(_entries[at + ID])
 		# Periods first, for the ticks it was still running: the tick it ends on counts for nothing.
-		if effect and effect.period_seconds > 0.0:
+		if effect and effect.period_ticks > 0:
 			var lasted := mini(elapsed, maxi(int(_entries[at + TICKS_LEFT]) - 1, 0))
 			_entries[at + PERIOD_LEFT] -= lasted
 			while _entries[at + PERIOD_LEFT] <= 0 and lasted > 0:
-				_entries[at + PERIOD_LEFT] += maxi(TickDriver.seconds_to_ticks(effect.period_seconds), 1)
+				_entries[at + PERIOD_LEFT] += maxi(TickDriver.ticks_at_rate(effect.period_ticks), 1)
 				due.append([effect, int(_entries[at + STACKS]), _entries[at + SOURCE]])
 		_entries[at + TICKS_LEFT] -= elapsed
 		if _entries[at + TICKS_LEFT] <= 0:
@@ -402,8 +402,13 @@ func _apply_stat_changes() -> void:
 
 
 # What the list keeps for a source: its entity id online (the same on every machine), else its instance id. -1: none.
+# REFACTOR: offline the source is kept by instance id, not its entity number, because nothing finds an entity by its number yet; the
+# entity registry (pawn spec 16.10, step 9) will.
 func _source_key(source: Pawn) -> int:
-	return HitInfo.key_of(source) if is_instance_valid(source) else -1
+	if not is_instance_valid(source):
+		return -1
+	var entity := source.get_network_entity()
+	return entity.entity_id if entity and entity.entity_id >= 0 else source.get_instance_id()
 
 
 func _source_pawn(key: int) -> Pawn:

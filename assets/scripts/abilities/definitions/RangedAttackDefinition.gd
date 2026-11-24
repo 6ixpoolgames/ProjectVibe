@@ -68,4 +68,4 @@ func _init() -> void:
 	locks_out = [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT]
 	interrupt_priority = 15
 	interrupt_threshold = 15
-	cooldown = 0.6
+	cooldown_ticks = 36

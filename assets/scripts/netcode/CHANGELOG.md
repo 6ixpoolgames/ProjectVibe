@@ -22,6 +22,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Size the lag compensation record from the rewind cap | `HIT_HISTORY_SIZE` in `NetworkEntity` | A fixed 64 ticks, while how far back lag compensation goes is a setting (`rewind_cap_seconds`). A cap above about 1 s, or a higher tick rate, silently rewinds nothing | S |
 | A public way to sync a body's collision now | `NetworkEntity.rewind_to`, `restore_after_rewind` | They call `TickStateComponent._sync_collision`, a private function of another class | S |
 
+## 2026-11-24
+
+- **Follow refresh spread by entity number** (the pawn redesign's build step 1, foundations (pawn spec 16.10)): `TickStateComponent` spreads entities' refresh turns by their entity number instead of their instance id.
+
 ## 2026-11-23
 
 - **Script warnings:** `NetworkEntity.lingering_started` is marked as emitted elsewhere (by `NetworkSession.despawn`), which the checker can't see.

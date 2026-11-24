@@ -36,7 +36,7 @@ const LOCAL_IDS_START := 1 << 30
 ## On, a run with no display (a test, a dedicated server) records into folder/headless/<role> instead, with its own [member keep_recordings].
 @export var headless_runs_apart := true
 ## Recordings kept per role's folder; older ones are deleted when a new one starts. 0 keeps all, and skips [member max_folder_megabytes] too.
-@export_range(0, 1000, 1, "or_greater") var keep_recordings := 10
+@export_range(0, 1000, 1, "or_greater") var keep_recordings := 100
 ## Block length in seconds. Seeking starts at a block's keyframe: shorter seeks faster, longer makes smaller files.
 @export_range(0.1, 10.0, 0.1) var block_seconds := 1.0
 ## The longest a recording may be, in seconds (3 hours). 0 switches it off, as for the other safeguards below.

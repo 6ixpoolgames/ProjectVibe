@@ -26,7 +26,7 @@ enum WhilePossessed {
 ## How often the AI decides, in ticks at 60 a second (15: four times a second). Each pawn is offset by its own number, so a crowd
 ## doesn't all decide on one tick. Some events wake a decision early (pawn spec 10.9).
 @export_range(1, 600, 1, "or_greater") var decision_interval_ticks := 15
-## Part of every random number this AI uses; pawn numbers still make two pawns differ. A game can set it from its world seed.
+## Part of every random number this AI uses, with the match seed; entity numbers still make two pawns differ.
 @export var random_seed := 0
 
 ## Where every AI pawn's orders come from, if not from its own AI: called instead of [method think] in each pawn's AI step, as
@@ -404,7 +404,7 @@ func think(tick: int) -> void:
 ## True on this pawn's regular decision ticks, every [member decision_interval_ticks], offset by its own number.
 func is_decision_tick(tick: int) -> bool:
 	# Or one it skipped since its last run, for a pawn running every Nth tick (pawn spec 8.21).
-	return pawn.fired_since_last_run(tick, pawn_number(), TickDriver.ticks_at_rate(decision_interval_ticks))
+	return pawn.fired_since_last_run(tick, pawn.entity_number(), TickDriver.ticks_at_rate(decision_interval_ticks))
 
 
 ## Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state
@@ -453,14 +453,7 @@ func random_unit(salt: int) -> float:
 
 ## random_unit() for a given tick.
 func random_unit_at(tick: int, salt: int) -> float:
-	# A small integer hash, not a generator: nothing is stored, so skipping a call never changes the next. Each step stays within
-	# 32 bits so nothing overflows. Bit-for-bit twin of the hash in native/src/ai_batch_decider.cpp.
-	var h := (random_seed * 83492791) ^ (pawn_number() * 19349663) ^ (tick * 73856093) ^ salt
-	h &= 0xFFFFFFFF
-	h = ((h ^ (h >> 16)) * 0x45D9F3B) & 0xFFFFFFFF
-	h = ((h ^ (h >> 16)) * 0x45D9F3B) & 0xFFFFFFFF
-	h = h ^ (h >> 16)
-	return float(h & 0xFFFFFF) / 16777216.0 # 24 bits, so every value fits exactly in a float
+	return DeterministicRandom.unit_seeded(effective_seed(), pawn.entity_number() if pawn else 0, tick, salt)
 
 
 ## A number from -1 to 1. See random_unit().
@@ -468,35 +461,7 @@ func random_signed(salt: int) -> float:
 	return random_unit(salt) * 2.0 - 1.0
 
 
-var _number_name: StringName = &"" # the name _name_number was worked out from
-var _name_number := 0
-
-## This pawn's own number, for spreading decisions and for random numbers: its network id when it has one, which is the same on
-## every machine, or else a hash of its name.
-func pawn_number() -> int:
-	if pawn == null:
-		return 0
-	var entity := pawn.get_network_entity()
-	if entity and entity.entity_id >= 0:
-		return entity.entity_id
-	# The hash is kept until the name changes, since it's asked for at least twice a tick for every pawn.
-	# StringNames compare by pointer, far cheaper than hashing the text.
-	if pawn.name != _number_name:
-		_number_name = pawn.name
-		_name_number = _number_from_name(pawn.name)
-	return _name_number
-
-
-## Any pawn's number, as [method pawn_number] gives it, for a pawn that may have no AI of its own. 0 for null.
-static func number_of(other: Pawn) -> int:
-	if other == null:
-		return 0
-	var entity := other.get_network_entity()
-	if entity and entity.entity_id >= 0:
-		return entity.entity_id
-	return _number_from_name(other.name)
-
-
-# A pawn's number when it has no entity id; pawn_number and number_of must agree, so a replay rolls the same.
-static func _number_from_name(pawn_name: StringName) -> int:
-	return String(pawn_name).hash() & 0x7FFFFFFF
+## The seed this AI's rolls use: [member random_seed] plus the match's ([member DeterministicRandom.match_seed]). The C++ decider is
+## given the same when the pawn joins it.
+func effective_seed() -> int:
+	return random_seed + DeterministicRandom.match_seed

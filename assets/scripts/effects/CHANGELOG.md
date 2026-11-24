@@ -14,6 +14,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 |---|---|---|---|
 | Threat through a signal | `EffectManager._run_once` | Effects write threat straight into the AI's memory, so this system knows the AI. A signal for Health taken, which the AI listens to (as it does to `hit_arrived`), keeps effects usable without the AI and open to other listeners (UI, scoring) | S |
 
+## 2026-11-24
+
+- **Ticks at 60 a second** (the pawn redesign's build step 1, foundations (pawn spec 16.10)): `Effect.duration_seconds` and `period_seconds` are now `duration_ticks` and `period_ticks`; the two combo boosts were converted (0.6 s → 36). Offline effect sources are still kept by instance id until the entity registry can find an entity by number (REFACTOR).
+
 ## 2026-11-23
 
 - **Documentation pass:** `EffectManager` reaches the ability manager as `pawn.ability_manager`, and keys a hit's source by `HitInfo.key_of` like the ability manager; `EffectApplier`'s doc and this header brought up to date.

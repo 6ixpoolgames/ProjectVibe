@@ -19,8 +19,8 @@ class HalfSecond extends AbilityBase:
 		super()
 		kind = Kind.ACTION
 		trigger_action = &"ability_1"
-		duration = 0.5
-		cooldown = 0.5
+		duration_ticks = 30
+		cooldown_ticks = 30
 
 
 func _ready() -> void:
@@ -123,8 +123,8 @@ func _test_ability_timing() -> void:
 func _test_effect_over_time() -> void:
 	var poison := Effect.new()
 	poison.effect_name = &"test poison"
-	poison.duration_seconds = 1.0
-	poison.period_seconds = 0.25
+	poison.duration_ticks = 60
+	poison.period_ticks = 15
 	var part := StatChangePart.new()
 	part.stat = &"Health"
 	part.amount = -5.0

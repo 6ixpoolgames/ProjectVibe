@@ -58,11 +58,11 @@ func is_active() -> bool:
 	return window <= 0 or ticks_in < window
 
 
-## Ticks it stays on from the start (active_seconds, converted with ticks_for); 0: the whole run.
+## Ticks it stays on from the start (active_seconds at the match's rate); 0: the whole run.
 func window_ticks() -> int:
 	if active_seconds <= 0.0:
 		return 0
-	return ability.manager.ticks_for(active_seconds) if ability and ability.manager else 0
+	return TickDriver.seconds_to_ticks(active_seconds)
 
 
 ## TURN_AWAY only: whether to stop this hit. The base stops every hit (a plain block); a parry only those from the front. Server,

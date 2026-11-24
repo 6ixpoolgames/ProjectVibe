@@ -51,7 +51,8 @@ const ARENA_BRAIN := preload("res://assets/scenes/samples/arena_brain.tscn")
 ## Claude 2026-11-10: MeleeAttack 1.5 → 0.8, the owner's call that it was a little long. Claude 2026-11-10: the faction arena leaves
 ## MeleeAttack's out, so its combo is decided by boosts alone (FactionArenaSample._debug_cooldowns).
 ## Claude 2026-11-10: Dash 3 → 6, doubled with the base's (1 → 2), the owner's call that it's too good.
-const DEBUG_COOLDOWNS := {"MeleeAttack": 0.8, "Jump": 1.0, "Dash": 6.0, "Sprint": 8.0}
+## Claude 2026-11-24: in ticks at 60 a second now (0.8 s, 1 s, 6 s, 8 s).
+const DEBUG_COOLDOWNS := {"MeleeAttack": 48, "Jump": 60, "Dash": 360, "Sprint": 480}
 ## Claude 2026-11-09: the players' team. Every other team is AI (faction_arena_sample has two).
 const PLAYER_TEAM := 0
 
@@ -368,10 +369,10 @@ func _lengthen_cooldowns(pawn: Pawn) -> void:
 		var cooldowns := _debug_cooldowns() # Claude 2026-11-10: a function, so the faction arena can change the list
 		if not cooldowns.has(String(ability.name)):
 			continue
-		if ability.cooldown <= 0.0:
+		if ability.cooldown_ticks <= 0:
 			new_entries.append("%s:ready_at" % pawn.get_path_to(ability))
 		ability.make_definition_unique() # the sample's own numbers, on this pawn only
-		ability.cooldown = cooldowns[String(ability.name)]
+		ability.cooldown_ticks = cooldowns[String(ability.name)]
 	if tick_state and not new_entries.is_empty():
 		tick_state.add_state_properties(new_entries)
 

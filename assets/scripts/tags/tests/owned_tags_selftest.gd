@@ -127,7 +127,7 @@ func _test_effects() -> void:
 	var before := p.effect_manager.active_effects.duplicate()
 	var slow := Effect.new()
 	slow.effect_name = &"owned tags test slow"
-	slow.duration_seconds = 0.5
+	slow.duration_ticks = 30
 	slow.tags = [Tags.EFFECT.DEBUFF_SLOW] as Array[StringName]
 	p.effect_manager.apply_effect(slow, null)
 	_check(p.owned_tags.has(Tags.EFFECT.DEBUFF_SLOW) and p.owned_tags.has(Tags.EFFECT.DEBUFF), "a held effect's tags are owned while it's on the pawn")

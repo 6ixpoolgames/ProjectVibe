@@ -38,31 +38,33 @@ extends Definition
 		combo_positions = value
 		_changed(&"combo_positions", value)
 ## A random offset, up to plus or minus this, added to priority when a press picks between abilities. 0: none. It comes from the tick's
-## own random numbers ([method TickDriver.tick_rng]), so a replay picks the same ability. Locomotion ignores it.
+## own random numbers ([DeterministicRandom]), so a replay picks the same ability. Locomotion ignores it.
 @export var priority_jitter: float = 0.0:
 	set(value):
 		priority_jitter = value
 		_changed(&"priority_jitter", value)
-## Seconds. For an action, 0 means it happens at once. For locomotion, 0 means it runs as long as it's wanted.
-@export_range(0.0, 60.0, 0.05, "or_greater") var duration: float = 0.0:
+## How long it runs, in ticks at 60 a second. For an action, 0 means it happens at once. For locomotion, 0 means it runs as long as
+## it's wanted.
+@export_range(0, 3600, 1, "or_greater") var duration_ticks: int = 0:
 	set(value):
-		duration = value
-		_changed(&"duration", value)
-## Seconds after it stops before it can start again.
-@export_range(0.0, 60.0, 0.05, "or_greater") var cooldown: float = 0.0:
+		duration_ticks = value
+		_changed(&"duration_ticks", value)
+## Ticks at 60 a second after it stops before it can start again.
+@export_range(0, 3600, 1, "or_greater") var cooldown_ticks: int = 0:
 	set(value):
-		cooldown = value
-		_changed(&"cooldown", value)
+		cooldown_ticks = value
+		_changed(&"cooldown_ticks", value)
 ## Categories that can't start, or steer, while this runs, such as &"ability.movement" for an attack that roots the pawn.
 @export var locks_out: Array[StringName] = []:
 	set(value):
 		locks_out = value
 		_changed(&"locks_out", value)
-## Seconds a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried once.
-@export_range(0.0, 2.0, 0.01, "or_greater") var buffer_window: float = 0.0:
+## Ticks at 60 a second a press waits if the ability can't start yet, such as jump pressed just before landing. 0: a press is tried
+## once.
+@export_range(0, 120, 1, "or_greater") var buffer_window_ticks: int = 0:
 	set(value):
-		buffer_window = value
-		_changed(&"buffer_window", value)
+		buffer_window_ticks = value
+		_changed(&"buffer_window_ticks", value)
 ## How hard it cancels a running ability it conflicts with (pawn spec 8.6): Walk 0, Jump 5, Sprint 10, Parry 10, MeleeAttack 15,
 ## Knockback 30, Dash 40, Death 1000.
 @export var interrupt_priority: int = 0:

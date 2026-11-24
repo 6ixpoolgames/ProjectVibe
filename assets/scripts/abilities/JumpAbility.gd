@@ -1,8 +1,8 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
 ## Jumping: an action bound to &"jump", which happens at once.
 ##
-## It starts from the ground, or within [member coyote_time] of walking off an edge. A press a moment too early waits [member buffer_window]
-## seconds and jumps on landing; holding the key doesn't bounce, because only a press starts it. Height comes from the pawn's JumpVelocity
+## It starts from the ground, or within [member coyote_ticks] of walking off an edge. A press a moment too early waits [member buffer_window_ticks]
+## and jumps on landing; holding the key doesn't bounce, because only a press starts it. Height comes from the pawn's JumpVelocity
 ## stat, in metres per second upward. Rollback: [member left_ground_at].
 ## Design: pawn spec 8.5.
 class_name JumpAbility
@@ -12,14 +12,14 @@ extends AbilityBase
 var _jump: JumpDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
-## From the definition: [member JumpDefinition.coyote_time].
-var coyote_time: float:
+## From the definition: [member JumpDefinition.coyote_ticks].
+var coyote_ticks: int:
 	get:
 		if _jump == null:
 			prepare_settings()
-		return _jump.coyote_time
+		return _jump.coyote_ticks
 	set(value):
-		_write_setting(&"coyote_time", value)
+		_write_setting(&"coyote_ticks", value)
 
 ## The last tick the pawn was known to be on the ground before it left it; [constant ON_GROUND] while it's there. Rolls back (pushed).
 var left_ground_at := ON_GROUND:
@@ -72,7 +72,7 @@ func can_start() -> bool:
 	if pawn.grounded:
 		return true
 	# Walked off an edge a moment ago, and not already going up.
-	return ticks_off_ground() <= manager.ticks_for(coyote_time) and pawn.velocity.y <= 0.0
+	return ticks_off_ground() <= TickDriver.ticks_at_rate(coyote_ticks) and pawn.velocity.y <= 0.0
 
 
 func start() -> void:

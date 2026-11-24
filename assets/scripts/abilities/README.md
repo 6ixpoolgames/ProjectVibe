@@ -110,12 +110,12 @@ Ability settings are in its definition (`AbilityDefinition` and each kind's own 
 | `priority` | `AbilityDefinition` | 0 | Which ability a press picks among those on one action (higher wins) |
 | `interrupt_priority` / `interrupt_threshold` | `AbilityDefinition` | 0 / 100 | How hard it cancels others; how hard it is to cancel. Walk 0, Jump 5, Sprint 10, swing 15, Knockback 30 (35), Dash 40 (25) |
 | `locks_out`, `cancelled_by` | `AbilityDefinition` | empty | Categories it stops while running; categories that can always cancel it |
-| `cooldown`, `buffer_window` | `AbilityDefinition` | 0 | Seconds before it can start again; seconds an early press waits |
+| `duration_ticks`, `cooldown_ticks`, `buffer_window_ticks` | `AbilityDefinition` | 0 | Ticks at 60 a second: how long it runs; before it can start again; how long an early press waits |
 | `combo_positions` | `AbilityDefinition` | empty | Which combo positions it can fill |
 | `max_charges`, `recharges`, `charge_restore_ticks`, `charges_restored`, `restore_all_charges` | `AbilityDefinition` | 0 (no limit), off, 600, 1, off | Limited uses, whether they come back on their own, and how |
 | `has_charges_tag` | `AbilityDefinition` | empty (a ranged attack: `status.has_ammo.ranged`) | A tag owned while charges are left |
 | `start_requirements` | `AbilityDefinition` | empty | Owned tags it needs, or that block it, to start |
-| `max_charge`, `recharge_rate`, `recharge_delay`, `min_start_charge` | `SprintDefinition` | 3 s, 0.5, 1 s, 0.5 s | Sprint's charge: how long, how fast it refills, after how long, and what it needs to start |
+| `max_charge_ticks`, `recharge_rate`, `recharge_delay_ticks`, `min_start_charge_ticks` | `SprintDefinition` | 180 (3 s), 0.5, 60, 30 | Sprint's charge: how long, how fast it refills, after how long, and what it needs to start |
 | `speed`, `speed_curve`, `gravity_scale` | `ProjectileDefinition` | 30 m/s, steady, 0 | A projectile's flight |
 | `hits_self`, `hits_allies`, `hits_enemies` | `HitDefinition` | off, off, on | Who a swing or projectile may hit |
 | `max_hits`, `max_intersects` | `HitDefinition` | no limit (a ranged attack's: 1 hit) | How many pawns it hits, or things it meets, before it stops |

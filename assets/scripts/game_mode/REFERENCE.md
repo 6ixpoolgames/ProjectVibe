@@ -13,7 +13,7 @@ Every class in `assets/scripts/game_mode/`, from its doc comments. The overview 
 
 ## AIActivationManager
 
-`res://assets/scripts/game_mode/AIActivationManager.gd`, extends [`GameModeModule`](#gamemodemodule)
+`res://assets/scripts/game_mode/AIActivationManager.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 Switches AI pawns off when the ground around them isn't loaded, back on when it is, and sets how often the rest run.
 
@@ -65,7 +65,7 @@ Extend it, and override what's useful. A module with no per-frame work should sw
 
 ## PawnInitializer
 
-`res://assets/scripts/game_mode/PawnInitializer.gd`, extends [`GameModeModule`](#gamemodemodule)
+`res://assets/scripts/game_mode/PawnInitializer.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 Gives every pawn the parts it needs to work, from one list per game.
 
@@ -95,7 +95,7 @@ GameMode (the whole game). Design: pawn spec 11.
 
 ## PossessionCoordinator
 
-`res://assets/scripts/game_mode/PossessionCoordinator.gd`, extends [`GameModeModule`](#gamemodemodule)
+`res://assets/scripts/game_mode/PossessionCoordinator.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 Who controls which pawn: players possess and let go of pawns through here.
 
@@ -149,7 +149,7 @@ Spectating is local: only this machine knows its player is spectating, and the s
 
 ## SpawnManager
 
-`res://assets/scripts/game_mode/SpawnManager.gd`, extends [`GameModeModule`](#gamemodemodule)
+`res://assets/scripts/game_mode/SpawnManager.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 Puts pawns into the world at SpawnPoints, and brings players back after they die.
 
@@ -166,13 +166,14 @@ Points are chosen by team and group, shuffled with the tick's random numbers (re
 ### Settings and properties
 
 - `respawn_players: bool` = `true`: On: players' pawns come back after dying.
-- `player_respawn_seconds: float` = `3.0`: How long a player's pawn stays dead, in seconds.
+- `player_respawn_ticks: int` = `180`: How long a player's pawn stays dead, in ticks at 60 a second (180: 3 s).
 - `player_respawn_at_spawn_point: bool` = `true`: On: a player's pawn comes back at a spawn point for its team. Off, or with no point: where it fell.
 - `tries_per_point: int` = `4`: How many spots inside a point's scatter_radius it tries before going on to the next point.
 - `clearance_radius: float` = `0.6`: How close another pawn's body may be to a new pawn's middle, in metres, for the spot to count as free.
 - `ground_lift: float` = `0.3`: How far above the ground a pawn appears on terrain, in metres, so it never starts inside it.
 - `pawn_layers: int` = `2`: The physics layers pawns are on, for the free-spot check. Pawns use layer 2.
 - `claim_ticks: int` = `2`: For how many ticks a spot it handed out counts as taken, until physics has stepped and sees the pawn there itself. 2 covers a frame that runs two ticks.
+- `max_spawns_per_tick: int` = `1`: The most pawns spawners ([`PawnSpawner`](../spawning/REFERENCE.md#pawnspawner)) may spawn in one tick; the rest wait for the next ticks, so a wave or a burst of replacements is spread out instead of landing in one frame (a pawn costs about 10 ms to spawn). 0: no limit. Players' pawns (`spawn_player()`) are never held back, but count towards it.
 
 ### Signals
 
@@ -181,7 +182,7 @@ Points are chosen by team and group, shuffled with the tick's random numbers (re
 
 ### Constants
 
-- `RANDOM_SALT = 7151`: Separates these rolls from other users of the same tick's random numbers.
+- `RANDOM_SALT = 7151`: Separates these rolls from other users of the same tick's random numbers (DeterministicRandom).
 
 ### Functions
 
@@ -190,18 +191,18 @@ Points are chosen by team and group, shuffled with the tick's random numbers (re
 - `spawn_near(type_name: String, around: Node3D, scatter_radius: float, owner_peer: int = 0) -> Pawn`: Spawns a pawn of this type within scatter_radius of a node, facing the node's way, with no spawn point needed. PawnSpawner uses this when it has no group of points.
 - `spawn_player(peer: int, type_name: String = "pawn", group: StringName = &"") -> Pawn`: A player's pawn: spawned at a point for its team, possessed for this player, and brought back when it dies (respawn_players). peer is the player's network peer; offline, anything (it's possessed for the one local player).
 - `find_place(team: int, group: StringName = &"") -> Dictionary`: Where a pawn of this team would appear, asked for with this group: {"position": Vector3, "yaw": float}, or {} with no point. See "How a spawn point is chosen" in the README.
-- `after_seconds(seconds: float, what: Callable) -> void`: Runs what after this many seconds of ticks, between ticks. Pausing the tick driver pauses the count. For delays that are part of the game's rules, such as respawns and body removal.
-- `_free_spot(world_node: Node3D, centre: Vector3, yaw: float, radius: float, rng: RandomNumberGenerator) -> Dictionary`: A free spot near this centre, or {}. The node is only for its physics world.
-- `_spot(centre: Vector3, yaw: float, radius: float, rng: RandomNumberGenerator) -> Dictionary`: A spot inside the circle, on the ground if there's terrain.
+- `after_ticks(ticks: int, what: Callable) -> void`: Runs what after this many ticks (at 60 a second, converted to the match's rate), booked with the tick scheduler: it runs just before the tick it's due on, between ticks. Pausing the tick driver pauses the count. For delays that are part of the game's rules, such as respawns and body removal.
+- `_free_spot(world_node: Node3D, centre: Vector3, yaw: float, radius: float) -> Dictionary`: A free spot near this centre, or {}. The node is only for its physics world.
+- `_spot(centre: Vector3, yaw: float, radius: float) -> Dictionary`: A spot inside the circle, on the ground if there's terrain.
 - `_ground_height(at: Vector3) -> float`: The height a pawn appears at here: on terrain, just above the ground (building that chunk first if it isn't yet, since the server may have no ground there); without terrain, the height it was given.
 - `_is_free(world_node: Node3D, feet: Vector3) -> bool`: True if no pawn body is within clearance_radius of a new pawn's middle here, and no spot handed out lately is within twice clearance_radius (two pawns' worth), since physics doesn't see those pawns yet.
 - `_claim(feet: Vector3) -> void`: Remembers a spot a pawn was just put on, for claim_ticks ticks (see the README).
 - `_team_of(type_name: String) -> int`: A pawn type's team, read from its scene once: an instance is made, read and freed, without entering the tree.
-- `_run_due() -> void`: Between ticks: runs every delay whose tick has come, in the order they were asked for.
+- `spawns_left_this_tick() -> int`: How many more pawns spawners may spawn this tick (`max_spawns_per_tick`); a large number with no limit.
 
 ## TeamRegistry
 
-`res://assets/scripts/game_mode/TeamRegistry.gd`, extends [`GameModeModule`](#gamemodemodule)
+`res://assets/scripts/game_mode/TeamRegistry.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 How many pawns are on each team, kept current as pawns enter and leave the tree and change team.
 

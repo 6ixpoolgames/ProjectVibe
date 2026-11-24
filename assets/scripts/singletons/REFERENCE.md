@@ -4,10 +4,38 @@
 
 Every class in `assets/scripts/singletons/`, from its doc comments. The overview is in [README.md](README.md).
 
+- [DeterministicRandom](#deterministicrandom)
 - [GameModeSingleton](#gamemodesingleton)
 - [NavMarkerManager](#navmarkermanager)
 - [NetworkSessionSingleton](#networksessionsingleton)
 - [TickDriverSingleton](#tickdriversingleton)
+- [TickScheduler](#tickscheduler)
+
+## DeterministicRandom
+
+`res://assets/scripts/singletons/DeterministicRandom.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Repeatable random numbers for gameplay: each roll is a hash of the match seed, a key, a tick and a salt (pawn spec 16.9).
+
+Nothing is stored, so a replayed or re-simulated tick rolls the same, skipping a roll never changes the next, and there's no generator state to save or send. The key is usually an entity number (`EntityNumber.of()`); the salt tells apart rolls made for different things in one tick. Use it instead of `randf()` for anything that changes play. Debug tools that are meant to be random, and terrain noise, stay apart. A static class: nothing to add to a scene. Twin of `native/src/deterministic_random.h`.
+
+```gdscript
+var roll := DeterministicRandom.unit(pawn.entity_number(), TickDriver.tick, MY_SALT)
+var spot: Node3D = DeterministicRandom.pick(points, pawn.entity_number(), TickDriver.tick, MY_SALT)
+```
+
+### Settings and properties
+
+- `match_seed: int` = `0`: The match's seed, mixed into every roll. Set from the game mode (`GameModeSingleton.match_seed`) before a match starts; it must be the same on every machine.
+
+### Functions
+
+- `unit(key: int, tick: int, salt: int = 0) -> float` *(static)*: A number from 0 up to (not including) 1.
+- `signed(key: int, tick: int, salt: int = 0) -> float` *(static)*: A number from -1 up to (not including) 1.
+- `float_range(from: float, to: float, key: int, tick: int, salt: int = 0) -> float` *(static)*: A number from `from` up to (not including) `to`.
+- `int_range(from: int, to: int, key: int, tick: int, salt: int = 0) -> int` *(static)*: A whole number from `from` to `to`, both included, as `randi_range` gives. Spans above 16 million repeat some values, as the hash gives 24 bits.
+- `pick(items: Array, key: int, tick: int, salt: int = 0) -> Variant` *(static)*: One of the items, or null if there are none.
+- `unit_seeded(seed_value: int, key: int, tick: int, salt: int) -> float` *(static)*: The roll itself, with a seed of its own: `unit()` uses the match seed. A small integer hash, not a generator. Each step stays within 32 bits so nothing overflows, and it gives 24 bits, so every value fits exactly in a float.
 
 ## GameModeSingleton
 
@@ -32,6 +60,7 @@ GameMode.add_module(node)        # a game's own modules, which extend GameModeMo
 - `replay_recorder: ReplayRecorder` = `null`: Records the game to replay files, or null without one (docs/replay/REPLAY_SPEC.md).
 - `team_registry: TeamRegistry` = `null`: How many pawns are on each team, or null without one.
 - `crowd_mover: CrowdMover` = `null`: Moves AI pawns walking on the ground as one crowd (pawn spec 8.22), or null without one.
+- `match_seed: int` = `0`
 
 ### Signals
 
@@ -311,7 +340,7 @@ TickDriver.register(self)   # then write any of _tick_input(dt, tick), _tick_cap
                             # _tick_simulate(dt, tick), _tick_record(tick); each is optional
 ```
 
-One tick: `before_tick`, input, capture input, simulate, `after_simulate`, record, commit, `after_tick`. Within a phase, lower `order` runs first, then registration order. The commit writes every entity's state into `store`, the record of play at tick boundaries. A participant with a `due_tick` property (a pawn) isn't called in input or simulate before that tick, so a pawn on a load step costs nothing on the ticks it skips. Rollback and the load ladder are in the README. Design: state store spec 4 and 9, netcode spec 3 (rollback 3.5), scaling spec 7, pawn spec 8.21 (load ladder).
+One tick: the `scheduler`'s actions due before it, `before_tick`, input, capture input, simulate, the scheduler's actions due after simulate (hits), `after_simulate`, record, commit, `after_tick`. Within a phase, lower `order` runs first, then registration order. The commit writes every entity's state into `store`, the record of play at tick boundaries. A participant with a `due_tick` property (a pawn) isn't called in input or simulate before that tick, so a pawn on a load step costs nothing on the ticks it skips. Rollback and the load ladder are in the README. Design: state store spec 4 and 9, netcode spec 3 (rollback 3.5), scaling spec 7, pawn spec 8.21 (load ladder).
 
 ### Settings and properties
 
@@ -324,6 +353,7 @@ One tick: `before_tick`, input, capture input, simulate, `after_simulate`, recor
 - `store: Object` = `null`: The central record of play (`StateStore` in C++, or its twin [`StateStoreGD`](../state_store/REFERENCE.md#statestoregd)): every entity's state at the end of each tick. Untyped because it's one of two classes with the same calls.
 - `use_native_store: bool` = `true`: Use the C++ store when the library is there. Off: the GDScript twin, for comparing (tests take `-- --gdscript-store`).
 - `store_mismatches: int` = `0`: Entities the tripwire (`verify_store_each_tick`) has caught, added up.
+- `scheduler: TickScheduler` = `<unknown>`: Actions booked for a tick and a point in it (hit delivery, delays), run in a fixed order (netcode spec 19.4). See [`TickScheduler`](#tickscheduler).
 - `tick: int` = `0`: Current tick number: the last tick that ran, 0 before any. Change it only with `set_tick()`.
 - `tick_factor: float` = `1.0`: Time dilation multiplier: how fast ticks happen. 1.0 offline and on the server; on a client the netcode nudges it to keep its clock right.
 - `dropped_ticks: int` = `0`: Ticks dropped by the `max_ticks_per_frame` limit, plus time Godot dropped beyond its own limit; for diagnostics.
@@ -350,8 +380,8 @@ One tick: `before_tick`, input, capture input, simulate, `after_simulate`, recor
 - `before_tick_loop()`: Sent once a frame, before the frame's first tick. Not sent in a frame with no tick due.
 - `before_tick(dt: float, tick: int)`: Sent at the start of each tick, before any phase. The netcode applies snapshots here, and may roll back from it.
 - `after_tick(dt: float, tick: int)`: Sent at the end of each tick, after every phase. A rollback from here counts this tick as finished.
-- `after_simulate(dt: float, tick: int)`: Sent after every participant has simulated, before anything is recorded (pawn spec 15.1). Queued effects, such as hits, are delivered here, so they never depend on simulate order. Not sent during a replay.
-- `after_tick_loop()`: Sent once a frame, after the frame's last tick. Delays counted in ticks (SpawnManager's, say) run here, between ticks.
+- `after_simulate(dt: float, tick: int)`: Sent after every participant has simulated and the `scheduler`'s actions due then (hits) have run, before anything is recorded (pawn spec 15.1). Not sent during a replay.
+- `after_tick_loop()`: Sent once a frame, after the frame's last tick.
 - `after_rollback(from_tick: int, to_tick: int)`: Sent when a rollback's replay is over: it went back to from_tick and replayed up to to_tick.
 - `rollback_state_loaded(from_tick: int)`: State is back to from_tick and the replay is about to run. A correction can move a pawn here, and anything that must be ready before it moves (the ground, say) gets its chance now.
 - `load_step_changed(step: int)`: Sent when `load_step` changes (see the load ladder in the README).
@@ -380,12 +410,13 @@ One tick: `before_tick`, input, capture input, simulate, `after_simulate`, recor
 - `get_physics_factor() -> float`: Multiply velocity by this before move_and_slide (and divide after), which scales by Godot's physics delta, so a tick moves the pawn velocity × tick length even if tick_rate isn't the physics rate. 1.0 when they match.
 - `get_interpolation_fraction() -> float`: How far between the last tick and the next it is, 0 to 1. For smoothing visuals per rendered frame.
 - `seconds_to_ticks(seconds: float) -> int`: Seconds (as designers type them) to whole ticks. Any time above zero is at least one tick, so a short window never becomes zero.
+- `reference_ticks(seconds: float) -> int`: Seconds as ticks at 60 a second, for writing a setting that's counted in ticks (pawn spec 16.1): 0.5 is 30.
+- `reference_seconds(reference_ticks_count: int) -> float`: A setting counted in ticks at 60 a second as seconds: 30 is 0.5.
 - `ticks_to_seconds(ticks: int) -> float`: Ticks to seconds at this match's rate.
 - `set_tick(new_tick: int) -> void`: Jumps to a tick number; the only way to change `tick`. For a client setting its clock from the server's. Not allowed during a tick or a replay. Saved history stays valid, as each slot remembers which tick it holds.
 - `is_resimulating() -> bool`: True while a rollback replays ticks. Cosmetic effects (sounds, particles) must not fire then.
 - `is_in_tick() -> bool`: True while a tick runs, from before_tick to after_tick. A request aimed at another pawn's AI made then is queued for that pawn's next AI step (pawn spec 15.1), so it never depends on which pawn went first.
 - `is_in_simulate() -> bool`: True while a tick's simulate phase runs (not a replay's). An effect aimed at another entity then is queued and delivered from `after_simulate` (pawn spec 15.1).
-- `tick_rng(key: int, salt: int = 0) -> RandomNumberGenerator`: Repeatable randomness for gameplay, instead of randf(): the rolls depend only on key (usually an entity id), tick and salt (separates rolls in one tick), so a replayed tick rolls the same. Use it at once; the same object is returned every call.
 - `rollback(from_tick: int) -> bool`: Rolls predicted participants back to how they ended from_tick, then replays every tick up to the last finished one (netcode spec 3.5). Only between ticks or from before_tick; else warns and returns false, as it does if nothing could load or from_tick is in the future. Rules in the README.
 - `_load_for_rollback(from_tick: int) -> Array`: Loads resimulated participants, then following ones near them (far-away followers are skipped, which keeps a swarm affordable). Empty if no resimulated participant could load.
 - `_commit(t: int) -> void`: The commit: every active entity's row for this tick into the store, in one pass. Entities the store can't read by itself (still being matched, or a node gone) are handed to their owner's `_store_gather(handle, tick)`.
@@ -396,3 +427,30 @@ One tick: `before_tick`, input, capture input, simulate, `after_simulate`, recor
 - `_lower_step_fits() -> bool`: True if the next step down looks safe now: load under `lower_below`, or the predicted load for the lower step (load now plus what this step saved, or twice the load if unknown) under `raise_above` less `step_down_headroom`.
 - `_profile_phase(phase: StringName, mark: int) -> int`: Adds the time since mark to this phase, and returns the new mark.
 - `_rebuild_phases() -> void`: Sorts participants and splits them by the phase methods they have. Only runs when the registry changed. Also drops freed participants.
+
+## TickScheduler
+
+`res://assets/scripts/singletons/TickScheduler.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Actions booked for a tick and a point in it, run in a fixed order (netcode spec 19.4, pawn spec 16.9).
+
+Any system books an action with `book()`: what to call, the tick it's for, the point in that tick, and an order number. The tick driver that owns it (`TickDriver.scheduler`) runs each point's due actions: `BEFORE_TICK` just before the tick's phases (delays such as respawns and body removal; objects come and go only between ticks), `AFTER_SIMULATE` once every participant has simulated (hit delivery). Within a point, actions run by tick, then order number, then the order they were booked in, so the result never depends on which entity happened to book first. An action booked for a tick that has passed runs at that point's next run; one whose object was freed is skipped. Pausing the tick driver pauses them all.
+
+```gdscript
+TickDriver.scheduler.book(TickDriver.tick + TickDriver.ticks_at_rate(180), respawn.bind(pawn_number))
+```
+
+Tier 0 (v0) carries hit delivery and delays. Spawns and despawns, possession hand-offs and terrain edits join later, with the record that lets a replay land them on the same ticks.
+
+### Constants
+
+- `Point.BEFORE_TICK = 0`: Before the tick's phases, between ticks.
+- `Point.AFTER_SIMULATE = 1`: After every participant has simulated, before record.
+- `NOT_DUE = 9223372036854775807`
+
+### Functions
+
+- `book(tick: int, action: Callable, point: int = 0, order: int = 0) -> void`: Books `action` for `tick` at `point`. Lower `order` numbers run first among actions due together (hits use the attacker's and target's entity numbers).
+- `run_due(point: int, tick: int) -> int`: Runs every action booked at `point` for `tick` or earlier, in order, and returns how many came due. Actions booked while they run wait for the next run. The tick driver calls it; a test may too.
+- `count(point: int) -> int`: How many actions are booked at `point` and not yet run.
+- `clear() -> void`: Drops every booking. For a new match and for tests.

@@ -164,8 +164,8 @@ func describe() -> Dictionary:
 			"conditions": _describe_conditions(behaviour), "score_curves": _describe_curves(behaviour),
 		})
 	return {
-		"pawn_number": context.pawn_number() if context else 0, "pawn": String(pawn.name) if pawn else "",
-		"random_seed": context.random_seed if context else 0,
+		"pawn_number": pawn.entity_number() if pawn else 0, "pawn": String(pawn.name) if pawn else "",
+		"random_seed": context.effective_seed() if context else 0,
 		"decision_interval_ticks": context.decision_interval_ticks if context else 0,
 		"default_score_jitter": default_score_jitter, "randomize_ties": randomize_ties,
 		"tie_margin": tie_margin, "tie_salt": TIE_SALT, "tag_words": TagRegistry.get_categories().size(), "behaviours": behaviours,
@@ -589,7 +589,7 @@ func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, even
 		numbers := true) -> void:
 	var context := pawn.ai_context
 	record.tick = tick
-	record.pawn_number = context.pawn_number()
+	record.pawn_number = pawn.entity_number()
 	record.pawn_name = pawn.name
 	record.event_priority = event_priority
 	record.event_is_normal = event_is_normal

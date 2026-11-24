@@ -48,11 +48,11 @@ extends Definition
 	set(value):
 		max_range = value
 		_changed(&"max_range", value)
-## Seconds it can fly before it's gone.
-@export_range(0.1, 60.0, 0.1, "or_greater") var max_lifetime: float = 3.0:
+## Ticks at 60 a second it can fly before it's gone.
+@export_range(1, 3600, 1, "or_greater") var max_lifetime_ticks: int = 180:
 	set(value):
-		max_lifetime = value
-		_changed(&"max_lifetime", value)
+		max_lifetime_ticks = value
+		_changed(&"max_lifetime_ticks", value)
 ## On: the level's solid geometry (world_mask) stops it.
 @export var hits_world: bool = true:
 	set(value):
@@ -100,7 +100,7 @@ func tracer_ticks() -> int:
 
 ## How many ticks it flies before its lifetime is up, at the match's rate.
 func lifetime_ticks() -> int:
-	return maxi(1, roundi(max_lifetime * TickDriver.get_tick_rate()))
+	return maxi(1, TickDriver.ticks_at_rate(max_lifetime_ticks))
 
 
 ## Where it is this many ticks after launch (a fraction is between ticks), from its launch point, fired along direction (length 1).

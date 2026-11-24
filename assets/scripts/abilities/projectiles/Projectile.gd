@@ -78,7 +78,7 @@ var max_range: float:
 
 var _shooter_instance := 0 # the shooter's instance id, for a shooter with no entity id
 @warning_ignore("unused_private_class_variable") # read and written by name, by its HitRun
-var _hit_keys := PackedInt64Array() # the pawns it has hit (HitInfo.key_of): its hit run's list
+var _hit_keys := PackedInt64Array() # the pawns it has hit (entity numbers): its hit run's list
 var _cleared_shooter := false # it has left the shooter's body, so the shooter can be hit (hits_self)
 var _view_delay := 0.0 # how far behind the shooter saw other pawns when it fired, in ticks
 var _ends_at_world := false # end_tick is the world's, not range or lifetime (server)

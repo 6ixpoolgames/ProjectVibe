@@ -68,8 +68,8 @@ var _players := {} # Claude 2026-11-13: peer -> true for every player in the gam
 ## so the arena's own 0.8 doesn't replace them. Combos are counted by position now, not decided by boosts.
 func _debug_cooldowns() -> Dictionary:
 	var cooldowns: Dictionary = super().duplicate()
-	cooldowns["MeleeAttack"] = 1.2
-	cooldowns["HeavyAttack"] = 1.9
+	cooldowns["MeleeAttack"] = 72 # ticks at 60 a second (Claude 2026-11-24)
+	cooldowns["HeavyAttack"] = 114
 	return cooldowns
 
 

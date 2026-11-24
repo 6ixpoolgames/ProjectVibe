@@ -60,7 +60,7 @@ A recording can never run away, outnumber the cap, or grow without limit. Each s
 | `max_recording_seconds` | 10800 (3 hours) | A recording stops at this length |
 | `max_file_megabytes` | 2048 | A recording stops when its file reaches this size |
 | `min_free_megabytes` | 1024 | A recording doesn't start, or stops, with less disk space than this. Checked every minute |
-| `keep_recordings` | 10 | Recordings kept in each role's folder |
+| `keep_recordings` | 100 | Recordings kept in each role's folder |
 | `max_folder_megabytes` | 4096 | Old recordings are deleted, oldest first, to keep a role's folder under this. The file being recorded is never deleted, and one another instance has open is skipped |
 | `max_queued_blocks` | 60 (about a minute; was 30, raised 2026-11-16) | If the disk falls this far behind, the recording stops rather than filling memory. After a failed write, the writer writes nothing more |
 

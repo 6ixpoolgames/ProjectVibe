@@ -165,7 +165,7 @@ def rewrite_links(content: str, source: str, page: str) -> str:
 # An icon per system for its card (Material Design icons, https://pictogrammers.com/library/mdi/). A new system gets the default.
 ICONS = {
     "abilities": "sword-cross", "ai": "brain", "camera": "camera-outline", "controllers": "gamepad-variant-outline",
-    "diagnostics": "chart-timeline-variant", "effects": "auto-fix", "game_mode": "chess-king", "jobs": "cogs",
+    "diagnostics": "chart-timeline-variant", "effects": "auto-fix", "entities": "identifier", "game_mode": "chess-king", "jobs": "cogs",
     "movement": "run-fast", "native": "language-cpp", "navigation": "map-marker-path", "netcode": "lan", "pawn": "account-outline",
     "platform": "laptop", "player": "account-cog-outline", "replay": "replay", "resources": "file-cog-outline",
     "singletons": "cog-outline", "spawning": "account-plus-outline", "stats": "chart-bar", "streaming": "transfer",

@@ -13,5 +13,5 @@ script = ExtResource("3_f06iw")
 effect_name = &"combo second boost"
 tags = Array[StringName]([&"effect.buff.combo"])
 is_harmful = false
-duration_seconds = 0.6
+duration_ticks = 36
 parts = Array[ExtResource("1_c3n2e")]([SubResource("Resource_25fe4")])

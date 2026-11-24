@@ -18,6 +18,6 @@ extra_categories = Array[StringName]([&"ability.combo.finisher"])
 priority = 20
 combo_positions = Array[int]([3])
 locks_out = Array[StringName]([&"ability.movement", &"ability.combat"])
-buffer_window = 0.15
+buffer_window_ticks = 9
 interrupt_priority = 10
 interrupt_threshold = 20

@@ -116,11 +116,13 @@ func _test_held_in_view() -> void:
 
 func _test_sight() -> void:
 	var observer := await _make_pawn(1, Vector3.ZERO) # faces -Z
-	# A real interval, because a first sighting counts this many ticks. Passes below are made by hand, at ticks the test picks.
-	observer.ai_context.sensing_manager.sense_interval_ticks = 10
 	var sight: SightSense = observer.ai_context.sensing_manager.get_node("Sight")
 	var memory := observer.ai_context.memory
 	var front := await _make_pawn(0, Vector3(0, 0, -5))
+	# A real interval, because a first sighting counts this many ticks. Passes below are made by hand, at ticks the test picks.
+	# Claude 2026-11-24: set after the ticks that make the second pawn, or the observer's own schedule may make a pass in them, as
+	# its entity number decides.
+	observer.ai_context.sensing_manager.sense_interval_ticks = 10
 	observer.ai_context.sensing_manager.full_pass(5000)
 	var i := memory.find(front)
 	_check(i >= 0 and is_equal_approx(memory.awareness_at(i, 5000), 10.0 / 30.0), "in front at 5 m: a first pass adds 10 ticks' worth, 1/3 (%.3f)" % memory.awareness_at(i, 5000))

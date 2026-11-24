@@ -108,8 +108,11 @@ func _test_random_numbers() -> void:
 		context.random_seed = seed
 		for tick: int in [0, 1, 999, 123456789]:
 			for salt: int in [0, 0x7135, 2817701341, 4229566536]:
-				all_same = all_same and decider.random_unit(seed, context.pawn_number(), tick, salt) == context.random_unit_at(tick, salt)
-	_check(all_same, "C++ random numbers equal GDScript's, bit for bit (negative seeds and salts over 2^31 included)")
+				all_same = all_same and decider.random_unit(seed, pawn.entity_number(), tick, salt) == context.random_unit_at(tick, salt)
+				# Claude 2026-11-24 (pawn spec 16.9): the shared service is the same hash, with any key.
+				for key: int in [0, 7, 2147483647, -1]:
+					all_same = all_same and decider.random_unit(seed, key, tick, salt) == DeterministicRandom.unit_seeded(seed, key, tick, salt)
+	_check(all_same, "C++ random numbers equal GDScript's (the AI's and DeterministicRandom's), bit for bit (negative seeds and salts over 2^31 included)")
 	pawn.free()
 
 

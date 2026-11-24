@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | A public way to read a block's ticks | `ReplayViewer._fill_strip` | The viewer reads `ReplayReader._blocks`, the reader's private data. A `get_block_ticks(index)` keeps the reader free to change how it stores blocks | S |
 | An index of blocks | `ReplayReader.open` | Opening reads the whole file into memory and decompresses every block once just to learn its ticks. At mass-battle sizes (about 160 MB an hour) a long recording is slow to open and heavy to hold; an index (at the end of the file, or a block header outside the compression) would fix both | M |
 
+## 2026-11-24
+
+- **`keep_recordings` 10 → 100** (the owner's call, for now): enough sessions to look back over a profiling round. `max_folder_megabytes` (4096) still caps each role's folder; the mass battle at size 25 records about 4.4 MB a minute.
+
 ## 2026-11-23
 
 - **The code pass:** `ReplayRecorder`'s id-to-pawn map and its `write_on_thread` switch removed (nothing read or set them); `ReplayWriter.use_thread`'s doc says what it's for; `ReplayViewer`'s test-only reads flagged `REFACTOR:` (row above).

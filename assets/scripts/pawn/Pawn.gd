@@ -127,6 +127,7 @@ var _prepared_tick := -1 # the tick _runs_this_tick and ticks_elapsed were worke
 var _runs_this_tick := true
 var _next_due_tick := 0 # when this tick's run is followed by the next, for due_tick
 var _entity: NetworkEntity = null
+var _path_number := -1 # entity_number()'s hash of the path; -1 until worked out
 var _visual: Node3D = null
 var _smoother: VisualSmoother = null # draws Visual between ticks; null without a Visual
 var _moved_since_run := false # teleported since its last run began: no sleeping and no skipped move until it has run again
@@ -143,6 +144,7 @@ func _init() -> void:
 
 
 func _enter_tree() -> void:
+	_path_number = -1 # its path may have changed
 	add_to_group(GROUP) # the list of all pawns
 	add_to_group(TerrainBodyLifter.GROUP)
 	SharedPawnTable.join(self) # the shared table of plain pawn data, which AI sensing's grid reads (C++ only; scaling spec step 1)
@@ -302,6 +304,17 @@ func teleport(to: Vector3) -> void:
 ## This pawn's NetworkEntity, or null when it isn't networked. Its entity_id is the same on every machine.
 func get_network_entity() -> NetworkEntity:
 	return _entity
+
+
+## This pawn's entity number (pawn spec 16.9), the same on every machine and in every replay: its network entity id, or else a hash of
+## its path in the scene tree ([method EntityNumber.from_path]). For AI rolls, stagger, hit lists and hit order, effect sources.
+func entity_number() -> int:
+	if _entity and _entity.entity_id >= 0:
+		return _entity.entity_id
+	# The path's hash is kept until the pawn enters the tree again, since it's asked for several times a tick for every pawn.
+	if _path_number < 0:
+		_path_number = EntityNumber.from_path(self)
+	return _path_number
 
 
 # --- Ticks ---
@@ -483,7 +496,7 @@ func _can_sleep(tick: int) -> bool:
 # One of this pawn's check ticks, every sleep_check_ticks, staggered by entity id, when a sleeping or still pawn runs a full tick
 # anyway so ground that went away under it is noticed.
 func _is_check_tick(tick: int) -> bool:
-	var stagger := _stagger()
+	var stagger := entity_number()
 	# "< ticks_elapsed" rather than "== 0", so a pawn running every Nth tick still finds the check tick that fell between its runs.
 	# sleep_check_ticks is written for 60 ticks a second (scaling spec step 6).
 	return posmod(tick + stagger, TickDriver.ticks_at_rate(sleep_check_ticks)) < ticks_elapsed
@@ -512,7 +525,7 @@ func next_run_tick(tick: int) -> int:
 		return tick + 1
 	# How many ticks until (tick + ahead + stagger) is a multiple of step; none within the step (ahead 0) means a whole step on, when
 	# "a whole step has passed" makes it run.
-	var ahead := posmod(-(tick + _stagger()), step)
+	var ahead := posmod(-(tick + entity_number()), step)
 	return tick + (ahead if ahead > 0 else step)
 
 
@@ -520,10 +533,6 @@ func next_run_tick(tick: int) -> int:
 # next_run_tick, so both use the same rule.
 func _current_step() -> int:
 	return 1 if _has_a_player() else clampi(tick_step, 1, MAX_TICK_STEP)
-
-
-func _stagger() -> int:
-	return _entity.entity_id if _entity and _entity.entity_id >= 0 else get_instance_id()
 
 
 # Works out, once per tick, whether this pawn runs this tick and how many ticks the run covers (pawn spec 8.21). Due when its step is
@@ -538,12 +547,12 @@ func _prepare_run(tick: int) -> void:
 		_runs_this_tick = true
 	else:
 		var since := tick - _last_run_tick
-		_runs_this_tick = since >= step or (since > 0 and posmod(tick + _stagger(), step) == 0)
+		_runs_this_tick = since >= step or (since > 0 and posmod(tick + entity_number(), step) == 0)
 	if _runs_this_tick: # on ticks it skips, ticks_elapsed keeps its last run's value
 		ticks_elapsed = clampi(tick - _last_run_tick, 1, MAX_TICK_STEP) if _last_run_tick >= 0 else 1
 		mark_state_changed() # a run changes it, so the store reads it this tick
 		# next_run_tick's rule, from what's at hand: the next tick that lines up with its step, or a whole step on.
-		_next_due_tick = tick + 1 if step <= 1 else tick + step - posmod(tick + _stagger(), step)
+		_next_due_tick = tick + 1 if step <= 1 else tick + step - posmod(tick + entity_number(), step)
 
 
 # Something that decides when it runs changed (a player took it or let go), so the driver asks it every tick until its next run.

@@ -41,7 +41,7 @@ func is_timed() -> bool:
 	return true
 
 
-func duration_ticks() -> int:
+func run_length_ticks() -> int:
 	return push_ticks
 
 

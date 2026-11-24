@@ -17,6 +17,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Split the tick-step rule out of `AIActivationManager` | `AIActivationManager.gd` | Two jobs in one module, freezing pawns and choosing their tick step, and the name says only the first. Apart, a game could swap either alone | M |
 | Reuse the free-spot query | `_is_free()` in `SpawnManager.gd` | A new shape and query object for every spot tried; made once and reused, a wave of spawns would allocate nothing | S |
 
+## 2026-11-24
+
+- **Spawns spread over ticks** (the owner's request, to cut load spikes): `SpawnManager.max_spawns_per_tick` (1; 0 for no limit) caps what spawners spawn in one tick, and `spawns_left_this_tick()` tells them what's left; players' pawns are never held back. Each spawn is timed as `spawning.spawn`. *Why:* the mass battle's replays showed a spawn costs about 12 ms, and a frame with three replacements took 42-44 ms of physics. *Measured* (windowed, `--size=25`, 150 s, from the replays' diagnostics): frames over 45 ms that were mostly physics went from 17 to 3, and over 30 ms from 140 to 55; frames with a spawn in them still average about 16 ms of physics against 7 without, as one spawn is still about 12 ms.
+- **Delays on the tick scheduler, rolls from `DeterministicRandom`** (the pawn redesign's build step 1, foundations (pawn spec 16.10)): `SpawnManager.after_seconds(seconds, callable)` is now `after_ticks(ticks, callable)` (ticks at 60 a second), booked with `TickDriver.scheduler`, which runs it just before its tick instead of after the frame's tick loop; its own list is gone. `player_respawn_seconds` (3) is now `player_respawn_ticks` (180). Spawn-spot rolls use `DeterministicRandom` with a roll count instead of a seeded generator. `GameMode.match_seed` sets the match's random seed.
+
 ## 2026-11-23
 
 - **`AIActivationManager` runs on ticks:** its checks run from `TickDriver.before_tick` (skipped while resimulating) instead of once a physics frame, so which pawns are frozen depends on ticks, not frame timing; a chunk being removed checks its pawns at once, before the chunk's ground goes. `spread_over_frames` and `max_checks_per_frame` are now `spread_over_ticks` and `max_checks_per_tick` (no saved scene set them). Without a tick driver it still runs per frame.
