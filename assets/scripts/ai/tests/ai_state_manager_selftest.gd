@@ -1,6 +1,7 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless self-test for AIStateManager and AIStateBase. Checks picking by priority,
 ## the fixed order, forced states with priorities, running out and releasing, the signal, and the odd cases at the top of
 ## AIStateManager.gd. Claude 2026-11-09 (scaling spec step 3): and forces asked for during a tick, which wait for the next AI step.
+## Claude 2026-11-25 (pawn spec 16.10 step 6b): forcing is gone; the AI manager's request inbox is checked instead.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_state_manager_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
@@ -32,8 +33,7 @@ func _ready() -> void:
 	print("--- AI state manager self-test ---")
 	await _test_priority_order()
 	_test_fixed_order()
-	await _test_forcing()
-	await _test_forcing_during_a_tick()
+	await _test_request_inbox() # Claude 2026-11-25 (pawn spec 16.10 step 6b): forcing is gone; outside requests go through the inbox
 	_test_odd_cases()
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
@@ -83,83 +83,56 @@ func _test_fixed_order() -> void:
 	second.free()
 
 
-func _test_forcing() -> void:
-	var combat := _state("Combat", 20)
-	var flee := _state("Flee", 30)
-	var pawn := _make_pawn([combat, flee])
-	var states := pawn.ai.state_manager
+## Claude 2026-11-25 (pawn spec 16.10 step 6b): forcing a state or a target is gone. Requests from outside the AI go through the AI
+## manager's inbox: asked during a tick (here from after_simulate, as another pawn's hit or ability would), they wait for the pawn's
+## next AI step and apply in the order asked; on a client they're ignored, with one warning.
+func _test_request_inbox() -> void:
+	var pawn := _make_pawn([_state("Combat", 20)])
 	await _ticks(2)
-	_check(states.force_state(&"Combat", 10, 50, "test"), "a force is accepted")
-	_check(states.get_current_state() == combat, "and takes effect at once, though Combat's prerequisites don't hold")
-	_check(pawn.ai.has_decision_waiting() and pawn.ai.waiting_event_priority() == 50, "and asks for a decision with the force's priority")
-	await _ticks(5)
-	_check(states.get_current_state() == combat, "it holds while the normal check would say Idle")
-	print("  (a refused force is logged next)")
-	_check(not states.force_state(&"Flee", 10, 40, "weaker"), "a weaker force is refused")
-	_check(states.get_current_state() == combat, "and changes nothing")
-	_check(states.force_state(&"Flee", -1, 50, "as strong"), "an equal one replaces it")
-	await _ticks(20)
-	_check(states.get_current_state() == flee and states.is_state_forced(), "hold_ticks -1: it holds until released, past the old force's time")
-	states.release_forced_state()
+	var behaviours := pawn.ai.behaviour_manager
+	var charge := AIBehaviourModifier.new()
+	charge.granted_tags = [Tags.AI.STANCE_MELEE]
+	var seen := {}
+	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
+		pawn.ai.add_modifier(charge, &"shout")
+		pawn.ai.set_input(&"test_morale", 0.25)
+		seen["waiting"] = pawn.ai.waiting_requests()
+		seen["applied right away"] = behaviours.get_modifiers().size(), CONNECT_ONE_SHOT)
+	await _ticks(1)
+	_check(seen.get("waiting", 0) == 2 and seen.get("applied right away", -1) == 0, "requests asked during a tick wait in the inbox")
 	await _ticks(2)
-	_check(states.get_current_state().name == &"Idle" and not states.is_state_forced(), "released: the normal check picks Idle again")
-	states.force_state(&"Combat", 4, 1, "short")
-	await _ticks(7)
-	_check(states.get_current_state().name == &"Idle", "a force runs out after hold_ticks, and the normal check takes over on time")
-	print("  (a warning about a missing state is expected next)")
-	_check(not states.force_state(&"Nowhere", 10, 99, "missing"), "a state it doesn't have: false")
-	# On a client, the AI doesn't run, so forcing does nothing.
+	_check(behaviours.get_modifiers().size() == 1 and pawn.owned_tags.has(Tags.AI.STANCE_MELEE) and pawn.ai.waiting_requests() == 0,
+			"the pawn's next AI step applies them: the modifier is added, its tag owned")
+	_check(is_equal_approx(pawn.ai.inputs.value(AIInputs.slot_of(&"test_morale")), 0.25), "and the game's input is set")
+	# In the order asked: a remove then an add leaves the modifier; an add then a remove leaves none.
+	pawn.ai.remove_modifiers(&"shout")
+	pawn.ai.add_modifier(charge, &"shout")
+	pawn.ai.apply_requests()
+	_check(behaviours.get_modifiers().size() == 1, "remove, then add: in the order asked, it's there")
+	pawn.ai.add_modifier(charge, &"other")
+	pawn.ai.remove_modifiers(&"other")
+	pawn.ai.remove_modifiers(&"shout")
+	pawn.ai.apply_requests()
+	_check(behaviours.get_modifiers().is_empty() and not pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "add, then remove: none left")
+	# A source asked by object is kept by its id, so one freed before the request applies still matches.
+	var shouter := Node.new()
+	pawn.ai.add_modifier(charge, shouter)
+	pawn.ai.apply_requests()
+	pawn.ai.remove_modifiers(shouter)
+	shouter.free()
+	pawn.ai.apply_requests()
+	_check(behaviours.get_modifiers().is_empty(), "a source freed after asking still removes its own")
+	# On a client the AI doesn't run, so requests are ignored.
 	var real_entity: NetworkEntity = pawn._entity
 	var client_entity := NetworkEntity.new()
 	client_entity.role = NetworkEntity.Role.REMOTE_FOLLOWING
 	pawn._entity = client_entity
-	print("  (a warning about forcing on a client is expected next)")
-	_check(not states.force_state(&"Combat", 10, 99, "client"), "on a client: refused, with a warning")
+	print("  (a warning about a request on a client is expected next, once)")
+	pawn.ai.add_modifier(charge, &"client")
+	pawn.ai.add_modifier(charge, &"client again")
+	_check(pawn.ai.waiting_requests() == 0, "on a client: ignored, with one warning")
 	pawn._entity = real_entity
 	client_entity.free()
-	pawn.free()
-
-
-## Claude 2026-11-09 (scaling spec step 3): a force or release asked for during a tick (here from after_simulate, as another pawn's
-## hit or ability would) waits for the pawn's next AI step, and queued ones apply in the order they were asked for. Forced targets
-## (taunts) work the same way.
-func _test_forcing_during_a_tick() -> void:
-	var combat := _state("Combat", 20)
-	var flee := _state("Flee", 30)
-	var pawn := _make_pawn([combat, flee])
-	var taunter: Pawn = load(PAWN_SCENE).instantiate()
-	taunter.team = 5
-	taunter.position = Vector3(30, 0, 0)
-	add_child(taunter)
-	var states := pawn.ai.state_manager
-	var selector := pawn.ai.target_selector
-	await _ticks(2)
-	var seen := {}
-	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
-		seen["state accepted"] = states.force_state(&"Combat", 60, 50, "during a tick")
-		seen["weaker accepted"] = states.force_state(&"Flee", 60, 40, "weaker, during a tick")
-		seen["target accepted"] = selector.force_target(taunter, 60, 10, "taunt during a tick")
-		seen["state right after"] = states.get_current_state().name
-		seen["target right after"] = selector.get_current_target(), CONNECT_ONE_SHOT)
-	await _ticks(1)
-	_check(seen.get("state accepted", false) and seen.get("weaker accepted", false) and seen.get("target accepted", false), "during a tick, forces are queued and return true")
-	_check(seen.get("state right after") == &"Idle" and seen.get("target right after") == null, "and change nothing yet")
-	await _ticks(2)
-	_check(states.get_current_state() == combat and states.is_state_forced(), "the pawn's next AI step applies them: Combat, forced")
-	_check(selector.get_current_target() == taunter and selector.is_target_forced(), "and the taunt: the target is forced")
-	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
-		states.release_forced_state()
-		selector.release_forced_target()
-		seen["still forced"] = states.is_state_forced() and selector.is_target_forced(), CONNECT_ONE_SHOT)
-	await _ticks(3)
-	_check(seen.get("still forced", false) and not states.is_state_forced() and not selector.is_target_forced() and states.get_current_state().name == &"Idle", "releases during a tick wait too, then hand back")
-	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
-		states.force_state(&"Combat", 60, 50, "first")
-		states.force_state(&"Flee", 60, 50, "second, as strong"), CONNECT_ONE_SHOT)
-	await _ticks(3)
-	_check(states.get_current_state() == flee, "queued forces apply in the order they were asked for: the second, as strong, replaces the first")
-	states.release_forced_state()
-	taunter.free()
 	pawn.free()
 
 

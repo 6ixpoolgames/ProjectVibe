@@ -256,19 +256,7 @@ func _test_target_selection() -> void:
 	_check(selector.get_current_target() == null, "below min_awareness (0.3): not a target")
 	memory.record_sighting(far, 0.9, 7200, far.global_position)
 	selector.update_target(7200)
-	_check(selector.force_target(near, 30, 10, "taunt"), "force_target is accepted")
-	_check(selector.get_current_target() == near and observer.ai.waiting_event_priority() == 10, "it takes effect at once, and asks for a decision with its priority")
-	print("  (a refused forced target is logged next)")
-	_check(not selector.force_target(far, 30, 5, "weaker"), "a weaker forced target is refused")
-	selector.update_target(TickDriver.tick + 1)
-	_check(selector.get_current_target() == near, "while forced, picking by priority is skipped")
-	selector.check_force_expiry(TickDriver.tick + 31)
-	selector.update_target(TickDriver.tick + 31)
-	_check(selector.get_current_target() == far and not selector.is_target_forced(), "after hold_ticks, picking by priority again")
-	selector.force_target(near, -1, 1, "until released")
-	selector.release_forced_target()
-	selector.update_target(TickDriver.tick + 32)
-	_check(selector.get_current_target() == far, "release_forced_target hands back")
+	_check(selector.get_current_target() == far, "the more aware one is the target") # Claude 2026-11-25: forcing is gone (pawn spec 16.10 step 6b)
 	# Claude 2026-11-12: a target freed between AI steps (a spawner removing a body) is skipped, not cast. Casting the freed object
 	# was a script error that stopped the faction arena; this run's log would show it as a SCRIPT ERROR.
 	observer.ai.current_target = near

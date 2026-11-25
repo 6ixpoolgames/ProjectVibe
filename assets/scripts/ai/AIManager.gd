@@ -6,13 +6,10 @@
 ## [AIBehaviourManager]. A pawn scene overrides one by putting its own of that name under its AIManager; PawnInitializer fills in the
 ## rest. It makes no decisions: it holds what the components share (the pawn, the current target, the pawn's [AIInputs], the last hit
 ## and swing coming, the waiting decision, and random numbers that replay the same), and the pawn calls [method run_ai] from its own
-## tick, which runs [method think]. Behaviours and states get it as their "context":
-## [codeblock]
-## context.controller, context.memory, context.state_manager, context.behaviour_manager
-## context.current_tick            # the tick the AI is running now
-## context.random_unit(salt)       # 0 up to 1, the same on every run for this pawn and tick
-## [/codeblock]
-## Design: pawn spec 10, 10.7 and 10.9.
+## tick, which runs [method think]. Behaviours and states get it as their "context" ([code]context.memory[/code],
+## [code]context.current_tick[/code], [code]context.random_unit(salt)[/code]). Code outside the AI asks through its request inbox
+## ([method add_modifier], [method remove_modifiers], [method set_input]): requests wait for the pawn's next AI step and apply in the
+## order asked, so no result depends on which pawn ran first. Design: pawn spec 10, 10.7, 10.9 and 16.5.
 class_name AIManager
 extends Node
 
@@ -53,6 +50,8 @@ var current_target: Node3D = null:
 ## own with [code]inputs.set_input(name, value)[/code].
 var inputs: AIInputs = null
 
+var _requests: Array = [] # the request inbox: [what, arguments], in the order asked
+var _warned_client_request := false
 var _decision_waiting := false
 var _event_priority := 0 # the strongest reason for the waiting decision (pawn spec 10.7)
 var _event_is_normal := true # true when every reason was an ordinary decision tick
@@ -326,20 +325,17 @@ func run_ai(tick: int) -> void:
 	think(tick)
 
 
-## The AI thinking, in a fixed order (pawn spec 4 and 10.9): forces, sensing, a decision when one is due, the running behaviour. While
-## a player has the pawn, only as far as [member while_possessed] allows. [method run_ai] calls it; an [member order_source] may too.
+## The AI thinking, in a fixed order (pawn spec 4, 10.9 and 16.5): the request inbox, sensing, a decision when one is due, the running
+## behaviour. While a player has the pawn, only as far as [member while_possessed] allows. [method run_ai] calls it; an
+## [member order_source] may too.
 func think(tick: int) -> void:
 	var has_player := pawn.controller_manager != null and pawn.controller_manager.has_player()
 	var ai_state_manager := state_manager
 	var ai_target_selector := target_selector
 	var ai_behaviour_manager := behaviour_manager
 	var ai_sensing_manager := sensing_manager
-	# Forces asked for during the last tick (a taunt from another pawn, say), in the order they were asked for (scaling spec step 3).
-	# Before anything else, and even while possessed, as a force between ticks would have been.
-	if ai_state_manager:
-		ai_state_manager.apply_queued(tick)
-	if ai_target_selector:
-		ai_target_selector.apply_queued(tick)
+	# Requests from outside the AI since its last step, in the order asked. Before anything else, and even while possessed.
+	apply_requests()
 	if has_player and while_possessed == WhilePossessed.OFF:
 		return
 	# Sensing writes into memory. MEMORY_ONLY stops after it.
@@ -349,10 +345,6 @@ func think(tick: int) -> void:
 		PerfScopes.end(&"ai.sensing", sensing_started)
 	if has_player and while_possessed == WhilePossessed.MEMORY_ONLY:
 		return
-	if ai_state_manager:
-		ai_state_manager.check_force_expiry(tick)
-	if ai_target_selector:
-		ai_target_selector.check_force_expiry(tick)
 	if is_decision_tick(tick):
 		request_decision()
 	# A running behaviour whose tag requirements stopped passing (out of shots, say) is replaced now, not at the next decision tick.
@@ -392,6 +384,64 @@ func think(tick: int) -> void:
 		PerfScopes.end(&"ai.behaviours", behaviours_started)
 
 
+# --- The request inbox ---
+
+
+## Asks for a behaviour modifier to be added under this source ([method AIBehaviourManager.add_modifier]), at the pawn's next AI step.
+func add_modifier(modifier: AIBehaviourModifier, source: Variant) -> void:
+	_request(&"add_modifier", [modifier, _source_key(source)])
+
+
+## Asks for every behaviour modifier this source added to be taken away, at the pawn's next AI step.
+func remove_modifiers(source: Variant) -> void:
+	_request(&"remove_modifiers", [_source_key(source)])
+
+
+## Asks for one of the AI's own inputs (a game's, such as &"morale") to be set, at the pawn's next AI step ([method AIInputs.set_input]).
+func set_input(input_name: StringName, value: float) -> void:
+	_request(&"set_input", [input_name, value])
+
+
+## Applies the requests waiting in the inbox, in the order asked. [method think] calls it first; a test can call it directly.
+func apply_requests() -> void:
+	if _requests.is_empty():
+		return
+	var waiting := _requests
+	_requests = []
+	var behaviours := behaviour_manager
+	for request: Array in waiting:
+		var args: Array = request[1]
+		match request[0]:
+			&"add_modifier":
+				if behaviours:
+					behaviours.add_modifier(args[0], args[1])
+			&"remove_modifiers":
+				if behaviours:
+					behaviours.remove_modifiers(args[0])
+			&"set_input":
+				if inputs:
+					inputs.set_input(args[0], args[1])
+
+
+## How many requests are waiting for the pawn's next AI step.
+func waiting_requests() -> int:
+	return _requests.size()
+
+
+func _request(what: StringName, args: Array) -> void:
+	if pawn and not pawn.runs_ai_here():
+		if not _warned_client_request:
+			_warned_client_request = true
+			push_warning("AIManager: %s (on %s) is ignored here: the AI runs only on the server." % [what, pawn.name])
+		return
+	_requests.append([what, args])
+
+
+# A source as a key, taken when asked: an object by its instance id, so one freed before the request applies still matches.
+static func _source_key(source: Variant) -> Variant:
+	return source.get_instance_id() if source is Object else source
+
+
 # --- Decisions ---
 
 
@@ -402,8 +452,8 @@ func is_decision_tick(tick: int) -> bool:
 
 
 ## Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state
-## change, a force's priority for a forced state. normal is true only for an ordinary decision, the one kind a behaviour's
-## min_run_ticks holds off. Several requests in one tick combine into one decision with the strongest reason.
+## change. normal is true only for an ordinary decision, the one kind a behaviour's min_run_ticks holds off. Several requests in one
+## tick combine into one decision with the strongest reason.
 func request_decision(priority: int = 0, normal: bool = true) -> void:
 	if _decision_waiting:
 		_event_priority = maxi(_event_priority, priority)

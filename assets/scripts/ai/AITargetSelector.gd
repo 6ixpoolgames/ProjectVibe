@@ -1,23 +1,18 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Picks the AI's current target from its memory, by priority: the standard threat or aggro table, kept small.
 ##
-## A component of the pawn's AIManager. At each decision, before the state is checked, every memory entry at awareness [member min_awareness] or more
-## is a candidate, and the highest priority wins (ties go to the nearer, then the lower id); the winner becomes the context's
-## current_target. The current target gets a fading bonus so the pawn doesn't flick between two close targets.
+## A component of the pawn's AIManager. At each decision, before the state, every memory entry at [member min_awareness] or more is a
+## candidate; the highest priority wins (ties: the nearer, then the lower id) and becomes the context's current_target, which gets a
+## fading bonus so the pawn doesn't flick between two close targets. A taunt is threat on the taunter's entry (no forcing).
 ## [codeblock]
 ## priority = awareness_weight × awareness
 ##          + distance_weight × (1 − distance / distance_range)     (distance to its last known position)
 ##          + threat_weight × threat
 ##          + current_target_bonus × current_target_fade's value    (only for the current target)
 ## [/codeblock]
-## [method force_target] overrides the choice, for taunts. A game with its own rules overrides [method target_priority]; the loop then
-## runs in GDScript instead of the memory store ([code]AIMemoryStore[/code] in C++, whose [code]best_target[/code] must match this
-## formula). Listen to [signal target_changed]:
-## [codeblock]
-## pawn.ai.target_selector.force_target(player_pawn, 180, 40, "taunt")
-## [/codeblock]
-## Design: pawn spec 10.5 and 10.11, scaling spec step 3.
-# REFACTOR: forcing and queueing are the same code as AIStateManager's force_state (reusable). See CHANGELOG.md.
+## A game with its own rules overrides [method target_priority]; the loop then runs in GDScript instead of the memory store
+## ([code]AIMemoryStore[/code] in C++, whose [code]best_target[/code] must match this formula). Listen to [signal target_changed].
+## Design: pawn spec 10.5, 10.11 and 16.5.
 class_name AITargetSelector
 extends Node
 
@@ -44,13 +39,7 @@ var pawn: Pawn = null
 
 var _current: Node3D = null
 var _picked_tick := 0
-var _forced: Node3D = null
-var _force_priority := 0
-var _force_until_tick := -1
 var _custom_priority := false # true when a script overrides target_priority()
-# Forces and releases asked for during a tick, applied at the pawn's next AI step.
-# Each is [entity, hold_ticks, priority, reason], or [] for a release.
-var _queued: Array = []
 
 
 func _init() -> void:
@@ -80,23 +69,10 @@ func get_current_target() -> Node3D:
 	return _current if is_instance_valid(_current) else null
 
 
-## True while a forced target is holding.
-func is_target_forced() -> bool:
-	return _forced != null
-
-
 ## [method AIManager.think] calls this at each decision, before the state is checked.
 func update_target(tick: int) -> void:
 	if pawn == null:
 		return
-	if _forced and not is_instance_valid(_forced):
-		_end_force()
-	if _forced:
-		if _force_until_tick >= 0 and tick >= _force_until_tick:
-			_end_force()
-		else:
-			_set_target(_forced, "forced", tick)
-			return
 	var memory := pawn.ai.memory
 	var best: Node3D = null
 	var best_priority := -INF
@@ -139,65 +115,6 @@ func target_priority(memory: AIMemory, index: int, tick: int) -> float:
 	return priority
 
 
-## Makes this entity the target for hold_ticks at 60 a second (-1: until released). Returns false, changing nothing, if a stronger
-## force holds, the entity is gone, or this isn't where the AI runs. During a tick it's queued and returns true.
-func force_target(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool:
-	if pawn == null or not is_instance_valid(entity):
-		return false
-	if not pawn.runs_ai_here():
-		push_warning("AITargetSelector: force_target on a client does nothing. The AI only runs on the server.")
-		return false
-	if _during_tick():
-		_queued.append([entity, hold_ticks, priority, reason])
-		return true
-	return _apply_force(entity, hold_ticks, priority, reason)
-
-
-## Ends a forced target. The next decision picks by priority again. During a tick it's queued, as forces are.
-func release_forced_target() -> void:
-	if _during_tick():
-		_queued.append([])
-		return
-	if _forced:
-		_end_force()
-
-
-## [method AIManager.think] calls this at the start of the AI step: applies the forces and releases queued during the
-## last tick, in the order they were asked for.
-func apply_queued(_tick: int) -> void:
-	if _queued.is_empty():
-		return
-	var queued := _queued
-	_queued = []
-	for request: Array in queued:
-		if request.is_empty():
-			if _forced:
-				_end_force()
-		elif is_instance_valid(request[0]):
-			_apply_force(request[0], request[1], request[2], request[3])
-
-
-# What force_target does, shared by the queued way and the immediate one.
-func _apply_force(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool:
-	if _forced and priority < _force_priority:
-		if OS.is_debug_build():
-			print("AITargetSelector: %s refused a forced target (priority %d, \"%s\"): one is forced at priority %d." % [pawn.name, priority, reason, _force_priority])
-		return false
-	_forced = entity
-	_force_priority = priority
-	_force_until_tick = -1 if hold_ticks < 0 else _now() + TickDriver.ticks_at_rate(hold_ticks) # hold_ticks are at 60 a second
-	_set_target(entity, reason, _now())
-	if pawn.ai:
-		pawn.ai.request_decision(priority, false)
-	return true
-
-
-## [method AIManager.think] calls this every tick, so a forced target that runs out hands back on time.
-func check_force_expiry(tick: int) -> void:
-	if _forced and _force_until_tick >= 0 and tick >= _force_until_tick:
-		_end_force()
-
-
 # --- Internals ---
 
 
@@ -212,21 +129,3 @@ func _set_target(entity: Node3D, reason: String, tick: int) -> void:
 	if pawn.ai:
 		pawn.ai.current_target = entity
 	target_changed.emit(old, entity, reason)
-
-
-func _end_force() -> void:
-	_forced = null
-	_force_priority = 0
-	_force_until_tick = -1
-	if pawn and pawn.ai:
-		pawn.ai.request_decision()
-
-
-# True while a tick runs, when a request must wait for the pawn's next AI step.
-func _during_tick() -> bool:
-	return TickDriver.is_in_tick()
-
-
-# The tick now, from the TickDriver autoload.
-func _now() -> int:
-	return TickDriver.tick

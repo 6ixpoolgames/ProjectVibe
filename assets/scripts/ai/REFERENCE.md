@@ -393,15 +393,7 @@ pawn.ai.inputs.value_of(AIInputs.TARGET_DISTANCE)
 
 The pawn's AI: holds its AI components as children, what they share, and the step that runs them in order.
 
-A component on the pawn (`Pawn.ai`), added by PawnInitializer from parts/AIManager.tscn. Its children are the AI's components: the [`AIController`](../controllers/REFERENCE.md#aicontroller) (the AI's hands), [`AISensingManager`](#aisensingmanager), [`AIMemory`](#aimemory), [`AITargetSelector`](#aitargetselector), [`AIStateManager`](#aistatemanager) and [`AIBehaviourManager`](#aibehaviourmanager). A pawn scene overrides one by putting its own of that name under its AIManager; PawnInitializer fills in the rest. It makes no decisions: it holds what the components share (the pawn, the current target, the pawn's [`AIInputs`](#aiinputs), the last hit and swing coming, the waiting decision, and random numbers that replay the same), and the pawn calls `run_ai()` from its own tick, which runs `think()`. Behaviours and states get it as their "context":
-
-```gdscript
-context.controller, context.memory, context.state_manager, context.behaviour_manager
-context.current_tick            # the tick the AI is running now
-context.random_unit(salt)       # 0 up to 1, the same on every run for this pawn and tick
-```
-
-Design: pawn spec 10, 10.7 and 10.9.
+A component on the pawn (`Pawn.ai`), added by PawnInitializer from parts/AIManager.tscn. Its children are the AI's components: the [`AIController`](../controllers/REFERENCE.md#aicontroller) (the AI's hands), [`AISensingManager`](#aisensingmanager), [`AIMemory`](#aimemory), [`AITargetSelector`](#aitargetselector), [`AIStateManager`](#aistatemanager) and [`AIBehaviourManager`](#aibehaviourmanager). A pawn scene overrides one by putting its own of that name under its AIManager; PawnInitializer fills in the rest. It makes no decisions: it holds what the components share (the pawn, the current target, the pawn's [`AIInputs`](#aiinputs), the last hit and swing coming, the waiting decision, and random numbers that replay the same), and the pawn calls `run_ai()` from its own tick, which runs `think()`. Behaviours and states get it as their "context" (`context.memory`, `context.current_tick`, `context.random_unit(salt)`). Code outside the AI asks through its request inbox (`add_modifier()`, `remove_modifiers()`, `set_input()`): requests wait for the pawn's next AI step and apply in the order asked, so no result depends on which pawn ran first. Design: pawn spec 10, 10.7, 10.9 and 16.5.
 
 ### Settings and properties
 
@@ -448,9 +440,14 @@ Design: pawn spec 10, 10.7 and 10.9.
 - `point_of_interest(within_ticks: int) -> Variant`: Something half-noticed to look at or go and see: the most aware memory entry's last known position while it isn't certain yet, or else where an unremembered attacker hit from, within this many ticks (at 60 a second); null when neither. Their conditions check the same facts through `AIInputs.half_noticed_conditions()`, which the C++ decider can read.
 - `has_target() -> bool`: True when there's a current target, picked by the target selector.
 - `run_ai(tick: int) -> void`: The AI's step, called by the pawn in its input phase. Runs only where the AI runs (offline or the server), never while a rollback replays ticks. The pawn's orders for the tick come from `order_source` if one is set, else from `think()`.
-- `think(tick: int) -> void`: The AI thinking, in a fixed order (pawn spec 4 and 10.9): forces, sensing, a decision when one is due, the running behaviour. While a player has the pawn, only as far as `while_possessed` allows. `run_ai()` calls it; an `order_source` may too.
+- `think(tick: int) -> void`: The AI thinking, in a fixed order (pawn spec 4, 10.9 and 16.5): the request inbox, sensing, a decision when one is due, the running behaviour. While a player has the pawn, only as far as `while_possessed` allows. `run_ai()` calls it; an `order_source` may too.
+- `add_modifier(modifier: AIBehaviourModifier, source: Variant) -> void`: Asks for a behaviour modifier to be added under this source (`AIBehaviourManager.add_modifier()`), at the pawn's next AI step.
+- `remove_modifiers(source: Variant) -> void`: Asks for every behaviour modifier this source added to be taken away, at the pawn's next AI step.
+- `set_input(input_name: StringName, value: float) -> void`: Asks for one of the AI's own inputs (a game's, such as &"morale") to be set, at the pawn's next AI step (`AIInputs.set_input()`).
+- `apply_requests() -> void`: Applies the requests waiting in the inbox, in the order asked. `think()` calls it first; a test can call it directly.
+- `waiting_requests() -> int`: How many requests are waiting for the pawn's next AI step.
 - `is_decision_tick(tick: int) -> bool`: True on this pawn's regular decision ticks, every `decision_interval_ticks`, offset by its own number.
-- `request_decision(priority: int = 0, normal: bool = true) -> void`: Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state change, a force's priority for a forced state. normal is true only for an ordinary decision, the one kind a behaviour's min_run_ticks holds off. Several requests in one tick combine into one decision with the strongest reason.
+- `request_decision(priority: int = 0, normal: bool = true) -> void`: Asks for a decision this tick. priority is how strong the reason is: 0 for an ordinary decision, a state's priority for a state change. normal is true only for an ordinary decision, the one kind a behaviour's min_run_ticks holds off. Several requests in one tick combine into one decision with the strongest reason.
 - `has_decision_waiting() -> bool`: True when a decision is waiting to happen.
 - `waiting_event_priority() -> int`: The strongest reason for the waiting decision. Only meaningful while one is waiting.
 - `waiting_event_is_normal() -> bool`: True when the waiting decision is only an ordinary one.
@@ -617,15 +614,13 @@ A child of the pawn's [`AIStateManager`](#aistatemanager). A state doesn't act: 
 
 Picks the pawn's current AI state: the highest-priority state whose prerequisites hold.
 
-A component of the pawn's AIManager with its [`AIStateBase`](#aistatebase) nodes as children. At each decision it moves the pawn to the first state, checked from the highest priority down, whose prerequisites hold, and a change asks for a decision with the new state's priority as the reason. States are sorted by priority, then name, once, when the manager is ready. Outside code only talks to the manager; a forced state skips the normal check for a while, and during a tick a force is queued until the pawn's next AI step so the order never depends on which pawn went first (scaling spec step 3). Server and offline only. The pawn owns the current state's tag (`AIStateBase.get_tag()`, such as ai.state.combat) in its [`OwnedTags`](../tags/REFERENCE.md#ownedtags).
+A component of the pawn's AIManager with its [`AIStateBase`](#aistatebase) nodes as children. At each decision it moves the pawn to the first state, checked from the highest priority down, whose prerequisites hold, and a change asks for a decision with the new state's priority as the reason. States are sorted by priority, then name, once, when the manager is ready. Server and offline only. The pawn owns the current state's tag (`AIStateBase.get_tag()`, such as ai.state.combat) in its [`OwnedTags`](../tags/REFERENCE.md#ownedtags), so behaviours gate on it. There's no forcing: a scripted state is a state whose prerequisites read a tag the script grants (pawn spec 16.5).
 
 ```gdscript
-pawn.ai.state_manager.get_current_state()                         # an AIStateBase, or null before the first pick
-pawn.ai.state_manager.force_state(&"Combat", 120, 50, "scripted") # skip the normal check for 120 ticks
-pawn.ai.state_manager.release_forced_state()
+pawn.ai.state_manager.get_current_state()   # an AIStateBase, or null before the first pick
 ```
 
-Design: pawn spec 10.6 and 10.7.
+Design: pawn spec 10.6, 16.5.
 
 ### Settings and properties
 
@@ -639,12 +634,7 @@ Design: pawn spec 10.6 and 10.7.
 
 - `get_current_state() -> AIStateBase`: The current state, or null before the first pick.
 - `get_states() -> AIStateBase[]`: Every state, in the order they're checked.
-- `is_state_forced() -> bool`: True while a forced state is holding.
-- `update_state(tick: int) -> void`: `AIManager.think()` calls this at each decision. Checks the states in order and moves to the first that fits, unless a force holds.
-- `check_force_expiry(tick: int) -> void`: `AIManager.think()` calls this every tick, so a force that runs out hands back to the normal check on time.
-- `force_state(state_name: StringName, hold_ticks: int, priority: int, reason: String) -> bool`: Moves to this state at once, and holds it for hold_ticks (-1: until `release_forced_state()`). Returns false, and changes nothing, if a stronger force is holding, the state doesn't exist, or this isn't where the AI runs. During a tick it's queued instead and returns true; the priority check happens when it's applied.
-- `apply_queued(_tick: int) -> void`: `AIManager.think()` calls this at the start of the AI step: applies the forces and releases queued during the last tick, in the order they were asked for.
-- `release_forced_state() -> void`: Ends a forced state. The normal check picks the state again at once. During a tick it's queued, as forces are.
+- `update_state(_tick: int) -> void`: `AIManager.think()` calls this at each decision. Checks the states in order and moves to the first that fits.
 
 ## AITargetSelector
 
@@ -652,7 +642,7 @@ Design: pawn spec 10.6 and 10.7.
 
 Picks the AI's current target from its memory, by priority: the standard threat or aggro table, kept small.
 
-A component of the pawn's AIManager. At each decision, before the state is checked, every memory entry at awareness `min_awareness` or more is a candidate, and the highest priority wins (ties go to the nearer, then the lower id); the winner becomes the context's current_target. The current target gets a fading bonus so the pawn doesn't flick between two close targets.
+A component of the pawn's AIManager. At each decision, before the state, every memory entry at `min_awareness` or more is a candidate; the highest priority wins (ties: the nearer, then the lower id) and becomes the context's current_target, which gets a fading bonus so the pawn doesn't flick between two close targets. A taunt is threat on the taunter's entry (no forcing).
 
 ```gdscript
 priority = awareness_weight × awareness
@@ -661,13 +651,7 @@ priority = awareness_weight × awareness
          + current_target_bonus × current_target_fade's value    (only for the current target)
 ```
 
-`force_target()` overrides the choice, for taunts. A game with its own rules overrides `target_priority()`; the loop then runs in GDScript instead of the memory store (`AIMemoryStore` in C++, whose `best_target` must match this formula). Listen to `target_changed`:
-
-```gdscript
-pawn.ai.target_selector.force_target(player_pawn, 180, 40, "taunt")
-```
-
-Design: pawn spec 10.5 and 10.11, scaling spec step 3.
+A game with its own rules overrides `target_priority()`; the loop then runs in GDScript instead of the memory store (`AIMemoryStore` in C++, whose `best_target` must match this formula). Listen to `target_changed`. Design: pawn spec 10.5, 10.11 and 16.5.
 
 ### Settings and properties
 
@@ -687,13 +671,8 @@ Design: pawn spec 10.5 and 10.11, scaling spec step 3.
 ### Functions
 
 - `get_current_target() -> Node3D`: The current target, or null.
-- `is_target_forced() -> bool`: True while a forced target is holding.
 - `update_target(tick: int) -> void`: `AIManager.think()` calls this at each decision, before the state is checked.
 - `target_priority(memory: AIMemory, index: int, tick: int) -> float`: This entry's target priority. Override for a game's own rules.
-- `force_target(entity: Node3D, hold_ticks: int, priority: int, reason: String) -> bool`: Makes this entity the target for hold_ticks at 60 a second (-1: until released). Returns false, changing nothing, if a stronger force holds, the entity is gone, or this isn't where the AI runs. During a tick it's queued and returns true.
-- `release_forced_target() -> void`: Ends a forced target. The next decision picks by priority again. During a tick it's queued, as forces are.
-- `apply_queued(_tick: int) -> void`: `AIManager.think()` calls this at the start of the AI step: applies the forces and releases queued during the last tick, in the order they were asked for.
-- `check_force_expiry(tick: int) -> void`: `AIManager.think()` calls this every tick, so a forced target that runs out hands back on time.
 
 ## FadeProfile
 

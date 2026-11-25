@@ -164,9 +164,14 @@ func _test_ai_state() -> void:
 	var current := states.get_current_state()
 	_check(current != null and p.owned_tags.has(current.get_tag()) and p.owned_tags.has(Tags.AI.STATE), "the pawn owns its AI state's tag (%s)" % (current.get_tag() if current else &"none"))
 	_check(TagRegistry.read_declared_tags([Tags.AI.ALL]).has(current.get_tag()) if current else false, "the default states' tags are declared")
-	states.force_state(&"Combat", 120, 50, "owned tags test")
+	# Claude 2026-11-25 (pawn spec 16.10 step 6b): forcing is gone, so a sighting moves it to Alert (any entry at 0.3 or more).
+	var seen := Node3D.new()
+	seen.position = Vector3(20, 0, 0)
+	add_child(seen)
+	p.ai.memory.record_sighting(seen, 0.8, TickDriver.tick, seen.global_position)
 	await _ticks(3)
-	_check(p.owned_tags.has(Tags.AI.STATE_COMBAT) and p.owned_tags.get_owned().filter(func(t): return String(t).begins_with("ai.state.")).size() == 1, "a new state replaces the last state's tag")
+	_check(p.owned_tags.has(Tags.AI.STATE_ALERT) and p.owned_tags.get_owned().filter(func(t): return String(t).begins_with("ai.state.")).size() == 1, "a new state replaces the last state's tag")
+	seen.free()
 	p.free()
 
 

@@ -47,8 +47,10 @@ NET_SUITES="assets/scripts/pawn/tests/net_pawn_selftest.tscn assets/scripts/stre
 
 failed_suites=()
 ran=0
+# A failed suite's whole output is kept here (build/ isn't committed), so a failure that doesn't come back can still be read.
+LOG_DIR="build/test_logs"
 
-# Runs one suite and prints one line for it, then up to five of its failure lines. $1: what to show, $2: seconds allowed, the rest:
+# Runs one suite and prints one line for it; when it fails, up to five of its failure lines, and its whole output goes to $LOG_DIR. $1: what to show, $2: seconds allowed, the rest:
 # Godot's arguments.
 run_suite() {
   local name="$1" limit="$2"
@@ -73,6 +75,10 @@ run_suite() {
   echo "$verdict  $name  checks=$passed fail=$failed script_errors=$errors exit=$code $(( $(date +%s) - started ))s$why"
   if [ "$verdict" = "FAILED" ]; then
     echo "$out" | grep -E "^ *FAIL|SCRIPT ERROR" | head -5
+    mkdir -p "$LOG_DIR"
+    local log="$LOG_DIR/${name}_$(date +%Y%m%d_%H%M%S).log"
+    echo "$out" > "$log"
+    echo "  full output: $log"
   fi
 }
 
