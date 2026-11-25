@@ -11,7 +11,7 @@
 ## _timeline_step_finished(step, reason)      # a step exited
 ## _timeline_runaway()                        # too many starts in one tick: end the run
 ## [/codeblock]
-## Conditions are asked about the host ([method AbilityCondition.holds]).
+## Conditions are asked about the host. A host whose steps write a pawn's input also has [code]step_input()[/code] ([MoveStep]).
 class_name StepTimeline
 extends RefCounted
 

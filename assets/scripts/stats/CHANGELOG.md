@@ -4,7 +4,7 @@ this says how it got here and why. -->
 
 # Stats changelog
 
-Stats are this folder (`StatManager`, `Stat`) and the default part `assets/scenes/pawn/parts/StatManager.tscn`. Effects change stats through `effects/EffectManager`; hits and death read Health in `abilities/AbilityManager`. Design: [docs/pawn/PAWN_SPEC.md](../../../docs/pawn/PAWN_SPEC.md) section 9. Overview: [README.md](README.md).
+Stats are this folder (`Stat`), held by the pawn's status manager (`status/StatusManager`, since pawn spec 16.10 step 3a), which changes them and reads Health for hits and death. Design: [docs/pawn/PAWN_SPEC.md](../../../docs/pawn/PAWN_SPEC.md) section 9. Overview: [README.md](README.md).
 
 **Known future step, not a refactor:** a deeper StatManager design waits for the game mechanics, the owner's call. Tier 0 keeps stats at a reasonable baseline.
 
@@ -12,10 +12,12 @@ Stats are this folder (`StatManager`, `Stat`) and the default part `assets/scene
 
 Code that works but doesn't yet fit the project's goals (reusable, extensible, efficient, designer friendly). Each is marked `REFACTOR:` in the code. Sizes are rough: S an hour or two, M a day, L more.
 
-| What | Where | Why | Size |
-|---|---|---|---|
-| A test-only helper | `StatManager.set_detectability` | Only AI and pawn-table tests call it; a helper in `tests/` keeps test code out of the shipping class | S |
-| One place for the "current stays between 0 and value" rule | `Stat.current`; written directly by `abilities/AbilityManager.revive`, `effects/EffectManager`, `samples/ArenaSample` | Refilling and capping a current value is done by hand in several places. A refill and a cap on `Stat` or `StatManager`, beside `change_current`, would keep the rule in one place | S |
+None at the moment.
+
+## 2026-11-25
+
+- **Refactor rows closed:** "A test-only helper" moved with `set_detectability` to the status manager (its row is in `status/CHANGELOG.md`); "One place for the current value rule" is done, since every write to a stat's current value goes through `StatusManager`.
+
 
 ## 2026-11-24
 

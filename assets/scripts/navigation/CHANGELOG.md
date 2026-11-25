@@ -18,6 +18,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-25
 
+- **`PathFollowSettings` and end reasons** (cleanup after pawn spec 16.10 step 5c). The follower's 8 settings moved into one resource, `PathFollowSettings`, which the follower reads as it walks (`settings`; the defaults when none is given), so nothing is copied: a `MoveStep` exports one, and the AI controller exports `path_settings`, giving its walks back the inspector settings they had on the `NavigationManager`. `get_end_reason()` says why the last path ended (`ARRIVED`, `NO_WAY`, `NAV_TOO_SLOW`, `LINK_MISSED`, `STOPPED`) and stays after `stop()` until the next `move_to`. Test: `path_follower_selftest` (each end reason; test pawns get their own settings).
+
 - **`NavigationManager` became `PathFollower`** (pawn spec 16.7, 16.10 step 5c). The pawn no longer has one shared nav part: whatever walks it somewhere holds its own follower (a `RefCounted`), a `MoveStep` for the player's click-to-move and the AI controller's `path_follower` until the behaviour steps. The logic is the same; its waits are tick deadlines now (`_give_up_tick`, `_retry_tick`, `_link_deadline`) instead of counters, and `link_timeout` (seconds) became `link_timeout_ticks` (180). `take_link_press()` gives a link's action as input bits, and `get_goal()` the last goal. The part scene `parts/NavigationManager.tscn` and `pawn.navigation_manager` are gone. Test: `path_follower_selftest` (was `navigation_manager_selftest`), with click-to-move added.
 
 

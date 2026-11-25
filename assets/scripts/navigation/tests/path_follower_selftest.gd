@@ -1,7 +1,8 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-08: headless self-test for NavigationManager (pawn spec section 7, step 7), and
 ## AIController.move_to, which uses it. Claude 2026-11-25 (pawn spec 16.10 step 5c): NavigationManager became PathFollower, which each
 ## controller holds (the AI controller directly, the player through a MoveToStep on its step host), so this tests the follower.
-## Checks the odd cases at the top of PathFollower.gd. Exits 0 on success, 1 on failure. Run from the project folder:
+## Checks the odd cases at the top of PathFollower.gd. Claude 2026-11-25: the settings are a PathFollowSettings resource (each test pawn's
+## AI gets its own, so no test changes the shared defaults), and each way a path ends gives its end reason. Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/navigation/tests/path_follower_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
@@ -77,18 +78,20 @@ func _test_straight_line_with_no_nav() -> void:
 	var ticks := await _walk_until_done(navigation, 600)
 	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
 	_check(navigation.has_arrived() and not navigation.is_following_path(), "it gets there (%d ticks)" % ticks)
-	_check(distance < navigation.arrival_distance + 0.4, "close to the point (%.2f m)" % distance)
+	_check(distance < navigation.settings.arrival_distance + 0.4, "close to the point (%.2f m)" % distance)
 	_check(arrivals[0] == 1, "arrived is sent once (%d)" % arrivals[0])
 	_check(navigation.get_path_state() == PathFollower.PathState.ARRIVED, "and the state is ARRIVED") # Claude 2026-11-16
+	_check(navigation.get_end_reason() == PathFollower.EndReason.ARRIVED, "end reason ARRIVED") # Claude 2026-11-25
 	await _ticks(30)
 	_check(pawn.velocity.length() < 0.05, "and the pawn stands still there")
 
 	# Claude 2026-11-16: the straight line is a choice. Off, no nav means no way there.
-	navigation.straight_line_without_nav = false
+	navigation.settings.straight_line_without_nav = false
 	_check(not ai.move_to(Vector3(2.0, 0.0, 2.0)), "straight_line_without_nav off: with no nav, move_to says no")
 	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE and not navigation.is_under_way(),
 			"UNREACHABLE, and not under way")
-	navigation.straight_line_without_nav = true
+	_check(navigation.get_end_reason() == PathFollower.EndReason.NO_WAY, "end reason NO_WAY") # Claude 2026-11-25
+	navigation.settings.straight_line_without_nav = true
 
 	# A direction from the follower is flat and length 1.
 	ai.move_to(Vector3(-4.0, 3.0, 0.0))
@@ -100,8 +103,10 @@ func _test_straight_line_with_no_nav() -> void:
 	ai.move_in_direction(Vector3(0, 0, 1))
 	_check(not navigation.is_following_path(), "AIController.move_in_direction drops the path")
 	ai.move_to(Vector3(-4.0, 0.0, 0.0))
+	_check(navigation.get_end_reason() == PathFollower.EndReason.NONE, "a new move_to clears the end reason") # Claude 2026-11-25
 	ai.stop()
 	_check(not navigation.is_following_path(), "and so does stop()")
+	_check(navigation.get_end_reason() == PathFollower.EndReason.STOPPED, "end reason STOPPED, kept after stop()") # Claude 2026-11-25
 	ai.move_to(Vector3(-4.0, 0.0, 0.0))
 	ai.release_all()
 	_check(not navigation.is_following_path(), "and release_all()")
@@ -142,6 +147,8 @@ func _test_click_to_move() -> void:
 	player.take_pawn(pawn)
 	var target := Vector3(5.0, 0.0, -3.0)
 	_check(player.move_to(target) and player.step_host.is_running(), "a click starts the step host's MoveTo")
+	var move_step := player.step_host.get_node(^"MoveTo") as MoveToStep # Claude 2026-11-25
+	_check(move_step.input == player.step_host.input, "the step writes the input its host gives it (step_input())")
 	var ticks := 0
 	while player.step_host.is_running() and ticks < 600:
 		await get_tree().physics_frame
@@ -178,6 +185,7 @@ func _test_corner_by_corner() -> void:
 	var ai: AIController = pawn.controller_manager.ai_controller
 	var own := GivenCornersFollower.new(pawn)
 	own.given = PackedVector3Array([Vector3(4, 0, 0), Vector3(4, 0, 4)])
+	own.settings = ai.path_settings
 	ai.path_follower = own
 	var target := Vector3(0, 0, 4)
 	ai.move_to(target)
@@ -195,10 +203,10 @@ func _test_corner_by_corner() -> void:
 			var flat := Vector2(pawn.position.x - own.given[i].x, pawn.position.z - own.given[i].z).length()
 			closest_to_corners[i] = minf(closest_to_corners[i], flat)
 	_check(seen == [3, 2, 1, 0], "it passes the corners one at a time, in order (%s)" % str(seen))
-	_check(closest_to_corners[0] < own.corner_reached_distance + 0.2 and closest_to_corners[1] < own.corner_reached_distance + 0.2,
+	_check(closest_to_corners[0] < own.settings.corner_reached_distance + 0.2 and closest_to_corners[1] < own.settings.corner_reached_distance + 0.2,
 			"going round each corner, not cutting across (%.2f m, %.2f m)" % closest_to_corners)
 	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
-	_check(own.has_arrived() and distance < own.arrival_distance + 0.4, "and arrives at the end (%.2f m, %d ticks)" % [distance, ticks])
+	_check(own.has_arrived() and distance < own.settings.arrival_distance + 0.4, "and arrives at the end (%.2f m, %d ticks)" % [distance, ticks])
 	pawn.free()
 	floor_body.free()
 
@@ -227,7 +235,7 @@ func _test_waiting_for_nav() -> void:
 	_check(not NavServer.is_idle(), "(nav isn't built yet)")
 
 	# Giving up: nav never finishes, because nothing ticks it.
-	navigation.pending_give_up_ticks = 20
+	navigation.settings.pending_give_up_ticks = 20
 	_check(ai.move_to(target), "nav still being built: move_to says yes")
 	_check(navigation.get_path_state() == PathFollower.PathState.PENDING and navigation.is_under_way() and not navigation.is_following_path(),
 			"it's PENDING: under way, but no path yet")
@@ -237,9 +245,10 @@ func _test_waiting_for_nav() -> void:
 	await _ticks(20)
 	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE and not ai.is_following_order(),
 			"past pending_give_up_ticks it gives up: UNREACHABLE")
+	_check(navigation.get_end_reason() == PathFollower.EndReason.NAV_TOO_SLOW, "end reason NAV_TOO_SLOW") # Claude 2026-11-25
 
 	# Finding the path: nav is built while it waits, and a retry finds it.
-	navigation.pending_give_up_ticks = 100000
+	navigation.settings.pending_give_up_ticks = 100000
 	ai.move_to(target)
 	_check(navigation.get_path_state() == PathFollower.PathState.PENDING, "PENDING again")
 	var ticks := 0
@@ -300,6 +309,7 @@ func _test_following_a_nav_path() -> void:
 	_check(not ai.move_to(Vector3(5000.0, 0.0, 5000.0)), "a point nowhere near nav: move_to says no")
 	_check(not navigation.is_following_path(), "and the path it had is dropped, so it doesn't wander off on the old one")
 	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE, "UNREACHABLE, since nav is built and it isn't there") # Claude 2026-11-16
+	_check(navigation.get_end_reason() == PathFollower.EndReason.NO_WAY, "end reason NO_WAY") # Claude 2026-11-25
 
 	pawn.free()
 	terrain.free()
@@ -357,12 +367,12 @@ func _test_crossing_links() -> void:
 	await _walk_course_leg(pawn, ai, Vector3(24, -1.2, 0)) # back up to D for the next check
 
 	# use_links off: a pawn that can't jump never leaves D, however far its goal.
-	navigation.use_links = false
+	navigation.settings.use_links = false
 	var stays := await _walk_course_leg(pawn, ai, Vector3(-10, 0, 0))
 	_check(not stays.crossed_link and absf(pawn.position.y + 1.2) < 0.3, "use_links off: it goes only as far as it can walk, and stays on D")
 	# Claude 2026-11-17 (C++ bundle stage 2): a path without links says it's partial too (find_path_now_result).
 	_check(navigation.is_partial(), "and is_partial() says the path ended short, with use_links off too")
-	navigation.use_links = true
+	navigation.settings.use_links = true
 
 	# A link it can't cross: a placed ladder from C up to B that presses nothing. It tries, finds one new path, misses again, and
 	# gives up rather than trying forever.
@@ -375,11 +385,12 @@ func _test_crossing_links() -> void:
 	_check(absf(pawn.position.y + 2.0) < 0.3, "still down on C")
 	var ladder: int = NavServer.add_link(Vector3(13.5, -2, 0), Vector3(10.5, 0, 0), false, &"")
 	_settle()
-	navigation.link_timeout_ticks = 60
+	navigation.settings.link_timeout_ticks = 60
 	var stuck := await _walk_course_leg(pawn, ai, Vector3(6, 0, 0), 900)
 	_check(stuck.crossed_link and not navigation.is_following_path() and not navigation.has_arrived(),
 			"a link it can't cross: after one new path and a second miss, it stops, neither following nor arrived (%d ticks)" % stuck.ticks)
 	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE, "UNREACHABLE") # Claude 2026-11-16
+	_check(navigation.get_end_reason() == PathFollower.EndReason.LINK_MISSED, "end reason LINK_MISSED") # Claude 2026-11-25
 	_check(absf(pawn.position.y + 2.0) < 0.3, "still down on C")
 	NavServer.remove_link(ladder)
 
@@ -436,6 +447,7 @@ func _make_pawn(at: Vector3) -> Pawn:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
 	pawn.position = at
 	add_child(pawn)
+	pawn.ai.controller.path_settings = PathFollowSettings.new() # Claude 2026-11-25: its own, so the test can change them
 	return pawn
 
 

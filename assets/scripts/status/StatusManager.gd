@@ -150,10 +150,9 @@ func get_current(stat_name: StringName, fallback := 0.0) -> float:
 	return stat.current if stat and stat.changes_during_play else fallback
 
 
-## Adds to a stat that changes during play (negative takes away), kept between 0 and its value. Returns the new amount, or 0 if there's
-## no such stat. A change that crosses one of the stat's [member Stat.thresholds] sends that threshold's event at once, through the
-## pawn, with [param source] as its instigator and [param cause] (a hit, say) as its object. Only the server should change it: clients
-## get it in snapshots, and a value a snapshot or rollback restores sends nothing.
+## Adds to a stat that changes during play (negative takes away), kept between 0 and its value; returns the new amount (0: no such
+## stat). Crossing one of its [member Stat.thresholds] sends that event at once, from [param source] about [param cause]. Server only:
+## clients get it in snapshots, and a value a snapshot or rollback restores sends nothing.
 func change_current(stat_name: StringName, amount: float, source: Node = null, cause: Object = null) -> float:
 	var stat: Stat = _stats.get(stat_name)
 	if stat == null or not stat.changes_during_play:

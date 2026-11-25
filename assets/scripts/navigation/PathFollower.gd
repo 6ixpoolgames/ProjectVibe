@@ -10,8 +10,8 @@
 ## follower.get_move_direction()     # which way to walk this tick; zero when there's no path
 ## follower.get_path_state()         # NONE, FOLLOWING, PENDING, ARRIVED or UNREACHABLE
 ## [/codeblock]
-## No nav at all means a straight line ([member straight_line_without_nav]); nav still building means PENDING. The navigation
-## README's "How a move works" has the odd cases.
+## How it follows is a shared [PathFollowSettings] ([member settings]). No nav at all means a straight line; nav still building means
+## PENDING; [method get_end_reason] says why a path ended. The navigation README's "How a move works" has the odd cases.
 class_name PathFollower
 extends RefCounted
 
@@ -30,33 +30,29 @@ enum PathState {
 	UNREACHABLE, ## no way there: nowhere near nav, a link it missed twice, or nav or a queued path didn't come in time
 }
 
-## How close, in metres, the pawn must get to a corner of the path before it heads for the next one. Measured flat, ignoring
-## height, because a path's height between corners isn't the ground.
-var corner_reached_distance := 0.5
-## How close, in metres, it must get to the end of the path to count as arrived. Smaller than corner_reached_distance, because the
-## end is where something wanted to be.
-var arrival_distance := 0.3
-## Which size of nav to use. 0 is the smallest. The nav spec's tiers are by pawn radius; t0 builds only tier 0.
-var nav_tier := 0
-## On, paths may cross links (jumps, drops, placed links). Off for a pawn that can't jump, so it only goes where it can walk.
-var use_links := true
-## How long the pawn has to get from a link's start to its end, in ticks at 60 a second. Past that it finds a new path, from wherever
-## it ended up, to the same place. 180 is 3 s.
-var link_timeout_ticks := 180
-## On, a move_to where there's no nav at all, and none being built, walks in a straight line (bare test levels, click-to-move without
-## nav). Off, it's UNREACHABLE, for a game where walking off the nav would be a bug.
-var straight_line_without_nav := true
-## While PENDING for nav to be built, how often it tries again to find a path, in ticks at 60 a second.
-var pending_retry_ticks := 10
-## How long it stays PENDING, in ticks at 60 a second, for nav to be built or a queued path to come, before giving up
-## (UNREACHABLE). 300 is 5 s.
-var pending_give_up_ticks := 300
+## Why the last path ended. Read it with [method get_end_reason]; it stays after [method stop], until the next move_to.
+enum EndReason {
+	NONE, ## still going, or no move_to yet
+	ARRIVED, ## got to the end of its path (with is_partial(), the closest place it could reach)
+	NO_WAY, ## no path: nowhere near nav, or the point can't be reached and nav is built
+	NAV_TOO_SLOW, ## nav under the pawn, or a queued path, didn't come within pending_give_up_ticks
+	LINK_MISSED, ## it missed a link twice (the second time on a new path)
+	STOPPED, ## stop() was called while it was going somewhere
+}
+
+## How it follows: closeness, which nav, links, waiting for nav. Shared, read as it goes; never null (the defaults when none is given).
+var settings: PathFollowSettings:
+	get:
+		return settings if settings else _default_settings
+	set(value):
+		settings = value
 
 ## How many paths all pawns together find straight away in one tick. Any more go to NavServer's queue (searched within its own budget
 ## a tick, across links too), and those pawns wait PENDING. 0 sends every path through the queue. Shared by every follower.
 static var paths_now_per_tick := 8
 static var _paths_now_tick := -1 # the tick _paths_now_used counts
 static var _paths_now_used := 0
+static var _default_settings := PathFollowSettings.new() # for followers given none
 
 ## The pawn it moves. Null: move_to finds no way.
 var pawn: Pawn = null
@@ -73,6 +69,7 @@ var _action_to_press: StringName = &"" # waiting for the owner to take it
 var _link_deadline := -1 # crossing a link: the tick it must be across by; -1 when not crossing one
 var _new_paths_left := 1 # how many more times a missed link may lead to a new path, before it gives up
 var _path_request := 0 # the queued search this pawn is waiting for (NavServer.find_path), or 0
+var _end_reason := EndReason.NONE
 
 
 func _init(for_pawn: Pawn = null) -> void:
@@ -83,18 +80,30 @@ func _init(for_pawn: Pawn = null) -> void:
 ## (UNREACHABLE). With no nav at all, it goes in a straight line and returns true. While nav is still being built, or the path is
 ## queued, it returns true and waits (PENDING).
 func move_to(point: Vector3) -> bool:
-	stop()
+	_clear()
+	_end_reason = EndReason.NONE
 	if pawn == null:
 		_state = PathState.UNREACHABLE
+		_end_reason = EndReason.NO_WAY
 		return false
 	_goal = point
 	_new_paths_left = 1
 	_state = _find_path(point)
+	if _state == PathState.UNREACHABLE:
+		_end_reason = EndReason.NO_WAY
 	return _state != PathState.UNREACHABLE
 
 
-## Stops following the path, and cancels a queued one. [method has_arrived] goes back to false, and the state to NONE.
+## Stops following the path, and cancels a queued one. [method has_arrived] goes back to false, and the state to NONE; a path still
+## under way ends with STOPPED ([method get_end_reason]).
 func stop() -> void:
+	if is_under_way():
+		_end_reason = EndReason.STOPPED
+	_clear()
+
+
+# Drops the path and any queued search, leaving the end reason alone.
+func _clear() -> void:
 	if _path_request != 0: # a queued search nobody wants any more
 		var nav := _nav_server()
 		if nav:
@@ -118,8 +127,9 @@ func get_move_direction() -> Vector3:
 	# Waiting for nav to be built or for a queued path. Try again now and then, and give up after a while.
 	if _state == PathState.PENDING:
 		if now >= _give_up_tick:
-			stop() # which also cancels a queued search
+			_clear() # which also cancels a queued search
 			_state = PathState.UNREACHABLE
+			_end_reason = EndReason.NAV_TOO_SLOW
 			path_ended.emit(false)
 			return Vector3.ZERO
 		if _path_request != 0:
@@ -133,6 +143,7 @@ func get_move_direction() -> Vector3:
 			_state = _find_path(_goal, false)
 		if _state != PathState.FOLLOWING:
 			if _state == PathState.UNREACHABLE:
+				_end_reason = EndReason.NO_WAY
 				path_ended.emit(false) # found there's no way after all; not asked again, since it's no longer under way
 			return Vector3.ZERO # still waiting, or found there's no way after all
 	if _corners.is_empty():
@@ -141,8 +152,9 @@ func get_move_direction() -> Vector3:
 	if _link_deadline >= 0 and now > _link_deadline:
 		# Once per move_to. A link that can't be crossed would otherwise be tried forever, since a new path picks it again.
 		if _new_paths_left <= 0:
-			stop()
+			_clear()
 			_state = PathState.UNREACHABLE
+			_end_reason = EndReason.LINK_MISSED
 			path_ended.emit(false)
 			return Vector3.ZERO # gave up: not following, not arrived
 		var left := _new_paths_left - 1
@@ -152,11 +164,12 @@ func get_move_direction() -> Vector3:
 		if _state != PathState.FOLLOWING:
 			return Vector3.ZERO # nowhere to go from here, or waiting for nav
 	var at := pawn.global_position
+	var follow := settings
 	while _next_corner < _corners.size():
 		var to_corner := _corners[_next_corner] - at
 		to_corner.y = 0.0
 		var is_last := _next_corner == _corners.size() - 1
-		var close_enough := arrival_distance if is_last else corner_reached_distance
+		var close_enough := follow.arrival_distance if is_last else follow.corner_reached_distance
 		if to_corner.length() > close_enough:
 			return to_corner.normalized()
 		_reached_corner(_next_corner, now)
@@ -167,6 +180,7 @@ func get_move_direction() -> Vector3:
 	_link_ids = PackedInt64Array()
 	_link_deadline = -1
 	_state = PathState.ARRIVED # _partial stays, so whatever asked can tell how close it got
+	_end_reason = EndReason.ARRIVED
 	arrived.emit()
 	path_ended.emit(true)
 	return Vector3.ZERO
@@ -219,6 +233,11 @@ func is_partial() -> bool:
 	return _partial
 
 
+## Why the last path ended ([enum EndReason]); NONE while it's still going. Kept after [method stop], until the next move_to.
+func get_end_reason() -> EndReason:
+	return _end_reason
+
+
 ## Where the last move_to was going. Kept after it ends, until the next one.
 func get_goal() -> Vector3:
 	return _goal
@@ -238,7 +257,7 @@ func _reached_corner(index: int, now: int) -> void:
 		return
 	var nav := _nav_server()
 	_action_to_press = nav.get_link_action(_link_ids[index]) if nav else &""
-	_link_deadline = now + TickDriver.ticks_at_rate(link_timeout_ticks)
+	_link_deadline = now + TickDriver.ticks_at_rate(settings.link_timeout_ticks)
 
 
 # Finds a path from where the pawn stands to the point, and sets it up to follow. Returns the state it leads to: FOLLOWING (a path,
@@ -250,28 +269,29 @@ func _find_path(point: Vector3, first_try := true) -> PathState:
 	if nav == null:
 		return _straight_line(start, point) # no nav library at all
 	var now: int = TickDriver.tick
-	if nav.closest_point(start, nav_tier) == null:
+	var follow := settings
+	if nav.closest_point(start, follow.nav_tier) == null:
 		# NavServer is idle once every tile it was asked for is built. Not idle, the nav under the pawn may just not be built yet.
 		if nav.is_idle():
 			return _straight_line(start, point)
 		_wait_from(now, first_try)
-		_retry_tick = now + maxi(1, TickDriver.ticks_at_rate(pending_retry_ticks))
+		_retry_tick = now + maxi(1, TickDriver.ticks_at_rate(follow.pending_retry_ticks))
 		return PathState.PENDING
 	# Nav under the pawn. From here, no path is UNREACHABLE whether or not nav is still building (README, How a move works).
 	# Straight away if this tick's budget allows; otherwise queued, and the pawn waits until get_move_direction takes the answer.
 	if not _may_search_now():
-		_path_request = nav.find_path(start, point, nav_tier, use_links)
+		_path_request = nav.find_path(start, point, follow.nav_tier, follow.use_links)
 		_wait_from(now, first_try)
 		return PathState.PENDING
 	# One search either way, which says whether the path is partial, with links or without. With use_links, a path may cross links,
 	# with each link's id at the corner where it starts.
-	return _follow(nav.find_path_now_result(start, point, nav_tier, use_links))
+	return _follow(nav.find_path_now_result(start, point, follow.nav_tier, follow.use_links))
 
 
 # PENDING starts now: the give-up deadline, set once per wait.
 func _wait_from(now: int, first_try: bool) -> void:
 	if first_try:
-		_give_up_tick = now + TickDriver.ticks_at_rate(pending_give_up_ticks)
+		_give_up_tick = now + TickDriver.ticks_at_rate(settings.pending_give_up_ticks)
 
 
 # One more path straight away this tick, if the budget allows; counts it if so.
@@ -302,7 +322,7 @@ func _follow(found: Dictionary) -> PathState:
 
 # A straight line from the pawn to the point, if straight_line_without_nav allows it.
 func _straight_line(start: Vector3, point: Vector3) -> PathState:
-	if not straight_line_without_nav:
+	if not settings.straight_line_without_nav:
 		return PathState.UNREACHABLE
 	_corners = PackedVector3Array([start, point])
 	_next_corner = 1

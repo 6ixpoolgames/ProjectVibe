@@ -72,6 +72,11 @@ func run(elapsed := 1) -> void:
 		_running = false
 
 
+## The input its steps write ([member input]): how a [MoveStep] finds it when the timeline is built.
+func step_input() -> InputCommand:
+	return input
+
+
 ## Ends the run, stopping every running step ("cancelled").
 func stop() -> void:
 	if _running:

@@ -711,11 +711,9 @@ func _finish(ability: AbilityBase) -> void:
 # --- Hits and death (pawn spec 8.16: hits and death are abilities' business) ---
 
 
-## Something hit this pawn; the server's attacker calls it, such as a [MeleeSweepStep]. During simulate, or with a delay (a parry's
-## reply, a tick later), it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (attacker's
-## entity number, target's, booking order), so it never depends on who simulated first (pawn spec 15.4); otherwise at once. Delivery
-## sends [code]event.hit.taken[/code], which starts the hit ability ([ReceiveHitAbility]): it decides whether the hit is ignored,
-## blocked or lands. Steps: see the README.
+## Something hit this pawn (the server's attacker calls it). During simulate or with a delay, it's booked with the tick scheduler and
+## delivered after every pawn has simulated, in a fixed order (pawn spec 15.4); otherwise at once. Delivery sends
+## [code]event.hit.taken[/code], which starts the hit ability ([ReceiveHitAbility]): ignored, blocked or landed. The README has the steps.
 func receive_hit(hit: HitInfo, delay_ticks := 0) -> void:
 	if pawn == null or not pawn.is_authority() or hit == null:
 		return

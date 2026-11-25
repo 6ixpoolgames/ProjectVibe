@@ -35,6 +35,7 @@ enum Comparison { AT_MOST, LESS_THAN, AT_LEAST, MORE_THAN, EQUAL, NOT_EQUAL }
 
 
 ## True if it holds for this ability's pawn now.
+# REFACTOR: takes an ability, though behaviour steps will share these conditions (pawn spec 16.10 step 7). See steps/CHANGELOG.md.
 func holds(ability: AbilityBase) -> bool:
 	var got := read(ability)
 	match comparison:

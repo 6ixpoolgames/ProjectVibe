@@ -55,9 +55,9 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 
 One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's [`AbilityManager`](#abilitymanager).
 
-Its settings come from its `definition`, a Resource every pawn using it shares (ability spec 3): the node holds that reference and its state, and reads each setting from the definition. Empty, it runs with its kind's defaults.
-Extend it, override `make_default_definition()` for a kind with settings of its own, and override `can_start()`, `start()`, `tick()`, `stop()` and, for counters that run all the time, `every_tick()` (with `can_sleep()`). A quick ability can instead set base settings in `_init()` (`self.duration_ticks = 30`): they go into a definition of its own. Any setting reads and writes by name on the node (`ability.cooldown_ticks`); code inside an ability reads `settings` directly. LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities start on a press of their `AbilityDefinition.trigger_action`, at once or for `AbilityDefinition.duration_ticks`. Players' keys and AI behaviours press the same actions. Times are set in ticks at 60 a second and converted to the match's rate.
-Rollback: whatever an ability keeps between ticks must be named in `get_pushed_properties()` (its setter calls `push_state()`) or `get_rollback_properties()` (read at every commit); the base already covers its own timers and step state. It can also be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a swing). What it does to pawns is effects in its definition: `AbilityDefinition.start_effects` and `AbilityDefinition.running_effects` on itself, and its hit's target_effects and attacker_effects. Besides an action, a gameplay event can start it (`AbilityDefinition.trigger_event`). Design: pawn spec 8, 8.20, 16.7.
+Its settings come from its `definition`, a Resource every pawn using it shares (ability spec 3); empty, it runs with its kind's defaults. Any setting reads and writes by name on the node (`ability.cooldown_ticks`); code inside reads `settings`. A quick ability can set base settings in `_init()` instead, which go into a definition of its own.
+Extend it: `make_default_definition()` for settings of its own, then `can_start()`, `start()`, `tick()`, `stop()`, and `every_tick()` with `can_sleep()` for counters that always run. LOCOMOTION abilities move the pawn every tick they're chosen (one at a time); ACTION ones start on their trigger action (players' keys and AI behaviours press the same actions) or a gameplay event (`AbilityDefinition.trigger_event`). Ticks are at 60 a second.
+It can be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a swing). What it does to pawns is effects in its definition (start, running, and its hit's target and attacker effects). Rollback: what it keeps between ticks is named in `get_pushed_properties()` or `get_rollback_properties()`; the base covers its own timers and step state. Design: pawn spec 8, 8.20, 16.7.
 
 ### Settings and properties
 
@@ -156,7 +156,7 @@ Rollback: whatever an ability keeps between ticks must be named in `get_pushed_p
 - `note_hit_key(key: int) -> bool`: Notes that this run hit the pawn with this key (`Pawn.entity_number()`). False, with a warning once, if the run has hit `MAX_HITS_PER_RUN` already: then the pawn isn't hit.
 - `hit_definition() -> HitDefinition`: Who its hits may hit and what they do now: one swapped in while playing, else its definition's, else a hit on enemies.
 - `use_hit_definition(hit: HitDefinition) -> void`: Swaps who its hits may hit and what they do, while playing (an empowered state); null goes back to its definition's.
-- `land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo`: Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [`HitInfo`](#hitinfo) carrying the hit definition's effects (with: the one its step or projectile names; null: `hit_definition()`), delivered to the target (its hit ability decides what it does), then `hit_landed`. The one place a hit is applied; override it for an ability's own rules (damage falling off with distance), calling `super()`.
+- `land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo`: The one place a hit is applied (ability spec 13.1): a [`HitInfo`](#hitinfo) with the effects of `with` (null: `hit_definition()`), delivered to the target, whose hit ability decides what it does; then `hit_landed`. Override it for an ability's own rules (damage falling off with distance), calling `super()`.
 - `get_hit_run() -> HitRun`: Its swing's record of this run: whom it hit and what it met. Made the first time it's asked for; cleared as the ability starts.
 - `prepare_from_event(_event: GameplayEventData) -> void`: Called by the manager just before it starts from its trigger event, with the event: keep what its run needs before it starts (a push's length decides how long Knockback runs). `trigger_data` is set too. Nothing by default.
 - `running_effects_now() -> Effect[]`: The effects on its own pawn while it runs (`AbilityDefinition.running_effects`), or its kind's default with none.
@@ -254,7 +254,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 15.2, 16.7.
   Returns {"result": "alongside" | "cancels" | "blocked", "reason": text}: alongside (no lockout between them), cancels (priority at least the threshold, or cancelled_by), blocked (a locomotion ability stops steering instead).
 - `get_interrupt_table() -> Dictionary[]`: The interrupt table (pawn spec 8.10): a row per ability that can run (timed ones and locomotion), in run order, with an `interrupt_rule()` answer per other ability. Instant actions such as Jump have no row.
 - `get_interrupt_table_text() -> String`: The interrupt table as text, a line per ability with what cancels it and what it blocks.
-- `receive_hit(hit: HitInfo, delay_ticks: int = 0) -> void`: Something hit this pawn; the server's attacker calls it, such as a [`MeleeSweepStep`](#meleesweepstep). During simulate, or with a delay (a parry's reply, a tick later), it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (attacker's entity number, target's, booking order), so it never depends on who simulated first (pawn spec 15.4); otherwise at once. Delivery sends `event.hit.taken`, which starts the hit ability ([`ReceiveHitAbility`](#receivehitability)): it decides whether the hit is ignored, blocked or lands. Steps: see the README.
+- `receive_hit(hit: HitInfo, delay_ticks: int = 0) -> void`: Something hit this pawn (the server's attacker calls it). During simulate or with a delay, it's booked with the tick scheduler and delivered after every pawn has simulated, in a fixed order (pawn spec 15.4); otherwise at once. Delivery sends `event.hit.taken`, which starts the hit ability ([`ReceiveHitAbility`](#receivehitability)): ignored, blocked or landed. The README has the steps.
 - `health_ran_out(hit: HitInfo) -> void`: Death starts and `died` goes out, on the authority, as if Health had reached 0: for code that kills a pawn some other way. hit is what did it, or null. Nothing if already dead. Health reaching 0 sends `event.health.depleted`, which does the same.
 - `revive() -> void`: Brings a dead pawn back with full Health, on the server, and sends `event.revived` (charges refill). Death ends on its next tick.
 - `settings_changed() -> void`: An ability's settings changed while playing (`AbilityBase.use_definition()`): its masks, priority order and lists are worked out again.
@@ -979,7 +979,7 @@ STAT "Health" AT_MOST  20
 
 ### Functions
 
-- `holds(ability: AbilityBase) -> bool`: True if it holds for this ability's pawn now.
+- `holds(ability: AbilityBase) -> bool`
 - `read(ability: AbilityBase) -> float`: The value it compares, for this ability's pawn now.
 
 ## AbilityStep
@@ -1165,7 +1165,7 @@ Sweep   after "Windup" (ends, done)          values {"start_angle": 60.0, "end_a
 ### Functions
 
 - `get_label() -> StringName`: The name other entries use for it.
-- `starts_with_ability() -> bool`: True if no rule is set, so it starts with the ability.
+- `starts_with_ability() -> bool`
 - `at(step_name: StringName, tick: int = 0, run_values: Dictionary = {}) -> TimelineEntry` *(static)*: An entry for this step that starts this many ticks after the ability (0: with it).
 - `after_end_of(step_name: StringName, other: StringName, run_values: Dictionary = {}, entry_label: StringName = &"") -> TimelineEntry` *(static)*: An entry for this step that starts when another entry ends (done or released, by default).
 

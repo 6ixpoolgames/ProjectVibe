@@ -1,20 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: abilities/CHANGELOG.md.
 ## One thing a pawn can do, such as walk, jump, swing or dash: a child of the pawn's [AbilityManager].
 ##
-## Its settings come from its [member definition], a Resource every pawn using it shares (ability spec 3): the node holds that
-## reference and its state, and reads each setting from the definition. Empty, it runs with its kind's defaults.
-## [br][br]Extend it, override [method make_default_definition] for a kind with settings of its own, and override [method can_start],
-## [method start], [method tick], [method stop] and, for counters that run all the time, [method every_tick] (with [method can_sleep]).
-## A quick ability can instead set base settings in [code]_init()[/code] ([code]self.duration_ticks = 30[/code]): they go into a
-## definition of its own. Any setting reads and writes by name on the node ([code]ability.cooldown_ticks[/code]); code inside an ability
-## reads [member settings] directly. LOCOMOTION abilities move the pawn every tick they're chosen (one runs at a time); ACTION abilities
-## start on a press of their [member AbilityDefinition.trigger_action], at once or for [member AbilityDefinition.duration_ticks]. Players' keys and AI behaviours press the same actions. Times are set in ticks at 60 a second and converted
-## to the match's rate.
-## [br][br]Rollback: whatever an ability keeps between ticks must be named in [method get_pushed_properties] (its setter calls
-## [method push_state]) or [method get_rollback_properties] (read at every commit); the base already covers its own timers and step
-## state. It can also be built from [AbilityStep] children (a windup, a turn, a swing). What it does to pawns is effects in its
-## definition: [member AbilityDefinition.start_effects] and [member AbilityDefinition.running_effects] on itself, and its hit's
-## target_effects and attacker_effects. Besides an action, a gameplay event can start it ([member AbilityDefinition.trigger_event]).
+## Its settings come from its [member definition], a Resource every pawn using it shares (ability spec 3); empty, it runs with its
+## kind's defaults. Any setting reads and writes by name on the node ([code]ability.cooldown_ticks[/code]); code inside reads
+## [member settings]. A quick ability can set base settings in [code]_init()[/code] instead, which go into a definition of its own.
+## [br][br]Extend it: [method make_default_definition] for settings of its own, then [method can_start], [method start],
+## [method tick], [method stop], and [method every_tick] with [method can_sleep] for counters that always run. LOCOMOTION abilities
+## move the pawn every tick they're chosen (one at a time); ACTION ones start on their trigger action (players' keys and AI
+## behaviours press the same actions) or a gameplay event ([member AbilityDefinition.trigger_event]). Ticks are at 60 a second.
+## [br][br]It can be built from [AbilityStep] children (a windup, a turn, a swing). What it does to pawns is effects in its
+## definition (start, running, and its hit's target and attacker effects). Rollback: what it keeps between ticks is named in
+## [method get_pushed_properties] or [method get_rollback_properties]; the base covers its own timers and step state.
 ## Design: pawn spec 8, 8.20, 16.7.
 class_name AbilityBase
 extends Node
@@ -689,10 +685,9 @@ func use_hit_definition(hit: HitDefinition) -> void:
 	_hit_swap = hit.resolved() as HitDefinition if hit else null
 
 
-## Lands a hit its swing or projectile made on this pawn (ability spec 13.1): a [HitInfo] carrying the hit definition's effects
-## (with: the one its step or projectile names; null: [method hit_definition]), delivered to the target (its hit ability decides
-## what it does), then [signal hit_landed]. The one place a hit is applied; override it for an ability's own rules (damage falling off with
-## distance), calling [code]super()[/code].
+## The one place a hit is applied (ability spec 13.1): a [HitInfo] with the effects of [param with] (null: [method hit_definition]),
+## delivered to the target, whose hit ability decides what it does; then [signal hit_landed]. Override it for an ability's own rules
+## (damage falling off with distance), calling [code]super()[/code].
 func land_hit(target: Pawn, direction: Vector3, at_tick: int, _at: Vector3, with: HitDefinition = null) -> HitInfo:
 	var using := with if with else hit_definition()
 	var target_effects := using.target_effects

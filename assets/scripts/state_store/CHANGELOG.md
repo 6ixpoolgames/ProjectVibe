@@ -11,7 +11,7 @@ Code that works but doesn't yet fit the project's goals. Each is marked `REFACTO
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| Typed columns instead of Variants | `Layout::cells` in `state_store.h`, `_Layout.cells` in the twin | Each cell is a Variant, so any value fits (today's state lists hold arrays and dictionaries). Worker jobs (sensing, snapshot encoding, replay packing) want plain typed lanes they can read without the engine. Comes with the first job that reads the store | M |
+| Typed columns instead of Variants | `Layout::cells` in `state_store.h`, `_Layout.cells` in the twin, `StateStoreGD` | Each cell is a Variant, so any value fits (today's state lists hold arrays and dictionaries). Worker jobs (sensing, snapshot encoding, replay packing) want plain typed lanes they can read without the engine. Comes with the first job that reads the store | M |
 
 ## 2026-11-23
 

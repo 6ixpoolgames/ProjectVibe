@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 194 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 195 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -122,6 +122,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [ParryDefinition](../assets/scripts/abilities/REFERENCE.md#parrydefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | A parry's settings. |
 | [ParryModifier](../assets/scripts/effects/REFERENCE.md#parrymodifier) | [effects](../assets/scripts/effects/README.md) | EffectModifier | Parrying: while its effect lasts, hits from the front are blocked and the attacker gets a reply. An [EffectModifier]. |
 | [PathFollower](../assets/scripts/navigation/REFERENCE.md#pathfollower) | [navigation](../assets/scripts/navigation/README.md) | RefCounted | Follows one nav path for one pawn: finds it through NavServer, keeps its corners, and says which way to walk each tick. |
+| [PathFollowSettings](../assets/scripts/navigation/REFERENCE.md#pathfollowsettings) | [navigation](../assets/scripts/navigation/README.md) | Resource | How a [PathFollower] follows its path: how close counts as there, which nav, links, and how long it waits for nav. |
 | [Pawn](../assets/scripts/pawn/REFERENCE.md#pawn) | [pawn](../assets/scripts/pawn/README.md) | CharacterBody3D | A body something can possess, which runs its parts in a fixed order each tick. |
 | [PawnDefaultsRes](../assets/scripts/resources/REFERENCE.md#pawndefaultsres) | [resources](../assets/scripts/resources/README.md) | Resource | The parts every pawn gets unless its own scene already has one of the same name, and other game-wide pawn settings. |
 | [PawnInitializer](../assets/scripts/game_mode/REFERENCE.md#pawninitializer) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Gives every pawn the parts it needs to work, from one list per game. |

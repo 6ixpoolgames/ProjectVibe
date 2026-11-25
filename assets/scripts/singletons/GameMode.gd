@@ -11,6 +11,7 @@
 ## [/codeblock]
 # REFACTOR: the autoload has a named line for every base module (from game_mode/, replay/ and movement/), so adding a module to the
 # base means editing the autoload. Modules naming themselves, with get_module for the rest, would keep it universal (extensible).
+# See game_mode/CHANGELOG.md.
 extends Node
 class_name GameModeSingleton
 
@@ -22,7 +23,7 @@ signal module_removed(module: GameModeModule)
 ## The project setting that lists the modules to start, as script paths.
 const MODULES_SETTING := "project_base/game_mode/modules"
 # REFACTOR: DEFAULT_MODULES is a second copy of the project setting's list, and it has drifted (the setting also starts
-# DiagnosticsManager). One list, in one place, is easier for a designer to keep right.
+# DiagnosticsManager). One list, in one place, is easier for a designer to keep right. See game_mode/CHANGELOG.md.
 ## The modules started when the project setting isn't there, in this order.
 const DEFAULT_MODULES: Array[String] = [
 	"res://assets/scripts/game_mode/PawnInitializer.gd", # first, so it's ready before any pawn arrives

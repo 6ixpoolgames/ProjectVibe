@@ -5,6 +5,7 @@
 Every class in `assets/scripts/navigation/`, from its doc comments. The overview is in [README.md](README.md).
 
 - [NavMarkerNode](#navmarkernode)
+- [PathFollowSettings](#pathfollowsettings)
 - [PathFollower](#pathfollower)
 - [TerrainSettings](#terrainsettings)
 - [NavArea](#navarea)
@@ -37,6 +38,25 @@ The marker's id comes from this node's scene path, so renaming or moving the nod
 - `set_marker_enabled(enabled: bool) -> void`: Switches this node's marker on or off. The change takes effect on the next tick.
 - `_get_configuration_warnings() -> PackedStringArray`: What the editor shows as a warning triangle on this node. An empty list means no warning.
 
+## PathFollowSettings
+
+`res://assets/scripts/navigation/PathFollowSettings.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+How a [`PathFollower`](#pathfollower) follows its path: how close counts as there, which nav, links, and how long it waits for nav.
+
+One resource, shared by every follower given it: a [`MoveStep`](../steps/REFERENCE.md#movestep) exports one, and so does the [`AIController`](../controllers/REFERENCE.md#aicontroller) for its own walks. A follower with none uses the defaults below. Followers read it as they go, so a change takes hold at once; make a new one for a pawn that should differ rather than changing a shared one. Ticks are written for 60 a second.
+
+### Settings and properties
+
+- `corner_reached_distance: float` = `0.5`: How close, in metres, the pawn must get to a corner of the path before it heads for the next one. Measured flat, ignoring height, because a path's height between corners isn't the ground.
+- `arrival_distance: float` = `0.3`: How close, in metres, it must get to the end of the path to count as arrived. Smaller than corner_reached_distance, because the end is where something wanted to be.
+- `nav_tier: int` = `0`: Which size of nav to use. 0 is the smallest. The nav spec's tiers are by pawn radius; t0 builds only tier 0.
+- `use_links: bool` = `true`: On, paths may cross links (jumps, drops, placed links). Off for a pawn that can't jump, so it only goes where it can walk.
+- `link_timeout_ticks: int` = `180`: How long the pawn has to get from a link's start to its end, in ticks. Past that it finds a new path, from wherever it ended up, to the same place; missing again, it gives up. 180 is 3 s.
+- `straight_line_without_nav: bool` = `true`: On, a move where there's no nav at all, and none being built, walks in a straight line (bare test levels, click-to-move without nav). Off, there's no way there, for a game where walking off the nav would be a bug.
+- `pending_retry_ticks: int` = `10`: While waiting for nav to be built under the pawn, how often it tries again to find a path, in ticks.
+- `pending_give_up_ticks: int` = `300`: How long it waits for nav to be built or a queued path to come, in ticks, before giving up. 300 is 5 s.
+
 ## PathFollower
 
 `res://assets/scripts/navigation/PathFollower.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
@@ -51,18 +71,11 @@ follower.get_move_direction()     # which way to walk this tick; zero when there
 follower.get_path_state()         # NONE, FOLLOWING, PENDING, ARRIVED or UNREACHABLE
 ```
 
-No nav at all means a straight line (`straight_line_without_nav`); nav still building means PENDING. The navigation README's "How a move works" has the odd cases.
+How it follows is a shared [`PathFollowSettings`](#pathfollowsettings) (`settings`). No nav at all means a straight line; nav still building means PENDING; `get_end_reason()` says why a path ended. The navigation README's "How a move works" has the odd cases.
 
 ### Settings and properties
 
-- `corner_reached_distance: float` = `0.5`: How close, in metres, the pawn must get to a corner of the path before it heads for the next one. Measured flat, ignoring height, because a path's height between corners isn't the ground.
-- `arrival_distance: float` = `0.3`: How close, in metres, it must get to the end of the path to count as arrived. Smaller than corner_reached_distance, because the end is where something wanted to be.
-- `nav_tier: int` = `0`: Which size of nav to use. 0 is the smallest. The nav spec's tiers are by pawn radius; t0 builds only tier 0.
-- `use_links: bool` = `true`: On, paths may cross links (jumps, drops, placed links). Off for a pawn that can't jump, so it only goes where it can walk.
-- `link_timeout_ticks: int` = `180`: How long the pawn has to get from a link's start to its end, in ticks at 60 a second. Past that it finds a new path, from wherever it ended up, to the same place. 180 is 3 s.
-- `straight_line_without_nav: bool` = `true`: On, a move_to where there's no nav at all, and none being built, walks in a straight line (bare test levels, click-to-move without nav). Off, it's UNREACHABLE, for a game where walking off the nav would be a bug.
-- `pending_retry_ticks: int` = `10`: While PENDING for nav to be built, how often it tries again to find a path, in ticks at 60 a second.
-- `pending_give_up_ticks: int` = `300`: How long it stays PENDING, in ticks at 60 a second, for nav to be built or a queued path to come, before giving up (UNREACHABLE). 300 is 5 s.
+- `settings: PathFollowSettings`: How it follows: closeness, which nav, links, waiting for nav. Shared, read as it goes; never null (the defaults when none is given).
 - `paths_now_per_tick: int` = `8`: How many paths all pawns together find straight away in one tick. Any more go to NavServer's queue (searched within its own budget a tick, across links too), and those pawns wait PENDING. 0 sends every path through the queue. Shared by every follower.
 - `pawn: Pawn` = `null`: The pawn it moves. Null: move_to finds no way.
 
@@ -78,11 +91,17 @@ No nav at all means a straight line (`straight_line_without_nav`); nav still bui
 - `PathState.PENDING = 2`: waiting: for nav to be built under the pawn (it tries again every pending_retry_ticks), or for a queued path
 - `PathState.ARRIVED = 3`: got to the end of the path. With is_partial(), that's the closest place it could reach, not the point
 - `PathState.UNREACHABLE = 4`: no way there: nowhere near nav, a link it missed twice, or nav or a queued path didn't come in time
+- `EndReason.NONE = 0`: still going, or no move_to yet
+- `EndReason.ARRIVED = 1`: got to the end of its path (with is_partial(), the closest place it could reach)
+- `EndReason.NO_WAY = 2`: no path: nowhere near nav, or the point can't be reached and nav is built
+- `EndReason.NAV_TOO_SLOW = 3`: nav under the pawn, or a queued path, didn't come within pending_give_up_ticks
+- `EndReason.LINK_MISSED = 4`: it missed a link twice (the second time on a new path)
+- `EndReason.STOPPED = 5`: stop() was called while it was going somewhere
 
 ### Functions
 
 - `move_to(point: Vector3) -> bool`: Finds a path from the pawn to this point and starts following it. Returns false, and stops, if there's no way there (UNREACHABLE). With no nav at all, it goes in a straight line and returns true. While nav is still being built, or the path is queued, it returns true and waits (PENDING).
-- `stop() -> void`: Stops following the path, and cancels a queued one. `has_arrived()` goes back to false, and the state to NONE.
+- `stop() -> void`: Stops following the path, and cancels a queued one. `has_arrived()` goes back to false, and the state to NONE; a path still under way ends with STOPPED (`get_end_reason()`).
 - `get_move_direction() -> Vector3`: Which way to walk now: flat, length 1, or zero when there's no path. Call it once per tick, because it also moves on to the next corner when the pawn is close enough, finishes the path at the end, and runs PENDING's retries.
 - `take_link_action() -> StringName`: The named action to press this tick for a link the pawn just reached, such as &"jump", or empty. It's given once: call it after `get_move_direction()`, each tick, and press what it gives for that tick.
 - `take_link_press() -> int`: `take_link_action()` as input bits ([`InputActions`](../controllers/REFERENCE.md#inputactions)), 0 when there's nothing to press: OR it into this tick's held actions.
@@ -92,6 +111,7 @@ No nav at all means a straight line (`straight_line_without_nav`); nav still bui
 - `get_path_state() -> int`: Where the last move_to stands (see `PathState`).
 - `is_under_way() -> bool`: True while the last move_to is going somewhere: following its path, or waiting (PENDING). Its owner asks for a direction each tick while this is true, which is also what lets a PENDING wait try again.
 - `is_partial() -> bool`: True when the path ends at the closest place it can reach rather than at the point, such as a point on an island. Stays true after arriving there, until the next move_to or `stop()`.
+- `get_end_reason() -> int`: Why the last path ended (`EndReason`); NONE while it's still going. Kept after `stop()`, until the next move_to.
 - `get_goal() -> Vector3`: Where the last move_to was going. Kept after it ends, until the next one.
 - `get_path_corners() -> PackedVector3Array`: The corners still ahead, starting with the one being walked to. For debug drawing. Empty when there's no path.
 

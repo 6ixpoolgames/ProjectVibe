@@ -10,9 +10,12 @@ Effects are this folder: `Effect` and its parts (`parts/`), `EffectApplier`, `Ef
 
 Code that works but doesn't yet fit the project's goals (reusable, extensible, efficient, designer friendly). Each is marked `REFACTOR:` in the code. Sizes are rough: S an hour or two, M a day, L more.
 
-| What | Where | Why | Size |
-|---|---|---|---|
-| Threat through a signal | `EffectManager._run_once` | Effects write threat straight into the AI's memory, so this system knows the AI. A signal for Health taken, which the AI listens to (as it does to `hit_arrived`), keeps effects usable without the AI and open to other listeners (UI, scoring) | S |
+None at the moment.
+
+## 2026-11-25
+
+- **Refactor row closed:** "Threat through a signal". `EffectManager` is gone; since the status manager (pawn spec 16.10 step 3a) damage reaches the AI as an event, so effects don't know the AI.
+
 
 ## 2026-11-24
 

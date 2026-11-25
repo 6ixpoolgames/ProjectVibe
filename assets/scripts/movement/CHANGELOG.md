@@ -15,6 +15,8 @@ The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as
 
 ## 2026-11-25
 
+- CrowdMover reads the nav tier from the follower's settings (`follower.settings.nav_tier`).
+
 - **Links and nav tier from the path in charge** (pawn spec 16.10 step 5c): CrowdMover asks `pawn.controller_manager.get_path_follower()` whether a pawn is crossing a link, and for its nav tier, now that the pawn has no `NavigationManager`. Tagged `REFACTOR:`: the tier belongs to the body.
 
 

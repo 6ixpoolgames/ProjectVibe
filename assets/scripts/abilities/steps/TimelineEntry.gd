@@ -46,6 +46,7 @@ func get_label() -> StringName:
 
 
 ## True if no rule is set, so it starts with the ability.
+# REFACTOR: named for abilities, though behaviour steps will share the timeline (pawn spec 16.10 step 7). See steps/CHANGELOG.md.
 func starts_with_ability() -> bool:
 	return not manual and at_tick < 0 and after == &"" and condition == null
 

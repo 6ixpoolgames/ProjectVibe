@@ -13,6 +13,8 @@ This folder holds the step core (pawn spec 16.7). Overview: [README.md](README.m
 
 ## 2026-11-25
 
+- **`MoveStep` finds its input through a checked contract** (cleanup after step 5c). A host whose steps write a pawn's input has `step_input()`; `MoveStep` reads it once when the timeline is built into a typed `input`, and warns once if the host gives none (it read the host's `input` property by name each tick before). Its 8 path settings are one `PathFollowSettings` resource (`settings`) instead of copies.
+
 - **Movement steps** (pawn spec 16.7, 16.10 step 5c): `MoveStep` (`movement/`), the base of steps that walk the pawn along a nav path, holds a `PathFollower`, shows its settings in the inspector, and writes its direction and a link's action into its host's `input` (`steer()`). `MoveToStep` walks to `goal`: done on arriving, failed with no way there. The player's click-to-move runs one; the AI's behaviours will from step 7. Test: `navigation/tests/path_follower_selftest`.
 
 

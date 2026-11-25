@@ -18,6 +18,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-25
 
+- **`AIController.path_settings`** and **`ControllerStepHost.step_input()`** (cleanup after step 5c): the AI's walks take a `PathFollowSettings` from the inspector again, and the step host hands its steps their input through the step contract.
+
 - **Each controller follows its own path** (pawn spec 16.4, 16.10 step 5c). `ControllerStepHost` runs steps that write a controller's input: a node with its steps as children, on a timeline of manual entries, run once a tick by its controller, on its machine only. The player controller's click-to-move is a `MoveToStep` on one (`step_host`), so the duplicated path following in `PlayerController.take_input_command` is gone. `AIController` holds a `PathFollower` (`path_follower`) for `move_to`, `follow` and `keep_distance`. `ControllerBase` gained `get_path_follower()` and `drop_path()`: the ControllerManager gives the path of whoever is in charge (`get_path_follower()`, which CrowdMover asks about links) and has both controllers drop theirs when charge changes hands. Paths waiting for nav are no longer shared, so the AI's kept walk can't touch a player's path.
 
 - **The AIController moved into the AI tree** (pawn spec 16.10 step 5b). It's a child of the pawn's `AIManager` now, not of the ControllerManager (`parts/AIController.tscn`, in `parts/AIManager.tscn`). `ControllerManager.ai_controller` reads it from `pawn.ai.controller`, so it's found whichever part enters the tree first; the controller reads its pawn from the AIManager and asks the pawn's ControllerManager whether it's in charge. Its order API stays until the behaviour steps write the input (step 7), tagged `REFACTOR:`.

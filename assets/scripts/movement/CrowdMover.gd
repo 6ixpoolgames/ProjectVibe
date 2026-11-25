@@ -539,7 +539,7 @@ func _move_batch_cpp(cpp_batch: Object, pawns: Array[Pawn], positions: PackedVec
 		if follower and follower.is_crossing_link():
 			tiers.append(-1)
 		else:
-			tiers.append(follower.nav_tier if follower else 0)
+			tiers.append(follower.settings.nav_tier if follower else 0)
 	var obstacles := _obstacles(pawns, tick)
 	PerfScopes.end(&"movement.crowd_others", others_started)
 	cpp_batch.set_settings(separation_strength, separation_margin, max_push_speed, max_step, ground_layers, cell_size)

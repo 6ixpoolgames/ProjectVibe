@@ -73,12 +73,12 @@ Over the network a client follows its own path and only sends directions; the se
 |---|---|---|---|
 | `agent_radius` | `NavServer.configure` | 0.4 m | The smallest pawn's radius; nav keeps paths this far from walls |
 | `auto_links` | `NavServer.configure` | on | Nav finds jumps and drops at ledges by itself |
-| `use_links` | `MoveStep`, `PathFollower` | on | Off for a pawn that can't jump |
-| `straight_line_without_nav` | `MoveStep`, `PathFollower` | on | With no nav at all, walk straight to the point |
-| `paths_now_per_tick` | `PathFollower` (shared) | 8 | Paths found at once each tick; the rest queue |
-| `link_timeout_ticks` | `MoveStep`, `PathFollower` | 180 (3 s) | How long a link may take before finding a new path |
+| `use_links` | `PathFollowSettings` | on | Off for a pawn that can't jump |
+| `straight_line_without_nav` | `PathFollowSettings` | on | With no nav at all, walk straight to the point |
+| `link_timeout_ticks` | `PathFollowSettings` | 180 (3 s) | How long a link may take before finding a new path |
+| `paths_now_per_tick` | `PathFollower` (shared by all) | 8 | Paths found at once each tick; the rest queue |
 
-A `MoveStep` shows these in the inspector and copies them into its follower; the AI controller's follower has the defaults (set them on `path_follower` in code).
+How a pawn follows its paths is one `PathFollowSettings` resource: a `MoveStep`'s `settings`, or the AI controller's `path_settings`, both in the inspector (empty: the defaults). It's shared and read as the pawn walks, so make a new one for a pawn that should differ. Why a walk ended is the follower's `get_end_reason()`: arrived, no way there, nav too slow, a link missed twice, or stopped.
 
 ## Tests
 

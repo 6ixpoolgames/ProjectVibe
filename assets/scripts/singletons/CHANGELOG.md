@@ -15,6 +15,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | A test-only swap | `TickDriver.replace_store` | Only `tick_state_selftest` calls it, to compare the C++ store with its twin; a test helper keeps it out of the shipping autoload | S |
 | Move the load ladder's rule to a GameMode module | `_note_tick_cost()`, the ladder's settings and `get_match_options()` in `TickDriver.gd` | A policy for shedding AI work, with its own tuning and match options, inside the universal tick driver. The owner wants autoloads to hold only what every game needs: the driver could report each tick's cost, and a module beside `AIActivationManager` own the rule | M |
 | One timing tool | `profile_enabled`, `profile`, `_profile_phase()` in `TickDriver.gd` | A second way of timing work beside diagnostics' `PerfScopes`, with its own names and its own switch | S |
+| The match seed reaches clients | `GameMode.match_seed` | Nothing sends it to clients yet, so a networked game that changes it must set the same value on every machine itself (pawn spec 16.10 step 1 left it for later) | S |
 
 ## 2026-11-24
 

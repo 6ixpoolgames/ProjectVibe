@@ -18,7 +18,7 @@ class_name NetworkSessionSingleton
 # REFACTOR: one class doing many jobs, about 2000 lines: the connection and handshake, the entity list and spawning, the clock and
 # time dilation, inputs, encoding and acknowledging snapshots (deltas, parts), reconciliation, interpolation, world and client
 # channels, and connection statistics. Helpers with one job each (a snapshot sender and receiver, a clock, the channels) would be
-# easier to read, test and extend; the autoload would keep the public API (reusable, extensible). See CHANGELOG.md.
+# easier to read, test and extend; the autoload would keep the public API (reusable, extensible). See netcode/CHANGELOG.md.
 
 ## Server: hosting has started.
 signal hosted
@@ -127,7 +127,7 @@ var world_root: Node = null
 ## Which address the server listens on. "*" is all of them.
 var bind_address: String = "*"
 # REFACTOR: the three packet limits below and bind_address are plain vars, not exports like the settings above, so a designer can't
-# set them without code (designer friendly). See CHANGELOG.md.
+# set them without code (designer friendly). See netcode/CHANGELOG.md.
 ## Server: most packets one client may send a second, so a broken or hostile client can't bury the server. Over it, [member max_bytes_per_second]
 ## or [member max_packet_bytes], packets are dropped and counted in stats (0: no limit). A pawn costs a client about 60 packets and 6 KB a second.
 var max_packets_per_second: int = 2000
@@ -192,7 +192,7 @@ const DELTA_MAX_BASELINE_AGE := 48
 const BASELINE_RING := 64
 # REFACTOR: a base autoload naming a file in netcode/debug/; docs/TEST_AND_DEBUG_CODE.md says a base class should never name a debug
 # class (production kept apart from debug code). NetMonitors could attach itself instead, from an editor-only plugin or a
-# DiagnosticsManager-style module. See CHANGELOG.md.
+# DiagnosticsManager-style module. See netcode/CHANGELOG.md.
 ## The debugger graphs' script, loaded only if it's there (see _ready).
 const NET_MONITORS_SCRIPT := "res://assets/scripts/netcode/debug/NetMonitors.gd"
 ## The most ticks one ACK packet may name. A client sends at most this many, and the server refuses a packet claiming more, so one
@@ -532,7 +532,7 @@ func content_hash() -> int:
 	if _hash_is_cached:
 		return _cached_hash
 	# REFACTOR: the netcode names other systems' tables here (TagRegistry, InputActions). A list that systems add their own part to
-	# would let a game's own table join the check without editing the session (extensible). See CHANGELOG.md.
+	# would let a game's own table join the check without editing the session (extensible). See netcode/CHANGELOG.md.
 	var parts := PackedStringArray()
 	parts.append(str(NetPackets.PROTOCOL_VERSION))
 	parts.append(str(TagRegistry.content_hash())) # every category's tags, navigation's included
@@ -989,7 +989,7 @@ func _drop_silent_peers() -> void:
 
 
 # REFACTOR: a Dictionary read by string keys, where the server's other per-client record is a class (PeerRecord). A small LinkRecord
-# class would catch a mistyped key when the script loads (reusable). See CHANGELOG.md.
+# class would catch a mistyped key when the script loads (reusable). See netcode/CHANGELOG.md.
 ## A new connection's numbers.
 func _new_link() -> Dictionary:
 	var now := Time.get_ticks_usec()

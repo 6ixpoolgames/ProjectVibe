@@ -23,7 +23,12 @@ extends ControllerBase
 ## point of the same ticks, give the same input.
 static var order_listener := Callable()
 
-## The path its walks follow (move_to, follow, keep_distance). Its settings are the follower's defaults; change them on it.
+## How its walks follow their paths (closeness, nav tier, links, waiting for nav). Empty: the defaults.
+@export var path_settings: PathFollowSettings:
+	set(value):
+		path_settings = value
+		path_follower.settings = value
+## The path its walks follow (move_to, follow, keep_distance), with [member path_settings].
 var path_follower := PathFollower.new()
 ## Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired
 ## along the look meets the point looked at.

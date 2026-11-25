@@ -11,7 +11,7 @@ This folder holds the status manager (pawn spec 16.8). Overview: [README.md](REA
 |---|---|---|---|
 | A test-only helper | `StatusManager.set_detectability` | Only tests call it; a helper in tests/ keeps it out of the shipping class | S |
 | Effect sources by instance id offline | `StatusManager._source_key` | Nothing finds an entity by its number until the entity registry (step 9) | S |
-| Stat, effect and part classes in three folders | `stats/`, `effects/`, `status/` | One system now; the classes can move here once step 3b settles their names (saved resources name their scripts by path) | M |
+| Stat, effect and part classes in three folders | `stats/`, `effects/`, `status/` *(no tag: a folder layout)* | One system now; the classes can move here once step 3b settles their names (saved resources name their scripts by path) | M |
 
 ## 2026-11-24
 
