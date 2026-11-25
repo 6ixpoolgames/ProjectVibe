@@ -57,7 +57,7 @@ func _test_death_and_threat() -> void:
 	await _ticks(2)
 	var tags: Array[StringName] = []
 	victim.gameplay_event_received.connect(func(event: GameplayEventData) -> void: tags.append(event.tag))
-	var memory := victim.ai_context.memory if victim.ai_context else null
+	var memory := victim.ai.memory if victim.ai else null
 	if memory:
 		memory.record_sighting(attacker, 1.0, TickDriver.tick, attacker.global_position) # remembered, so it can have threat
 	var threat_before: float = memory.threat_at(memory.find(attacker)) if memory else 0.0

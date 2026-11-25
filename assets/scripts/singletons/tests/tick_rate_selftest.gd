@@ -114,8 +114,8 @@ func _test_noticing() -> void:
 		var certain_at := -1
 		for i in 200:
 			await get_tree().physics_frame
-			var index: int = goblin.ai_context.memory.find(other)
-			if index >= 0 and goblin.ai_context.memory.is_certain_at(index):
+			var index: int = goblin.ai.memory.find(other)
+			if index >= 0 and goblin.ai.memory.is_certain_at(index):
 				certain_at = TickDriver.tick
 				break
 		took[rate] = float(certain_at - started) / rate if certain_at >= 0 else -1.0

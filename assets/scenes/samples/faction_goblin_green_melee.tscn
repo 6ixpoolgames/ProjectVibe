@@ -4,8 +4,8 @@
 
 [node name="FactionGoblinGreenMelee" instance=ExtResource("1_base")]
 
-[node name="Shoot" parent="AIBehaviourManager"]
+[node name="Shoot" parent="AIManager/AIBehaviourManager"]
 enabled = false
 
-[node name="KeepDistance" parent="AIBehaviourManager"]
+[node name="KeepDistance" parent="AIManager/AIBehaviourManager"]
 enabled = false

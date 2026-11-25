@@ -82,8 +82,9 @@ var status_manager: StatusManager = null
 var controller_manager: ControllerManager = null
 ## Finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
 var navigation_manager: NavigationManager = null
-## Shared data and settings for this pawn's AI (pawn spec 10), and the AI's core. Null if the pawn has no AI.
-var ai_context: AIContextComponent = null
+## The pawn's AI (pawn spec 10): its components (the AIController, sensing, memory, target selector, state and behaviour managers)
+## and what they share. Null if the pawn has no AI.
+var ai: AIManager = null
 ## The tags this pawn owns right now (dead, in combat, a running ability's kind), which tag queries ask about (tag spec 3). Null if it
 ## has none, and then it owns nothing.
 var owned_tags: OwnedTags = null
@@ -91,8 +92,8 @@ var owned_tags: OwnedTags = null
 ## and then it never does.
 var streaming_source: PawnStreamingSource = null
 # Each of these parts sets its reference when it enters the tree, so on a pawn that's been made but not yet added they're all null
-# (and default parts don't exist yet): set things on its parts after add_child. The other AI parts (state manager, behaviour manager, sensing,
-# memory, target selector) are found by the AI's core, ai_context, not by the pawn: pawn.ai_context.memory and so on.
+# (and default parts don't exist yet): set things on its parts after add_child. The AI's components are reached through its AIManager:
+# pawn.ai.memory, pawn.ai.controller and so on.
 
 
 var _driver: Node = null
@@ -338,10 +339,10 @@ func _tick_input(_dt: float, tick: int) -> void:
 	if not _runs_this_tick:
 		return
 	# The AI first (step 1 of pawn spec section 4), before the controller in charge is asked for input. Its ordered step is in its
-	# core part, AIContextComponent.run_ai. A dead pawn's AI doesn't run; its input is blocked by status.dead (ControllerManager).
-	if ai_context and not is_dead():
+	# AIManager.run_ai. A dead pawn's AI doesn't run; its input is blocked by status.dead (ControllerManager).
+	if ai and not is_dead():
 		var ai_started := PerfScopes.begin() # timed for diagnostics (PerfScopes)
-		ai_context.run_ai(tick)
+		ai.run_ai(tick)
 		PerfScopes.end(&"ai", ai_started)
 	# The ControllerManager asks the controller in charge and writes the input, where it's decided here.
 	if controller_manager:

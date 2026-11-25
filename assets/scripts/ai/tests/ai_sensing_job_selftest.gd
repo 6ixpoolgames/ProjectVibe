@@ -9,7 +9,7 @@ extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come fr
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const GOBLIN_SCENE := "res://assets/scenes/samples/arena_goblin.tscn"
-const NO_AI: Array[StringName] = [&"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
+const NO_AI: Array[StringName] = [&"AIManager", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 # Worker counts compared: none (everything on the main thread), 1, 2, 3 (the target machine's dedicated server), and the machine's.
 const WORKER_COUNTS := [0, 1, 2, 3, -1]
 
@@ -208,7 +208,7 @@ func _run_fight(use_job: bool, workers: int) -> Dictionary:
 		await get_tree().physics_frame
 	var state := []
 	for goblin in goblins:
-		var memory := goblin.ai_context.memory
+		var memory := goblin.ai.memory
 		var entries := []
 		for e in memory.entry_count():
 			entries.append([String(memory.get_store().entity_at(e).name), memory.get_store().awareness_at(e, 5240), memory.get_store().last_known_position_at(e)])

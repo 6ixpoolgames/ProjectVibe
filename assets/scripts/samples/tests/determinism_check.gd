@@ -25,7 +25,7 @@
 ##   --record-orders=FILE     every order the AI gives a pawn's controller (AIController.order_listener): its tick, the pawn, the order
 ##                            and its exact arguments, and whether it came during that pawn's own AI step
 ##   --replay-orders=FILE     the AI doesn't think: each pawn's AI step plays its recorded orders for that tick instead
-##                            (AIContextComponent.order_source). Compare the two runs' fingerprints with run_determinism_check.py
+##                            (AIManager.order_source). Compare the two runs' fingerprints with run_determinism_check.py
 ##                            --compare: the same means orders alone rebuild the game
 ##
 ## The fingerprint file, per tick: tick (int64), frame checksum (int64), entity count (int32), then per entity, in handle order:
@@ -154,7 +154,7 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	AIBehaviourManager.decision_listener = Callable()
 	AIController.order_listener = Callable()
-	AIContextComponent.order_source = Callable()
+	AIManager.order_source = Callable()
 	if _path_log:
 		Engine.get_singleton(&"NavServer").debug_log_path_steps(false)
 
@@ -163,7 +163,7 @@ func _exit_tree() -> void:
 # named in an order (look_at_node) is written as {"pawn": its name}, which is the same in every run.
 func _start_recording_orders() -> void:
 	_orders_out = FileAccess.open(_record_orders_path, FileAccess.WRITE)
-	AIContextComponent.order_source = func(context: AIContextComponent, tick: int) -> void:
+	AIManager.order_source = func(context: AIManager, tick: int) -> void:
 		_thinking = context.pawn
 		context.think(tick)
 		_thinking = null
@@ -183,7 +183,7 @@ func _start_replaying_orders() -> void:
 		var entry: Array = file.get_var()
 		var by_pawn: Dictionary = _orders.get_or_add(int(entry[0]), {})
 		(by_pawn.get_or_add(String(entry[1]), []) as Array).append([entry[2], entry[3], entry[4]])
-	AIContextComponent.order_source = func(context: AIContextComponent, tick: int) -> void:
+	AIManager.order_source = func(context: AIManager, tick: int) -> void:
 		for order: Array in _orders.get(tick, {}).get(String(context.pawn.name), []):
 			# Claude 2026-11-23: none are expected since a dead pawn's controller takes no orders (it was the AI tidying up mid-tick when
 			# its pawn died). One given outside its pawn's AI step belongs to another moment of the tick, so it's left out and counted,

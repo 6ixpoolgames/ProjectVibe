@@ -38,23 +38,23 @@ func own_conditions() -> Array[AICondition]:
 	return AIInputs.half_noticed_conditions(hit_memory_ticks)
 
 
-func enter(context: AIContextComponent) -> void:
+func enter(context: AIManager) -> void:
 	context.controller.stop()
 	_look(context)
 
 
-func tick(context: AIContextComponent) -> Status:
+func tick(context: AIManager) -> Status:
 	_look(context) # follow it if it moves while still in view
 	# Time since it started, in ticks, so it lasts the same at any tick_interval_ticks.
 	return Status.SUCCEEDED if context.current_tick - started_tick >= TickDriver.ticks_at_rate(look_ticks) else Status.RUNNING
 
 
-func exit(context: AIContextComponent, _reason: String) -> void:
+func exit(context: AIManager, _reason: String) -> void:
 	if context.controller:
 		context.controller.stop_looking()
 
 
-func _look(context: AIContextComponent) -> void:
+func _look(context: AIManager) -> void:
 	var point: Variant = context.point_of_interest(hit_memory_ticks)
 	if point != null:
 		context.controller.look_at_point(point + Vector3(0.0, 1.0, 0.0))

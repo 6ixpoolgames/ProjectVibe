@@ -37,24 +37,24 @@ func _test_memory() -> void:
 	var observer := await _make_pawn(1, Vector3.ZERO)
 	var a := await _make_pawn(0, Vector3(0, 0, -5))
 	var b := await _make_pawn(0, Vector3(3, 0, -3))
-	var memory := observer.ai_context.memory
+	var memory := observer.ai.memory
 	var certain := []
 	var forgotten := []
 	memory.entity_became_certain.connect(func(e): certain.append(e))
 	memory.entity_forgotten.connect(func(e): forgotten.append(e))
-	observer.ai_context.clear_decision()
+	observer.ai.clear_decision()
 	memory.record_sighting(a, 0.5, 1000, a.global_position)
 	var i := memory.find(a)
 	_check(i == 0 and is_equal_approx(memory.awareness_at(i, 1000), 0.5), "a first sighting makes an entry with its gain as awareness")
-	_check(observer.ai_context.has_decision_waiting(), "and asks for a decision at once")
+	_check(observer.ai.has_decision_waiting(), "and asks for a decision at once")
 	_check(is_equal_approx(memory.awareness_at(i, 1300), 0.5), "uncertain, it holds for 300 ticks (the default)")
 	_check(is_equal_approx(memory.awareness_at(i, 1450), 0.25), "then fades in a straight line: half gone 150 ticks after that (%.3f)" % memory.awareness_at(i, 1450))
 	memory.record_sighting(a, 0.6, 1450, a.global_position)
 	_check(is_equal_approx(memory.awareness_at(i, 1450), 0.85), "a sighting adds to what's left: 0.25 + 0.6")
-	observer.ai_context.clear_decision()
+	observer.ai.clear_decision()
 	memory.record_sighting(a, 0.3, 1460, a.global_position)
 	_check(memory.is_certain_at(i) and certain == [a], "reaching 1: certain, with entity_became_certain")
-	_check(observer.ai_context.has_decision_waiting(), "and a decision is asked for")
+	_check(observer.ai.has_decision_waiting(), "and a decision is asked for")
 	_check(is_equal_approx(memory.awareness_at(i, 2060), 0.5), "certain, it fades over 1200 ticks instead, with no hold: half gone 600 ticks later")
 	memory.record_sighting(a, 0.01, 1760, a.global_position)
 	_check(is_equal_approx(memory.awareness_at(i, 1760), 1.0), "seeing a certain entity again refills it to 1, whatever the gain")
@@ -87,7 +87,7 @@ func _test_memory() -> void:
 func _test_held_in_view() -> void:
 	var observer := await _make_pawn(1, Vector3.ZERO)
 	var a := await _make_pawn(0, Vector3(0, 0, -5))
-	var memory := observer.ai_context.memory
+	var memory := observer.ai.memory
 	memory.record_sighting(a, 1.0, 8000, a.global_position) # certain at once; a certain entry fades from the next tick
 	var i := memory.find(a)
 	_check(memory.awareness_at(i, 8004) == 1.0, "a certain target seen 4 ticks ago, with no check since: still exactly 1, not 0.997 (it's in view)")
@@ -116,28 +116,28 @@ func _test_held_in_view() -> void:
 
 func _test_sight() -> void:
 	var observer := await _make_pawn(1, Vector3.ZERO) # faces -Z
-	var sight: SightSense = observer.ai_context.sensing_manager.get_node("Sight")
-	var memory := observer.ai_context.memory
+	var sight: SightSense = observer.ai.sensing_manager.get_node("Sight")
+	var memory := observer.ai.memory
 	var front := await _make_pawn(0, Vector3(0, 0, -5))
 	# A real interval, because a first sighting counts this many ticks. Passes below are made by hand, at ticks the test picks.
 	# Claude 2026-11-24: set after the ticks that make the second pawn, or the observer's own schedule may make a pass in them, as
 	# its entity number decides.
-	observer.ai_context.sensing_manager.sense_interval_ticks = 10
-	observer.ai_context.sensing_manager.full_pass(5000)
+	observer.ai.sensing_manager.sense_interval_ticks = 10
+	observer.ai.sensing_manager.full_pass(5000)
 	var i := memory.find(front)
 	_check(i >= 0 and is_equal_approx(memory.awareness_at(i, 5000), 10.0 / 30.0), "in front at 5 m: a first pass adds 10 ticks' worth, 1/3 (%.3f)" % memory.awareness_at(i, 5000))
-	observer.ai_context.sensing_manager.full_pass(5005)
+	observer.ai.sensing_manager.full_pass(5005)
 	_check(is_equal_approx(memory.awareness_at(i, 5005), 0.5), "a pass 5 ticks later adds 5 ticks' worth: the checking rate doesn't matter")
-	observer.ai_context.sensing_manager.full_pass(5020)
+	observer.ai.sensing_manager.full_pass(5020)
 	_check(memory.is_certain_at(i), "after 20 ticks in front, close: certain (basically instant)")
 	front.free()
 	memory.clear()
 	# Claude 2026-11-24: no scheduled passes from here on (the passes below are made by hand): which ticks they'd land on depends on
 	# the pawns' entity numbers, so one could see a pawn while the test sets it up.
-	observer.ai_context.sensing_manager.sense_interval_ticks = NEVER
+	observer.ai.sensing_manager.sense_interval_ticks = NEVER
 
 	var behind := await _make_pawn(0, Vector3(0, 0, 5))
-	observer.ai_context.sensing_manager.full_pass(5100)
+	observer.ai.sensing_manager.full_pass(5100)
 	_check(memory.find(behind) < 0, "behind it: never seen")
 	behind.free()
 
@@ -151,12 +151,12 @@ func _test_sight() -> void:
 	StatusManager.set_detectability(side, 0.5)
 	_check(is_equal_approx(sight.visibility_of(side), 0.5), "detectability 0.5: half")
 	StatusManager.set_detectability(side, 0.0)
-	observer.ai_context.sensing_manager.full_pass(5200)
+	observer.ai.sensing_manager.full_pass(5200)
 	_check(memory.find(side) < 0, "detectability 0: invisible")
 	StatusManager.set_detectability(side, 0.2)
-	observer.ai_context.sensing_manager.full_pass(5300)
+	observer.ai.sensing_manager.full_pass(5300)
 	var faded_before := memory.awareness_at(memory.find(side), 5800) # what's left 500 ticks later, before the next pass
-	observer.ai_context.sensing_manager.full_pass(5800)
+	observer.ai.sensing_manager.full_pass(5800)
 	var gained := memory.awareness_at(memory.find(side), 5800) - faded_before
 	_check(absf(gained - 0.2) < 0.001, "a long gap counts as max_gain_ticks (30) at most: +0.2, not +3.3 (%.3f)" % gained)
 	StatusManager.set_detectability(side, 1.0)
@@ -165,14 +165,14 @@ func _test_sight() -> void:
 	var wall := _make_box(Vector3(0, 1, -2.5), Vector3(4, 2, 0.5))
 	await _ticks(2)
 	_check(not sight.has_line_of_sight(side), "a wall between them blocks the ray")
-	observer.ai_context.sensing_manager.full_pass(6000)
+	observer.ai.sensing_manager.full_pass(6000)
 	_check(memory.find(side) < 0, "so nothing behind the wall is seen")
 	wall.free()
 	await _ticks(2)
 	_check(sight.has_line_of_sight(side), "and with the wall gone, it's seen")
 	memory.clear() # a scheduled pass may have run during the waits
 	side.team = 1
-	observer.ai_context.sensing_manager.full_pass(6100)
+	observer.ai.sensing_manager.full_pass(6100)
 	_check(memory.find(side) < 0, "a pawn on its own team never goes into memory")
 	# Claude 2026-11-16 (pawn M1): the counts are the TeamRegistry module's now.
 	_check(GameMode.team_registry.count_not_on_team(1) == 0, "with everyone on one team, there's no one to look for, so the query is skipped")
@@ -185,7 +185,7 @@ func _test_sight() -> void:
 func _test_eyes() -> void:
 	var observer := await _make_pawn(1, Vector3.ZERO)
 	var target := await _make_pawn(0, Vector3(0, 0, 5)) # behind it
-	var sight: SightSense = observer.ai_context.sensing_manager.get_node("Sight")
+	var sight: SightSense = observer.ai.sensing_manager.get_node("Sight")
 	var hands: AIController = observer.controller_manager.ai_controller
 	_check(sight.visibility_of(target) == 0.0, "eyes face the way the body faces: a pawn behind isn't seen")
 	hands.look_at_point(Vector3(0, 1, 10))
@@ -204,11 +204,11 @@ func _test_eyes() -> void:
 func _test_scheduled_sensing() -> void:
 	var observer := await _make_pawn(1, Vector3.ZERO, true)
 	var target := await _make_pawn(0, Vector3(0, 0, -6))
-	var memory := observer.ai_context.memory
+	var memory := observer.ai.memory
 	var ticks := await _until(func() -> bool: return memory.find(target) >= 0 and memory.is_certain_at(memory.find(target)), 120)
 	_check(ticks >= 0 and ticks < 60, "on schedule (passes and refreshes): certain in front, close, within a second (%d ticks)" % ticks)
 	memory.clear()
-	observer.ai_context.while_possessed = AIContextComponent.WhilePossessed.MEMORY_ONLY
+	observer.ai.while_possessed = AIManager.WhilePossessed.MEMORY_ONLY
 	observer.controller_manager.set_has_player(true)
 	observer.controller_manager.look_yaw = 0.0
 	ticks = await _until(func() -> bool: return memory.find(target) >= 0, 60)
@@ -222,14 +222,14 @@ func _test_target_selection() -> void:
 	var observer := await _make_pawn(1, Vector3.ZERO)
 	var far := await _make_pawn(0, Vector3(0, 0, -20))
 	var near := await _make_pawn(0, Vector3(0, 0, -3))
-	var memory := observer.ai_context.memory
-	var selector := observer.ai_context.target_selector
+	var memory := observer.ai.memory
+	var selector := observer.ai.target_selector
 	var changes := []
 	selector.target_changed.connect(func(old, new, reason): changes.append([old, new, reason]))
 	_remember(memory, far, 0.9, near, 0.5, 7000)
 	selector.update_target(7000)
 	# far: 0.9 + 0.5 × (1 - 20/25) = 1.0; near: 0.5 + 0.5 × (1 - 3/25) = 0.94
-	_check(selector.get_current_target() == far and observer.ai_context.current_target == far, "the highest priority is the target, and it goes on the context")
+	_check(selector.get_current_target() == far and observer.ai.current_target == far, "the highest priority is the target, and it goes on the context")
 	_check(changes.size() == 1 and changes[0][1] == far, "target_changed, once")
 	selector.distance_weight = 0.0 # awareness alone, from here, to see the bonus clearly
 	_remember(memory, far, 0.8, near, 1.0, 7010)
@@ -257,7 +257,7 @@ func _test_target_selection() -> void:
 	memory.record_sighting(far, 0.9, 7200, far.global_position)
 	selector.update_target(7200)
 	_check(selector.force_target(near, 30, 10, "taunt"), "force_target is accepted")
-	_check(selector.get_current_target() == near and observer.ai_context.waiting_event_priority() == 10, "it takes effect at once, and asks for a decision with its priority")
+	_check(selector.get_current_target() == near and observer.ai.waiting_event_priority() == 10, "it takes effect at once, and asks for a decision with its priority")
 	print("  (a refused forced target is logged next)")
 	_check(not selector.force_target(far, 30, 5, "weaker"), "a weaker forced target is refused")
 	selector.update_target(TickDriver.tick + 1)
@@ -271,14 +271,14 @@ func _test_target_selection() -> void:
 	_check(selector.get_current_target() == far, "release_forced_target hands back")
 	# Claude 2026-11-12: a target freed between AI steps (a spawner removing a body) is skipped, not cast. Casting the freed object
 	# was a script error that stopped the faction arena; this run's log would show it as a SCRIPT ERROR.
-	observer.ai_context.current_target = near
+	observer.ai.current_target = near
 	near.free()
 	var refreshed := 0
-	for sense in observer.ai_context.sensing_manager.get_children():
+	for sense in observer.ai.sensing_manager.get_children():
 		if sense is SightSense:
 			sense.refresh(TickDriver.tick)
 			refreshed += 1
-	_check(refreshed > 0 and not observer.ai_context.has_target(), "a freed target: the sight refresh skips it, and has_target() is false")
+	_check(refreshed > 0 and not observer.ai.has_target(), "a freed target: the sight refresh skips it, and has_target() is false")
 	observer.free()
 	far.free()
 
@@ -365,9 +365,9 @@ func _make_pawn(team: int, at: Vector3, schedule := false) -> Pawn:
 	pawn.position = at
 	add_child(pawn)
 	if not schedule:
-		pawn.ai_context.decision_interval_ticks = NEVER
-		pawn.ai_context.sensing_manager.sense_interval_ticks = NEVER
-		pawn.ai_context.sensing_manager.refresh_interval_ticks = NEVER
+		pawn.ai.decision_interval_ticks = NEVER
+		pawn.ai.sensing_manager.sense_interval_ticks = NEVER
+		pawn.ai.sensing_manager.refresh_interval_ticks = NEVER
 	await _ticks(2)
 	return pawn
 

@@ -8,5 +8,5 @@ class_name AIIdleState
 extends AIStateBase
 
 
-func prerequisites_met(_context: AIContextComponent) -> bool:
+func prerequisites_met(_context: AIManager) -> bool:
 	return true

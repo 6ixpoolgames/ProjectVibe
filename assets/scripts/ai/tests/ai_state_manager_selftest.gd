@@ -15,13 +15,13 @@ class SwitchState extends AIStateBase:
 	var entered := 0
 	var exited := 0
 
-	func prerequisites_met(_context: AIContextComponent) -> bool:
+	func prerequisites_met(_context: AIManager) -> bool:
 		return level >= needed
 
-	func enter(_context: AIContextComponent) -> void:
+	func enter(_context: AIManager) -> void:
 		entered += 1
 
-	func exit(_context: AIContextComponent) -> void:
+	func exit(_context: AIManager) -> void:
 		exited += 1
 
 
@@ -43,7 +43,7 @@ func _test_priority_order() -> void:
 	var combat := _state("Combat", 20)
 	var alert := _state("Alert", 10)
 	var pawn := _make_pawn([alert, combat]) # added lowest first on purpose
-	var states := pawn.ai_context.state_manager
+	var states := pawn.ai.state_manager
 	var changes := []
 	states.state_changed.connect(func(old, new, reason): changes.append([old, new, reason]))
 	await _ticks(3) # decisions every tick in this test
@@ -71,14 +71,14 @@ func _test_fixed_order() -> void:
 	var second := _make_pawn([_state("Alpha", 5, 0), _state("Bravo", 5, 0)])
 	var a: Array[StringName] = []
 	var b: Array[StringName] = []
-	for state in first.ai_context.state_manager.get_states():
+	for state in first.ai.state_manager.get_states():
 		a.append(state.name)
-	for state in second.ai_context.state_manager.get_states():
+	for state in second.ai.state_manager.get_states():
 		b.append(state.name)
 	_check(a == b and a[0] == &"Alpha", "the same order whatever order they were added in: %s" % str(a))
-	first.ai_context.state_manager.update_state(0)
-	second.ai_context.state_manager.update_state(0)
-	_check(first.ai_context.state_manager.get_current_state().name == &"Alpha" and second.ai_context.state_manager.get_current_state().name == &"Alpha", "so both pick the same state")
+	first.ai.state_manager.update_state(0)
+	second.ai.state_manager.update_state(0)
+	_check(first.ai.state_manager.get_current_state().name == &"Alpha" and second.ai.state_manager.get_current_state().name == &"Alpha", "so both pick the same state")
 	first.free()
 	second.free()
 
@@ -87,11 +87,11 @@ func _test_forcing() -> void:
 	var combat := _state("Combat", 20)
 	var flee := _state("Flee", 30)
 	var pawn := _make_pawn([combat, flee])
-	var states := pawn.ai_context.state_manager
+	var states := pawn.ai.state_manager
 	await _ticks(2)
 	_check(states.force_state(&"Combat", 10, 50, "test"), "a force is accepted")
 	_check(states.get_current_state() == combat, "and takes effect at once, though Combat's prerequisites don't hold")
-	_check(pawn.ai_context.has_decision_waiting() and pawn.ai_context.waiting_event_priority() == 50, "and asks for a decision with the force's priority")
+	_check(pawn.ai.has_decision_waiting() and pawn.ai.waiting_event_priority() == 50, "and asks for a decision with the force's priority")
 	await _ticks(5)
 	_check(states.get_current_state() == combat, "it holds while the normal check would say Idle")
 	print("  (a refused force is logged next)")
@@ -131,8 +131,8 @@ func _test_forcing_during_a_tick() -> void:
 	taunter.team = 5
 	taunter.position = Vector3(30, 0, 0)
 	add_child(taunter)
-	var states := pawn.ai_context.state_manager
-	var selector := pawn.ai_context.target_selector
+	var states := pawn.ai.state_manager
+	var selector := pawn.ai.target_selector
 	await _ticks(2)
 	var seen := {}
 	TickDriver.after_simulate.connect(func(_dt: float, _tick: int) -> void:
@@ -174,18 +174,18 @@ func _test_odd_cases() -> void:
 	var only := _state("Only", 1)
 	var pawn := _make_pawn([only], false)
 	only.level = 1
-	pawn.ai_context.state_manager.update_state(0)
+	pawn.ai.state_manager.update_state(0)
 	only.level = 0
 	print("  (a warning about no state fitting is expected next)")
-	pawn.ai_context.state_manager.update_state(1)
-	_check(pawn.ai_context.state_manager.get_current_state() == only, "no state fits: it keeps the current one")
+	pawn.ai.state_manager.update_state(1)
+	_check(pawn.ai.state_manager.get_current_state() == only, "no state fits: it keeps the current one")
 	pawn.free()
 	var automatic := SwitchState.new() # no name set
 	var holder := AIStateManager.new()
 	holder.name = "AIStateManager"
 	holder.add_child(automatic) # GDScript note: a node added with no name gets an automatic one, like "@Node@123"
 	var other: Pawn = load(PAWN_SCENE).instantiate()
-	other.add_child(holder)
+	AITestPawns.ai_of(other).add_child(holder)
 	print("  (a warning about an automatic name is expected next)")
 	add_child(other)
 	_check(holder.get_states().size() == 1, "a state with an automatic name still works, with a warning")
@@ -214,9 +214,9 @@ func _make_pawn(states: Array, with_idle := true) -> Pawn:
 		var idle := AIIdleState.new()
 		idle.name = "Idle"
 		manager.add_child(idle)
-	pawn.add_child(manager)
+	AITestPawns.ai_of(pawn).add_child(manager)
 	add_child(pawn)
-	pawn.ai_context.decision_interval_ticks = 1
+	pawn.ai.decision_interval_ticks = 1
 	return pawn
 
 

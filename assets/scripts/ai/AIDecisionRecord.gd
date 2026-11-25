@@ -40,7 +40,7 @@ const RULE_NOT_WORKED_OUT := &"cpp"
 
 ## The tick of the decision.
 var tick := 0
-## The pawn's own number ([method AIContextComponent.pawn_number]), which also goes into its random numbers.
+## The pawn's own number ([method AIManager.pawn_number]), which also goes into its random numbers.
 var pawn_number := 0
 ## The pawn's node name, for reading.
 var pawn_name: StringName = &""

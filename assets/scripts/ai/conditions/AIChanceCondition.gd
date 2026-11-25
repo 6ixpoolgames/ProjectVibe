@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-17. History: ai/CHANGELOG.md.
 ## A condition that passes on a random roll, with a chance from 0 to 1, the same roll on every run.
 ##
-## The roll comes from [method AIContextComponent.random_unit_at] (pawn, tick, salt), rolled again at every decision by default. With
+## The roll comes from [method AIManager.random_unit_at] (pawn, tick, salt), rolled again at every decision by default. With
 ## [member once_per_input] set, that input's value takes the tick's place, so the roll holds until the input changes: Parry rolls once per
 ## swing. The C++ decider rolls the same hash, so both give the same answer.
 ## [codeblock]
@@ -35,7 +35,7 @@ static func make(passing_chance: float, salt_number: int, once_per: StringName =
 	return condition
 
 
-func passes(inputs: AIInputs, context: AIContextComponent, behaviour_salt: int) -> bool:
+func passes(inputs: AIInputs, context: AIManager, behaviour_salt: int) -> bool:
 	if not _resolved:
 		_resolve()
 	return context.random_unit_at(roll_tick(inputs, context.current_tick), roll_salt(inputs, behaviour_salt)) < chance

@@ -17,7 +17,7 @@ extends AbilityStep
 @export var muzzle_height := 1.3
 ## Where it leaves from: metres in front of the pawn.
 @export var muzzle_forward := 0.5
-## On: the first enemy on the straight path ahead hears a hit is coming (AIContextComponent.note_incoming_attack).
+## On: the first enemy on the straight path ahead hears a hit is coming (AIManager.note_incoming_attack).
 @export var warns_targets := true
 
 ## The projectile fired on this run, on the server; null on clients.
@@ -85,6 +85,6 @@ func _warn_first_on_path(origin: Vector3, direction: Vector3) -> void:
 		if along > 0.0 and along < best_along:
 			best_along = along
 			best = other
-	if best and best.ai_context and best.is_authority():
+	if best and best.ai and best.is_authority():
 		var ticks := ceili(best_along / maxf(fired.speed, 0.01) * TickDriver.get_tick_rate())
-		best.ai_context.note_incoming_attack(pawn, now, now + ticks)
+		best.ai.note_incoming_attack(pawn, now, now + ticks)

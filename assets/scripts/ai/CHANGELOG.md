@@ -20,6 +20,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Decision records as a replay channel | `ai/debug/AIDecisionRecorder.gd` | A second recording mechanism with its own storage and file format, beside `ReplayRecorder`, the one place that records everything. An "AI decisions" channel (off by default; 31 MB of JSON for 40 s at 150 pawns) would put them in the replay file, and the shadow comparison could read it live or from a file (the owner's call, 2026-11-17: logged, not now) | M |
 | The sprint action's name as a setting | `&"sprint"` in `AIChaseBehaviour`, `AISearchBehaviour`, `AIInvestigateBehaviour`, `AIKeepDistanceBehaviour` | Written into the code, so a game that names its sprint action differently has to edit four behaviours. A setting, or a tag as Chase's `close_in_tag` is, would need no code | S |
 
+## 2026-11-25
+
+- **The AI is one tree** (pawn spec 16.5, 16.10 step 5b). `AIContextComponent` became the `AIManager` (`pawn.ai`, was `pawn.ai_context`), and the AI's components are its children: the `AIController` (moved from the ControllerManager), `AISensingManager`, `AIMemory`, `AITargetSelector`, `AIStateManager` and `AIBehaviourManager`. Each reads the pawn from its AIManager as it enters the tree, and the AIManager finds them among its own children (it no longer watches the pawn's). The default is `parts/AIManager.tscn`; a pawn scene overrides one component by putting its own under an `AIManager` node (the sample goblins do, for their behaviour manager), and PawnInitializer fills in the rest. Nothing about how the AI decides changed. Tests that build AI pawns by hand use `AITestPawns.ai_of(pawn)` (in `tests/`); a test that drops the whole AI skips `&"AIManager"`.
+
+
 ## 2026-11-24
 
 - **Threat from an event** (the pawn redesign's build step 3a, pawn spec 16.8): `AIMemory` adds threat on `event.damage.taken` instead of the effect manager writing it. The C++ memory store reads detectability through `status_manager` (it named `stat_manager` and silently saw full detectability until fixed). The perception test stops the observer's scheduled passes once it makes its own, since entity numbers decide their ticks.

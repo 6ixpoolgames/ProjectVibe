@@ -1,7 +1,8 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: controllers/CHANGELOG.md.
 ## The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick.
 ##
-## A child of the pawn's ControllerManager, in charge whenever no player has the pawn. It decides nothing: the AI's behaviours (or a
+## A component of the pawn's AIManager ([member AIManager.controller]); the ControllerManager puts it in charge whenever no player
+## has the pawn. It decides nothing: the AI's behaviours (or a
 ## script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until
 ## changed, except [method press], which lasts one tick. Until [method look_at_point] is called it keeps the pawn's own look.
 ## [codeblock]
@@ -13,6 +14,8 @@
 ## A dead pawn's controller takes no orders, and lets go of everything as the pawn dies; the controllers README has the rest. Design: pawn spec 6.3, 10.3.
 class_name AIController
 extends ControllerBase
+# REFACTOR: the order API (move_to, follow, keep_distance, press, look_at_*) stays until the behaviour steps write the input (pawn spec
+# 16.10 step 7); then the controller only hands over what the running behaviour's steps write. See controllers/CHANGELOG.md.
 
 ## Sees every order given to any AIController, in order: [code]order_listener.call(controller, order, args)[/code], order being the
 ## method's name (&"move_to", &"press"...). Empty by default. The order stream's tap (netcode spec 19.3): the same orders, at the same
@@ -50,12 +53,17 @@ var _follow_standing := false
 var _let_go := false # it let go of everything (its pawn died) and has taken no order since
 
 
+# Its pawn is its AIManager's, which entered the tree first.
+func _enter_tree() -> void:
+	var ai := get_parent() as AIManager
+	pawn = ai.pawn if ai else null
+
+
 func _ready() -> void:
-	# As its pawn dies it lets go of every order, once, so it comes back from a revive holding nothing. Its parent is the pawn's
-	# ControllerManager; the pawn's parts have all entered the tree by now.
-	var body := get_parent().get_parent() as Pawn if get_parent() else null
-	if body and body.ability_manager:
-		body.ability_manager.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: let_go())
+	# As its pawn dies it lets go of every order, once, so it comes back from a revive holding nothing. The pawn's parts have all
+	# entered the tree by now.
+	if pawn and pawn.ability_manager:
+		pawn.ability_manager.died.connect(func(_pawn: Pawn, _hit: HitInfo) -> void: let_go())
 
 
 ## Closes in on a node and stops stop_distance away (flat), looking at it offset above its origin; walks again once it's further than
@@ -344,8 +352,8 @@ func _stop_path() -> void:
 		navigation.stop()
 
 
-# True when the pawn follows this controller's input. With no ControllerManager above it, it counts as in
-# charge, so a controller used on its own still works.
+# True when the pawn follows this controller's input. With no ControllerManager on the pawn, it counts as in charge, so a controller
+# used on its own still works.
 func _is_in_charge() -> bool:
-	var manager := get_parent() as ControllerManager
+	var manager := pawn.controller_manager if pawn else null
 	return manager == null or manager.get_controller_in_charge() == self

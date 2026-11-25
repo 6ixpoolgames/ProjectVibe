@@ -857,7 +857,7 @@ const double *AIBatchDecider::work_out_inputs(const PawnRow &p, const Vector3 &p
 				break;
 			}
 			case INCOMING_ATTACK: {
-				// AIContextComponent.has_incoming_attack: not hit yet, and the attacker still there and alive.
+				// AIManager.has_incoming_attack: not hit yet, and the attacker still there and alive.
 				Object *attacker = alive(p.incoming_attacker_id);
 				value = (p.incoming_hit_tick >= tick && attacker != nullptr && !bool(attacker->get("dead"))) ? 1.0 : 0.0;
 				break;

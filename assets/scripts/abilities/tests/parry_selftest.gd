@@ -125,7 +125,7 @@ func _test_ai_parries(chance: float) -> void:
 	var goblin: Pawn = load(GOBLIN_SCENE).instantiate()
 	goblin.team = 2
 	goblin.position = Vector3(40, 0.1, 0)
-	var behaviours := goblin.get_node("AIBehaviourManager")
+	var behaviours := goblin.get_node("AIManager/AIBehaviourManager")
 	for child in behaviours.get_children():
 		if child.name != &"Parry":
 			behaviours.remove_child(child)

@@ -1,20 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-07. History: controllers/CHANGELOG.md.
 ## Picks whose input a pawn follows, and holds that input and whether a player has the pawn.
 ##
-## A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child. This machine's player controller is in
-## charge when it has the pawn; nobody is when a player elsewhere has it (the input arrives over the network); otherwise the AI is, so
-## it takes over the moment a player lets go. The pawn calls [method tick_input] once per tick, which asks the controller in charge
-## and writes its command into the input. Controllers never write to the pawn themselves. Input is blocked by tags: while the pawn
-## owns a tag [member input_blocked_by] matches (status.dead by default; a stun, a cutscene's tag) it's cleared, whoever is in charge,
-## and with nobody in charge here it's cleared too (pawn spec 16.4).
+## A part on the pawn, added by PawnInitializer. This machine's player controller is in charge when it has the pawn; nobody is when a
+## player elsewhere has it (the input arrives over the network); otherwise the AI's controller is ([member ai_controller], from the
+## AIManager), so it takes over the moment a player lets go. The pawn calls [method tick_input] once per tick, which asks the controller
+## in charge and writes its command into the input; controllers never write to the pawn themselves. While the pawn owns a tag
+## [member input_blocked_by] matches (status.dead by default), or nobody here is in charge, the input is cleared (pawn spec 16.4).
 ## [br]
 ## The input rolls back (the pawn's TickStateComponent lists it, with [member previous_held_actions] as state). The server's checks on
-## a client's input are here too ([method sanitize_network_input]), as the NetworkEntity's input_owner.
-## [codeblock]
-## pawn.controller_manager.get_controller_in_charge()   # a ControllerBase, or null
-## pawn.controller_manager.was_action_pressed(&"jump")  # held this tick, not last tick
-## [/codeblock]
-## Only PlayerController calls [method attach_player] and [method detach_player]. Design: pawn spec 6.4, 8.17, 16.4.
+## a client's input are here too ([method sanitize_network_input]), as the NetworkEntity's input_owner. Only PlayerController calls
+## [method attach_player] and [method detach_player]. Use [code]get_controller_in_charge()[/code] (a ControllerBase, or null) and
+## [code]was_action_pressed(&"jump")[/code] (held this tick, not last tick). Design: pawn spec 6.4, 8.17, 16.4.
 class_name ControllerManager
 extends Node
 
@@ -51,8 +47,11 @@ var previous_held_actions := 0
 
 ## The pawn this manager belongs to, or null if its parent isn't one.
 var pawn: Pawn = null
-## The AI's controller: the first ControllerBase child. Null if there's none.
-var ai_controller: ControllerBase = null
+## The AI's controller, from the pawn's AIManager ([member AIManager.controller]). Null if the pawn has no AI or its AI has none.
+var ai_controller: ControllerBase:
+	get:
+		var ai := pawn.ai if pawn else null
+		return ai.controller if is_instance_valid(ai) else null
 ## This machine's player controller while it has the pawn, or null.
 var player_controller: ControllerBase = null
 
@@ -79,11 +78,6 @@ func _enter_tree() -> void:
 
 
 func _ready() -> void:
-	for child in get_children():
-		if child is ControllerBase:
-			ai_controller = child
-			ai_controller.pawn = pawn
-			break
 	possession_changed.connect(_on_possession_changed)
 	# The server's checks on a client's input come here, not to the pawn, and so does a change of who runs the pawn.
 	if pawn:
@@ -114,10 +108,9 @@ func take_input_command(tick: int) -> InputCommand:
 # --- The input ---
 
 
-## The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. While
-## the input is blocked ([member input_blocked_by]) it's cleared instead, on every machine; with nobody in charge (no controller here,
-## and no player elsewhere) it's cleared too.
-## A script that writes input later in the same phase wins.
+## The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. It's
+## cleared instead while blocked ([member input_blocked_by]), on every machine, and with nobody in charge (no controller here, no player
+## elsewhere). A script that writes input later in the same phase wins.
 func tick_input(tick: int) -> void:
 	if is_input_blocked():
 		clear_input()

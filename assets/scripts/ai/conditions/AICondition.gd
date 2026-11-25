@@ -16,7 +16,7 @@ const INPUT_SUGGESTIONS := "target_distance,most_aware_certain,most_aware_uncert
 
 ## True if the condition passes for this pawn now. inputs holds the values worked out for this decision; behaviour_salt is the
 ## behaviour's own number for random rolls, so two behaviours' rolls differ.
-func passes(_inputs: AIInputs, _context: AIContextComponent, _behaviour_salt: int) -> bool:
+func passes(_inputs: AIInputs, _context: AIManager, _behaviour_salt: int) -> bool:
 	return true
 
 

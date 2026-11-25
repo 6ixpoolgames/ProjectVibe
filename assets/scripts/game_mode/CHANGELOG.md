@@ -17,6 +17,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Split the tick-step rule out of `AIActivationManager` | `AIActivationManager.gd` | Two jobs in one module, freezing pawns and choosing their tick step, and the name says only the first. Apart, a game could swap either alone | M |
 | Reuse the free-spot query | `_is_free()` in `SpawnManager.gd` | A new shape and query object for every spot tried; made once and reused, a wave of spawns would allocate nothing | S |
 
+## 2026-11-25
+
+- **A part's components are filled in too** (pawn spec 16.10 step 5b). `PawnInitializer` treats the children a default part's scene instances from scenes of their own as that part's components: a pawn's own part gets each one it lacks, by name (`_add_missing_components`), and a part made from its default scene loses the ones `skip_default_parts` names (`_trim_components`). The game's `ai_brain` goes in place of the part or component of its name, now the AIManager's `AIBehaviourManager`. `components_of(scene)` reads them without making the scene, once per scene. The defaults list went from 12 parts to 7: one `AIManager` holds the AI. Test: `pawn_initializer_selftest`.
+
+
 ## 2026-11-24
 
 - **`max_spawns_per_tick` 1 → 8** (the owner's call: fill faster, still spread out; the internal build accepts the cost of bigger spawn frames).

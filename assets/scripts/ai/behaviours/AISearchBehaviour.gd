@@ -41,7 +41,7 @@ func own_conditions() -> Array[AICondition]:
 	return list
 
 
-func enter(context: AIContextComponent) -> void:
+func enter(context: AIManager) -> void:
 	var index := context.most_aware_index()
 	_centre = context.memory.last_known_position_at(index) if index >= 0 else pawn.global_position
 	_going_to_centre = true
@@ -53,7 +53,7 @@ func enter(context: AIContextComponent) -> void:
 		wake_at(context.current_tick + 1) # no walk to wake it: on to the next step
 
 
-func tick(context: AIContextComponent) -> Status:
+func tick(context: AIManager) -> Status:
 	var hands := context.controller
 	# Pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
 	if _pause_until >= 0:
@@ -81,7 +81,7 @@ func tick(context: AIContextComponent) -> Status:
 	return Status.RUNNING
 
 
-func exit(context: AIContextComponent, _reason: String) -> void:
+func exit(context: AIManager, _reason: String) -> void:
 	if context.controller:
 		context.controller.hold(&"sprint", false)
 		context.controller.stop()

@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Runs a pawn's AI senses on their turn, and finds the other-team pawns they may notice.
 ##
-## A part on the pawn with its [AISenseBase] nodes as children (SightSense by default). Every [member sense_interval_ticks] a full pass
+## A component of the pawn's AIManager with its [AISenseBase] nodes as children (SightSense by default). Every [member sense_interval_ticks] a full pass
 ## finds the other-team pawns within the longest sense's range, hands them to each sense, then has memory forget faded entries; every
 ## [member refresh_interval_ticks] in between, each sense refreshes the current target. Both are offset by the pawn's own number.
 ## With the navcore C++ library, a full pass's search, visibility and line of sight run on worker threads as a shared sensing job
@@ -64,9 +64,10 @@ func _init() -> void:
 
 
 func _enter_tree() -> void:
-	pawn = get_parent() as Pawn
+	var ai := get_parent() as AIManager
+	pawn = ai.pawn if ai else null
 	if pawn == null:
-		push_warning("AISensingManager: its parent isn't a Pawn, so it senses nothing.")
+		push_warning("AISensingManager: its parent isn't a pawn's AIManager, so it senses nothing.")
 
 
 func _ready() -> void:
@@ -92,9 +93,9 @@ func get_senses() -> Array[AISenseBase]:
 	return _senses.duplicate()
 
 
-## [method AIContextComponent.think] calls this each tick the pawn's AI runs.
+## [method AIManager.think] calls this each tick the pawn's AI runs.
 func tick_sensing(tick: int) -> void:
-	if pawn == null or pawn.ai_context == null or pawn.ai_context.memory == null or _senses.is_empty():
+	if pawn == null or pawn.ai == null or pawn.ai.memory == null or _senses.is_empty():
 		return
 	var rate := TickDriver.get_tick_rate()
 	if rate != _schedule_rate:
@@ -173,7 +174,7 @@ func full_pass(tick: int) -> void:
 # Memory drops what has faded away, after each full pass; timed as "ai.memory.forget".
 func _forget_old(tick: int) -> void:
 	var started := PerfScopes.begin_detailed()
-	pawn.ai_context.memory.forget_old(tick)
+	pawn.ai.memory.forget_old(tick)
 	PerfScopes.end(&"ai.memory.forget", started)
 
 
@@ -222,7 +223,7 @@ static func _start_job(_dt: float, tick: int) -> void:
 # This pawn's request, skipped in the same cases _find_candidates finds nothing, so that pass runs on the main thread and gives the
 # same answer.
 func _ask_job() -> void:
-	if pawn == null or pawn.ai_context == null or pawn.ai_context.memory == null or not pawn.is_inside_tree():
+	if pawn == null or pawn.ai == null or pawn.ai.memory == null or not pawn.is_inside_tree():
 		return
 	# A pawn that died during this tick, after it asked: a dead pawn's AI doesn't run (Pawn._tick_input), so the pass won't happen.
 	if pawn.is_dead():

@@ -85,7 +85,7 @@ public:
 	// missing or the wrong length.
 	Dictionary decide(const Dictionary &columns);
 
-	// AIContextComponent.random_unit_at, bit for bit: a number from 0 up to 1 from (seed, pawn, tick, salt), nothing stored.
+	// AIManager.random_unit_at, bit for bit: a number from 0 up to 1 from (seed, pawn, tick, salt), nothing stored.
 	static double random_unit_at(int64_t seed, int64_t pawn_number, int64_t tick, int64_t salt);
 	// The same, as GDScript calls it, for tests.
 	double random_unit(int64_t seed, int64_t pawn_number, int64_t tick, int64_t salt) const;
@@ -126,7 +126,7 @@ public:
 	void set_owned_tags(int row, const PackedInt64Array &words);
 	// The score modifiers' sum per behaviour slot and the behaviours they block, written when they change (pawn spec 10.13).
 	void set_modifiers(int row, const PackedFloat64Array &sums, int64_t blocked_mask);
-	// Its target's instance id (0: none), from AIContextComponent's current_target. A target that's gone counts as none.
+	// Its target's instance id (0: none), from AIManager's current_target. A target that's gone counts as none.
 	void set_target(int row, int64_t target_id);
 	// The behaviours whose action could start (a mask by slot), from the AbilityManager's readiness after it changed.
 	void set_can_press(int row, int64_t mask);

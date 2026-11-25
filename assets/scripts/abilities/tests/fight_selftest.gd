@@ -78,13 +78,13 @@ func _test_being_hit_states() -> void:
 	var goblin := _make_goblin(Vector3(40, 0.1, 0))
 	var sneak := _make_pawn(Vector3(40, 0.1, 6), 0) # behind the goblin, which faces -Z: never seen
 	await _ticks(20)
-	_check(goblin.ai_context.current_state_name() == &"Idle", "an unseen pawn behind it: Idle")
+	_check(goblin.ai.current_state_name() == &"Idle", "an unseen pawn behind it: Idle")
 	goblin.ability_manager.receive_hit(_hit(sneak, goblin, 10))
 	await _ticks(3)
-	_check(goblin.ai_context.current_state_name() == &"Alert", "hit by an attacker it doesn't know: Alert at once (the hit rule)")
-	_check(goblin.ai_context.behaviour_manager.get_running_behaviour().name == &"LookToward", "and it looks toward where the hit came from")
+	_check(goblin.ai.current_state_name() == &"Alert", "hit by an attacker it doesn't know: Alert at once (the hit rule)")
+	_check(goblin.ai.behaviour_manager.get_running_behaviour().name == &"LookToward", "and it looks toward where the hit came from")
 	await _ticks(20)
-	var sight: SightSense = goblin.ai_context.sensing_manager.get_node("Sight")
+	var sight: SightSense = goblin.ai.sensing_manager.get_node("Sight")
 	_check(sight.visibility_of(sneak) > 0.5, "turning its eyes there, it can now see the attacker")
 	goblin.free()
 	sneak.free()
@@ -92,11 +92,11 @@ func _test_being_hit_states() -> void:
 	goblin = _make_goblin(Vector3(60, 0.1, 0))
 	var known := _make_pawn(Vector3(60, 0.1, 6), 0)
 	await _ticks(20)
-	goblin.ai_context.memory.record_sighting(known, 0.4, TickDriver.tick, known.global_position) # half-noticed earlier
+	goblin.ai.memory.record_sighting(known, 0.4, TickDriver.tick, known.global_position) # half-noticed earlier
 	goblin.ability_manager.receive_hit(_hit(known, goblin, 10))
 	await _ticks(3)
-	_check(goblin.ai_context.current_state_name() == &"Combat", "hit by an attacker it knows: straight to Combat")
-	_check(goblin.ai_context.memory.threat_at(goblin.ai_context.memory.find(known)) > 0.09, "and the damage added threat to the attacker's entry (%.2f)" % goblin.ai_context.memory.threat_at(goblin.ai_context.memory.find(known)))
+	_check(goblin.ai.current_state_name() == &"Combat", "hit by an attacker it knows: straight to Combat")
+	_check(goblin.ai.memory.threat_at(goblin.ai.memory.find(known)) > 0.09, "and the damage added threat to the attacker's entry (%.2f)" % goblin.ai.memory.threat_at(goblin.ai.memory.find(known)))
 	goblin.free()
 	known.free()
 
@@ -105,12 +105,12 @@ func _test_dead_are_ignored() -> void:
 	var watcher := _make_pawn(Vector3(80, 0.1, 0), 1)
 	var corpse := _make_pawn(Vector3(80, 0.1, -5), 0)
 	await _ticks(30)
-	_check(watcher.ai_context.memory.find(corpse) >= 0, "a living enemy in front is sensed")
+	_check(watcher.ai.memory.find(corpse) >= 0, "a living enemy in front is sensed")
 	for i in 5:
 		corpse.ability_manager.receive_hit(_hit(watcher, corpse, 20))
 	_check(corpse.is_dead(), "it dies")
 	await _ticks(25) # past a full sensing pass
-	_check(watcher.ai_context.memory.find(corpse) < 0, "and memory forgets it on the next pass; sensing doesn't put it back")
+	_check(watcher.ai.memory.find(corpse) < 0, "and memory forgets it on the next pass; sensing doesn't put it back")
 	watcher.free()
 	corpse.free()
 
@@ -126,7 +126,7 @@ func _test_fight_to_the_death() -> void:
 			break
 	_check(deaths.size() == 1, "the goblin chases and swings until the intruder dies (5 hits of 20)")
 	await _ticks(90)
-	_check(goblin.ai_context.current_state_name() != &"Combat" and goblin.ai_context.memory.find(intruder) < 0, "then it forgets the body and leaves Combat")
+	_check(goblin.ai.current_state_name() != &"Combat" and goblin.ai.memory.find(intruder) < 0, "then it forgets the body and leaves Combat")
 	goblin.free()
 	intruder.free()
 
@@ -165,7 +165,7 @@ func _make_goblin(at: Vector3) -> Pawn:
 		var behaviour: AIBehaviourBase = pair[1].new()
 		behaviour.name = pair[0]
 		manager.add_child(behaviour)
-	goblin.add_child(manager)
+	AITestPawns.ai_of(goblin).add_child(manager)
 	add_child(goblin)
 	return goblin
 

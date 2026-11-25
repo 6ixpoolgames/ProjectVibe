@@ -17,7 +17,7 @@
 | What records | Every gameplay entity: whatever play and replay need to be deterministic | the owner |
 | Slots | Never move. A freed slot is emptied, waits until no frame in the history still holds its old occupant, then is reused with a new generation | the owner |
 | References and lists | Object references become ids. Lists of varying length become a fixed number of slots holding ids | the owner |
-| Holders | Node and scene structure is projected onto a holder per entity (as `AIContextComponent` is for the AI), updated on events; the store reads from the holder | the owner's idea; section 6 |
+| Holders | Node and scene structure is projected onto a holder per entity (as `AIManager`, was `AIContextComponent`, is for the AI), updated on events; the store reads from the holder | the owner's idea; section 6 |
 | Replays | Play back the full record, so they're exact on any machine. Every pawn's applied input command is recorded, AI included. No AI runs during a replay | the owner |
 | Branches | Starting play from a rewind is a branch, the only time AI decisions run again. Running forward is deterministic on the same machine; physics drift is corrected from the store | the owner |
 | AI on a branch | AI state is saved at keyframes so a branch resumes where the AI was. What's saved is declared like any other column and pruned at design time | the owner |
@@ -132,7 +132,7 @@ One C++ pass at the end of each tick reads every gathered column of every entity
 - **It writes into the store when that happens** (as `Stat.set_value` pushes into the pawn table today), applied at the next gather.
 - **It works both ways.** A rollback, a seek or a branch loads the store, and the holder writes back into the nodes, turning handles back into nodes through the slot map.
 - Most of an entity's state is pushed (target, abilities, team, stats); only what physics changes is gathered every tick (position, velocity, grounded). So the per-tick gather stays small.
-- Candidate holders: `ControllerManager` (input), `AIContextComponent` (AI), `AbilityManager` (abilities), `EffectManager` (effects), the stats. To be settled per system in the reviews (section 14).
+- Candidate holders: `ControllerManager` (input), `AIManager` (AI), `AbilityManager` (abilities), `EffectManager` (effects), the stats. To be settled per system in the reviews (section 14).
 
 ### 6.4 Custom state: quarantined
 

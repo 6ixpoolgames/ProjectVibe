@@ -16,7 +16,7 @@ Every class in `assets/scripts/controllers/`, from its doc comments. The overvie
 
 The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick.
 
-A child of the pawn's ControllerManager, in charge whenever no player has the pawn. It decides nothing: the AI's behaviours (or a script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until changed, except `press()`, which lasts one tick. Until `look_at_point()` is called it keeps the pawn's own look.
+A component of the pawn's AIManager (`AIManager.controller`); the ControllerManager puts it in charge whenever no player has the pawn. It decides nothing: the AI's behaviours (or a script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until changed, except `press()`, which lasts one tick. Until `look_at_point()` is called it keeps the pawn's own look.
 
 ```gdscript
 ai.move_to(point)                        # walks there along a nav path; false if there's no way there
@@ -87,16 +87,9 @@ How to make one: extend this, and override `take_input_command()`.
 
 Picks whose input a pawn follows, and holds that input and whether a player has the pawn.
 
-A part on the pawn, added by PawnInitializer, with the pawn's AIController as its child. This machine's player controller is in charge when it has the pawn; nobody is when a player elsewhere has it (the input arrives over the network); otherwise the AI is, so it takes over the moment a player lets go. The pawn calls `tick_input()` once per tick, which asks the controller in charge and writes its command into the input. Controllers never write to the pawn themselves. Input is blocked by tags: while the pawn owns a tag `input_blocked_by` matches (status.dead by default; a stun, a cutscene's tag) it's cleared, whoever is in charge, and with nobody in charge here it's cleared too (pawn spec 16.4).
+A part on the pawn, added by PawnInitializer. This machine's player controller is in charge when it has the pawn; nobody is when a player elsewhere has it (the input arrives over the network); otherwise the AI's controller is (`ai_controller`, from the AIManager), so it takes over the moment a player lets go. The pawn calls `tick_input()` once per tick, which asks the controller in charge and writes its command into the input; controllers never write to the pawn themselves. While the pawn owns a tag `input_blocked_by` matches (status.dead by default), or nobody here is in charge, the input is cleared (pawn spec 16.4).
 
-The input rolls back (the pawn's TickStateComponent lists it, with `previous_held_actions` as state). The server's checks on a client's input are here too (`sanitize_network_input()`), as the NetworkEntity's input_owner.
-
-```gdscript
-pawn.controller_manager.get_controller_in_charge()   # a ControllerBase, or null
-pawn.controller_manager.was_action_pressed(&"jump")  # held this tick, not last tick
-```
-
-Only PlayerController calls `attach_player()` and `detach_player()`. Design: pawn spec 6.4, 8.17, 16.4.
+The input rolls back (the pawn's TickStateComponent lists it, with `previous_held_actions` as state). The server's checks on a client's input are here too (`sanitize_network_input()`), as the NetworkEntity's input_owner. Only PlayerController calls `attach_player()` and `detach_player()`. Use `get_controller_in_charge()` (a ControllerBase, or null) and `was_action_pressed(&"jump")` (held this tick, not last tick). Design: pawn spec 6.4, 8.17, 16.4.
 
 ### Settings and properties
 
@@ -111,7 +104,7 @@ Only PlayerController calls `attach_player()` and `detach_player()`. Design: paw
 - `view_ticks_behind: float` = `0.0`: How many ticks behind its own tick the controller was drawing other pawns, for lag compensation. The server limits it to what's believable (LagCompensation).
 - `previous_held_actions: int` = `0`: Last tick's held_actions, so a press can be told from a hold. In the TickState's state list, so a correction fixes it.
 - `pawn: Pawn` = `null`: The pawn this manager belongs to, or null if its parent isn't one.
-- `ai_controller: ControllerBase` = `null`: The AI's controller: the first ControllerBase child. Null if there's none.
+- `ai_controller: ControllerBase`: The AI's controller, from the pawn's AIManager (`AIManager.controller`). Null if the pawn has no AI or its AI has none.
 - `player_controller: ControllerBase` = `null`: This machine's player controller while it has the pawn, or null.
 
 ### Signals
@@ -123,7 +116,7 @@ Only PlayerController calls `attach_player()` and `detach_player()`. Design: paw
 
 - `get_controller_in_charge() -> ControllerBase`: Who the pawn follows right now, or null. See the rule in the class description.
 - `take_input_command(tick: int) -> InputCommand`: This tick's input from the controller in charge, or null when nobody here is.
-- `tick_input(tick: int) -> void`: The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. While the input is blocked (`input_blocked_by`) it's cleared instead, on every machine; with nobody in charge (no controller here, and no player elsewhere) it's cleared too. A script that writes input later in the same phase wins.
+- `tick_input(tick: int) -> void`: The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. It's cleared instead while blocked (`input_blocked_by`), on every machine, and with nobody in charge (no controller here, no player elsewhere). A script that writes input later in the same phase wins.
 - `is_input_blocked() -> bool`: True while the pawn owns a tag `input_blocked_by` matches, such as status.dead.
 - `apply_input(command: InputCommand) -> void`: Writes a command into this tick's input.
 - `is_action_held(action: StringName) -> bool`: True if a named action is held this tick.

@@ -45,7 +45,7 @@ func own_conditions() -> Array[AICondition]:
 	return list
 
 
-func enter(context: AIContextComponent) -> void:
+func enter(context: AIManager) -> void:
 	var hands := context.controller
 	hands.stop()
 	if context.has_target():
@@ -66,7 +66,7 @@ func enter(context: AIContextComponent) -> void:
 		wake_at(_started_tick + 2)
 
 
-func tick(context: AIContextComponent) -> Status:
+func tick(context: AIManager) -> Status:
 	# The press that had to wait a tick (see enter()).
 	if _hold_from_tick >= 0:
 		if context.current_tick < _hold_from_tick:
@@ -89,13 +89,13 @@ func tick(context: AIContextComponent) -> Status:
 	return Status.SUCCEEDED
 
 
-func exit(context: AIContextComponent, _reason: String) -> void:
+func exit(context: AIManager, _reason: String) -> void:
 	if context.controller:
 		context.controller.hold(presses_action, false) # never left held
 		context.controller.stop_looking()
 
 
-func _look_at_target(context: AIContextComponent) -> void:
+func _look_at_target(context: AIManager) -> void:
 	var index := context.current_target_index()
 	if index >= 0:
 		context.controller.look_at_point(context.memory.last_known_position_at(index) + Vector3(0.0, 1.0, 0.0))

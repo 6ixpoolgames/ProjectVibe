@@ -28,7 +28,7 @@ func _ready() -> void:
 func _test_no_point() -> void:
 	var goblin := _make_goblin(Vector3(0, 0.1, 0))
 	await _ticks(60)
-	var running := goblin.ai_context.behaviour_manager.get_running_behaviour()
+	var running := goblin.ai.behaviour_manager.get_running_behaviour()
 	_check(running != null and running.name == &"Wander", "with no rally point in the level, it wanders (%s)" % (String(running.name) if running else "nothing"))
 	goblin.queue_free()
 	await _ticks(2)
@@ -41,9 +41,9 @@ func _test_march() -> void:
 	add_child(point)
 	var goblin := _make_goblin(Vector3(0, 0.1, 0))
 	await _ticks(30)
-	var running := goblin.ai_context.behaviour_manager.get_running_behaviour()
+	var running := goblin.ai.behaviour_manager.get_running_behaviour()
 	_check(running != null and running.name == &"GoToPoint", "with one, an idle pawn walks to it (%s)" % (String(running.name) if running else "nothing"))
-	var go: AIGoToPointBehaviour = goblin.get_node("AIBehaviourManager/GoToPoint")
+	var go: AIGoToPointBehaviour = goblin.get_node("AIManager/AIBehaviourManager/GoToPoint")
 	for i in 1200:
 		await get_tree().physics_frame
 		if Vector2(goblin.global_position.x - 70.0, goblin.global_position.z).length() <= go.arrive_radius:
@@ -51,7 +51,7 @@ func _test_march() -> void:
 	var left := Vector2(goblin.global_position.x - 70.0, goblin.global_position.z).length()
 	_check(left <= go.arrive_radius, "it gets there, 70 m in legs of up to %d m (%.1f m left)" % [go.leg_metres, left])
 	await _ticks(40)
-	running = goblin.ai_context.behaviour_manager.get_running_behaviour()
+	running = goblin.ai.behaviour_manager.get_running_behaviour()
 	_check(running != null and running.name == &"Wander", "then Wander takes over (%s)" % (String(running.name) if running else "nothing"))
 	goblin.queue_free()
 	point.queue_free()

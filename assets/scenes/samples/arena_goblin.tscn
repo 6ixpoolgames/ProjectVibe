@@ -1,7 +1,8 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/pawn.tscn" id="1_pawn"]
 [ext_resource type="Script" path="res://assets/scripts/ai/AIBehaviourManager.gd" id="2_manager"]
+[ext_resource type="Script" path="res://assets/scripts/ai/AIManager.gd" id="11_ai_manager"]
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIWanderBehaviour.gd" id="3_wander"]
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AILookTowardBehaviour.gd" id="4_look"]
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIInvestigateBehaviour.gd" id="5_investigate"]
@@ -18,24 +19,27 @@ team = 1
 [node name="Body" parent="Visual/Model" index="0"]
 surface_material_override/0 = SubResource("Goblin_material")
 
-[node name="AIBehaviourManager" type="Node" parent="."]
+[node name="AIManager" type="Node" parent="."]
+script = ExtResource("11_ai_manager")
+
+[node name="AIBehaviourManager" type="Node" parent="AIManager"]
 script = ExtResource("2_manager")
 
-[node name="Wander" type="Node" parent="AIBehaviourManager"]
+[node name="Wander" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("3_wander")
 
-[node name="LookToward" type="Node" parent="AIBehaviourManager"]
+[node name="LookToward" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("4_look")
 
-[node name="Investigate" type="Node" parent="AIBehaviourManager"]
+[node name="Investigate" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("5_investigate")
 
-[node name="Search" type="Node" parent="AIBehaviourManager"]
+[node name="Search" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("6_search")
 
-[node name="Chase" type="Node" parent="AIBehaviourManager"]
+[node name="Chase" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("7_chase")
 dash_to_close = true
 
-[node name="Attack" type="Node" parent="AIBehaviourManager"]
+[node name="Attack" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("8_attack")

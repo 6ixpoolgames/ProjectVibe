@@ -175,8 +175,8 @@ func _warn_targets() -> void:
 		if to.length_squared() > 0.0001 and facing.angle_to(to.normalized()) > widest:
 			continue
 		# Straight to the target's AI, on the server.
-		if other.ai_context and other.is_authority():
-			other.ai_context.note_incoming_attack(pawn, now, now + windup_length())
+		if other.ai and other.is_authority():
+			other.ai.note_incoming_attack(pawn, now, now + windup_length())
 
 
 

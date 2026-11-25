@@ -96,8 +96,8 @@ func _ready() -> void:
 		pawn.skip_move_when_still = _skip_still_moves)
 	if _decision_interval > 0: # Claude 2026-11-17: every AI context as it enters the tree
 		get_tree().node_added.connect(func(node: Node) -> void:
-			if node is AIContextComponent:
-				(node as AIContextComponent).decision_interval_ticks = _decision_interval)
+			if node is AIManager:
+				(node as AIManager).decision_interval_ticks = _decision_interval)
 	# Claude 2026-11-18: the ranged attack. An Attack behaviour whose action has no attack is never available, so pointing it at an
 	# action nothing is bound to switches it off without removing it.
 	if _no_ranged or _melee_off:

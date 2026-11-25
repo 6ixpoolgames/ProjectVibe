@@ -6,8 +6,8 @@
 ## until written again ([method set_input]). Names starting [code]ticks_[/code] are times in ticks, written for 60 a second.
 ## Design: scaling spec 6.2.
 ## [codeblock]
-## pawn.ai_context.inputs.set_input(&"morale", 0.4)
-## pawn.ai_context.inputs.value_of(AIInputs.TARGET_DISTANCE)
+## pawn.ai.inputs.set_input(&"morale", 0.4)
+## pawn.ai.inputs.value_of(AIInputs.TARGET_DISTANCE)
 ## [/codeblock]
 class_name AIInputs
 extends RefCounted
@@ -57,7 +57,7 @@ const GROUP_LOOK_AGAIN_TICKS := 120
 ## The values by slot; 0 where nothing was written or worked out.
 var values := PackedFloat64Array()
 
-var _context: AIContextComponent = null
+var _context: AIManager = null
 var _decision := 0 # counts decisions; a worked-out value is fresh while its stamp matches
 var _tick := 0 # the tick of the decision under way
 var _stamps := PackedInt32Array() # per slot, the decision it was last worked out for
@@ -66,7 +66,7 @@ var _group_looked_tick := {} # group -> the tick it was last looked for
 var _ready_version := {} # action -> the AbilityManager's readiness_version when last asked
 
 
-func _init(context: AIContextComponent = null) -> void:
+func _init(context: AIManager = null) -> void:
 	_context = context
 
 

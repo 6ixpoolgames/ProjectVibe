@@ -95,7 +95,7 @@ func full_pass(candidates: Array[Pawn], tick: int) -> void:
 ## The full pass with the sensing job's result: the job found the candidates, how visible each is and (against SightGeometry) the
 ## line of sight, on a worker thread; this records them, the same as full_pass would. AISensingManager calls it.
 func full_pass_prepared(job: Object, tick: int) -> void:
-	var memory := pawn.ai_context.memory if pawn and pawn.ai_context else null
+	var memory := pawn.ai.memory if pawn and pawn.ai else null
 	if memory == null:
 		return
 	var store: Object = memory.get_store()
@@ -111,7 +111,7 @@ func ask_job(job: Object, reach: float, max_candidates: int) -> void:
 ## Only the current target, one ray. Refreshing every remembered entity costs more than the full passes in a crowd (measured with
 ## ai_stress), and keeping a tracked target fresh is what the refresh is for.
 func refresh(tick: int) -> void:
-	var context := pawn.ai_context if pawn else null
+	var context := pawn.ai if pawn else null
 	# has_target() first. The target can be freed between AI steps (a spawner removing a body), and casting a freed object is a
 	# script error.
 	var target := context.current_target as Pawn if context and context.has_target() else null
@@ -183,7 +183,7 @@ func _visibility(target: Pawn) -> float:
 
 # Hands the checks to memory's store, then lets memory wake a decision and send its signals.
 func _check_all(targets: Array, tick: int) -> void:
-	var memory := pawn.ai_context.memory if pawn and pawn.ai_context else null
+	var memory := pawn.ai.memory if pawn and pawn.ai else null
 	if memory == null:
 		return
 	var store: Object = memory.get_store()

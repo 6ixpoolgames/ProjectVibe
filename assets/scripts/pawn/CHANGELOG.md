@@ -17,6 +17,8 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 
 ## 2026-11-25
 
+- **`pawn.ai`** (pawn spec 16.10 step 5b): the AI is one `AIManager` with the AI's components as its children; `pawn.ai_context` is gone.
+
 - **Dead ticks** (pawn spec 16.4): `_tick_input` no longer clears a dead pawn's input or has its AI let go; it skips only the AI. The controller manager blocks the input (`input_blocked_by`, `status.dead`).
 
 ## 2026-11-24

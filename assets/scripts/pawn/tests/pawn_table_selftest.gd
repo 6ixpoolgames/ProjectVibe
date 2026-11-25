@@ -188,7 +188,7 @@ func _brute_force(pawns: Array[Pawn], seeker: Pawn, radius: float, cap: int) -> 
 func _make_pawn(at: Vector3, entity_id := -1) -> Pawn:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate()
 	pawn.position = at
-	pawn.skip_default_parts = [&"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
+	pawn.skip_default_parts = [&"AIManager", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 	if entity_id >= 0:
 		for child in pawn.get_children():
 			if child is NetworkEntity:

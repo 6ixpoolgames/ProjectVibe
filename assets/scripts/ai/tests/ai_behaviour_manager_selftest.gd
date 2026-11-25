@@ -1,5 +1,5 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless self-test for AIBehaviourManager, AIBehaviourBase, AIWanderBehaviour,
-## AIContextComponent and the pawn's AI step. Checks the decision steps of pawn spec 10.8 one by one (hard rules, ranges, early stop,
+## AIManager and the pawn's AI step. Checks the decision steps of pawn spec 10.8 one by one (hard rules, ranges, early stop,
 ## jitter, ties, the fixed order), persistence, interrupts, finishing, Wander, what runs while a player has the pawn, that a client
 ## never runs the AI, that a rollback doesn't run it again, and the odd cases at the top of AIBehaviourManager.gd.
 ## Claude 2026-11-17 (scaling spec 6.2): and wake-ups: wake_at, a walk ending and an ability on the action ending wake a sleeping
@@ -23,21 +23,21 @@ class TestBehaviour extends AIBehaviourBase:
 	var ticks := 0
 	var last_exit_reason := ""
 
-	func is_available(_context: AIContextComponent) -> bool:
+	func is_available(_context: AIManager) -> bool:
 		return available
 
-	func score(_context: AIContextComponent) -> float:
+	func score(_context: AIManager) -> float:
 		scored += 1
 		return value
 
-	func enter(_context: AIContextComponent) -> void:
+	func enter(_context: AIManager) -> void:
 		entered += 1
 
-	func tick(_context: AIContextComponent) -> Status:
+	func tick(_context: AIManager) -> Status:
 		ticks += 1
 		return finish_with
 
-	func exit(_context: AIContextComponent, reason: String) -> void:
+	func exit(_context: AIManager, reason: String) -> void:
 		exited += 1
 		last_exit_reason = reason
 
@@ -47,7 +47,7 @@ class GoToBehaviour extends AIBehaviourBase:
 	var target := Vector3.ZERO
 	var walk_accepted := false
 
-	func enter(context: AIContextComponent) -> void:
+	func enter(context: AIManager) -> void:
 		walk_accepted = context.controller.move_to(target)
 
 
@@ -55,7 +55,7 @@ class GoToBehaviour extends AIBehaviourBase:
 class SwitchState extends AIStateBase:
 	var fits := false
 
-	func prerequisites_met(_context: AIContextComponent) -> bool:
+	func prerequisites_met(_context: AIManager) -> bool:
 		return fits
 
 
@@ -90,9 +90,9 @@ func _test_empty_manager() -> void:
 	var pawn: Pawn = load(PAWN_SCENE).instantiate() # the default parts: an empty behaviour manager
 	pawn.position = Vector3(0, 0.1, 0)
 	add_child(pawn)
-	pawn.ai_context.decision_interval_ticks = 1
+	pawn.ai.decision_interval_ticks = 1
 	await _ticks(10)
-	_check(pawn.ai_context.state_manager.get_current_state().name == &"Idle", "default parts: the state manager picks Idle")
+	_check(pawn.ai.state_manager.get_current_state().name == &"Idle", "default parts: the state manager picks Idle")
 	pawn.controller_manager.ai_controller.move_in_direction(Vector3(1, 0, 0))
 	await _ticks(20)
 	_check(pawn.velocity.x > 4.0, "an empty behaviour manager leaves a script driving the AI controller alone (%.2f m/s)" % pawn.velocity.x)
@@ -129,7 +129,7 @@ func _test_hard_rules() -> void:
 	_decide(pawn, 100)
 	_check(_running_name(pawn) == &"Quick", "a behaviour needing a target, one whose action can't start, and one for another state are all skipped")
 	_check(target_needed.scored == 0 and cant_press.scored == 0 and elsewhere.scored == 0, "...without running their score()")
-	pawn.ai_context.behaviour_manager.tick_running(101) # Quick finishes, and the manager decides at once
+	pawn.ai.behaviour_manager.tick_running(101) # Quick finishes, and the manager decides at once
 	_check(quick.last_exit_reason == "succeeded" and _running_name(pawn) == &"Fallback", "Quick finished: on cooldown, so Fallback runs at once")
 	_decide(pawn, 110)
 	_check(_running_name(pawn) == &"Fallback", "still cooling down 9 ticks later")
@@ -163,7 +163,7 @@ func _test_ranges_and_early_stop() -> void:
 
 func _test_random_numbers_and_jitter() -> void:
 	var pawn := _make_pawn([_b("A", 0.5), _b("B", 0.5)])
-	var context := pawn.ai_context
+	var context := pawn.ai
 	var same := context.random_unit_at(500, 77) == context.random_unit_at(500, 77)
 	var differs := context.random_unit_at(500, 77) != context.random_unit_at(501, 77) and context.random_unit_at(500, 77) != context.random_unit_at(500, 78)
 	_check(same and differs, "random numbers: the same tick and salt give the same number; another tick or salt, another number")
@@ -185,7 +185,7 @@ func _test_random_numbers_and_jitter() -> void:
 		winners[_running_name(pawn)] = true
 	_check(winners.size() == 1 and winners.has(&"A"), "jitter 0 (the default): the same choice every time")
 	# Jitter on B only: B sometimes beats A, and the choices replay the same.
-	pawn.ai_context.behaviour_manager.set_score_jitter(&"B", 0.2)
+	pawn.ai.behaviour_manager.set_score_jitter(&"B", 0.2)
 	var b_wins := 0
 	var first_run: Array[StringName] = []
 	for t in 60:
@@ -198,8 +198,8 @@ func _test_random_numbers_and_jitter() -> void:
 		second_run.append(_running_name(pawn))
 	_check(b_wins > 10 and b_wins < 50, "jitter per behaviour: B, with jitter, wins about half the time (%d of 60)" % b_wins)
 	_check(first_run == second_run, "the same ticks give the same choices")
-	pawn.ai_context.behaviour_manager.set_score_jitter(&"B", -1.0)
-	pawn.ai_context.behaviour_manager.default_score_jitter = 0.2
+	pawn.ai.behaviour_manager.set_score_jitter(&"B", -1.0)
+	pawn.ai.behaviour_manager.default_score_jitter = 0.2
 	var a_seen := false
 	var b_seen := false
 	for t in 60:
@@ -210,7 +210,7 @@ func _test_random_numbers_and_jitter() -> void:
 	pawn.free()
 
 
-func same_seed_value(context: AIContextComponent) -> float:
+func same_seed_value(context: AIManager) -> float:
 	var seed_now := context.random_seed
 	context.random_seed = 0
 	var value := context.random_unit_at(500, 77)
@@ -220,7 +220,7 @@ func same_seed_value(context: AIContextComponent) -> float:
 
 func _test_ties() -> void:
 	var pawn := _make_pawn([_b("Kilo", 0.5), _b("Lima", 0.5), _b("Mike", 0.5)])
-	pawn.ai_context.behaviour_manager.randomize_ties = true
+	pawn.ai.behaviour_manager.randomize_ties = true
 	var seen := {}
 	var first: Array[StringName] = []
 	for t in 60:
@@ -276,16 +276,16 @@ func _test_persistence() -> void:
 func _test_persistence_modifiers(pawn: Pawn, keeper: TestBehaviour) -> void:
 	var now: int = TickDriver.tick
 	keeper.start_persistence(now - 25) # 25 ticks along: past its 20, so it adds nothing
-	pawn.ai_context.behaviour_manager.add_persistence_ticks(&"Keeper", 20) # back to 5 ticks along: held at full
+	pawn.ai.behaviour_manager.add_persistence_ticks(&"Keeper", 20) # back to 5 ticks along: held at full
 	_decide(pawn, now)
 	_check(_running_name(pawn) == &"Keeper", "add_persistence_ticks: 20 ticks more keep Keeper ahead of the rival")
 	keeper.start_persistence(now - 25)
 	_decide(pawn, now)
 	_check(_running_name(pawn) == &"Rival", "...and without them, the rival wins")
 	keeper.start_persistence(now)
-	pawn.ai_context.behaviour_manager.set_persistence_speed(&"Keeper", 0.0)
+	pawn.ai.behaviour_manager.set_persistence_speed(&"Keeper", 0.0)
 	_check(is_equal_approx(keeper.persistence_now(now + 500), 0.1), "set_persistence_speed 0: frozen at full 500 ticks later")
-	pawn.ai_context.behaviour_manager.set_persistence_speed(&"Keeper", 2.0)
+	pawn.ai.behaviour_manager.set_persistence_speed(&"Keeper", 2.0)
 	_check(is_equal_approx(keeper.persistence_now(now + 5), 0.1) and keeper.persistence_now(now + 10) == 0.0, "speed 2: through its 20 ticks in 10")
 
 
@@ -313,7 +313,7 @@ func _test_interrupts() -> void:
 	_decide(pawn, 2, 999, false)
 	_check(_running_name(pawn) == &"Stubborn", "cannot_be_interrupted: not even priority 999")
 	stubborn.finish_with = AIBehaviourBase.Status.SUCCEEDED
-	pawn.ai_context.behaviour_manager.tick_running(3)
+	pawn.ai.behaviour_manager.tick_running(3)
 	_check(_running_name(pawn) == &"Keen", "until it finishes itself")
 	pawn.free()
 
@@ -352,8 +352,8 @@ func _test_interrupts() -> void:
 	_decide(pawn, 1)
 	combat.fits = true
 	_decide(pawn, 2) # the state check moves to Combat, a state-change event of priority 20
-	_check(pawn.ai_context.state_manager.get_current_state() == combat and _running_name(pawn) == &"Guard", "a threshold above the new state's priority keeps a behaviour running in a state that doesn't allow it")
-	pawn.ai_context.behaviour_manager.set_interrupt_threshold(&"Guard", 0)
+	_check(pawn.ai.state_manager.get_current_state() == combat and _running_name(pawn) == &"Guard", "a threshold above the new state's priority keeps a behaviour running in a state that doesn't allow it")
+	pawn.ai.behaviour_manager.set_interrupt_threshold(&"Guard", 0)
 	_decide(pawn, 3)
 	_check(_running_name(pawn) == &"Fight", "set_interrupt_threshold: lowered while running, the next decision replaces it")
 	pawn.free()
@@ -366,7 +366,7 @@ func _test_tag_gates() -> void:
 	shoot.min_run_ticks = 600
 	var fight := _b("Fight", 0.5)
 	var pawn := _make_pawn([shoot, fight])
-	var manager := pawn.ai_context.behaviour_manager
+	var manager := pawn.ai.behaviour_manager
 	_decide(pawn, 1)
 	_check(_running_name(pawn) == &"Fight", "a behaviour whose tag requirements fail isn't chosen")
 	_check(shoot.scored == 0, "...and its score() isn't run")
@@ -374,15 +374,15 @@ func _test_tag_gates() -> void:
 	_decide(pawn, 2)
 	_check(_running_name(pawn) == &"Shoot", "the tag owned: it's chosen")
 	pawn.owned_tags.remove(Tags.STATUS.HAS_AMMO_RANGED)
-	pawn.ai_context.clear_decision()
+	pawn.ai.clear_decision()
 	manager.check_running(3)
-	_check(pawn.ai_context.has_decision_waiting() and not pawn.ai_context.waiting_event_is_normal(),
+	_check(pawn.ai.has_decision_waiting() and not pawn.ai.waiting_event_is_normal(),
 			"check_running: its requirements stopped passing, so it asks for a decision min_run_ticks don't hold off")
 	manager.decide(3)
 	_check(_running_name(pawn) == &"Fight", "...which replaces it, though its min_run_ticks (600) haven't passed")
-	pawn.ai_context.clear_decision()
+	pawn.ai.clear_decision()
 	manager.check_running(4)
-	_check(not pawn.ai_context.has_decision_waiting(), "check_running asks nothing when nothing changed")
+	_check(not pawn.ai.has_decision_waiting(), "check_running asks nothing when nothing changed")
 	# A threshold still holds it, as it does through a state change.
 	pawn.owned_tags.add(Tags.STATUS.HAS_AMMO_RANGED)
 	_decide(pawn, 5)
@@ -409,7 +409,7 @@ func _test_score_modifiers() -> void:
 	var ranged := _b("Ranged", 0.85)
 	ranged.tags = [Tags.AI.STANCE_RANGED]
 	var pawn := _make_pawn([melee, ranged])
-	var manager := pawn.ai_context.behaviour_manager
+	var manager := pawn.ai.behaviour_manager
 	_decide(pawn, 1)
 	_check(_running_name(pawn) == &"Ranged", "no modifiers: Ranged (0.85) over Melee (0.8)")
 	var charge := AIScoreModifier.new()
@@ -459,9 +459,9 @@ func _test_score_modifiers() -> void:
 	no_ranged.applies_to = TagQuery.make([], [Tags.AI.STANCE_RANGED])
 	no_ranged.blocks = true
 	no_ranged.wakes_decision = true
-	pawn.ai_context.clear_decision()
+	pawn.ai.clear_decision()
 	manager.add_score_modifier(no_ranged, shout_b)
-	_check(ranged.decision_blocked and pawn.ai_context.has_decision_waiting(), "a blocking modifier blocks, and wakes_decision asks for a decision")
+	_check(ranged.decision_blocked and pawn.ai.has_decision_waiting(), "a blocking modifier blocks, and wakes_decision asks for a decision")
 	manager.decide(121)
 	_check(_running_name(pawn) == &"Melee", "a blocked running behaviour is replaced")
 	manager.remove_score_modifier(shout_b)
@@ -477,7 +477,7 @@ func _test_finishing() -> void:
 	once.cooldown_ticks = 1000
 	var after := _b("After", 0.2)
 	var pawn := _make_pawn([once, after])
-	pawn.ai_context.decision_interval_ticks = NEVER
+	pawn.ai.decision_interval_ticks = NEVER
 	_decide(pawn, TickDriver.tick)
 	_check(_running_name(pawn) == &"Once", "a behaviour that will fail starts")
 	await _ticks(2)
@@ -493,11 +493,11 @@ func _test_tick_interval() -> void:
 	var pawn := _make_pawn([slow])
 	_decide(pawn, 100)
 	for t in range(100, 111):
-		pawn.ai_context.behaviour_manager.tick_running(t)
+		pawn.ai.behaviour_manager.tick_running(t)
 	_check(slow.ticks == 3, "tick_interval_ticks 5: ticked on the tick it started, then every 5 (%d ticks in 11)" % slow.ticks)
 	slow.tick_interval_ticks = 1
 	for t in range(111, 116):
-		pawn.ai_context.behaviour_manager.tick_running(t)
+		pawn.ai.behaviour_manager.tick_running(t)
 	_check(slow.ticks == 8, "1: every tick")
 	pawn.free()
 
@@ -507,7 +507,7 @@ func _test_wake_ups() -> void:
 	var sleeper := _b("Sleeper", 0.5)
 	sleeper.tick_interval_ticks = 600
 	var pawn := _make_pawn([sleeper])
-	var manager := pawn.ai_context.behaviour_manager
+	var manager := pawn.ai.behaviour_manager
 	_decide(pawn, 100)
 	manager.tick_running(100) # the tick it starts
 	for t in range(101, 110):
@@ -562,7 +562,7 @@ func _test_odd_cases() -> void:
 	print("  (a warning about a state with no behaviour is expected next, once)")
 	_decide(pawn, 1)
 	_decide(pawn, 2)
-	_check(pawn.ai_context.behaviour_manager.get_running_behaviour() == null, "a state that allows none of its behaviours: nothing runs")
+	_check(pawn.ai.behaviour_manager.get_running_behaviour() == null, "a state that allows none of its behaviours: nothing runs")
 	pawn.free()
 	var liar := _b("Liar", 0.9, 0.5) # scores 0.9 but says its max is 0.5
 	pawn = _make_pawn([liar])
@@ -571,7 +571,7 @@ func _test_odd_cases() -> void:
 	_decide(pawn, 2)
 	_check(liar.warned_score_range, "a score above max_score: a warning naming it")
 	print("  (a warning about a missing behaviour is expected next)")
-	pawn.ai_context.behaviour_manager.set_score_jitter(&"Nobody", 0.5)
+	pawn.ai.behaviour_manager.set_score_jitter(&"Nobody", 0.5)
 	_check(true, "a behaviour asked for by name that doesn't exist: a warning, nothing else")
 	pawn.free()
 
@@ -584,7 +584,7 @@ func _test_wander() -> void:
 	wander.min_pause_ticks = 20
 	wander.max_pause_ticks = 40
 	var pawn := _make_pawn([wander], [], Vector3(0, 0.1, 0))
-	pawn.ai_context.decision_interval_ticks = 15
+	pawn.ai.decision_interval_ticks = 15
 	await _ticks(10)
 	var start := pawn.global_position
 	var furthest := 0.0
@@ -611,10 +611,10 @@ func _test_while_possessed() -> void:
 	var floor_body := _make_floor(100.0)
 	var counter := _b("Counter", 0.5)
 	var pawn := _make_pawn([counter], [], Vector3(0, 0.1, 0))
-	pawn.ai_context.decision_interval_ticks = 1
+	pawn.ai.decision_interval_ticks = 1
 	await _ticks(5)
-	var context := pawn.ai_context
-	context.while_possessed = AIContextComponent.WhilePossessed.MEMORY_ONLY
+	var context := pawn.ai
+	context.while_possessed = AIManager.WhilePossessed.MEMORY_ONLY
 	pawn.controller_manager.set_has_player(true) # a player on another machine, so nobody here is in charge
 	var before := counter.ticks
 	await _ticks(10)
@@ -622,12 +622,12 @@ func _test_while_possessed() -> void:
 	pawn.controller_manager.set_has_player(false)
 	await _ticks(5)
 	_check(counter.ticks > before and _running_name(pawn) == &"Counter", "letting go: the same behaviour carries on, with no special code")
-	context.while_possessed = AIContextComponent.WhilePossessed.OFF
+	context.while_possessed = AIManager.WhilePossessed.OFF
 	pawn.controller_manager.set_has_player(true)
 	before = counter.ticks
 	await _ticks(10)
 	_check(counter.ticks == before, "OFF: nothing runs while a player has the pawn")
-	context.while_possessed = AIContextComponent.WhilePossessed.FULL
+	context.while_possessed = AIManager.WhilePossessed.FULL
 	await _ticks(10)
 	_check(counter.ticks > before, "FULL: behaviours keep running")
 	pawn.controller_manager.set_has_player(false)
@@ -637,8 +637,8 @@ func _test_while_possessed() -> void:
 	go.name = "GoTo"
 	go.target = Vector3(10, 0, 0)
 	pawn = _make_pawn([go], [], Vector3(0, 0.1, 0))
-	pawn.ai_context.while_possessed = AIContextComponent.WhilePossessed.FULL
-	pawn.ai_context.decision_interval_ticks = NEVER
+	pawn.ai.while_possessed = AIManager.WhilePossessed.FULL
+	pawn.ai.decision_interval_ticks = NEVER
 	await _ticks(5)
 	pawn.controller_manager.set_has_player(true)
 	pawn.navigation_manager.move_to(Vector3(-10, 0, 0)) # the player's path
@@ -662,7 +662,7 @@ func _test_client_and_rollback() -> void:
 	var floor_body := _make_floor(100.0)
 	var counter := _b("Counter", 0.5)
 	var pawn := _make_pawn([counter], [], Vector3(0, 0.1, 0))
-	pawn.ai_context.decision_interval_ticks = 1
+	pawn.ai.decision_interval_ticks = 1
 	await _ticks(5)
 	var real_entity: NetworkEntity = pawn._entity
 	var client_entity := NetworkEntity.new()
@@ -710,7 +710,7 @@ func _make_pawn(behaviours: Array, states: Array = [], at := Vector3(0, 1000, 0)
 	manager.name = "AIBehaviourManager"
 	for behaviour in behaviours:
 		manager.add_child(behaviour)
-	pawn.add_child(manager)
+	AITestPawns.ai_of(pawn).add_child(manager)
 	if not states.is_empty():
 		var state_manager := AIStateManager.new()
 		state_manager.name = "AIStateManager"
@@ -719,23 +719,23 @@ func _make_pawn(behaviours: Array, states: Array = [], at := Vector3(0, 1000, 0)
 		var idle := AIIdleState.new()
 		idle.name = "Idle"
 		state_manager.add_child(idle)
-		pawn.add_child(state_manager)
+		AITestPawns.ai_of(pawn).add_child(state_manager)
 	add_child(pawn)
-	pawn.ai_context.decision_interval_ticks = NEVER
+	pawn.ai.decision_interval_ticks = NEVER
 	return pawn
 
 
 ## Makes one decision now, as the pawn's AI step would: the state is checked, then the behaviour manager decides.
 func _decide(pawn: Pawn, tick: int, priority := 0, normal := true) -> void:
-	var context := pawn.ai_context
+	var context := pawn.ai
 	context.current_tick = tick
 	context.request_decision(priority, normal)
-	pawn.ai_context.state_manager.update_state(tick)
-	pawn.ai_context.behaviour_manager.decide(tick)
+	pawn.ai.state_manager.update_state(tick)
+	pawn.ai.behaviour_manager.decide(tick)
 
 
 func _running_name(pawn: Pawn) -> StringName:
-	var running := pawn.ai_context.behaviour_manager.get_running_behaviour()
+	var running := pawn.ai.behaviour_manager.get_running_behaviour()
 	return running.name if running else &""
 
 

@@ -505,7 +505,7 @@ pawn.ability_manager.can_start(&"primary")
 
 ## ReceiveHitAbility
 
-`res://assets/scripts/abilities/ReceiveHitAbility.gd`, extends [`AbilityBase`](#abilitybase)
+`res://assets/scripts/abilities/ReceiveHitAbility.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 Taking a hit: an instant action, started by `event.hit.taken`, that decides what a hit does to its pawn (pawn spec 16.7).
 
@@ -1039,7 +1039,7 @@ The server (or offline game) spawns it, never in a rollback replay. The shooter'
 - `projectile_scene: PackedScene`: For a projectile with code of its own: its scene (see `RangedAttackDefinition.projectile_scene`). Empty: the built-in one.
 - `muzzle_height: float` = `1.3`: Where it leaves from: metres above the pawn's feet.
 - `muzzle_forward: float` = `0.5`: Where it leaves from: metres in front of the pawn.
-- `warns_targets: bool` = `true`: On: the first enemy on the straight path ahead hears a hit is coming (AIContextComponent.note_incoming_attack).
+- `warns_targets: bool` = `true`: On: the first enemy on the straight path ahead hears a hit is coming (AIManager.note_incoming_attack).
 - `fired: Projectile` = `null`: The projectile fired on this run, on the server; null on clients.
 
 ### Functions

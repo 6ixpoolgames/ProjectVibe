@@ -1,15 +1,15 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Picks and runs the pawn's AI behaviour, judging between its behaviours by score.
 ##
-## A part on the pawn (added by PawnInitializer or the game's AI brain) with its [AIBehaviourBase] nodes as children. At each decision
+## A component of the pawn's AIManager (added by PawnInitializer, or the game's AI brain) with its [AIBehaviourBase] nodes as children. At each decision
 ## it checks whether the running behaviour may be replaced, drops behaviours that fail a hard rule, scores the rest and starts the
 ## winner; between decisions only the running behaviour's tick runs. Behaviours are kept sorted by name (the fixed order), never by
 ## the order added. Outside code only talks to the manager:
 ## [codeblock]
-## pawn.ai_context.behaviour_manager.get_running_behaviour()
-## pawn.ai_context.behaviour_manager.add_persistence_ticks(&"Chase", 60)    # say after landing a hit
-## pawn.ai_context.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say for a confused effect
-## pawn.ai_context.behaviour_manager.add_score_modifier(charge_shout, self)   # raise melee until removed (AIScoreModifier)
+## pawn.ai.behaviour_manager.get_running_behaviour()
+## pawn.ai.behaviour_manager.add_persistence_ticks(&"Chase", 60)    # say after landing a hit
+## pawn.ai.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say for a confused effect
+## pawn.ai.behaviour_manager.add_score_modifier(charge_shout, self)   # raise melee until removed (AIScoreModifier)
 ## [/codeblock]
 ## With the [AIDecisionModule] in the game, C++ makes the decisions and this manager is the backup ([method decide]).
 ## Design: pawn spec 10.7 and 10.8, scaling spec 6.2.
@@ -87,9 +87,10 @@ func _init() -> void:
 
 
 func _enter_tree() -> void:
-	pawn = get_parent() as Pawn
+	var ai := get_parent() as AIManager
+	pawn = ai.pawn if ai else null
 	if pawn == null:
-		push_warning("AIBehaviourManager: its parent isn't a Pawn, so it does nothing.")
+		push_warning("AIBehaviourManager: its parent isn't a pawn's AIManager, so it does nothing.")
 
 
 func _ready() -> void:
@@ -109,7 +110,7 @@ func _ready() -> void:
 
 func _exit_tree() -> void:
 	if _running and pawn:
-		_stop_running("removed", pawn.ai_context.current_tick if pawn.ai_context else 0)
+		_stop_running("removed", pawn.ai.current_tick if pawn.ai else 0)
 	if _placed_by and is_instance_valid(_placed_by):
 		_placed_by.forget(self)
 	_placed_by = null
@@ -133,7 +134,7 @@ func get_behaviour_list() -> Array[AIBehaviourBase]:
 ## This brain as plain data: the manager's, the AI context's and each behaviour's settings, in the fixed order. Taken by
 ## [code]AIBatchDecider.add_brain()[/code] and saved by [AIDecisionRecorder]. Settings changed during play show in the next call.
 func describe() -> Dictionary:
-	var context := pawn.ai_context if pawn else null
+	var context := pawn.ai if pawn else null
 	var behaviours: Array = []
 	for behaviour in _behaviours:
 		var tag_names: Array = []
@@ -172,12 +173,12 @@ func describe() -> Dictionary:
 	}
 
 
-## Makes the waiting decision ([method AIContextComponent.request_decision]) and starts what it chose. record: filled in while
+## Makes the waiting decision ([method AIManager.request_decision]) and starts what it chose. record: filled in while
 ## [member decision_listener] is set (null: made here). Twin of C++ [code]AIBatchDecider[/code]: same steps, a change goes in both.
 func decide(tick: int, record: AIDecisionRecord = null) -> void:
-	if pawn == null or pawn.ai_context == null:
+	if pawn == null or pawn.ai == null:
 		return
-	var context := pawn.ai_context
+	var context := pawn.ai
 	var event_priority := context.waiting_event_priority()
 	var event_is_normal := context.waiting_event_is_normal()
 	context.clear_decision()
@@ -300,7 +301,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		module.compare(self, cpp_choice, tick)
 
 
-## [method AIContextComponent.think] calls this every tick the AI runs, after any decision. Ticks the running behaviour.
+## [method AIManager.think] calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 func tick_running(tick: int) -> void:
 	if _running == null or pawn == null:
 		return
@@ -315,7 +316,7 @@ func tick_running(tick: int) -> void:
 	_running.woken = false
 	if _running.wake_tick >= 0 and tick >= _running.wake_tick:
 		_running.wake_tick = -1
-	var context := pawn.ai_context
+	var context := pawn.ai
 	var tick_started := PerfScopes.begin_detailed() # each behaviour's tick timed on its own, in detail (PerfScopes)
 	var status := _running.tick(context)
 	PerfScopes.end(_running.perf_tick_name, tick_started)
@@ -402,8 +403,8 @@ func add_score_modifier(modifier: AIScoreModifier, source: Variant) -> void:
 	_modifiers.append({"modifier": resolved, "source": _source_key(source), "ends": ends})
 	_modifiers_dirty = true
 	refresh_modifiers(now)
-	if resolved.wakes_decision and pawn and pawn.ai_context:
-		pawn.ai_context.request_decision(0, false)
+	if resolved.wakes_decision and pawn and pawn.ai:
+		pawn.ai.request_decision(0, false)
 
 
 ## Takes away every score modifier this source added.
@@ -418,8 +419,8 @@ func remove_score_modifier(source: Variant) -> void:
 	if not _modifiers_dirty:
 		return
 	refresh_modifiers(_now())
-	if wakes and pawn and pawn.ai_context:
-		pawn.ai_context.request_decision(0, false)
+	if wakes and pawn and pawn.ai:
+		pawn.ai.request_decision(0, false)
 
 
 ## The score modifiers now, in the order added: {modifier, source, ends} each (ends is the tick it goes, -1 until removed).
@@ -482,7 +483,7 @@ func refresh_modifiers(tick: int) -> void:
 ## interrupt_threshold still does). A pawn out of shots leaves Keep Distance at once instead of at its next decision tick.
 func check_running(tick: int) -> void:
 	refresh_modifiers(tick)
-	if _running == null or _running.cannot_be_interrupted or pawn == null or pawn.ai_context == null:
+	if _running == null or _running.cannot_be_interrupted or pawn == null or pawn.ai == null:
 		return
 	var owned := pawn.owned_tags
 	var tags_version := owned.version if owned else 0
@@ -491,7 +492,7 @@ func check_running(tick: int) -> void:
 	_checked_tags_version = tags_version
 	_checked_modifiers_version = modifiers_version
 	if _must_go(_running, _owned_words()):
-		pawn.ai_context.request_decision(0, false)
+		pawn.ai.request_decision(0, false)
 
 
 # --- Internals ---
@@ -536,7 +537,7 @@ func _switch_to(best: AIBehaviourBase, event_is_normal: bool, tick: int) -> void
 	var reason := "decision" if event_is_normal else "interrupted"
 	if best == null:
 		_stop_running(reason, tick, false)
-		var hands := pawn.ai_context.controller if pawn and pawn.ai_context else null
+		var hands := pawn.ai.controller if pawn and pawn.ai else null
 		if hands:
 			hands.release_all() # nothing can run: stand still
 	else:
@@ -547,13 +548,13 @@ func _switch_to(best: AIBehaviourBase, event_is_normal: bool, tick: int) -> void
 func _start(behaviour: AIBehaviourBase, reason: String, tick: int) -> void:
 	var old := _running
 	if old:
-		old.exit(pawn.ai_context, reason)
+		old.exit(pawn.ai, reason)
 		old.ended_tick = tick
 	_running = behaviour
 	behaviour.started_tick = tick
 	behaviour.start_persistence(tick)
 	behaviour.clear_wake_ups()
-	behaviour.enter(pawn.ai_context)
+	behaviour.enter(pawn.ai)
 	behaviour_changed.emit(old, behaviour, reason)
 
 
@@ -564,7 +565,7 @@ func _stop_running(reason: String, tick: int, tell_cpp := true) -> void:
 		return
 	var old := _running
 	_running = null
-	old.exit(pawn.ai_context, reason)
+	old.exit(pawn.ai, reason)
 	old.ended_tick = tick
 	if tell_cpp and cpp_row >= 0 and decision_module:
 		decision_module.stopped(self, tick)
@@ -572,7 +573,7 @@ func _stop_running(reason: String, tick: int, tell_cpp := true) -> void:
 
 
 # is_available() once per decision: the floor check and the scoring may both ask.
-func _is_available(behaviour: AIBehaviourBase, context: AIContextComponent) -> bool:
+func _is_available(behaviour: AIBehaviourBase, context: AIManager) -> bool:
 	if not behaviour.availability_checked:
 		behaviour.availability_checked = true
 		var started := PerfScopes.begin_detailed() # each behaviour's check timed on its own, in detail (PerfScopes)
@@ -587,7 +588,7 @@ func _is_available(behaviour: AIBehaviourBase, context: AIContextComponent) -> b
 # numbers: false for a decision C++ made, where GDScript's scratch values (ranges, availability, scores) weren't worked out.
 func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, event_is_normal: bool, kept_by_interrupt: bool,
 		numbers := true) -> void:
-	var context := pawn.ai_context
+	var context := pawn.ai
 	record.tick = tick
 	record.pawn_number = pawn.entity_number()
 	record.pawn_name = pawn.name
@@ -628,7 +629,7 @@ func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, even
 # Whether pressing the action could start an ability: the action_ready input, asked of the AbilityManager again only after something
 # that affects it changed (AIInputs.action_ready).
 func _could_press(action: StringName) -> bool:
-	return pawn.ai_context.inputs.action_ready(action)
+	return pawn.ai.inputs.action_ready(action)
 
 
 ## The slots of the worked-out inputs any behaviour's conditions or curves read, listed once (and again after inputs_changed()).

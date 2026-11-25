@@ -168,12 +168,12 @@ func _entry_names_of(state: TickStateComponent) -> Array:
 
 # An AI pawn's command (its applied input, when it changes) and its orders (decisions and steering) this tick.
 func _note_ai(pawn: Pawn, state: TickStateComponent, tick: int, counting: bool) -> void:
-	if pawn.controller_manager == null or pawn.controller_manager.has_player() or pawn.ai_context == null or pawn.is_dead():
+	if pawn.controller_manager == null or pawn.controller_manager.has_player() or pawn.ai == null or pawn.is_dead():
 		return
 	var id := pawn.get_instance_id()
-	var behaviours := pawn.ai_context.behaviour_manager
+	var behaviours := pawn.ai.behaviour_manager
 	var running: Variant = behaviours.get_running_behaviour() if behaviours else null
-	var target := pawn.ai_context.current_target
+	var target := pawn.ai.current_target
 	var navigation := pawn.navigation_manager
 	var goal: Variant = navigation._goal if navigation and navigation._state != NavigationManager.PathState.NONE else null
 	var held := pawn.controller_manager.held_actions

@@ -41,7 +41,7 @@ func _ready() -> void:
 
 func _watch_new_archers() -> void:
 	for pawn: Pawn in get_tree().get_nodes_in_group(Pawn.GROUP):
-		if _watched.has(pawn) or not pawn.scene_file_path.contains("archer") or pawn.ai_context == null:
+		if _watched.has(pawn) or not pawn.scene_file_path.contains("archer") or pawn.ai == null:
 			continue
 		var bolts: AbilityBase = pawn.ability_manager.get_node_or_null(^"RangedAttack")
 		if bolts == null or not bolts.uses_charges():
@@ -49,7 +49,7 @@ func _watch_new_archers() -> void:
 		_watched[pawn] = true
 		# [dry at the last switch, has run dry since it last kept its distance]
 		var seen := [false, false]
-		pawn.ai_context.behaviour_manager.behaviour_changed.connect(func(_old: AIBehaviourBase, new: AIBehaviourBase, _reason: String) -> void:
+		pawn.ai.behaviour_manager.behaviour_changed.connect(func(_old: AIBehaviourBase, new: AIBehaviourBase, _reason: String) -> void:
 			var dry := bolts.charges_left() == 0
 			if pawn.owned_tags.has(Tags.STATUS.HAS_AMMO_RANGED) == dry:
 				_tag_wrong += 1

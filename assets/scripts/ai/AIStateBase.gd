@@ -33,15 +33,15 @@ func get_tag() -> StringName:
 
 
 ## Whether this state fits right now. The base never fits, so a state that forgets to override this is never picked by mistake.
-func prerequisites_met(_context: AIContextComponent) -> bool:
+func prerequisites_met(_context: AIManager) -> bool:
 	return false
 
 
 ## Once, when the pawn enters this state.
-func enter(_context: AIContextComponent) -> void:
+func enter(_context: AIManager) -> void:
 	pass
 
 
 ## Once, when the pawn leaves this state.
-func exit(_context: AIContextComponent) -> void:
+func exit(_context: AIManager) -> void:
 	pass

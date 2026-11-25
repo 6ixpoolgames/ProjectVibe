@@ -73,7 +73,7 @@ func find_ranged_attack() -> AbilityBase:
 	return _ranged
 
 
-func enter(context: AIContextComponent) -> void:
+func enter(context: AIManager) -> void:
 	_hands = context.controller
 	_memory = context.memory
 	_keeping_from = null
@@ -81,7 +81,7 @@ func enter(context: AIContextComponent) -> void:
 	_set_sprint(false)
 
 
-func tick(context: AIContextComponent) -> Status:
+func tick(context: AIManager) -> Status:
 	var index := context.current_target_index()
 	if index < 0:
 		return Status.FAILED # the target is gone
@@ -111,7 +111,7 @@ func tick(context: AIContextComponent) -> Status:
 	return Status.RUNNING
 
 
-func exit(context: AIContextComponent, _reason: String) -> void:
+func exit(context: AIManager, _reason: String) -> void:
 	if context.controller:
 		context.controller.hold(&"sprint", false)
 		context.controller.stop()

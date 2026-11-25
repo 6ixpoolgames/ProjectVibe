@@ -116,7 +116,7 @@ func place(manager: AIBehaviourManager) -> void:
 	if brain < 0:
 		_forget_row(manager)
 		return
-	var context := manager.pawn.ai_context
+	var context := manager.pawn.ai
 	var row: int = _decider.add_pawn(id, brain, manager.pawn.entity_number(), context.effective_seed())
 	if row < 0:
 		_forget_row(manager)
@@ -164,7 +164,7 @@ func place(manager: AIBehaviourManager) -> void:
 func target_changed(manager: AIBehaviourManager) -> void:
 	if manager.cpp_row < 0:
 		return
-	var target := manager.pawn.ai_context.current_target
+	var target := manager.pawn.ai.current_target
 	_decider.set_target(manager.cpp_row, target.get_instance_id() if is_instance_valid(target) else 0)
 
 
@@ -176,7 +176,7 @@ func input_set(manager: AIBehaviourManager, slot: int, value: float) -> void:
 
 ## The facts C++ works the pawn's inputs out from (its last hit, the swing coming at it) changed: copies them over.
 func facts_changed(manager: AIBehaviourManager) -> void:
-	var context := manager.pawn.ai_context
+	var context := manager.pawn.ai
 	_decider.note_hit(manager.cpp_row, context.last_hit_tick,
 		context.last_attacker.get_instance_id() if is_instance_valid(context.last_attacker) else 0)
 	var attacker := context.incoming_attacker
@@ -309,7 +309,7 @@ static func _can_press_mask(manager: AIBehaviourManager, inputs: AIInputs) -> in
 
 # The actions that could start, as a mask by behaviour slot, and any action_ready inputs the conditions read.
 func _write_readiness(manager: AIBehaviourManager, kept: Dictionary) -> void:
-	var inputs := manager.pawn.ai_context.inputs
+	var inputs := manager.pawn.ai.inputs
 	_decider.set_can_press(manager.cpp_row, _can_press_mask(manager, inputs))
 	for slot: int in kept["ready_slots"]:
 		_decider.set_input(manager.cpp_row, slot, inputs.value(slot))
@@ -318,7 +318,7 @@ func _write_readiness(manager: AIBehaviourManager, kept: Dictionary) -> void:
 # Each group's nearest point, where it is now. The node is kept 2 seconds but checked at every call (as GDScript's reading does), and
 # a point can move (one carried by a hero), so its position goes over at every decision.
 func _write_group_points(manager: AIBehaviourManager, kept: Dictionary, tick: int) -> void:
-	var inputs := manager.pawn.ai_context.inputs
+	var inputs := manager.pawn.ai.inputs
 	for group: Array in kept["groups"]:
 		var point := inputs.nearest_in_group(group[0], tick)
 		_decider.set_group_point(manager.cpp_row, group[1], group[2], point != null, point.global_position if point else Vector3.ZERO)
@@ -352,7 +352,7 @@ func _write_modifiers(manager: AIBehaviourManager, kept: Dictionary) -> void:
 # Shadow mode: every input C++ just worked out against GDScript's own, slot by slot (the hit and swing facts, a game's inputs, the
 # group points and the memory-based ones all show up here). Counted with the stale facts.
 func _check_inputs(manager: AIBehaviourManager) -> void:
-	var inputs := manager.pawn.ai_context.inputs
+	var inputs := manager.pawn.ai.inputs
 	var slots := manager.worked_out_inputs()
 	inputs.fill(slots)
 	var used: PackedFloat64Array = _decider.get_last_inputs()
@@ -370,7 +370,7 @@ func _check_inputs(manager: AIBehaviourManager) -> void:
 # was missed somewhere.
 func _check_facts(manager: AIBehaviourManager) -> void:
 	var facts: Dictionary = _decider.get_facts(manager.cpp_row)
-	var context := manager.pawn.ai_context
+	var context := manager.pawn.ai
 	var target_id: int = facts["target_id"]
 	var live_target := context.current_target.get_instance_id() if context.has_target() else 0
 	var written_target := target_id if target_id != 0 and is_instance_valid(instance_from_id(target_id)) else 0
@@ -387,7 +387,7 @@ func _check_facts(manager: AIBehaviourManager) -> void:
 
 # Why this pawn decides in GDScript, or "" if it can decide in C++.
 func _gdscript_reason(manager: AIBehaviourManager) -> String:
-	if manager.pawn == null or manager.pawn.ai_context == null or manager.get_behaviour_list().is_empty():
+	if manager.pawn == null or manager.pawn.ai == null or manager.get_behaviour_list().is_empty():
 		return "no AI"
 	if _decider == null:
 		if not _warned_no_library:
@@ -398,7 +398,7 @@ func _gdscript_reason(manager: AIBehaviourManager) -> String:
 		return "the game mode's setting"
 	if decider == Decider.PAWN_SETTING and manager.decides_in == AIBehaviourManager.DecidesIn.GDSCRIPT:
 		return "its own setting"
-	if manager.pawn.ai_context.memory == null or manager.pawn.ai_context.memory.native_store() == null:
+	if manager.pawn.ai.memory == null or manager.pawn.ai.memory.native_store() == null:
 		return "the GDScript memory store"
 	for behaviour in manager.get_behaviour_list():
 		if behaviour.has_own_code():

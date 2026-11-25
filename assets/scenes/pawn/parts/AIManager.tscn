@@ -1,0 +1,24 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://assets/scripts/ai/AIManager.gd" id="1_manager"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AIController.tscn" id="2_controller"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AISensingManager.tscn" id="3_sensing"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AIMemory.tscn" id="4_memory"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AITargetSelector.tscn" id="5_target"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AIStateManager.tscn" id="6_states"]
+[ext_resource type="PackedScene" path="res://assets/scenes/pawn/parts/AIBehaviourManager.tscn" id="7_behaviours"]
+
+[node name="AIManager" type="Node"]
+script = ExtResource("1_manager")
+
+[node name="AIController" parent="." instance=ExtResource("2_controller")]
+
+[node name="AISensingManager" parent="." instance=ExtResource("3_sensing")]
+
+[node name="AIMemory" parent="." instance=ExtResource("4_memory")]
+
+[node name="AITargetSelector" parent="." instance=ExtResource("5_target")]
+
+[node name="AIStateManager" parent="." instance=ExtResource("6_states")]
+
+[node name="AIBehaviourManager" parent="." instance=ExtResource("7_behaviours")]

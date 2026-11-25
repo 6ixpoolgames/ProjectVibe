@@ -64,14 +64,14 @@ func watch(pawn: Pawn) -> void:
 		_connected = true
 		TickDriver.after_tick.connect(_record)
 	var who := String(pawn.name)
-	if pawn.ai_context and pawn.ai_context.state_manager:
-		pawn.ai_context.state_manager.state_changed.connect(func(old: AIStateBase, new: AIStateBase, reason: String) -> void:
+	if pawn.ai and pawn.ai.state_manager:
+		pawn.ai.state_manager.state_changed.connect(func(old: AIStateBase, new: AIStateBase, reason: String) -> void:
 			_event("%s: state %s → %s (%s)" % [who, _name_of(old), _name_of(new), reason]))
-	if pawn.ai_context and pawn.ai_context.behaviour_manager:
-		pawn.ai_context.behaviour_manager.behaviour_changed.connect(func(old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
+	if pawn.ai and pawn.ai.behaviour_manager:
+		pawn.ai.behaviour_manager.behaviour_changed.connect(func(old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
 			_event("%s: behaviour %s → %s (%s)" % [who, _name_of(old), _name_of(new), reason]))
-	if pawn.ai_context and pawn.ai_context.target_selector:
-		pawn.ai_context.target_selector.target_changed.connect(func(old: Node3D, new: Node3D, reason: String) -> void:
+	if pawn.ai and pawn.ai.target_selector:
+		pawn.ai.target_selector.target_changed.connect(func(old: Node3D, new: Node3D, reason: String) -> void:
 			_event("%s: target %s → %s (%s)" % [who, _name_of(old), _name_of(new), reason]))
 	if pawn.ability_manager:
 		pawn.ability_manager.ability_started.connect(func(ability: AbilityBase) -> void:

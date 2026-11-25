@@ -64,7 +64,7 @@ func _ready() -> void:
 	var labelled := false # Claude 2026-11-09: a swing sphere was labelled with the player's name
 	for i in 900:
 		await get_tree().physics_frame
-		noticed = noticed or goblins.any(func(g: Pawn) -> bool: return is_instance_valid(g) and g.ai_context.current_state_name() == &"Combat")
+		noticed = noticed or goblins.any(func(g: Pawn) -> bool: return is_instance_valid(g) and g.ai.current_state_name() == &"Combat")
 		hurt = player.status_manager.get_health() < 100.0 or player.is_dead()
 		for last: AbilityBase in arena._last_ability.values():
 			if is_instance_valid(last):

@@ -28,13 +28,13 @@ class TestBehaviour extends AIBehaviourBase:
 	var available := true
 	var finish_with := Status.RUNNING
 
-	func is_available(_context: AIContextComponent) -> bool:
+	func is_available(_context: AIManager) -> bool:
 		return available
 
-	func score(_context: AIContextComponent) -> float:
+	func score(_context: AIManager) -> float:
 		return value
 
-	func tick(_context: AIContextComponent) -> Status:
+	func tick(_context: AIManager) -> Status:
 		return finish_with
 
 
@@ -42,7 +42,7 @@ class TestBehaviour extends AIBehaviourBase:
 class SwitchState extends AIStateBase:
 	var fits := false
 
-	func prerequisites_met(_context: AIContextComponent) -> bool:
+	func prerequisites_met(_context: AIManager) -> bool:
 		return fits
 
 
@@ -101,7 +101,7 @@ func _ready() -> void:
 
 func _test_random_numbers() -> void:
 	var pawn := _make_pawn([_b("Alpha", 0.5)])
-	var context := pawn.ai_context
+	var context := pawn.ai
 	var decider: Object = ClassDB.instantiate(&"AIBatchDecider")
 	var all_same := true
 	for seed: int in [0, 12345, -7]:
@@ -237,12 +237,12 @@ func _play_made_up(_shadow: bool) -> Array[String]:
 	golf.min_score = 0.6
 	var one := _make_pawn([alpha, bravo, charlie, delta, echo, foxtrot, golf], [alarm])
 	one.name = "One"
-	one.ai_context.behaviour_manager.default_score_jitter = 0.2
-	one.ai_context.random_seed = 4242
+	one.ai.behaviour_manager.default_score_jitter = 0.2
+	one.ai.random_seed = 4242
 	# Pawn two: equal scores and random ties.
 	var two := _make_pawn([_b("Kilo", 0.5), _b("Lima", 0.5), _b("November", 0.5)])
 	two.name = "Two"
-	two.ai_context.behaviour_manager.randomize_ties = true
+	two.ai.behaviour_manager.randomize_ties = true
 	# Pawn three: the interrupt rules. Hotel needs 8 ticks before an ordinary decision replaces it, and a reason of 5 or more;
 	# Juliet, when it gets in, can't be interrupted at all, and ends after a while.
 	var hotel := _b("Hotel", 0.6)
@@ -254,7 +254,7 @@ func _play_made_up(_shadow: bool) -> Array[String]:
 	var three := _make_pawn([hotel, india, juliet])
 	three.name = "Three"
 	for pawn: Pawn in [one, two, three]:
-		pawn.ai_context.behaviour_manager.behaviour_changed.connect(note.bind(String(pawn.name)))
+		pawn.ai.behaviour_manager.behaviour_changed.connect(note.bind(String(pawn.name)))
 	for t in 400:
 		var tick := 5000 + t
 		alpha.available = t % 11 != 0
@@ -263,13 +263,13 @@ func _play_made_up(_shadow: bool) -> Array[String]:
 		alarm.fits = t % 50 >= 30
 		var priority := 10 if t % 13 == 0 else 0
 		_decide(one, tick, priority, priority == 0)
-		one.ai_context.behaviour_manager.tick_running(tick) # Delta ends at once when it runs
+		one.ai.behaviour_manager.tick_running(tick) # Delta ends at once when it runs
 		_decide(two, tick)
 		hotel.available = t % 9 < 6
 		juliet.available = t % 40 < 3
 		juliet.finish_with = AIBehaviourBase.Status.SUCCEEDED if t % 40 == 20 else AIBehaviourBase.Status.RUNNING
 		_decide(three, tick, [0, 3, 5, 9][t % 4], t % 3 != 0)
-		three.ai_context.behaviour_manager.tick_running(tick)
+		three.ai.behaviour_manager.tick_running(tick)
 	for pawn: Pawn in [one, two, three]:
 		pawn.free()
 	return choices
@@ -289,7 +289,7 @@ func _test_gates_and_modifiers() -> void:
 	var rest := _plain("Rest", 0.1)
 	var pawn := _make_pawn([melee, ranged, hold, rest])
 	pawn.name = "Four"
-	var manager := pawn.ai_context.behaviour_manager
+	var manager := pawn.ai.behaviour_manager
 	var charge := AIScoreModifier.new()
 	charge.applies_to = TagQuery.make([], [Tags.AI.STANCE_MELEE])
 	charge.amount = 0.1
@@ -412,7 +412,7 @@ func _make_pawn(behaviours: Array, states: Array = [], at := Vector3(0, 1000, 0)
 	manager.name = "AIBehaviourManager"
 	for behaviour in behaviours:
 		manager.add_child(behaviour)
-	pawn.add_child(manager)
+	AITestPawns.ai_of(pawn).add_child(manager)
 	if not states.is_empty():
 		var state_manager := AIStateManager.new()
 		state_manager.name = "AIStateManager"
@@ -421,14 +421,14 @@ func _make_pawn(behaviours: Array, states: Array = [], at := Vector3(0, 1000, 0)
 		var idle := AIIdleState.new()
 		idle.name = "Idle"
 		state_manager.add_child(idle)
-		pawn.add_child(state_manager)
+		AITestPawns.ai_of(pawn).add_child(state_manager)
 	add_child(pawn)
-	pawn.ai_context.decision_interval_ticks = NEVER
+	pawn.ai.decision_interval_ticks = NEVER
 	return pawn
 
 
 func _decide(pawn: Pawn, tick: int, priority := 0, normal := true) -> void:
-	var context := pawn.ai_context
+	var context := pawn.ai
 	context.current_tick = tick
 	context.request_decision(priority, normal)
 	context.state_manager.update_state(tick)

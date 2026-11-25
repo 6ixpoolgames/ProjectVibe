@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Picks the AI's current target from its memory, by priority: the standard threat or aggro table, kept small.
 ##
-## A part on the pawn. At each decision, before the state is checked, every memory entry at awareness [member min_awareness] or more
+## A component of the pawn's AIManager. At each decision, before the state is checked, every memory entry at awareness [member min_awareness] or more
 ## is a candidate, and the highest priority wins (ties go to the nearer, then the lower id); the winner becomes the context's
 ## current_target. The current target gets a fading bonus so the pawn doesn't flick between two close targets.
 ## [codeblock]
@@ -14,7 +14,7 @@
 ## runs in GDScript instead of the memory store ([code]AIMemoryStore[/code] in C++, whose [code]best_target[/code] must match this
 ## formula). Listen to [signal target_changed]:
 ## [codeblock]
-## pawn.ai_context.target_selector.force_target(player_pawn, 180, 40, "taunt")
+## pawn.ai.target_selector.force_target(player_pawn, 180, 40, "taunt")
 ## [/codeblock]
 ## Design: pawn spec 10.5 and 10.11, scaling spec step 3.
 # REFACTOR: forcing and queueing are the same code as AIStateManager's force_state (reusable). See CHANGELOG.md.
@@ -59,9 +59,10 @@ func _init() -> void:
 
 
 func _enter_tree() -> void:
-	pawn = get_parent() as Pawn
+	var ai := get_parent() as AIManager
+	pawn = ai.pawn if ai else null
 	if pawn == null:
-		push_warning("AITargetSelector: its parent isn't a Pawn, so it never picks a target.")
+		push_warning("AITargetSelector: its parent isn't a pawn's AIManager, so it never picks a target.")
 
 
 func _ready() -> void:
@@ -84,7 +85,7 @@ func is_target_forced() -> bool:
 	return _forced != null
 
 
-## [method AIContextComponent.think] calls this at each decision, before the state is checked.
+## [method AIManager.think] calls this at each decision, before the state is checked.
 func update_target(tick: int) -> void:
 	if pawn == null:
 		return
@@ -96,7 +97,7 @@ func update_target(tick: int) -> void:
 		else:
 			_set_target(_forced, "forced", tick)
 			return
-	var memory := pawn.ai_context.memory
+	var memory := pawn.ai.memory
 	var best: Node3D = null
 	var best_priority := -INF
 	var best_distance := INF
@@ -161,7 +162,7 @@ func release_forced_target() -> void:
 		_end_force()
 
 
-## [method AIContextComponent.think] calls this at the start of the AI step: applies the forces and releases queued during the
+## [method AIManager.think] calls this at the start of the AI step: applies the forces and releases queued during the
 ## last tick, in the order they were asked for.
 func apply_queued(_tick: int) -> void:
 	if _queued.is_empty():
@@ -186,12 +187,12 @@ func _apply_force(entity: Node3D, hold_ticks: int, priority: int, reason: String
 	_force_priority = priority
 	_force_until_tick = -1 if hold_ticks < 0 else _now() + TickDriver.ticks_at_rate(hold_ticks) # hold_ticks are at 60 a second
 	_set_target(entity, reason, _now())
-	if pawn.ai_context:
-		pawn.ai_context.request_decision(priority, false)
+	if pawn.ai:
+		pawn.ai.request_decision(priority, false)
 	return true
 
 
-## [method AIContextComponent.think] calls this every tick, so a forced target that runs out hands back on time.
+## [method AIManager.think] calls this every tick, so a forced target that runs out hands back on time.
 func check_force_expiry(tick: int) -> void:
 	if _forced and _force_until_tick >= 0 and tick >= _force_until_tick:
 		_end_force()
@@ -208,8 +209,8 @@ func _set_target(entity: Node3D, reason: String, tick: int) -> void:
 	var old: Node3D = _current if is_instance_valid(_current) else null
 	_current = entity
 	_picked_tick = tick
-	if pawn.ai_context:
-		pawn.ai_context.current_target = entity
+	if pawn.ai:
+		pawn.ai.current_target = entity
 	target_changed.emit(old, entity, reason)
 
 
@@ -217,8 +218,8 @@ func _end_force() -> void:
 	_forced = null
 	_force_priority = 0
 	_force_until_tick = -1
-	if pawn and pawn.ai_context:
-		pawn.ai_context.request_decision()
+	if pawn and pawn.ai:
+		pawn.ai.request_decision()
 
 
 # True while a tick runs, when a request must wait for the pawn's next AI step.

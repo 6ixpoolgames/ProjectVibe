@@ -38,7 +38,7 @@ The game's rules, in small optional pieces: who spawns where, who controls which
 
 **Choose a game's modules.** Set the project setting `project_base/game_mode/modules` to the list of module scripts (and `.release` for release builds). An empty list runs none, and the game still runs.
 
-**Change what every pawn starts with.** Edit `resources/pawn_defaults.tres`: its parts list, the default AI brain, and how far a player's pawn loads the world. To override one part on one pawn, put a part with the same name in its scene; to skip some, list them in `Pawn.skip_default_parts`.
+**Change what every pawn starts with.** Edit `resources/pawn_defaults.tres`: its parts list, the default AI brain, and how far a player's pawn loads the world. To override one part on one pawn, put a part with the same name in its scene; to skip some, list them in `Pawn.skip_default_parts`. A part's components are filled in the same way: a pawn with its own `AIManager` holding only an `AIBehaviourManager` gets the default sensing, memory and the rest, and `skip_default_parts` can name a component (`AIMemory`).
 
 **Spawn a pawn, or a player.** On the server or offline:
 ```gdscript
@@ -63,7 +63,7 @@ Place `SpawnPoint` nodes in the level; a point says which teams and group it ser
 | `player_respawn_ticks` | `SpawnManager` | 180 (3 s) | How long a player's pawn stays dead, in ticks at 60 a second |
 | `max_spawns_per_tick` | `SpawnManager` | 8 | The most pawns spawners may spawn in one tick; the rest wait for the next ticks. 0: no limit |
 | `clearance_radius` | `SpawnManager` | 0.6 m | How far another pawn must be for a spot to count as free |
-| `ai_brain` | `pawn_defaults.tres` | none | The behaviours a pawn without its own gets |
+| `ai_brain` | `pawn_defaults.tres` | none | The behaviours a pawn without its own gets: an AIBehaviourManager scene, in place of the AIManager's empty one |
 
 ## How it works
 

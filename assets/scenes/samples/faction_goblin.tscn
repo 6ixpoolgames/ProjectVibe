@@ -15,16 +15,16 @@
 
 [node name="AbilityManager" parent="." instance=ExtResource("2_abilities")]
 
-[node name="HeavyAttack" type="Node" parent="AIBehaviourManager"]
+[node name="HeavyAttack" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("3_attack")
 presses_action = &"secondary"
 max_score = 0.95
 min_score = 0.95
 
-[node name="Parry" type="Node" parent="AIBehaviourManager"]
+[node name="Parry" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("8_parry")
 
-[node name="GoToPoint" type="Node" parent="AIBehaviourManager"]
+[node name="GoToPoint" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("9_go_to_point")
 
 [node name="Body" parent="Visual/Model" index="0"]
@@ -42,12 +42,12 @@ stand_color = Color(0.82, 0.2, 0.17, 1)
 script = ExtResource("6_sword")
 sword_scene = ExtResource("7_sword_model")
 
-[node name="Shoot" type="Node" parent="AIBehaviourManager"]
+[node name="Shoot" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("3_attack")
 presses_action = &"ability_3"
 max_score = 0.97
 min_score = 0.97
 min_distance = 4.0
 
-[node name="KeepDistance" type="Node" parent="AIBehaviourManager"]
+[node name="KeepDistance" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("10_keep_distance")

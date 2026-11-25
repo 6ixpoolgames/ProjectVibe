@@ -18,7 +18,7 @@ const Comparison := AICompareCondition.Comparison
 
 ## A behaviour with code of its own, which the C++ decider can't read.
 class OwnCodeBehaviour extends AIBehaviourBase:
-	func is_available(_context: AIContextComponent) -> bool:
+	func is_available(_context: AIManager) -> bool:
 		return true
 
 
@@ -77,7 +77,7 @@ func _test_compare() -> void:
 
 
 func _test_chance() -> void:
-	var context := AIContextComponent.new()
+	var context := AIManager.new()
 	context.random_seed = 99
 	var inputs := context.inputs
 	var always := AIChanceCondition.make(1.0, 1)
@@ -134,7 +134,7 @@ func _test_any_and_curves() -> void:
 	inputs.set_input(&"test_c", -3.0)
 	_check_equal(rising.amount(inputs), 0.0, "0 below the bottom")
 	# A behaviour's score with a curve: between min_score (or 0) and max_score.
-	var context := AIContextComponent.new()
+	var context := AIManager.new()
 	context.inputs.set_input(&"test_c", 5.0)
 	var behaviour := AIBehaviourBase.new()
 	behaviour.max_score = 0.8
@@ -193,7 +193,7 @@ func _test_cpp_agrees() -> void:
 	# Where pawns decide.
 	var pawn := _make_pawn(_made_up_behaviours())
 	_decide(pawn, 1)
-	var manager := pawn.ai_context.behaviour_manager
+	var manager := pawn.ai.behaviour_manager
 	_check(manager.cpp_row >= 0, "a pawn decides in C++ by default")
 	manager.decides_in = AIBehaviourManager.DecidesIn.GDSCRIPT
 	_check(manager.cpp_row == -1, "its own setting moves it to GDScript at once")
@@ -207,7 +207,7 @@ func _test_cpp_agrees() -> void:
 	own.name = "OwnCode"
 	var special := _make_pawn([own])
 	_decide(special, 1)
-	_check(special.ai_context.behaviour_manager.cpp_row == -1, "a special mind (a behaviour with code of its own) decides in GDScript")
+	_check(special.ai.behaviour_manager.cpp_row == -1, "a special mind (a behaviour with code of its own) decides in GDScript")
 	special.free()
 	if added:
 		GameMode.remove_module(module)
@@ -232,7 +232,7 @@ func _test_moving_group_point() -> void:
 	var stay := _behaviour("Stay", 0.3, 0.3)
 	var pawn := _make_pawn([away, stay])
 	var changes := [0] # GDScript note: a lambda captures plain locals by value, so the count lives in an array it can change
-	pawn.ai_context.behaviour_manager.behaviour_changed.connect(func(_o: AIBehaviourBase, _n: AIBehaviourBase, _r: String) -> void: changes[0] += 1)
+	pawn.ai.behaviour_manager.behaviour_changed.connect(func(_o: AIBehaviourBase, _n: AIBehaviourBase, _r: String) -> void: changes[0] += 1)
 	for t in 60:
 		if point:
 			point.global_position = pawn.global_position + Vector3(2.0 if t % 2 == 0 else 20.0, 0.0, 0.0)
@@ -258,9 +258,9 @@ func _play_conditions(_module: AIDecisionModule) -> Dictionary:
 	for n in 3:
 		var pawn := _make_pawn(_made_up_behaviours())
 		pawn.name = "Conditions%d" % n
-		pawn.ai_context.random_seed = 1000 + n
-		pawn.ai_context.behaviour_manager.default_score_jitter = 0.05 * n
-		pawn.ai_context.behaviour_manager.behaviour_changed.connect(func(_old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
+		pawn.ai.random_seed = 1000 + n
+		pawn.ai.behaviour_manager.default_score_jitter = 0.05 * n
+		pawn.ai.behaviour_manager.behaviour_changed.connect(func(_old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
 			changes.append("%d:%s:%s" % [n, String(new.name) if new else "", reason])
 			if new:
 				chosen[String(new.name)] = true)
@@ -269,19 +269,19 @@ func _play_conditions(_module: AIDecisionModule) -> Dictionary:
 	var mask := FadeProfile.new()
 	mask.mode = FadeProfile.Mode.HALF_LIFE
 	mask.half_life_ticks = 7
-	pawns[2].ai_context.behaviour_manager.set_persistence_mask(&"Ant", mask)
+	pawns[2].ai.behaviour_manager.set_persistence_mask(&"Ant", mask)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 31337
 	for t in TICKS:
 		var tick := 9000 + t
 		for pawn in pawns:
-			var inputs := pawn.ai_context.inputs
+			var inputs := pawn.ai.inputs
 			inputs.set_input(&"test_x", rng.randf())
 			inputs.set_input(&"test_y", rng.randf())
 			inputs.set_input(&"test_key", float(t / 10))
 			inputs.set_input(&"ticks_test_since", float(rng.randi_range(0, 60)))
 			_decide(pawn, tick)
-			var manager := pawn.ai_context.behaviour_manager
+			var manager := pawn.ai.behaviour_manager
 			# Events C++'s copy of the state must follow: persistence changes, jitter, a behaviour finishing on its own.
 			if t % 37 == 5:
 				manager.add_persistence_ticks(&"Ant", 9.0)
@@ -346,14 +346,14 @@ func _make_pawn(behaviours: Array) -> Pawn:
 	manager.name = "AIBehaviourManager"
 	for behaviour in behaviours:
 		manager.add_child(behaviour)
-	pawn.add_child(manager)
+	AITestPawns.ai_of(pawn).add_child(manager)
 	add_child(pawn)
-	pawn.ai_context.decision_interval_ticks = NEVER
+	pawn.ai.decision_interval_ticks = NEVER
 	return pawn
 
 
 func _decide(pawn: Pawn, tick: int) -> void:
-	var context := pawn.ai_context
+	var context := pawn.ai
 	context.current_tick = tick
 	context.request_decision()
 	context.state_manager.update_state(tick)

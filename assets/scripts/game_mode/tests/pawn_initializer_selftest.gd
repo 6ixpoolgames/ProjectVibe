@@ -10,7 +10,10 @@ const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const STATS_PART := "res://assets/scenes/pawn/parts/StatusManager.tscn"
 # Claude 2026-11-09: the AI parts joined the defaults (pawn spec steps 8a and 8b).
 # Claude 2026-11-10: StatusManager is a default part now (pawn spec 8.11).
-const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatusManager", &"OwnedTags", &"AbilityManager", &"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3); Claude 2026-11-22: owned tags (tag spec step 2)
+const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatusManager", &"OwnedTags", &"AbilityManager", &"AIManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3); Claude 2026-11-22: owned tags (tag spec step 2); Claude 2026-11-25: one AIManager holds the AI's components (pawn spec 16.10 step 5b)
+## Claude 2026-11-25: the AIManager's components, in order.
+const AI_COMPONENTS: Array[StringName] = [&"AIController", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
+const BRAIN_SCENE := "res://assets/scenes/samples/arena_brain.tscn"
 
 
 func _ready() -> void:
@@ -18,6 +21,7 @@ func _ready() -> void:
 	_test_the_module_and_its_file()
 	_test_default_parts()
 	_test_a_designer_override()
+	_test_ai_components()
 	_test_ways_out()
 	_test_entering_again()
 	_test_odd_defaults()
@@ -47,7 +51,7 @@ func _test_default_parts() -> void:
 	_check(none_in_scene, "pawn.tscn itself holds none of the default parts")
 	add_child(pawn)
 	_check(pawn.get_node_or_null(^"ControllerManager") is ControllerManager, "entering the tree, the pawn gets a ControllerManager")
-	_check(pawn.get_node_or_null(^"ControllerManager/AIController") is AIController, "with its AIController")
+	_check(pawn.get_node_or_null(^"AIManager/AIController") is AIController and pawn.controller_manager.ai_controller == pawn.ai.controller, "the AIController is in the AIManager, and the ControllerManager puts it in charge")
 	_check(pawn.get_node_or_null(^"NavigationManager") is NavigationManager and pawn.navigation_manager == pawn.get_node(^"NavigationManager"), "a NavigationManager, which the pawn knows") # Claude 2026-11-08
 	_check(pawn.get_node_or_null(^"StatusManager") is StatusManager and pawn.status_manager.has_stat(&"MoveSpeed"), "a StatusManager with movement stats")
 	var abilities := pawn.get_node_or_null(^"AbilityManager") as AbilityManager
@@ -79,6 +83,40 @@ func _test_a_designer_override() -> void:
 	_check(pawn.status_manager.get_value(&"MoveSpeed") == 2.0 and not pawn.status_manager.has_stat(&"SprintSpeed"), "so the pawn has only its own stats")
 	_check(pawn.has_node(^"ControllerManager") and pawn.has_node(^"AbilityManager"), "the other defaults still are")
 	pawn.free()
+
+
+## Claude 2026-11-25 (pawn spec 16.10 step 5b): the AIManager's components are filled in like parts: a pawn's own AIManager keeps what it
+## has and gets the rest; skip_default_parts leaves one out by name; the game's brain goes in place of the behaviour manager.
+func _test_ai_components() -> void:
+	var pawn: Pawn = load(PAWN_SCENE).instantiate()
+	add_child(pawn)
+	var names: Array[StringName] = []
+	for child in pawn.ai.get_children():
+		names.append(child.name)
+	_check(names == AI_COMPONENTS and pawn.get_node(^"AIManager") == pawn.ai, "the default AIManager holds the AI's components, in order (%s)" % str(names))
+	_check(pawn.ai.memory.pawn == pawn and pawn.ai.controller.pawn == pawn and pawn.ai.behaviour_manager.pawn == pawn, "and each knows the pawn")
+	pawn.free()
+	var own: Pawn = load(PAWN_SCENE).instantiate()
+	var behaviours := AIBehaviourManager.new()
+	behaviours.name = "AIBehaviourManager"
+	AITestPawns.ai_of(own).add_child(behaviours)
+	own.skip_default_parts = [&"AITargetSelector"]
+	add_child(own)
+	_check(own.ai.behaviour_manager == behaviours and own.ai.get_children().filter(func(c): return c is AIBehaviourManager).size() == 1, "an AIManager of the pawn's own keeps its behaviour manager")
+	_check(own.ai.controller != null and own.ai.memory != null and own.ai.sensing_manager != null and own.ai.state_manager != null, "and gets the other components")
+	_check(own.ai.target_selector == null, "except one skip_default_parts names")
+	own.free()
+	var initializer: PawnInitializer = GameMode.pawn_initializer
+	var defaults_before := initializer.defaults
+	initializer.defaults = defaults_before.duplicate()
+	initializer.defaults.ai_brain = load(BRAIN_SCENE)
+	var with_brain: Pawn = load(PAWN_SCENE).instantiate()
+	with_brain.skip_default_parts = [&"AIMemory"]
+	add_child(with_brain)
+	initializer.defaults = defaults_before
+	_check(with_brain.ai.behaviour_manager.has_node(^"Chase") and with_brain.ai.behaviour_manager.get_index() == AI_COMPONENTS.size() - 2, "the game's brain goes in place of the default behaviour manager, where it was")
+	_check(with_brain.ai.memory == null and with_brain.ai.controller != null, "and a skipped component is left out of a default AIManager")
+	with_brain.free()
 
 
 func _test_ways_out() -> void:

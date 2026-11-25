@@ -44,7 +44,7 @@ func _test_walkthrough() -> void:
 	_check(ticks >= 0, "a glimpse at 22 m: Alert after %d ticks" % ticks)
 	_check(_running(goblin) == &"LookToward", "it stops and looks (Look Toward)")
 	_check(not _certain(goblin, intruder), "still uncertain")
-	var last_known: Vector3 = goblin.ai_context.memory.last_known_position_at(goblin.ai_context.memory.find(intruder))
+	var last_known: Vector3 = goblin.ai.memory.last_known_position_at(goblin.ai.memory.find(intruder))
 	intruder.global_position = FAR_AWAY # it ducks out of sight
 	ticks = await _until(func() -> bool: return _running(goblin) == &"Investigate", 120)
 	_check(ticks >= 0, "after looking, it goes to investigate (%d ticks later)" % ticks)
@@ -58,14 +58,14 @@ func _test_walkthrough() -> void:
 		_put_in_front(intruder, goblin, 5.0)
 		return _state(goblin) == &"Combat", 60)
 	_check(ticks >= 0 and ticks < 30, "close in front: certain and in Combat within half a second (%d ticks)" % ticks)
-	_check(goblin.ai_context.current_target == intruder, "the intruder is its target")
+	_check(goblin.ai.current_target == intruder, "the intruder is its target")
 	await _ticks(5)
 	_check(_running(goblin) == &"Chase" and goblin.controller_manager.is_action_held(&"sprint"), "Chase runs, holding sprint")
 	ticks = await _until(func() -> bool: return _flat_distance(goblin.global_position, intruder.global_position) < 2.5, 120)
 	_check(ticks >= 0, "it closes in on the intruder, and stops near it (%d ticks)" % ticks)
 
 	# 3. The intruder vanishes: two seconds later the goblin is Alert again, searching where it was.
-	goblin.ai_context.memory.certain_fade = _straight_line(400) # shorter than the default 1200, to keep the test quick
+	goblin.ai.memory.certain_fade = _straight_line(400) # shorter than the default 1200, to keep the test quick
 	var vanished_at: Vector3 = intruder.global_position
 	intruder.global_position = FAR_AWAY
 	await _ticks(100)
@@ -74,7 +74,7 @@ func _test_walkthrough() -> void:
 	_check(ticks >= 0, "after 2 s unseen: back to Alert")
 	await _ticks(2)
 	_check(_running(goblin) == &"Search", "searching, because it became certain (Search, not Investigate)")
-	_check(goblin.ai_context.memory.last_known_position_at(goblin.ai_context.memory.find(intruder)).distance_to(vanished_at) < 1.0, "around where it was last seen")
+	_check(goblin.ai.memory.last_known_position_at(goblin.ai.memory.find(intruder)).distance_to(vanished_at) < 1.0, "around where it was last seen")
 
 	# 4. It forgets: the certain entry fades below Alert's 0.3, and it wanders again.
 	ticks = await _until(func() -> bool: return _state(goblin) == &"Idle", 600)
@@ -92,7 +92,7 @@ func _test_look_before_investigating() -> void:
 	var goblin := _make_goblin(Vector3(-60, 0, 0))
 	var intruder := _make_pawn(0, FAR_AWAY)
 	var switches: Array[String] = []
-	goblin.ai_context.behaviour_manager.behaviour_changed.connect(func(old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
+	goblin.ai.behaviour_manager.behaviour_changed.connect(func(old: AIBehaviourBase, new: AIBehaviourBase, reason: String) -> void:
 		switches.append("%s>%s:%s" % [String(old.name) if old else "", String(new.name) if new else "", reason]))
 	await _ticks(30)
 	var ticks := await _until(func() -> bool:
@@ -102,8 +102,8 @@ func _test_look_before_investigating() -> void:
 	intruder.global_position = FAR_AWAY
 	ticks = await _until(func() -> bool: return _running(goblin) == &"Investigate", 120)
 	_check(ticks >= 0, "after looking, Investigate (%d ticks later)" % ticks)
-	var look := goblin.ai_context.behaviour_manager.get_behaviours().filter(func(b: AIBehaviourBase) -> bool: return b.name == &"LookToward")[0] as AIBehaviourBase
-	_check(look.persistence_now(goblin.ai_context.current_tick) < -0.1, "Look Toward is held back by its persistence (%.2f)" % look.persistence_now(goblin.ai_context.current_tick))
+	var look := goblin.ai.behaviour_manager.get_behaviours().filter(func(b: AIBehaviourBase) -> bool: return b.name == &"LookToward")[0] as AIBehaviourBase
+	_check(look.persistence_now(goblin.ai.current_tick) < -0.1, "Look Toward is held back by its persistence (%.2f)" % look.persistence_now(goblin.ai.current_tick))
 	# Long enough for the old 3 s cooldown to have run out and Look Toward to have cut in.
 	switches.clear()
 	await _until(func() -> bool: return _running(goblin) != &"Investigate", 300)
@@ -123,7 +123,7 @@ func _test_never_alerted() -> void:
 		_put_in_front(friend, goblin, 4.0)
 		_put_in_front(ghost, goblin, 3.0)
 		await get_tree().physics_frame
-	_check(_state(goblin) == &"Idle" and goblin.ai_context.memory.entry_count() == 0, "a pawn on its own team, and an invisible one, close in front for 2 s: never noticed")
+	_check(_state(goblin) == &"Idle" and goblin.ai.memory.entry_count() == 0, "a pawn on its own team, and an invisible one, close in front for 2 s: never noticed")
 	goblin.free()
 	friend.free()
 	ghost.free()
@@ -148,7 +148,7 @@ func _make_goblin(at: Vector3) -> Pawn:
 		var behaviour: AIBehaviourBase = pair[1].new()
 		behaviour.name = pair[0]
 		manager.add_child(behaviour)
-	goblin.add_child(manager)
+	AITestPawns.ai_of(goblin).add_child(manager)
 	add_child(goblin)
 	return goblin
 
@@ -163,24 +163,24 @@ func _make_pawn(team: int, at: Vector3) -> Pawn:
 
 ## Puts a pawn this far in front of the goblin's eyes.
 func _put_in_front(pawn: Pawn, goblin: Pawn, distance: float) -> void:
-	var sight: SightSense = goblin.ai_context.sensing_manager.get_node("Sight")
+	var sight: SightSense = goblin.ai.sensing_manager.get_node("Sight")
 	var yaw: float = sight._eye_yaw()
 	pawn.global_position = goblin.global_position + Vector3(-sin(yaw), 0.0, -cos(yaw)) * distance
 	pawn.velocity = Vector3.ZERO
 
 
 func _state(pawn: Pawn) -> StringName:
-	return pawn.ai_context.current_state_name()
+	return pawn.ai.current_state_name()
 
 
 func _running(pawn: Pawn) -> StringName:
-	var behaviour := pawn.ai_context.behaviour_manager.get_running_behaviour()
+	var behaviour := pawn.ai.behaviour_manager.get_running_behaviour()
 	return behaviour.name if behaviour else &""
 
 
 func _certain(goblin: Pawn, other: Pawn) -> bool:
-	var i := goblin.ai_context.memory.find(other)
-	return i >= 0 and goblin.ai_context.memory.is_certain_at(i)
+	var i := goblin.ai.memory.find(other)
+	return i >= 0 and goblin.ai.memory.is_certain_at(i)
 
 
 func _flat_distance(a: Vector3, b: Vector3) -> float:

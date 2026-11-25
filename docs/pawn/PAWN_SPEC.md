@@ -108,27 +108,27 @@ Pawn (CharacterBody3D)                    (built, tier -1; gets reworked)
 ├─ Visual (Node3D)                         follows the body smoothly; models hang from it
 ├─ TickStateComponent, NetworkEntity       (built) rollback state and networking
 ├─ ControllerManager                       picks which controller's input counts
-│  └─ AIController                         turns behaviour calls into input
 ├─ NavigationManager                       paths and "which way to walk now"
 ├─ AbilityManager                          starts, runs and stops abilities
 │  ├─ Walk                                 locomotion
 │  └─ Jump                                 action
 ├─ StatManager                             holds stat nodes
 │  └─ stat nodes (Health, MoveSpeed, ...)
-├─ AISensingManager                        runs its senses; writes what they find to memory
-│  └─ SightSense
-├─ AIMemory                                one entry per sensed entity; awareness that fades
-├─ AITargetSelector                        picks the current target from memory, by priority
-├─ AIStateManager                          picks the current state by priority
-│  └─ state nodes (Idle, Alert, Combat)
-├─ AIBehaviourManager                      picks and runs a behaviour the state allows
-│  └─ behaviour nodes (Wander, Look Toward, Investigate, Search, Chase)
-└─ AIContextComponent                      shared data and settings for the AI; makes no decisions
+└─ AIManager                               shared data and settings for the AI, and its step; makes no decisions
+   ├─ AIController                         turns behaviour calls into input
+   ├─ AISensingManager                     runs its senses; writes what they find to memory
+   │  └─ SightSense
+   ├─ AIMemory                             one entry per sensed entity; awareness that fades
+   ├─ AITargetSelector                     picks the current target from memory, by priority
+   ├─ AIStateManager                       picks the current state by priority
+   │  └─ state nodes (Idle, Alert, Combat)
+   └─ AIBehaviourManager                   picks and runs a behaviour the state allows
+      └─ behaviour nodes (Wander, Look Toward, Investigate, Search, Chase)
 
 PlayerController (outside the pawn)        (built) reads devices; joins a pawn through PossessionCoordinator
 ```
 
-- The parts are kept flat on the pawn, so a designer sees every part in one place.
+- The parts are kept flat on the pawn, except the AI's, which sit under its AIManager *(2026-11-25, step 5b of 16.10)*.
 - The AI parts exist on every peer, but only tick on the server, because AI only runs there.
 - **Today (2026-11-09, after step 8b):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`), `NavigationManager`, `StatManager` (with the movement stats), `AbilityManager` (with Walk, Sprint and Jump), `AIContextComponent`, `AISensingManager` (with Sight), `AIMemory`, `AITargetSelector`, `AIStateManager` (with Idle, Alert and Combat) and an empty `AIBehaviourManager`.
 
@@ -1150,7 +1150,7 @@ The sweep and ray together are about 2.5 microseconds in any of these; the rest 
 | `AITargetSelector` | Picks the current target from memory by priority: awareness, distance, threat, and a bonus for keeping the current one. Taunts force it (10.5) | No |
 | `AIStateManager` + state nodes | Checks each state's prerequisites in priority order and moves the pawn to the first one that fits. t0 states: Idle, Alert, Combat | No |
 | `AIBehaviourManager` + behaviour nodes | Keeps the behaviours the current state allows, scores them, and runs the winner | Not planned (below) |
-| `AIContextComponent` | Shared data and settings for this pawn's AI: references to the other parts, the current state, the shared inputs (10.8), the random seed, and `while_possessed` (10.3). It makes no decisions | No |
+| `AIManager` (was `AIContextComponent`) | Shared data and settings for this pawn's AI, with the other parts as its children: references to them, the current state, the shared inputs (10.8), the random seed, and `while_possessed` (10.3). It makes no decisions | No |
 | `AIController` | The hands (6.3) **(built)** | No |
 
 **GDScript first.** Everything is written in GDScript. Parts marked "C++ later" are laid out so a port is mechanical: plain data in packed arrays, one array per field, rather than an object per fact. They move to C++ if the stress tests say so, behind the same functions, the way `NetCodec` was done with `NetPackets` kept as the fallback.
@@ -1200,7 +1200,7 @@ The sweep and ray together are about 2.5 microseconds in any of these; the rest 
 
 ### 10.3 While a player has the pawn
 
-`AIContextComponent.while_possessed` says what the AI does while a player has the pawn. Which is right depends on the game:
+`AIManager.while_possessed` says what the AI does while a player has the pawn. Which is right depends on the game:
 
 | Setting | What runs | For |
 |---|---|---|
@@ -2130,7 +2130,7 @@ Each step keeps behaviour the same where it isn't meant to change, passes the af
 2. **The step core:** `Step` and `StepTimeline` lifted out of `AbilityBase` (ability tests unchanged); generic `_set` and `_get` settings for abilities. *Built 2026-11-24: the step core (`steps/`), and generic settings (no forwarders; outside reads and writes by name, inside reads typed through `settings`). Left: showing a node's settings as overrides in the inspector.*
 3. **The status manager:** the merge; deadlines; modifiers and effectors; one modifier rule (multiply, then add, for everything: the owner's call on 2026-11-24; a designer-chosen order may be a feature later); `change_current` thresholds and events; effects lists into definitions. *Built 2026-11-24: 3a the merge (`status/StatusManager`), deadlines, thresholds and events through `Pawn.send_event` (Death and AI threat started by events); 3b modifiers and effectors (`effects/modifiers/`, `effects/effectors/`), multiply then add with overrides. Moved to step 4: effect lists into definitions, with `EffectApplier`.*
 4. **Hits and reactions:** the hit ability through the scheduler; blocked versus ignored; parry and invulnerability as tag-granting effects; abilities started by events with payloads; charges on abilities. `HitInterceptor`, `EffectApplier` and the static hit queue go. *Built 2026-11-24: 4a effect lists into definitions (`AbilityDefinition.start_effects`, the hit definition's `target_effects` and `attacker_effects`; the samples' hits in `resources/hits/`); 4b the hit ability (`ReceiveHitAbility` on `event.hit.taken`: ignored, blocked, landed), abilities started by events (`trigger_event`, Death and Knockback included), parry and invulnerability as running effects granting tags (`ParryModifier`; a reply lands a tick later and can be parried), charges refilled on `event.revived` with a version counter. Interceptors and `EffectApplier` are gone.*
-5. **Input and controllers:** `input_blocked_by`; input cleared with no controller; the AI tree (`AIManager` root, thin `AIController`); the player controller's step host; `NavServer` plus the path follower in `MoveStep`; `NavigationManager` goes. *5a built 2026-11-25: `input_blocked_by` (any of `status.dead` by default) replaces the three death paths; input cleared with nobody in charge.*
+5. **Input and controllers:** `input_blocked_by`; input cleared with no controller; the AI tree (`AIManager` root, thin `AIController`); the player controller's step host; `NavServer` plus the path follower in `MoveStep`; `NavigationManager` goes. *5a built 2026-11-25: `input_blocked_by` (any of `status.dead` by default) replaces the three death paths; input cleared with nobody in charge. 5b built 2026-11-25: the AI tree, `AIManager` (`pawn.ai`) holding the `AIController` and the five AI components, which PawnInitializer fills in like parts (a pawn's own AIManager keeps what it has); the ControllerManager reads the AI controller from `pawn.ai.controller` rather than taking a registration; `ai_brain` stays, in place of the AIManager's behaviour manager; the controller's order API stays until step 7.*
 6. **AI decisions:** the decision module parted out (`AIDecider` per behaviour manager, the brain cache, version counters, scripted behaviours mixed with data ones); behaviour definitions; generic behaviour modifiers with on start and on end; persistence and forcing go; states as conditions; the request inbox.
 7. **Behaviour steps:** the step library; today's behaviours rebuilt from steps; the order stream's hooks on the behaviour timeline.
 8. **Memory and senses:** fact tables and sources; selectors (`AIInputs` goes); stimuli; the sight sense out of memory; the damage sense; hearing with footsteps; `AIStimulusSource`; the target as a query (`AITargetSelector` goes).

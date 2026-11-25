@@ -18,7 +18,7 @@ static func make(list: Array[AICondition]) -> AIAnyCondition:
 	return condition
 
 
-func passes(inputs: AIInputs, context: AIContextComponent, behaviour_salt: int) -> bool:
+func passes(inputs: AIInputs, context: AIManager, behaviour_salt: int) -> bool:
 	for condition in conditions:
 		if condition and condition.passes(inputs, context, behaviour_salt):
 			return true

@@ -4,8 +4,8 @@
 ##
 ## A designer-made [Definition] (with variants), given to a pawn's behaviour manager by whatever causes it, keyed by that source:
 ## [codeblock]
-## pawn.ai_context.behaviour_manager.add_score_modifier(charge_shout, self)
-## pawn.ai_context.behaviour_manager.remove_score_modifier(self)
+## pawn.ai.behaviour_manager.add_score_modifier(charge_shout, self)
+## pawn.ai.behaviour_manager.remove_score_modifier(self)
 ## [/codeblock]
 ## Its [member amount] is added wherever persistence is added, so it reads in the same units as max_score. Modifiers from different
 ## sources stack. Only on the server, where the AI runs.

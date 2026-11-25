@@ -194,7 +194,7 @@ func _test_ai_shoots() -> void:
 	var goblin: Pawn = load(GOBLIN_SCENE).instantiate()
 	goblin.team = 2
 	goblin.position = Vector3(360, 0.1, 0)
-	var behaviours := goblin.get_node("AIBehaviourManager")
+	var behaviours := goblin.get_node("AIManager/AIBehaviourManager")
 	for behaviour_name in MELEE_BEHAVIOURS:
 		var behaviour := behaviours.get_node_or_null(NodePath(behaviour_name))
 		if behaviour:
@@ -233,12 +233,12 @@ func _test_ai_shoots() -> void:
 						print("    bolt ended at %s, velocity %s; target at %s" % [last_seen[bolt][0], last_seen[bolt][1], target.global_position])
 				last_seen = now
 		if OS.get_cmdline_user_args().has("--verbose"):
-			var running: AIBehaviourBase = goblin.get_node("AIBehaviourManager").get_running_behaviour()
-			print("    t=%d state=%s target=%s running=%s dist=%.1f" % [second, goblin.ai_context.current_state_name(),
-				goblin.ai_context.current_target, running.name if running else "-", goblin.global_position.distance_to(target.global_position)])
+			var running: AIBehaviourBase = goblin.get_node("AIManager/AIBehaviourManager").get_running_behaviour()
+			print("    t=%d state=%s target=%s running=%s dist=%.1f" % [second, goblin.ai.current_state_name(),
+				goblin.ai.current_target, running.name if running else "-", goblin.global_position.distance_to(target.global_position)])
 			for bolt in _bolts():
 				print("    bolt at %s velocity %s launched %s done %s" % [bolt.global_position, bolt.velocity, bolt._launched, bolt.is_done()])
-			var shoot: AIBehaviourBase = goblin.get_node("AIBehaviourManager/Shoot")
+			var shoot: AIBehaviourBase = goblin.get_node("AIManager/AIBehaviourManager/Shoot")
 			var condition: Variant = shoot.all_conditions()[0] if not shoot.all_conditions().is_empty() else null
 			print("    shoot conditions=%s threshold=%s can_start=%s" % [shoot.all_conditions().size(), condition.get("value") if condition else "-",
 				goblin.ability_manager.can_start(&"ability_3")])
@@ -255,7 +255,7 @@ func _test_keep_distance() -> void:
 	goblin.team = 2
 	goblin.position = Vector3(-360, 0.1, 0)
 	add_child(goblin)
-	var keep: AIKeepDistanceBehaviour = goblin.get_node("AIBehaviourManager/KeepDistance")
+	var keep: AIKeepDistanceBehaviour = goblin.get_node("AIManager/AIBehaviourManager/KeepDistance")
 	var target := _make_pawn(Vector3(-360, 0.1, -10), 1) # close enough to be seen quickly: sight fills slower with distance
 	var health := target.status_manager.get_stat(&"Health")
 	health.base_value = 100000.0 # never dies here
@@ -301,7 +301,7 @@ func _watch(goblin: Pawn, target: Pawn, ticks: int, pinned := false) -> Dictiona
 		await _ticks(1)
 		if pinned and target.global_position.distance_to(goblin.global_position) > 2.0:
 			target.global_position = goblin.global_position + _toward(goblin, target) * 1.5 # knockback pushes it off; keep it close
-		var running: AIBehaviourBase = goblin.get_node("AIBehaviourManager").get_running_behaviour()
+		var running: AIBehaviourBase = goblin.get_node("AIManager/AIBehaviourManager").get_running_behaviour()
 		if running:
 			ran[running.name] = true
 		if verbose and t % 30 == 0:

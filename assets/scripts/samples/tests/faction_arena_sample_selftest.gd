@@ -110,7 +110,7 @@ func _ready() -> void:
 	_check(TickDriver.active and TickDriver.tick > paused_at + 1, "P again plays on")
 	# Claude 2026-11-16 (the owner's call): the player's pawn has this game mode's default AI brain, the soldiers' behaviours, idle while
 	# the player has it; let go of (U), its AI takes over and picks one.
-	var brain: AIBehaviourManager = player.get_node_or_null(^"AIBehaviourManager")
+	var brain: AIBehaviourManager = player.get_node_or_null(^"AIManager/AIBehaviourManager")
 	var behaviour_names: Array = brain.get_behaviours().map(func(b: AIBehaviourBase) -> String: return String(b.name)) if brain else []
 	_check(brain != null and behaviour_names.has("Chase") and behaviour_names.has("HeavyAttack") and behaviour_names.has("GoToPoint"),
 		"the player's pawn has the game mode's AI brain (%s)" % ", ".join(behaviour_names))

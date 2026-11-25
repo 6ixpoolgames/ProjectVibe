@@ -33,14 +33,14 @@ func own_conditions() -> Array[AICondition]:
 	return AIInputs.half_noticed_conditions(hit_memory_ticks)
 
 
-func enter(context: AIContextComponent) -> void:
+func enter(context: AIManager) -> void:
 	context.controller.hold(&"sprint", false)
 	var point: Variant = context.point_of_interest(hit_memory_ticks)
 	if point != null:
 		_go(context, point)
 
 
-func tick(context: AIContextComponent) -> Status:
+func tick(context: AIManager) -> Status:
 	var point: Variant = context.point_of_interest(hit_memory_ticks)
 	if point == null:
 		return Status.FAILED # forgotten
@@ -53,11 +53,11 @@ func tick(context: AIContextComponent) -> Status:
 	return Status.SUCCEEDED if offset.length() <= arrive_distance else Status.FAILED
 
 
-func exit(context: AIContextComponent, _reason: String) -> void:
+func exit(context: AIManager, _reason: String) -> void:
 	if context.controller:
 		context.controller.stop()
 
 
-func _go(context: AIContextComponent, point: Vector3) -> void:
+func _go(context: AIManager, point: Vector3) -> void:
 	_goal = point
 	context.controller.move_to(point)

@@ -158,9 +158,9 @@ func _test_ai_state() -> void:
 	var p: Pawn = load(PAWN_SCENE).instantiate()
 	p.position = Vector3(15, 0.1, 0)
 	add_child(p)
-	p.ai_context.decision_interval_ticks = 1 # decide every tick, so the first state is picked at once
+	p.ai.decision_interval_ticks = 1 # decide every tick, so the first state is picked at once
 	await _ticks(10)
-	var states := p.ai_context.state_manager
+	var states := p.ai.state_manager
 	var current := states.get_current_state()
 	_check(current != null and p.owned_tags.has(current.get_tag()) and p.owned_tags.has(Tags.AI.STATE), "the pawn owns its AI state's tag (%s)" % (current.get_tag() if current else &"none"))
 	_check(TagRegistry.read_declared_tags([Tags.AI.ALL]).has(current.get_tag()) if current else false, "the default states' tags are declared")

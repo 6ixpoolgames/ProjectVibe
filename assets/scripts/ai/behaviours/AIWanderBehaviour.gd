@@ -35,7 +35,7 @@ func _init() -> void:
 	tick_interval_ticks = 60 # the safety net: it wakes when a walk ends (wake_on_path_end) and when a pause ends (wake_at)
 
 
-func enter(_context: AIContextComponent) -> void:
+func enter(_context: AIManager) -> void:
 	if not _has_home and pawn:
 		_home = pawn.global_position
 		_has_home = true
@@ -44,7 +44,7 @@ func enter(_context: AIContextComponent) -> void:
 	wake_on_path_end()
 
 
-func tick(context: AIContextComponent) -> Status:
+func tick(context: AIManager) -> Status:
 	var hands := context.controller
 	if hands == null or pawn == null:
 		return Status.FAILED
@@ -76,7 +76,7 @@ func tick(context: AIContextComponent) -> Status:
 	return Status.RUNNING
 
 
-func exit(context: AIContextComponent, _reason: String) -> void:
+func exit(context: AIManager, _reason: String) -> void:
 	_walking = false
 	_pause_until = -1
 	if context and context.controller:

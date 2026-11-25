@@ -18,13 +18,13 @@ class TestBehaviour extends AIBehaviourBase:
 	var available := true
 	var finish_with := Status.RUNNING
 
-	func is_available(_context: AIContextComponent) -> bool:
+	func is_available(_context: AIManager) -> bool:
 		return available
 
-	func score(_context: AIContextComponent) -> float:
+	func score(_context: AIManager) -> float:
 		return value
 
-	func tick(_context: AIContextComponent) -> Status:
+	func tick(_context: AIManager) -> Status:
 		return finish_with
 
 
@@ -32,7 +32,7 @@ class TestBehaviour extends AIBehaviourBase:
 class SwitchState extends AIStateBase:
 	var fits := false
 
-	func prerequisites_met(_context: AIContextComponent) -> bool:
+	func prerequisites_met(_context: AIManager) -> bool:
 		return fits
 
 
@@ -118,7 +118,7 @@ func _test_behaviour_ended() -> void:
 	quick.finish_with = AIBehaviourBase.Status.SUCCEEDED
 	var pawn := _make_pawn([quick, _b("Fallback", 0.1)])
 	_decide(pawn, 100)
-	pawn.ai_context.behaviour_manager.tick_running(101) # Quick finishes; the manager decides at once
+	pawn.ai.behaviour_manager.tick_running(101) # Quick finishes; the manager decides at once
 	var records := _recorder.get_records()
 	_check_equal(records.size(), 2, "a behaviour ending decides again, and that's recorded")
 	if records.size() < 2:
@@ -160,7 +160,7 @@ func _test_jitter_and_early_stop() -> void:
 	var low_entry := record.entry_for(&"Low")
 	_check_equal(low_entry["available"], -1, "the early stop: Low (ceiling 0.5) is never asked once High scores 0.9")
 	_check(low_entry["score"] == null, "...and never scored")
-	var expected := 0.1 * pawn.ai_context.random_signed(low.name_hash) # the context's tick is still 500
+	var expected := 0.1 * pawn.ai.random_signed(low.name_hash) # the context's tick is still 500
 	_check_near(low_entry["jitter"], expected, 0.0000001, "its jitter can be worked out again from the tick, pawn and name hash")
 	_check_near(low_entry["ceiling"], 0.5, 0.0000001, "...and its ceiling is max_score plus the full jitter")
 	pawn.free()
@@ -175,10 +175,10 @@ func _test_ai_step() -> void:
 	var react := _b("React", 0.8)
 	react.tag_requirements = TagQuery.make([&"ai.state.alarm"])
 	var pawn := _make_pawn([wander, react], [alarm])
-	pawn.ai_context.decision_interval_ticks = 1 # decides on every AI step
-	pawn.ai_context.run_ai(200)
+	pawn.ai.decision_interval_ticks = 1 # decides on every AI step
+	pawn.ai.run_ai(200)
 	alarm.fits = true
-	pawn.ai_context.run_ai(201)
+	pawn.ai.run_ai(201)
 	var records := _recorder.get_records()
 	_check(records.size() >= 2, "the AI step's decisions are recorded (%d)" % records.size())
 	if records.size() < 2:
@@ -228,20 +228,20 @@ func _test_timings() -> void:
 	var quick := _b("Quick", 0.9)
 	quick.finish_with = AIBehaviourBase.Status.SUCCEEDED
 	var pawn := _make_pawn([quick, _b("Slow", 0.5)], [alarm])
-	pawn.ai_context.decision_interval_ticks = 1
+	pawn.ai.decision_interval_ticks = 1
 	# Claude 2026-11-17: without detail, only the coarse scopes; the fine ones (one per state, behaviour and sense) cost too much to
 	# run always.
 	PerfScopes.detailed = false
 	PerfScopes.take_frame() # start afresh; everything below runs before any other code can take a frame
-	pawn.ai_context.run_ai(299)
-	pawn.ai_context.sensing_manager.full_pass(299)
+	pawn.ai.run_ai(299)
+	pawn.ai.sensing_manager.full_pass(299)
 	var coarse := PerfScopes.take_frame()
 	_check(coarse.has(&"ai.decide.behaviour") and not coarse.has(&"ai.state.Idle") and not coarse.has(&"ai.behaviour.Quick")
 			and not coarse.has(&"ai.sense.Sight.full"), "detail off: the coarse scopes only, none per state, behaviour or sense")
 	PerfScopes.detailed = true
 	PerfScopes.take_frame()
-	pawn.ai_context.run_ai(300)
-	pawn.ai_context.sensing_manager.full_pass(300)
+	pawn.ai.run_ai(300)
+	pawn.ai.sensing_manager.full_pass(300)
 	var scopes := PerfScopes.take_frame()
 	PerfScopes.enabled = was_enabled
 	PerfScopes.detailed = was_detailed
@@ -287,7 +287,7 @@ func _make_pawn(behaviours: Array, states: Array = [], at := Vector3(0, 1000, 0)
 	manager.name = "AIBehaviourManager"
 	for behaviour in behaviours:
 		manager.add_child(behaviour)
-	pawn.add_child(manager)
+	AITestPawns.ai_of(pawn).add_child(manager)
 	if not states.is_empty():
 		var state_manager := AIStateManager.new()
 		state_manager.name = "AIStateManager"
@@ -296,15 +296,15 @@ func _make_pawn(behaviours: Array, states: Array = [], at := Vector3(0, 1000, 0)
 		var idle := AIIdleState.new()
 		idle.name = "Idle"
 		state_manager.add_child(idle)
-		pawn.add_child(state_manager)
+		AITestPawns.ai_of(pawn).add_child(state_manager)
 	add_child(pawn)
-	pawn.ai_context.decision_interval_ticks = NEVER
+	pawn.ai.decision_interval_ticks = NEVER
 	return pawn
 
 
 ## Makes one decision now, as the pawn's AI step would: the state is checked, then the behaviour manager decides.
 func _decide(pawn: Pawn, tick: int) -> void:
-	var context := pawn.ai_context
+	var context := pawn.ai
 	context.current_tick = tick
 	context.request_decision()
 	context.state_manager.update_state(tick)

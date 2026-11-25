@@ -458,7 +458,7 @@ func _update_readouts() -> void:
 		if not label.visible:
 			continue
 		label.text = _readout_text(pawn)
-		label.modulate = Color(1.0, 0.45, 0.4) if pawn.ai_context and pawn.ai_context.current_state_name() == &"Combat" else Color(1.0, 0.95, 0.8)
+		label.modulate = Color(1.0, 0.45, 0.4) if pawn.ai and pawn.ai.current_state_name() == &"Combat" else Color(1.0, 0.95, 0.8)
 	# Claude 2026-11-10: players' pawns: their last ability, their effects and their Health.
 	for pawn: Pawn in _player_readouts.keys():
 		var label: Label3D = _player_readouts[pawn]
@@ -477,18 +477,18 @@ func _readout_text(pawn: Pawn) -> String:
 	var lines := PackedStringArray()
 	if pawn.is_dead():
 		lines.append("dead")
-	elif pawn.runs_ai_here() and pawn.ai_context:
-		var running := pawn.ai_context.behaviour_manager.get_running_behaviour() if pawn.ai_context.behaviour_manager else null
-		lines.append("%s · %s" % [pawn.ai_context.current_state_name(), String(running.name) if running else "—"]) # Claude 2026-11-12: String(), so both sides are text
+	elif pawn.runs_ai_here() and pawn.ai:
+		var running := pawn.ai.behaviour_manager.get_running_behaviour() if pawn.ai.behaviour_manager else null
+		lines.append("%s · %s" % [pawn.ai.current_state_name(), String(running.name) if running else "—"]) # Claude 2026-11-12: String(), so both sides are text
 		# Claude 2026-11-12: has_target() first: casting a target that was freed (a body removed) is a script error.
-		var target := pawn.ai_context.current_target as Pawn if pawn.ai_context.has_target() else null
+		var target := pawn.ai.current_target as Pawn if pawn.ai.has_target() else null
 		if not is_instance_valid(target):
 			target = _player_pawn if is_instance_valid(_player_pawn) else null
-		if target and pawn.ai_context.memory:
-			var index := pawn.ai_context.memory.find(target)
+		if target and pawn.ai.memory:
+			var index := pawn.ai.memory.find(target)
 			if index >= 0:
-				var awareness := pawn.ai_context.memory.awareness_at(index, pawn.ai_context.current_tick)
-				lines.append("%s: aware %d%%%s" % [target.name, int(awareness * 100.0), " (certain)" if pawn.ai_context.memory.is_certain_at(index) else ""])
+				var awareness := pawn.ai.memory.awareness_at(index, pawn.ai.current_tick)
+				lines.append("%s: aware %d%%%s" % [target.name, int(awareness * 100.0), " (certain)" if pawn.ai.memory.is_certain_at(index) else ""])
 		# Claude 2026-11-09: the last ability it started, marked while it's still running (Sprint lasts up to 3 s).
 		var last: AbilityBase = _last_ability.get(pawn)
 		if is_instance_valid(last):

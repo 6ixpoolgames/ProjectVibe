@@ -1,16 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## What a pawn's AI has sensed, and how aware of each thing it is: awareness that rises when seen and fades when not.
 ##
-## A part on the pawn, added by PawnInitializer. One entry per sensed entity: its last known position, when it was last seen, its
+## A component of the pawn's AIManager. One entry per sensed entity: its last known position, when it was last seen, its
 ## awareness (0 to 1), whether it's certain, and its threat. The entries live in a store, [code]AIMemoryStore[/code] in the navcore
 ## C++ library or else [AIMemoryStoreGD] (same rules); this node keeps the settings and signals and passes calls on. It asks for a
 ## decision when an entity is first sensed or becomes certain. Indexes stay valid until the next [method forget_old], so use them
 ## within one tick:
 ## [codeblock]
-## var i := pawn.ai_context.memory.find(entity)   # -1 when it isn't remembered
-## pawn.ai_context.memory.awareness_at(i, tick)
-## pawn.ai_context.memory.is_certain_at(i)
-## pawn.ai_context.memory.add_threat(entity, 5.0)
+## var i := pawn.ai.memory.find(entity)   # -1 when it isn't remembered
+## pawn.ai.memory.awareness_at(i, tick)
+## pawn.ai.memory.is_certain_at(i)
+## pawn.ai.memory.add_threat(entity, 5.0)
 ## [/codeblock]
 ## Design: pawn spec 10.5 and 10.11.
 class_name AIMemory
@@ -80,9 +80,10 @@ func _init() -> void:
 
 
 func _enter_tree() -> void:
-	pawn = get_parent() as Pawn
+	var ai := get_parent() as AIManager
+	pawn = ai.pawn if ai else null
 	if pawn == null:
-		push_warning("AIMemory: its parent isn't a Pawn, so nothing will sense anything for it.")
+		push_warning("AIMemory: its parent isn't a pawn's AIManager, so nothing will sense anything for it.")
 
 
 func _ready() -> void:
@@ -210,8 +211,8 @@ func announce_sight_results(results: Array) -> void:
 
 func _announce(added: bool, became_certain: Array) -> void:
 	if added or not became_certain.is_empty():
-		if pawn and pawn.ai_context:
-			pawn.ai_context.request_decision()
+		if pawn and pawn.ai:
+			pawn.ai.request_decision()
 	for entity in became_certain:
 		entity_became_certain.emit(entity)
 

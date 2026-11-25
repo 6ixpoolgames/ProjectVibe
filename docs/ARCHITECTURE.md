@@ -39,7 +39,7 @@ flowchart LR
     EM[StatusManager]
     SM[StatusManager + stats]
     NAV[NavigationManager]
-    AICTX[AIContextComponent + memory, senses, states, behaviours]
+    AICTX[AIManager + AIController, memory, senses, states, behaviours]
     TSC[TickStateComponent]
     NE[NetworkEntity]
     VIS[Visual: smoothing, waddle, sword]

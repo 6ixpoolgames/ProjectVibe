@@ -37,7 +37,7 @@ enum Attacker {
 @export var attacker := Attacker.ANY
 
 
-func prerequisites_met(context: AIContextComponent) -> bool:
+func prerequisites_met(context: AIManager) -> bool:
 	if _hit_fits(context):
 		return true
 	var memory := context.memory
@@ -62,7 +62,7 @@ func _entry_fits(memory: AIMemory, index: int, tick: int) -> bool:
 
 
 # The hit rule.
-func _hit_fits(context: AIContextComponent) -> bool:
+func _hit_fits(context: AIManager) -> bool:
 	if hit_within_ticks < 0 or not context.was_hit_within(hit_within_ticks):
 		return false
 	match attacker:

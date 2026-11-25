@@ -12,10 +12,13 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | What | Where | Why | Size |
 |---|---|---|---|
 | Orders that change nothing still count | `AIController._note` (and `order_listener`, a prototype tap) | Over 90% of `stop` and `stop_looking` orders repeat one already in force; an order stream should drop them before sending. The listener's shape is the order stream's to settle (netcode spec 19.3) | S |
+| The AI's hands give orders instead of handing over input | `AIController` (its order API) | Behaviours call `move_to`, `follow`, `press` and the rest; in pawn spec 16.4 the controller only hands over the input the running behaviour's steps write. Goes with the behaviour steps (16.10 step 7) | M |
 | Move the test hooks out of `InputActions` | `reset()`, `use_list()` in `InputActions.gd` | Test hooks in a shipping class; the owner's rule keeps test code in `tests/` | S |
 | Share the missing-input defaults | `_network_input_missing()` in `ControllerManager.gd` | 3 and 6 copy `NetworkSession`'s defaults by hand, so the two can drift apart | S |
 
 ## 2026-11-25
+
+- **The AIController moved into the AI tree** (pawn spec 16.10 step 5b). It's a child of the pawn's `AIManager` now, not of the ControllerManager (`parts/AIController.tscn`, in `parts/AIManager.tscn`). `ControllerManager.ai_controller` reads it from `pawn.ai.controller`, so it's found whichever part enters the tree first; the controller reads its pawn from the AIManager and asks the pawn's ControllerManager whether it's in charge. Its order API stays until the behaviour steps write the input (step 7), tagged `REFACTOR:`.
 
 - **Input blocked by tags; cleared with nobody in charge** (pawn spec 16.4, 16.10 step 5a). `ControllerManager.input_blocked_by` (a `TagQuery`, any of `status.dead` by default) clears the input while the pawn owns a matching tag, on every machine, whoever is in charge, as Unreal GAS's blocking tags do. It replaces the three death paths: the manager's `died` hook (`release_all`, which did nothing on a dead pawn), `ControllerManager.let_go_of_ai_orders` and the pawn clearing input on its dead ticks. The AIController lets go of its orders once, as its pawn dies. With nobody in charge (no controller here and no player elsewhere) the input is cleared each tick; before, the last input stayed. Test: `controller_manager_selftest`.
 

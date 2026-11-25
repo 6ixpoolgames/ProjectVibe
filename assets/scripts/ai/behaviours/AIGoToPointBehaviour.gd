@@ -43,12 +43,12 @@ func own_conditions() -> Array[AICondition]:
 	return list
 
 
-func enter(_context: AIContextComponent) -> void:
+func enter(_context: AIManager) -> void:
 	_shorten = 0.0
 	wake_on_path_end()
 
 
-func tick(context: AIContextComponent) -> Status:
+func tick(context: AIManager) -> Status:
 	var hands := context.controller
 	var point := context.inputs.nearest_in_group(point_group, context.current_tick) if pawn else null
 	if hands == null or point == null:
@@ -74,7 +74,7 @@ func tick(context: AIContextComponent) -> Status:
 	return Status.RUNNING
 
 
-func exit(context: AIContextComponent, _reason: String) -> void:
+func exit(context: AIManager, _reason: String) -> void:
 	if context and context.controller:
 		context.controller.stop()
 

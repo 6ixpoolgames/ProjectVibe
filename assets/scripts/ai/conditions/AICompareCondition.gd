@@ -47,7 +47,7 @@ static func make(input_name: StringName, how: Comparison, number: float, other_n
 	return condition
 
 
-func passes(inputs: AIInputs, _context: AIContextComponent, _behaviour_salt: int) -> bool:
+func passes(inputs: AIInputs, _context: AIManager, _behaviour_salt: int) -> bool:
 	if not _resolved:
 		_resolve()
 	var left := inputs.value(_slot)

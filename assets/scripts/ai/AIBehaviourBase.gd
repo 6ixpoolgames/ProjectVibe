@@ -119,7 +119,7 @@ func _init() -> void:
 
 ## Its own yes or no, after the manager's checks: every condition passes ([method all_conditions]). The inputs they read were worked
 ## out for this decision by the behaviour manager. Overriding this with code works, but see [method has_own_code].
-func is_available(context: AIContextComponent) -> bool:
+func is_available(context: AIManager) -> bool:
 	var inputs := context.inputs
 	for condition in all_conditions():
 		if not condition.passes(inputs, context, name_hash):
@@ -128,7 +128,7 @@ func is_available(context: AIContextComponent) -> bool:
 
 
 ## How much it wants to run now, between min_score and max_score: max_score, scaled by [member score_curves] if it has any.
-func score(context: AIContextComponent) -> float:
+func score(context: AIManager) -> float:
 	if score_curves.is_empty():
 		return max_score
 	var amount := 1.0
@@ -204,17 +204,17 @@ func clear_wake_ups() -> void:
 
 
 ## Once, when it starts.
-func enter(_context: AIContextComponent) -> void:
+func enter(_context: AIManager) -> void:
 	pass
 
 
 ## Every tick while it runs. The default runs forever.
-func tick(_context: AIContextComponent) -> Status:
+func tick(_context: AIManager) -> Status:
 	return Status.RUNNING
 
 
 ## Once, when it stops. reason says why, such as "decision", "interrupted", "succeeded", "failed" or "removed".
-func exit(_context: AIContextComponent, _reason: String) -> void:
+func exit(_context: AIManager, _reason: String) -> void:
 	pass
 
 

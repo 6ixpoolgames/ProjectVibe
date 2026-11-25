@@ -26,7 +26,7 @@ var _breakdown := false
 var _totals := {} # part -> [microseconds, calls], shared by the timed parts below
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
-const AI_PARTS: Array[StringName] = [&"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
+const AI_PARTS: Array[StringName] = [&"AIManager", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 const CROWDS := [50, 100, 200, 400]
 const WARM_UP_TICKS := 60
 const MEASURED_TICKS := 300
@@ -194,15 +194,15 @@ func _measure(count: int, with_ai: bool) -> float:
 			if _breakdown:
 				_add_timed_parts(pawn)
 			elif not _no_behaviours:
-				pawn.add_child(_behaviours())
+				AITestPawns.ai_of(pawn).add_child(_behaviours())
 		else:
 			pawn.skip_default_parts = AI_PARTS.duplicate()
 		add_child(pawn)
 		if with_ai and _no_sensing:
-			pawn.ai_context.sensing_manager.sense_interval_ticks = 100000000
-			pawn.ai_context.sensing_manager.refresh_interval_ticks = 100000000
+			pawn.ai.sensing_manager.sense_interval_ticks = 100000000
+			pawn.ai.sensing_manager.refresh_interval_ticks = 100000000
 		elif with_ai and _no_refresh:
-			pawn.ai_context.sensing_manager.refresh_interval_ticks = 100000000
+			pawn.ai.sensing_manager.refresh_interval_ticks = 100000000
 		pawns.append(pawn)
 	for i in WARM_UP_TICKS:
 		await get_tree().physics_frame
@@ -244,11 +244,11 @@ func _run_breakdown(count: int) -> void:
 
 ## The AI parts with timing wrapped round them, swapped in before the pawn joins the tree, so PawnInitializer keeps them.
 func _add_timed_parts(pawn: Pawn) -> void:
-	var controllers: ControllerManager = load("res://assets/scenes/pawn/parts/ControllerManager.tscn").instantiate()
-	var hands := controllers.get_node("AIController")
+	var ai := AITestPawns.ai_of(pawn) # Claude 2026-11-25: the AI's components sit under its AIManager (pawn spec 16.10 step 5b)
+	var hands: Node = load("res://assets/scenes/pawn/parts/AIController.tscn").instantiate()
 	hands.set_script(TimedHands)
 	hands.totals = _totals
-	pawn.add_child(controllers)
+	ai.add_child(hands)
 	var navigation: NavigationManager = load("res://assets/scenes/pawn/parts/NavigationManager.tscn").instantiate()
 	navigation.set_script(TimedNavigation)
 	navigation.totals = _totals
@@ -259,15 +259,15 @@ func _add_timed_parts(pawn: Pawn) -> void:
 	var sight := sensing.get_node("Sight")
 	sight.set_script(TimedSight)
 	sight.totals = _totals
-	pawn.add_child(sensing)
+	ai.add_child(sensing)
 	var selector := TimedSelector.new()
 	selector.name = "AITargetSelector"
 	selector.totals = _totals
-	pawn.add_child(selector)
+	ai.add_child(selector)
 	var states: AIStateManager = load("res://assets/scenes/pawn/parts/AIStateManager.tscn").instantiate()
 	states.set_script(TimedStates)
 	states.totals = _totals
-	pawn.add_child(states)
+	ai.add_child(states)
 	var behaviours := TimedBehaviours.new()
 	behaviours.name = "AIBehaviourManager"
 	behaviours.totals = _totals
@@ -275,4 +275,4 @@ func _add_timed_parts(pawn: Pawn) -> void:
 		var behaviour: AIBehaviourBase = pair[1].new()
 		behaviour.name = pair[0]
 		behaviours.add_child(behaviour)
-	pawn.add_child(behaviours)
+	ai.add_child(behaviours)

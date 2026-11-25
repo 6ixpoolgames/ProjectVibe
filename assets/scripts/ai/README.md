@@ -16,7 +16,7 @@ The brain on each computer-run pawn: it notices enemies by sight, remembers them
 
 ## The pieces
 
-Every part is a child of the pawn. The pawn calls `AIContextComponent.run_ai` once per tick, offline or on the server only, and the AI thinks (`think`), running the rest in this order. An order source (`AIContextComponent.order_source`) can supply the pawn's orders instead, as the order replay test does (netcode spec 19.10); the AI gives orders only through the AIController, and should give them only in this step (a death-time exception is a refactor row in the changelog).
+The AI is one component on the pawn, the **`AIManager`** (`pawn.ai`), with the AI's other components as its children: the AIController, sensing, memory, the target selector, and the state and behaviour managers. The pawn calls `AIManager.run_ai` once per tick, offline or on the server only, and the AI thinks (`think`), running the rest in this order. An order source (`AIManager.order_source`) can supply the pawn's orders instead, as the order replay test does (netcode spec 19.10); the AI gives orders only through the AIController, and should give them only in this step (a death-time exception is a refactor row in the changelog).
 
 ```
  SightSense ─► AISensingManager ─► AIMemory ─► AITargetSelector ─► AIStateManager ─► AIBehaviourManager ─► AIController
@@ -25,13 +25,13 @@ Every part is a child of the pawn. The pawn calls `AIContextComponent.run_ai` on
                                                                                                                 like a player
 ```
 
-- **`AIContextComponent`** holds what the parts share: the settings for the whole AI, the current target, the decision waiting this tick, the last hit, and random numbers that replay the same. Other code reaches every AI part through it: `pawn.ai_context.memory`.
+- **`AIManager`** holds the AI's components and what they share: the settings for the whole AI, the current target, the decision waiting this tick, the last hit, and random numbers that replay the same. Other code reaches every AI component through it: `pawn.ai.memory`, `pawn.ai.controller`.
 - **`AISensingManager`** runs its senses on a schedule and finds the other-team pawns near enough. **`SightSense`** (in `senses/`) fills awareness faster for targets close and in front, if there's a line of sight. **`SightGeometryFeeder`** keeps C++'s copy of the level's solid shapes up to date for line of sight.
 - **`AIMemory`** keeps one entry per pawn sensed: awareness from 0 to 1 that rises when seen, becomes certain at 1, and fades by a **`FadeProfile`** when not seen. Its entries live in a store: `AIMemoryStore` in C++ when the navcore library loads, else **`AIMemoryStoreGD`**, the same rules in GDScript.
 - **`AITargetSelector`** picks the target by priority (awareness, nearness, threat), with taunts (`force_target`).
 - **`AIStateManager`** picks the state: the highest-priority **`AIStateBase`** whose prerequisites hold. `states/`: `AIIdleState`, and `AIAwarenessState`, which Alert and Combat both are, with different settings.
 - **`AIBehaviourManager`** scores the **`AIBehaviourBase`** behaviours the state allows and runs the winner. `behaviours/`: Wander, Go To Point (Idle); Look Toward, Investigate, Search (Alert); Chase, Keep Distance, Attack (Combat: any attack, melee or ranged, from the reach its ability reports, `AbilityBase.attack_reach()`; a pawn with a ranged attack hangs back at shooting distance with Keep Distance, and melees a target that comes within 4 m); Parry (any state).
-- Behaviours act only through **`AIController`** (`controllers/`): `move_to`, `press`, `hold`, `look_at_point`, `look_at_node`. It turns those into the pawn's input command, and uses the pawn's `NavigationManager` for paths.
+- Behaviours act only through **`AIController`** (`controllers/`, a child of the AIManager; the pawn's ControllerManager puts it in charge while no player has the pawn): `move_to`, `press`, `hold`, `look_at_point`, `look_at_node`. It turns those into the pawn's input command, and uses the pawn's `NavigationManager` for paths.
 - **When a behaviour may run is data** (scaling spec 6.2): conditions in **`conditions/`** (`AICompareCondition`, `AIChanceCondition`, `AIAnyCondition`, and `AIScoreCurve` for the score) read named numbers from the pawn's **`AIInputs`** (`context.inputs`): target distance, the most aware memory entry, a swing coming, the distance to the nearest node in a group, whether an action could start, and any a game adds. They're worked out once per decision. Each built-in behaviour builds its own conditions from its settings; a designer adds more in the inspector. Because they're data, the C++ decider (`AIBatchDecider`) can make the same decision without calling GDScript.
 - **C++ makes the decisions; GDScript is the backup.** The **`AIDecisionModule`** (a GameMode module, in the project's list) holds the C++ decider and each pawn's decision state there, and makes each pawn's decision with one call; the behaviour manager starts what it chose. A pawn decides in GDScript instead when its `decides_in` says so, when the game mode's `decider` overrides every pawn (a match option; F10 in debug builds switches all to GDScript and back), when it's a special mind (a behaviour with its own `is_available` or `score` code, a fade with its own `value_at`), or without the C++ library. Nothing checks this every tick.
 - **Behaviours sleep between events:** a running behaviour's `tick()` runs when something it waits for happens (a walk ending, an ability on its action ending, a tick it named: `wake_on_path_end`, `wake_on_action_end`, `wake_at`), with `tick_interval_ticks` as the longest it sleeps.
@@ -40,7 +40,7 @@ Every part is a child of the pawn. The pawn calls `AIContextComponent.run_ai` on
 
 ## How to use it
 
-**Give a pawn a brain.** The default parts (`assets/scenes/pawn/parts/`) give every pawn sensing, memory, targets and the three states, but no behaviours, so it stands still. Add an `AIBehaviourManager` with behaviour children to the pawn's scene, or set the game's default brain in `resources/pawn_defaults.tres` (`ai_brain`). `assets/scenes/samples/arena_brain.tscn` and `faction_brain.tscn` are working brains to copy.
+**Give a pawn a brain.** The default AIManager (`assets/scenes/pawn/parts/AIManager.tscn`) gives every pawn sensing, memory, targets and the three states, but no behaviours, so it stands still. Add an `AIManager` node to the pawn's scene with an `AIBehaviourManager` and its behaviour children under it (PawnInitializer fills in the other components), or set the game's default brain in `resources/pawn_defaults.tres` (`ai_brain`, which goes in place of the AIManager's empty behaviour manager). `assets/scenes/samples/arena_brain.tscn` and `faction_brain.tscn` are working brains to copy.
 
 **Tune a behaviour.** Select it under the AIBehaviourManager. `max_score` and `min_score` say how much it wants to run; `tag_requirements` when (a tag query over the pawn's owned tags: the AI's state is one, `ai.state.combat`, and so are conditions such as `status.has_ammo.ranged`); `enabled` switches it off (an inherited scene can't remove it); `cooldown_ticks`, `min_run_ticks` and `interrupt_threshold` how long it holds; `persistence` with a `FadeProfile` keeps it chosen for a while. Every tick setting is at 60 ticks a second.
 
@@ -48,25 +48,25 @@ Every part is a child of the pawn. The pawn calls `AIContextComponent.run_ai` on
 
 **Change priorities while playing.** A score modifier (`AIScoreModifier`, a definition) raises, lowers or blocks the behaviours whose `tags` it applies to, for as long as it's added (or for `duration_ticks`), while its `ongoing_requirements` pass. Whatever causes it adds and removes it, keyed by itself:
 ```gdscript
-pawn.ai_context.behaviour_manager.add_score_modifier(charge_shout, self)    # Chase (ai.stance.melee) +0.1
-pawn.ai_context.behaviour_manager.remove_score_modifier(self)
+pawn.ai.behaviour_manager.add_score_modifier(charge_shout, self)    # Chase (ai.stance.melee) +0.1
+pawn.ai.behaviour_manager.remove_score_modifier(self)
 ```
 A running behaviour whose tag requirements stop passing, or that a modifier blocks, is replaced at the pawn's next AI step: its `min_run_ticks` don't hold it, its `interrupt_threshold` still does.
 
-**Change when a behaviour runs, without code.** In the inspector, add conditions to a behaviour's `conditions` list (compare an input with a number, a random chance, or "any of"), or `score_curves` to scale its score by an input. A game adds its own inputs by writing them when they change: `pawn.ai_context.inputs.set_input(&"morale", 0.4)`, then compare `morale` in a condition.
+**Change when a behaviour runs, without code.** In the inspector, add conditions to a behaviour's `conditions` list (compare an input with a number, a random chance, or "any of"), or `score_curves` to scale its score by an input. A game adds its own inputs by writing them when they change: `pawn.ai.inputs.set_input(&"morale", 0.4)`, then compare `morale` in a condition.
 
 **Make a new awareness state.** Add a node with `AIAwarenessState` under the AIStateManager and fill in its settings (awareness needed, certain or not, seen how recently, hit by whom). No code.
 
 **Taunt or script the AI.**
 ```gdscript
-pawn.ai_context.target_selector.force_target(player_pawn, 180, 40, "taunt")
-pawn.ai_context.state_manager.force_state(&"Combat", 120, 50, "scripted")
+pawn.ai.target_selector.force_target(player_pawn, 180, 40, "taunt")
+pawn.ai.state_manager.force_state(&"Combat", 120, 50, "scripted")
 ```
 A stronger force replaces a weaker one; during a tick, forces wait for the pawn's next AI step.
 
 **Stealth.** A pawn's Detectability stat (1 normal, 0 invisible) scales how fast others fill awareness of it. Walls on physics layer 1 block sight.
 
-**While a player has the pawn.** `while_possessed` on the AIContextComponent: OFF, MEMORY_ONLY (the default: it keeps noticing, so it knows what's around when the player lets go), or FULL.
+**While a player has the pawn.** `while_possessed` on the AIManager: OFF, MEMORY_ONLY (the default: it keeps noticing, so it knows what's around when the player lets go), or FULL.
 
 **See it.** In the arena samples, each goblin has a readout of its state, target and behaviour, and P pauses with a rewind of the last 10 s (`ai/debug/AIDebugTimeline.gd`).
 
@@ -105,8 +105,8 @@ Between decisions only the running behaviour's `tick()` runs. When it returns SU
 
 | Setting | Where | Default | What it does |
 |---|---|---|---|
-| `while_possessed` | AIContextComponent | MEMORY_ONLY | What the AI does while a player has the pawn |
-| `decision_interval_ticks` | AIContextComponent | 15 | How often it decides (some events wake it early) |
+| `while_possessed` | AIManager | MEMORY_ONLY | What the AI does while a player has the pawn |
+| `decision_interval_ticks` | AIManager | 15 | How often it decides (some events wake it early) |
 | `sense_interval_ticks` | AISensingManager | 10 | How often sight looks for everyone near |
 | `sight_range`, `near_range` | SightSense | 25 m, 8 m | How far it sees, and within what distance at full strength |
 | `central_cone_degrees`, `periphery_degrees` | SightSense | 90, 160 | Its field of view: full strength, and weaker at the sides |

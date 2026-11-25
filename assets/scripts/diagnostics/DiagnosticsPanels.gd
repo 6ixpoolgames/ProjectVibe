@@ -332,10 +332,10 @@ func _inspector_text() -> String:
 			var effect: Effect = entry.effect
 			effects.append("%s x%d (%d)" % [String(effect.effect_name) if effect else "?", entry.stacks, entry.ticks_left])
 		lines.append("  effects: %s" % (", ".join(effects) if not effects.is_empty() else "-"))
-	if pawn.ai_context:
-		var behaviour: AIBehaviourBase = pawn.ai_context.behaviour_manager.get_running_behaviour() if pawn.ai_context.behaviour_manager else null
-		var target: Node3D = pawn.ai_context.target_selector.get_current_target() if pawn.ai_context.target_selector else null
-		lines.append("  AI: state %s, behaviour %s, target %s" % [pawn.ai_context.current_state_name(), String(behaviour.name) if behaviour else "-",
+	if pawn.ai:
+		var behaviour: AIBehaviourBase = pawn.ai.behaviour_manager.get_running_behaviour() if pawn.ai.behaviour_manager else null
+		var target: Node3D = pawn.ai.target_selector.get_current_target() if pawn.ai.target_selector else null
+		lines.append("  AI: state %s, behaviour %s, target %s" % [pawn.ai.current_state_name(), String(behaviour.name) if behaviour else "-",
 			String(target.name) if is_instance_valid(target) else "-"])
 	return "\n".join(lines)
 

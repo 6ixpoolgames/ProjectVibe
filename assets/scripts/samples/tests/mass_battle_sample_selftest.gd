@@ -126,7 +126,7 @@ func _test_centre_switch() -> void:
 # out from the middle between the red and blue spawners, where nothing else loads ground.
 func _test_outrunning() -> void:
 	var runner: Pawn = load(ALLY_SCENE).instantiate()
-	var behaviours := runner.get_node("AIBehaviourManager")
+	var behaviours := runner.get_node("AIManager/AIBehaviourManager")
 	for child in behaviours.get_children():
 		behaviours.remove_child(child)
 		child.free()

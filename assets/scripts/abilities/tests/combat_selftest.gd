@@ -479,7 +479,7 @@ func _test_ai_attacks() -> void:
 		var behaviour: AIBehaviourBase = pair[1].new()
 		behaviour.name = pair[0]
 		behaviours.add_child(behaviour)
-	goblin.add_child(behaviours)
+	AITestPawns.ai_of(goblin).add_child(behaviours)
 	add_child(goblin)
 	var intruder := _make_pawn(Vector3(0, 0.1, 74))
 	await _ticks(5)
@@ -488,14 +488,14 @@ func _test_ai_attacks() -> void:
 	melee.hit_landed.connect(func(hit): landed.append(hit))
 	# GDScript note: a lambda gets a copy of a local number, so it records into an array, which it shares.
 	var attack_started := []
-	goblin.ai_context.behaviour_manager.behaviour_changed.connect(func(_old, new, _reason):
+	goblin.ai.behaviour_manager.behaviour_changed.connect(func(_old, new, _reason):
 		if new and new.name == &"Attack":
 			attack_started.append(TickDriver.tick))
 	for i in 240:
 		await get_tree().physics_frame
 		if not landed.is_empty():
 			break
-	_check(goblin.ai_context.current_state_name() == &"Combat", "the goblin sees the intruder and goes into Combat")
+	_check(goblin.ai.current_state_name() == &"Combat", "the goblin sees the intruder and goes into Combat")
 	_check(not attack_started.is_empty(), "it chases, then switches to Attack once close enough")
 	var gap := Vector2(goblin.global_position.x - intruder.global_position.x, goblin.global_position.z - intruder.global_position.z).length()
 	_check(not landed.is_empty() and landed[0].target == intruder, "the swing lands (from %.2f m, inside attack_range %.1f)" % [gap, melee.attack_range])

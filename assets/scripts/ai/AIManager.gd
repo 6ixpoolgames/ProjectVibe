@@ -1,17 +1,19 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
-## Shared data and settings for one pawn's AI, and the step that runs the AI parts in order.
+## The pawn's AI: holds its AI components as children, what they share, and the step that runs them in order.
 ##
-## A part on the pawn, added by PawnInitializer. It makes no decisions: it holds what the other AI parts share (the pawn, its AI
-## controller, the other parts, the current target, the pawn's [AIInputs], the last hit and swing coming, the waiting decision, and
-## random numbers that replay the same), and the pawn calls [method run_ai] from its own tick, which runs [method think]. Behaviours and states get it as their
-## "context":
+## A component on the pawn ([member Pawn.ai]), added by PawnInitializer from parts/AIManager.tscn. Its children are the AI's components:
+## the [AIController] (the AI's hands), [AISensingManager], [AIMemory], [AITargetSelector], [AIStateManager] and
+## [AIBehaviourManager]. A pawn scene overrides one by putting its own of that name under its AIManager; PawnInitializer fills in the
+## rest. It makes no decisions: it holds what the components share (the pawn, the current target, the pawn's [AIInputs], the last hit
+## and swing coming, the waiting decision, and random numbers that replay the same), and the pawn calls [method run_ai] from its own
+## tick, which runs [method think]. Behaviours and states get it as their "context":
 ## [codeblock]
 ## context.controller, context.memory, context.state_manager, context.behaviour_manager
 ## context.current_tick            # the tick the AI is running now
 ## context.random_unit(salt)       # 0 up to 1, the same on every run for this pawn and tick
 ## [/codeblock]
 ## Design: pawn spec 10, 10.7 and 10.9.
-class_name AIContextComponent
+class_name AIManager
 extends Node
 
 ## What the AI does while a player has the pawn (pawn spec 10.3).
@@ -61,27 +63,19 @@ func _init() -> void:
 	set_process(false)
 	set_physics_process(false)
 	inputs = AIInputs.new(self)
+	# A component added or removed: look again next time one is asked for.
+	child_entered_tree.connect(_on_components_changed)
+	child_exiting_tree.connect(_on_components_changed)
 
 
+# Its components read the pawn from here as they enter the tree, which is after this (a parent enters first).
 func _enter_tree() -> void:
 	pawn = get_parent() as Pawn
-	# It tells its pawn it's here, before any part's _ready; the first AIContextComponent a pawn has is the one it uses.
-	if pawn and not is_instance_valid(pawn.ai_context):
-		pawn.ai_context = self
+	# It tells its pawn it's here, before any part's _ready; the first AIManager a pawn has is the one it uses.
+	if pawn and not is_instance_valid(pawn.ai):
+		pawn.ai = self
 	if pawn == null:
-		push_warning("AIContextComponent: its parent isn't a Pawn, so this AI has nothing to drive.")
-		return
-	_parts_found = false # see _find_parts_if_needed
-	if not pawn.child_entered_tree.is_connected(_on_pawn_parts_changed):
-		pawn.child_entered_tree.connect(_on_pawn_parts_changed)
-		pawn.child_exiting_tree.connect(_on_pawn_parts_changed)
-
-
-# Stops listening to the pawn it leaves.
-func _exit_tree() -> void:
-	if pawn and pawn.child_entered_tree.is_connected(_on_pawn_parts_changed):
-		pawn.child_entered_tree.disconnect(_on_pawn_parts_changed)
-		pawn.child_exiting_tree.disconnect(_on_pawn_parts_changed)
+		push_warning("AIManager: its parent isn't a Pawn, so this AI has nothing to drive.")
 
 
 # The AI notes every hit that reaches the pawn, parried ones included, by listening to the AbilityManager's hit_arrived.
@@ -91,18 +85,15 @@ func _ready() -> void:
 		abilities.hit_arrived.connect(note_hit)
 
 
-# --- References (read through the pawn when needed, so a part swapped later is still found) ---
+# --- Its components (its children; the first of each kind) ---
+# Looked for the first time one is asked for, and again after a child is added or removed, so one swapped later is still found.
 
 
-## The AI's hands, or null if the pawn has no AI controller.
+## The AI's hands, or null if it has no AIController. The pawn's ControllerManager puts it in charge while no player has the pawn.
 var controller: AIController:
 	get:
-		if pawn and pawn.controller_manager:
-			return pawn.controller_manager.ai_controller as AIController
-		return null
-
-# The context finds the pawn's other AI parts itself, so the pawn holds only ai_context. They're looked for the first time one is
-# asked for, and again after a part is added to or removed from the pawn.
+		_find_parts_if_needed()
+		return _controller
 
 ## The pawn's state manager, or null.
 var state_manager: AIStateManager:
@@ -135,6 +126,7 @@ var target_selector: AITargetSelector:
 		return _target_selector
 
 var _parts_found := false
+var _controller: AIController = null
 var _state_manager: AIStateManager = null
 var _behaviour_manager: AIBehaviourManager = null
 var _sensing_manager: AISensingManager = null
@@ -142,18 +134,21 @@ var _memory: AIMemory = null
 var _target_selector: AITargetSelector = null
 
 
-# The first of each AI part among the pawn's children.
+# The first of each AI component among its children.
 func _find_parts_if_needed() -> void:
-	if _parts_found or pawn == null:
+	if _parts_found:
 		return
 	_parts_found = true
+	_controller = null
 	_state_manager = null
 	_behaviour_manager = null
 	_sensing_manager = null
 	_memory = null
 	_target_selector = null
-	for child in pawn.get_children():
-		if child is AIStateManager and _state_manager == null:
+	for child in get_children():
+		if child is AIController and _controller == null:
+			_controller = child
+		elif child is AIStateManager and _state_manager == null:
 			_state_manager = child
 		elif child is AIBehaviourManager and _behaviour_manager == null:
 			_behaviour_manager = child
@@ -165,8 +160,7 @@ func _find_parts_if_needed() -> void:
 			_target_selector = child
 
 
-# A part added or removed: look again next time one is asked for.
-func _on_pawn_parts_changed(_node: Node) -> void:
+func _on_components_changed(_node: Node) -> void:
 	_parts_found = false
 
 

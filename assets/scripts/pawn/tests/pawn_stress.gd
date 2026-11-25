@@ -29,7 +29,7 @@ extends Node
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const WARM_UP_TICKS := 60
 const MEASURED_TICKS := 240
-const AI_PARTS: Array[StringName] = [&"AIContextComponent", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
+const AI_PARTS: Array[StringName] = [&"AIManager", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 
 var _sizes: Array[int] = [100, 200, 400, 800]
 var _breakdown := false # Claude 2026-11-09: --breakdown, simulate split into abilities and the rest (TimedAbilityManager)
@@ -104,10 +104,10 @@ func _measure(scene: String, count: int) -> Dictionary:
 				pawn.skip_default_parts = AI_PARTS.duplicate()
 			"wandering":
 				pawn.team = 0
-				pawn.add_child(_behaviours([["Wander", AIWanderBehaviour]]))
+				AITestPawns.ai_of(pawn).add_child(_behaviours([["Wander", AIWanderBehaviour]]))
 			"fighting":
 				pawn.team = i % 2
-				pawn.add_child(_behaviours([["Wander", AIWanderBehaviour], ["LookToward", AILookTowardBehaviour], ["Investigate", AIInvestigateBehaviour], ["Search", AISearchBehaviour], ["Chase", AIChaseBehaviour], ["Attack", AIAttackBehaviour]]))
+				AITestPawns.ai_of(pawn).add_child(_behaviours([["Wander", AIWanderBehaviour], ["LookToward", AILookTowardBehaviour], ["Investigate", AIInvestigateBehaviour], ["Search", AISearchBehaviour], ["Chase", AIChaseBehaviour], ["Attack", AIAttackBehaviour]]))
 		if _breakdown:
 			# Claude 2026-11-09: the default AbilityManager part with the timed subclass as its script. Placed before the pawn enters
 			# the tree, so PawnInitializer keeps it instead of adding the default one.
