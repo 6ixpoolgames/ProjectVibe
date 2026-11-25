@@ -18,6 +18,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Test hooks in `NavServer` | `debug_fail_tile_commits`, `debug_limit_path_corners`, `debug_log_path_steps` in `nav_server.h` (and `GroundDomain`, `PathQueue`) | Test code bound into the shipping class. A test-only build flag or subclass would keep them out | S |
 | `NavHooks` settings that do nothing | `send_estimates`, `send_link_hints` in `nav_hooks.h` | A designer sees two switches in the inspector that change nothing. Hide them until the coarse planner (estimates) or link hints exist | S |
 
+## 2026-11-25
+
+- **`AIBatchDecider`: persistence goes, modifiers' numbers come in** (pawn spec 16.10 step 6a). The persistence columns, `add_persistence_ticks`, `set_persistence_speed`, `set_persistence_mask`, `persistence_now`, `set_score_jitter` and `set_interrupt_threshold` are gone, and `set_pawn_state` takes no persistence. `set_modifiers(row, bonus, jitter, interrupt_threshold, cooldown, min_run, blocked_mask)` writes the numbers the behaviour modifiers leave (an empty array: the brain's); `decide(columns)` takes them as optional `modifier`, `jitter`, `interrupt_threshold` and `min_run` columns, and no `persistence` column. The cooldown rule and the minimum run read the pawn's numbers. Twin: `AIBehaviourManager`.
+
+
 ## 2026-11-23
 
 - **The AI decider's tag requirements, switching off and score modifiers** (pawn spec 10.13), twin of `AIBehaviourManager`: a brain takes each behaviour's `tag_requirements` as masks and `enabled`; a row takes the owned tags as words (`set_owned_tags`) and the modifiers' sums and blocked mask (`set_modifiers`), and `decide()` takes them as optional columns. The state number (`find_state`, `set_state`) is gone: the state is one of the owned tags.

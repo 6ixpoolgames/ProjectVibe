@@ -397,14 +397,14 @@ tick. Chase stays on its interval: following a moving target is regular work.
 | Memory: awareness, certain, last seen, last known position | `AIMemoryStore` (C++) | before |
 | Position, facing, team | the pawn table | before |
 | The brain: behaviours, their settings, conditions and curves | `AIBehaviourManager.describe()`, added once per brain | 5a, 5b |
-| Each pawn's decision state: running behaviour and since when, cooldowns, persistence, its own jitter, thresholds and persistence masks | `AIBatchDecider`'s pawn rows (C++), kept in step by events | 5c |
+| Each pawn's decision state: running behaviour and since when, cooldowns, and the numbers its behaviour modifiers leave *(2026-11-25: persistence and its masks are gone, pawn spec 16.10 step 6a)* | `AIBatchDecider`'s pawn rows (C++), kept in step by events | 5c |
 
 **Built differently from the plan (2026-11-18):** C++ decides one pawn at a time, at the moment GDScript decided (`decide_pawn`), not in
 a batch applied the next tick. The C++ call costs a microsecond or two, the same-tick timing keeps decisions exactly as they were, and
 the comparison with GDScript stays exact. Batching onto the worker threads (5e) is worth it only for work that's heavy in C++; it's
 measured before it's built.
 
-**Per-pawn persistence masks** *(the owner, 2026-11-18: hooks now, uses later)*: a pawn's own fade multiplied with a behaviour's
+**Per-pawn persistence masks** *(the owner, 2026-11-18: hooks now, uses later. 2026-11-25: gone with persistence, pawn spec 16.10 step 6a; a behaviour modifier reshapes one pawn's behaviour instead)*: a pawn's own fade multiplied with a behaviour's
 persistence fade (`AIBehaviourManager.set_persistence_mask`, `AIBatchDecider.set_persistence_mask`), so something can reshape one
 pawn's persistence without changing the brain the others share. A mask whose script has its own `value_at()` makes the pawn a special
 mind.

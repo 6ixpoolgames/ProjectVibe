@@ -124,14 +124,9 @@ func place(manager: AIBehaviourManager) -> void:
 	# Its state as the behaviour nodes hold it, so moving in changes nothing.
 	var running := manager.get_running_behaviour()
 	var ended := PackedInt64Array()
-	var persistence := PackedFloat64Array()
 	for behaviour in manager.get_behaviours():
 		ended.append(behaviour.ended_tick)
-		persistence.append_array(behaviour.persistence_state())
-	_decider.set_pawn_state(row, running.decision_index if running else -1, running.started_tick if running else -1, ended, persistence)
-	for behaviour in manager.get_behaviours():
-		if behaviour.persistence_mask:
-			_decider.set_persistence_mask(row, behaviour.decision_index, behaviour.persistence_mask.values_at_rate())
+	_decider.set_pawn_state(row, running.decision_index if running else -1, running.started_tick if running else -1, ended)
 	manager.cpp_row = row
 	# The facts, as they are now; from here on each is written when it changes.
 	_decider.set_body(row, manager.pawn.get_instance_id(), context.memory.native_store())
@@ -209,8 +204,8 @@ func decide_in_cpp(manager: AIBehaviourManager, tick: int, event_priority: int, 
 	if AIInputs.input_count() != _kinds_sent:
 		_kinds_sent = AIInputs.input_count()
 		_decider.set_input_kinds(AIInputs.kinds())
-	# Written here, not by their owner, and only when changed: the owned tags (OwnedTags.version, the AI's state among them), the score
-	# modifiers (modifiers_version), the actions that could start (once the AbilityManager's readiness_version moves on), and a
+	# Written here, not by their owner, and only when changed: the owned tags (OwnedTags.version, the AI's state among them), what the
+	# behaviour modifiers leave (modifiers_version), the actions that could start (once the AbilityManager's readiness_version moves on), and a
 	# group's nearest point (when the lookup, every 2 seconds, finds another).
 	var owned := manager.pawn.owned_tags
 	if owned and owned.version != kept["tags_version"]:
@@ -270,31 +265,6 @@ func stopped(manager: AIBehaviourManager, tick: int) -> void:
 	_decider.stop_running(manager.cpp_row, tick)
 
 
-func persistence_ticks_added(manager: AIBehaviourManager, slot: int, ticks: float, tick: int) -> void:
-	_decider.add_persistence_ticks(manager.cpp_row, slot, ticks, tick)
-
-
-func persistence_speed_set(manager: AIBehaviourManager, slot: int, speed: float, tick: int) -> void:
-	_decider.set_persistence_speed(manager.cpp_row, slot, speed, tick)
-
-
-func jitter_set(manager: AIBehaviourManager, slot: int, effective_jitter: float) -> void:
-	_decider.set_score_jitter(manager.cpp_row, slot, effective_jitter)
-
-
-func threshold_set(manager: AIBehaviourManager, slot: int, threshold: int) -> void:
-	_decider.set_interrupt_threshold(manager.cpp_row, slot, threshold)
-
-
-## A behaviour's per-pawn persistence mask changed (null: none). A mask with its own value_at() code makes the pawn a special mind.
-func mask_set(manager: AIBehaviourManager, behaviour: AIBehaviourBase) -> void:
-	if behaviour.persistence_mask and ScriptOverrides.overrides(behaviour.persistence_mask.get_script(), &"value_at"):
-		place(manager) # to GDScript
-		return
-	_decider.set_persistence_mask(manager.cpp_row, behaviour.decision_index,
-		behaviour.persistence_mask.values_at_rate() if behaviour.persistence_mask else {})
-
-
 # --- Internals ---
 
 
@@ -338,15 +308,24 @@ func _write_owned_tags(manager: AIBehaviourManager, kept: Dictionary) -> void:
 	_decider.set_owned_tags(manager.cpp_row, owned.get_words() if owned else PackedInt64Array())
 
 
+# What the behaviour modifiers leave, as the numbers the decider uses (the ticks at the match's rate).
 func _write_modifiers(manager: AIBehaviourManager, kept: Dictionary) -> void:
 	kept["modifiers_version"] = manager.modifiers_version
-	var sums := PackedFloat64Array()
+	var bonus := PackedFloat64Array()
+	var jitter := PackedFloat64Array()
+	var threshold := PackedInt64Array()
+	var cooldown := PackedInt64Array()
+	var min_run := PackedInt64Array()
 	var blocked := 0
 	for behaviour in manager.get_behaviour_list():
-		sums.append(behaviour.decision_modifier)
+		bonus.append(behaviour.score_bonus())
+		jitter.append(behaviour.current_jitter())
+		threshold.append(behaviour.current_interrupt_threshold())
+		cooldown.append(behaviour.current_cooldown_ticks())
+		min_run.append(behaviour.current_min_run_ticks())
 		if behaviour.decision_blocked:
 			blocked |= 1 << behaviour.decision_index
-	_decider.set_modifiers(manager.cpp_row, sums, blocked)
+	_decider.set_modifiers(manager.cpp_row, bonus, jitter, threshold, cooldown, min_run, blocked)
 
 
 # Shadow mode: every input C++ just worked out against GDScript's own, slot by slot (the hit and swing facts, a game's inputs, the
@@ -403,9 +382,6 @@ func _gdscript_reason(manager: AIBehaviourManager) -> String:
 	for behaviour in manager.get_behaviour_list():
 		if behaviour.has_own_code():
 			return "special mind: %s's behaviour %s has is_available() or score() code of its own" % [_brain_label(manager), behaviour.name]
-		for profile: FadeProfile in [behaviour.persistence_fade, behaviour.persistence_mask]:
-			if profile and ScriptOverrides.overrides(profile.get_script(), &"value_at"):
-				return "special mind: %s's behaviour %s has a fade with value_at() code of its own" % [_brain_label(manager), behaviour.name]
 		for condition in behaviour.all_conditions():
 			if not _kind_known(condition.describe()):
 				return "special mind: %s's behaviour %s has a condition of a kind C++ doesn't know" % [_brain_label(manager), behaviour.name]

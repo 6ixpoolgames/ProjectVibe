@@ -4,6 +4,8 @@
 ## conditions and curves the same way: live shadow mode over made-up brains fed random inputs, which must agree on every decision.
 ## Claude 2026-11-18 (step 5c): and C++ driving (the main path) plays the same game as GDScript driving, persistence, a per-pawn
 ## persistence mask, jitter changes and behaviours finishing included; and where pawns decide (setting, override, special minds).
+## Claude 2026-11-25 (pawn spec 16.10 step 6a): persistence is gone; the same game now has behaviours' own start and end modifiers, and
+## modifiers changing jitter, interrupt thresholds, cooldowns and minimum runs, which C++ gets as numbers.
 ## Claude 2026-11-18 (a review's finding): a group point that moves, or is freed, between the lookup's 2-second looks gives C++ and
 ## GDScript the same answer.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
@@ -249,7 +251,7 @@ func _test_moving_group_point() -> void:
 		GameMode.remove_module(module)
 
 
-# One game of the made-up brains: 3 pawns, TICKS ticks of random inputs, with persistence changes along the way. Returns the
+# One game of the made-up brains: 3 pawns, TICKS ticks of random inputs, with modifiers coming and going. Returns the
 # changes of behaviour in order and which behaviours were chosen.
 func _play_conditions(_module: AIDecisionModule) -> Dictionary:
 	var pawns: Array[Pawn] = []
@@ -265,11 +267,11 @@ func _play_conditions(_module: AIDecisionModule) -> Dictionary:
 			if new:
 				chosen[String(new.name)] = true)
 		pawns.append(pawn)
-	# Pawn 2's Ant carries a persistence mask: a per-pawn shape over its fade (the hook).
-	var mask := FadeProfile.new()
-	mask.mode = FadeProfile.Mode.HALF_LIFE
-	mask.half_life_ticks = 7
-	pawns[2].ai.behaviour_manager.set_persistence_mask(&"Ant", mask)
+	# Modifiers on the numbers C++ gets as numbers: Ant's minimum run, Cat's cooldown and threshold, everyone's jitter.
+	var rush := _modifier(AIBehaviourModifier.Number.MIN_RUN_TICKS, 1.0, 9.0, [Tags.AI.STANCE_MELEE])
+	var lazy := _modifier(AIBehaviourModifier.Number.COOLDOWN_TICKS, 2.0, 3.0, [Tags.AI.STANCE_RANGED])
+	var firm := _modifier(AIBehaviourModifier.Number.INTERRUPT_THRESHOLD, 1.0, 4.0, [Tags.AI.STANCE_RANGED])
+	var shaky := _modifier(AIBehaviourModifier.Number.SCORE_JITTER, 1.5, 0.02, [])
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 31337
 	for t in TICKS:
@@ -282,13 +284,20 @@ func _play_conditions(_module: AIDecisionModule) -> Dictionary:
 			inputs.set_input(&"ticks_test_since", float(rng.randi_range(0, 60)))
 			_decide(pawn, tick)
 			var manager := pawn.ai.behaviour_manager
-			# Events C++'s copy of the state must follow: persistence changes, jitter, a behaviour finishing on its own.
+			# Events C++'s copy of the state must follow: modifiers coming and going, a behaviour finishing on its own.
 			if t % 37 == 5:
-				manager.add_persistence_ticks(&"Ant", 9.0)
+				manager.add_modifier(rush, &"rush")
+			elif t % 37 == 25:
+				manager.remove_modifiers(&"rush")
 			if t % 53 == 11:
-				manager.set_persistence_speed(&"Cat", 0.5 + 0.25 * (t % 3))
+				manager.add_modifier(lazy, &"cat")
+				manager.add_modifier(firm, &"cat")
+			elif t % 53 == 40:
+				manager.remove_modifiers(&"cat")
 			if t % 71 == 3:
-				manager.set_score_jitter(&"Bee", 0.02 * (t % 4))
+				manager.add_modifier(shaky, &"shaky")
+			elif t % 71 == 50:
+				manager.remove_modifiers(&"shaky")
 			if t % 29 == 17 and manager.get_running_behaviour():
 				manager.stop_running("finished")
 	for pawn in pawns:
@@ -298,16 +307,16 @@ func _play_conditions(_module: AIDecisionModule) -> Dictionary:
 
 func _made_up_behaviours() -> Array:
 	var ant := _behaviour("Ant", 0.6, 0.1)
-	ant.persistence = 0.2
-	ant.persistence_fade = _fade(FadeProfile.Mode.LINEAR, 10, 40)
+	ant.tags = [Tags.AI.STANCE_MELEE]
+	ant.modifier_on_start = _modifier(AIBehaviourModifier.Number.SCORE_BONUS, 1.0, 0.2, [], 30) # Claude 2026-11-25: was persistence
 	ant.conditions = [AICompareCondition.make(&"test_x", Comparison.AT_MOST, 0.5)]
 	ant.score_curves = [AIScoreCurve.make(&"test_y", 0.0, 1.0)]
 	var bee := _behaviour("Bee", 0.55, 0.55)
 	var either: Array[AICondition] = [AICompareCondition.make(&"test_x", Comparison.MORE_THAN, 0.7), AIChanceCondition.make(0.4, 3)]
 	bee.conditions = [AIAnyCondition.make(either)]
 	var cat := _behaviour("Cat", 0.7, 0.0)
-	cat.persistence = -0.15
-	cat.persistence_fade = _fade(FadeProfile.Mode.HALF_LIFE, 5, 0, 12)
+	cat.tags = [Tags.AI.STANCE_RANGED]
+	cat.modifier_on_end = _modifier(AIBehaviourModifier.Number.SCORE_BONUS, 1.0, -0.15, [], 20) # Claude 2026-11-25: was persistence
 	cat.cooldown_ticks = 9
 	cat.conditions = [AICompareCondition.make(&"test_y", Comparison.AT_LEAST, 0.0, &"test_x")] # y >= x
 	cat.score_curves = [AIScoreCurve.make(&"test_x", 1.0, 0.0), AIScoreCurve.make(&"test_y", 0.0, 1.0)]
@@ -317,6 +326,19 @@ func _made_up_behaviours() -> Array:
 	var fox := _behaviour("Fox", 0.65, 0.65)
 	fox.conditions = [AICompareCondition.make(&"ticks_test_since", Comparison.AT_MOST, 20.0), AICompareCondition.make(&"test_x", Comparison.NOT_EQUAL, 0.25)]
 	return [ant, bee, cat, dog, elk, fox]
+
+
+# Claude 2026-11-25 (pawn spec 16.10 step 6a): a behaviour modifier on one number, for the behaviours with any of these tags (none:
+# every behaviour, or only the one giving it to itself), lasting this many ticks (0: until removed).
+func _modifier(number: AIBehaviourModifier.Number, multiply: float, add: float, any_of: Array[StringName], duration := 0) -> AIBehaviourModifier:
+	var modifier := AIBehaviourModifier.new()
+	modifier.number = number
+	modifier.multiply = multiply
+	modifier.add = add
+	modifier.duration_ticks = duration
+	if not any_of.is_empty():
+		modifier.applies_to = TagQuery.make([], any_of)
+	return modifier
 
 
 # --- Helpers ---

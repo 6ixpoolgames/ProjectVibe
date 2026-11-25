@@ -4,7 +4,7 @@
 
 The brain on each computer-run pawn: it notices enemies by sight, remembers them with awareness that fades (basic stealth), picks a target and a situation (Idle, Alert, Combat), and chooses what to do by score, acting through the same inputs a player would press.
 
-**Status:** built, tier 0. Not yet (pawn spec section 14): hearing, more persistence options, and rolling back the AI's decisions for games where clients predict it.
+**Status:** built, tier 0. Not yet (pawn spec section 14): hearing, and rolling back the AI's decisions for games where clients predict it.
 
 | File | What it's for |
 |---|---|
@@ -42,14 +42,14 @@ The AI is one component on the pawn, the **`AIManager`** (`pawn.ai`), with the A
 
 **Give a pawn a brain.** The default AIManager (`assets/scenes/pawn/parts/AIManager.tscn`) gives every pawn sensing, memory, targets and the three states, but no behaviours, so it stands still. Add an `AIManager` node to the pawn's scene with an `AIBehaviourManager` and its behaviour children under it (PawnInitializer fills in the other components), or set the game's default brain in `resources/pawn_defaults.tres` (`ai_brain`, which goes in place of the AIManager's empty behaviour manager). `assets/scenes/samples/arena_brain.tscn` and `faction_brain.tscn` are working brains to copy.
 
-**Tune a behaviour.** Select it under the AIBehaviourManager. `max_score` and `min_score` say how much it wants to run; `tag_requirements` when (a tag query over the pawn's owned tags: the AI's state is one, `ai.state.combat`, and so are conditions such as `status.has_ammo.ranged`); `enabled` switches it off (an inherited scene can't remove it); `cooldown_ticks`, `min_run_ticks` and `interrupt_threshold` how long it holds; `persistence` with a `FadeProfile` keeps it chosen for a while. Every tick setting is at 60 ticks a second.
+**Tune a behaviour.** Select it under the AIBehaviourManager. `max_score` and `min_score` say how much it wants to run; `tag_requirements` when (a tag query over the pawn's owned tags: the AI's state is one, `ai.state.combat`, and so are conditions such as `status.has_ammo.ranged`); `enabled` switches it off (an inherited scene can't remove it); `cooldown_ticks`, `min_run_ticks` and `interrupt_threshold` how long it holds; `modifier_on_start` and `modifier_on_end` are behaviour modifiers it gives itself as it starts or ends (Look Toward steps aside for 15 s with one). Every tick setting is at 60 ticks a second.
 
 **Make a new behaviour.** Extend `AIBehaviourBase`, set its scores and states in `_init()`, say when it may run with `own_conditions()` (conditions built from its settings), and override `enter`, `tick` and `exit` as needed. Act only through `context.controller`. In `enter()`, ask to be woken for what it waits for (`wake_on_path_end()`, `wake_on_action_end(action)`, `wake_at(tick)`) and give it a long `tick_interval_ticks` as a safety net. Overriding `is_available` or `score` with code still works, but the C++ decider then has to ask GDScript for that behaviour (`has_own_code()`).
 
-**Change priorities while playing.** A score modifier (`AIScoreModifier`, a definition) raises, lowers or blocks the behaviours whose `tags` it applies to, for as long as it's added (or for `duration_ticks`), while its `ongoing_requirements` pass. Whatever causes it adds and removes it, keyed by itself:
+**Change priorities while playing.** A behaviour modifier (`AIBehaviourModifier`, a definition) changes one number of the behaviours whose `tags` it applies to: their score bonus, jitter, interrupt threshold, cooldown or minimum run, multiplying, then adding, or overriding (the last added wins). It can block them instead. It lasts as long as it's added (or for `duration_ticks`), while its `ongoing_requirements` pass. Whatever causes it adds and removes it, keyed by itself:
 ```gdscript
-pawn.ai.behaviour_manager.add_score_modifier(charge_shout, self)    # Chase (ai.stance.melee) +0.1
-pawn.ai.behaviour_manager.remove_score_modifier(self)
+pawn.ai.behaviour_manager.add_modifier(charge_shout, self)    # Chase (ai.stance.melee) +0.1
+pawn.ai.behaviour_manager.remove_modifiers(self)
 ```
 A running behaviour whose tag requirements stop passing, or that a modifier blocks, is replaced at the pawn's next AI step: its `min_run_ticks` don't hold it, its `interrupt_threshold` still does.
 
@@ -82,10 +82,10 @@ Details the code's doc comments leave out.
 0. Interrupts: if the running behaviour can't be replaced by this decision's reason (`cannot_be_interrupted`, `interrupt_threshold`, `min_run_ticks`), it keeps running.
 1. Valid: the behaviours the current state allows.
 2. Hard rules, with no behaviour code run: drop any on cooldown, needing a target when there is none, or whose action can't start.
-3. Ranges: each result can only land between floor (`min_score` + persistence - jitter) and ceiling (`max_score` + persistence + jitter). One whose ceiling is below the highest floor can't win. A floor is only certain if its behaviour is available, so the highest floor comes from the first available behaviour, from the highest floor down.
-4. Scoring, highest ceiling first: `is_available()` and `score()`, plus persistence and this decision's jitter (each behaviour's own offset from the context's replayable random numbers). Once the next ceiling can't beat the best result, the rest are skipped.
+3. Ranges: each result can only land between floor (`min_score` + bonus - jitter) and ceiling (`max_score` + bonus + jitter), with the modifiers' score bonus and jitter. One whose ceiling is below the highest floor can't win. A floor is only certain if its behaviour is available, so the highest floor comes from the first available behaviour, from the highest floor down.
+4. Scoring, highest ceiling first: `is_available()` and `score()`, plus the modifiers' bonus and this decision's jitter (each behaviour's own offset from the context's replayable random numbers). Once the next ceiling can't beat the best result, the rest are skipped.
 5. Ties: results within `tie_margin` tie; `randomize_ties` picks at random, otherwise the fixed order (behaviours sorted by name) decides.
-6. Switching: the old behaviour's `exit()`, then the new one's `enter()`, and its persistence starts.
+6. Switching: the old behaviour's `exit()` and its `modifier_on_end`, then the new one's `modifier_on_start` and `enter()`.
 
 Between decisions only the running behaviour's `tick()` runs. When it returns SUCCEEDED or FAILED the manager decides at once; when the pawn dies it stops (reason "died"). Odd cases are in `ai_behaviour_manager_selftest`: a state allowing no behaviour makes the pawn stand still with one warning; a `score()` outside its range warns once in debug builds; a behaviour with an automatic name (starting with `@`) warns, because names must be the same every run.
 
@@ -118,4 +118,4 @@ Between decisions only the running behaviour's `tick()` runs. When it returns SU
 
 ## Tests
 
-`ai/tests/`: `ai_state_manager_selftest` (states, forcing, queueing during a tick), `ai_behaviour_manager_selftest` (scoring, interrupts, persistence, ties, wake-ups, tag requirements, score modifiers), `fade_profile_selftest`, `ai_perception_selftest` (sight, memory, targets; `-- --gdscript-store` runs it on the GDScript store), `ai_stealth_selftest`, `ai_sensing_job_selftest` (the worker-thread job gives the same answers), `sight_geometry_selftest` (C++ line of sight against physics), `ai_go_to_point_selftest`, `ai_decision_recorder_selftest` (decision records, the recorder and the timing scopes), `ai_batch_decider_selftest` (the C++ decider makes every decision the same way; the kept "could this action start" answers match the ability manager), `ai_conditions_selftest` (inputs, conditions, score curves, and C++ judging them the same way), and `ai_stress`, which prints the AI's cost per tick. Fights with the AI are in `abilities/tests/fight_selftest` and `parry_selftest`. Run them with `bash tools/run_tests.sh <name>`.
+`ai/tests/`: `ai_state_manager_selftest` (states, forcing, queueing during a tick), `ai_behaviour_manager_selftest` (scoring, interrupts, ties, wake-ups, tag requirements, behaviour modifiers and their numbers, a behaviour's own start and end modifiers), `fade_profile_selftest`, `ai_perception_selftest` (sight, memory, targets; `-- --gdscript-store` runs it on the GDScript store), `ai_stealth_selftest`, `ai_sensing_job_selftest` (the worker-thread job gives the same answers), `sight_geometry_selftest` (C++ line of sight against physics), `ai_go_to_point_selftest`, `ai_decision_recorder_selftest` (decision records, the recorder and the timing scopes), `ai_batch_decider_selftest` (the C++ decider makes every decision the same way; the kept "could this action start" answers match the ability manager), `ai_conditions_selftest` (inputs, conditions, score curves, and C++ judging them the same way), and `ai_stress`, which prints the AI's cost per tick. Fights with the AI are in `abilities/tests/fight_selftest` and `parry_selftest`. Run them with `bash tools/run_tests.sh <name>`.

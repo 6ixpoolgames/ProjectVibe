@@ -4,7 +4,7 @@
 
 Names like `ability.combat.melee` or `nav.point.cover` that say what something is, turned into bits so a game can ask "is this any kind of combat?" with one quick check, the same way on every machine. One registry for every kind of tag: abilities, effects, a pawn's status, the AI, navigation.
 
-**Status:** built, tier 0 (tag spec steps 1 and 2): the registry, the tags a pawn owns right now, and tag queries. Next: the AI's score modifiers use them (pawn spec 10.13). Not yet: more than 64 levels in one category, owned tags in C++.
+**Status:** built, tier 0 (tag spec steps 1 and 2): the registry, the tags a pawn owns right now, and tag queries. The AI's behaviour modifiers use them (pawn spec 16.5). Not yet: more than 64 levels in one category, owned tags in C++.
 
 | File | What it's for |
 |---|---|

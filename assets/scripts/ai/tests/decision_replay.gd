@@ -4,7 +4,7 @@
 ##
 ## The input is what AIDecisionRecorder holds: brain descriptions by pawn number, and decision records as plain dictionaries (from a
 ## live recorder, or from a saved file). Each decision becomes a row for the decider, built only from what GDScript saw: the hard rules
-## a behaviour failed (cooldown, action), the availability GDScript asked for, the persistence and scores it had. The decider then
+## a behaviour failed (cooldown, action), the availability GDScript asked for, the modifiers' numbers and the scores it had. The decider then
 ## makes the decision itself: the interrupt rule, the masks, the ranges, the early stop, jitter and ties. Agreeing means it chose the
 ## same behaviour, kept the running one when GDScript did, and asked is_available() of exactly the same behaviours.
 ##
@@ -62,6 +62,7 @@ static func compare(data: Dictionary) -> Dictionary:
 	var brain_by_text := {} # the description without the pawn's own fields -> brain number
 	var seed_of_pawn := {}
 	var slots := [] # brain number -> {behaviour name -> slot}
+	var numbers := [] # brain number -> [jitter, interrupt threshold, minimum run] by slot, the brain's own (Claude 2026-11-25, step 6a)
 	for pawn_number: Variant in data["brains"]:
 		var description: Dictionary = data["brains"][pawn_number]
 		var shared := description.duplicate()
@@ -75,6 +76,13 @@ static func compare(data: Dictionary) -> Dictionary:
 			for slot in decider.get_behaviour_count(number):
 				names[String(decider.get_behaviour_name(number, slot))] = slot
 			slots.append(names)
+			# A decision the interrupt rule kept records no behaviours, so its row starts from these.
+			var own := []
+			own.resize(names.size())
+			for entry: Dictionary in description.get("behaviours", []):
+				own[names[String(entry["name"])]] = [float(entry.get("effective_jitter", 0.0)), int(entry.get("interrupt_threshold", 0)),
+					int(entry.get("min_run_ticks_at_rate", entry.get("min_run_ticks", 0)))]
+			numbers.append(own)
 		brain_of_pawn[int(pawn_number)] = brain_by_text[text]
 		seed_of_pawn[int(pawn_number)] = int(description.get("random_seed", 0))
 	result["brains"] = brain_by_text.size()
@@ -89,7 +97,7 @@ static func compare(data: Dictionary) -> Dictionary:
 			ticks.append(tick)
 		by_tick[tick].append(decision)
 	for tick: int in ticks:
-		_compare_batch(decider, by_tick[tick], brain_of_pawn, seed_of_pawn, slots, stride, result)
+		_compare_batch(decider, by_tick[tick], brain_of_pawn, seed_of_pawn, slots, numbers, stride, result)
 	return result
 
 
@@ -104,7 +112,7 @@ static func describe(result: Dictionary) -> String:
 
 
 static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dictionary, seed_of_pawn: Dictionary, slots: Array,
-		stride: int, result: Dictionary) -> void:
+		numbers: Array, stride: int, result: Dictionary) -> void:
 	var rows := decisions.size()
 	var brain := PackedInt32Array()
 	var pawn := PackedInt64Array()
@@ -123,14 +131,23 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 	var can_press := PackedInt64Array()
 	var known := PackedInt64Array()
 	var available := PackedInt64Array()
-	var persistence := PackedFloat64Array()
 	var score := PackedFloat64Array()
-	persistence.resize(rows * stride)
-	persistence.fill(0.0)
+	# Claude 2026-11-25 (pawn spec 16.10 step 6a): persistence is gone; the numbers behaviour modifiers leave go over instead, where
+	# a record has them (older records: the brain's).
+	var jitter := PackedFloat64Array()
+	var threshold := PackedInt64Array()
+	var min_run := PackedInt64Array()
+	var has_numbers := false
 	score.resize(rows * stride)
 	score.fill(NAN)
 	modifier.resize(rows * stride)
 	modifier.fill(0.0)
+	jitter.resize(rows * stride)
+	jitter.fill(0.0)
+	threshold.resize(rows * stride)
+	threshold.fill(0)
+	min_run.resize(rows * stride)
+	min_run.fill(0)
 	var expected_chosen := PackedInt32Array()
 	var expected_asked := PackedInt64Array()
 	# Claude 2026-11-17 (scaling spec 6.2, step 5b): each decision's AI inputs, for behaviours judged by their conditions, flattened
@@ -146,6 +163,11 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 		var pawn_number := int(d["pawn_number"])
 		var b: int = brain_of_pawn[pawn_number]
 		var names: Dictionary = slots[b]
+		var own: Array = numbers[b]
+		for slot in own.size():
+			jitter[r * stride + slot] = own[slot][0]
+			threshold[r * stride + slot] = own[slot][1]
+			min_run[r * stride + slot] = own[slot][2]
 		var row_inputs: Array = d.get("inputs", [])
 		for i in row_inputs.size():
 			inputs[r * input_stride + i] = float(row_inputs[i])
@@ -173,6 +195,11 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 				continue
 			var bit := 1 << slot
 			modifier[r * stride + slot] = float(entry.get("modifier", 0.0))
+			if entry.has("jitter_amount"):
+				has_numbers = true
+				jitter[r * stride + slot] = float(entry["jitter_amount"])
+				threshold[r * stride + slot] = int(entry["interrupt_threshold"])
+				min_run[r * stride + slot] = int(entry["min_run"])
 			match entry["rule"]:
 				"blocked", "off": # switched off can change during a run, and a recording keeps one brain: passed per decision, as a block
 					blocked_mask |= bit
@@ -181,7 +208,6 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 				"action":
 					press_mask &= ~bit
 				"":
-					persistence[r * stride + slot] = float(entry["persistence"])
 					if entry["score"] != null:
 						score[r * stride + slot] = float(entry["score"])
 					var answer := int(entry["available"])
@@ -200,8 +226,12 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 	var columns := {"brain": brain, "pawn_number": pawn, "random_seed": random_seed, "tick": tick, "owned": owned, "tag_words": tag_words,
 		"modifier": modifier, "blocked": blocked,
 		"has_target": has_target, "event_normal": normal, "event_priority": priority, "running": running, "running_started": started,
-		"cooling": cooling, "can_press": can_press, "available_known": known, "available": available, "persistence": persistence,
+		"cooling": cooling, "can_press": can_press, "available_known": known, "available": available,
 		"score": score, "inputs": inputs, "input_stride": input_stride}
+	if has_numbers:
+		columns["jitter"] = jitter
+		columns["interrupt_threshold"] = threshold
+		columns["min_run"] = min_run
 	var started_usec := Time.get_ticks_usec()
 	var answer: Dictionary = decider.decide(columns)
 	result["decide_usec"] += Time.get_ticks_usec() - started_usec

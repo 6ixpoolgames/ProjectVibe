@@ -102,15 +102,6 @@ int AIBatchDecider::add_brain(const Dictionary &description) {
 		}
 		behaviour.scorer = Scorer(scorer);
 		behaviour.cooldown_ticks = int64_t(entry.get("cooldown_ticks_at_rate", entry.get("cooldown_ticks", 0)));
-		behaviour.persistence = double(entry.get("persistence", 0.0));
-		const Variant fade = entry.get("persistence_fade", Variant());
-		if (fade.get_type() == Variant::DICTIONARY) {
-			// Already at the match's rate (AIBehaviourManager.describe()).
-			const Dictionary f = fade;
-			fade_math::read_values(behaviour.persistence_fade, int(f.get("mode", 0)), int64_t(f.get("hold", 0)), int64_t(f.get("fade", 60)),
-					int64_t(f.get("half_life", 30)), f.get("curve", Variant()));
-			behaviour.has_persistence_fade = true;
-		}
 		if (!add_conditions(entry.get("conditions", Array()), brain, behaviour.first_condition, behaviour.condition_count)) {
 			return -1;
 		}
@@ -392,7 +383,7 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	PackedInt64Array pawn_h, seed_h, tick_h, started_h, cooling_h, press_h, known_h, avail_h;
 	PackedInt32Array priority_h, running_h;
 	PackedByteArray target_h, normal_h;
-	PackedFloat64Array persistence_h, score_h;
+	PackedFloat64Array score_h;
 	const auto *pawn = column(columns, "pawn_number", Variant::PACKED_INT64_ARRAY, rows, pawn_h);
 	const auto *seed = column(columns, "random_seed", Variant::PACKED_INT64_ARRAY, rows, seed_h);
 	const auto *tick = column(columns, "tick", Variant::PACKED_INT64_ARRAY, rows, tick_h);
@@ -405,7 +396,6 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	const auto *can_press = column(columns, "can_press", Variant::PACKED_INT64_ARRAY, rows, press_h);
 	const auto *known = column(columns, "available_known", Variant::PACKED_INT64_ARRAY, rows, known_h);
 	const auto *available = column(columns, "available", Variant::PACKED_INT64_ARRAY, rows, avail_h);
-	const auto *persistence = column(columns, "persistence", Variant::PACKED_FLOAT64_ARRAY, flat, persistence_h);
 	const auto *scores = column(columns, "score", Variant::PACKED_FLOAT64_ARRAY, flat, score_h, false);
 	// The AI inputs, optional: rows * input_stride values.
 	const int64_t input_stride = int64_t(columns.get("input_stride", 0));
@@ -414,18 +404,22 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	if (input_stride > 0 && !inputs) {
 		return result; // column() said why
 	}
-	// The owned tags (rows * tag_words), the modifiers' sums (rows * stride) and the blocks: all optional.
+	// The owned tags (rows * tag_words), the numbers the modifiers leave (rows * stride each) and the blocks: all optional.
 	const int64_t tag_words = int64_t(columns.get("tag_words", 0));
-	PackedInt64Array owned_h, blocked_h;
-	PackedFloat64Array modifier_h;
+	PackedInt64Array owned_h, blocked_h, threshold_h, min_run_h;
+	PackedFloat64Array modifier_h, jitter_h;
 	const auto *owned = tag_words > 0 ? column(columns, "owned", Variant::PACKED_INT64_ARRAY, rows * tag_words, owned_h) : nullptr;
 	const auto *modifiers = columns.has("modifier") ? column(columns, "modifier", Variant::PACKED_FLOAT64_ARRAY, flat, modifier_h) : nullptr;
+	const auto *jitters = columns.has("jitter") ? column(columns, "jitter", Variant::PACKED_FLOAT64_ARRAY, flat, jitter_h) : nullptr;
+	const auto *thresholds = columns.has("interrupt_threshold") ? column(columns, "interrupt_threshold", Variant::PACKED_INT64_ARRAY, flat, threshold_h) : nullptr;
+	const auto *min_runs = columns.has("min_run") ? column(columns, "min_run", Variant::PACKED_INT64_ARRAY, flat, min_run_h) : nullptr;
 	const auto *blocked = columns.has("blocked") ? column(columns, "blocked", Variant::PACKED_INT64_ARRAY, rows, blocked_h) : nullptr;
-	if ((tag_words > 0 && !owned) || (columns.has("modifier") && !modifiers) || (columns.has("blocked") && !blocked)) {
+	if ((tag_words > 0 && !owned) || (columns.has("modifier") && !modifiers) || (columns.has("jitter") && !jitters) ||
+			(columns.has("interrupt_threshold") && !thresholds) || (columns.has("min_run") && !min_runs) || (columns.has("blocked") && !blocked)) {
 		return result; // column() said why
 	}
 	if (!pawn || !seed || !tick || !has_target || !normal || !priority || !running || !started || !cooling || !can_press ||
-			!known || !available || !persistence) {
+			!known || !available) {
 		return result;
 	}
 	if (columns.has("score") && !scores) {
@@ -440,11 +434,13 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 	unknown_out.resize(rows);
 	// Raw pointers, read once: the Packed arrays' operator[] goes through a bounds check each time.
 	const int32_t *brain_of = brains_holder.ptr();
-	const double *persistence_of = persistence->ptr();
 	const double *score_of = scores ? scores->ptr() : nullptr;
 	const double *inputs_of = inputs ? inputs->ptr() : nullptr;
 	const uint64_t *owned_of = owned ? reinterpret_cast<const uint64_t *>(owned->ptr()) : nullptr;
 	const double *modifier_of = modifiers ? modifiers->ptr() : nullptr;
+	const double *jitter_of = jitters ? jitters->ptr() : nullptr;
+	const int64_t *threshold_of = thresholds ? thresholds->ptr() : nullptr;
+	const int64_t *min_run_of = min_runs ? min_runs->ptr() : nullptr;
 
 	for (int64_t r = 0; r < rows; ++r) {
 		chosen_out.set(r, -1);
@@ -464,12 +460,14 @@ Dictionary AIBatchDecider::decide(const Dictionary &columns) {
 		in.event_normal = (*normal)[r] != 0;
 		in.owned = owned_of ? owned_of + r * tag_words : nullptr;
 		in.owned_count = owned_of ? tag_words : 0;
-		in.modifier = modifier_of ? modifier_of + r * _stride : nullptr;
+		in.bonus = modifier_of ? modifier_of + r * _stride : nullptr;
+		in.jitter = jitter_of ? jitter_of + r * _stride : nullptr;
+		in.interrupt_threshold = threshold_of ? threshold_of + r * _stride : nullptr;
+		in.min_run = min_run_of ? min_run_of + r * _stride : nullptr;
 		in.blocked = blocked ? uint64_t((*blocked)[r]) : 0;
 		in.has_target = (*has_target)[r] != 0;
 		in.cooling = uint64_t((*cooling)[r]);
 		in.can_press = uint64_t((*can_press)[r]);
-		in.persistence = persistence_of + r * _stride;
 		in.view = RowView{ (*known)[r], (*available)[r], score_of ? score_of + r * _stride : nullptr,
 			inputs_of ? inputs_of + r * input_stride : nullptr, input_stride, (*seed)[r], (*pawn)[r], in.now };
 		const RowResult out = decide_row(_brains[b], in);
@@ -500,10 +498,11 @@ AIBatchDecider::RowResult AIBatchDecider::decide_row(const Brain &brain, const R
 	if (run_bit) {
 		const Behaviour &running_one = brain.behaviours[run];
 		const int64_t threshold = in.interrupt_threshold ? in.interrupt_threshold[run] : running_one.interrupt_threshold;
+		const int64_t min_run = in.min_run ? in.min_run[run] : running_one.min_run_ticks;
 		const bool must_go = (in.blocked & run_bit) != 0 || !passes_gate(running_one, in.owned, in.owned_count);
 		const bool normal = in.event_normal && !must_go;
 		const bool keep = running_one.cannot_be_interrupted || in.event_priority < threshold ||
-				(normal && running_one.min_run_ticks > 0 && now - in.running_started < running_one.min_run_ticks);
+				(normal && min_run > 0 && now - in.running_started < min_run);
 		if (keep) {
 			out.chosen = run;
 			out.kept = true;
@@ -535,12 +534,12 @@ AIBatchDecider::RowResult AIBatchDecider::decide_row(const Brain &brain, const R
 		const double jitter = in.jitter ? in.jitter[slot] : behaviour.jitter;
 		Candidate c;
 		c.slot = slot;
-		// Persistence and the modifiers' sum together, added as GDScript adds them (its boost), so the two agree to the bit.
-		c.persistence = in.persistence[slot] + (in.modifier ? in.modifier[slot] : 0.0);
+		// The modifiers' score bonus, added as GDScript adds it, so the two agree to the bit.
+		c.bonus = in.bonus ? in.bonus[slot] : 0.0;
 		c.jitter = jitter > 0.0 ? jitter * (random_unit_at(view.random_seed, view.pawn_number, now, behaviour.name_hash) * 2.0 - 1.0) : 0.0;
-		c.ceiling = behaviour.max_score + c.persistence + jitter;
+		c.ceiling = behaviour.max_score + c.bonus + jitter;
 		c.has_floor = behaviour.has_min_score;
-		c.floor = c.has_floor ? behaviour.min_score + c.persistence - jitter : NEG_INF;
+		c.floor = c.has_floor ? behaviour.min_score + c.bonus - jitter : NEG_INF;
 		_candidates.push_back(c);
 	}
 	uint64_t answers = 0;
@@ -575,7 +574,7 @@ AIBatchDecider::RowResult AIBatchDecider::decide_row(const Brain &brain, const R
 		if (!is_available(brain, c.slot, view, out.asked, answers, out.unknown)) {
 			continue;
 		}
-		const double result_now = score(brain, c.slot, view) + c.persistence + c.jitter;
+		const double result_now = score(brain, c.slot, view) + c.bonus + c.jitter;
 		if (best < 0 || result_now > best_result + brain.tie_margin) {
 			best = c.slot;
 			best_result = result_now;
@@ -627,17 +626,7 @@ int AIBatchDecider::add_pawn(int64_t id, int brain, int64_t pawn_number, int64_t
 	p.pawn_number = pawn_number;
 	p.random_seed = random_seed;
 	p.ended.assign(count, -1);
-	p.persistence_running.assign(count, 0);
-	p.persistence_along.assign(count, 0.0);
-	p.persistence_changed.assign(count, 0);
-	p.persistence_speed.assign(count, 1.0);
-	p.persistence_mask.assign(count, fade_math::Fade());
-	p.jitter.resize(count);
-	p.interrupt_threshold.resize(count);
-	for (size_t i = 0; i < count; ++i) {
-		p.jitter[i] = b.behaviours[i].jitter;
-		p.interrupt_threshold[i] = b.behaviours[i].interrupt_threshold;
-	}
+	reset_numbers(p, b);
 	return row;
 }
 
@@ -664,20 +653,15 @@ bool AIBatchDecider::row_ok(int row) const {
 	return row >= 0 && row < int(_pawns.size()) && _pawns[row].brain >= 0;
 }
 
-void AIBatchDecider::set_pawn_state(int row, int running, int64_t running_started, const PackedInt64Array &ended_ticks,
-		const PackedFloat64Array &persistence) {
+void AIBatchDecider::set_pawn_state(int row, int running, int64_t running_started, const PackedInt64Array &ended_ticks) {
 	ERR_FAIL_COND_MSG(!row_ok(row), "AIBatchDecider.set_pawn_state: no pawn in that row.");
 	PawnRow &p = _pawns[row];
 	const int64_t count = int64_t(p.ended.size());
-	ERR_FAIL_COND_MSG(ended_ticks.size() != count || persistence.size() != count * 4, "AIBatchDecider.set_pawn_state: wrong lengths for the brain.");
+	ERR_FAIL_COND_MSG(ended_ticks.size() != count, "AIBatchDecider.set_pawn_state: wrong length for the brain.");
 	p.running = running;
 	p.running_started = running_started;
 	for (int64_t i = 0; i < count; ++i) {
 		p.ended[i] = ended_ticks[i];
-		p.persistence_running[i] = persistence[i * 4] != 0.0 ? 1 : 0;
-		p.persistence_along[i] = persistence[i * 4 + 1];
-		p.persistence_changed[i] = int64_t(persistence[i * 4 + 2]);
-		p.persistence_speed[i] = persistence[i * 4 + 3];
 	}
 }
 
@@ -686,18 +670,12 @@ Dictionary AIBatchDecider::get_pawn_state(int row) const {
 	ERR_FAIL_COND_V_MSG(!row_ok(row), state, "AIBatchDecider.get_pawn_state: no pawn in that row.");
 	const PawnRow &p = _pawns[row];
 	PackedInt64Array ended;
-	PackedFloat64Array persistence;
 	for (size_t i = 0; i < p.ended.size(); ++i) {
 		ended.push_back(p.ended[i]);
-		persistence.push_back(p.persistence_running[i] ? 1.0 : 0.0);
-		persistence.push_back(p.persistence_along[i]);
-		persistence.push_back(double(p.persistence_changed[i]));
-		persistence.push_back(p.persistence_speed[i]);
 	}
 	state["running"] = p.running;
 	state["running_started"] = p.running_started;
 	state["ended"] = ended;
-	state["persistence"] = persistence;
 	return state;
 }
 
@@ -710,71 +688,20 @@ void AIBatchDecider::stop_running(int row, int64_t tick) {
 	}
 }
 
-// AIBehaviourBase._persistence_ticks_along: how far along its fade, from the three numbers.
-static double ticks_along(double along, int64_t changed, double speed, int64_t tick) {
-	return along + double(tick - changed) * speed;
-}
-
-void AIBatchDecider::add_persistence_ticks(int row, int slot, double ticks, int64_t tick) {
-	ERR_FAIL_COND(!row_ok(row));
-	PawnRow &p = _pawns[row];
-	ERR_FAIL_INDEX(slot, int(p.ended.size()));
-	if (!p.persistence_running[slot]) {
-		return;
+// The numbers the modifiers leave, back to the brain's own: no bonus, its jitter, threshold, cooldown and minimum run.
+void AIBatchDecider::reset_numbers(PawnRow &p, const Brain &b) {
+	const size_t count = b.behaviours.size();
+	p.bonus.clear();
+	p.jitter.resize(count);
+	p.interrupt_threshold.resize(count);
+	p.cooldown.resize(count);
+	p.min_run.resize(count);
+	for (size_t i = 0; i < count; ++i) {
+		p.jitter[i] = b.behaviours[i].jitter;
+		p.interrupt_threshold[i] = b.behaviours[i].interrupt_threshold;
+		p.cooldown[i] = b.behaviours[i].cooldown_ticks;
+		p.min_run[i] = b.behaviours[i].min_run_ticks;
 	}
-	p.persistence_along[slot] = std::max(0.0, ticks_along(p.persistence_along[slot], p.persistence_changed[slot], p.persistence_speed[slot], tick) - ticks);
-	p.persistence_changed[slot] = tick;
-}
-
-void AIBatchDecider::set_persistence_speed(int row, int slot, double speed, int64_t tick) {
-	ERR_FAIL_COND(!row_ok(row));
-	PawnRow &p = _pawns[row];
-	ERR_FAIL_INDEX(slot, int(p.ended.size()));
-	p.persistence_along[slot] = ticks_along(p.persistence_along[slot], p.persistence_changed[slot], p.persistence_speed[slot], tick);
-	p.persistence_changed[slot] = tick;
-	p.persistence_speed[slot] = std::max(0.0, speed);
-}
-
-void AIBatchDecider::set_persistence_mask(int row, int slot, const Dictionary &fade_values) {
-	ERR_FAIL_COND(!row_ok(row));
-	PawnRow &p = _pawns[row];
-	ERR_FAIL_INDEX(slot, int(p.persistence_mask.size()));
-	if (fade_values.is_empty()) {
-		p.persistence_mask[slot] = fade_math::Fade();
-		return;
-	}
-	fade_math::read_values(p.persistence_mask[slot], int(fade_values.get("mode", 0)), int64_t(fade_values.get("hold", 0)),
-			int64_t(fade_values.get("fade", 60)), int64_t(fade_values.get("half_life", 30)), fade_values.get("curve", Variant()));
-}
-
-void AIBatchDecider::set_score_jitter(int row, int slot, double effective_jitter) {
-	ERR_FAIL_COND(!row_ok(row));
-	ERR_FAIL_INDEX(slot, int(_pawns[row].jitter.size()));
-	_pawns[row].jitter[slot] = effective_jitter;
-}
-
-void AIBatchDecider::set_interrupt_threshold(int row, int slot, int64_t threshold) {
-	ERR_FAIL_COND(!row_ok(row));
-	ERR_FAIL_INDEX(slot, int(_pawns[row].interrupt_threshold.size()));
-	_pawns[row].interrupt_threshold[slot] = threshold;
-}
-
-double AIBatchDecider::persistence_now(int row, int slot, int64_t tick) const {
-	ERR_FAIL_COND_V(!row_ok(row), 0.0);
-	const PawnRow &p = _pawns[row];
-	ERR_FAIL_INDEX_V(slot, int(p.ended.size()), 0.0);
-	const Behaviour &behaviour = _brains[p.brain].behaviours[slot];
-	// AIBehaviourBase.persistence_now: nothing unless it started, has an amount, and has a fade.
-	if (!p.persistence_running[slot] || behaviour.persistence == 0.0 || !behaviour.has_persistence_fade) {
-		return 0.0;
-	}
-	// AIBehaviourBase.persistence_now: the amount times the fade, times the pawn's own mask if it has one, in that order.
-	const double along = ticks_along(p.persistence_along[slot], p.persistence_changed[slot], p.persistence_speed[slot], tick);
-	double amount = behaviour.persistence * fade_math::value_at(behaviour.persistence_fade, along);
-	if (p.persistence_mask[slot].has_profile) {
-		amount *= fade_math::value_at(p.persistence_mask[slot], along);
-	}
-	return amount;
 }
 
 void AIBatchDecider::set_input_kinds(const PackedInt32Array &kinds) {
@@ -907,11 +834,31 @@ void AIBatchDecider::set_owned_tags(int row, const PackedInt64Array &words) {
 	}
 }
 
-void AIBatchDecider::set_modifiers(int row, const PackedFloat64Array &sums, int64_t blocked_mask) {
+void AIBatchDecider::set_modifiers(int row, const PackedFloat64Array &bonus, const PackedFloat64Array &jitter,
+		const PackedInt64Array &interrupt_threshold, const PackedInt64Array &cooldown, const PackedInt64Array &min_run, int64_t blocked_mask) {
 	ERR_FAIL_COND(!row_ok(row));
 	PawnRow &p = _pawns[row];
-	ERR_FAIL_COND_MSG(sums.size() != int64_t(_brains[p.brain].behaviours.size()), "AIBatchDecider.set_modifiers: one sum per behaviour.");
-	p.modifier.assign(sums.ptr(), sums.ptr() + sums.size());
+	const Brain &b = _brains[p.brain];
+	const int64_t count = int64_t(b.behaviours.size());
+	for (int64_t size : { bonus.size(), jitter.size(), interrupt_threshold.size(), cooldown.size(), min_run.size() }) {
+		ERR_FAIL_COND_MSG(size != 0 && size != count, "AIBatchDecider.set_modifiers: each array is empty or has one number per behaviour.");
+	}
+	reset_numbers(p, b);
+	if (!bonus.is_empty()) {
+		p.bonus.assign(bonus.ptr(), bonus.ptr() + count);
+	}
+	if (!jitter.is_empty()) {
+		p.jitter.assign(jitter.ptr(), jitter.ptr() + count);
+	}
+	if (!interrupt_threshold.is_empty()) {
+		p.interrupt_threshold.assign(interrupt_threshold.ptr(), interrupt_threshold.ptr() + count);
+	}
+	if (!cooldown.is_empty()) {
+		p.cooldown.assign(cooldown.ptr(), cooldown.ptr() + count);
+	}
+	if (!min_run.is_empty()) {
+		p.min_run.assign(min_run.ptr(), min_run.ptr() + count);
+	}
 	p.blocked = uint64_t(blocked_mask);
 }
 
@@ -956,11 +903,22 @@ Dictionary AIBatchDecider::get_facts(int row) const {
 		owned.append(int64_t(word));
 	}
 	facts["owned"] = owned;
-	PackedFloat64Array modifier;
-	for (double sum : p.modifier) {
-		modifier.append(sum);
+	PackedFloat64Array bonus, jitter;
+	PackedInt64Array threshold, cooldown, min_run;
+	for (double value : p.bonus) {
+		bonus.append(value);
 	}
-	facts["modifier"] = modifier;
+	for (size_t i = 0; i < p.jitter.size(); ++i) {
+		jitter.append(p.jitter[i]);
+		threshold.append(p.interrupt_threshold[i]);
+		cooldown.append(p.cooldown[i]);
+		min_run.append(p.min_run[i]);
+	}
+	facts["bonus"] = bonus;
+	facts["jitter"] = jitter;
+	facts["interrupt_threshold"] = threshold;
+	facts["cooldown"] = cooldown;
+	facts["min_run"] = min_run;
 	facts["blocked"] = int64_t(p.blocked);
 	facts["target_id"] = int64_t(p.target_id);
 	facts["can_press"] = int64_t(p.can_press);
@@ -973,15 +931,13 @@ int AIBatchDecider::decide_pawn(int row, int64_t tick, int64_t event_priority, b
 	PawnRow &p = _pawns[row];
 	const Brain &brain = _brains[p.brain];
 	const int count = int(brain.behaviours.size());
-	// The hard rule's cooldowns (AIBehaviourBase.is_cooling_down) and each behaviour's persistence now.
+	// The hard rule's cooldowns (AIBehaviourBase.is_cooling_down), with the modifiers' numbers.
 	uint64_t cooling = 0;
-	_persistence_scratch.resize(size_t(count));
 	for (int slot = 0; slot < count; ++slot) {
-		const int64_t cooldown = brain.behaviours[slot].cooldown_ticks;
+		const int64_t cooldown = p.cooldown[slot];
 		if (cooldown > 0 && p.ended[slot] >= 0 && tick - p.ended[slot] < cooldown) {
 			cooling |= uint64_t(1) << slot;
 		}
-		_persistence_scratch[slot] = persistence_now(row, slot, tick);
 	}
 	// Where the pawn is now, from its body.
 	Node3D *body = Object::cast_to<Node3D>(alive(p.body_id));
@@ -994,20 +950,20 @@ int AIBatchDecider::decide_pawn(int row, int64_t tick, int64_t event_priority, b
 	in.event_normal = event_normal;
 	in.owned = p.owned.data();
 	in.owned_count = int64_t(p.owned.size());
-	in.modifier = p.modifier.empty() ? nullptr : p.modifier.data();
+	in.bonus = p.bonus.empty() ? nullptr : p.bonus.data();
 	in.blocked = p.blocked;
 	in.has_target = alive(p.target_id) != nullptr;
 	in.cooling = cooling;
 	in.can_press = p.can_press;
-	in.persistence = _persistence_scratch.data();
 	in.jitter = p.jitter.data();
 	in.interrupt_threshold = p.interrupt_threshold.data();
+	in.min_run = p.min_run.data();
 	int64_t input_count = 0;
 	const double *input_values = work_out_inputs(p, position, tick, input_count);
 	in.view = RowView{ 0, 0, nullptr, input_values, input_count, p.random_seed, p.pawn_number, tick };
 	const RowResult out = decide_row(brain, in);
 	_last_kept = out.kept;
-	// The switch, as AIBehaviourManager._start and _stop_running apply it: the old one's end, the new one's start and persistence.
+	// The switch, as AIBehaviourManager._start and _stop_running apply it: the old one's end, the new one's start.
 	if (out.chosen != p.running) {
 		if (p.running >= 0) {
 			p.ended[p.running] = tick;
@@ -1015,10 +971,6 @@ int AIBatchDecider::decide_pawn(int row, int64_t tick, int64_t event_priority, b
 		p.running = out.chosen;
 		if (out.chosen >= 0) {
 			p.running_started = tick;
-			p.persistence_running[out.chosen] = 1;
-			p.persistence_along[out.chosen] = 0.0;
-			p.persistence_changed[out.chosen] = tick;
-			p.persistence_speed[out.chosen] = 1.0;
 		}
 	}
 	return out.chosen;
@@ -1041,19 +993,13 @@ void AIBatchDecider::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("remove_pawn", "id"), &AIBatchDecider::remove_pawn);
 	ClassDB::bind_method(D_METHOD("find_pawn", "id"), &AIBatchDecider::find_pawn);
 	ClassDB::bind_method(D_METHOD("get_pawn_count"), &AIBatchDecider::get_pawn_count);
-	ClassDB::bind_method(D_METHOD("set_pawn_state", "row", "running", "running_started", "ended_ticks", "persistence"), &AIBatchDecider::set_pawn_state);
+	ClassDB::bind_method(D_METHOD("set_pawn_state", "row", "running", "running_started", "ended_ticks"), &AIBatchDecider::set_pawn_state);
 	ClassDB::bind_method(D_METHOD("get_pawn_state", "row"), &AIBatchDecider::get_pawn_state);
 	ClassDB::bind_method(D_METHOD("stop_running", "row", "tick"), &AIBatchDecider::stop_running);
-	ClassDB::bind_method(D_METHOD("add_persistence_ticks", "row", "slot", "ticks", "tick"), &AIBatchDecider::add_persistence_ticks);
-	ClassDB::bind_method(D_METHOD("set_persistence_speed", "row", "slot", "speed", "tick"), &AIBatchDecider::set_persistence_speed);
-	ClassDB::bind_method(D_METHOD("set_persistence_mask", "row", "slot", "fade_values"), &AIBatchDecider::set_persistence_mask);
-	ClassDB::bind_method(D_METHOD("set_score_jitter", "row", "slot", "effective_jitter"), &AIBatchDecider::set_score_jitter);
-	ClassDB::bind_method(D_METHOD("set_interrupt_threshold", "row", "slot", "threshold"), &AIBatchDecider::set_interrupt_threshold);
-	ClassDB::bind_method(D_METHOD("persistence_now", "row", "slot", "tick"), &AIBatchDecider::persistence_now);
 	ClassDB::bind_method(D_METHOD("decide_pawn", "row", "tick", "event_priority", "event_normal"), &AIBatchDecider::decide_pawn);
 	ClassDB::bind_method(D_METHOD("set_body", "row", "body_id", "memory_store"), &AIBatchDecider::set_body);
 	ClassDB::bind_method(D_METHOD("set_owned_tags", "row", "words"), &AIBatchDecider::set_owned_tags);
-	ClassDB::bind_method(D_METHOD("set_modifiers", "row", "sums", "blocked_mask"), &AIBatchDecider::set_modifiers);
+	ClassDB::bind_method(D_METHOD("set_modifiers", "row", "bonus", "jitter", "interrupt_threshold", "cooldown", "min_run", "blocked_mask"), &AIBatchDecider::set_modifiers);
 	ClassDB::bind_method(D_METHOD("set_target", "row", "target_id"), &AIBatchDecider::set_target);
 	ClassDB::bind_method(D_METHOD("set_can_press", "row", "mask"), &AIBatchDecider::set_can_press);
 	ClassDB::bind_method(D_METHOD("set_input", "row", "slot", "value"), &AIBatchDecider::set_input);

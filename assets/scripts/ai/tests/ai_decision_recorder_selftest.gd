@@ -143,7 +143,9 @@ func _test_kept_by_interrupt() -> void:
 	stronger.available = true
 	_decide(pawn, 2)
 	var record := _recorder.get_records()[1]
-	_check(record.kept_by_interrupt and record.behaviours.is_empty(), "a behaviour that can't be interrupted: kept, nothing looked at")
+	# Claude 2026-11-25 (pawn spec 16.10 step 6a): a kept record holds the running behaviour's numbers, which its modifiers may change.
+	_check(record.kept_by_interrupt and record.behaviours.size() == 1 and record.behaviours[0]["rule"] == AIDecisionRecord.RULE_KEPT,
+			"a behaviour that can't be interrupted: kept, nothing looked at but its own numbers")
 	_check(record.chosen == &"Stubborn" and record.running_before == &"Stubborn", "...and it's still the choice")
 	_check_equal(record.running_started_tick, 1, "...with the tick it started")
 	pawn.free()

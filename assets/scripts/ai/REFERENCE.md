@@ -6,13 +6,13 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 
 - [AIBehaviourBase](#aibehaviourbase)
 - [AIBehaviourManager](#aibehaviourmanager)
+- [AIBehaviourModifier](#aibehaviourmodifier)
 - [AIDecisionModule](#aidecisionmodule)
 - [AIDecisionRecord](#aidecisionrecord)
 - [AIInputs](#aiinputs)
 - [AIManager](#aimanager)
 - [AIMemory](#aimemory)
 - [AIMemoryStoreGD](#aimemorystoregd)
-- [AIScoreModifier](#aiscoremodifier)
 - [AISenseBase](#aisensebase)
 - [AISensingManager](#aisensingmanager)
 - [AIStateBase](#aistatebase)
@@ -49,7 +49,7 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 ### Settings and properties
 
 - `enabled: bool` = `true`: Off: never chosen, and a running one is replaced, as if it weren't there. The way an inherited scene switches off a behaviour it can't remove.
-- `tags: StringName[]` = `[]`: What it is, as tags such as &"ai.stance.melee": what score modifiers pick behaviours by (`AIScoreModifier.applies_to`).
+- `tags: StringName[]` = `[]`: What it is, as tags such as &"ai.stance.melee": what behaviour modifiers pick behaviours by (`AIBehaviourModifier.applies_to`).
 - `tag_requirements: TagQuery`: When it may run: a query over the pawn's owned tags, such as any of ai.state.combat (the AI's state is a tag), or none of status.has_ammo. While it fails, the behaviour can't be chosen, and a running one is replaced at the next AI step. Empty: always.
 - `max_score: float` = `0.5`: The highest score() can return. Lets the manager skip it without running its code when it can't win.
 - `min_score: float` = `inf_neg`: Optional: the lowest score() can return. Left at -inf it can't help skip others, but it's never wrong.
@@ -58,14 +58,13 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `conditions: AICondition[]` = `[]`: More conditions it needs, on top of its own (`own_conditions()`). All must pass. Made in the inspector: compare an input with a number, a random chance, or "any of".
 - `score_curves: AIScoreCurve[]` = `[]`: Optional: inputs that scale its score between min_score (or 0) and max_score, multiplied together. Empty: always max_score.
 - `cooldown_ticks: int` = `0`: Ticks after it ends before it can be chosen again. A hard rule, checked before any scoring.
-- `min_run_ticks: int` = `0`: Once chosen, ordinary decisions can't replace it for this many ticks. State changes and forces still can, if strong enough.
+- `min_run_ticks: int` = `0`: Once chosen, ordinary decisions can't replace it for this many ticks. State changes and forces still can, if strong enough. Behaviour modifiers can change it, as they can cooldown_ticks, interrupt_threshold and score_jitter.
 - `interrupt_threshold: int` = `0`: While it runs, only events of this priority or higher can replace it: 0 for an ordinary decision, a state's priority for a state change, a force's priority for a forced state. 0: anything can.
 - `cannot_be_interrupted: bool` = `false`: Runs until it returns SUCCEEDED or FAILED, whatever happens, even if its state no longer allows it. Use sparingly.
 - `score_jitter: float` = `-1.0`: ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
 - `tick_interval_ticks: int` = `1`: While it runs, `tick()` is called every this many ticks, and sooner when a wake-up it asked for happens (the longest it sleeps). Count time with context.current_tick, not by counting tick() calls. 1: every tick.
-- `persistence: float` = `0.0`: Added to its score from when it's chosen, times persistence_fade's value. +: tends to keep it chosen. -: prefers others for a while.
-- `persistence_fade: FadeProfile`: How persistence fades over ticks. Empty: no persistence.
-- `persistence_mask: FadeProfile` = `null`: This pawn's own mask over `persistence_fade`, multiplied with it. Null: none. Set through `AIBehaviourManager.set_persistence_mask()` so C++ hears of it. A hook; nothing sets one yet.
+- `modifier_on_start: AIBehaviourModifier`: A modifier it gives itself as it starts, such as a score bonus that keeps it chosen a while. Empty applies_to: only this behaviour. With no duration it lasts while the behaviour runs; with one, its duration from the start. Starting again replaces it.
+- `modifier_on_end: AIBehaviourModifier`: A modifier it gives itself as it ends, such as -0.3 to its score for 15 s so something else gets a turn. Empty applies_to: only this behaviour. With no duration it lasts until the behaviour starts again; with one, its duration. Ending again replaces it.
 - `manager: AIBehaviourManager` = `null`: Set by the AIBehaviourManager.
 - `pawn: Pawn` = `null`: The pawn this behaviour belongs to. Set by the AIBehaviourManager.
 - `name_hash: int` = `0`: Worked out once by the manager: a hash of the name, for random numbers.
@@ -73,9 +72,9 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `ended_tick: int` = `-1`: The tick it last ended (-1: never).
 - `perf_available_name: StringName` = `&""`: The timing scope names for its is_available() and its tick(), such as &"ai.available.Chase" and &"ai.behaviour.Chase" (see [`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)). Made once by the manager, so timing makes no new names.
 - `perf_tick_name: StringName` = `&""`: The timing scope name for its tick(), such as &"ai.behaviour.Chase". Made once by the manager.
-- `decision_persistence: float` = `0.0`
-- `decision_modifier: float` = `0.0`
-- `decision_blocked: bool` = `false`
+- `modifier_changes: PackedFloat64Array[]` = `[]`: What the behaviour modifiers that count for it do to each of its numbers (`AIBehaviourModifier.Number`): one `[multiply, add, overrides, override value]` per number. Worked out by the manager when they or the owned tags change.
+- `decision_blocked: bool` = `false`: A blocking behaviour modifier counts for it. Set by the manager with `modifier_changes`.
+- `decision_bonus: float` = `0.0`
 - `decision_jitter: float` = `0.0`
 - `decision_ceiling: float` = `0.0`
 - `decision_floor: float` = `0.0`
@@ -114,13 +113,14 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `exit(_context: AIManager, _reason: String) -> void`: Once, when it stops. reason says why, such as "decision", "interrupted", "succeeded", "failed" or "removed".
 - `passes_requirements(owned_words: PackedInt64Array) -> bool`: True if it's enabled and its tag requirements pass for the pawn's owned tags, given as words (`OwnedTags.get_words()`).
 - `tag_words() -> PackedInt64Array`: Its own `tags` as words, parents included, for score modifiers' applies_to.
-- `is_cooling_down(at_tick: int) -> bool`: True while its cooldown hasn't finished.
-- `effective_jitter() -> float`: This behaviour's jitter amount: its own, or the manager's default when it's -1.
-- `persistence_now(at_tick: int) -> float`: What persistence adds to its score at this tick.
-- `persistence_state() -> PackedFloat64Array`: Its persistence as four numbers: started (1 or 0), ticks along the fade, the tick that was worked out at, and the speed. The AIDecisionModule copies them into C++ when the pawn starts deciding there.
-- `start_persistence(at_tick: int) -> void`: Starts persistence from the beginning of its fade. The manager calls this when the behaviour is chosen.
-- `add_persistence_ticks(ticks: float, at_tick: int) -> void`: Moves persistence back along its fade by this many ticks, so it lasts longer. Negative: forward, so it ends sooner.
-- `set_persistence_speed(speed: float, at_tick: int) -> void`: How fast persistence moves along its fade from now on: 1.0 normally, 0.5 for half speed.
+- `is_cooling_down(at_tick: int) -> bool`: True while its cooldown (as its modifiers leave it) hasn't finished.
+- `effective_jitter() -> float`: This behaviour's jitter amount before modifiers: its own, or the manager's default when it's -1.
+- `modified(number: int, base: float) -> float`: One of its numbers as its modifiers leave it: base times their multiplies plus their adds, or the last override.
+- `score_bonus() -> float`: What its modifiers add to its score (0 with none).
+- `current_jitter() -> float`: Its jitter amount with modifiers, never below 0.
+- `current_interrupt_threshold() -> int`: Its interrupt threshold with modifiers.
+- `current_cooldown_ticks() -> int`: Its cooldown with modifiers, in this match's ticks; 0: none.
+- `current_min_run_ticks() -> int`: Its minimum run with modifiers, in this match's ticks; 0: none.
 
 ## AIBehaviourManager
 
@@ -132,9 +132,8 @@ A component of the pawn's AIManager (added by PawnInitializer, or the game's AI 
 
 ```gdscript
 pawn.ai.behaviour_manager.get_running_behaviour()
-pawn.ai.behaviour_manager.add_persistence_ticks(&"Chase", 60)    # say after landing a hit
-pawn.ai.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say for a confused effect
-pawn.ai.behaviour_manager.add_score_modifier(charge_shout, self)   # raise melee until removed (AIScoreModifier)
+pawn.ai.behaviour_manager.add_modifier(charge_shout, self)   # raise melee until removed (AIBehaviourModifier)
+pawn.ai.behaviour_manager.remove_modifiers(self)
 ```
 
 With the [`AIDecisionModule`](#aidecisionmodule) in the game, C++ makes the decisions and this manager is the backup (`decide()`). Design: pawn spec 10.7 and 10.8, scaling spec 6.2.
@@ -149,7 +148,7 @@ With the [`AIDecisionModule`](#aidecisionmodule) in the game, C++ makes the deci
 - `tie_margin: float` = `0.0001`: Results closer than this count as a tie.
 - `pawn: Pawn` = `null`: The pawn this is a part of, or null.
 - `cpp_row: int` = `-1`: Its row in the C++ decider, set by the [`AIDecisionModule`](#aidecisionmodule); -1 while it decides in GDScript.
-- `modifiers_version: int` = `0`: Goes up by one whenever the score modifiers' sums or blocks change, so the C++ decider's copy is written again. Don't set it.
+- `modifiers_version: int` = `0`: Goes up by one whenever what the behaviour modifiers do to any behaviour changes, so the C++ decider's copy is written again.
 
 ### Signals
 
@@ -160,7 +159,7 @@ With the [`AIDecisionModule`](#aidecisionmodule) in the game, C++ makes the deci
 - `DecidesIn.CPP = 0`: by C++, the main path (the default)
 - `DecidesIn.GDSCRIPT = 1`: by this manager, the backup
 - `TIE_SALT = 28981`
-- `MODIFIER_TAG_SOURCE = &"score_modifiers"`
+- `MODIFIER_TAG_SOURCE = &"behaviour_modifiers"`
 
 ### Functions
 
@@ -171,18 +170,55 @@ With the [`AIDecisionModule`](#aidecisionmodule) in the game, C++ makes the deci
 - `decide(tick: int, record: AIDecisionRecord = null) -> void`: Makes the waiting decision (`AIManager.request_decision()`) and starts what it chose. record: filled in while `decision_listener` is set (null: made here). Twin of C++ `AIBatchDecider`: same steps, a change goes in both.
 - `tick_running(tick: int) -> void`: `AIManager.think()` calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 - `stop_running(reason: String) -> void`: Stops the running behaviour, if any; its exit() gets this reason. Called with "died" when the pawn dies.
-- `add_persistence_ticks(behaviour_name: StringName, ticks: float) -> void`: Moves a behaviour's persistence back along its fade by this many ticks, so it lasts longer. Negative: it ends sooner.
-- `set_persistence_speed(behaviour_name: StringName, speed: float) -> void`: How fast a behaviour's persistence fades from now on: 1.0 normally, 0.5 for half speed.
-- `set_persistence_mask(behaviour_name: StringName, mask: FadeProfile) -> void`: Gives this pawn's behaviour a persistence mask: a fade multiplied with its own persistence fade, for this pawn only. Null: none. Counted from when the behaviour starts, as the fade is.
-- `set_interrupt_threshold(behaviour_name: StringName, threshold: int) -> void`: Changes a behaviour's interrupt threshold, even while it runs.
 - `inputs_changed() -> void`: Called when a behaviour's conditions change (`AIBehaviourBase.rebuild_conditions()`), so the inputs worked out at each decision are listed again, and C++ gets the new brain.
-- `set_score_jitter(behaviour_name: StringName, jitter: float) -> void`: Changes a behaviour's jitter. -1: back to default_score_jitter.
-- `add_score_modifier(modifier: AIScoreModifier, source: Variant) -> void`: Adds a score modifier (pawn spec 10.13), kept under this source: anything that names it, usually the node or effect that adds it. A source may add several; `remove_score_modifier()` takes all of its own away.
-- `remove_score_modifier(source: Variant) -> void`: Takes away every score modifier this source added.
-- `get_score_modifiers() -> Dictionary[]`: The score modifiers now, in the order added: {modifier, source, ends} each (ends is the tick it goes, -1 until removed).
-- `refresh_modifiers(tick: int) -> void`: Works the modifiers' sum and block for each behaviour out again, if anything they depend on changed: the list, a deadline passing, or the pawn's owned tags (their ongoing requirements). Every decision calls it first; cheap when nothing changed.
+- `add_modifier(modifier: AIBehaviourModifier, source: Variant) -> void`: Adds a behaviour modifier (pawn spec 16.5), kept under this source: anything that names it, usually the node or effect that adds it. A source may add several; `remove_modifiers()` takes all of its own away.
+- `remove_modifiers(source: Variant) -> void`: Takes away every behaviour modifier this source added.
+- `get_modifiers() -> Dictionary[]`: The behaviour modifiers now, in the order added: {modifier, source, ends, only} each (ends is the tick it goes, -1 until removed; only is the behaviour that gave it to itself, or null).
+- `refresh_modifiers(tick: int) -> void`: Works out again what the modifiers do to each behaviour's numbers and which they block, if anything they depend on changed: the list, a deadline passing, or the pawn's owned tags (their ongoing requirements). Every decision calls it first; cheap when nothing changed.
 - `check_running(tick: int) -> void`: The AI step calls this every run, before deciding: if the owned tags or the modifiers changed and the running behaviour's tag requirements now fail (or a modifier blocks it), it asks for a decision that its min_run_ticks don't hold off (its interrupt_threshold still does). A pawn out of shots leaves Keep Distance at once instead of at its next decision tick.
 - `worked_out_inputs() -> PackedInt32Array`: The slots of the worked-out inputs any behaviour's conditions or curves read, listed once (and again after inputs_changed()).
+
+## AIBehaviourModifier
+
+`res://assets/scripts/ai/AIBehaviourModifier.gd`, extends [`Definition`](../abilities/REFERENCE.md#definition)
+
+A change to some behaviours while it lasts: "Charge!" raising melee, fear lowering fighting, confusion's extra jitter, a block.
+
+The generic modifier (pawn spec 16.5, 16.9) aimed at behaviours by their tags: it changes one of their numbers (`number`), multiplying, then adding, or overriding it (the last added wins). A designer-made [`Definition`](../abilities/REFERENCE.md#definition) (with variants), given to a pawn's behaviour manager by whatever causes it and kept under that source:
+
+```gdscript
+pawn.ai.behaviour_manager.add_modifier(charge_shout, self)
+pawn.ai.behaviour_manager.remove_modifiers(self)
+```
+
+A behaviour can also apply one to itself as it starts or ends (`AIBehaviourBase.modifier_on_start`). The C++ decider gets the numbers they leave, not the modifiers. Only on the server, where the AI runs.
+
+### Settings and properties
+
+- `applies_to: TagQuery`: Which behaviours it changes: a query over each behaviour's own tags (`AIBehaviourBase.tags`), such as any of ai.stance.melee. Empty: every behaviour, or, given by a behaviour to itself as it starts or ends, only that behaviour.
+- `number: int` = `0`: Which number it changes.
+- `multiply: float` = `1.0`: The number is multiplied by this, before the adds. 1: nothing. Multiplies from several modifiers combine.
+- `add: float` = `0.0`: Added after the multiplies. Negative takes away. A score bonus of -0.3 drops a behaviour that scores 0.6 to 0.3.
+- `overrides: bool` = `false`: On: the number takes `override_value`, whatever the others do (the last one added wins). A berserk state's threshold.
+- `override_value: float` = `0.0`: With `overrides`, the number's value.
+- `blocks: bool` = `false`: On: the behaviours it applies to can't be chosen while it counts, and a running one is replaced; its number change is ignored.
+- `duration_ticks: int` = `0`: How long it lasts once added, in ticks at 60 a second; the manager keeps the tick it ends. 0: until its source removes it.
+- `ongoing_requirements: TagQuery`: It counts only while the pawn's owned tags pass this, such as none of status.has_ammo. Empty: always.
+- `granted_tags: StringName[]` = `[]`: Tags the pawn owns while it's added, so other queries can see it (an "ai.stance.melee" order, say).
+- `wakes_decision: bool` = `false`: On: adding or removing it asks for a decision at once. Off by default: hundreds of pawns deciding on one tick is a spike.
+
+### Constants
+
+- `Number.SCORE_BONUS = 0`: added to its score, in the units of max_score (0 with no modifier)
+- `Number.SCORE_JITTER = 1`: the ± random offset on its score (AIBehaviourBase.score_jitter, or the manager's default)
+- `Number.INTERRUPT_THRESHOLD = 2`: how strong an event must be to replace it while it runs
+- `Number.COOLDOWN_TICKS = 3`: ticks after it ends before it can be chosen again, at 60 a second
+- `Number.MIN_RUN_TICKS = 4`: ticks an ordinary decision can't replace it once chosen, at 60 a second
+
+### Functions
+
+- `applies_to_behaviour(behaviour: AIBehaviourBase, only: AIBehaviourBase = null) -> bool`: True if it applies to this behaviour. only: the behaviour that gave it to itself (null: none), which an empty applies_to means.
+- `counts_for(owned_words: PackedInt64Array) -> bool`: True if it counts for owned tags given as words (its ongoing requirements pass).
 
 ## AIDecisionModule
 
@@ -222,11 +258,6 @@ A GameMode module (`GameMode.get_module(AIDecisionModule)`). It holds the C++ de
 - `was_kept() -> bool`: Whether the interrupt rule kept the running behaviour at the last C++ decision.
 - `compare(manager: AIBehaviourManager, cpp_choice: int, tick: int) -> void`: Shadow mode: compares C++'s answer with GDScript's (what runs now), counts it, and puts C++'s copy of the state right after a disagreement.
 - `stopped(manager: AIBehaviourManager, tick: int) -> void`: The running behaviour stopped without a decision (finished, died, removed).
-- `persistence_ticks_added(manager: AIBehaviourManager, slot: int, ticks: float, tick: int) -> void`
-- `persistence_speed_set(manager: AIBehaviourManager, slot: int, speed: float, tick: int) -> void`
-- `jitter_set(manager: AIBehaviourManager, slot: int, effective_jitter: float) -> void`
-- `threshold_set(manager: AIBehaviourManager, slot: int, threshold: int) -> void`
-- `mask_set(manager: AIBehaviourManager, behaviour: AIBehaviourBase) -> void`: A behaviour's per-pawn persistence mask changed (null: none). A mask with its own value_at() code makes the pawn a special mind.
 
 ## AIDecisionRecord
 
@@ -264,7 +295,7 @@ Design: scaling spec 6.2.
 - `running_before: StringName` = `&""`: The behaviour running before the decision (&"": none), and the tick it started (-1: none).
 - `running_started_tick: int` = `-1`
 - `kept_by_interrupt: bool` = `false`: True when the running behaviour couldn't be replaced for this reason (step 0), so no behaviour was looked at.
-- `behaviours: Dictionary[]` = `[]`: One Dictionary per behaviour, in the manager's fixed order. Empty when `kept_by_interrupt`. See `add_behaviour()`.
+- `behaviours: Dictionary[]` = `[]`: One Dictionary per behaviour, in the manager's fixed order; only the running one's (`RULE_KEPT`) when `kept_by_interrupt`. See `add_behaviour()`.
 - `inputs: PackedFloat64Array` = `PackedFloat64Array()`: The pawn's AI inputs as this decision worked them out (`AIInputs.values`), by slot: what the behaviours' conditions read.
 - `chosen: StringName` = `&""`: What runs after the decision: a behaviour's name, or &"" for nothing.
 
@@ -276,18 +307,19 @@ Design: scaling spec 6.2.
 - `RULE_NONE = &""`: A hard rule that ruled a behaviour out before any of its own code ran (pawn spec 10.8 step 2). None: it was a candidate.
 - `RULE_TAGS = &"tags"`: Its tag requirements failed for the pawn's owned tags (the AI's state is one of them).
 - `RULE_OFF = &"off"`: Switched off (`AIBehaviourBase.enabled`).
-- `RULE_BLOCKED = &"blocked"`: A score modifier blocks it.
+- `RULE_BLOCKED = &"blocked"`: A behaviour modifier blocks it.
 - `RULE_COOLDOWN = &"cooldown"`: Cooling down.
 - `RULE_NO_TARGET = &"no_target"`: Needs a target, and there's none.
 - `RULE_ACTION = &"action"`: Its action couldn't start (AbilityManager.can_start).
 - `RULE_NOT_WORKED_OUT = &"cpp"`: Passed the hard rules, but C++ made the decision, so GDScript's range, availability and score weren't worked out.
+- `RULE_KEPT = &"kept"`: The running behaviour the interrupt rule kept: only its numbers, which the rule read (its threshold and minimum run).
 
 ### Functions
 
 - `note_target_before(target: Node3D) -> void`: Notes the target before the selector's update.
 - `note_target_after(target: Node3D) -> void`: Notes the target after the selector's update.
 - `changed() -> bool`: True when the running behaviour changed.
-- `add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void`: Adds one behaviour's entry from the scratch values the manager left on it. rule: the hard rule that ruled it out, or `RULE_NONE`. Keys: name, rule, modifier (the score modifiers' sum), and for a candidate persistence, jitter, ceiling, floor (null: none), available (1 yes, 0 no, -1 never asked) and score (null: not scored).
+- `add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void`: One behaviour's entry, from the manager's scratch values; rule: what ruled it out, or `RULE_NONE`. Keys: name, rule, and its numbers with modifiers (modifier: the score bonus, jitter_amount, interrupt_threshold, min_run at the match's rate); a candidate's also jitter (this decision's offset), ceiling, floor (null: none), available (1, 0, -1 never asked) and score (null: not scored).
 - `entry_for(behaviour_name: StringName) -> Dictionary`: The entry for this behaviour, or an empty Dictionary.
 - `to_dict() -> Dictionary`: Everything as plain values (text, numbers, arrays, dictionaries), ready for JSON.
 
@@ -513,36 +545,6 @@ Twin of `AIMemoryStore` in the navcore C++ library: same functions, same rules, 
 - `set_sight_settings(settings: PackedFloat64Array) -> void`: SightSense's settings: fill_rate, near_range, sight_range, cos of half the central cone, cos of half the periphery, periphery_multiplier, max_gain_ticks, eye_height, target_height, sight_blocking_mask, sense_interval_ticks.
 - `sight_check(observer: Node3D, eye_yaw: float, candidates: Array, tick: int) -> Array`: Checks each candidate from observer's eyes, facing eye_yaw, and records what's seen. Returns [a new entry was made, entities that became certain]. See SightSense for the rules.
 
-## AIScoreModifier
-
-`res://assets/scripts/ai/AIScoreModifier.gd`, extends [`Definition`](../abilities/REFERENCE.md#definition)
-
-A change to how some behaviours compare while it lasts: "Charge!" raising melee, fear lowering fighting, a block (pawn spec 10.13).
-
-A designer-made [`Definition`](../abilities/REFERENCE.md#definition) (with variants), given to a pawn's behaviour manager by whatever causes it, keyed by that source:
-
-```gdscript
-pawn.ai.behaviour_manager.add_score_modifier(charge_shout, self)
-pawn.ai.behaviour_manager.remove_score_modifier(self)
-```
-
-Its `amount` is added wherever persistence is added, so it reads in the same units as max_score. Modifiers from different sources stack. Only on the server, where the AI runs.
-
-### Settings and properties
-
-- `applies_to: TagQuery`: Which behaviours it changes: a query over each behaviour's own tags (`AIBehaviourBase.tags`), such as any of ai.stance.melee. Empty: every behaviour.
-- `amount: float` = `0.0`: Added to their scores while it counts. Negative lowers them.
-- `blocks: bool` = `false`: On: the behaviours it applies to can't be chosen while it counts, and a running one is replaced, instead of adding amount.
-- `duration_ticks: int` = `0`: How long it lasts once added, in ticks at 60 a second; the manager keeps the tick it ends. 0: until its source removes it.
-- `ongoing_requirements: TagQuery`: It counts only while the pawn's owned tags pass this, such as none of status.has_ammo. Empty: always.
-- `granted_tags: StringName[]` = `[]`: Tags the pawn owns while it's added, so other queries can see it (an "ai.stance.melee" order, say).
-- `wakes_decision: bool` = `false`: On: adding or removing it asks for a decision at once. Off by default: hundreds of pawns deciding on one tick is a spike.
-
-### Functions
-
-- `applies_to_behaviour(behaviour: AIBehaviourBase) -> bool`: True if it applies to this behaviour.
-- `counts_for(owned_words: PackedInt64Array) -> bool`: True if it counts for owned tags given as words (its ongoing requirements pass).
-
 ## AISenseBase
 
 `res://assets/scripts/ai/AISenseBase.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
@@ -699,7 +701,7 @@ Design: pawn spec 10.5 and 10.11, scaling spec step 3.
 
 How a value fades over ticks, from full to nothing, as a Resource designers tune in the inspector.
 
-Used by behaviour persistence, memory's awareness and the target selector's current target bonus. One profile has one curve (`Mode`): LINEAR, HALF_LIFE (counts as nothing below 1%) or CURVE (a drawn curve). Its tick settings are written for 60 a second and used at the match's rate (`TickDriver.ticks_at_rate`). For a fade no mode covers, extend it and override `value_at()` and `ends_after()`; the C++ memory store then calls it, and the C++ decider hands that pawn to GDScript.
+Used by memory's awareness and the target selector's current target bonus. One profile has one curve (`Mode`): LINEAR, HALF_LIFE (counts as nothing below 1%) or CURVE (a drawn curve). Its tick settings are written for 60 a second and used at the match's rate (`TickDriver.ticks_at_rate`). For a fade no mode covers, extend it and override `value_at()` and `ends_after()`; the C++ memory store then calls it, and the C++ decider hands that pawn to GDScript.
 
 ```gdscript
 var fade := FadeProfile.new()  # or a .tres file made in the inspector, shared by everything that uses it
@@ -857,7 +859,7 @@ Allowed in Combat while a ranged attack has shots left (the status.has_ammo.rang
 
 Stops and looks toward something half-noticed: the first reaction to a glimpse.
 
-Allowed in Alert. Available while the most aware memory entry isn't certain yet, or an unknown attacker hit the pawn within `hit_memory_ticks` (then it looks where the hit came from). It stops the pawn and looks at that position for `look_ticks`; looking turns the AI's eyes, so a target still in view keeps filling awareness. It scores 0.6, above Investigate (0.5), because turning to look is the cheaper way to become certain; once it has looked, a negative persistence (-0.3) drops it to 0.3, so Investigate wins and Look Toward doesn't catch again while it walks over. It runs again only when Investigate is cooling down. Design: pawn spec 10.7.
+Allowed in Alert. Available while the most aware memory entry isn't certain yet, or an unknown attacker hit the pawn within `hit_memory_ticks` (then it looks where the hit came from). It stops the pawn and looks at that position for `look_ticks`; looking turns the AI's eyes, so a target still in view keeps filling awareness. It scores 0.6, above Investigate (0.5), because turning to look is the cheaper way to become certain; as it starts it gives itself -0.3 for 15 s (`AIBehaviourBase.modifier_on_start`), dropping it to 0.3, so Investigate wins and Look Toward doesn't catch again while it walks over. It runs again only when Investigate is cooling down. Design: pawn spec 10.7.
 
 ### Settings and properties
 

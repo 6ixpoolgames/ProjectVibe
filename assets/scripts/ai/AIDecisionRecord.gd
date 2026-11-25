@@ -27,7 +27,7 @@ const RULE_NONE := &""
 const RULE_TAGS := &"tags"
 ## Switched off ([member AIBehaviourBase.enabled]).
 const RULE_OFF := &"off"
-## A score modifier blocks it.
+## A behaviour modifier blocks it.
 const RULE_BLOCKED := &"blocked"
 ## Cooling down.
 const RULE_COOLDOWN := &"cooldown"
@@ -37,6 +37,8 @@ const RULE_NO_TARGET := &"no_target"
 const RULE_ACTION := &"action"
 ## Passed the hard rules, but C++ made the decision, so GDScript's range, availability and score weren't worked out.
 const RULE_NOT_WORKED_OUT := &"cpp"
+## The running behaviour the interrupt rule kept: only its numbers, which the rule read (its threshold and minimum run).
+const RULE_KEPT := &"kept"
 
 ## The tick of the decision.
 var tick := 0
@@ -72,7 +74,8 @@ var running_before: StringName = &""
 var running_started_tick := -1
 ## True when the running behaviour couldn't be replaced for this reason (step 0), so no behaviour was looked at.
 var kept_by_interrupt := false
-## One Dictionary per behaviour, in the manager's fixed order. Empty when [member kept_by_interrupt]. See [method add_behaviour].
+## One Dictionary per behaviour, in the manager's fixed order; only the running one's ([constant RULE_KEPT]) when
+## [member kept_by_interrupt]. See [method add_behaviour].
 var behaviours: Array[Dictionary] = []
 ## The pawn's AI inputs as this decision worked them out ([member AIInputs.values]), by slot: what the behaviours' conditions read.
 var inputs := PackedFloat64Array()
@@ -99,13 +102,13 @@ func changed() -> bool:
 	return chosen != running_before
 
 
-## Adds one behaviour's entry from the scratch values the manager left on it. rule: the hard rule that ruled it out, or
-## [constant RULE_NONE]. Keys: name, rule, modifier (the score modifiers' sum), and for a candidate persistence, jitter, ceiling, floor
-## (null: none), available (1 yes, 0 no, -1 never asked) and score (null: not scored).
+## One behaviour's entry, from the manager's scratch values; rule: what ruled it out, or [constant RULE_NONE]. Keys: name, rule, and its
+## numbers with modifiers (modifier: the score bonus, jitter_amount, interrupt_threshold, min_run at the match's rate); a candidate's
+## also jitter (this decision's offset), ceiling, floor (null: none), available (1, 0, -1 never asked) and score (null: not scored).
 func add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void:
-	var entry := {"name": behaviour.name, "rule": rule, "modifier": behaviour.decision_modifier}
+	var entry := {"name": behaviour.name, "rule": rule, "modifier": behaviour.score_bonus(), "jitter_amount": behaviour.current_jitter(),
+		"interrupt_threshold": behaviour.current_interrupt_threshold(), "min_run": behaviour.current_min_run_ticks()}
 	if rule == RULE_NONE:
-		entry["persistence"] = behaviour.decision_persistence
 		entry["jitter"] = behaviour.decision_jitter
 		entry["ceiling"] = behaviour.decision_ceiling
 		entry["floor"] = null # JSON has no infinity

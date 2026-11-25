@@ -103,7 +103,8 @@ func _test_look_before_investigating() -> void:
 	ticks = await _until(func() -> bool: return _running(goblin) == &"Investigate", 120)
 	_check(ticks >= 0, "after looking, Investigate (%d ticks later)" % ticks)
 	var look := goblin.ai.behaviour_manager.get_behaviours().filter(func(b: AIBehaviourBase) -> bool: return b.name == &"LookToward")[0] as AIBehaviourBase
-	_check(look.persistence_now(goblin.ai.current_tick) < -0.1, "Look Toward is held back by its persistence (%.2f)" % look.persistence_now(goblin.ai.current_tick))
+	# Claude 2026-11-25 (pawn spec 16.10 step 6a): persistence is gone; Look Toward gives itself -0.3 as it starts (modifier_on_start).
+	_check(look.score_bonus() < -0.1, "Look Toward is held back by its own step aside (%.2f)" % look.score_bonus())
 	# Long enough for the old 3 s cooldown to have run out and Look Toward to have cut in.
 	switches.clear()
 	await _until(func() -> bool: return _running(goblin) != &"Investigate", 300)

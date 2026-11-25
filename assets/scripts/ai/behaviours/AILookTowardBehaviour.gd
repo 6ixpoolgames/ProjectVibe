@@ -4,8 +4,9 @@
 ## Allowed in Alert. Available while the most aware memory entry isn't certain yet, or an unknown attacker hit the pawn within
 ## [member hit_memory_ticks] (then it looks where the hit came from). It stops the pawn and looks at that position for [member look_ticks];
 ## looking turns the AI's eyes, so a target still in view keeps filling awareness. It scores 0.6, above Investigate (0.5), because
-## turning to look is the cheaper way to become certain; once it has looked, a negative persistence (-0.3) drops it to 0.3, so
-## Investigate wins and Look Toward doesn't catch again while it walks over. It runs again only when Investigate is cooling down.
+## turning to look is the cheaper way to become certain; as it starts it gives itself -0.3 for 15 s ([member AIBehaviourBase.modifier_on_start]),
+## dropping it to 0.3, so Investigate wins and Look Toward doesn't catch again while it walks over. It runs again only when
+## Investigate is cooling down.
 ## Design: pawn spec 10.7.
 class_name AILookTowardBehaviour
 extends AIBehaviourBase
@@ -22,15 +23,13 @@ func _init() -> void:
 	max_score = 0.6
 	min_score = max_score # a fixed score, so it can help skip others
 	tick_interval_ticks = 5 # re-aiming 12 times a second is plenty, and each tick searches memory
-	min_run_ticks = look_ticks # an ordinary decision doesn't cut its look short, whatever its persistence
-	# Once it has looked, Investigate goes first: -0.3 takes it from 0.6 to 0.3, below Investigate's 0.5, for about 10 s, fading over
-	# the next 5 (written for 60 ticks a second).
-	persistence = -0.3
-	var penalty := FadeProfile.new()
-	penalty.mode = FadeProfile.Mode.LINEAR
-	penalty.hold_ticks = 600
-	penalty.fade_ticks = 300
-	persistence_fade = penalty
+	min_run_ticks = look_ticks # an ordinary decision doesn't cut its look short, whatever its score
+	# Once it has looked, Investigate goes first: -0.3 takes it from 0.6 to 0.3, below Investigate's 0.5, for 15 s from when it starts
+	# (written for 60 ticks a second).
+	var step_aside := AIBehaviourModifier.new()
+	step_aside.add = -0.3
+	step_aside.duration_ticks = 900
+	modifier_on_start = step_aside
 
 
 ## Only for something half-noticed: an uncertain most aware entry, or a recent hit from an attacker it doesn't remember. Either will do.

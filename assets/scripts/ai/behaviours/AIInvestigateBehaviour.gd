@@ -24,7 +24,7 @@ func _init() -> void:
 	tag_requirements = TagQuery.shared([Tags.AI.STATE_ALERT])
 	max_score = 0.5
 	min_score = max_score # a fixed score, so it can help skip others
-	cooldown_ticks = 120 # after it finishes, Look Toward gets its turn again, even while Look Toward's own persistence holds it back
+	cooldown_ticks = 120 # after it finishes, Look Toward gets its turn again, even while Look Toward's own step aside holds it back
 	tick_interval_ticks = 5 # it only needs to notice arriving, or the position moving
 
 

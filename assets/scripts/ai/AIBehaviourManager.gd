@@ -7,9 +7,8 @@
 ## the order added. Outside code only talks to the manager:
 ## [codeblock]
 ## pawn.ai.behaviour_manager.get_running_behaviour()
-## pawn.ai.behaviour_manager.add_persistence_ticks(&"Chase", 60)    # say after landing a hit
-## pawn.ai.behaviour_manager.set_score_jitter(&"Wander", 0.2)       # say for a confused effect
-## pawn.ai.behaviour_manager.add_score_modifier(charge_shout, self)   # raise melee until removed (AIScoreModifier)
+## pawn.ai.behaviour_manager.add_modifier(charge_shout, self)   # raise melee until removed (AIBehaviourModifier)
+## pawn.ai.behaviour_manager.remove_modifiers(self)
 ## [/codeblock]
 ## With the [AIDecisionModule] in the game, C++ makes the decisions and this manager is the backup ([method decide]).
 ## Design: pawn spec 10.7 and 10.8, scaling spec 6.2.
@@ -61,14 +60,15 @@ var _by_floor := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 	return a.decision_floor > b.decision_floor or (a.decision_floor == b.decision_floor and a.decision_index < b.decision_index)
 var _by_index := func(a: AIBehaviourBase, b: AIBehaviourBase) -> bool:
 	return a.decision_index < b.decision_index
-## Goes up by one whenever the score modifiers' sums or blocks change, so the C++ decider's copy is written again. Don't set it.
+## Goes up by one whenever what the behaviour modifiers do to any behaviour changes, so the C++ decider's copy is written again.
 var modifiers_version := 0
 
 var _warned_states := {} # state name -> true, for "no behaviour's tag requirements pass in this state"
-# Score modifiers (pawn spec 10.13): {modifier (resolved), source (a key), ends (a tick, -1 until removed)}, in the order added.
+# Behaviour modifiers (pawn spec 16.5): {modifier (resolved), source (a key), ends (a tick, -1 until removed), only (the behaviour
+# that gave it to itself, or null)}, in the order added.
 var _modifiers: Array[Dictionary] = []
 var _modifiers_dirty := false
-var _modifier_values_set := false # some behaviour has a sum or a block, so clearing them needs a pass
+var _modifier_values_set := false # some behaviour has a change or a block, so clearing them needs a pass
 var _soonest_modifier_end := -1
 var _modifiers_tags_version := -1 # the owned tags' version the sums were worked out for
 var _checked_tags_version := -1 # check_running()'s last look
@@ -77,8 +77,9 @@ var _input_slots := PackedInt32Array() # the worked-out inputs the behaviours' c
 var _input_slots_known := false
 var _placed_by: AIDecisionModule = null # the module that settled where it decides
 
-const TIE_SALT := 0x7135
-const MODIFIER_TAG_SOURCE := &"score_modifiers" # the owned-tags source for the modifiers' granted tags # what the tie-breaking random number is for, so it differs from every behaviour's jitter
+const TIE_SALT := 0x7135 # what the tie-breaking random number is for, so it differs from every behaviour's jitter
+const MODIFIER_TAG_SOURCE := &"behaviour_modifiers" # the owned-tags source for the modifiers' granted tags
+const _NUMBERS := 5 # AIBehaviourModifier.Number's size
 
 
 func _init() -> void:
@@ -144,9 +145,6 @@ func describe() -> Dictionary:
 		var lowest: Variant = null # JSON has no infinity
 		if behaviour.min_score > -INF:
 			lowest = behaviour.min_score
-		var fade: Variant = null
-		if behaviour.persistence_fade:
-			fade = behaviour.persistence_fade.values_at_rate()
 		behaviours.append({
 			"name": String(behaviour.name), "name_hash": behaviour.name_hash, "tags": tag_names, "enabled": behaviour.enabled,
 			# Names and the words they make now (TagQuery.describe_words); null: no requirements.
@@ -158,8 +156,6 @@ func describe() -> Dictionary:
 			"min_run_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.min_run_ticks), # what the interrupt rule compares with
 			"interrupt_threshold": behaviour.interrupt_threshold, "cannot_be_interrupted": behaviour.cannot_be_interrupted,
 			"score_jitter": behaviour.score_jitter, "effective_jitter": behaviour.effective_jitter(),
-			"persistence": behaviour.persistence, "has_persistence_fade": behaviour.persistence_fade != null,
-			"persistence_fade": fade,
 			"script": behaviour.get_script().resource_path.get_file() if behaviour.get_script() else "",
 			# How C++ judges it: from its conditions and curves, or by asking GDScript for a behaviour with its own code.
 			"scorer": "given" if behaviour.has_own_code() else "conditions",
@@ -238,14 +234,13 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		# The running one has already pressed its action, so "could it start" doesn't apply to it.
 		if behaviour.presses_action != &"" and behaviour != _running and not _could_press(behaviour.presses_action):
 			continue
-		# 3. Its range.
-		var jitter := behaviour.effective_jitter()
-		behaviour.decision_persistence = behaviour.persistence_now(tick)
+		# 3. Its range, with the numbers its modifiers leave.
+		var jitter := behaviour.current_jitter()
 		behaviour.decision_jitter = jitter * context.random_signed(behaviour.name_hash) if jitter > 0.0 else 0.0
-		# Persistence and the score modifiers' sum, added together first, as C++ does, so the two agree to the bit.
-		var boost := behaviour.decision_persistence + behaviour.decision_modifier
-		behaviour.decision_ceiling = behaviour.max_score + boost + jitter
-		behaviour.decision_floor = behaviour.min_score + boost - jitter if behaviour.min_score > -INF else -INF
+		var bonus := behaviour.score_bonus()
+		behaviour.decision_bonus = bonus
+		behaviour.decision_ceiling = behaviour.max_score + bonus + jitter
+		behaviour.decision_floor = behaviour.min_score + bonus - jitter if behaviour.min_score > -INF else -INF
 		behaviour.availability_checked = false
 		behaviour.decision_scored = false
 		_candidates.append(behaviour)
@@ -278,7 +273,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		_check_score_range(behaviour, raw)
 		behaviour.decision_score = raw
 		behaviour.decision_scored = true
-		var result := raw + (behaviour.decision_persistence + behaviour.decision_modifier) + behaviour.decision_jitter
+		var result := raw + behaviour.decision_bonus + behaviour.decision_jitter
 		if best == null or result > best_result + tie_margin:
 			best = behaviour
 			best_result = result
@@ -339,43 +334,6 @@ func stop_running(reason: String) -> void:
 	_stop_running(reason, _now())
 
 
-## Moves a behaviour's persistence back along its fade by this many ticks, so it lasts longer. Negative: it ends sooner.
-func add_persistence_ticks(behaviour_name: StringName, ticks: float) -> void:
-	var behaviour := _find(behaviour_name)
-	if behaviour:
-		behaviour.add_persistence_ticks(ticks, _now())
-		if cpp_row >= 0:
-			decision_module.persistence_ticks_added(self, behaviour.decision_index, ticks, _now())
-
-
-## How fast a behaviour's persistence fades from now on: 1.0 normally, 0.5 for half speed.
-func set_persistence_speed(behaviour_name: StringName, speed: float) -> void:
-	var behaviour := _find(behaviour_name)
-	if behaviour:
-		behaviour.set_persistence_speed(speed, _now())
-		if cpp_row >= 0:
-			decision_module.persistence_speed_set(self, behaviour.decision_index, speed, _now())
-
-
-## Gives this pawn's behaviour a persistence mask: a fade multiplied with its own persistence fade, for this pawn only. Null: none.
-## Counted from when the behaviour starts, as the fade is.
-func set_persistence_mask(behaviour_name: StringName, mask: FadeProfile) -> void:
-	var behaviour := _find(behaviour_name)
-	if behaviour:
-		behaviour.persistence_mask = mask
-		if cpp_row >= 0:
-			decision_module.mask_set(self, behaviour)
-
-
-## Changes a behaviour's interrupt threshold, even while it runs.
-func set_interrupt_threshold(behaviour_name: StringName, threshold: int) -> void:
-	var behaviour := _find(behaviour_name)
-	if behaviour:
-		behaviour.interrupt_threshold = threshold
-		if cpp_row >= 0:
-			decision_module.threshold_set(self, behaviour.decision_index, threshold)
-
-
 ## Called when a behaviour's conditions change ([method AIBehaviourBase.rebuild_conditions]), so the inputs worked out at each
 ## decision are listed again, and C++ gets the new brain.
 func inputs_changed() -> void:
@@ -384,53 +342,42 @@ func inputs_changed() -> void:
 		_placed_by.place(self)
 
 
-## Changes a behaviour's jitter. -1: back to default_score_jitter.
-func set_score_jitter(behaviour_name: StringName, jitter: float) -> void:
-	var behaviour := _find(behaviour_name)
-	if behaviour:
-		behaviour.score_jitter = jitter
-		if cpp_row >= 0:
-			decision_module.jitter_set(self, behaviour.decision_index, behaviour.effective_jitter())
+## Adds a behaviour modifier (pawn spec 16.5), kept under this source: anything that names it, usually the node or effect that adds
+## it. A source may add several; [method remove_modifiers] takes all of its own away.
+func add_modifier(modifier: AIBehaviourModifier, source: Variant) -> void:
+	_add_modifier(modifier, _source_key(source), null, _now())
 
 
-## Adds a score modifier (pawn spec 10.13), kept under this source: anything that names it, usually the node or effect that adds it.
-## A source may add several; [method remove_score_modifier] takes all of its own away.
-func add_score_modifier(modifier: AIScoreModifier, source: Variant) -> void:
-	if modifier == null:
-		return
-	var resolved := modifier.resolved() as AIScoreModifier
-	var now := _now()
-	var ends := now + TickDriver.ticks_at_rate(resolved.duration_ticks) if resolved.duration_ticks > 0 else -1
-	_modifiers.append({"modifier": resolved, "source": _source_key(source), "ends": ends})
-	_modifiers_dirty = true
-	refresh_modifiers(now)
-	if resolved.wakes_decision and pawn and pawn.ai:
-		pawn.ai.request_decision(0, false)
+## Takes away every behaviour modifier this source added.
+func remove_modifiers(source: Variant) -> void:
+	_remove_modifiers(_source_key(source), _now())
 
 
-## Takes away every score modifier this source added.
-func remove_score_modifier(source: Variant) -> void:
-	var key: Variant = _source_key(source)
+# Takes away every modifier kept under this source key, at this tick.
+func _remove_modifiers(key: Variant, now: int) -> void:
 	var wakes := false
 	for i in range(_modifiers.size() - 1, -1, -1):
-		if _modifiers[i]["source"] == key:
+		var source: Variant = _modifiers[i]["source"]
+		if typeof(source) == typeof(key) and source == key: # sources mix kinds (ids, names, arrays); == between kinds is an error
 			wakes = wakes or _modifiers[i]["modifier"].wakes_decision
 			_modifiers.remove_at(i)
 			_modifiers_dirty = true
 	if not _modifiers_dirty:
 		return
-	refresh_modifiers(_now())
+	refresh_modifiers(now)
 	if wakes and pawn and pawn.ai:
 		pawn.ai.request_decision(0, false)
 
 
-## The score modifiers now, in the order added: {modifier, source, ends} each (ends is the tick it goes, -1 until removed).
-func get_score_modifiers() -> Array[Dictionary]:
-	return _modifiers.duplicate(true)
+## The behaviour modifiers now, in the order added: {modifier, source, ends, only} each (ends is the tick it goes, -1 until
+## removed; only is the behaviour that gave it to itself, or null).
+func get_modifiers() -> Array[Dictionary]:
+	return _modifiers.duplicate()
 
 
-## Works the modifiers' sum and block for each behaviour out again, if anything they depend on changed: the list, a deadline passing,
-## or the pawn's owned tags (their ongoing requirements). Every decision calls it first; cheap when nothing changed.
+## Works out again what the modifiers do to each behaviour's numbers and which they block, if anything they depend on changed: the
+## list, a deadline passing, or the pawn's owned tags (their ongoing requirements). Every decision calls it first; cheap when nothing
+## changed.
 func refresh_modifiers(tick: int) -> void:
 	var owned := pawn.owned_tags if pawn else null
 	var tags_version := owned.version if owned else 0
@@ -459,21 +406,31 @@ func refresh_modifiers(tick: int) -> void:
 	var any_set := false
 	var changed := false
 	for behaviour in _behaviours:
-		var sum := 0.0
+		var changes: Array[PackedFloat64Array] = []
 		var blocked := false
-		for entry in _modifiers: # in the order added, so the sum is the same on every run
-			var modifier: AIScoreModifier = entry["modifier"]
-			if not modifier.counts_for(words) or not modifier.applies_to_behaviour(behaviour):
+		for entry in _modifiers: # in the order added, so the result is the same on every run
+			var modifier: AIBehaviourModifier = entry["modifier"]
+			if not modifier.counts_for(words) or not modifier.applies_to_behaviour(behaviour, entry["only"]):
 				continue
 			if modifier.blocks:
 				blocked = true
+				continue
+			if changes.is_empty():
+				for n in _NUMBERS:
+					changes.append(PackedFloat64Array([1.0, 0.0, 0.0, 0.0]))
+			var change := changes[modifier.number]
+			if modifier.overrides:
+				change[2] = 1.0
+				change[3] = modifier.override_value
 			else:
-				sum += modifier.amount
-		if sum != behaviour.decision_modifier or blocked != behaviour.decision_blocked:
+				change[0] *= modifier.multiply
+				change[1] += modifier.add
+			changes[modifier.number] = change # a packed array taken out of an array may be a copy
+		if changes != behaviour.modifier_changes or blocked != behaviour.decision_blocked:
 			changed = true
-			behaviour.decision_modifier = sum
+			behaviour.modifier_changes = changes
 			behaviour.decision_blocked = blocked
-		any_set = any_set or sum != 0.0 or blocked
+		any_set = any_set or not changes.is_empty() or blocked
 	_modifier_values_set = any_set
 	if changed:
 		modifiers_version += 1
@@ -509,6 +466,35 @@ func _owned_words() -> PackedInt64Array:
 	return pawn.owned_tags.get_words() if pawn and pawn.owned_tags else PackedInt64Array()
 
 
+# Adds a resolved modifier under a source key, at this tick; only: the behaviour that gives it to itself (null for any other source).
+func _add_modifier(modifier: AIBehaviourModifier, key: Variant, only: AIBehaviourBase, now: int) -> void:
+	if modifier == null:
+		return
+	var resolved := modifier.resolved() as AIBehaviourModifier
+	var ends := now + TickDriver.ticks_at_rate(resolved.duration_ticks) if resolved.duration_ticks > 0 else -1
+	_modifiers.append({"modifier": resolved, "source": key, "ends": ends, "only": only})
+	_modifiers_dirty = true
+	refresh_modifiers(now)
+	if resolved.wakes_decision and pawn and pawn.ai:
+		pawn.ai.request_decision(0, false)
+
+
+# A behaviour's own modifier as it starts or ends (modifier_on_start, modifier_on_end): its earlier one of that kind goes, and its
+# other kind's goes too when that one lasts only until now (a start modifier with no duration ends with the behaviour; an end one
+# with no duration ends when it starts again).
+func _apply_own_modifier(behaviour: AIBehaviourBase, starting: bool, tick: int) -> void:
+	var own := [behaviour.get_instance_id(), &"start" if starting else &"end"]
+	var other := [behaviour.get_instance_id(), &"end" if starting else &"start"]
+	var mine := behaviour.modifier_on_start if starting else behaviour.modifier_on_end
+	var theirs := behaviour.modifier_on_end if starting else behaviour.modifier_on_start
+	if mine == null and theirs == null:
+		return # the usual case: nothing to do, and no list to walk
+	_remove_modifiers(own, tick)
+	if theirs and theirs.resolved().duration_ticks == 0:
+		_remove_modifiers(other, tick)
+	_add_modifier(mine, own, behaviour, tick)
+
+
 # A modifier's source as a key: an object by its instance id (so a freed one still matches), anything else as it is.
 static func _source_key(source: Variant) -> Variant:
 	if source is Object:
@@ -521,10 +507,11 @@ static func _source_key(source: Variant) -> Variant:
 func _can_replace_running(event_priority: int, event_is_normal: bool, tick: int) -> bool:
 	if _running.cannot_be_interrupted:
 		return false
-	if event_priority < _running.interrupt_threshold:
+	if event_priority < _running.current_interrupt_threshold():
 		return false
-	# min_run_ticks 0 means no minimum at all, whatever the ticks say.
-	if event_is_normal and _running.min_run_ticks > 0 and tick - _running.started_tick < TickDriver.ticks_at_rate(_running.min_run_ticks):
+	# A minimum run of 0 means no minimum at all, whatever the ticks say.
+	var min_run := _running.current_min_run_ticks()
+	if event_is_normal and min_run > 0 and tick - _running.started_tick < min_run:
 		return false
 	return true
 
@@ -551,10 +538,11 @@ func _start(behaviour: AIBehaviourBase, reason: String, tick: int) -> void:
 	if old:
 		old.exit(pawn.ai, reason)
 		old.ended_tick = tick
+		_apply_own_modifier(old, false, tick)
 	_running = behaviour
 	behaviour.started_tick = tick
-	behaviour.start_persistence(tick)
 	behaviour.clear_wake_ups()
+	_apply_own_modifier(behaviour, true, tick)
 	behaviour.enter(pawn.ai)
 	behaviour_changed.emit(old, behaviour, reason)
 
@@ -568,6 +556,7 @@ func _stop_running(reason: String, tick: int, tell_cpp := true) -> void:
 	_running = null
 	old.exit(pawn.ai, reason)
 	old.ended_tick = tick
+	_apply_own_modifier(old, false, tick)
 	if tell_cpp and cpp_row >= 0 and decision_module:
 		decision_module.stopped(self, tick)
 	behaviour_changed.emit(old, null, reason)
@@ -608,7 +597,10 @@ func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, even
 		record.state_before = record.state
 		record.state_after = record.state
 	if kept_by_interrupt:
-		return # no behaviour was looked at
+		# No behaviour was looked at; the running one's numbers go in, since its threshold and minimum run kept it.
+		if _running:
+			record.add_behaviour(_running, AIDecisionRecord.RULE_KEPT)
+		return
 	var owned := _owned_words()
 	for behaviour in _behaviours:
 		var rule := AIDecisionRecord.RULE_NONE
@@ -669,14 +661,6 @@ func _check_score_range(behaviour: AIBehaviourBase, raw: float) -> void:
 	if raw > behaviour.max_score + 0.000001 or raw < behaviour.min_score - 0.000001:
 		behaviour.warned_score_range = true
 		push_warning("AIBehaviourManager: %s's score() gave %.3f, outside its min_score %.3f to max_score %.3f. Choices may be wrong until that's fixed." % [behaviour.name, raw, behaviour.min_score, behaviour.max_score])
-
-
-func _find(behaviour_name: StringName) -> AIBehaviourBase:
-	for behaviour in _behaviours:
-		if behaviour.name == behaviour_name:
-			return behaviour
-	push_warning("AIBehaviourManager: %s has no behaviour called %s." % [String(pawn.name) if pawn else "this pawn", behaviour_name]) # String(), so both sides are text
-	return null
 
 
 # The tick now, from the TickDriver autoload.

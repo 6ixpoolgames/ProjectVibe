@@ -1,7 +1,7 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## How a value fades over ticks, from full to nothing, as a Resource designers tune in the inspector.
 ##
-## Used by behaviour persistence, memory's awareness and the target selector's current target bonus. One profile has one curve
+## Used by memory's awareness and the target selector's current target bonus. One profile has one curve
 ## ([enum Mode]): LINEAR, HALF_LIFE (counts as nothing below 1%) or CURVE (a drawn curve). Its tick settings are written for 60 a
 ## second and used at the match's rate ([code]TickDriver.ticks_at_rate[/code]). For a fade no mode covers, extend it and override
 ## [method value_at] and [method ends_after]; the C++ memory store then calls it, and the C++ decider hands that pawn to GDScript.

@@ -45,7 +45,7 @@ Each pawn gets `owned_tags`: a count per tag, and the masks of every tag with a 
 - a held effect: its tags, while it's held
 - the AI state manager: `ai.state.<state>`, on the server
 - death: `status.dead`
-- an AI score modifier: its `granted_tags`, while it's active (pawn spec 10.13)
+- an AI behaviour modifier (`AIBehaviourModifier`, was the score modifier): its `granted_tags`, while it's active (pawn spec 10.13, 16.5)
 - an ability with charges: the tag its definition names, while it has charges left (pawn spec 10.13)
 - a game's own code: loose tags, `owned_tags.add(tag)` / `owned_tags.remove(tag)`
 

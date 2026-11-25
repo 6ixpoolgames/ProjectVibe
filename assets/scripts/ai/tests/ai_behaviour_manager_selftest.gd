@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-09: headless self-test for AIBehaviourManager, AIBehaviourBase, AIWanderBehaviour,
 ## AIManager and the pawn's AI step. Checks the decision steps of pawn spec 10.8 one by one (hard rules, ranges, early stop,
-## jitter, ties, the fixed order), persistence, interrupts, finishing, Wander, what runs while a player has the pawn, that a client
+## jitter, ties, the fixed order), persistence (Claude 2026-11-25: own modifiers now), interrupts, finishing, Wander, what runs while a player has the pawn, that a client
 ## never runs the AI, that a rollback doesn't run it again, and the odd cases at the top of AIBehaviourManager.gd.
 ## Claude 2026-11-17 (scaling spec 6.2): and wake-ups: wake_at, a walk ending and an ability on the action ending wake a sleeping
 ## behaviour, used up when they fire, cleared when it starts again.
@@ -70,7 +70,7 @@ func _ready() -> void:
 	_test_ranges_and_early_stop()
 	_test_random_numbers_and_jitter()
 	_test_ties()
-	_test_persistence()
+	_test_own_modifiers() # Claude 2026-11-25 (pawn spec 16.10 step 6a): was _test_persistence; persistence is gone
 	_test_interrupts()
 	_test_tag_gates()
 	_test_score_modifiers()
@@ -162,7 +162,8 @@ func _test_ranges_and_early_stop() -> void:
 
 
 func _test_random_numbers_and_jitter() -> void:
-	var pawn := _make_pawn([_b("A", 0.5), _b("B", 0.5)])
+	var b := _b("B", 0.5) # Claude 2026-11-25: kept, since set_score_jitter is gone (step 6a): settings are set on the behaviour
+	var pawn := _make_pawn([_b("A", 0.5), b])
 	var context := pawn.ai
 	var same := context.random_unit_at(500, 77) == context.random_unit_at(500, 77)
 	var differs := context.random_unit_at(500, 77) != context.random_unit_at(501, 77) and context.random_unit_at(500, 77) != context.random_unit_at(500, 78)
@@ -185,7 +186,7 @@ func _test_random_numbers_and_jitter() -> void:
 		winners[_running_name(pawn)] = true
 	_check(winners.size() == 1 and winners.has(&"A"), "jitter 0 (the default): the same choice every time")
 	# Jitter on B only: B sometimes beats A, and the choices replay the same.
-	pawn.ai.behaviour_manager.set_score_jitter(&"B", 0.2)
+	b.score_jitter = 0.2
 	var b_wins := 0
 	var first_run: Array[StringName] = []
 	for t in 60:
@@ -198,7 +199,7 @@ func _test_random_numbers_and_jitter() -> void:
 		second_run.append(_running_name(pawn))
 	_check(b_wins > 10 and b_wins < 50, "jitter per behaviour: B, with jitter, wins about half the time (%d of 60)" % b_wins)
 	_check(first_run == second_run, "the same ticks give the same choices")
-	pawn.ai.behaviour_manager.set_score_jitter(&"B", -1.0)
+	b.score_jitter = -1.0
 	pawn.ai.behaviour_manager.default_score_jitter = 0.2
 	var a_seen := false
 	var b_seen := false
@@ -236,57 +237,44 @@ func _test_ties() -> void:
 	pawn.free()
 
 
-func _test_persistence() -> void:
+# Claude 2026-11-25 (pawn spec 16.10 step 6a): persistence is gone. A behaviour gives itself a modifier as it starts or ends; with no
+# applies_to it changes only itself.
+func _test_own_modifiers() -> void:
 	var keeper := _b("Keeper", 0.5)
-	keeper.persistence = 0.1
-	keeper.persistence_fade = _linear(10, 10) # full for 10 ticks, gone 10 ticks later
+	var hold := AIBehaviourModifier.new()
+	hold.add = 0.1 # no duration: while it runs
+	keeper.modifier_on_start = hold
 	var rival := _b("Rival", 0.4, 1.0) # max 1.0, because the test raises its score
 	var pawn := _make_pawn([keeper, rival])
 	_decide(pawn, 100)
-	_check(_running_name(pawn) == &"Keeper", "persistence: Keeper wins first, and its persistence starts")
+	_check(_running_name(pawn) == &"Keeper", "Keeper wins first")
+	_check(is_equal_approx(keeper.score_bonus(), 0.1) and rival.score_bonus() == 0.0, "as it starts it gives itself +0.1, and only itself")
 	rival.value = 0.55
 	_decide(pawn, 105)
-	_check(_running_name(pawn) == &"Keeper", "while held, +0.1 keeps it ahead of a rival at 0.55")
-	_decide(pawn, 117)
-	_check(_running_name(pawn) == &"Rival", "faded to under 0.05 by tick 17, the rival wins")
-	# Modifiers: more ticks, and a slower fade.
-	rival.value = 0.4
-	_decide(pawn, 200)
-	_check(_running_name(pawn) == &"Keeper", "Keeper wins back over a rival at 0.4, and its persistence starts again")
-	rival.value = 0.55
-	_test_persistence_modifiers(pawn, keeper)
+	_check(_running_name(pawn) == &"Keeper", "+0.1 keeps it ahead of a rival at 0.55")
+	rival.value = 0.7
+	_decide(pawn, 106)
+	_check(_running_name(pawn) == &"Rival" and keeper.score_bonus() == 0.0, "a rival at 0.7 wins, and with no duration the +0.1 went as Keeper ended")
 	pawn.free()
-	# Negative persistence: prefers something else after it's been chosen.
+	# On end, with a duration: it steps aside for a while, as Look Toward does.
 	var restless := _b("Restless", 0.5)
-	restless.persistence = -0.2
-	restless.persistence_fade = _linear(30, 0)
-	var other := _b("Other", 0.4)
+	var aside := AIBehaviourModifier.new()
+	aside.add = -0.2
+	aside.duration_ticks = 30
+	restless.modifier_on_end = aside
+	var other := _b("Other", 0.4, 1.0)
 	pawn = _make_pawn([restless, other])
 	_decide(pawn, 1)
-	_check(_running_name(pawn) == &"Restless", "negative persistence: Restless wins first")
+	_check(_running_name(pawn) == &"Restless", "Restless wins first")
+	other.value = 0.6
 	_decide(pawn, 2)
-	_check(_running_name(pawn) == &"Other", "then -0.2 makes the AI prefer Other for a while")
-	_decide(pawn, 40)
-	_check(_running_name(pawn) == &"Restless", "once it's faded, Restless wins again")
+	_check(_running_name(pawn) == &"Other" and is_equal_approx(restless.score_bonus(), -0.2), "Other wins; Restless gives itself -0.2 as it ends")
+	other.value = 0.4
+	_decide(pawn, 31)
+	_check(_running_name(pawn) == &"Other", "for 30 ticks, -0.2 keeps it behind Other at 0.4")
+	_decide(pawn, 32)
+	_check(_running_name(pawn) == &"Restless" and restless.score_bonus() == 0.0, "at its deadline it's gone, and Restless wins again")
 	pawn.free()
-
-
-# Keeper is running with +0.1, held 10 ticks then gone 10 later; the rival is at 0.55. Modifiers read the current tick from
-# TickDriver, so the test sets Keeper's persistence against TickDriver's tick.
-func _test_persistence_modifiers(pawn: Pawn, keeper: TestBehaviour) -> void:
-	var now: int = TickDriver.tick
-	keeper.start_persistence(now - 25) # 25 ticks along: past its 20, so it adds nothing
-	pawn.ai.behaviour_manager.add_persistence_ticks(&"Keeper", 20) # back to 5 ticks along: held at full
-	_decide(pawn, now)
-	_check(_running_name(pawn) == &"Keeper", "add_persistence_ticks: 20 ticks more keep Keeper ahead of the rival")
-	keeper.start_persistence(now - 25)
-	_decide(pawn, now)
-	_check(_running_name(pawn) == &"Rival", "...and without them, the rival wins")
-	keeper.start_persistence(now)
-	pawn.ai.behaviour_manager.set_persistence_speed(&"Keeper", 0.0)
-	_check(is_equal_approx(keeper.persistence_now(now + 500), 0.1), "set_persistence_speed 0: frozen at full 500 ticks later")
-	pawn.ai.behaviour_manager.set_persistence_speed(&"Keeper", 2.0)
-	_check(is_equal_approx(keeper.persistence_now(now + 5), 0.1) and keeper.persistence_now(now + 10) == 0.0, "speed 2: through its 20 ticks in 10")
 
 
 func _test_interrupts() -> void:
@@ -353,9 +341,13 @@ func _test_interrupts() -> void:
 	combat.fits = true
 	_decide(pawn, 2) # the state check moves to Combat, a state-change event of priority 20
 	_check(pawn.ai.state_manager.get_current_state() == combat and _running_name(pawn) == &"Guard", "a threshold above the new state's priority keeps a behaviour running in a state that doesn't allow it")
-	pawn.ai.behaviour_manager.set_interrupt_threshold(&"Guard", 0)
+	# Claude 2026-11-25 (pawn spec 16.10 step 6a): set_interrupt_threshold is gone; a modifier lowers it.
+	var lowered := AIBehaviourModifier.new()
+	lowered.number = AIBehaviourModifier.Number.INTERRUPT_THRESHOLD
+	lowered.overrides = true
+	pawn.ai.behaviour_manager.add_modifier(lowered, self)
 	_decide(pawn, 3)
-	_check(_running_name(pawn) == &"Fight", "set_interrupt_threshold: lowered while running, the next decision replaces it")
+	_check(_running_name(pawn) == &"Fight", "a modifier lowering its threshold while it runs: the next decision replaces it")
 	pawn.free()
 
 
@@ -403,6 +395,8 @@ func _test_tag_gates() -> void:
 
 
 # Claude 2026-11-23 (pawn spec 10.13): score modifiers, keyed by source, with deadlines, requirements, blocks and granted tags.
+# Claude 2026-11-25 (pawn spec 16.10 step 6a): AIScoreModifier is AIBehaviourModifier (amount is add), the calls are add_modifier and
+# remove_modifiers, and the sum is score_bonus(); its other numbers are checked at the end.
 func _test_score_modifiers() -> void:
 	var melee := _b("Melee", 0.8)
 	melee.tags = [Tags.AI.STANCE_MELEE]
@@ -412,60 +406,92 @@ func _test_score_modifiers() -> void:
 	var manager := pawn.ai.behaviour_manager
 	_decide(pawn, 1)
 	_check(_running_name(pawn) == &"Ranged", "no modifiers: Ranged (0.85) over Melee (0.8)")
-	var charge := AIScoreModifier.new()
+	var charge := AIBehaviourModifier.new()
 	charge.applies_to = TagQuery.make([], [Tags.AI.STANCE_MELEE])
-	charge.amount = 0.1
+	charge.add = 0.1
 	charge.granted_tags = [Tags.AI.STANCE_MELEE]
 	var shout_a := Node.new()
 	var shout_b := Node.new()
-	manager.add_score_modifier(charge, shout_a)
-	_check(is_equal_approx(melee.decision_modifier, 0.1) and ranged.decision_modifier == 0.0, "a modifier adds to the behaviours it applies to (by their tags) only")
+	manager.add_modifier(charge, shout_a)
+	_check(is_equal_approx(melee.score_bonus(), 0.1) and ranged.score_bonus() == 0.0, "a modifier adds to the behaviours it applies to (by their tags) only")
 	_check(pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "its granted tags are owned while it's added")
 	_decide(pawn, 2)
 	_check(_running_name(pawn) == &"Melee", "Melee 0.8 + 0.1 beats Ranged 0.85")
-	manager.add_score_modifier(charge, shout_b)
-	_check(is_equal_approx(melee.decision_modifier, 0.2), "two sources stack")
-	manager.remove_score_modifier(shout_a)
-	_check(is_equal_approx(melee.decision_modifier, 0.1) and pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing one source leaves the other's")
-	manager.remove_score_modifier(shout_b)
-	_check(melee.decision_modifier == 0.0 and not pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing the last: no sum, no granted tag")
+	manager.add_modifier(charge, shout_b)
+	_check(is_equal_approx(melee.score_bonus(), 0.2), "two sources stack")
+	manager.remove_modifiers(shout_a)
+	_check(is_equal_approx(melee.score_bonus(), 0.1) and pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing one source leaves the other's")
+	manager.remove_modifiers(shout_b)
+	_check(melee.score_bonus() == 0.0 and not pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing the last: no sum, no granted tag")
 	# A deadline.
-	var brief := AIScoreModifier.new()
+	var brief := AIBehaviourModifier.new()
 	brief.applies_to = charge.applies_to
-	brief.amount = 0.1
+	brief.add = 0.1
 	brief.duration_ticks = 10
 	TickDriver.tick = 100
-	manager.add_score_modifier(brief, shout_a)
+	manager.add_modifier(brief, shout_a)
 	manager.refresh_modifiers(109)
-	_check(is_equal_approx(melee.decision_modifier, 0.1), "a 10-tick modifier counts at tick 109")
+	_check(is_equal_approx(melee.score_bonus(), 0.1), "a 10-tick modifier counts at tick 109")
 	manager.refresh_modifiers(110)
-	_check(melee.decision_modifier == 0.0 and manager.get_score_modifiers().is_empty(), "...and is gone at its deadline, tick 110")
+	_check(melee.score_bonus() == 0.0 and manager.get_modifiers().is_empty(), "...and is gone at its deadline, tick 110")
 	# Ongoing requirements.
-	var with_ammo := AIScoreModifier.new()
+	var with_ammo := AIBehaviourModifier.new()
 	with_ammo.applies_to = TagQuery.make([], [Tags.AI.STANCE_RANGED])
-	with_ammo.amount = -0.2
+	with_ammo.add = -0.2
 	with_ammo.ongoing_requirements = TagQuery.make([], [], [Tags.STATUS.HAS_AMMO])
-	manager.add_score_modifier(with_ammo, shout_a)
-	_check(is_equal_approx(ranged.decision_modifier, -0.2), "ongoing requirements pass (no ammo tag): it counts")
+	manager.add_modifier(with_ammo, shout_a)
+	_check(is_equal_approx(ranged.score_bonus(), -0.2), "ongoing requirements pass (no ammo tag): it counts")
 	pawn.owned_tags.add(Tags.STATUS.HAS_AMMO_RANGED)
 	manager.refresh_modifiers(111)
-	_check(ranged.decision_modifier == 0.0, "the pawn now owns a tag under status.has_ammo: it stops counting")
+	_check(ranged.score_bonus() == 0.0, "the pawn now owns a tag under status.has_ammo: it stops counting")
 	pawn.owned_tags.remove(Tags.STATUS.HAS_AMMO_RANGED)
-	manager.remove_score_modifier(shout_a)
+	manager.remove_modifiers(shout_a)
 	# A block, on the running behaviour.
 	_decide(pawn, 120)
 	_check(_running_name(pawn) == &"Ranged", "back to Ranged")
-	var no_ranged := AIScoreModifier.new()
+	var no_ranged := AIBehaviourModifier.new()
 	no_ranged.applies_to = TagQuery.make([], [Tags.AI.STANCE_RANGED])
 	no_ranged.blocks = true
 	no_ranged.wakes_decision = true
 	pawn.ai.clear_decision()
-	manager.add_score_modifier(no_ranged, shout_b)
+	manager.add_modifier(no_ranged, shout_b)
 	_check(ranged.decision_blocked and pawn.ai.has_decision_waiting(), "a blocking modifier blocks, and wakes_decision asks for a decision")
 	manager.decide(121)
 	_check(_running_name(pawn) == &"Melee", "a blocked running behaviour is replaced")
-	manager.remove_score_modifier(shout_b)
+	manager.remove_modifiers(shout_b)
 	_check(not ranged.decision_blocked, "removed: unblocked")
+	# The other numbers: multiply, then add; an override wins whatever the order; ticks are written for 60 a second.
+	melee.score_jitter = 0.2
+	melee.cooldown_ticks = 30
+	var calm := AIBehaviourModifier.new()
+	calm.number = AIBehaviourModifier.Number.SCORE_JITTER
+	calm.multiply = 0.0
+	calm.add = 0.05
+	manager.add_modifier(calm, shout_a) # no applies_to: every behaviour
+	_check(is_equal_approx(melee.current_jitter(), 0.05), "jitter: 0.2 x 0 + 0.05")
+	var stubborn := AIBehaviourModifier.new()
+	stubborn.number = AIBehaviourModifier.Number.INTERRUPT_THRESHOLD
+	stubborn.overrides = true
+	stubborn.override_value = 40.0
+	var softer := AIBehaviourModifier.new()
+	softer.number = AIBehaviourModifier.Number.INTERRUPT_THRESHOLD
+	softer.add = -5.0
+	manager.add_modifier(stubborn, shout_a)
+	manager.add_modifier(softer, shout_a)
+	_check(melee.current_interrupt_threshold() == 40, "an override wins over an add made after it")
+	var slow := AIBehaviourModifier.new()
+	slow.number = AIBehaviourModifier.Number.COOLDOWN_TICKS
+	slow.multiply = 2.0
+	var settle := AIBehaviourModifier.new()
+	settle.number = AIBehaviourModifier.Number.MIN_RUN_TICKS
+	settle.add = 20.0
+	manager.add_modifier(slow, shout_a)
+	manager.add_modifier(settle, shout_a)
+	_check(melee.current_cooldown_ticks() == TickDriver.ticks_at_rate(60) and melee.current_min_run_ticks() == TickDriver.ticks_at_rate(20),
+			"cooldown 30 x 2 and minimum run 0 + 20, at the match's rate")
+	manager.remove_modifiers(shout_a)
+	_check(is_equal_approx(melee.current_jitter(), 0.2) and melee.current_interrupt_threshold() == 0 and melee.current_cooldown_ticks() == TickDriver.ticks_at_rate(30)
+			and melee.current_min_run_ticks() == 0, "removed: its own numbers again")
 	shout_a.free()
 	shout_b.free()
 	pawn.free()
@@ -570,9 +596,6 @@ func _test_odd_cases() -> void:
 	_decide(pawn, 1)
 	_decide(pawn, 2)
 	_check(liar.warned_score_range, "a score above max_score: a warning naming it")
-	print("  (a warning about a missing behaviour is expected next)")
-	pawn.ai.behaviour_manager.set_score_jitter(&"Nobody", 0.5)
-	_check(true, "a behaviour asked for by name that doesn't exist: a warning, nothing else")
 	pawn.free()
 
 

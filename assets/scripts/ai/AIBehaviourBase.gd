@@ -20,7 +20,7 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 		enabled = value
 		if manager:
 			manager.inputs_changed() # C++ gets the brain again
-## What it is, as tags such as &"ai.stance.melee": what score modifiers pick behaviours by ([member AIScoreModifier.applies_to]).
+## What it is, as tags such as &"ai.stance.melee": what behaviour modifiers pick behaviours by ([member AIBehaviourModifier.applies_to]).
 @export var tags: Array[StringName] = []:
 	set(value):
 		tags = value
@@ -44,6 +44,7 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 ## Ticks after it ends before it can be chosen again. A hard rule, checked before any scoring.
 @export_range(0, 36000, 1, "or_greater") var cooldown_ticks := 0
 ## Once chosen, ordinary decisions can't replace it for this many ticks. State changes and forces still can, if strong enough.
+## Behaviour modifiers can change it, as they can cooldown_ticks, interrupt_threshold and score_jitter.
 @export_range(0, 36000, 1, "or_greater") var min_run_ticks := 0
 ## While it runs, only events of this priority or higher can replace it: 0 for an ordinary decision, a state's priority for a state
 ## change, a force's priority for a forced state. 0: anything can.
@@ -55,13 +56,12 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 ## While it runs, [method tick] is called every this many ticks, and sooner when a wake-up it asked for happens (the longest it
 ## sleeps). Count time with context.current_tick, not by counting tick() calls. 1: every tick.
 @export_range(1, 600, 1, "or_greater") var tick_interval_ticks := 1
-## Added to its score from when it's chosen, times persistence_fade's value. +: tends to keep it chosen. -: prefers others for a while.
-@export var persistence := 0.0
-## How persistence fades over ticks. Empty: no persistence.
-@export var persistence_fade: FadeProfile
-## This pawn's own mask over [member persistence_fade], multiplied with it. Null: none. Set through
-## [method AIBehaviourManager.set_persistence_mask] so C++ hears of it. A hook; nothing sets one yet.
-var persistence_mask: FadeProfile = null
+## A modifier it gives itself as it starts, such as a score bonus that keeps it chosen a while. Empty applies_to: only this behaviour.
+## With no duration it lasts while the behaviour runs; with one, its duration from the start. Starting again replaces it.
+@export var modifier_on_start: AIBehaviourModifier
+## A modifier it gives itself as it ends, such as -0.3 to its score for 15 s so something else gets a turn. Empty applies_to: only this
+## behaviour. With no duration it lasts until the behaviour starts again; with one, its duration. Ending again replaces it.
+@export var modifier_on_end: AIBehaviourModifier
 
 ## Set by the AIBehaviourManager.
 var manager: AIBehaviourManager = null
@@ -79,10 +79,14 @@ var perf_available_name: StringName = &""
 ## The timing scope name for its tick(), such as &"ai.behaviour.Chase". Made once by the manager.
 var perf_tick_name: StringName = &""
 
+## What the behaviour modifiers that count for it do to each of its numbers ([enum AIBehaviourModifier.Number]): one
+## [code][multiply, add, overrides, override value][/code] per number. Worked out by the manager when they or the owned tags change.
+var modifier_changes: Array[PackedFloat64Array] = []
+## A blocking behaviour modifier counts for it. Set by the manager with [member modifier_changes].
+var decision_blocked := false
+
 # Scratch values for one decision, kept here so a decision creates no arrays or objects. Only the manager reads them.
-var decision_persistence := 0.0
-var decision_modifier := 0.0 # the score modifiers' sum for it, worked out when they or the owned tags change
-var decision_blocked := false # a blocking score modifier counts for it
+var decision_bonus := 0.0 # score_bonus() for this decision
 var decision_jitter := 0.0 # this decision's random offset
 var decision_ceiling := 0.0
 var decision_floor := 0.0 # -INF when min_score isn't set
@@ -103,13 +107,6 @@ var _tag_words := PackedInt64Array()
 var _tag_words_generation := -1
 var _all_conditions: Array[AICondition] = []
 var _conditions_built := false
-
-# Persistence, as three numbers: how far along the fade it was at the last change, that change's tick, and how fast it moves along.
-# The amount now is worked out from these and the current tick, so nothing runs every tick.
-var _persistence_running := false
-var _persistence_along := 0.0
-var _persistence_changed_tick := 0
-var _persistence_speed := 1.0
 
 
 func _init() -> void:
@@ -234,59 +231,48 @@ func tag_words() -> PackedInt64Array:
 	return _tag_words
 
 
-## True while its cooldown hasn't finished.
+## True while its cooldown (as its modifiers leave it) hasn't finished.
 func is_cooling_down(at_tick: int) -> bool:
 	# The parameter is at_tick, not tick: that would clash with tick() above.
-	return cooldown_ticks > 0 and ended_tick >= 0 and at_tick - ended_tick < TickDriver.ticks_at_rate(cooldown_ticks)
+	var cooldown := current_cooldown_ticks()
+	return cooldown > 0 and ended_tick >= 0 and at_tick - ended_tick < cooldown
 
 
-## This behaviour's jitter amount: its own, or the manager's default when it's -1.
+## This behaviour's jitter amount before modifiers: its own, or the manager's default when it's -1.
 func effective_jitter() -> float:
 	if score_jitter >= 0.0:
 		return score_jitter
 	return manager.default_score_jitter if manager else 0.0
 
 
-## What persistence adds to its score at this tick.
-func persistence_now(at_tick: int) -> float:
-	if not _persistence_running or persistence == 0.0 or persistence_fade == null:
-		return 0.0
-	var along := _persistence_ticks_along(at_tick)
-	var amount := persistence * persistence_fade.value_at(along)
-	if persistence_mask:
-		amount *= persistence_mask.value_at(along)
-	return amount
+## One of its numbers as its modifiers leave it: base times their multiplies plus their adds, or the last override.
+func modified(number: AIBehaviourModifier.Number, base: float) -> float:
+	if modifier_changes.is_empty():
+		return base
+	var change := modifier_changes[number]
+	return change[3] if change[2] != 0.0 else base * change[0] + change[1]
 
 
-## Its persistence as four numbers: started (1 or 0), ticks along the fade, the tick that was worked out at, and the speed. The
-## AIDecisionModule copies them into C++ when the pawn starts deciding there.
-func persistence_state() -> PackedFloat64Array:
-	return PackedFloat64Array([1.0 if _persistence_running else 0.0, _persistence_along, float(_persistence_changed_tick), _persistence_speed])
+## What its modifiers add to its score (0 with none).
+func score_bonus() -> float:
+	return modified(AIBehaviourModifier.Number.SCORE_BONUS, 0.0)
 
 
-## Starts persistence from the beginning of its fade. The manager calls this when the behaviour is chosen.
-func start_persistence(at_tick: int) -> void:
-	_persistence_running = true
-	_persistence_along = 0.0
-	_persistence_changed_tick = at_tick
-	_persistence_speed = 1.0
+## Its jitter amount with modifiers, never below 0.
+func current_jitter() -> float:
+	return maxf(0.0, modified(AIBehaviourModifier.Number.SCORE_JITTER, effective_jitter()))
 
 
-## Moves persistence back along its fade by this many ticks, so it lasts longer. Negative: forward, so it ends sooner.
-func add_persistence_ticks(ticks: float, at_tick: int) -> void:
-	if not _persistence_running:
-		return
-	_persistence_along = maxf(0.0, _persistence_ticks_along(at_tick) - ticks)
-	_persistence_changed_tick = at_tick
+## Its interrupt threshold with modifiers.
+func current_interrupt_threshold() -> int:
+	return roundi(modified(AIBehaviourModifier.Number.INTERRUPT_THRESHOLD, interrupt_threshold))
 
 
-## How fast persistence moves along its fade from now on: 1.0 normally, 0.5 for half speed.
-func set_persistence_speed(speed: float, at_tick: int) -> void:
-	_persistence_along = _persistence_ticks_along(at_tick)
-	_persistence_changed_tick = at_tick
-	_persistence_speed = maxf(0.0, speed)
+## Its cooldown with modifiers, in this match's ticks; 0: none.
+func current_cooldown_ticks() -> int:
+	return TickDriver.ticks_at_rate(maxi(0, roundi(modified(AIBehaviourModifier.Number.COOLDOWN_TICKS, cooldown_ticks))))
 
 
-# How far along its fade persistence is at this tick.
-func _persistence_ticks_along(at_tick: int) -> float:
-	return _persistence_along + (at_tick - _persistence_changed_tick) * _persistence_speed
+## Its minimum run with modifiers, in this match's ticks; 0: none.
+func current_min_run_ticks() -> int:
+	return TickDriver.ticks_at_rate(maxi(0, roundi(modified(AIBehaviourModifier.Number.MIN_RUN_TICKS, min_run_ticks))))

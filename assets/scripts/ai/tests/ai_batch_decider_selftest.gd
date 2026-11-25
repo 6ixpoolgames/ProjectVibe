@@ -146,7 +146,7 @@ func _test_brains() -> void:
 		"event_priority": PackedInt32Array([0, 0, 0, 0, 0]), "running": PackedInt32Array([-1, -1, -1, -1, -1]),
 		"running_started": PackedInt64Array([-1, -1, -1, -1, -1]), "cooling": PackedInt64Array([0, 0, 0, 0, 0]),
 		"can_press": PackedInt64Array([-1, -1, -1, -1, -1]), "available_known": PackedInt64Array([0, 0, 0, 0, 0]),
-		"available": PackedInt64Array([0, 0, 0, 0, 0]), "persistence": zeros, "modifier": modifier,
+		"available": PackedInt64Array([0, 0, 0, 0, 0]), "modifier": modifier, # Claude 2026-11-25: no persistence column (step 6a)
 		"blocked": PackedInt64Array([0, 0, 0, 1 << 1, 0])}
 	var answer: Dictionary = decider.decide(columns)
 	_check_equal(answer.get("chosen", PackedInt32Array()), PackedInt32Array([0, 1, 1, 2, 2]),
@@ -167,7 +167,7 @@ func _test_made_up_brains() -> void:
 	var kept := 0
 	var ended := 0
 	var jitter := 0
-	var persisting := 0
+	var boosted := 0 # Claude 2026-11-25 (pawn spec 16.10 step 6a): was persisting; persistence is gone, Alpha boosts itself
 	var tie_picks := {}
 	for record in _recorder.get_records():
 		kept += 1 if record.kept_by_interrupt else 0
@@ -176,9 +176,9 @@ func _test_made_up_brains() -> void:
 			tie_picks[record.chosen] = true
 		for entry in record.behaviours:
 			jitter += 1 if entry.get("jitter", 0.0) != 0.0 else 0
-			persisting += 1 if entry.get("persistence", 0.0) != 0.0 else 0
-	_check(kept > 20 and ended > 20 and jitter > 100 and persisting > 20 and tie_picks.size() == 3,
-			"the made-up brains used every rule (kept %d, ended %d, jittered %d, persisting %d, tie picks %d)" % [kept, ended, jitter, persisting, tie_picks.size()])
+			boosted += 1 if entry.get("modifier", 0.0) != 0.0 else 0
+	_check(kept > 20 and ended > 20 and jitter > 100 and boosted > 20 and tie_picks.size() == 3,
+			"the made-up brains used every rule (kept %d, ended %d, jittered %d, boosted %d, tie picks %d)" % [kept, ended, jitter, boosted, tie_picks.size()])
 	var data := DecisionReplay.from_recorder(_recorder)
 	var result := DecisionReplay.compare(data)
 	print("  made-up brains: " + DecisionReplay.describe(result))
@@ -215,13 +215,16 @@ func _play_made_up(_shadow: bool) -> Array[String]:
 	var choices: Array[String] = []
 	var note := func(_old: AIBehaviourBase, new: AIBehaviourBase, _reason: String, who: String) -> void:
 		choices.append("%s:%s" % [who, String(new.name) if new else ""])
-	# Pawn one: jitter on everything, persistence that fades, floors, a cooldown, a target, an action, a state, a behaviour ending.
+	# Pawn one: jitter on everything, a boost it gives itself as it starts (Claude 2026-11-25: was persistence that fades), floors, a
+	# cooldown, a target, an action, a state, a behaviour ending.
 	var alarm := SwitchState.new()
 	alarm.name = "Alarm"
 	alarm.priority = 10
 	var alpha := _b("Alpha", 0.5)
-	alpha.persistence = 0.3
-	alpha.persistence_fade = _linear(5, 20)
+	var boost := AIBehaviourModifier.new()
+	boost.add = 0.3
+	boost.duration_ticks = 15
+	alpha.modifier_on_start = boost
 	var bravo := _b("Bravo", 0.45)
 	bravo.min_score = 0.4
 	var charlie := _b("Charlie", 0.6, 0.9) # scores below its max
@@ -290,13 +293,29 @@ func _test_gates_and_modifiers() -> void:
 	var pawn := _make_pawn([melee, ranged, hold, rest])
 	pawn.name = "Four"
 	var manager := pawn.ai.behaviour_manager
-	var charge := AIScoreModifier.new()
+	var charge := AIBehaviourModifier.new()
 	charge.applies_to = TagQuery.make([], [Tags.AI.STANCE_MELEE])
-	charge.amount = 0.1
-	var no_ranged := AIScoreModifier.new()
+	charge.add = 0.1
+	var no_ranged := AIBehaviourModifier.new()
 	no_ranged.applies_to = TagQuery.make([], [Tags.AI.STANCE_RANGED])
 	no_ranged.blocks = true
 	no_ranged.duration_ticks = 15
+	# Claude 2026-11-25 (pawn spec 16.10 step 6a): modifiers changing the other numbers, which C++ gets as numbers.
+	var wild := AIBehaviourModifier.new()
+	wild.number = AIBehaviourModifier.Number.SCORE_JITTER
+	wild.add = 0.1
+	var steady := AIBehaviourModifier.new()
+	steady.number = AIBehaviourModifier.Number.MIN_RUN_TICKS
+	steady.add = 12.0
+	steady.applies_to = charge.applies_to
+	var firm := AIBehaviourModifier.new()
+	firm.number = AIBehaviourModifier.Number.INTERRUPT_THRESHOLD
+	firm.overrides = true
+	firm.override_value = 5.0
+	firm.applies_to = no_ranged.applies_to
+	var slow := AIBehaviourModifier.new()
+	slow.number = AIBehaviourModifier.Number.COOLDOWN_TICKS
+	slow.add = 15.0
 	_module.reset_counts()
 	_recorder.clear()
 	_recorder.start()
@@ -309,11 +328,20 @@ func _test_gates_and_modifiers() -> void:
 		elif t % 37 == 20:
 			pawn.owned_tags.remove(Tags.STATUS.HAS_AMMO_RANGED)
 		if t % 60 == 10:
-			manager.add_score_modifier(charge, self)
+			manager.add_modifier(charge, self)
 		elif t % 60 == 40:
-			manager.remove_score_modifier(self)
+			manager.remove_modifiers(self)
 		if t % 90 == 50:
-			manager.add_score_modifier(no_ranged, &"block")
+			manager.add_modifier(no_ranged, &"block")
+		if t % 80 == 5:
+			manager.add_modifier(wild, &"wild")
+		elif t % 80 == 45:
+			manager.remove_modifiers(&"wild")
+		if t % 100 == 15:
+			for numbers: AIBehaviourModifier in [steady, firm, slow]:
+				manager.add_modifier(numbers, &"numbers")
+		elif t % 100 == 70:
+			manager.remove_modifiers(&"numbers")
 		hold.enabled = t % 70 >= 60
 		manager.check_running(tick)
 		_decide(pawn, tick, 0, t % 5 != 0)

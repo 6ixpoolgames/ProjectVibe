@@ -121,6 +121,11 @@ Owner's decisions, 2026-11-16:
   - paths re-planned after edits, with a watchdog for progress
 - **Later:** checkpoints of the edit log per chunk, catch-up for late joiners in bounded batches, and shared or hierarchical routes, where profiling justifies them. Replacing Recast/Detour, flow fields and threaded pawn movement are not planned.
 
+## To-do *(logged as they come up, so nothing is lost)*
+
+- **Tuning** *(the owner, 2026-11-25: feel is tuned once a game needs it)*.
+- **Look Toward's step aside.** Before pawn spec 16.10 step 6a it held -0.3 for 10 s, then faded out over 5 s (a persistence fade). Persistence is gone, so it's now a flat -0.3 for 15 s (`modifier_on_start`, 900 ticks), and the step aside ends abruptly. The stealth tests pass. To tune: the length, and whether a fade is wanted back (a modifier with a fading amount would be new machinery). `ai/behaviours/AILookTowardBehaviour.gd`.
+
 ## Wishlist
 
 - **A C++ mover replacing move_and_slide** *(the owner asked 2026-11-16, then put it here: a bigger job than expected, with more knock-on effects than the rest of the performance work)*. A batched, deterministic collide-and-slide:
