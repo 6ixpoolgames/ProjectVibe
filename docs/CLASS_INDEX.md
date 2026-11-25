@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 195 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 196 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -61,6 +61,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [Definition](../assets/scripts/abilities/REFERENCE.md#definition) | [abilities](../assets/scripts/abilities/README.md) | Resource | Settings shared by everything that uses them, with variants: the base of [AbilityDefinition] and [ProjectileDefinition] (ability spec 3). |
 | [DefinitionRegistry](../assets/scripts/abilities/REFERENCE.md#definitionregistry) | [abilities](../assets/scripts/abilities/README.md) | RefCounted | Gives every definition file (abilities, projectiles) an id that's the same on every machine with the same files (ability spec 3.1). |
 | [DeterministicRandom](../assets/scripts/singletons/REFERENCE.md#deterministicrandom) | [singletons](../assets/scripts/singletons/README.md) | RefCounted | Repeatable random numbers for gameplay: each roll is a hash of the match seed, a key, a tick and a salt (pawn spec 16.9). |
+| [DiagnosticsFrameHistory](../assets/scripts/diagnostics/REFERENCE.md#diagnosticsframehistory) | [diagnostics](../assets/scripts/diagnostics/README.md) | RefCounted | The newest frames' numbers in a fixed amount of memory: a ring buffer, each new frame overwriting the oldest. |
 | [DiagnosticsLogger](../assets/scripts/diagnostics/REFERENCE.md#diagnosticslogger) | [diagnostics](../assets/scripts/diagnostics/README.md) | Logger | Catches the engine's warnings and errors for [DiagnosticsManager]. |
 | [DiagnosticsManager](../assets/scripts/diagnostics/REFERENCE.md#diagnosticsmanager) | [diagnostics](../assets/scripts/diagnostics/README.md) | GameModeModule | Measures every frame, keeps the history, spikes and session log, feeds the replay and shows the panels. |
 | [DiagnosticsPanels](../assets/scripts/diagnostics/REFERENCE.md#diagnosticspanels) | [diagnostics](../assets/scripts/diagnostics/README.md) | CanvasLayer | The on-screen panels, one key each, for reading [DiagnosticsManager]'s numbers. |

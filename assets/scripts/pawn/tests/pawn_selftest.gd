@@ -549,7 +549,7 @@ func _test_skipping_still_moves() -> void:
 	var diagnostics := GameMode.get_module(DiagnosticsManager) as DiagnosticsManager
 	var skipped := 0
 	if diagnostics:
-		for record: Dictionary in diagnostics.get_frames().slice(-15):
+		for record: Dictionary in diagnostics.get_frames(15):
 			skipped += int(record.scopes.get(&"pawn.move_skipped", [0, 0])[1])
 	var at := pawn.global_position
 	await _ticks(10)

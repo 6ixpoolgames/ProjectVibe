@@ -7,6 +7,8 @@
 ## separately when the pawn was hit within [member hit_within_ticks] by an [member attacker] of the right kind. So Combat holds when
 ## a known attacker hits, and Alert when an unknown one does (there is no damage sense).
 ## Design: pawn spec 10.6.
+# REFACTOR: prerequisites written in code over memory, with settings, where the goal is states as conditions over inputs. Built on
+# step 8's selectors (pawn spec 16.10), so nothing is written twice. Data over code. See CHANGELOG.md.
 class_name AIAwarenessState
 extends AIStateBase
 

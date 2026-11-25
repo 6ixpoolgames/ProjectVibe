@@ -4,6 +4,7 @@
 
 Every class in `assets/scripts/diagnostics/`, from its doc comments. The overview is in [README.md](README.md).
 
+- [DiagnosticsFrameHistory](#diagnosticsframehistory)
 - [DiagnosticsLogger](#diagnosticslogger)
 - [DiagnosticsManager](#diagnosticsmanager)
 - [DiagnosticsPanels](#diagnosticspanels)
@@ -11,6 +12,32 @@ Every class in `assets/scripts/diagnostics/`, from its doc comments. The overvie
 - [NavDebugView](#navdebugview)
 - [PerfScopes](#perfscopes)
 - [ProjectileTraceView](#projectiletraceview)
+
+## DiagnosticsFrameHistory
+
+`res://assets/scripts/diagnostics/DiagnosticsFrameHistory.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+The newest frames' numbers in a fixed amount of memory: a ring buffer, each new frame overwriting the oldest.
+
+[`DiagnosticsManager`](#diagnosticsmanager) keeps one for its live views: summaries, the F2 frame graph, the editor's monitors and captures. A frame is a row of numbers in one packed array, in the columns named when the history is made, plus the frame's scopes. Once full, adding a frame allocates and moves nothing. The whole session's frames are in the replay's diagnostics channel.
+
+```gdscript
+var frame_ms := history.column(&"frame_ms")
+for age in history.size():          # 0 is the newest frame
+    total += history.value(frame_ms, age)
+```
+
+### Functions
+
+- `capacity() -> int`: The most frames it keeps.
+- `size() -> int`: How many frames it holds now.
+- `columns() -> PackedStringArray`: The column names, in order.
+- `column(column_name: StringName) -> int`: A column's number, for `value()`; -1 if there's no such column.
+- `add(record: Dictionary) -> void`: Adds a frame: each column from the record's value of that name (0 when it has none), and the record's "scopes".
+- `value(column_number: int, age: int) -> float`: A column's value in the frame age frames ago (0: the newest). Age must be below `size()`.
+- `scopes(age: int) -> Dictionary`: The scopes of the frame age frames ago: name -> [microseconds, calls].
+- `record(age: int) -> Dictionary`: The frame age frames ago as a record: column name -> value, plus "scopes". A new Dictionary each call, so not for every frame.
+- `clear() -> void`: Forgets every frame.
 
 ## DiagnosticsLogger
 
@@ -48,7 +75,7 @@ Design: diagnostics spec.
 
 ### Settings and properties
 
-- `history_seconds: float` = `30.0`: How much history is kept in memory, in seconds.
+- `history_frames: int` = `3600`: Frames kept in memory for the live views (60 s at 60 fps, 15 s at 240); the replay keeps the whole session. Changing it while running starts the history afresh.
 - `spike_over_budget: float` = `1.2`: A frame is a spike when it takes longer than the tick's budget times this (1.2: over 20 ms at 60 ticks a second). Not lower: with vsync, ordinary frames jitter a millisecond.
 - `spikes_kept: int` = `50`: How many spikes are kept, newest last.
 - `log_every_seconds: float` = `5.0`: How often a summary line goes into the session log, in seconds.
@@ -61,7 +88,8 @@ Design: diagnostics spec.
 ### Functions
 
 - `get_move_check() -> MoveSanityCheck`: The [`MoveSanityCheck`](#movesanitycheck) it runs after each tick, or null when `check_moves` is off.
-- `get_frames() -> Array`: The history, oldest first.
+- `get_frames(newest: int = 0) -> Array`: The newest frames (all with 0) as records, oldest first: column name -> value, plus "scopes". Builds a Dictionary a frame, so for tests and tools; a view drawn every frame reads `get_history()`.
+- `get_history() -> DiagnosticsFrameHistory`: The frame history itself: a ring buffer of the newest `history_frames` frames' numbers.
 - `get_spikes() -> Array`: The spikes kept, newest last.
 - `get_log_lines() -> Array`: Every warning and error so far, as [level, text, where, count], in the order they first came.
 - `get_log_path() -> String`: The session log's path.

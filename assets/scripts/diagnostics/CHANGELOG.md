@@ -4,7 +4,7 @@ does now, this says how it got here and why. -->
 
 # Diagnostics changelog
 
-Diagnostics is this folder: `PerfScopes`, `DiagnosticsManager`, `DiagnosticsLogger`, `DiagnosticsPanels`, `MoveSanityCheck`, `ProjectileTraceView` (F5) and `NavDebugView` (whose history is in [navigation's changelog](../navigation/CHANGELOG.md)), plus `replay/ReplayDiagnosticsChannel` (in [replay's changelog](../replay/CHANGELOG.md)). Design: [docs/diagnostics/DIAGNOSTICS_SPEC.md](../../../docs/diagnostics/DIAGNOSTICS_SPEC.md). Overview: [README.md](README.md).
+Diagnostics is this folder: `PerfScopes`, `DiagnosticsManager`, `DiagnosticsFrameHistory`, `DiagnosticsLogger`, `DiagnosticsPanels`, `MoveSanityCheck`, `ProjectileTraceView` (F5) and `NavDebugView` (whose history is in [navigation's changelog](../navigation/CHANGELOG.md)), plus `replay/ReplayDiagnosticsChannel` (in [replay's changelog](../replay/CHANGELOG.md)). Design: [docs/diagnostics/DIAGNOSTICS_SPEC.md](../../../docs/diagnostics/DIAGNOSTICS_SPEC.md). Overview: [README.md](README.md).
 
 ## Refactor candidates
 
@@ -18,6 +18,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Always-on recordings belong to the recorder | `DiagnosticsManager._on_possessed`, `_set_role` | A replay rule living in diagnostics: a game without the manager gets no always-on recordings. An `always_on` setting on `ReplayRecorder` keeps the rule with the recorder | S |
 | The window title in shipped games | `DiagnosticsManager._update_title` | A debugging convenience (role and process id, to tell instances apart) that also renames a release build's window, since diagnostics ship. A setting, or debug builds only, keeps a game's own title | S |
 | "Late" and "very late" as settings | `DiagnosticsManager._summary`; the F4 panel's text; `replay/ReplayViewer`'s strip colours | Fixed at 20 and 34 ms (60 and 30 fps) in three places, while spikes follow the tick rate and `spike_over_budget`. A game aiming at another frame rate can't set them | S |
+
+## 2026-11-25
+
+- **The frame history is a ring buffer** (`DiagnosticsFrameHistory`, new; the owner's call, as the replay already keeps the whole session). It was a list of every frame's record from the last 30 s, with no limit, trimmed by a `pop_front` each frame, which moves the whole array. A test run with `--fixed-fps` makes about 15,000 frames a second, so a waiting test process grew to 2 GB. After one long frame, the trim had thousands of records to drop, each moving the whole array, and froze the process for up to a minute at a time. That was `net_projectile_selftest`'s lossy failure: the test froze between starting the server and its clients, so the clients started after the server had finished and never joined (4 of 19 runs; every run lost about two minutes). Now the newest `history_frames` (3600) frames' numbers sit in one packed array, each new frame overwriting the oldest, with each frame's scopes beside them: fixed memory, nothing moved. `history_seconds` is gone. `get_history()` gives the ring buffer (the F2 graph reads it); `get_frames(newest)` builds records for tests and tools. A summary over more time than the history holds covers what it has, and its `seconds` says so. `diagnostics_selftest` checks the ring.
 
 ## 2026-11-23
 

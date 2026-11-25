@@ -20,8 +20,13 @@
 class_name DiagnosticsManager
 extends GameModeModule
 
-## How much history is kept in memory, in seconds.
-@export_range(1.0, 300.0, 1.0, "or_greater") var history_seconds := 30.0
+## Frames kept in memory for the live views (60 s at 60 fps, 15 s at 240); the replay keeps the whole session. Changing it while
+## running starts the history afresh.
+@export_range(60, 100000, 1, "or_greater") var history_frames := 3600:
+	set(value):
+		history_frames = value
+		if _history:
+			_make_history()
 ## A frame is a spike when it takes longer than the tick's budget times this (1.2: over 20 ms at 60 ticks a second). Not lower: with vsync, ordinary frames jitter a millisecond.
 @export_range(1.0, 4.0, 0.05) var spike_over_budget := 1.2
 ## How many spikes are kept, newest last.
@@ -47,7 +52,8 @@ var _channel := ReplayDiagnosticsChannel.new()
 var _logger := DiagnosticsLogger.new()
 var _panels: DiagnosticsPanels = null
 var _marker: Node = null
-var _frames: Array = [] # records, oldest first (see ReplayDiagnosticsChannel.add_frame for the keys, plus "time" and "ticks")
+var _history: DiagnosticsFrameHistory = null # made once the network counters' names are known
+var _step_counts := {} # the newest frame's AI pawns running every tick, 2nd and 4th
 var _spikes: Array = []
 var _frame_number := 0
 var _first_physics_usec := 0 # when this frame's first physics step started, or 0 before one
@@ -101,6 +107,7 @@ func _on_module_added(game_mode: GameModeSingleton) -> void:
 		_net_counters.assign(NetworkSessionSingleton.COUNTING_STATS)
 		for counter in _net_counters:
 			_net_keys.append("net_" + counter)
+	_make_history()
 	PerfScopes.enabled = true
 	if _driver:
 		_driver.profile_enabled = true
@@ -216,13 +223,12 @@ func _process(delta: float) -> void:
 	var activation: AIActivationManager = game_mode.ai_activation_manager if game_mode else null
 	if activation:
 		record["step_counts"] = activation.get_step_counts()
+		_step_counts = record["step_counts"]
 	_record_network(record)
 	_record_server_ticks(record)
 	record["scopes"] = scopes
-	_frames.append(record)
-	var oldest: float = record.time - history_seconds
-	while not _frames.is_empty() and _frames[0].time < oldest:
-		_frames.pop_front()
+	if _history:
+		_history.add(record)
 	if _is_spike(record):
 		_spikes.append(record)
 		if _spikes.size() > spikes_kept:
@@ -248,9 +254,21 @@ func _is_spike(record: Dictionary) -> bool:
 # --- Reading it ---
 
 
-## The history, oldest first.
-func get_frames() -> Array:
-	return _frames
+## The newest frames (all with 0) as records, oldest first: column name -> value, plus "scopes". Builds a Dictionary a frame, so for
+## tests and tools; a view drawn every frame reads [method get_history].
+func get_frames(newest := 0) -> Array:
+	var out: Array = []
+	if _history == null:
+		return out
+	var count := _history.size() if newest <= 0 else mini(newest, _history.size())
+	for age in range(count - 1, -1, -1):
+		out.append(_history.record(age))
+	return out
+
+
+## The frame history itself: a ring buffer of the newest [member history_frames] frames' numbers.
+func get_history() -> DiagnosticsFrameHistory:
+	return _history
 
 
 ## The spikes kept, newest last.
@@ -287,7 +305,6 @@ static func steps_text(counts: Variant) -> String:
 func _summary(seconds: float) -> Dictionary:
 	var out := {"seconds": seconds, "role": _role, "window": "%dx%d" % [get_viewport().get_visible_rect().size.x, get_viewport().get_visible_rect().size.y],
 		"vsync": ["off", "on", "adaptive", "mailbox"][DisplayServer.window_get_vsync_mode()] if not RunEnvironment.is_headless() else "headless"}
-	var since: float = (_frames[-1].time if not _frames.is_empty() else 0.0) - seconds
 	var count := 0
 	var sums := {"frame_ms": 0.0, "physics_ms": 0.0, "scripts_ms": 0.0, "rest_ms": 0.0, "steps": 0.0, "render_cpu_ms": 0.0,
 		"render_gpu_ms": 0.0, "ticks": 0.0, "dropped": 0.0}
@@ -299,25 +316,28 @@ func _summary(seconds: float) -> Dictionary:
 	var over_30 := 0
 	var scope_sums := {}
 	var tick_total := 0.0
-	var last: Dictionary = {}
-	for i in range(_frames.size() - 1, -1, -1):
-		var record: Dictionary = _frames[i]
-		if record.time <= since:
-			break
-		if last.is_empty():
-			last = record
+	var history := _history if _history else DiagnosticsFrameHistory.new(1, PackedStringArray(["time", "frame_ms"]))
+	var keys: Array = sums.keys()
+	var key_columns: Array[int] = []
+	for key: String in keys:
+		key_columns.append(history.column(key))
+	var frame_ms_at := history.column(&"frame_ms")
+	for age in _frames_within(seconds):
 		count += 1
-		for key: String in sums:
-			sums[key] += float(record.get(key, 0.0))
-		worst = maxf(worst, record.frame_ms)
+		for k in keys.size():
+			if key_columns[k] >= 0:
+				sums[keys[k]] += history.value(key_columns[k], age)
+		var frame_ms := history.value(frame_ms_at, age)
+		worst = maxf(worst, frame_ms)
 		# REFACTOR: "late" and "very late" are fixed at 20 and 34 ms (60 and 30 fps), while spikes follow the tick rate and
 		# spike_over_budget; the panels and the replay viewer's strip repeat them. Designer friendly. See CHANGELOG.md.
-		if record.frame_ms > 20.0: # late: a missed 1/60 s, allowing for a millisecond of jitter either side
+		if frame_ms > 20.0: # late: a missed 1/60 s, allowing for a millisecond of jitter either side
 			over_60 += 1
-		if record.frame_ms > 34.0:
+		if frame_ms > 34.0:
 			over_30 += 1
-		for scope: StringName in record.scopes:
-			var entry: Array = record.scopes[scope]
+		var frame_scopes := history.scopes(age)
+		for scope: StringName in frame_scopes:
+			var entry: Array = frame_scopes[scope]
 			var sum: Variant = scope_sums.get(scope)
 			if sum == null:
 				scope_sums[scope] = [float(entry[0]), float(entry[1])]
@@ -325,6 +345,8 @@ func _summary(seconds: float) -> Dictionary:
 				sum[0] += entry[0]
 				sum[1] += entry[1]
 	var frames := maxf(count, 1)
+	seconds = _covered_seconds(seconds, count)
+	out["seconds"] = seconds
 	out["frames"] = count
 	for key: String in ["frame_ms", "physics_ms", "scripts_ms", "rest_ms", "render_cpu_ms", "render_gpu_ms"]:
 		out[key] = sums[key] / frames
@@ -336,11 +358,11 @@ func _summary(seconds: float) -> Dictionary:
 	var span := maxf(seconds, 0.001)
 	out["ticks_per_second"] = sums.ticks / span
 	out["dropped_per_second"] = sums.dropped / span
-	out["load_step"] = int(last.get("load_step", 1)) # the load ladder (pawn spec 8.21)
-	out["step_counts"] = last.get("step_counts", {})
+	out["load_step"] = _driver.load_step if _driver else 1 # the load ladder (pawn spec 8.21)
+	out["step_counts"] = _step_counts
 	for key: String in ["draw_calls", "objects", "nodes", "orphans"]:
-		out[key] = int(last.get(key, 0))
-	out["memory_mb"] = last.get("memory_kb", 0) / 1024.0
+		out[key] = int(_last_frame(StringName(key)))
+	out["memory_mb"] = _last_frame(&"memory_kb") / 1024.0
 	# Scopes as ms a frame, most expensive first. The tick phases are also given a tick, for comparing with the tick's budget.
 	var names := scope_sums.keys()
 	names.sort_custom(func(a: StringName, b: StringName) -> bool: return scope_sums[a][0] > scope_sums[b][0])
@@ -396,14 +418,43 @@ func _server_summary(ticks_per_second: float) -> Dictionary:
 
 ## The server's tick rate over the last seconds, as in a summary's "server". Cheap enough for a HUD every frame, unlike [method get_summary].
 func get_server_ticks(seconds := 1.0) -> Dictionary:
-	var since: float = (_frames[-1].time if not _frames.is_empty() else 0.0) - seconds
 	var ticks := 0.0
-	for i in range(_frames.size() - 1, -1, -1):
-		var record: Dictionary = _frames[i]
-		if record.time <= since:
-			break
-		ticks += float(record.get("server_ticks", 0))
-	return _server_summary(ticks / maxf(seconds, 0.001))
+	var count := _frames_within(seconds)
+	var column := _history.column(&"server_ticks") if _history else -1
+	if column >= 0:
+		for age in count:
+			ticks += _history.value(column, age)
+	return _server_summary(ticks / maxf(_covered_seconds(seconds, count), 0.001))
+
+
+# How many of the newest frames finished within the last seconds (all the history holds, if it covers less).
+func _frames_within(seconds: float) -> int:
+	if _history == null or _history.size() == 0:
+		return 0
+	var time_at := _history.column(&"time")
+	var since := _history.value(time_at, 0) - seconds
+	var count := 0
+	while count < _history.size() and _history.value(time_at, count) > since:
+		count += 1
+	return count
+
+
+# The seconds the newest count frames cover, at most seconds: less when the history holds less (early on, or at a very high frame
+# rate), so rates are over the time measured.
+func _covered_seconds(seconds: float, count: int) -> float:
+	if _history == null or count <= 0 or count < _history.size():
+		return seconds
+	var time_at := _history.column(&"time")
+	var first_frame := _history.value(_history.column(&"frame_ms"), count - 1) / 1000.0
+	return minf(seconds, _history.value(time_at, 0) - _history.value(time_at, count - 1) + first_frame)
+
+
+# Made afresh with history_frames rows: a frame record's numbers, and each network counter.
+func _make_history() -> void:
+	var columns := PackedStringArray(["frame", "time", "frame_ms", "physics_ms", "scripts_ms", "rest_ms", "steps", "render_cpu_ms",
+		"render_gpu_ms", "draw_calls", "objects", "nodes", "orphans", "memory_kb", "ticks", "dropped", "load_step", "server_ticks"])
+	columns.append_array(PackedStringArray(_net_keys))
+	_history = DiagnosticsFrameHistory.new(history_frames, columns)
 
 
 ## A summary's "server" as a short line: "server 60 ticks/s, running 59.8, load 63%, step 1".
@@ -663,7 +714,7 @@ func capture() -> String:
 	var table := FileAccess.open(path.path_join("frames.csv"), FileAccess.WRITE)
 	if table:
 		table.store_line("time,frame,frame_ms,physics_ms,scripts_ms,rest_ms,steps,ticks,render_cpu_ms,render_gpu_ms,draw_calls,objects,nodes,orphans,memory_kb,top_scopes")
-		for record: Dictionary in _frames:
+		for record: Dictionary in get_frames():
 			table.store_line("%.3f,%d,%.2f,%.2f,%.2f,%.2f,%d,%d,%.2f,%.2f,%d,%d,%d,%d,%d,\"%s\"" % [record.time, record.frame, record.frame_ms,
 				record.physics_ms, record.scripts_ms, record.rest_ms, record.steps, record.get("ticks", 0), record.render_cpu_ms,
 				record.render_gpu_ms, record.draw_calls, record.objects, record.nodes, record.orphans, record.memory_kb,
@@ -700,7 +751,7 @@ func _add_monitors() -> void:
 		&"Diagnostics/Frame (ms)": func() -> float: return _last_frame(&"frame_ms"),
 		&"Diagnostics/Physics (ms)": func() -> float: return _last_frame(&"physics_ms"),
 		&"Diagnostics/Scripts (ms)": func() -> float: return _last_frame(&"scripts_ms"),
-		&"Diagnostics/Animation (ms)": func() -> float: return _animation_usec(_frames[-1].scopes) / 1000.0 if not _frames.is_empty() else 0.0,
+		&"Diagnostics/Animation (ms)": func() -> float: return _animation_usec(_history.scopes(0)) / 1000.0 if _history and _history.size() > 0 else 0.0,
 		&"Diagnostics/Physics steps": func() -> float: return _last_frame(&"steps"),
 		&"Diagnostics/Objects": func() -> float: return _last_frame(&"objects"),
 		&"Diagnostics/Nodes": func() -> float: return _last_frame(&"nodes"),
@@ -715,4 +766,5 @@ func _add_monitors() -> void:
 
 
 func _last_frame(key: StringName) -> float:
-	return float(_frames[-1].get(key, 0.0)) if not _frames.is_empty() else 0.0
+	var column := _history.column(key) if _history else -1
+	return _history.value(column, 0) if column >= 0 and _history.size() > 0 else 0.0

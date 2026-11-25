@@ -42,16 +42,19 @@ class FrameGraph extends Control:
 			queue_redraw()
 
 	func _draw() -> void:
-		var frames: Array = manager.get_frames()
+		var history := manager.get_history()
+		if history == null:
+			return
 		var height := size.y
 		var bar := 2.0
-		var count := mini(frames.size(), int(size.x / bar))
+		var count := mini(history.size(), int(size.x / bar))
 		var x := size.x - count * bar
-		for i in range(frames.size() - count, frames.size()):
-			var record: Dictionary = frames[i]
+		var parts := [[history.column(&"physics_ms"), Color(0.35, 0.6, 1.0)], [history.column(&"scripts_ms"), Color(1.0, 0.6, 0.25)],
+			[history.column(&"rest_ms"), Color(0.5, 0.5, 0.5)]]
+		for age in range(count - 1, -1, -1): # oldest on the left
 			var y := height
-			for part: Array in [["physics_ms", Color(0.35, 0.6, 1.0)], ["scripts_ms", Color(1.0, 0.6, 0.25)], ["rest_ms", Color(0.5, 0.5, 0.5)]]:
-				var length := minf(float(record.get(part[0], 0.0)) / SCALE_MS, 1.0) * height
+			for part: Array in parts:
+				var length := minf(history.value(part[0], age) / SCALE_MS, 1.0) * height
 				draw_rect(Rect2(x, y - length, bar, length), part[1])
 				y -= length
 			x += bar

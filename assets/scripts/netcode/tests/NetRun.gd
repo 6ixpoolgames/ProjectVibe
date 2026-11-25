@@ -6,11 +6,14 @@ extends RefCounted
 const NODE_SCENE := "res://assets/scripts/netcode/tests/net_test_node.tscn"
 ## Extra time for processes to start and finish, on top of how long the longest machine plays.
 const EXTRA_SECONDS := 15.0
+## Earlier runs' folders kept in user://net_test (each test process has one); older ones are deleted at a test's first run.
+const RUNS_KEPT := 20
 
 ## Claude 2026-11-16 (wider audit): every script error on any machine, over every run() so far in this test. A test checks it is 0
 ## at its end, so a script error on a client or server fails the test even where no check looked at that machine's results.
 ## GDScript note: a static var belongs to the class, so it keeps counting across calls.
 static var script_errors_seen := 0
+static var _pruned := false
 
 
 ## A range of ports for this run of a test, so two runs at once can't connect to each other. Each test adds to this as it goes.
@@ -22,6 +25,10 @@ static func first_port() -> int:
 ## A machine that didn't finish in time is stopped, and has "timed_out" in its result. owner is any node in the tree.
 ## Claude 2026-11-18: node_scene is the scene each machine runs (net_test_node by default; the projectile test has its own).
 static func run(owner: Node, run_name: String, machines: Dictionary, port: int, node_scene := NODE_SCENE) -> Dictionary:
+	# Claude 2026-11-25: the folders of earlier test processes pile up (2.4 GB by then), so only the newest are kept.
+	if not _pruned:
+		_pruned = true
+		prune_runs("user://net_test")
 	# Claude 2026-11-05: each run of a test keeps its own folder, because two copies of the project share one user data folder.
 	var folder := ProjectSettings.globalize_path("user://net_test/%d/%s" % [OS.get_process_id(), run_name])
 	DirAccess.make_dir_recursive_absolute(folder)
@@ -50,8 +57,11 @@ static func run(owner: Node, run_name: String, machines: Dictionary, port: int, 
 				arguments.append(user_argument)
 		longest = maxf(longest, float(settings.get("seconds", 8)) + float(settings.get("delay", 0)))
 		pids[machine_name] = OS.create_process(OS.get_executable_path(), arguments, false)
-		# The server has to be listening before anyone joins.
-		await owner.get_tree().create_timer(0.3).timeout
+		# The server has to be listening before anyone joins. Claude 2026-11-25: 0.3 s of real time; a timer counts game time, which a
+		# test run with --fixed-fps plays out in about 2 ms.
+		var launched := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - launched < 300:
+			await owner.get_tree().process_frame
 	var deadline := Time.get_ticks_msec() + int((longest + EXTRA_SECONDS) * 1000.0)
 	while Time.get_ticks_msec() < deadline:
 		var all_done := true
@@ -85,6 +95,27 @@ static func run(owner: Node, run_name: String, machines: Dictionary, port: int, 
 			for line: String in errors.slice(0, 5):
 				print("  [%s] %s" % [machine_name, line])
 	return results
+
+
+## Deletes all but the newest keep run folders in parent (folders named by a process id), never this process's own. A test that
+## keeps its own folder of runs elsewhere calls it on that folder.
+static func prune_runs(parent: String, keep: int = RUNS_KEPT) -> void:
+	var own := str(OS.get_process_id())
+	var folders: Array = [] # [modified time, name]
+	for folder_name in DirAccess.get_directories_at(parent):
+		if folder_name.is_valid_int() and folder_name != own:
+			folders.append([FileAccess.get_modified_time(parent.path_join(folder_name)), folder_name])
+	folders.sort_custom(func(a: Array, b: Array) -> bool: return a[0] < b[0]) # oldest first
+	for i in maxi(folders.size() - keep, 0):
+		_remove_tree(parent.path_join(folders[i][1]))
+
+
+static func _remove_tree(path: String) -> void:
+	for folder_name in DirAccess.get_directories_at(path):
+		_remove_tree(path.path_join(folder_name))
+	for file_name in DirAccess.get_files_at(path):
+		DirAccess.remove_absolute(path.path_join(file_name))
+	DirAccess.remove_absolute(path)
 
 
 ## Claude 2026-11-07: every line of a machine's log that reports a script error. Empty if the log is missing.

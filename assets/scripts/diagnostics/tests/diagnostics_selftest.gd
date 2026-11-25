@@ -36,6 +36,7 @@ func _ready() -> void:
 	add_child(pawn)
 	await _frames(40)
 	_test_history(manager)
+	await _test_history_limit(manager)
 	await _test_spike(manager)
 	await _test_warnings(manager)
 	await _test_replay(manager)
@@ -91,6 +92,28 @@ func _test_history(manager: DiagnosticsManager) -> void:
 	# Claude 2026-11-16 (the owner's request): the animation category, every animation.* scope added up, in the summary and the log line.
 	_check(summary.has("animation_ms") and manager.summary_text(summary).contains("(animation "),
 		"the animation category is in the summary and the log line (%.3f ms a frame)" % float(summary.get("animation_ms", -1.0)))
+
+
+# The history is a ring buffer of history_frames: once full it holds exactly that many, the newest, in order. A history that grew with
+# the frame rate once reached 2 GB at thousands of frames a second (--fixed-fps), and trimming it stalled the process for minutes.
+func _test_history_limit(manager: DiagnosticsManager) -> void:
+	var kept := manager.history_frames
+	manager.history_frames = 100
+	await _frames(250) # round the ring twice and a half
+	var history := manager.get_history()
+	var frames := manager.get_frames()
+	_check(history.capacity() == 100 and history.size() == 100 and frames.size() == 100,
+		"the history holds history_frames once full (%d of %d)" % [frames.size(), history.capacity()])
+	var in_order := true
+	for i in range(1, frames.size()):
+		in_order = in_order and int(frames[i].frame) == int(frames[i - 1].frame) + 1
+	_check(in_order and int(frames[-1].frame) == int(history.value(history.column(&"frame"), 0)), "and they are the newest, oldest first")
+	_check(manager.get_frames(10).size() == 10 and int(manager.get_frames(10)[-1].frame) == int(frames[-1].frame),
+		"get_frames(10) gives the newest 10")
+	var summary := manager.get_summary(1000.0)
+	_check(summary.frames == 100 and float(summary.seconds) < 1000.0,
+		"a summary over more time than it holds covers what it has (%d frames, %.2f s)" % [summary.frames, float(summary.seconds)])
+	manager.history_frames = kept
 
 
 func _test_spike(manager: DiagnosticsManager) -> void:

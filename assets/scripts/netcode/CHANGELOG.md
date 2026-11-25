@@ -22,6 +22,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Size the lag compensation record from the rewind cap | `HIT_HISTORY_SIZE` in `NetworkEntity` | A fixed 64 ticks, while how far back lag compensation goes is a setting (`rewind_cap_seconds`). A cap above about 1 s, or a higher tick rate, silently rewinds nothing | S |
 | A public way to sync a body's collision now | `NetworkEntity.rewind_to`, `restore_after_rewind` | They call `TickStateComponent._sync_collision`, a private function of another class | S |
 
+## 2026-11-25
+
+- **Tests: `NetRun` keeps only the newest 20 runs** (`RUNS_KEPT`; `prune_runs()`, also used by the networked mass battle measure): every test process left a folder in `user://net_test`, 2.4 GB by then. **And it gives the server 0.3 s of real time** before starting the clients. It waited on a timer, which counts game time, so under `--fixed-fps` the server had about 2 ms (ENet's retries covered it). The lossy failure of `net_projectile_selftest` was the test process freezing, not the netcode; see [diagnostics' changelog](../diagnostics/CHANGELOG.md).
+
 ## 2026-11-24
 
 - **Follow refresh spread by entity number** (the pawn redesign's build step 1, foundations (pawn spec 16.10)): `TickStateComponent` spreads entities' refresh turns by their entity number instead of their instance id.

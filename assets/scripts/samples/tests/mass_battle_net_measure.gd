@@ -88,6 +88,7 @@ func _ready() -> void:
 func _coordinate() -> void:
 	# A port of this run's own, so two runs at once can't join each other's games (NetRun's rule).
 	_port = NetRun.first_port() + 7
+	NetRun.prune_runs("user://net_test/mass_battle") # Claude 2026-11-25: only the newest runs are kept
 	var folder := ProjectSettings.globalize_path("user://net_test/mass_battle/%d" % OS.get_process_id())
 	DirAccess.make_dir_recursive_absolute(folder)
 	print("--- Mass battle over the network: %d a faction, %s and %d client%s, %d s, on port %d ---" % [_size, "a dedicated server" if _dedicated else "a host", _clients, "" if _clients == 1 else "s", _seconds, _port])
