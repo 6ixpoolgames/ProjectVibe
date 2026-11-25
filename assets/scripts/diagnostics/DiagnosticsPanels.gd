@@ -340,6 +340,14 @@ func _inspector_text() -> String:
 		var target: Node3D = pawn.ai.target_selector.get_current_target() if pawn.ai.target_selector else null
 		lines.append("  AI: state %s, behaviour %s, target %s" % [pawn.ai.current_state_name(), String(behaviour.name) if behaviour else "-",
 			String(target.name) if is_instance_valid(target) else "-"])
+		var behaviours_to_check := PackedStringArray()
+		if pawn.ai.behaviour_manager:
+			for each in pawn.ai.behaviour_manager.get_behaviours():
+				var note := each.definition_note()
+				if note != "":
+					behaviours_to_check.append("%s (%s)" % [each.name, note])
+		if not behaviours_to_check.is_empty(): # as the abilities' line above
+			lines.append("  behaviour definitions to check: %s" % ", ".join(behaviours_to_check))
 	return "\n".join(lines)
 
 

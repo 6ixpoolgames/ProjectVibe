@@ -140,23 +140,25 @@ func describe() -> Dictionary:
 	var behaviours: Array = []
 	for behaviour in _behaviours:
 		var tag_names: Array = []
-		for tag in behaviour.tags:
+		for tag in behaviour.settings.tags:
 			tag_names.append(String(tag))
 		var lowest: Variant = null # JSON has no infinity
-		if behaviour.min_score > -INF:
-			lowest = behaviour.min_score
+		if behaviour.settings.min_score > -INF:
+			lowest = behaviour.settings.min_score
 		behaviours.append({
 			"name": String(behaviour.name), "name_hash": behaviour.name_hash, "tags": tag_names, "enabled": behaviour.enabled,
 			# Names and the words they make now (TagQuery.describe_words); null: no requirements.
-			"tag_requirements": behaviour.tag_requirements.describe_words() if behaviour.tag_requirements else null,
-			"max_score": behaviour.max_score, "min_score": lowest,
-			"needs_target": behaviour.needs_target, "presses_action": String(behaviour.presses_action),
-			"cooldown_ticks": behaviour.cooldown_ticks, "cooldown_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.cooldown_ticks),
-			"min_run_ticks": behaviour.min_run_ticks,
-			"min_run_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.min_run_ticks), # what the interrupt rule compares with
-			"interrupt_threshold": behaviour.interrupt_threshold, "cannot_be_interrupted": behaviour.cannot_be_interrupted,
-			"score_jitter": behaviour.score_jitter, "effective_jitter": behaviour.effective_jitter(),
+			"tag_requirements": behaviour.settings.tag_requirements.describe_words() if behaviour.settings.tag_requirements else null,
+			"max_score": behaviour.settings.max_score, "min_score": lowest,
+			"needs_target": behaviour.settings.needs_target, "presses_action": String(behaviour.settings.presses_action),
+			"cooldown_ticks": behaviour.settings.cooldown_ticks, "cooldown_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.settings.cooldown_ticks),
+			"min_run_ticks": behaviour.settings.min_run_ticks,
+			"min_run_ticks_at_rate": TickDriver.ticks_at_rate(behaviour.settings.min_run_ticks), # what the interrupt rule compares with
+			"interrupt_threshold": behaviour.settings.interrupt_threshold, "cannot_be_interrupted": behaviour.settings.cannot_be_interrupted,
+			"score_jitter": behaviour.settings.score_jitter, "effective_jitter": behaviour.effective_jitter(),
 			"script": behaviour.get_script().resource_path.get_file() if behaviour.get_script() else "",
+			# Where its settings come from: its definition's name ("" for its kind's defaults), and anything to check about it.
+			"definition": behaviour.definition.describe() if behaviour.definition else "", "definition_note": behaviour.definition_note(),
 			# How C++ judges it: from its conditions and curves, or by asking GDScript for a behaviour with its own code.
 			"scorer": "given" if behaviour.has_own_code() else "conditions",
 			"conditions": _describe_conditions(behaviour), "score_curves": _describe_curves(behaviour),
@@ -229,18 +231,18 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 			continue
 		if behaviour != _running and behaviour.is_cooling_down(tick):
 			continue
-		if behaviour.needs_target and not context.has_target():
+		if behaviour.settings.needs_target and not context.has_target():
 			continue
 		# The running one has already pressed its action, so "could it start" doesn't apply to it.
-		if behaviour.presses_action != &"" and behaviour != _running and not _could_press(behaviour.presses_action):
+		if behaviour.settings.presses_action != &"" and behaviour != _running and not _could_press(behaviour.settings.presses_action):
 			continue
 		# 3. Its range, with the numbers its modifiers leave.
 		var jitter := behaviour.current_jitter()
 		behaviour.decision_jitter = jitter * context.random_signed(behaviour.name_hash) if jitter > 0.0 else 0.0
 		var bonus := behaviour.score_bonus()
 		behaviour.decision_bonus = bonus
-		behaviour.decision_ceiling = behaviour.max_score + bonus + jitter
-		behaviour.decision_floor = behaviour.min_score + bonus - jitter if behaviour.min_score > -INF else -INF
+		behaviour.decision_ceiling = behaviour.settings.max_score + bonus + jitter
+		behaviour.decision_floor = behaviour.settings.min_score + bonus - jitter if behaviour.settings.min_score > -INF else -INF
 		behaviour.availability_checked = false
 		behaviour.decision_scored = false
 		_candidates.append(behaviour)
@@ -304,7 +306,7 @@ func tick_running(tick: int) -> void:
 	# Only when woken by an event it waits for, at the tick it asked for, or every tick_interval_ticks counted from when it started:
 	# ticking every tick costs a crowd far more (ai_stress).
 	var woken := _running.woken or (_running.wake_tick >= 0 and tick >= _running.wake_tick)
-	var interval := TickDriver.ticks_at_rate(_running.tick_interval_ticks)
+	var interval := TickDriver.ticks_at_rate(_running.settings.tick_interval_ticks)
 	# Or one skipped since its pawn's last run, for a pawn running every Nth tick (pawn spec 8.21).
 	if not woken and interval > 1 and not pawn.fired_since_last_run(tick, -_running.started_tick, interval):
 		return
@@ -340,6 +342,13 @@ func inputs_changed() -> void:
 	_input_slots_known = false
 	if _placed_by:
 		_placed_by.place(self)
+
+
+## Called when a behaviour's settings change in play ([method AIBehaviourBase.use_definition]): its inputs, the modifiers that count
+## for it (its tags may have changed) and C++'s brain are worked out again.
+func settings_changed() -> void:
+	_modifiers_dirty = true
+	inputs_changed()
 
 
 ## Adds a behaviour modifier (pawn spec 16.5), kept under this source: anything that names it, usually the node or effect that adds
@@ -441,7 +450,7 @@ func refresh_modifiers(tick: int) -> void:
 ## interrupt_threshold still does). A pawn out of shots leaves Keep Distance at once instead of at its next decision tick.
 func check_running(tick: int) -> void:
 	refresh_modifiers(tick)
-	if _running == null or _running.cannot_be_interrupted or pawn == null or pawn.ai == null:
+	if _running == null or _running.settings.cannot_be_interrupted or pawn == null or pawn.ai == null:
 		return
 	var owned := pawn.owned_tags
 	var tags_version := owned.version if owned else 0
@@ -485,8 +494,8 @@ func _add_modifier(modifier: AIBehaviourModifier, key: Variant, only: AIBehaviou
 func _apply_own_modifier(behaviour: AIBehaviourBase, starting: bool, tick: int) -> void:
 	var own := [behaviour.get_instance_id(), &"start" if starting else &"end"]
 	var other := [behaviour.get_instance_id(), &"end" if starting else &"start"]
-	var mine := behaviour.modifier_on_start if starting else behaviour.modifier_on_end
-	var theirs := behaviour.modifier_on_end if starting else behaviour.modifier_on_start
+	var mine := behaviour.settings.modifier_on_start if starting else behaviour.settings.modifier_on_end
+	var theirs := behaviour.settings.modifier_on_end if starting else behaviour.settings.modifier_on_start
 	if mine == null and theirs == null:
 		return # the usual case: nothing to do, and no list to walk
 	_remove_modifiers(own, tick)
@@ -505,7 +514,7 @@ static func _source_key(source: Variant) -> Variant:
 # Pawn spec 10.7: an event replaces the running behaviour only if it isn't cannot_be_interrupted, the event's priority reaches its
 # interrupt_threshold, and, for an ordinary decision, its min_run_ticks have passed.
 func _can_replace_running(event_priority: int, event_is_normal: bool, tick: int) -> bool:
-	if _running.cannot_be_interrupted:
+	if _running.settings.cannot_be_interrupted:
 		return false
 	if event_priority < _running.current_interrupt_threshold():
 		return false
@@ -612,9 +621,9 @@ func _fill_record(record: AIDecisionRecord, tick: int, event_priority: int, even
 			rule = AIDecisionRecord.RULE_BLOCKED
 		elif behaviour != _running and behaviour.is_cooling_down(tick):
 			rule = AIDecisionRecord.RULE_COOLDOWN
-		elif behaviour.needs_target and not record.has_target:
+		elif behaviour.settings.needs_target and not record.has_target:
 			rule = AIDecisionRecord.RULE_NO_TARGET
-		elif behaviour.presses_action != &"" and behaviour != _running and not _could_press(behaviour.presses_action):
+		elif behaviour.settings.presses_action != &"" and behaviour != _running and not _could_press(behaviour.settings.presses_action):
 			rule = AIDecisionRecord.RULE_ACTION
 		record.add_behaviour(behaviour, rule if numbers or rule != AIDecisionRecord.RULE_NONE else AIDecisionRecord.RULE_NOT_WORKED_OUT)
 
@@ -649,7 +658,7 @@ func _describe_conditions(behaviour: AIBehaviourBase) -> Array:
 
 func _describe_curves(behaviour: AIBehaviourBase) -> Array:
 	var list: Array = []
-	for curve in behaviour.score_curves:
+	for curve in behaviour.settings.score_curves:
 		if curve:
 			list.append(curve.describe())
 	return list
@@ -658,9 +667,9 @@ func _describe_curves(behaviour: AIBehaviourBase) -> Array:
 func _check_score_range(behaviour: AIBehaviourBase, raw: float) -> void:
 	if behaviour.warned_score_range or not OS.is_debug_build():
 		return
-	if raw > behaviour.max_score + 0.000001 or raw < behaviour.min_score - 0.000001:
+	if raw > behaviour.settings.max_score + 0.000001 or raw < behaviour.settings.min_score - 0.000001:
 		behaviour.warned_score_range = true
-		push_warning("AIBehaviourManager: %s's score() gave %.3f, outside its min_score %.3f to max_score %.3f. Choices may be wrong until that's fixed." % [behaviour.name, raw, behaviour.min_score, behaviour.max_score])
+		push_warning("AIBehaviourManager: %s's score() gave %.3f, outside its min_score %.3f to max_score %.3f. Choices may be wrong until that's fixed." % [behaviour.name, raw, behaviour.settings.min_score, behaviour.settings.max_score])
 
 
 # The tick now, from the TickDriver autoload.
@@ -672,8 +681,8 @@ func _collect_behaviours() -> void:
 	_behaviours.clear()
 	for child in get_children():
 		if child is AIBehaviourBase:
-			child.manager = self
 			child.pawn = pawn
+			child.manager = self
 			child.name_hash = String(child.name).hash()
 			child.perf_available_name = StringName("ai.available." + String(child.name))
 			child.perf_tick_name = StringName("ai.behaviour." + String(child.name))

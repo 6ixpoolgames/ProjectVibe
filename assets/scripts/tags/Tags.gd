@@ -106,7 +106,7 @@ class AI:
 	const STATE_IDLE := &"ai.state.idle"
 	const STATE_ALERT := &"ai.state.alert"
 	const STATE_COMBAT := &"ai.state.combat"
-	## How a behaviour fights (its AIBehaviourBase.tags), so score modifiers can favour one style.
+	## How a behaviour fights (its AIBehaviourDefinition.tags), so score modifiers can favour one style.
 	const STANCE := &"ai.stance"
 	const STANCE_MELEE := &"ai.stance.melee"
 	const STANCE_RANGED := &"ai.stance.ranged"

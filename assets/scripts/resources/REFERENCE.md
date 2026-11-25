@@ -4,9 +4,83 @@
 
 Every class in `assets/scripts/resources/`, from its doc comments. The overview is in [README.md](README.md).
 
+- [Definition](#definition)
+- [DefinitionRegistry](#definitionregistry)
+- [DefinitionSettings](#definitionsettings)
 - [InputActionsRes](#inputactionsres)
 - [PawnDefaultsRes](#pawndefaultsres)
 - [TagDeclarationsRes](#tagdeclarationsres)
+
+## Definition
+
+`res://assets/scripts/resources/Definition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+Settings shared by everything that uses them, with variants: the base of [`AbilityDefinition`](../abilities/REFERENCE.md#abilitydefinition) and [`ProjectileDefinition`](../abilities/REFERENCE.md#projectiledefinition) (ability spec 3).
+
+A subclass declares its settings as exported properties whose setters call `_changed()`. `based_on` makes one a variant: each setting it hasn't changed comes from its base, so changing the base changes its variants. In the inspector a variant shows its base's values, and the revert arrow on a changed one goes back to following the base. Read-only while playing: what uses it runs with `resolved()`, the copy with every setting worked out.
+
+### Settings and properties
+
+- `changed_values: PackedStringArray` = `PackedStringArray()`: The settings this variant has changed from its base: set as they're edited, and saved with it. Only these are saved in a variant's file; the rest follow the base.
+- `based_on: Definition`: The definition this one is a variant of. Empty: one of its own, starting from the kind's defaults.
+- `resolved_from: Definition`: For a resolved copy: the definition it was worked out from. Null on a definition of its own.
+
+### Constants
+
+- `MAX_BASE_DEPTH = 32`
+
+### Functions
+
+- `setting_names() -> PackedStringArray`: The names of its settings: what a variant can change.
+- `value_of(setting: StringName, depth: int = 0) -> Variant`: A setting's value here: its own if it changed it or has no base, else its base's.
+- `resolved() -> Definition`: This definition with every setting worked out, the copy an ability runs with: itself when it has no base. Worked out once while playing (definitions don't change then), every time in the editor.
+- `describe() -> String`: A short name for warnings and readouts: its resource_name, its file's name, or the kind.
+- `is_embedded() -> bool`: True if it's saved inside a scene ("Make Unique"), not in a file of its own: a quick tweak while prototyping. Diagnostics lists them.
+
+## DefinitionRegistry
+
+`res://assets/scripts/resources/DefinitionRegistry.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Gives every definition file (abilities, projectiles, AI behaviours) an id that's the same on every machine with the same files (ability spec 3.1).
+
+The permanent id is the file's Godot resource UID (replays and saves keep it); the index is small, for the store and the network: the files in `FOLDERS`, sorted by UID and numbered from 0, so machines with the same files agree. `table()` is the index-to-UID list a replay keeps. A definition embedded in a scene has no index. Why it's built this way: ability spec 3.1.
+
+### Constants
+
+- `FOLDERS = Array[String](["res://assets/scripts/resources/abilities/", "res://assets/scripts/resources/ai_behaviours/"])`: Where definition files are found, searched with their subfolders.
+
+### Functions
+
+- `scan(folders: String[] = Array[String](["res://assets/scripts/resources/abilities/", "res://assets/scripts/resources/ai_behaviours/"])) -> void` *(static)*: Finds every definition file in the folders, numbers them and reports UIDs that clash (a file copied outside the editor keeps its original's). Called on first use; call it again after adding files while running.
+- `index_of(definition: Definition) -> int` *(static)*: The definition's index, or -1 if it has none (embedded, made in code, or outside the folders). A resolved copy answers for the definition it was worked out from.
+- `nearest_index(definition: Definition) -> int` *(static)*: The index of this definition, or of the nearest one it's based on that has one: what a client can look up for an embedded variant, whose own changes then have to travel some other way (a projectile's launch record carries its flight numbers). -1 with none.
+- `find(index: int) -> Definition` *(static)*: The definition with this index, or null.
+- `find_by_uid(uid: int) -> Definition` *(static)*: The definition with this permanent id (a UID), wherever its file is now, or null.
+- `table() -> PackedInt64Array` *(static)*: Index to UID, the list a replay keeps in its header.
+- `count() -> int` *(static)*: How many definitions have an index.
+
+## DefinitionSettings
+
+`res://assets/scripts/resources/DefinitionSettings.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Works out the settings a node runs with: its definition (or its kind's defaults), with the node's own changes on top.
+
+[`AbilityBase`](../abilities/REFERENCE.md#abilitybase) and [`AIBehaviourBase`](../ai/REFERENCE.md#aibehaviourbase) each hold one, so both read and write settings the same way (pawn spec 16.3). A node's kind gives its defaults (`make_default_definition()`, made once per script and shared); its definition picks a shared file; a setting written on the node goes into a variant of its own based on that (its script's _init(), values a scene sets, `make_own()`). While playing, writing a shared definition is an error: every pawn using it would change.
+
+### Settings and properties
+
+- `fell_back: bool` = `false`: True if the last `resolve()` was given a definition of another kind, so the node runs with its kind's defaults.
+- `own: Definition` = `null`: The node's own variant, on top of its definition: what was written on the node. Null: none.
+
+### Functions
+
+- `kind_defaults() -> Definition`: The node's kind's defaults: `make_default_definition()`, made once per script and shared by every node of the kind.
+- `resolve(definition: Definition) -> Definition`: The settings to run with: definition worked out (`Definition.resolved()`), or the kind's defaults when it's empty or of another kind (a warning), with `own` on top.
+- `write(definition: Definition, setting: StringName, value: Variant, locked: bool) -> bool`: Writes a setting into `own`, made on first use. With locked on (the node is set up and playing) and no own variant yet, it's an error and nothing is written. Returns true if it wrote it; the node then resolves its settings again.
+- `make_own(definition: Definition) -> Definition`: Makes `own` if there isn't one, so settings can be written while playing (Godot's "Make Unique"). Returns it.
+- `has_setting(setting: StringName) -> bool`: True if the node's kind has a setting of this name: what the node's _get and _set route to its settings.
+- `note(definition: Definition) -> String`: What to check about where the settings come from, for diagnostics: "fell back" (a definition of another kind), "embedded" (saved in a scene, a prototype tweak), "own settings" (written on the node), or "" for a definition file or the kind's defaults.
+- `fits(chosen: Definition, defaults: Definition) -> bool` *(static)*: True if chosen is of the defaults' class, or a class built on it.
 
 ## InputActionsRes
 

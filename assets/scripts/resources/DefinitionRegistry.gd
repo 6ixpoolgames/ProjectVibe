@@ -1,5 +1,5 @@
-# Written by Claude (claude-opus-5-5), 2026-11-21. History: abilities/CHANGELOG.md.
-## Gives every definition file (abilities, projectiles) an id that's the same on every machine with the same files (ability spec 3.1).
+# Written by Claude (claude-opus-5-5), 2026-11-21. History: resources/CHANGELOG.md.
+## Gives every definition file (abilities, projectiles, AI behaviours) an id that's the same on every machine with the same files (ability spec 3.1).
 ##
 ## The permanent id is the file's Godot resource UID (replays and saves keep it); the index is small, for the store and the network:
 ## the files in [constant FOLDERS], sorted by UID and numbered from 0, so machines with the same files agree. [method table] is the
@@ -8,7 +8,7 @@ class_name DefinitionRegistry
 extends RefCounted
 
 ## Where definition files are found, searched with their subfolders.
-const FOLDERS: Array[String] = ["res://assets/scripts/resources/abilities/"]
+const FOLDERS: Array[String] = ["res://assets/scripts/resources/abilities/", "res://assets/scripts/resources/ai_behaviours/"]
 
 # Index -> UID, sorted; UID -> path; UID -> index. Filled by scan.
 static var _uids := PackedInt64Array()

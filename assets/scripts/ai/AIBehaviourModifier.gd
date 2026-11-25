@@ -9,7 +9,7 @@
 ## pawn.ai.behaviour_manager.add_modifier(charge_shout, self)
 ## pawn.ai.behaviour_manager.remove_modifiers(self)
 ## [/codeblock]
-## A behaviour can also apply one to itself as it starts or ends ([member AIBehaviourBase.modifier_on_start]). The C++ decider gets
+## A behaviour can also apply one to itself as it starts or ends ([member AIBehaviourDefinition.modifier_on_start]). The C++ decider gets
 ## the numbers they leave, not the modifiers. Only on the server, where the AI runs.
 class_name AIBehaviourModifier
 extends Definition
@@ -17,13 +17,13 @@ extends Definition
 ## Which of a behaviour's numbers it changes.
 enum Number {
 	SCORE_BONUS, ## added to its score, in the units of max_score (0 with no modifier)
-	SCORE_JITTER, ## the ± random offset on its score (AIBehaviourBase.score_jitter, or the manager's default)
+	SCORE_JITTER, ## the ± random offset on its score (AIBehaviourDefinition.score_jitter, or the manager's default)
 	INTERRUPT_THRESHOLD, ## how strong an event must be to replace it while it runs
 	COOLDOWN_TICKS, ## ticks after it ends before it can be chosen again, at 60 a second
 	MIN_RUN_TICKS, ## ticks an ordinary decision can't replace it once chosen, at 60 a second
 }
 
-## Which behaviours it changes: a query over each behaviour's own tags ([member AIBehaviourBase.tags]), such as any of
+## Which behaviours it changes: a query over each behaviour's own tags ([member AIBehaviourDefinition.tags]), such as any of
 ## ai.stance.melee. Empty: every behaviour, or, given by a behaviour to itself as it starts or ends, only that behaviour.
 @export var applies_to: TagQuery:
 	set(value):

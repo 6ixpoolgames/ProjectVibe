@@ -98,16 +98,16 @@ func _ready() -> void:
 		get_tree().node_added.connect(func(node: Node) -> void:
 			if node is AIManager:
 				(node as AIManager).decision_interval_ticks = _decision_interval)
-	# Claude 2026-11-18: the ranged attack. An Attack behaviour whose action has no attack is never available, so pointing it at an
-	# action nothing is bound to switches it off without removing it.
+	# Claude 2026-11-18: the ranged attack, switched off (enabled) without removing it. Claude 2026-11-25: was pointing its action at
+	# one nothing is bound to; settings now come from a shared definition, and enabled is the node's own switch.
 	if _no_ranged or _melee_off:
 		get_tree().node_added.connect(func(node: Node) -> void:
 			var attack := node as AIAttackBehaviour
 			if attack == null:
 				return
-			var ranged := attack.presses_action == &"ability_3"
+			var ranged := attack.settings.presses_action == &"ability_3"
 			if (ranged and _no_ranged) or (not ranged and _melee_off):
-				attack.presses_action = &"switched_off")
+				attack.enabled = false)
 	NetworkSession.entity_spawned.connect(func(entity: NetworkEntity) -> void:
 		if entity.get_parent() is Projectile:
 			_bolts_fired += 1

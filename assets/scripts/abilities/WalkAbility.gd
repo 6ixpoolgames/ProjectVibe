@@ -11,7 +11,7 @@ extends AbilityBase
 # Its settings with their own type: the same object as settings.
 var _walk: WalkDefinition = null
 
-# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._set.
 
 # The five stats, read again only when the StatusManager's version changes (pawn spec 15.2); every tick was a third of the cost.
 var _stats_version := -1

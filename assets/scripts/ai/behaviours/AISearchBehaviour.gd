@@ -2,22 +2,15 @@
 ## Hunts around where an enemy it became certain of was last seen: "I know you were here".
 ##
 ## Allowed in Alert. Available only when the most aware memory entry is certain but not fresh enough for Combat (Look Toward and
-## Investigate handle half-noticed things). It goes to the last known position (holding sprint if [member sprint_to_last_known] is on),
-## then walks to [member search_points] random points within [member search_radius] of it, standing [member pause_ticks] at each, and
+## Investigate handle half-noticed things). It goes to the last known position (holding sprint if [member AISearchDefinition.sprint_to_last_known] is on),
+## then walks to [member AISearchDefinition.search_points] random points within [member AISearchDefinition.search_radius] of it, standing [member AISearchDefinition.pause_ticks] at each, and
 ## succeeds. While still Alert it's usually picked again, so it keeps searching until the entry fades (Idle) or the enemy is seen (Combat).
 ## Design: pawn spec 10.7.
 class_name AISearchBehaviour
 extends AIBehaviourBase
 
-## How many points it looks at around the last known position, each round.
-@export_range(0, 50, 1, "or_greater") var search_points := 3
-## How far from the last known position those points are, in metres.
-@export_range(0.5, 100.0, 0.5, "or_greater") var search_radius := 5.0
-## How long it stands at each, in ticks.
-@export_range(1, 36000, 1, "or_greater") var pause_ticks := 30
-## On: it holds sprint on the way to the last known position.
-@export var sprint_to_last_known := true
-
+# Its settings, typed: [member AIBehaviourBase.settings] as its kind's definition.
+var _kind_settings: AISearchDefinition = null
 const POINT_ANGLE_SALT := 0x5EA1
 const POINT_DISTANCE_SALT := 0x5EA2
 
@@ -27,12 +20,12 @@ var _points_left := 0
 var _pause_until := -1 # the tick its current pause ends; -1: not pausing
 
 
-func _init() -> void:
-	super()
-	tag_requirements = TagQuery.shared([Tags.AI.STATE_ALERT])
-	max_score = 0.7
-	min_score = max_score # a fixed score, so it can help skip others
-	tick_interval_ticks = 60 # the safety net: it wakes when a walk ends (wake_on_path_end) and when a pause ends (wake_at)
+func make_default_definition() -> AIBehaviourDefinition:
+	return AISearchDefinition.new()
+
+
+func _settings_changed() -> void:
+	_kind_settings = settings as AISearchDefinition
 
 
 ## Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is always max_score.
@@ -45,9 +38,9 @@ func enter(context: AIManager) -> void:
 	var index := context.most_aware_index()
 	_centre = context.memory.last_known_position_at(index) if index >= 0 else pawn.global_position
 	_going_to_centre = true
-	_points_left = search_points
+	_points_left = _kind_settings.search_points
 	_pause_until = -1
-	context.controller.hold(&"sprint", sprint_to_last_known)
+	context.controller.hold(&"sprint", _kind_settings.sprint_to_last_known)
 	wake_on_path_end()
 	if not context.controller.move_to(_centre):
 		wake_at(context.current_tick + 1) # no walk to wake it: on to the next step
@@ -66,7 +59,7 @@ func tick(context: AIManager) -> Status:
 		_points_left -= 1
 		# sqrt spreads the points evenly over the circle rather than bunching them in the middle.
 		var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
-		var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * search_radius
+		var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * _kind_settings.search_radius
 		if not hands.move_to(_centre + Vector3(cos(angle), 0.0, sin(angle)) * distance):
 			wake_at(context.current_tick + 1) # no walk to wake it: pause here and go on
 		return Status.RUNNING
@@ -76,7 +69,7 @@ func tick(context: AIManager) -> Status:
 	if _going_to_centre:
 		_going_to_centre = false
 		hands.hold(&"sprint", false)
-	_pause_until = context.current_tick + maxi(TickDriver.ticks_at_rate(pause_ticks), 1) # pause_ticks are at 60 a second
+	_pause_until = context.current_tick + maxi(TickDriver.ticks_at_rate(_kind_settings.pause_ticks), 1) # pause_ticks are at 60 a second
 	wake_at(_pause_until)
 	return Status.RUNNING
 

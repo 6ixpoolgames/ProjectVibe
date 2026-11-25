@@ -21,6 +21,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-25
 
+- **The pawn panel lists behaviour definitions to check** (F7), as it does abilities': a behaviour with settings of its own, a definition saved inside a scene, or one of another kind (pawn spec 16.10 step 6c).
 - **The frame history is a ring buffer** (`DiagnosticsFrameHistory`, new; the owner's call, as the replay already keeps the whole session). It was a list of every frame's record from the last 30 s, with no limit, trimmed by a `pop_front` each frame, which moves the whole array. A test run with `--fixed-fps` makes about 15,000 frames a second, so a waiting test process grew to 2 GB. After one long frame, the trim had thousands of records to drop, each moving the whole array, and froze the process for up to a minute at a time. That was `net_projectile_selftest`'s lossy failure: the test froze between starting the server and its clients, so the clients started after the server had finished and never joined (4 of 19 runs; every run lost about two minutes). Now the newest `history_frames` (3600) frames' numbers sit in one packed array, each new frame overwriting the oldest, with each frame's scopes beside them: fixed memory, nothing moved. `history_seconds` is gone. `get_history()` gives the ring buffer (the F2 graph reads it); `get_frames(newest)` builds records for tests and tools. A summary over more time than the history holds covers what it has, and its `seconds` says so. `diagnostics_selftest` checks the ring.
 
 ## 2026-11-23

@@ -1,0 +1,10 @@
+[gd_resource type="Resource" script_class="AIAttackDefinition" format=3 uid="uid://ckc6kwvj14rk5"]
+
+[ext_resource type="Script" path="res://assets/scripts/ai/definitions/AIAttackDefinition.gd" id="1_attack"]
+
+[resource]
+resource_name = "Heavy Attack"
+script = ExtResource("1_attack")
+presses_action = &"secondary"
+max_score = 0.95
+min_score = 0.95

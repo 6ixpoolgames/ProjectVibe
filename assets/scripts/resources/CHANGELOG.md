@@ -3,11 +3,15 @@ code comments and lives here, next to the code). Newest first. -->
 
 # Resources changelog
 
-The Resource classes in this folder (`InputActionsRes`, `PawnDefaultsRes`, `TagDeclarationsRes`). Overview: [README.md](README.md).
+The Resource classes in this folder (`InputActionsRes`, `PawnDefaultsRes`, `TagDeclarationsRes`, and the definitions' `Definition`, `DefinitionSettings` and `DefinitionRegistry`). Overview: [README.md](README.md).
 
 ## Refactor candidates
 
 None found.
+
+## 2026-11-25
+
+- **Definitions live here** (pawn spec 16.10 step 6c). `Definition` and `DefinitionRegistry` moved from `abilities/definitions/` (their history until now is in the abilities changelog), now that AI behaviours have definitions too. `DefinitionSettings` (new) is how a node works out its settings, shared by `AbilityBase` and `AIBehaviourBase`. `ai_behaviours/` (new) holds the samples' behaviour definitions, and the registry numbers them with the ability files. `Definition.resolved_from` became a weak link, ending a cycle that leaked every variant at exit.
 
 ## 2026-11-23
 

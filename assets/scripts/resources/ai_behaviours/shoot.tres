@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="AIAttackDefinition" format=3 uid="uid://cyuoxijrp7ayl"]
+
+[ext_resource type="Script" path="res://assets/scripts/ai/definitions/AIAttackDefinition.gd" id="1_attack"]
+
+[resource]
+resource_name = "Shoot"
+script = ExtResource("1_attack")
+presses_action = &"ability_3"
+max_score = 0.97
+min_score = 0.97
+min_distance = 4.0

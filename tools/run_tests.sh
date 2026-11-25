@@ -63,6 +63,11 @@ run_suite() {
   local failed=$(echo "$out" | grep -cE "^ *FAIL")
   local errors=$(echo "$out" | grep -c "SCRIPT ERROR")
   local all_passed=$(echo "$out" | grep -c "ALL PASSED")
+  # What it left alive at exit (Godot's own count; --verbose names them). Not a failure yet, but each one is a leak to fix.
+  local leaked=$(echo "$out" | grep -oE "[0-9]+ ObjectDB instances were leaked" | grep -oE "^[0-9]+")
+  local in_use=$(echo "$out" | grep -oE "[0-9]+ resources still in use at exit" | grep -oE "^[0-9]+")
+  local leaks=""
+  [ -n "$leaked$in_use" ] && leaks=" leaked=${leaked:-0} resources_in_use=${in_use:-0}"
   local verdict="PASSED"
   if [ "$code" -ne 0 ] || [ "$failed" -ne 0 ] || [ "$errors" -ne 0 ] || [ "$all_passed" -eq 0 ]; then
     verdict="FAILED"
@@ -72,7 +77,7 @@ run_suite() {
   local why=""
   [ "$code" -eq 124 ] && why=" (ran out of time: ${limit}s)"
   [ "$all_passed" -eq 0 ] && [ "$code" -ne 124 ] && why=" (never printed ALL PASSED)"
-  echo "$verdict  $name  checks=$passed fail=$failed script_errors=$errors exit=$code $(( $(date +%s) - started ))s$why"
+  echo "$verdict  $name  checks=$passed fail=$failed script_errors=$errors exit=$code $(( $(date +%s) - started ))s$leaks$why"
   if [ "$verdict" = "FAILED" ]; then
     echo "$out" | grep -E "^ *FAIL|SCRIPT ERROR" | head -5
     mkdir -p "$LOG_DIR"

@@ -11,7 +11,7 @@ extends AbilityBase
 # Its settings with their own type: the same object as settings.
 var _jump: JumpDefinition = null
 
-# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._set.
 
 ## The last tick the pawn was known to be on the ground before it left it; [constant ON_GROUND] while it's there. Rolls back (pushed).
 var left_ground_at := ON_GROUND:

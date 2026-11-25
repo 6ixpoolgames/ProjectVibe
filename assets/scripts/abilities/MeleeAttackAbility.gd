@@ -13,7 +13,7 @@ extends AbilityBase
 # Its settings with their own type: the same object as settings.
 var _melee: MeleeAttackDefinition = null
 
-# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._set.
 
 var _made_default_steps := false # true when it made its own steps from its settings
 

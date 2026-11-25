@@ -29,9 +29,11 @@ func _test_kind_defaults() -> void:
 	_check(settings is MeleeAttackDefinition and settings.category == Tags.ABILITY.COMBAT_MELEE and settings.windup_ticks == 8, "with no definition it runs with its kind's defaults (a MeleeAttackDefinition: combat.melee, windup 8)")
 	_check(two.prepare_settings() == settings and one.definition_note() == "", "and every node of the kind shares them")
 	_check(one.windup_ticks == 8 and one.locks_out == [Tags.ABILITY.MOVEMENT, Tags.ABILITY.COMBAT], "the node reads each setting from them")
-	_check(WalkAbility.new().prepare_settings().interrupt_threshold == 0 and SprintAbility.new().prepare_settings() is SprintDefinition, "each kind has its own defaults (Walk: threshold 0; Sprint: a SprintDefinition)")
-	one.free()
-	two.free()
+	var walk := WalkAbility.new()
+	var sprint := SprintAbility.new()
+	_check(walk.prepare_settings().interrupt_threshold == 0 and sprint.prepare_settings() is SprintDefinition, "each kind has its own defaults (Walk: threshold 0; Sprint: a SprintDefinition)")
+	for node in [one, two, walk, sprint]:
+		node.free()
 
 
 func _test_variants() -> void:

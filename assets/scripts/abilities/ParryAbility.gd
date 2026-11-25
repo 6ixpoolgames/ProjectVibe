@@ -15,7 +15,7 @@ var _parry: ParryDefinition = null
 # The default running effect, made once and shared: an effect made in code is recognised by its name, so there's one.
 static var _default_effects: Array[Effect] = []
 
-# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._write_setting.
+# Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._set.
 
 
 ## Its kind's defaults: a new [ParryDefinition].

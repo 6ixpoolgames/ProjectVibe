@@ -1,4 +1,4 @@
-# Written by Claude (claude-opus-5-5), 2026-11-21. History: abilities/CHANGELOG.md.
+# Written by Claude (claude-opus-5-5), 2026-11-21. History: resources/CHANGELOG.md.
 @tool
 ## Settings shared by everything that uses them, with variants: the base of [AbilityDefinition] and [ProjectileDefinition] (ability
 ## spec 3).
@@ -23,7 +23,13 @@ extends Resource
 			notify_property_list_changed()
 
 ## For a resolved copy: the definition it was worked out from. Null on a definition of its own.
-var resolved_from: Definition = null
+var resolved_from: Definition:
+	get:
+		return _resolved_from.get_ref() if _resolved_from else null
+	set(value):
+		_resolved_from = weakref(value) if value else null
+# Weak: the definition keeps its resolved copy (_resolved), so a strong link back would be a cycle neither is ever freed from.
+var _resolved_from: WeakRef = null
 var _resolved: Definition = null
 var _copying_base := false # setting values from the base, which doesn't change them
 # Each script's setting names, worked out once.

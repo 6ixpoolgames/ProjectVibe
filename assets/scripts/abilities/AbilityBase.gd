@@ -41,12 +41,11 @@ signal intersected(entry: Dictionary)
 ## while playing. Set by [method prepare_settings].
 var settings: AbilityDefinition = null
 ## True if its definition was of another kind, so it runs with its kind's defaults (diagnostics lists these).
-var definition_fell_back := false
-# Its own settings on top of its definition (a variant based on it), made when a setting is written on the node.
-var _own_definition: AbilityDefinition = null
-# Each kind's defaults, made once and shared by every node of that kind: script -> definition.
-static var _kind_defaults := {}
-static var _setting_names_by_kind := {} # script -> {setting name: true}, for _get and _set
+var definition_fell_back: bool:
+	get:
+		return _definition_settings.fell_back
+# Works out settings from the definition, the kind's defaults and what's written on the node (shared with AI behaviours).
+var _definition_settings := DefinitionSettings.new(self)
 
 # State that rolls back, pushed to the state store when it changes (push_state). Timers are tick deadlines, which don't change while
 # they run (ability spec 4): nothing counts down, and a pawn running every Nth tick needs nothing special. Each setter tells the manager,
@@ -197,32 +196,11 @@ func make_default_definition() -> AbilityDefinition:
 	return AbilityDefinition.new()
 
 
-## This kind's defaults, shared by every node of the kind.
-func kind_defaults() -> AbilityDefinition:
-	var script: Script = get_script()
-	var found: AbilityDefinition = _kind_defaults.get(script)
-	if found == null:
-		found = make_default_definition()
-		_kind_defaults[script] = found
-	return found
-
-
 ## Works out [member settings] from [member definition]: its kind's defaults with none, or with one of another kind (warning). Settings
 ## written on the node (a script's _init(), old scene values, [method make_definition_unique]) go into a variant of its own on top.
 ## The manager calls it as it collects its abilities; reading a setting before then calls it too. Returns the settings.
 func prepare_settings() -> AbilityDefinition:
-	var defaults := kind_defaults()
-	var base: AbilityDefinition = definition
-	definition_fell_back = false
-	if base and not _definition_fits(base, defaults):
-		push_warning("[AbilityBase] %s: its definition %s is for another kind of ability; it runs with the %s defaults." % [_describe_node(), base.describe(), defaults.get_script().get_global_name()])
-		definition_fell_back = true
-		base = null
-	var chosen: AbilityDefinition = base if base else defaults
-	if _own_definition:
-		_own_definition.based_on = chosen # its own changes on top of the definition, or of the kind's defaults
-		chosen = _own_definition
-	settings = chosen.resolved() as AbilityDefinition
+	settings = _definition_settings.resolve(definition) as AbilityDefinition
 	_settings_changed()
 	return settings
 
@@ -239,37 +217,21 @@ func use_definition(new_definition: AbilityDefinition) -> void:
 ## Gives it settings of its own, on top of its definition, which this node alone uses: Godot's "Make Unique", while playing. Its
 ## settings can be written after that. For prototyping and tests; a shipped game uses another definition.
 func make_definition_unique() -> AbilityDefinition:
-	if _own_definition == null:
-		_own_definition = _new_own_definition()
+	var own := _definition_settings.make_own(definition) as AbilityDefinition
 	use_definition(definition)
-	return _own_definition
+	return own
 
 
 ## True if it has settings of its own on top of its definition ([method make_definition_unique], its script's _init(), or values a
 ## scene sets on the node), not only the shared ones.
 func has_own_settings() -> bool:
-	return _own_definition != null
+	return _definition_settings.own != null
 
 
 ## What to check about where its settings come from, for diagnostics: "fell back" (a definition of another kind), "embedded" (saved
 ## in a scene, a prototype tweak), "own settings" (written on the node), or "" when it runs with a definition file or its kind's defaults.
 func definition_note() -> String:
-	if definition_fell_back:
-		return "fell back"
-	if definition and definition.is_embedded():
-		return "embedded"
-	if has_own_settings():
-		return "own settings"
-	return ""
-
-
-# Its own variant, of the definition's class, based on the definition (or the kind's defaults) from the start, so what's written on it
-# counts as changed.
-func _new_own_definition() -> AbilityDefinition:
-	var base: AbilityDefinition = definition if definition and _definition_fits(definition, kind_defaults()) else kind_defaults()
-	var own: AbilityDefinition = base.get_script().new()
-	own.based_on = base
-	return own
+	return _definition_settings.note(definition)
 
 
 # Each kind's typed reference to its settings is set here (MeleeAttackAbility._melee).
@@ -277,30 +239,12 @@ func _settings_changed() -> void:
 	pass
 
 
-# A setting written on the node goes into its own variant: freely before the manager sets it up (its script's _init(), values a scene
-# sets), and after that only once it has one (make_definition_unique). Otherwise it's an error: the definition is shared.
-func _write_setting(setting: StringName, value: Variant) -> void:
-	if _own_definition == null:
-		if manager:
-			push_error("[AbilityBase] %s: %s comes from its definition, which every pawn using it shares; give it another with use_definition(), or its own copy with make_definition_unique()." % [_describe_node(), setting])
-			return
-		_own_definition = _new_own_definition()
-	# A typed list setting (Array[StringName]) refuses a plain list through set(), so the value takes the setting's own array type.
-	var current: Variant = _own_definition.get(setting)
-	if value is Array and current is Array and (current as Array).is_typed() and not (value as Array).is_typed():
-		var typed: Array = (current as Array).duplicate()
-		typed.assign(value)
-		value = typed
-	_own_definition.set(setting, value)
-	if settings != null:
-		prepare_settings()
-
-
 # Settings by name on the node (pawn spec 16.3): any setting of its definition's class, such as ability.cooldown_ticks, reads from
-# its settings and writes into its own variant (_write_setting), for code outside the ability, scenes and quick abilities' _init()
+# its settings and writes into its own variant, for code outside the ability, scenes and quick abilities' _init()
 # ("self.duration_ticks = 30"). Code inside an ability reads settings.<name> (or its kind's typed reference), which is typed and faster.
+# A write is free before the manager sets it up, and after that only once it has its own variant (make_definition_unique).
 func _get(property: StringName) -> Variant:
-	if not _setting_names().has(property):
+	if not _definition_settings.has_setting(property):
 		return null
 	if settings == null:
 		prepare_settings()
@@ -308,35 +252,11 @@ func _get(property: StringName) -> Variant:
 
 
 func _set(property: StringName, value: Variant) -> bool:
-	if not _setting_names().has(property):
+	if not _definition_settings.has_setting(property):
 		return false
-	_write_setting(property, value)
+	if _definition_settings.write(definition, property, value, manager != null) and settings != null:
+		prepare_settings()
 	return true
-
-
-# The settings its kind's definition class has, by name, worked out once per class.
-func _setting_names() -> Dictionary:
-	var script: Script = get_script()
-	var names: Variant = _setting_names_by_kind.get(script)
-	if names == null:
-		names = {}
-		for property in kind_defaults().get_property_list():
-			if property["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE and property["usage"] & PROPERTY_USAGE_EDITOR:
-				names[StringName(property["name"])] = true
-		names.erase(&"based_on") # the variant's base, not a setting
-		_setting_names_by_kind[script] = names
-	return names
-
-
-# True if the definition is of this kind's class, or a class built on it.
-func _definition_fits(chosen: AbilityDefinition, defaults: AbilityDefinition) -> bool:
-	var script: Script = chosen.get_script()
-	var wanted: Script = defaults.get_script()
-	while script:
-		if script == wanted:
-			return true
-		script = script.get_base_script()
-	return false
 
 
 func _describe_node() -> String:

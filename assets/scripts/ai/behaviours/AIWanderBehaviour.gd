@@ -1,21 +1,16 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## Walks to random nearby points, pausing between them: what a pawn does when nothing more interesting can run.
 ##
-## Allowed in Idle, with a low fixed score. It picks a random point within [member wander_radius] of its home (where the pawn first
-## started wandering), walks there with the AI controller's move_to, then stands for a random time between [member min_pause_ticks]
-## and [member max_pause_ticks]. The points and pauses come from the context's replayable random numbers, so the same seed, pawn and
+## Allowed in Idle, with a low fixed score. It picks a random point within [member AIWanderDefinition.wander_radius] of its home (where the pawn first
+## started wandering), walks there with the AI controller's move_to, then stands for a random time between [member AIWanderDefinition.min_pause_ticks]
+## and [member AIWanderDefinition.max_pause_ticks]. The points and pauses come from the context's replayable random numbers, so the same seed, pawn and
 ## ticks give the same walk. A point with no way there is skipped and another tried soon. It never finishes on its own.
 ## Design: pawn spec 10.7.
 class_name AIWanderBehaviour
 extends AIBehaviourBase
 
-## How far from home it wanders, in metres.
-@export_range(0.5, 200.0, 0.5, "or_greater") var wander_radius := 8.0
-## The shortest stand between walks, in ticks.
-@export_range(0, 36000, 1, "or_greater") var min_pause_ticks := 30
-## The longest stand between walks, in ticks.
-@export_range(0, 36000, 1, "or_greater") var max_pause_ticks := 120
-
+# Its settings, typed: [member AIBehaviourBase.settings] as its kind's definition.
+var _kind_settings: AIWanderDefinition = null
 const POINT_ANGLE_SALT := 0x51A1 # what each random number is for, so they differ from each other
 const POINT_DISTANCE_SALT := 0x51A2
 const PAUSE_SALT := 0x51A3
@@ -26,13 +21,12 @@ var _walking := false # a walk was started and hasn't been seen to end
 var _pause_until := -1 # the tick its current pause ends; -1: not pausing
 
 
-func _init() -> void:
-	super()
-	tag_requirements = TagQuery.shared([Tags.AI.STATE_IDLE])
-	# A low, fixed score: Wander is what a pawn does when nothing more interesting can run.
-	max_score = 0.1
-	min_score = 0.1
-	tick_interval_ticks = 60 # the safety net: it wakes when a walk ends (wake_on_path_end) and when a pause ends (wake_at)
+func make_default_definition() -> AIBehaviourDefinition:
+	return AIWanderDefinition.new()
+
+
+func _settings_changed() -> void:
+	_kind_settings = settings as AIWanderDefinition
 
 
 func enter(_context: AIManager) -> void:
@@ -60,14 +54,14 @@ func tick(context: AIManager) -> Status:
 		# The walk ended: it arrived, or nav gave up on it. Stand for a while either way.
 		_walking = false
 		# Both written for 60 ticks a second.
-		var shortest := TickDriver.ticks_at_rate(min_pause_ticks)
-		var longest := TickDriver.ticks_at_rate(max_pause_ticks)
+		var shortest := TickDriver.ticks_at_rate(_kind_settings.min_pause_ticks)
+		var longest := TickDriver.ticks_at_rate(_kind_settings.max_pause_ticks)
 		_pause_until = context.current_tick + shortest + int(context.random_unit(PAUSE_SALT) * (maxi(longest - shortest, 0) + 1))
 		wake_at(_pause_until)
 		return Status.RUNNING
 	# sqrt makes points spread evenly over the circle; without it they'd bunch up near the middle.
 	var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
-	var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * wander_radius
+	var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * _kind_settings.wander_radius
 	var point := _home + Vector3(cos(angle), 0.0, sin(angle)) * distance
 	if hands.move_to(point):
 		_walking = true

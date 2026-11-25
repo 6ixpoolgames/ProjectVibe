@@ -23,8 +23,6 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [AbilityDefinition](#abilitydefinition)
 - [DashDefinition](#dashdefinition)
 - [DeathDefinition](#deathdefinition)
-- [Definition](#definition)
-- [DefinitionRegistry](#definitionregistry)
 - [HitDefinition](#hitdefinition)
 - [JumpDefinition](#jumpdefinition)
 - [KnockbackDefinition](#knockbackdefinition)
@@ -64,7 +62,7 @@ It can be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a
 - `kind: int` = `1`: What the code does with it: move the pawn every tick, or start on a press. Set by the kind's script.
 - `definition: AbilityDefinition`: The settings it runs with (ability spec 3): a file shared by every pawn that uses it, or one embedded in this node while prototyping. Empty: its kind's defaults. One of another kind falls back to the defaults, with a warning.
 - `settings: AbilityDefinition` = `null`: The settings it runs with: `definition` worked out (`AbilityDefinition.resolved()`), or its kind's defaults. Read-only while playing. Set by `prepare_settings()`.
-- `definition_fell_back: bool` = `false`: True if its definition was of another kind, so it runs with its kind's defaults (diagnostics lists these).
+- `definition_fell_back: bool`: True if its definition was of another kind, so it runs with its kind's defaults (diagnostics lists these).
 - `started_at: int` = `-1`: The tick the current (or last) timed run started.
 - `ends_at: int` = `-1`: The tick the current timed run ends: the manager finishes it on its first run at or after this tick. -1: not running.
 - `ready_at: int` = `0`: The tick it can start again: ready from this tick on.
@@ -106,7 +104,6 @@ It can be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a
 ### Functions
 
 - `make_default_definition() -> AbilityDefinition`: The definition a new node of this kind runs with: a new definition of the kind's class, with its defaults. Each kind overrides it.
-- `kind_defaults() -> AbilityDefinition`: This kind's defaults, shared by every node of the kind.
 - `prepare_settings() -> AbilityDefinition`: Works out `settings` from `definition`: its kind's defaults with none, or with one of another kind (warning). Settings written on the node (a script's _init(), old scene values, `make_definition_unique()`) go into a variant of its own on top. The manager calls it as it collects its abilities; reading a setting before then calls it too. Returns the settings.
 - `use_definition(new_definition: AbilityDefinition) -> void`: Gives it another definition while playing (a weapon swap), and has the manager work out its masks and lists again. What rolls back was decided when the pawn started, so a definition that turns on a timer this ability didn't have won't roll it back.
 - `make_definition_unique() -> AbilityDefinition`: Gives it settings of its own, on top of its definition, which this node alone uses: Godot's "Make Unique", while playing. Its settings can be written after that. For prototyping and tests; a shipped game uses another definition.
@@ -564,11 +561,11 @@ Its numbers come from the pawn's stats, so a buff or a different pawn changes th
 
 ## AbilityDefinition
 
-`res://assets/scripts/abilities/definitions/AbilityDefinition.gd`, extends [`Definition`](#definition)
+`res://assets/scripts/abilities/definitions/AbilityDefinition.gd`, extends [`Definition`](../resources/REFERENCE.md#definition)
 
 The settings one variant of an ability has, shared by every pawn that uses it, such as "Goblin Swing": a Resource an ability node points at (ability spec 3).
 
-Each kind of ability has its own class with its settings added ([`MeleeAttackDefinition`](#meleeattackdefinition)); a new one starts with the kind's defaults. Variants (`Definition.based_on`) come from [`Definition`](#definition). Read-only while playing: every pawn using it shares it. A pawn that needs other numbers uses another definition (`AbilityBase.use_definition()`), or gets them from stats and effects.
+Each kind of ability has its own class with its settings added ([`MeleeAttackDefinition`](#meleeattackdefinition)); a new one starts with the kind's defaults. Variants (`Definition.based_on`) come from [`Definition`](../resources/REFERENCE.md#definition). Read-only while playing: every pawn using it shares it. A pawn that needs other numbers uses another definition (`AbilityBase.use_definition()`), or gets them from stats and effects.
 
 ### Settings and properties
 
@@ -626,61 +623,13 @@ Death's settings: the base ones, with its defaults.
 
 A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydefinition) for variants. The Death node reads it.
 
-## Definition
-
-`res://assets/scripts/abilities/definitions/Definition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
-
-Settings shared by everything that uses them, with variants: the base of [`AbilityDefinition`](#abilitydefinition) and [`ProjectileDefinition`](#projectiledefinition) (ability spec 3).
-
-A subclass declares its settings as exported properties whose setters call `_changed()`. `based_on` makes one a variant: each setting it hasn't changed comes from its base, so changing the base changes its variants. In the inspector a variant shows its base's values, and the revert arrow on a changed one goes back to following the base. Read-only while playing: what uses it runs with `resolved()`, the copy with every setting worked out.
-
-### Settings and properties
-
-- `changed_values: PackedStringArray` = `PackedStringArray()`: The settings this variant has changed from its base: set as they're edited, and saved with it. Only these are saved in a variant's file; the rest follow the base.
-- `based_on: Definition`: The definition this one is a variant of. Empty: one of its own, starting from the kind's defaults.
-- `resolved_from: Definition` = `null`: For a resolved copy: the definition it was worked out from. Null on a definition of its own.
-
-### Constants
-
-- `MAX_BASE_DEPTH = 32`
-
-### Functions
-
-- `setting_names() -> PackedStringArray`: The names of its settings: what a variant can change.
-- `value_of(setting: StringName, depth: int = 0) -> Variant`: A setting's value here: its own if it changed it or has no base, else its base's.
-- `resolved() -> Definition`: This definition with every setting worked out, the copy an ability runs with: itself when it has no base. Worked out once while playing (definitions don't change then), every time in the editor.
-- `describe() -> String`: A short name for warnings and readouts: its resource_name, its file's name, or the kind.
-- `is_embedded() -> bool`: True if it's saved inside a scene ("Make Unique"), not in a file of its own: a quick tweak while prototyping. Diagnostics lists them.
-
-## DefinitionRegistry
-
-`res://assets/scripts/abilities/definitions/DefinitionRegistry.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
-
-Gives every definition file (abilities, projectiles) an id that's the same on every machine with the same files (ability spec 3.1).
-
-The permanent id is the file's Godot resource UID (replays and saves keep it); the index is small, for the store and the network: the files in `FOLDERS`, sorted by UID and numbered from 0, so machines with the same files agree. `table()` is the index-to-UID list a replay keeps. A definition embedded in a scene has no index. Why it's built this way: ability spec 3.1.
-
-### Constants
-
-- `FOLDERS = Array[String](["res://assets/scripts/resources/abilities/"])`: Where definition files are found, searched with their subfolders.
-
-### Functions
-
-- `scan(folders: String[] = Array[String](["res://assets/scripts/resources/abilities/"])) -> void` *(static)*: Finds every definition file in the folders, numbers them and reports UIDs that clash (a file copied outside the editor keeps its original's). Called on first use; call it again after adding files while running.
-- `index_of(definition: Definition) -> int` *(static)*: The definition's index, or -1 if it has none (embedded, made in code, or outside the folders). A resolved copy answers for the definition it was worked out from.
-- `nearest_index(definition: Definition) -> int` *(static)*: The index of this definition, or of the nearest one it's based on that has one: what a client can look up for an embedded variant, whose own changes then have to travel some other way (a projectile's launch record carries its flight numbers). -1 with none.
-- `find(index: int) -> Definition` *(static)*: The definition with this index, or null.
-- `find_by_uid(uid: int) -> Definition` *(static)*: The definition with this permanent id (a UID), wherever its file is now, or null.
-- `table() -> PackedInt64Array` *(static)*: Index to UID, the list a replay keeps in its header.
-- `count() -> int` *(static)*: How many definitions have an index.
-
 ## HitDefinition
 
-`res://assets/scripts/abilities/definitions/HitDefinition.gd`, extends [`Definition`](#definition)
+`res://assets/scripts/abilities/definitions/HitDefinition.gd`, extends [`Definition`](../resources/REFERENCE.md#definition)
 
 Who a hit may hit and what it does, for a swing and a projectile alike (ability spec 13.2).
 
-An ability's definition holds one (`AbilityDefinition.hit`); a sweep step or a ranged attack's projectile can name another, and an ability can swap it while playing (`AbilityBase.use_hit_definition()`). Variants come from [`Definition`](#definition). It matters only where hits are decided, so it needs no id on the wire.
+An ability's definition holds one (`AbilityDefinition.hit`); a sweep step or a ranged attack's projectile can name another, and an ability can swap it while playing (`AbilityBase.use_hit_definition()`). Variants come from [`Definition`](../resources/REFERENCE.md#definition). It matters only where hits are decided, so it needs no id on the wire.
 
 ### Settings and properties
 
@@ -765,11 +714,11 @@ A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydef
 
 ## ProjectileDefinition
 
-`res://assets/scripts/abilities/definitions/ProjectileDefinition.gd`, extends [`Definition`](#definition)
+`res://assets/scripts/abilities/definitions/ProjectileDefinition.gd`, extends [`Definition`](../resources/REFERENCE.md#definition)
 
 A projectile's flight, shared by every shot that uses it (ability spec 9): its speed and how it changes, how much it drops, its size, how far and long it flies, whether the world stops it, and its look. Who it may hit and what a hit does is its ability's [`HitDefinition`](#hitdefinition) (ability spec 13).
 
-The one thing a designer makes for a new projectile: a ranged attack's definition names it (`RangedAttackDefinition.projectile_definition`), and the built-in projectile carries the networking. Variants come from [`Definition`](#definition). Save it as a file in a registry folder, so clients find it by its index.
+The one thing a designer makes for a new projectile: a ranged attack's definition names it (`RangedAttackDefinition.projectile_definition`), and the built-in projectile carries the networking. Variants come from [`Definition`](../resources/REFERENCE.md#definition). Save it as a file in a registry folder, so clients find it by its index.
 
 ### Settings and properties
 
@@ -899,7 +848,7 @@ Projectile.fire(ability, origin, direction, preload("res://assets/scripts/resour
 - `launch_tick: int` = `-1`: The tick it was fired on; -1 before it's launched.
 - `launch_origin: Vector3` = `Vector3(0, 0, 0)`: Where it was fired from.
 - `launch_direction: Vector3` = `Vector3(0, 0, -1)`: The way it was fired, length 1.
-- `definition_index: int` = `-1`: The [`DefinitionRegistry`](#definitionregistry) index of the definition it flies with (for an embedded variant, the nearest file it's based on); -1: its own `definition`.
+- `definition_index: int` = `-1`: The [`DefinitionRegistry`](../resources/REFERENCE.md#definitionregistry) index of the definition it flies with (for an embedded variant, the nearest file it's based on); -1: its own `definition`.
 - `launch_speed: float` = `0.0`: Its speed and gravity scale as fired, so a client flies it the same when it was fired with a variant that changes them.
 - `launch_gravity_scale: float` = `0.0`
 - `end_tick: int` = `-1`: The tick it ends unless a pawn stops it first, worked out at launch: where it meets the world, or runs out of range or lifetime. -1 before launch.

@@ -1,0 +1,8 @@
+[gd_resource type="Resource" script_class="AIChaseDefinition" format=3 uid="uid://buxy3mxk0nffy"]
+
+[ext_resource type="Script" path="res://assets/scripts/ai/definitions/AIChaseDefinition.gd" id="1_chase"]
+
+[resource]
+resource_name = "Goblin Chase"
+script = ExtResource("1_chase")
+dash_to_close = true

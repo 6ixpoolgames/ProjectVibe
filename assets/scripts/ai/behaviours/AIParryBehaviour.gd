@@ -1,37 +1,34 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: ai/CHANGELOG.md.
-## Parries a swing coming at the pawn, some of the time ([member parry_chance]).
+## Parries a swing coming at the pawn, some of the time ([member AIParryDefinition.parry_chance]).
 ##
 ## Available when a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up (two conditions). An enemy's
 ## A MeleeAttackAbility (or a fired projectile, FireProjectileStep) tells the AI of an attack when it starts, on the server ([method AIManager.note_incoming_attack]), which asks
 ## for a decision at once: ordinary decisions come every 15 ticks, longer than a swing's windup. The roll comes from the swing's start
 ## tick and the attacker's pawn number, so each swing is rolled once and a replay rolls the same. It looks at the attacker and presses
-## parry ([member AIBehaviourBase.presses_action], so it's skipped while the parry is cooling down or locked out), finishes two ticks
+## parry ([member AIBehaviourDefinition.presses_action], so it's skipped while the parry is cooling down or locked out), finishes two ticks
 ## later and forgets the swing; ParryAbility does the rest.
 ## Design: scaling spec 6.2.
 class_name AIParryBehaviour
 extends AIBehaviourBase
 
-## How often it parries a swing coming at it, from 0 (never) to 1 (every one it can).
-@export_range(0.0, 1.0, 0.01) var parry_chance := 0.3
-
+# Its settings, typed: [member AIBehaviourBase.settings] as its kind's definition.
+var _kind_settings: AIParryDefinition = null
 const ROLL_SALT := 0x9A44
 
 
-func _init() -> void:
-	super()
-	# Above the samples' attacks (the heavy attack is 0.95), because a parry has to happen now or never. Shoot scores the same, 0.97, so
-	# a pawn with both breaks the tie by name order.
-	max_score = 0.97
-	min_score = 0.97
-	presses_action = &"parry"
-	tick_interval_ticks = 60 # the safety net: it wakes two ticks after the press (wake_at)
+func make_default_definition() -> AIBehaviourDefinition:
+	return AIParryDefinition.new()
+
+
+func _settings_changed() -> void:
+	_kind_settings = settings as AIParryDefinition
 
 
 ## A swing is coming, and its roll came up: once per swing, from its start tick and its attacker's number.
 func own_conditions() -> Array[AICondition]:
 	var list: Array[AICondition] = [
 		AICompareCondition.make(AIInputs.INCOMING_ATTACK, AICompareCondition.Comparison.EQUAL, 1.0),
-		AIChanceCondition.make(parry_chance, ROLL_SALT, AIInputs.INCOMING_ATTACK_TICK, AIInputs.INCOMING_ATTACKER),
+		AIChanceCondition.make(_kind_settings.parry_chance, ROLL_SALT, AIInputs.INCOMING_ATTACK_TICK, AIInputs.INCOMING_ATTACKER),
 	]
 	return list
 
@@ -47,7 +44,7 @@ func enter(context: AIManager) -> void:
 		return
 	hands.stop()
 	hands.look_at_point(context.incoming_attacker.global_position)
-	hands.press(presses_action) # the setting, so a parry on another action works too
+	hands.press(settings.presses_action) # the setting, so a parry on another action works too
 
 
 func tick(context: AIManager) -> Status:

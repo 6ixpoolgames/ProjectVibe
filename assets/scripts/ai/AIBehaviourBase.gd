@@ -1,12 +1,12 @@
 # Written by Claude (claude-opus-5-5), 2026-11-09. History: ai/CHANGELOG.md.
 ## The base for one AI behaviour, such as Wander or Chase: one concrete thing to do.
 ##
-## A child of the pawn's [AIBehaviourManager], which only judges between behaviours. A behaviour holds its own conditions, score and
-## actions, and acts only through the AI controller ([code]context.controller.move_to()[/code], [code]press()[/code]), never on
-## abilities or the body. Extend it, set the settings below, and override [method own_conditions], [method enter], [method tick]
-## (return SUCCEEDED or FAILED to finish) and [method exit]. Its node name is its name: the fixed order and the random numbers read
-## it. Settings counted in ticks are written for 60 a second and converted where read ([code]TickDriver.ticks_at_rate[/code]).
-## Design: pawn spec 10.7, scaling spec 6.2.
+## A child of the pawn's [AIBehaviourManager], which only judges between behaviours. Its settings come from its [member definition],
+## shared by every pawn using it ([AIBehaviourDefinition]); empty, it runs with its kind's defaults. It acts only through the AI
+## controller ([code]context.controller.move_to()[/code], [code]press()[/code]), never on abilities or the body. Extend it:
+## [method make_default_definition] for settings of its own, then [method own_conditions], [method enter], [method tick] (return
+## SUCCEEDED or FAILED to finish) and [method exit]. Its node name is its name: the fixed order and the random numbers read it.
+## Settings in ticks are written for 60 a second. Design: pawn spec 10.7 and 16.3, scaling spec 6.2.
 class_name AIBehaviourBase
 extends Node
 
@@ -20,49 +20,16 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 		enabled = value
 		if manager:
 			manager.inputs_changed() # C++ gets the brain again
-## What it is, as tags such as &"ai.stance.melee": what behaviour modifiers pick behaviours by ([member AIBehaviourModifier.applies_to]).
-@export var tags: Array[StringName] = []:
+## The settings it runs with: a file shared by every pawn that uses it, or one embedded in this node while prototyping. Empty: its
+## kind's defaults. One of another kind falls back to the defaults, with a warning.
+@export var definition: AIBehaviourDefinition:
 	set(value):
-		tags = value
-		_tag_words_generation = -1
-## When it may run: a query over the pawn's owned tags, such as any of ai.state.combat (the AI's state is a tag), or none of
-## status.has_ammo. While it fails, the behaviour can't be chosen, and a running one is replaced at the next AI step. Empty: always.
-@export var tag_requirements: TagQuery
-## The highest score() can return. Lets the manager skip it without running its code when it can't win.
-@export var max_score := 0.5
-## Optional: the lowest score() can return. Left at -inf it can't help skip others, but it's never wrong.
-@export var min_score := -INF
-## Skipped while the AI has no current target.
-@export var needs_target := false
-## A named action it presses, such as &"primary". Skipped while that action couldn't start.
-@export var presses_action: StringName = &""
-## More conditions it needs, on top of its own ([method own_conditions]). All must pass. Made in the inspector: compare an input
-## with a number, a random chance, or "any of".
-@export var conditions: Array[AICondition] = []
-## Optional: inputs that scale its score between min_score (or 0) and max_score, multiplied together. Empty: always max_score.
-@export var score_curves: Array[AIScoreCurve] = []
-## Ticks after it ends before it can be chosen again. A hard rule, checked before any scoring.
-@export_range(0, 36000, 1, "or_greater") var cooldown_ticks := 0
-## Once chosen, ordinary decisions can't replace it for this many ticks. State changes and forces still can, if strong enough.
-## Behaviour modifiers can change it, as they can cooldown_ticks, interrupt_threshold and score_jitter.
-@export_range(0, 36000, 1, "or_greater") var min_run_ticks := 0
-## While it runs, only events of this priority or higher can replace it: 0 for an ordinary decision, a state's priority for a state
-## change, a force's priority for a forced state. 0: anything can.
-@export var interrupt_threshold := 0
-## Runs until it returns SUCCEEDED or FAILED, whatever happens, even if its state no longer allows it. Use sparingly.
-@export var cannot_be_interrupted := false
-## ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
-@export var score_jitter := -1.0
-## While it runs, [method tick] is called every this many ticks, and sooner when a wake-up it asked for happens (the longest it
-## sleeps). Count time with context.current_tick, not by counting tick() calls. 1: every tick.
-@export_range(1, 600, 1, "or_greater") var tick_interval_ticks := 1
-## A modifier it gives itself as it starts, such as a score bonus that keeps it chosen a while. Empty applies_to: only this behaviour.
-## With no duration it lasts while the behaviour runs; with one, its duration from the start. Starting again replaces it.
-@export var modifier_on_start: AIBehaviourModifier
-## A modifier it gives itself as it ends, such as -0.3 to its score for 15 s so something else gets a turn. Empty applies_to: only this
-## behaviour. With no duration it lasts until the behaviour starts again; with one, its duration. Ending again replaces it.
-@export var modifier_on_end: AIBehaviourModifier
+		definition = value
+		prepare_settings()
 
+## The settings it runs with: [member definition] worked out, or its kind's defaults, with anything written on the node on top.
+## Read-only while playing. Set by [method prepare_settings].
+var settings: AIBehaviourDefinition = null
 ## Set by the AIBehaviourManager.
 var manager: AIBehaviourManager = null
 ## The pawn this behaviour belongs to. Set by the AIBehaviourManager.
@@ -103,6 +70,8 @@ var wakes_on_path_end := false
 var wakes_on_action: StringName = &""
 var woken := false # an event it waits for happened since its last tick()
 
+# Works out settings from the definition, the kind's defaults and what's written on the node (shared with abilities).
+var _definition_settings := DefinitionSettings.new(self)
 var _tag_words := PackedInt64Array()
 var _tag_words_generation := -1
 var _all_conditions: Array[AICondition] = []
@@ -112,6 +81,48 @@ var _conditions_built := false
 func _init() -> void:
 	set_process(false)
 	set_physics_process(false)
+	prepare_settings() # its kind's defaults, so it works before a manager collects it (tests call score() directly)
+
+
+## The definition a new node of this kind runs with: a new definition of the kind's class, with its defaults. Each kind overrides it.
+func make_default_definition() -> AIBehaviourDefinition:
+	return AIBehaviourDefinition.new()
+
+
+## Works out [member settings] from [member definition], with settings written on the node on top. Called as it's made, when its
+## definition changes, after a setting is written on it, and by the manager as it collects its behaviours. Returns the settings.
+func prepare_settings() -> AIBehaviourDefinition:
+	settings = _definition_settings.resolve(definition) as AIBehaviourDefinition
+	_tag_words_generation = -1
+	_conditions_built = false
+	_settings_changed()
+	return settings
+
+
+## Gives it another definition while playing. Behaviours can change in play (the AI runs on the server and never rolls back): the
+## manager works out its inputs again and C++ gets the new brain.
+func use_definition(new_definition: AIBehaviourDefinition) -> void:
+	definition = new_definition # works out its settings
+	if manager:
+		manager.settings_changed()
+
+
+## Gives it settings of its own, on top of its definition, which this node alone uses: Godot's "Make Unique", while playing. Its
+## settings can be written after that. For prototyping and tests; a shipped game uses another definition or a behaviour modifier.
+func make_definition_unique() -> AIBehaviourDefinition:
+	var own := _definition_settings.make_own(definition) as AIBehaviourDefinition
+	use_definition(definition)
+	return own
+
+
+## True if it has settings of its own on top of its definition ([method make_definition_unique], or values a scene sets on the node).
+func has_own_settings() -> bool:
+	return _definition_settings.own != null
+
+
+## Where its settings come from, for diagnostics: "fell back", "embedded", "own settings" or "" ([method DefinitionSettings.note]).
+func definition_note() -> String:
+	return _definition_settings.note(definition)
 
 
 ## Its own yes or no, after the manager's checks: every condition passes ([method all_conditions]). The inputs they read were worked
@@ -126,14 +137,14 @@ func is_available(context: AIManager) -> bool:
 
 ## How much it wants to run now, between min_score and max_score: max_score, scaled by [member score_curves] if it has any.
 func score(context: AIManager) -> float:
-	if score_curves.is_empty():
-		return max_score
+	if settings.score_curves.is_empty():
+		return settings.max_score
 	var amount := 1.0
-	for curve in score_curves:
+	for curve in settings.score_curves:
 		if curve:
 			amount *= curve.amount(context.inputs)
-	var low := min_score if min_score > -INF else 0.0
-	return low + (max_score - low) * amount
+	var low := settings.min_score if settings.min_score > -INF else 0.0
+	return low + (settings.max_score - low) * amount
 
 
 ## The conditions it builds from its own settings, such as Attack's reach. Override in a behaviour script; the default: none. Called
@@ -147,7 +158,7 @@ func all_conditions() -> Array[AICondition]:
 	if not _conditions_built:
 		_conditions_built = true
 		_all_conditions = own_conditions()
-		for condition in conditions:
+		for condition in settings.conditions:
 			if condition:
 				_all_conditions.append(condition)
 	return _all_conditions
@@ -164,7 +175,7 @@ func rebuild_conditions() -> void:
 func add_input_slots(slots: Dictionary) -> void:
 	for condition in all_conditions():
 		condition.add_input_slots(slots)
-	for curve in score_curves:
+	for curve in settings.score_curves:
 		if curve:
 			curve.add_input_slots(slots)
 
@@ -215,19 +226,48 @@ func exit(_context: AIManager, _reason: String) -> void:
 	pass
 
 
+# Each kind's typed reference to its settings is set here (AIChaseBehaviour._kind_settings).
+func _settings_changed() -> void:
+	pass
+
+
+# Settings by name on the node (pawn spec 16.3): any setting of its definition's class, such as behaviour.max_score, reads from its
+# settings and writes into its own variant, for code outside the behaviour and values a scene sets. Code inside a behaviour reads
+# settings.<name> (or its kind's typed reference). A write is free before the manager sets it up, and after that only once it has its
+# own variant (make_definition_unique).
+func _get(property: StringName) -> Variant:
+	if not _definition_settings.has_setting(property):
+		return null
+	return settings.get(property)
+
+
+func _set(property: StringName, value: Variant) -> bool:
+	if not _definition_settings.has_setting(property):
+		return false
+	if _definition_settings.write(definition, property, value, manager != null):
+		prepare_settings()
+		if manager:
+			manager.settings_changed()
+	return true
+
+
+func _describe_node() -> String:
+	return "%s/%s" % [pawn.name, name] if pawn else String(name)
+
+
 # --- Used by the manager ---
 
 
 ## True if it's enabled and its tag requirements pass for the pawn's owned tags, given as words ([method OwnedTags.get_words]).
 func passes_requirements(owned_words: PackedInt64Array) -> bool:
-	return enabled and (tag_requirements == null or tag_requirements.matches_words(owned_words))
+	return enabled and (settings.tag_requirements == null or settings.tag_requirements.matches_words(owned_words))
 
 
 ## Its own [member tags] as words, parents included, for score modifiers' applies_to.
 func tag_words() -> PackedInt64Array:
 	if _tag_words_generation != TagRegistry.generation:
 		_tag_words_generation = TagRegistry.generation
-		_tag_words = TagQuery.words_of(tags)
+		_tag_words = TagQuery.words_of(settings.tags)
 	return _tag_words
 
 
@@ -240,8 +280,8 @@ func is_cooling_down(at_tick: int) -> bool:
 
 ## This behaviour's jitter amount before modifiers: its own, or the manager's default when it's -1.
 func effective_jitter() -> float:
-	if score_jitter >= 0.0:
-		return score_jitter
+	if settings.score_jitter >= 0.0:
+		return settings.score_jitter
 	return manager.default_score_jitter if manager else 0.0
 
 
@@ -265,14 +305,14 @@ func current_jitter() -> float:
 
 ## Its interrupt threshold with modifiers.
 func current_interrupt_threshold() -> int:
-	return roundi(modified(AIBehaviourModifier.Number.INTERRUPT_THRESHOLD, interrupt_threshold))
+	return roundi(modified(AIBehaviourModifier.Number.INTERRUPT_THRESHOLD, settings.interrupt_threshold))
 
 
 ## Its cooldown with modifiers, in this match's ticks; 0: none.
 func current_cooldown_ticks() -> int:
-	return TickDriver.ticks_at_rate(maxi(0, roundi(modified(AIBehaviourModifier.Number.COOLDOWN_TICKS, cooldown_ticks))))
+	return TickDriver.ticks_at_rate(maxi(0, roundi(modified(AIBehaviourModifier.Number.COOLDOWN_TICKS, settings.cooldown_ticks))))
 
 
 ## Its minimum run with modifiers, in this match's ticks; 0: none.
 func current_min_run_ticks() -> int:
-	return TickDriver.ticks_at_rate(maxi(0, roundi(modified(AIBehaviourModifier.Number.MIN_RUN_TICKS, min_run_ticks))))
+	return TickDriver.ticks_at_rate(maxi(0, roundi(modified(AIBehaviourModifier.Number.MIN_RUN_TICKS, settings.min_run_ticks))))

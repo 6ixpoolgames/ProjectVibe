@@ -272,7 +272,7 @@ func stopped(manager: AIBehaviourManager, tick: int) -> void:
 static func _can_press_mask(manager: AIBehaviourManager, inputs: AIInputs) -> int:
 	var mask := 0
 	for behaviour in manager.get_behaviour_list():
-		if behaviour.presses_action != &"" and inputs.action_ready(behaviour.presses_action):
+		if behaviour.settings.presses_action != &"" and inputs.action_ready(behaviour.settings.presses_action):
 			mask |= 1 << behaviour.decision_index
 	return mask
 
@@ -297,7 +297,7 @@ func _write_group_points(manager: AIBehaviourManager, kept: Dictionary, tick: in
 # True if an action a behaviour presses has an ability whose readiness follows the body (Jump), so it's asked every time.
 func _follows_body(manager: AIBehaviourManager, abilities: AbilityManager) -> bool:
 	for behaviour in manager.get_behaviour_list():
-		if behaviour.presses_action != &"" and abilities.ready_follows_body(behaviour.presses_action):
+		if behaviour.settings.presses_action != &"" and abilities.ready_follows_body(behaviour.settings.presses_action):
 			return true
 	return false
 
