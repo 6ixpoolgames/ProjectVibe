@@ -13,7 +13,7 @@ Every class in `assets/scripts/player/`, from its doc comments. The overview is 
 
 One player's controls: reads their devices, aims their camera, and gives their pawn input.
 
-Survives with no pawn, as Unreal's does. PossessionCoordinator creates it and tells it which pawn it has. It reads the player's devices (this machine only), holds the look direction and aims the camera arm, owns the player's one arm (it moves to each pawn taken), and gives its pawn this tick's input when the ControllerManager asks (`take_input_command()`). Named actions come from keys through `action_keys`. It moves nothing itself: the pawn's abilities do. To drive it from a script, extend it and override the _read functions.
+Survives with no pawn, as Unreal's does. PossessionCoordinator creates it and tells it which pawn it has. It reads the player's devices (this machine only), holds the look direction and aims the camera arm, owns the player's one arm (it moves to each pawn taken), and gives its pawn this tick's input when the ControllerManager asks (`take_input_command()`). Named actions come from keys through `action_keys`. It moves nothing itself: the pawn's abilities do. Click-to-move is a [`MoveToStep`](../steps/REFERENCE.md#movetostep) on its `step_host`, which writes the move while it runs. To drive it from a script, extend it and override the _read functions.
 
 Spectating (`start_spectating()`, a FreeFlyCamera): the player README. Design: pawn spec 5, 6.2, 8.18.
 
@@ -23,7 +23,7 @@ Spectating (`start_spectating()`, a FreeFlyCamera): the player README. Design: p
 - `mouse_sensitivity: float` = `0.0025`: Radians turned per pixel the mouse moves, in CAPTURED mode.
 - `edge_zone: float` = `0.125`: How much of the screen counts as the edge, in SCREEN_EDGE mode, as a share of its width.
 - `edge_turn_speed: float` = `150.0`: How fast the view turns at the very edge, in degrees per second, in SCREEN_EDGE mode.
-- `click_to_move: bool` = `false`: On: clicking the ground walks there, along a nav path. The pawn's NavigationManager finds and follows it.
+- `click_to_move: bool` = `false`: On: clicking the ground walks there, along a nav path (`move_to()`).
 - `action_keys: Dictionary[StringName, StringName]` = `{...}`
 - `spectator_scene: PackedScene`: The free-flying camera used while spectating (start_spectating()). Its root must be a FreeFlyCamera. Empty: a FreeFlyCamera with its default settings.
 - `fly_up_key: StringName` = `&"move_jump"`: The key (InputMap action) that flies the spectator straight up: jump by default, so flying matches walking.
@@ -32,6 +32,7 @@ Spectating (`start_spectating()`, a FreeFlyCamera): the player README. Design: p
 - `world_cursor: WorldCursor` = `null`: What the mouse or crosshair points at. It's off until something asks it.
 - `look_yaw: float` = `0.0`: Where the player is looking, sideways, in radians.
 - `look_pitch: float` = `0.0`: Where the player is looking, up and down, in radians.
+- `step_host: ControllerStepHost` = `null`: Runs the steps that write this controller's input for it: click-to-move's [`MoveToStep`](../steps/REFERENCE.md#movetostep), named MoveTo. Made when it's ready.
 
 ### Constants
 
@@ -47,8 +48,10 @@ Spectating (`start_spectating()`, a FreeFlyCamera): the player README. Design: p
 - `is_spectating() -> bool`: True while flying a FreeFlyCamera.
 - `get_spectator() -> FreeFlyCamera`: The FreeFlyCamera, or null before the first time it spectates. For tests and debug tools.
 - `take_input_command(_tick: int) -> InputCommand`: This tick's input, from the devices. It uses up the presses saved since the last tick, so call it once per tick.
-- `move_to(world_point: Vector3) -> bool`: Walks the pawn to this place along a nav path, and in a straight line if there's no nav here. Keys take over from it. Passes on to the pawn's NavigationManager. False if there's no pawn, it has no NavigationManager, or there's no way there.
+- `move_to(world_point: Vector3) -> bool`: Walks the pawn to this place along a nav path, and in a straight line if there's no nav here, by starting its step host's MoveTo step. Keys take over from it. False if there's no pawn or there's no way there.
 - `is_following_path() -> bool`: True while it's walking a path from move_to.
+- `get_path_follower() -> PathFollower`: The path follower of the walk it's on, or null when it isn't on one (pawn spec 16.7).
+- `drop_path() -> void`: Drops a walk from move_to, if one is under way.
 - `_read_move() -> Vector2`: Which way to go, with X to the right and Y backward, up to length 1.
 - `_read_action_held(action: StringName) -> bool`: True while the key for this named action is down.
 - `_read_action_pressed(action: StringName) -> bool`: True on the rendered frame the key for this named action went down.

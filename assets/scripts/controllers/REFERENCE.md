@@ -7,6 +7,7 @@ Every class in `assets/scripts/controllers/`, from its doc comments. The overvie
 - [AIController](#aicontroller)
 - [ControllerBase](#controllerbase)
 - [ControllerManager](#controllermanager)
+- [ControllerStepHost](#controllerstephost)
 - [InputActions](#inputactions)
 - [InputCommand](#inputcommand)
 
@@ -16,7 +17,7 @@ Every class in `assets/scripts/controllers/`, from its doc comments. The overvie
 
 The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick.
 
-A component of the pawn's AIManager (`AIManager.controller`); the ControllerManager puts it in charge whenever no player has the pawn. It decides nothing: the AI's behaviours (or a script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until changed, except `press()`, which lasts one tick. Until `look_at_point()` is called it keeps the pawn's own look.
+A component of the pawn's AIManager (`AIManager.controller`); the ControllerManager puts it in charge whenever no player has the pawn. It decides nothing: the AI's behaviours (or a script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until changed, except `press()`, which lasts one tick. Until `look_at_point()` is called it keeps the pawn's own look. Its walks follow its own `path_follower`.
 
 ```gdscript
 ai.move_to(point)                        # walks there along a nav path; false if there's no way there
@@ -30,6 +31,7 @@ A dead pawn's controller takes no orders, and lets go of everything as the pawn 
 ### Settings and properties
 
 - `order_listener: Callable` = `Callable()`: Sees every order given to any AIController, in order: `order_listener.call(controller, order, args)`, order being the method's name (&"move_to", &"press"...). Empty by default. The order stream's tap (netcode spec 19.3): the same orders, at the same point of the same ticks, give the same input.
+- `path_follower: PathFollower` = `<unknown>`: The path its walks follow (move_to, follow, keep_distance). Its settings are the follower's defaults; change them on it.
 - `look_from_height: float` = `1.3`: Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired along the look meets the point looked at.
 
 ### Constants
@@ -58,6 +60,8 @@ A dead pawn's controller takes no orders, and lets go of everything as the pawn 
 - `release_all() -> void`: Back to idle: standing still, nothing held. The look direction stays.
 - `take_input_command(_tick: int) -> InputCommand`: This tick's input. Uses up press(), so call it once per tick: ControllerManager does.
 - `let_go() -> void`: Forgets every order (standing, nothing held, no look, no persistent order), without counting as one. The pawn calls it through its ControllerManager on each tick it's dead, on every machine that runs it, so it comes back from a revive with no orders and gives none while dead (netcode spec 19.10).
+- `get_path_follower() -> PathFollower`: Its `path_follower` while a walk is under way, else null.
+- `drop_path() -> void`: Drops the path it's following. A walk given while it wasn't in charge is kept, and starts when it's in charge again.
 
 ## ControllerBase
 
@@ -80,6 +84,8 @@ How to make one: extend this, and override `take_input_command()`.
 ### Functions
 
 - `take_input_command(_tick: int) -> InputCommand`: This tick's input. Called once per tick. The default is an idle command: standing still, nothing held.
+- `get_path_follower() -> PathFollower`: The path follower its input walks the pawn along now, or null: none by default. CrowdMover asks the controller in charge, through `ControllerManager.get_path_follower()`, whether the pawn is crossing a nav link.
+- `drop_path() -> void`: Drops any path it's walking the pawn along. The ControllerManager calls it when someone else takes charge, so nobody walks the rest of another's path once charge comes back. Nothing by default.
 
 ## ControllerManager
 
@@ -115,6 +121,7 @@ The input rolls back (the pawn's TickStateComponent lists it, with `previous_hel
 ### Functions
 
 - `get_controller_in_charge() -> ControllerBase`: Who the pawn follows right now, or null. See the rule in the class description.
+- `get_path_follower() -> PathFollower`: The path follower the controller in charge walks the pawn along now, or null (pawn spec 16.7).
 - `take_input_command(tick: int) -> InputCommand`: This tick's input from the controller in charge, or null when nobody here is.
 - `tick_input(tick: int) -> void`: The pawn calls this once per tick, in its input phase: asks the controller in charge and writes its command into the input. It's cleared instead while blocked (`input_blocked_by`), on every machine, and with nobody in charge (no controller here, no player elsewhere). A script that writes input later in the same phase wins.
 - `is_input_blocked() -> bool`: True while the pawn owns a tag `input_blocked_by` matches, such as status.dead.
@@ -131,6 +138,33 @@ The input rolls back (the pawn's TickStateComponent lists it, with `previous_hel
 - `attach_player(controller: ControllerBase) -> void`: PlayerController calls this when it takes the pawn.
 - `detach_player(controller: ControllerBase) -> void`: PlayerController calls this when it lets go. A controller that isn't the attached one changes nothing.
 - `_refresh() -> void`: Checks at the end of the frame whether who's in charge changed. Several changes in one frame give one check.
+
+## ControllerStepHost
+
+`res://assets/scripts/controllers/ControllerStepHost.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
+
+Runs steps that write a controller's input, such as the player's click-to-move ([`MoveToStep`](../steps/REFERENCE.md#movetostep)): a small step host (pawn spec 16.4).
+
+A child of its controller, with its steps as its own children. It owns a [`StepTimeline`](../steps/REFERENCE.md#steptimeline) whose entries are all manual: nothing starts until `start()` does, and one start ends any run before it. Each tick its controller calls `run()`, which clears `input` and lets the running steps write it; the controller then uses what they wrote. It runs on the controller's machine only, so nothing here rolls back: the input it makes does.
+
+```gdscript
+host.start(host.get_node(^"MoveTo"))   # begins a run with this step
+host.run(pawn.ticks_elapsed)           # once per tick, while is_running()
+```
+
+### Settings and properties
+
+- `input: InputCommand` = `<unknown>`: What the running steps wrote this tick: move, and actions to press. Look is left to the controller.
+- `pawn: Pawn` = `null`: The pawn its steps move. `set_pawn()` changes it.
+- `timeline: StepTimeline` = `<unknown>`: The timeline its steps run on, built when it's ready.
+
+### Functions
+
+- `set_pawn(new_pawn: Pawn) -> void`: Moves its steps to this pawn (null: none), ending any run, since its steps belonged to the last one.
+- `start(step: Step) -> bool`: Ends any run, then begins one with this step, which enters at once. False if it isn't one of this host's steps or there's no pawn.
+- `run(elapsed: int = 1) -> void`: Runs the running steps for this tick, covering elapsed ticks, after clearing `input`. The run ends once no step is left.
+- `stop() -> void`: Ends the run, stopping every running step ("cancelled").
+- `is_running() -> bool`: True while a run is going.
 
 ## InputActions
 

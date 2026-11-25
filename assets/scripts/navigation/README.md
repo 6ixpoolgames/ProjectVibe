@@ -19,15 +19,15 @@ How pawns find their way: a nav mesh built from the level while it streams in, p
  the level                         the nav library (C++)                  the pawn
  ─────────                         ─────────────────────                  ────────
  TerrainGenerator ─► TerrainNavFeeder ─┐
- StaticBody3D ─────► BodyNavFeeder ────┼─► NavServer: tiles, nav mesh ◄── NavigationManager ◄── a controller
- NavMarkerNode ──► NavMarkerManager ───┘    paths, links                     (move_to, a direction a tick)
+ StaticBody3D ─────► BodyNavFeeder ────┼─► NavServer: tiles, nav mesh ◄── PathFollower ◄── a MoveStep, or the AI controller
+ NavMarkerNode ──► NavMarkerManager ───┘    paths, links                (move_to, a direction a tick)
                        │
                        └─► marker modules (NavLinkModule, ...) ─► NavServer.add_link
 ```
 
 - **`NavServer`** (C++, `native/src/`): builds the nav mesh in tiles on worker threads, around the places streaming asks for, and answers path searches. An engine singleton, there only when the navcore library is loaded.
 - **Feeders** hand the level to nav: `world/TerrainNavFeeder` the terrain's chunks, `world/BodyNavFeeder` a static body's boxes (walls, rocks).
-- **`NavigationManager`** is a part on every pawn. A controller calls `move_to(point)`, then asks `get_move_direction()` once per tick and walks that way, as a player's keys would. It never moves the pawn itself.
+- **`PathFollower`** follows one path for one pawn. Whatever walks a pawn somewhere holds its own: a `MoveStep` (`steps/movement/`; the player's click-to-move runs a `MoveToStep` on its controller's step host), and, until the AI's behaviours are built from steps, the AI controller (`path_follower`). Its owner calls `move_to(point)`, then asks `get_move_direction()` once per tick and puts it in an input's move, as a player's keys would. It never moves the pawn itself.
 - **Nav markers** say what a spot means: `NavLink` (a jump, ladder or door), `NavPoint` (cover, patrol), `NavSmartObject` (a seat), `NavArea`, `NavObstacle`. They're plain data; a **module** (a `NavMarkerModule` node in the level) holds the code that acts on one kind. `NavMarkerManager` holds them all and tells modules what arrives and leaves.
 - **Nav tags** such as `nav.link.jump` say what a marker is: the `nav` category of the one tag registry (`tags/TagRegistry`), which turns them into bits, the same on every machine.
 
@@ -37,12 +37,12 @@ How pawns find their way: a nav mesh built from the level while it streams in, p
 
 **Add a wall or a block.** A `StaticBody3D` with a `BoxShape3D` collision shape, plus a `BodyNavFeeder` child. Paths go around it, and pawns walking the nav mesh slide along it. Only boxes go into nav for now.
 
-**Send a pawn somewhere.** From AI or game code:
+**Send a pawn somewhere.** From AI or game code, through the AI controller (or `PlayerController.move_to` for a player's pawn):
 ```gdscript
-if not pawn.navigation_manager.move_to(target):
+if not pawn.ai.controller.move_to(target):
     pass # no way there: pick another target
 ```
-The pawn walks while its controller asks for directions; `arrived` fires at the end. `get_path_state()` says where a move stands (PENDING while nav is still being built under it).
+The pawn walks while its controller is in charge; the follower's `arrived` fires at the end. `pawn.ai.controller.path_follower.get_path_state()` says where a move stands (PENDING while nav is still being built under it). A step on a timeline walks with a `MoveToStep` (`goal`), done on arriving and failed with no way there.
 
 **Place a jump or a ladder.** A `NavMarkerNode` with a `NavLink` marker (set `end_offset`, `two_way`, `press_action`), and a `NavLinkModule` somewhere in the level. Nav also finds jumps and drops at ledges by itself (`NavServer`'s `auto_links`).
 
@@ -60,9 +60,10 @@ The pawn walks while its controller asks for directions; `arrived` fires at the 
 - **Nav still being built under the pawn:** `PENDING`. `move_to` returns true, the pawn stands, and it tries again every `pending_retry_ticks` until it finds a path, nav finishes with none under it (the straight line), or `pending_give_up_ticks` pass (`UNREACHABLE`).
 - **Nav under the pawn but the point nowhere near nav:** `move_to` returns false and any old path is dropped, even while nav builds elsewhere. In a streaming game that is the usual case, so whatever asked (`AIGoToPointBehaviour`'s legs, say) picks a nearer point when told no.
 - **A point nav can't reach** (an island): the path goes to the nearest place it can reach and the pawn arrives there. `is_partial()` says so, while following and after arriving.
-- **Links:** a path may cross jumps and drops (found by nav itself) and placed `NavLink`s. At a link's start `take_link_action()` gives the action to press (a drop has none). If the pawn hasn't reached the link's far end within `link_timeout`, it finds a new path to the same place once per `move_to`; missing again, it gives up (`UNREACHABLE`).
+- **Links:** a path may cross jumps and drops (found by nav itself) and placed `NavLink`s. At a link's start `take_link_action()` gives the action to press (a drop has none). If the pawn hasn't reached the link's far end within `link_timeout_ticks`, it finds a new path to the same place once per `move_to`; missing again, it gives up (`UNREACHABLE`).
 - **Paths at scale:** `paths_now_per_tick` paths are found straight away each tick, across every pawn. Any more go to `NavServer`'s queue and those pawns wait `PENDING`, so an army given a goal in one tick doesn't stall it.
-- A change of controller calls `stop()`, so the AI never walks the rest of a player's path. If the manager's parent isn't a `Pawn` it warns and `move_to` returns false.
+- Each controller follows its own path, and a change of who's in charge drops both (`ControllerBase.drop_path`), so nobody walks on from a stale path. A follower with no pawn returns false from `move_to`.
+- Every wait is a tick deadline (the tick it gives up, retries, or must be across a link by), so a pawn running every few ticks waits as long as one running every tick.
 
 Over the network a client follows its own path and only sends directions; the server never sees a path (pawn spec 7). Not yet: a new path when nav tiles change, size tiers per pawn, and domains (air, ships).
 
@@ -72,11 +73,13 @@ Over the network a client follows its own path and only sends directions; the se
 |---|---|---|---|
 | `agent_radius` | `NavServer.configure` | 0.4 m | The smallest pawn's radius; nav keeps paths this far from walls |
 | `auto_links` | `NavServer.configure` | on | Nav finds jumps and drops at ledges by itself |
-| `use_links` | `NavigationManager` | on | Off for a pawn that can't jump |
-| `straight_line_without_nav` | `NavigationManager` | on | With no nav at all, walk straight to the point |
-| `paths_now_per_tick` | `NavigationManager` (shared) | 8 | Paths found at once each tick; the rest queue |
-| `link_timeout` | `NavigationManager` | 3 s | How long a link may take before finding a new path |
+| `use_links` | `MoveStep`, `PathFollower` | on | Off for a pawn that can't jump |
+| `straight_line_without_nav` | `MoveStep`, `PathFollower` | on | With no nav at all, walk straight to the point |
+| `paths_now_per_tick` | `PathFollower` (shared) | 8 | Paths found at once each tick; the rest queue |
+| `link_timeout_ticks` | `MoveStep`, `PathFollower` | 180 (3 s) | How long a link may take before finding a new path |
+
+A `MoveStep` shows these in the inspector and copies them into its follower; the AI controller's follower has the defaults (set them on `path_follower` in code).
 
 ## Tests
 
-`navigation/tests/`: `navigation_manager_selftest` (paths, links, waiting), `nav_selftest` (the library: tiles, paths, budgets), `nav_links_selftest`, `nav_link_module_selftest`, `nav_markers_selftest`, `nav_marker_node_selftest`, `nav_marker_manager_selftest`, `tags/tests/tag_registry_selftest` (nav tags are the `nav` category). Also `world/tests/body_nav_feeder_selftest` and `diagnostics/tests/nav_debug_view_selftest`. Run them with `bash tools/run_tests.sh <name>`.
+`navigation/tests/`: `path_follower_selftest` (paths, links, waiting, click-to-move), `nav_selftest` (the library: tiles, paths, budgets), `nav_links_selftest`, `nav_link_module_selftest`, `nav_markers_selftest`, `nav_marker_node_selftest`, `nav_marker_manager_selftest`, `tags/tests/tag_registry_selftest` (nav tags are the `nav` category). Also `world/tests/body_nav_feeder_selftest` and `diagnostics/tests/nav_debug_view_selftest`. Run them with `bash tools/run_tests.sh <name>`.

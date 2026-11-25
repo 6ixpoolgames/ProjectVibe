@@ -20,7 +20,7 @@
 ## Settings, after "--": --size=N (each faction's soldiers, 100), --seconds=N (40), --from=N (seconds before counting, 10),
 ## --spawn-distance=N (40: the factions meet within seconds, so it's the fight that's measured; 300 is the march), --snapshot-rate=N (30).
 ## The load ladder is pinned (every AI pawn every tick), so the numbers don't depend on this machine's speed.
-## Test code: it reaches into TickStateComponent and NavigationManager the way tests do (docs/TEST_AND_DEBUG_CODE.md).
+## Test code: it reaches into TickStateComponent and the AI's PathFollower the way tests do (docs/TEST_AND_DEBUG_CODE.md).
 extends Node
 
 const PAWN_BYTES := 3
@@ -174,8 +174,8 @@ func _note_ai(pawn: Pawn, state: TickStateComponent, tick: int, counting: bool) 
 	var behaviours := pawn.ai.behaviour_manager
 	var running: Variant = behaviours.get_running_behaviour() if behaviours else null
 	var target := pawn.ai.current_target
-	var navigation := pawn.navigation_manager
-	var goal: Variant = navigation._goal if navigation and navigation._state != NavigationManager.PathState.NONE else null
+	var navigation: PathFollower = pawn.ai.controller.path_follower if pawn.ai.controller else null # Claude 2026-11-25: pawn spec 16.10 step 5c
+	var goal: Variant = navigation._goal if navigation and navigation._state != PathFollower.PathState.NONE else null
 	var held := pawn.controller_manager.held_actions
 	var now := [running, target.get_instance_id() if is_instance_valid(target) else 0, goal, held]
 	var last: Array = _last.get(id, [])

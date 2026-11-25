@@ -11,6 +11,11 @@ This folder holds the step core (pawn spec 16.7). Overview: [README.md](README.m
 |---|---|---|---|
 | Entries and conditions still ability-flavoured | `TimelineEntry.starts_with_ability()`, `AbilityCondition.holds(ability)` in `abilities/steps/` | Behaviours will share them; move them here and name them for any owner when behaviour steps arrive (step 7) | S |
 
+## 2026-11-25
+
+- **Movement steps** (pawn spec 16.7, 16.10 step 5c): `MoveStep` (`movement/`), the base of steps that walk the pawn along a nav path, holds a `PathFollower`, shows its settings in the inspector, and writes its direction and a link's action into its host's `input` (`steer()`). `MoveToStep` walks to `goal`: done on arriving, failed with no way there. The player's click-to-move runs one; the AI's behaviours will from step 7. Test: `navigation/tests/path_follower_selftest`.
+
+
 ## 2026-11-24
 
 - **The step core** (the pawn redesign's build step 2, pawn spec 16.10): `Step` and `StepTimeline`, lifted out of `AbilityBase` and `AbilityStep` with their behaviour unchanged (the ability suites pass as they were, apart from names). The timeline reports to its owner through four host methods. `keeps_ability_running` is now `Step.keeps_owner_running`; release-ending became `Step.released_now()`, which `AbilityStep` overrides. `MAX_STEP_STARTS_PER_TICK` is now `StepTimeline.MAX_STARTS_PER_TICK`.

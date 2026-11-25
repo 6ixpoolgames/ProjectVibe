@@ -99,6 +99,12 @@ func get_controller_in_charge() -> ControllerBase:
 	return ai_controller if is_instance_valid(ai_controller) else null
 
 
+## The path follower the controller in charge walks the pawn along now, or null (pawn spec 16.7).
+func get_path_follower() -> PathFollower:
+	var controller := get_controller_in_charge()
+	return controller.get_path_follower() if controller else null
+
+
 ## This tick's input from the controller in charge, or null when nobody here is.
 func take_input_command(tick: int) -> InputCommand:
 	var controller := get_controller_in_charge()
@@ -243,15 +249,15 @@ func _network_input_missing() -> void:
 ## PlayerController calls this when it takes the pawn.
 func attach_player(controller: ControllerBase) -> void:
 	player_controller = controller
-	_stop_path()
+	_drop_paths()
 	_refresh()
 
 
 ## PlayerController calls this when it lets go. A controller that isn't the attached one changes nothing.
 func detach_player(controller: ControllerBase) -> void:
 	if player_controller == controller:
+		_drop_paths()
 		player_controller = null
-		_stop_path()
 		_refresh()
 
 
@@ -262,15 +268,18 @@ func _on_network_role_changed(entity: NetworkEntity) -> void:
 
 
 func _on_possession_changed(_pawn: Pawn, _player_has_it: bool) -> void:
-	_stop_path()
+	_drop_paths()
 	_refresh()
 
 
-# A path belongs to whoever asked for it. When someone else takes charge, it's dropped straight away, not at
-# the end of the frame like controller_changed, so the AI never walks the rest of a player's click, or the other way round.
-func _stop_path() -> void:
-	if pawn and pawn.navigation_manager:
-		pawn.navigation_manager.stop()
+# Each controller follows its own path. When charge changes hands, both drop theirs straight away, not at the end of the frame like
+# controller_changed, so neither walks on from a stale path once it's back in charge.
+func _drop_paths() -> void:
+	if is_instance_valid(player_controller):
+		player_controller.drop_path()
+	var ai := ai_controller
+	if is_instance_valid(ai):
+		ai.drop_path()
 
 
 ## Checks at the end of the frame whether who's in charge changed. Several changes in one frame give one check.

@@ -231,10 +231,12 @@ func _trace_pawn(tick: int, stage: String) -> void:
 	if stage == "after_simulate" and controllers:
 		var m := controllers.move_input
 		line += "\tmove %.9f %.9f %.9f actions %d" % [m.x, m.y, m.z, controllers.held_actions]
-	var navigation: NavigationManager = pawn.get(&"navigation_manager")
+	# Claude 2026-11-25: the AI controller's own follower (pawn spec 16.10 step 5c); the give-up deadline in place of the ticks waited.
+	var ai: AIManager = pawn.get(&"ai")
+	var navigation: PathFollower = ai.controller.path_follower if ai and ai.controller else null
 	if stage == "after_simulate" and navigation:
-		line += "\tpath state %d request %d pending %d corners %d" % [navigation._state, navigation._path_request,
-			navigation._pending_ticks, navigation._corners.size()]
+		line += "\tpath state %d request %d give up %d corners %d" % [navigation._state, navigation._path_request,
+			navigation._give_up_tick, navigation._corners.size()]
 		if navigation._corners.size() > 1:
 			line += " first corner %s" % [navigation._corners[1]]
 	_trace.store_line(line)
@@ -265,11 +267,11 @@ func _write_paths(tick: int) -> void:
 		if tick == _paths_to:
 			nav.debug_log_path_steps(false)
 	for pawn in get_tree().get_nodes_in_group(Pawn.GROUP):
-		var navigation: NavigationManager = pawn.navigation_manager
-		if navigation == null or navigation._state == NavigationManager.PathState.NONE:
+		var navigation: PathFollower = pawn.ai.controller.path_follower if pawn.ai and pawn.ai.controller else null # Claude 2026-11-25
+		if navigation == null or navigation._state == PathFollower.PathState.NONE:
 			continue
-		_paths.store_line("%d\t%s\tstate %d request %d pending %d\tgoal %s\tcorners %s" % [tick, pawn.name, navigation._state,
-			navigation._path_request, navigation._pending_ticks, var_to_bytes(navigation._goal).hex_encode(),
+		_paths.store_line("%d\t%s\tstate %d request %d give up %d\tgoal %s\tcorners %s" % [tick, pawn.name, navigation._state,
+			navigation._path_request, navigation._give_up_tick, var_to_bytes(navigation._goal).hex_encode(),
 			var_to_bytes(navigation._corners).hex_encode()])
 
 

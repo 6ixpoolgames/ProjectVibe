@@ -16,6 +16,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move `TerrainSettings` out of navigation | `TerrainSettings.gd` | It describes a terrain (where it is, its chunk size), so it belongs in `terrain/` or `world/`; names and folders should say what things are | S |
 | Move `NavMarkerDebugModule` to `diagnostics/` | `modules/NavMarkerDebugModule.gd` | A debug tool in a production folder. `diagnostics/NavDebugView` already uses it; the two sample scenes that place it would follow | S |
 
+## 2026-11-25
+
+- **`NavigationManager` became `PathFollower`** (pawn spec 16.7, 16.10 step 5c). The pawn no longer has one shared nav part: whatever walks it somewhere holds its own follower (a `RefCounted`), a `MoveStep` for the player's click-to-move and the AI controller's `path_follower` until the behaviour steps. The logic is the same; its waits are tick deadlines now (`_give_up_tick`, `_retry_tick`, `_link_deadline`) instead of counters, and `link_timeout` (seconds) became `link_timeout_ticks` (180). `take_link_press()` gives a link's action as input bits, and `get_goal()` the last goal. The part scene `parts/NavigationManager.tscn` and `pawn.navigation_manager` are gone. Test: `path_follower_selftest` (was `navigation_manager_selftest`), with click-to-move added.
+
+
 ## 2026-11-23
 
 - **Documentation pass:** a stale comment in `NavigationManager` fixed, `NavLinkModule` flagged `REFACTOR:` (row above), the README's test list and this header brought up to date.

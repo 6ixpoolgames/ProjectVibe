@@ -31,7 +31,7 @@ One player's side of the game: reading their keys and mouse, aiming their camera
 
 **Map a key to an action.** Add an entry to `action_keys`: the named action (from `resources/input_actions.tres`) on the left, the Input Map action on the right.
 
-**Click to move.** Tick `click_to_move`; a click on the ground walks the pawn there along a nav path. Keys take over from it.
+**Click to move.** Tick `click_to_move`; a click on the ground walks the pawn there along a nav path. Keys take over from it. The walk is a `MoveToStep` on the controller's `step_host`; its path settings are that step's.
 
 **Ask what's under the mouse.**
 ```gdscript

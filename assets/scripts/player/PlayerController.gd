@@ -4,8 +4,8 @@
 ## Survives with no pawn, as Unreal's does. PossessionCoordinator creates it and tells it which pawn it has. It reads the player's
 ## devices (this machine only), holds the look direction and aims the camera arm, owns the player's one arm (it moves to each pawn
 ## taken), and gives its pawn this tick's input when the ControllerManager asks ([method take_input_command]). Named actions come from
-## keys through [member action_keys]. It moves nothing itself: the pawn's abilities do. To drive it from a script, extend it and
-## override the _read functions.
+## keys through [member action_keys]. It moves nothing itself: the pawn's abilities do. Click-to-move is a [MoveToStep] on its
+## [member step_host], which writes the move while it runs. To drive it from a script, extend it and override the _read functions.
 ## [br]Spectating ([method start_spectating], a FreeFlyCamera): the player README.
 ## Design: pawn spec 5, 6.2, 8.18.
 # REFACTOR: the InputMap names for moving, the wheel and the mouse buttons (move_left, scrollWheel_up, left_click, middleMouse_button)
@@ -28,7 +28,7 @@ enum LookMode {
 @export_range(0.01, 0.5, 0.01) var edge_zone := 0.125
 ## How fast the view turns at the very edge, in degrees per second, in SCREEN_EDGE mode.
 @export var edge_turn_speed := 150.0
-## On: clicking the ground walks there, along a nav path. The pawn's NavigationManager finds and follows it.
+## On: clicking the ground walks there, along a nav path ([method move_to]).
 @export var click_to_move := false
 ## Which key in the project's input map presses which named action. The left side is an action from InputActions, and the right is an
 ## action in Project Settings > Input Map. An action with no key here is never pressed by the player.
@@ -50,6 +50,8 @@ var world_cursor: WorldCursor = null
 var look_yaw := 0.0
 ## Where the player is looking, up and down, in radians.
 var look_pitch := 0.0
+## Runs the steps that write this controller's input for it: click-to-move's [MoveToStep], named MoveTo. Made when it's ready.
+var step_host: ControllerStepHost = null
 
 # Actions pressed since the last tick, as bits, so a tap shorter than a tick still counts.
 var _latched_actions := 0
@@ -68,6 +70,13 @@ func _ready() -> void:
 	world_cursor = WorldCursor.new()
 	world_cursor.name = "WorldCursor"
 	add_child(world_cursor)
+	step_host = ControllerStepHost.new()
+	step_host.name = "StepHost"
+	var move_step := MoveToStep.new()
+	move_step.name = "MoveTo"
+	step_host.add_child(move_step)
+	add_child(step_host)
+	step_host.set_pawn(pawn)
 
 
 func _exit_tree() -> void:
@@ -93,6 +102,8 @@ func take_pawn(new_pawn: Pawn) -> void:
 	if is_instance_valid(pawn) and pawn.controller_manager:
 		pawn.controller_manager.detach_player(self)
 	pawn = new_pawn
+	if step_host:
+		step_host.set_pawn(pawn) # a walk left unfinished belonged to the last pawn
 	if pawn and pawn.controller_manager:
 		pawn.controller_manager.attach_player(self)
 	elif pawn:
@@ -182,20 +193,16 @@ func take_input_command(_tick: int) -> InputCommand:
 	var wanted := _read_move()
 	# Godot's forward is -Z, and move input's Y is backward, the way Input.get_vector gives it.
 	command.move = Basis(Vector3.UP, look_yaw) * Vector3(wanted.x, 0.0, wanted.y)
-	# Keys take over from a click. A path left unfinished is dropped. The path lives on the pawn's NavigationManager.
-	# REFACTOR: following a path and pressing a link's action is written out here and in AIController.take_input_command; one shared
-	# helper would keep them alike (duplicated logic). See CHANGELOG.md.
-	var navigation := _navigation()
+	# Keys take over from a click: the walk is dropped. While it runs (waiting for nav counts too), its step writes the move, and
+	# presses a link's action, such as jump, for the tick the path reaches it.
 	var link_press := 0
-	if navigation:
+	if step_host and step_host.is_running():
 		if wanted.length_squared() > 0.01:
-			navigation.stop()
-		elif navigation.is_under_way(): # a click waiting for nav (PENDING) counts too
-			command.move = navigation.get_move_direction()
-			# A link the path just reached may need an action, such as jump, pressed for this tick.
-			var action := navigation.take_link_action()
-			if action != &"":
-				link_press = InputActions.mask_of(action)
+			step_host.stop()
+		else:
+			step_host.run(pawn.ticks_elapsed if is_instance_valid(pawn) else 1)
+			command.move = step_host.input.move
+			link_press = step_host.input.held_actions
 	command.look_yaw = look_yaw
 	command.look_pitch = look_pitch
 	# How far behind this client draws others, so the server judges its swings against what it saw (lag compensation).
@@ -214,24 +221,40 @@ func take_input_command(_tick: int) -> InputCommand:
 	return command
 
 
-## Walks the pawn to this place along a nav path, and in a straight line if there's no nav here. Keys take over from it. Passes on
-## to the pawn's NavigationManager. False if there's no pawn, it has no NavigationManager, or there's no way there.
+## Walks the pawn to this place along a nav path, and in a straight line if there's no nav here, by starting its step host's
+## MoveTo step. Keys take over from it. False if there's no pawn or there's no way there.
 func move_to(world_point: Vector3) -> bool:
-	var navigation := _navigation()
-	if navigation == null:
+	var move_step := _move_step()
+	if move_step == null or not is_instance_valid(pawn):
 		return false
-	return navigation.move_to(world_point)
+	move_step.goal = world_point
+	if not step_host.start(move_step) or move_step.follower.get_path_state() == PathFollower.PathState.UNREACHABLE:
+		step_host.stop()
+		return false
+	return true
 
 
 ## True while it's walking a path from move_to.
 func is_following_path() -> bool:
-	var navigation := _navigation()
-	return navigation != null and navigation.is_following_path()
+	var move_step := _move_step()
+	return move_step != null and move_step.running and move_step.follower.is_following_path()
 
 
-# The pawn's NavigationManager, or null.
-func _navigation() -> NavigationManager:
-	return pawn.navigation_manager if is_instance_valid(pawn) else null
+## The path follower of the walk it's on, or null when it isn't on one (pawn spec 16.7).
+func get_path_follower() -> PathFollower:
+	var move_step := _move_step()
+	return move_step.follower if move_step and move_step.running else null
+
+
+## Drops a walk from move_to, if one is under way.
+func drop_path() -> void:
+	if step_host:
+		step_host.stop()
+
+
+# Click-to-move's step, or null before the host is made.
+func _move_step() -> MoveToStep:
+	return step_host.get_node_or_null(^"MoveTo") as MoveToStep if step_host else null
 
 
 # --- Per rendered frame: never changes game state ---

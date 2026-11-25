@@ -39,7 +39,6 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 - `ability_manager: AbilityManager` = `null`: Runs this pawn's abilities, which steer it. Null if it has none.
 - `status_manager: StatusManager` = `null`: This pawn's status: its stats, which abilities read, and the effects on it (pawn spec 16.8). Null if it has none: abilities then use their fallbacks, and hits and effects do nothing to it.
 - `controller_manager: ControllerManager` = `null`: Picks whose input this pawn follows, and holds that input. Null if the pawn has none, and then nothing writes its input for it.
-- `navigation_manager: NavigationManager` = `null`: Finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
 - `ai: AIManager` = `null`: The pawn's AI (pawn spec 10): its components (the AIController, sensing, memory, target selector, state and behaviour managers) and what they share. Null if the pawn has no AI.
 - `owned_tags: OwnedTags` = `null`: The tags this pawn owns right now (dead, in combat, a running ability's kind), which tag queries ask about (tag spec 3). Null if it has none, and then it owns nothing.
 - `streaming_source: PawnStreamingSource` = `null`: Keeps the world loaded around this pawn while a player has it (or always, with its keeps_world_loaded on). Null if it has none, and then it never does.

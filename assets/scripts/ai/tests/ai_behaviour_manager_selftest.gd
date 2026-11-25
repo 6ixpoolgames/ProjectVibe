@@ -632,7 +632,8 @@ func _test_while_possessed() -> void:
 	_check(counter.ticks > before, "FULL: behaviours keep running")
 	pawn.controller_manager.set_has_player(false)
 	pawn.free()
-	# FULL: the hands keep the order without touching the player's path, and carry it out once in charge again.
+	# FULL: the hands keep the order, and carry it out once in charge again. Claude 2026-11-25 (pawn spec 16.10 step 5c): each controller
+	# follows its own path now, so the player's path can't be touched; the hands' own follower stays idle while not in charge.
 	var go := GoToBehaviour.new()
 	go.name = "GoTo"
 	go.target = Vector3(10, 0, 0)
@@ -641,19 +642,17 @@ func _test_while_possessed() -> void:
 	pawn.ai.decision_interval_ticks = NEVER
 	await _ticks(5)
 	pawn.controller_manager.set_has_player(true)
-	pawn.navigation_manager.move_to(Vector3(-10, 0, 0)) # the player's path
 	_decide(pawn, TickDriver.tick) # GoTo starts while the AI isn't in charge
 	var hands: AIController = pawn.controller_manager.ai_controller
 	_check(go.walk_accepted and hands.is_following_order(), "FULL, not in charge: move_to is accepted and kept")
-	var corners := pawn.navigation_manager.get_path_corners()
-	_check(pawn.navigation_manager.is_following_path() and corners[corners.size() - 1].x < -9.0, "and the player's path is left alone")
+	_check(not hands.path_follower.is_under_way() and pawn.controller_manager.get_path_follower() == null, "and no path is followed while it isn't in charge")
 	hands.stop()
-	_check(pawn.navigation_manager.is_following_path(), "stop() while not in charge leaves the player's path alone too")
+	_check(not hands.is_following_order(), "stop() while not in charge drops the kept walk")
 	hands.move_to(Vector3(10, 0, 0))
 	pawn.controller_manager.set_has_player(false)
 	await _ticks(3)
-	corners = pawn.navigation_manager.get_path_corners()
-	_check(pawn.navigation_manager.is_following_path() and corners[corners.size() - 1].x > 9.0, "in charge again: the kept walk starts")
+	var corners := hands.path_follower.get_path_corners()
+	_check(hands.path_follower.is_following_path() and corners[corners.size() - 1].x > 9.0, "in charge again: the kept walk starts")
 	pawn.free()
 	floor_body.free()
 

@@ -8,7 +8,7 @@ Every class in `assets/scripts/movement/`, from its doc comments. The overview i
 
 ## CrowdMover
 
-`res://assets/scripts/movement/CrowdMover.gd`, extends [`GameModeModule`](../game_mode/REFERENCE.md#gamemodemodule)
+`res://assets/scripts/movement/CrowdMover.gd`, extends [`Node`](https://docs.godotengine.org/en/stable/classes/class_node.html)
 
 Moves AI pawns walking on the ground all together once a tick, instead of each one calling Godot's move_and_slide.
 

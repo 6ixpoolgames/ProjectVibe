@@ -15,7 +15,7 @@ extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come fr
 const AREA := AABB(Vector3(-30, -10, -10), Vector3(70, 20, 20))
 
 
-## The course's boxes, as [lowest corner, highest corner] pairs. Shared with navigation_manager_selftest, which adds collision.
+## The course's boxes, as [lowest corner, highest corner] pairs. Shared with path_follower_selftest, which adds collision.
 static func course_boxes() -> Array:
 	return [
 		[Vector3(-20, -1, -3), Vector3(-1.5, 0, 3)], # A

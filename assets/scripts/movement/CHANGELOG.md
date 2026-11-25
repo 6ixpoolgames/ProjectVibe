@@ -7,7 +7,16 @@ Movement is this folder: `CrowdMover`, a GameMode module, and its C++ batch `Cro
 
 ## Refactor candidates
 
-None found in the documentation pass. The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as the fallback where the C++ library isn't loaded; the twins' refactor row is in [native/CHANGELOG.md](../../../native/CHANGELOG.md).
+The GDScript batch (`_move_batch`) repeats what `CrowdBatch` does on purpose, as the fallback where the C++ library isn't loaded; the twins' refactor row is in [native/CHANGELOG.md](../../../native/CHANGELOG.md).
+
+| What | Where | Why | Size |
+|---|---|---|---|
+| The nav tier on the body | `CrowdMover._move_batch_cpp` | The tier comes from the path the controller in charge follows (`PathFollower.nav_tier`), so a pawn with no path gets tier 0; a tier is the body's, by its radius. Fine while t0 builds only tier 0 | S |
+
+## 2026-11-25
+
+- **Links and nav tier from the path in charge** (pawn spec 16.10 step 5c): CrowdMover asks `pawn.controller_manager.get_path_follower()` whether a pawn is crossing a link, and for its nav tier, now that the pawn has no `NavigationManager`. Tagged `REFACTOR:`: the tier belongs to the body.
+
 
 ## 2026-11-23
 

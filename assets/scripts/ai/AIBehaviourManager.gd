@@ -103,9 +103,10 @@ func _ready() -> void:
 		# Wake-ups: the running behaviour's tick() runs at its next AI step after an event it waits for.
 		abilities.ability_finished.connect(_on_ability_ended)
 		abilities.ability_cancelled.connect(func(ability: AbilityBase, _by: AbilityBase) -> void: _on_ability_ended(ability))
-	var navigation := pawn.navigation_manager if pawn else null
-	if navigation:
-		navigation.path_ended.connect(_on_path_ended)
+	# A walk the AI's own controller follows ends (a player's walk is on the player's controller).
+	var hands := pawn.ai.controller as AIController if pawn and pawn.ai else null
+	if hands:
+		hands.path_follower.path_ended.connect(_on_path_ended)
 
 
 func _exit_tree() -> void:

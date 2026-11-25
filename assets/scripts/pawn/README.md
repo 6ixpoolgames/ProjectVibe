@@ -19,7 +19,6 @@ The body every character is: something a player or the AI can drive. It runs its
 ```
  Pawn (CharacterBody3D, pawn.tscn)
  ├─ ControllerManager                    input: who's in charge, this tick's input, has_player   (controllers/)
- ├─ NavigationManager                    paths                                                    (navigation/)
  ├─ StatusManager           numbers, and effects on them                             (stats/, effects/)
  ├─ OwnedTags                            the tags it owns right now, for tag queries              (tags/)
  ├─ AbilityManager ─ Walk, Jump, Sprint  steer the pawn; hits and death                           (abilities/)
@@ -53,7 +52,7 @@ for node in get_tree().get_nodes_in_group(Pawn.GROUP):
     var pawn := node as Pawn
 ```
 
-**Reach a part.** `pawn.controller_manager`, `pawn.ability_manager`, `pawn.status_manager`, `pawn.owned_tags`, `pawn.navigation_manager`, `pawn.ai`, `pawn.streaming_source` (null when the pawn hasn't got one).
+**Reach a part.** `pawn.controller_manager`, `pawn.ability_manager`, `pawn.status_manager`, `pawn.owned_tags`, `pawn.ai`, `pawn.streaming_source` (null when the pawn hasn't got one).
 
 ## Settings worth knowing
 

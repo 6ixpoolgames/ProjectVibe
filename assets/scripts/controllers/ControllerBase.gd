@@ -22,3 +22,15 @@ func take_input_command(_tick: int) -> InputCommand:
 	# "take", not "get", because a controller may use things up here, such as the presses saved since the last tick; calling it
 	# twice in one tick would lose them.
 	return InputCommand.new()
+
+
+## The path follower its input walks the pawn along now, or null: none by default. CrowdMover asks the controller in charge, through
+## [method ControllerManager.get_path_follower], whether the pawn is crossing a nav link.
+func get_path_follower() -> PathFollower:
+	return null
+
+
+## Drops any path it's walking the pawn along. The ControllerManager calls it when someone else takes charge, so nobody walks the rest
+## of another's path once charge comes back. Nothing by default.
+func drop_path() -> void:
+	pass

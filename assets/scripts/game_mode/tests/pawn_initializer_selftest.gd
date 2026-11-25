@@ -10,7 +10,7 @@ const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const STATS_PART := "res://assets/scenes/pawn/parts/StatusManager.tscn"
 # Claude 2026-11-09: the AI parts joined the defaults (pawn spec steps 8a and 8b).
 # Claude 2026-11-10: StatusManager is a default part now (pawn spec 8.11).
-const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"NavigationManager", &"StatusManager", &"OwnedTags", &"AbilityManager", &"AIManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3); Claude 2026-11-22: owned tags (tag spec step 2); Claude 2026-11-25: one AIManager holds the AI's components (pawn spec 16.10 step 5b)
+const DEFAULT_PARTS: Array[StringName] = [&"ControllerManager", &"StatusManager", &"OwnedTags", &"AbilityManager", &"AIManager", &"PawnStreamingSource"] # Claude 2026-11-19: the streaming source part (state store step 3); Claude 2026-11-22: owned tags (tag spec step 2); Claude 2026-11-25: one AIManager holds the AI's components (pawn spec 16.10 step 5b); Claude 2026-11-25: NavigationManager is gone, each controller follows its own path (step 5c)
 ## Claude 2026-11-25: the AIManager's components, in order.
 const AI_COMPONENTS: Array[StringName] = [&"AIController", &"AISensingManager", &"AIMemory", &"AITargetSelector", &"AIStateManager", &"AIBehaviourManager"]
 const BRAIN_SCENE := "res://assets/scenes/samples/arena_brain.tscn"
@@ -52,7 +52,6 @@ func _test_default_parts() -> void:
 	add_child(pawn)
 	_check(pawn.get_node_or_null(^"ControllerManager") is ControllerManager, "entering the tree, the pawn gets a ControllerManager")
 	_check(pawn.get_node_or_null(^"AIManager/AIController") is AIController and pawn.controller_manager.ai_controller == pawn.ai.controller, "the AIController is in the AIManager, and the ControllerManager puts it in charge")
-	_check(pawn.get_node_or_null(^"NavigationManager") is NavigationManager and pawn.navigation_manager == pawn.get_node(^"NavigationManager"), "a NavigationManager, which the pawn knows") # Claude 2026-11-08
 	_check(pawn.get_node_or_null(^"StatusManager") is StatusManager and pawn.status_manager.has_stat(&"MoveSpeed"), "a StatusManager with movement stats")
 	var abilities := pawn.get_node_or_null(^"AbilityManager") as AbilityManager
 	_check(abilities != null and pawn.ability_manager == abilities, "and an AbilityManager, which the pawn uses")
@@ -62,7 +61,8 @@ func _test_default_parts() -> void:
 	var first := pawn.get_node(^"ControllerManager").get_index()
 	# Claude 2026-11-08: NavigationManager is second now. Claude 2026-11-10: and the effect manager between the stats and AbilityManager.
 	# Claude 2026-11-22: OwnedTags after the stats. Claude 2026-11-24: one StatusManager for stats and effects (pawn spec 16.8).
-	_check(pawn.get_node(^"NavigationManager").get_index() == first + 1 and pawn.get_node(^"StatusManager").get_index() == first + 2 and pawn.get_node(^"OwnedTags").get_index() == first + 3 and abilities.get_index() == first + 4,
+	# Claude 2026-11-25: NavigationManager is gone (pawn spec 16.10 step 5c).
+	_check(pawn.get_node(^"StatusManager").get_index() == first + 1 and pawn.get_node(^"OwnedTags").get_index() == first + 2 and abilities.get_index() == first + 3,
 			"in the list's order, after the scene's own children")
 	_check(pawn.get_node_or_null(^"TickState") != null and pawn.get_node_or_null(^"NetworkEntity") != null, "TickState and NetworkEntity stay in the scene")
 	pawn.free()

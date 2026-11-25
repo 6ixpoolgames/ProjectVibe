@@ -80,8 +80,6 @@ var ability_manager: AbilityManager = null
 var status_manager: StatusManager = null
 ## Picks whose input this pawn follows, and holds that input. Null if the pawn has none, and then nothing writes its input for it.
 var controller_manager: ControllerManager = null
-## Finds paths and says which way to walk, for click-to-move and the AI. Null if the pawn has none.
-var navigation_manager: NavigationManager = null
 ## The pawn's AI (pawn spec 10): its components (the AIController, sensing, memory, target selector, state and behaviour managers)
 ## and what they share. Null if the pawn has no AI.
 var ai: AIManager = null

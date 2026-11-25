@@ -108,7 +108,6 @@ Pawn (CharacterBody3D)                    (built, tier -1; gets reworked)
 ├─ Visual (Node3D)                         follows the body smoothly; models hang from it
 ├─ TickStateComponent, NetworkEntity       (built) rollback state and networking
 ├─ ControllerManager                       picks which controller's input counts
-├─ NavigationManager                       paths and "which way to walk now"
 ├─ AbilityManager                          starts, runs and stops abilities
 │  ├─ Walk                                 locomotion
 │  └─ Jump                                 action
@@ -221,9 +220,9 @@ Step 3 didn't need hooks for gaining and losing a pawn: `ControllerManager.attac
 - Reads keys, mouse and stick, rotates movement by the camera's yaw, and maps keys to actions.
 - **Click-to-move (built 2026-11-08, step 7a):**
   1. A click asks the world cursor for a point.
-  2. It calls `pawn.navigation_manager.move_to(point)`. A click with no way there does nothing.
-  3. While a path is being followed, `move` comes from `navigation_manager.get_move_direction()`.
-  4. WASD cancels the path.
+  2. It starts the `MoveToStep` on its step host (`ControllerStepHost`) with that point. A click with no way there does nothing.
+  3. While the step runs, `move` comes from the step's `PathFollower`, which the step writes into the host's input.
+  4. WASD cancels the path. *(2026-11-25, step 5c of 16.10: this was `pawn.navigation_manager`.)*
 
 ### 6.3 `AIController` (placeholder built 2026-11-07, step 3)
 - A child of `ControllerManager`.
@@ -238,9 +237,9 @@ func stop_looking() -> void                          # built: back to keeping th
 func press(action: StringName) -> void               # built: held for one tick
 func hold(action: StringName, held := true) -> void  # built
 func release_all() -> void                           # built: back to idle
-func move_to(point: Vector3) -> bool                 # built 2026-11-08: passes on to NavigationManager; false if there's no way there
+func move_to(point: Vector3) -> bool                 # built 2026-11-08: follows its own PathFollower (path_follower, 2026-11-25); false if there's no way there
 ```
-- **From step 8a, while it isn't in charge** (a player has the pawn and `while_possessed` is `FULL`, 10.3): it keeps the last order it was given (a target point, held actions, a look target) without touching `NavigationManager`, so it can't overwrite the player's path. When it takes charge again, it carries out that order.
+- **From step 8a, while it isn't in charge** (a player has the pawn and `while_possessed` is `FULL`, 10.3): it keeps the last order it was given (a target point, held actions, a look target) without finding a path *(since 2026-11-25 each controller follows its own path, so the player's can't be touched)*. When it takes charge again, it carries out that order.
 
 ### 6.4 `ControllerManager` (built 2026-11-07, step 3)
 - Picks whose input counts. The rule is fixed and simple:
@@ -256,6 +255,8 @@ func move_to(point: Vector3) -> bool                 # built 2026-11-08: passes 
 ---
 
 ## 7. Navigation manager (built 2026-11-08, step 7a)
+
+*(2026-11-25, step 5c of 16.10: the part is gone. Its logic is `navigation/PathFollower.gd`, which each controller holds: the player's in a `MoveToStep` on its step host, the AI controller's as `path_follower`. Timers are tick deadlines, and `link_timeout` became `link_timeout_ticks`. Test: `navigation/tests/path_follower_selftest`. What follows describes the logic, under its old name.)*
 
 The pawn's only contact with navigation. Both controllers use it. `assets/scripts/navigation/NavigationManager.gd`, part scene `scenes/pawn/parts/NavigationManager.tscn`. Test: `navigation/tests/navigation_manager_selftest`.
 
@@ -1468,7 +1469,7 @@ Between decisions, only the running behaviour's `tick` runs, once per tick. When
 - **A forced state that runs out** hands back to the normal check on that tick (`check_force_expiry`), not at the next decision.
 - **The AI controller:**
   - While it isn't in charge, `move_to` remembers the point and returns true. `stop`, `move_in_direction` and `release_all` forget it, and none of them touch the player's path.
-  - `is_following_order()` says whether its own walk is still under way. Behaviours use it rather than reading `NavigationManager`, so they work the same whether or not the AI is in charge.
+  - `is_following_order()` says whether its own walk is still under way. Behaviours use it rather than reading the path follower, so they work the same whether or not the AI is in charge.
 - **`min_run_ticks` 0 means no minimum at all,** even for a decision at an earlier tick than the behaviour started.
 
 **Tests:** `ai/tests/`, 106 checks between them:
@@ -2130,7 +2131,7 @@ Each step keeps behaviour the same where it isn't meant to change, passes the af
 2. **The step core:** `Step` and `StepTimeline` lifted out of `AbilityBase` (ability tests unchanged); generic `_set` and `_get` settings for abilities. *Built 2026-11-24: the step core (`steps/`), and generic settings (no forwarders; outside reads and writes by name, inside reads typed through `settings`). Left: showing a node's settings as overrides in the inspector.*
 3. **The status manager:** the merge; deadlines; modifiers and effectors; one modifier rule (multiply, then add, for everything: the owner's call on 2026-11-24; a designer-chosen order may be a feature later); `change_current` thresholds and events; effects lists into definitions. *Built 2026-11-24: 3a the merge (`status/StatusManager`), deadlines, thresholds and events through `Pawn.send_event` (Death and AI threat started by events); 3b modifiers and effectors (`effects/modifiers/`, `effects/effectors/`), multiply then add with overrides. Moved to step 4: effect lists into definitions, with `EffectApplier`.*
 4. **Hits and reactions:** the hit ability through the scheduler; blocked versus ignored; parry and invulnerability as tag-granting effects; abilities started by events with payloads; charges on abilities. `HitInterceptor`, `EffectApplier` and the static hit queue go. *Built 2026-11-24: 4a effect lists into definitions (`AbilityDefinition.start_effects`, the hit definition's `target_effects` and `attacker_effects`; the samples' hits in `resources/hits/`); 4b the hit ability (`ReceiveHitAbility` on `event.hit.taken`: ignored, blocked, landed), abilities started by events (`trigger_event`, Death and Knockback included), parry and invulnerability as running effects granting tags (`ParryModifier`; a reply lands a tick later and can be parried), charges refilled on `event.revived` with a version counter. Interceptors and `EffectApplier` are gone.*
-5. **Input and controllers:** `input_blocked_by`; input cleared with no controller; the AI tree (`AIManager` root, thin `AIController`); the player controller's step host; `NavServer` plus the path follower in `MoveStep`; `NavigationManager` goes. *5a built 2026-11-25: `input_blocked_by` (any of `status.dead` by default) replaces the three death paths; input cleared with nobody in charge. 5b built 2026-11-25: the AI tree, `AIManager` (`pawn.ai`) holding the `AIController` and the five AI components, which PawnInitializer fills in like parts (a pawn's own AIManager keeps what it has); the ControllerManager reads the AI controller from `pawn.ai.controller` rather than taking a registration; `ai_brain` stays, in place of the AIManager's behaviour manager; the controller's order API stays until step 7.*
+5. **Input and controllers:** `input_blocked_by`; input cleared with no controller; the AI tree (`AIManager` root, thin `AIController`); the player controller's step host; `NavServer` plus the path follower in `MoveStep`; `NavigationManager` goes. *5a built 2026-11-25: `input_blocked_by` (any of `status.dead` by default) replaces the three death paths; input cleared with nobody in charge. 5b built 2026-11-25: the AI tree, `AIManager` (`pawn.ai`) holding the `AIController` and the five AI components, which PawnInitializer fills in like parts (a pawn's own AIManager keeps what it has); the ControllerManager reads the AI controller from `pawn.ai.controller` rather than taking a registration; `ai_brain` stays, in place of the AIManager's behaviour manager; the controller's order API stays until step 7. 5c built 2026-11-25: `NavigationManager` became `PathFollower`, held by whatever walks the pawn: a `MoveStep` (`MoveToStep` so far, `steps/movement/`) and the AI controller until step 7; the player controller's step host (`ControllerStepHost`) runs click-to-move as a `MoveToStep`; each controller follows its own path, dropped when charge changes hands; waits are tick deadlines. Left: repathing on a deadline and when off the path, the goal moving or a link timing out is as before (a link timeout only); the follower's state isn't rolled back yet.*
 6. **AI decisions:** the decision module parted out (`AIDecider` per behaviour manager, the brain cache, version counters, scripted behaviours mixed with data ones); behaviour definitions; generic behaviour modifiers with on start and on end; persistence and forcing go; states as conditions; the request inbox.
 7. **Behaviour steps:** the step library; today's behaviours rebuilt from steps; the order stream's hooks on the behaviour timeline.
 8. **Memory and senses:** fact tables and sources; selectors (`AIInputs` goes); stimuli; the sight sense out of memory; the damage sense; hearing with footsteps; `AIStimulusSource`; the target as a query (`AITargetSelector` goes).

@@ -1,23 +1,26 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-08: headless self-test for NavigationManager (pawn spec section 7, step 7), and
-## AIController.move_to, which uses it. Checks the odd cases at the top of NavigationManager.gd.
-## Exits 0 on success, 1 on failure. Run from the project folder:
-##   godot --headless --path . "res://assets/scripts/navigation/tests/navigation_manager_selftest.tscn"
+## AIController.move_to, which uses it. Claude 2026-11-25 (pawn spec 16.10 step 5c): NavigationManager became PathFollower, which each
+## controller holds (the AI controller directly, the player through a MoveToStep on its step host), so this tests the follower.
+## Checks the odd cases at the top of PathFollower.gd. Exits 0 on success, 1 on failure. Run from the project folder:
+##   godot --headless --path . "res://assets/scripts/navigation/tests/path_follower_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
 const PAWN_SCENE := "res://assets/scenes/pawn/pawn.tscn"
 const Course := preload("res://assets/scripts/navigation/tests/nav_links_selftest.gd") # Claude 2026-11-08: the links course
 
 
-## A player controller that presses nothing, so tests can hand the pawn to "a player" without real devices.
+## A player controller that presses nothing, so tests can hand the pawn to "a player" without real devices. Claude 2026-11-25: its
+## move keys can be set, to check that keys take over from a click.
 class StillController extends PlayerController:
+	var keys := Vector2.ZERO
+
 	func _read_move() -> Vector2:
-		return Vector2.ZERO
+		return keys
 
 
-## Test code, kept out of NavigationManager: it follows corners it's given, so corner-by-corner following can be checked on a flat
-## floor, where a real nav path would be one straight line. Placed in the pawn's scene with the default part's name, so it also
-## shows a designer's own part replacing the default.
-class GivenCornersNavigation extends NavigationManager:
+## Test code, kept out of PathFollower: it follows corners it's given, so corner-by-corner following can be checked on a flat floor,
+## where a real nav path would be one straight line. Claude 2026-11-25: swapped in as the AI controller's follower.
+class GivenCornersFollower extends PathFollower:
 	var given := PackedVector3Array()
 
 	func move_to(point: Vector3) -> bool:
@@ -33,12 +36,12 @@ class GivenCornersNavigation extends NavigationManager:
 
 
 func _ready() -> void:
-	print("--- Navigation manager self-test ---")
+	print("--- Path follower self-test ---")
 	Engine.max_fps = 60
 	_test_not_on_a_pawn()
 	# The straight-line tests run first, while NavServer has no nav at all.
 	await _test_straight_line_with_no_nav()
-	await _test_without_a_navigation_manager()
+	await _test_click_to_move() # Claude 2026-11-25: the player's step host
 	await _test_corner_by_corner()
 	await _test_waiting_for_nav() # Claude 2026-11-16: path states
 	await _test_following_a_nav_path()
@@ -48,50 +51,46 @@ func _ready() -> void:
 
 
 func _test_not_on_a_pawn() -> void:
-	var holder := Node.new()
-	var navigation := NavigationManager.new()
-	holder.add_child(navigation)
-	add_child(holder) # warns: its parent isn't a Pawn
-	_check(navigation.pawn == null, "on something that isn't a Pawn, it has no pawn")
+	var navigation := PathFollower.new()
+	_check(navigation.pawn == null, "a follower made with no pawn has none")
 	_check(not navigation.move_to(Vector3(5, 0, 0)), "so move_to says there's no way")
 	_check(navigation.get_move_direction() == Vector3.ZERO and not navigation.is_following_path(), "and it never gives a direction")
-	holder.free()
 
 
 func _test_straight_line_with_no_nav() -> void:
 	var floor_body := _make_floor()
 	var pawn := _make_pawn(Vector3(0, 0.1, 0))
 	await _ticks(20)
-	var navigation := pawn.navigation_manager
-	_check(navigation != null and navigation.pawn == pawn, "a pawn gets a NavigationManager by default, which knows its pawn")
+	var ai: AIController = pawn.controller_manager.ai_controller
+	var navigation := ai.path_follower
+	_check(navigation != null and navigation.pawn == pawn, "the AI controller has its own follower, which knows its pawn")
 	_check(navigation.get_move_direction() == Vector3.ZERO and not navigation.is_following_path() and not navigation.has_arrived(),
 			"with no path: no direction, not following, not arrived")
 
 	var arrivals := [0]
 	navigation.arrived.connect(func(): arrivals[0] += 1)
-	var ai: AIController = pawn.controller_manager.ai_controller
 	var target := Vector3(6.0, 0.0, 2.0)
 	_check(ai.move_to(target), "with no nav anywhere, AIController.move_to still works")
 	_check(navigation.get_path_corners().size() == 1, "as a straight line: one corner ahead, the point itself")
-	_check(navigation.get_path_state() == NavigationManager.PathState.FOLLOWING and not navigation.is_partial(),
+	_check(navigation.get_path_state() == PathFollower.PathState.FOLLOWING and not navigation.is_partial(),
 			"in the FOLLOWING state, not partial") # Claude 2026-11-16
 	var ticks := await _walk_until_done(navigation, 600)
 	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
 	_check(navigation.has_arrived() and not navigation.is_following_path(), "it gets there (%d ticks)" % ticks)
 	_check(distance < navigation.arrival_distance + 0.4, "close to the point (%.2f m)" % distance)
 	_check(arrivals[0] == 1, "arrived is sent once (%d)" % arrivals[0])
-	_check(navigation.get_path_state() == NavigationManager.PathState.ARRIVED, "and the state is ARRIVED") # Claude 2026-11-16
+	_check(navigation.get_path_state() == PathFollower.PathState.ARRIVED, "and the state is ARRIVED") # Claude 2026-11-16
 	await _ticks(30)
 	_check(pawn.velocity.length() < 0.05, "and the pawn stands still there")
 
 	# Claude 2026-11-16: the straight line is a choice. Off, no nav means no way there.
 	navigation.straight_line_without_nav = false
 	_check(not ai.move_to(Vector3(2.0, 0.0, 2.0)), "straight_line_without_nav off: with no nav, move_to says no")
-	_check(navigation.get_path_state() == NavigationManager.PathState.UNREACHABLE and not navigation.is_under_way(),
+	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE and not navigation.is_under_way(),
 			"UNREACHABLE, and not under way")
 	navigation.straight_line_without_nav = true
 
-	# A direction from the manager is flat and length 1.
+	# A direction from the follower is flat and length 1.
 	ai.move_to(Vector3(-4.0, 3.0, 0.0))
 	var direction := navigation.get_move_direction()
 	_check(is_zero_approx(direction.y) and is_equal_approx(direction.length(), 1.0), "its direction is flat and length 1")
@@ -115,10 +114,15 @@ func _test_straight_line_with_no_nav() -> void:
 	player.take_pawn(pawn)
 	_check(not navigation.is_following_path(), "a player taking the pawn drops the AI's path")
 	player.move_to(Vector3(-8.0, 0.0, 0.0))
-	_check(navigation.is_following_path(), "PlayerController.move_to uses the same manager")
+	var players := player.get_path_follower()
+	_check(player.is_following_path() and players != navigation and not navigation.is_following_path(),
+			"PlayerController.move_to follows a path of its own, and the AI's stays dropped")
+	_check(pawn.controller_manager.get_path_follower() == players, "the ControllerManager gives the path of whoever is in charge")
 	player.take_pawn(null)
 	pawn.controller_manager.set_has_player(false)
-	_check(not navigation.is_following_path(), "letting go drops the player's path, so the AI doesn't walk the rest of it")
+	_check(not player.is_following_path() and players.get_path_state() == PathFollower.PathState.NONE,
+			"letting go drops the player's path")
+	_check(not navigation.is_following_path(), "and the AI doesn't walk the rest of it")
 	await _ticks(20)
 	_check(pawn.controller_manager.move_input.length() < 0.01, "and the AI stands where it was told to (still)")
 	player.free()
@@ -126,34 +130,55 @@ func _test_straight_line_with_no_nav() -> void:
 	floor_body.free()
 
 
-func _test_without_a_navigation_manager() -> void:
+# Claude 2026-11-25 (pawn spec 16.10 step 5c): click-to-move is a MoveToStep on the player's step host. It walks there, ends when it
+# arrives, and keys take over from it.
+func _test_click_to_move() -> void:
 	var floor_body := _make_floor()
-	var pawn: Pawn = load(PAWN_SCENE).instantiate()
-	pawn.skip_default_parts = [&"NavigationManager"]
-	pawn.position = Vector3(0, 0.1, 0)
-	add_child(pawn)
+	var pawn := _make_pawn(Vector3(0, 0.1, 0))
 	await _ticks(5)
-	_check(pawn.navigation_manager == null, "skip_default_parts can leave it out")
-	var ai: AIController = pawn.controller_manager.ai_controller
-	_check(not ai.move_to(Vector3(5, 0, 0)), "then AIController.move_to says no, with a warning")
-	await _ticks(10)
-	_check(pawn.controller_manager.move_input.length() < 0.01, "and the pawn stays put")
+	var player := StillController.new()
+	add_child(player)
+	pawn.controller_manager.set_has_player(true)
+	player.take_pawn(pawn)
+	var target := Vector3(5.0, 0.0, -3.0)
+	_check(player.move_to(target) and player.step_host.is_running(), "a click starts the step host's MoveTo")
+	var ticks := 0
+	while player.step_host.is_running() and ticks < 600:
+		await get_tree().physics_frame
+		ticks += 1
+	var distance := Vector2(pawn.position.x - target.x, pawn.position.z - target.z).length()
+	_check(not player.step_host.is_running() and distance < 0.7, "it walks there and the run ends on arriving (%.2f m, %d ticks)" % [distance, ticks])
+	_check(player.get_path_follower() == null, "and then it has no path")
+	await _ticks(20)
+	_check(pawn.controller_manager.move_input.length() < 0.01, "the pawn stands once there")
+	player.move_to(Vector3(-5.0, 0.0, 0.0))
+	await _ticks(5)
+	player.keys = Vector2(0.0, -1.0)
+	await _ticks(2)
+	_check(not player.step_host.is_running() and not player.is_following_path(), "pressing a move key drops the walk")
+	_check(pawn.controller_manager.move_input.length() > 0.5, "and the keys move the pawn")
+	player.keys = Vector2.ZERO
+	var other := _make_pawn(Vector3(3, 0.1, 3))
+	await _ticks(2)
+	player.move_to(Vector3(-5.0, 0.0, 0.0))
+	player.take_pawn(other)
+	_check(not player.step_host.is_running() and player.step_host.pawn == other, "taking another pawn drops the walk, and the steps move the new pawn")
+	player.take_pawn(null)
+	pawn.controller_manager.set_has_player(false)
+	player.free()
+	other.free()
 	pawn.free()
 	floor_body.free()
 
 
 func _test_corner_by_corner() -> void:
 	var floor_body := _make_floor()
-	var pawn: Pawn = load(PAWN_SCENE).instantiate()
-	var own := GivenCornersNavigation.new()
-	own.name = "NavigationManager"
-	own.given = PackedVector3Array([Vector3(4, 0, 0), Vector3(4, 0, 4)])
-	pawn.add_child(own)
-	pawn.position = Vector3(0, 0.1, 0)
-	add_child(pawn)
+	var pawn := _make_pawn(Vector3(0, 0.1, 0))
 	await _ticks(10)
-	_check(pawn.navigation_manager == own, "a NavigationManager placed in the pawn's scene is used instead of the default")
 	var ai: AIController = pawn.controller_manager.ai_controller
+	var own := GivenCornersFollower.new(pawn)
+	own.given = PackedVector3Array([Vector3(4, 0, 0), Vector3(4, 0, 4)])
+	ai.path_follower = own
 	var target := Vector3(0, 0, 4)
 	ai.move_to(target)
 	_check(own.get_path_corners().size() == 3, "a square path: three corners ahead")
@@ -195,8 +220,8 @@ func _test_waiting_for_nav() -> void:
 	var start := Vector3(5.0, terrain.height_at(5.0, 5.0) + 0.1, 5.0)
 	var pawn := _make_pawn(start)
 	await _ticks(10)
-	var navigation := pawn.navigation_manager
 	var ai: AIController = pawn.controller_manager.ai_controller
+	var navigation := ai.path_follower
 	var target := Vector3(-20.0, 0.0, 15.0)
 	target.y = terrain.height_at(target.x, target.z)
 	_check(not NavServer.is_idle(), "(nav isn't built yet)")
@@ -204,21 +229,21 @@ func _test_waiting_for_nav() -> void:
 	# Giving up: nav never finishes, because nothing ticks it.
 	navigation.pending_give_up_ticks = 20
 	_check(ai.move_to(target), "nav still being built: move_to says yes")
-	_check(navigation.get_path_state() == NavigationManager.PathState.PENDING and navigation.is_under_way() and not navigation.is_following_path(),
+	_check(navigation.get_path_state() == PathFollower.PathState.PENDING and navigation.is_under_way() and not navigation.is_following_path(),
 			"it's PENDING: under way, but no path yet")
 	_check(ai.is_following_order(), "AIController counts the wait as its order under way")
 	await _ticks(10)
 	_check(pawn.controller_manager.move_input.length() < 0.01, "the pawn stands while it waits, rather than walking a straight line")
 	await _ticks(20)
-	_check(navigation.get_path_state() == NavigationManager.PathState.UNREACHABLE and not ai.is_following_order(),
+	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE and not ai.is_following_order(),
 			"past pending_give_up_ticks it gives up: UNREACHABLE")
 
 	# Finding the path: nav is built while it waits, and a retry finds it.
 	navigation.pending_give_up_ticks = 100000
 	ai.move_to(target)
-	_check(navigation.get_path_state() == NavigationManager.PathState.PENDING, "PENDING again")
+	_check(navigation.get_path_state() == PathFollower.PathState.PENDING, "PENDING again")
 	var ticks := 0
-	while navigation.get_path_state() == NavigationManager.PathState.PENDING and ticks < 3000:
+	while navigation.get_path_state() == PathFollower.PathState.PENDING and ticks < 3000:
 		NavServer.tick(1.0 / 60.0)
 		await get_tree().physics_frame
 		ticks += 1
@@ -251,8 +276,8 @@ func _test_following_a_nav_path() -> void:
 	var start := Vector3(5.0, terrain.height_at(5.0, 5.0) + 0.1, 5.0)
 	var pawn := _make_pawn(start)
 	await _ticks(10)
-	var navigation := pawn.navigation_manager
 	var ai: AIController = pawn.controller_manager.ai_controller
+	var navigation := ai.path_follower
 	var target := Vector3(-40.0, 0.0, 30.0) # across a chunk border, over hills
 	target.y = terrain.height_at(target.x, target.z)
 	_check(ai.move_to(target), "with nav, move_to finds a path")
@@ -274,7 +299,7 @@ func _test_following_a_nav_path() -> void:
 	_check(navigation.is_following_path(), "(walking again)")
 	_check(not ai.move_to(Vector3(5000.0, 0.0, 5000.0)), "a point nowhere near nav: move_to says no")
 	_check(not navigation.is_following_path(), "and the path it had is dropped, so it doesn't wander off on the old one")
-	_check(navigation.get_path_state() == NavigationManager.PathState.UNREACHABLE, "UNREACHABLE, since nav is built and it isn't there") # Claude 2026-11-16
+	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE, "UNREACHABLE, since nav is built and it isn't there") # Claude 2026-11-16
 
 	pawn.free()
 	terrain.free()
@@ -296,8 +321,8 @@ func _test_crossing_links() -> void:
 
 	var pawn := _make_pawn(Vector3(-10, 0.1, 0))
 	await _ticks(10)
-	var navigation := pawn.navigation_manager
 	var ai: AIController = pawn.controller_manager.ai_controller
+	var navigation := ai.path_follower
 
 	var across := await _walk_course_leg(pawn, ai, Vector3(6, 0, 0))
 	_check(across.crossed_link and across.fastest_up > 3.0 and across.highest > 0.3, "A to B: it reaches the gap and jumps (up to %.2f m)" % across.highest)
@@ -313,8 +338,8 @@ func _test_crossing_links() -> void:
 
 	# Claude 2026-11-17 (C++ bundle stage 3): with no paths found straight away this tick, the path comes from NavServer's queue,
 	# across links too: back down from D to C, with the pawn waiting (PENDING) until it comes.
-	NavigationManager.paths_now_per_tick = 0
-	_check(ai.move_to(Vector3(16, -2, 0)) and navigation.get_path_state() == NavigationManager.PathState.PENDING,
+	PathFollower.paths_now_per_tick = 0
+	_check(ai.move_to(Vector3(16, -2, 0)) and navigation.get_path_state() == PathFollower.PathState.PENDING,
 			"over this tick's budget, a path is queued and the pawn waits (PENDING)")
 	var queued_ticks := 0
 	var queued_crossed := false
@@ -325,7 +350,7 @@ func _test_crossing_links() -> void:
 		queued_ticks += 1
 		followed = followed or navigation.is_following_path()
 		queued_crossed = queued_crossed or navigation.is_crossing_link()
-	NavigationManager.paths_now_per_tick = 8
+	PathFollower.paths_now_per_tick = 8
 	await _ticks(20)
 	_check(followed and queued_crossed and navigation.has_arrived() and absf(pawn.position.y + 2.0) < 0.3,
 			"the queued path comes, crosses the link and gets there (%d ticks, at %s)" % [queued_ticks, pawn.position])
@@ -350,11 +375,11 @@ func _test_crossing_links() -> void:
 	_check(absf(pawn.position.y + 2.0) < 0.3, "still down on C")
 	var ladder: int = NavServer.add_link(Vector3(13.5, -2, 0), Vector3(10.5, 0, 0), false, &"")
 	_settle()
-	navigation.link_timeout = 1.0
+	navigation.link_timeout_ticks = 60
 	var stuck := await _walk_course_leg(pawn, ai, Vector3(6, 0, 0), 900)
 	_check(stuck.crossed_link and not navigation.is_following_path() and not navigation.has_arrived(),
 			"a link it can't cross: after one new path and a second miss, it stops, neither following nor arrived (%d ticks)" % stuck.ticks)
-	_check(navigation.get_path_state() == NavigationManager.PathState.UNREACHABLE, "UNREACHABLE") # Claude 2026-11-16
+	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE, "UNREACHABLE") # Claude 2026-11-16
 	_check(absf(pawn.position.y + 2.0) < 0.3, "still down on C")
 	NavServer.remove_link(ladder)
 
@@ -368,7 +393,7 @@ func _test_crossing_links() -> void:
 
 ## Walks the pawn to the goal with AIController.move_to, ticking nav as it goes, and reports what happened.
 func _walk_course_leg(pawn: Pawn, ai: AIController, goal: Vector3, limit := 600) -> Dictionary:
-	var navigation := pawn.navigation_manager
+	var navigation := ai.path_follower
 	var report := {"crossed_link": false, "highest": pawn.position.y, "fastest_up": 0.0, "ticks": 0, "distance": INF}
 	if not ai.move_to(goal):
 		return report
@@ -399,7 +424,7 @@ func _make_box(lo: Vector3, hi: Vector3) -> StaticBody3D:
 # --- Helpers ---
 
 
-func _walk_until_done(navigation: NavigationManager, limit: int) -> int:
+func _walk_until_done(navigation: PathFollower, limit: int) -> int:
 	var ticks := 0
 	while navigation.is_following_path() and ticks < limit:
 		await get_tree().physics_frame

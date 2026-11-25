@@ -38,7 +38,7 @@ flowchart LR
     AM[AbilityManager + abilities + steps]
     EM[StatusManager]
     SM[StatusManager + stats]
-    NAV[NavigationManager]
+    NAV[PathFollower, in the controllers]
     AICTX[AIManager + AIController, memory, senses, states, behaviours]
     TSC[TickStateComponent]
     NE[NetworkEntity]

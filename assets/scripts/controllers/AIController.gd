@@ -4,7 +4,8 @@
 ## A component of the pawn's AIManager ([member AIManager.controller]); the ControllerManager puts it in charge whenever no player
 ## has the pawn. It decides nothing: the AI's behaviours (or a
 ## script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until
-## changed, except [method press], which lasts one tick. Until [method look_at_point] is called it keeps the pawn's own look.
+## changed, except [method press], which lasts one tick. Until [method look_at_point] is called it keeps the pawn's own look. Its walks
+## follow its own [member path_follower].
 ## [codeblock]
 ## ai.move_to(point)                        # walks there along a nav path; false if there's no way there
 ## ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way; drops any path
@@ -22,6 +23,8 @@ extends ControllerBase
 ## point of the same ticks, give the same input.
 static var order_listener := Callable()
 
+## The path its walks follow (move_to, follow, keep_distance). Its settings are the follower's defaults; change them on it.
+var path_follower := PathFollower.new()
 ## Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired
 ## along the look meets the point looked at.
 var look_from_height := 1.3
@@ -57,6 +60,7 @@ var _let_go := false # it let go of everything (its pawn died) and has taken no 
 func _enter_tree() -> void:
 	var ai := get_parent() as AIManager
 	pawn = ai.pawn if ai else null
+	path_follower.pawn = pawn
 
 
 func _ready() -> void:
@@ -104,16 +108,13 @@ func move_to(point: Vector3) -> bool:
 		return false
 	_follow = _Follow.NONE
 	_move = Vector3.ZERO # once the path ends, it stands
-	var navigation := _navigation()
-	if navigation == null:
-		push_warning("AIController: %s has no NavigationManager, so move_to can't find a way. Check its skip_default_parts." % (String(pawn.name) if pawn else "this pawn")) # String(), so both sides are text
-		return false
 	if not _is_in_charge():
+		path_follower.stop()
 		_waiting_point = point
 		_has_waiting_point = true
 		return true
 	_has_waiting_point = false
-	return navigation.move_to(point)
+	return path_follower.move_to(point)
 
 
 ## True while its own last move_to is under way: following its path (or waiting for nav, PENDING) when in charge, or waiting to
@@ -121,8 +122,7 @@ func move_to(point: Vector3) -> bool:
 func is_following_order() -> bool:
 	if _has_waiting_point:
 		return true
-	var navigation := _navigation()
-	return navigation != null and _is_in_charge() and navigation.is_under_way()
+	return _is_in_charge() and path_follower.is_under_way()
 
 
 ## Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
@@ -222,23 +222,19 @@ func release_all() -> void:
 
 ## This tick's input. Uses up press(), so call it once per tick: ControllerManager does.
 func take_input_command(_tick: int) -> InputCommand:
-	# While a path from move_to is being followed, the direction comes from it. ControllerManager drops a path
-	# when control changes hands, so any path here is this controller's own.
-	var navigation := _navigation()
+	# While a path from move_to is being followed, the direction comes from it. ControllerManager has it drop its path when control
+	# changes hands, so a path here was found while it was in charge.
 	# Being asked for input means it's in charge, so a walk it was given while it wasn't starts now.
-	if _has_waiting_point and navigation:
+	if _has_waiting_point:
 		_has_waiting_point = false
-		navigation.move_to(_waiting_point)
+		path_follower.move_to(_waiting_point)
 	if _follow != _Follow.NONE:
-		_carry_out_follow(_tick, navigation)
+		_carry_out_follow(_tick)
 	var link_press := 0
 	# is_under_way, so a path waiting for nav (PENDING) gets asked each tick, which is when it tries again.
-	if navigation and navigation.is_under_way():
-		_command.move = navigation.get_move_direction()
-		# A link it just reached may need an action, such as jump, pressed for this tick.
-		var action := navigation.take_link_action()
-		if action != &"":
-			link_press = InputActions.mask_of(action)
+	if path_follower.is_under_way():
+		_command.move = path_follower.get_move_direction()
+		link_press = path_follower.take_link_press() # a link it just reached may need an action, such as jump, pressed for this tick
 	else:
 		_command.move = _move
 	if _look_node != null:
@@ -289,11 +285,10 @@ func _start_following(mode: _Follow, node: Node3D, distance: float, band: float,
 
 # One input's worth of a persistent order: stand once near enough (or at its distance), walk again once outside the band, and find a
 # new path when the goal has moved or the path is old. Only from the node's real position, so every machine does the same.
-func _carry_out_follow(tick: int, navigation: NavigationManager) -> void:
+func _carry_out_follow(tick: int) -> void:
 	if not is_instance_valid(_follow_node) or pawn == null:
 		_follow = _Follow.NONE # the node is gone: stand
-		if navigation:
-			navigation.stop()
+		path_follower.stop()
 		return
 	var there := _follow_node.global_position
 	var away := pawn.global_position - there
@@ -309,17 +304,14 @@ func _carry_out_follow(tick: int, navigation: NavigationManager) -> void:
 	if off_by <= (_follow_band if _follow_standing else _follow_band * 0.5):
 		if not _follow_standing:
 			_follow_standing = true
-			if navigation:
-				navigation.stop()
-		return
-	if navigation == null:
+			path_follower.stop()
 		return
 	if _follow_standing or tick - _follow_path_tick >= TickDriver.ticks_at_rate(_follow_repath_ticks) \
-			or goal.distance_to(_follow_goal) > _follow_repath_distance or not navigation.is_under_way():
+			or goal.distance_to(_follow_goal) > _follow_repath_distance or not path_follower.is_under_way():
 		_follow_standing = false
 		_follow_goal = goal
 		_follow_path_tick = tick
-		navigation.move_to(goal)
+		path_follower.move_to(goal)
 
 
 ## Forgets every order (standing, nothing held, no look, no persistent order), without counting as one. The pawn calls it through its
@@ -339,17 +331,19 @@ func let_go() -> void:
 	_has_waiting_point = false
 
 
-# The pawn's NavigationManager, or null.
-func _navigation() -> NavigationManager:
-	return pawn.navigation_manager if pawn else null
+## Its [member path_follower] while a walk is under way, else null.
+func get_path_follower() -> PathFollower:
+	return path_follower if path_follower.is_under_way() else null
+
+
+## Drops the path it's following. A walk given while it wasn't in charge is kept, and starts when it's in charge again.
+func drop_path() -> void:
+	path_follower.stop()
 
 
 func _stop_path() -> void:
 	_has_waiting_point = false
-	var navigation := _navigation()
-	# Only its own path. While not in charge, the path belongs to whoever is.
-	if navigation and _is_in_charge():
-		navigation.stop()
+	path_follower.stop()
 
 
 # True when the pawn follows this controller's input. With no ControllerManager on the pawn, it counts as in charge, so a controller

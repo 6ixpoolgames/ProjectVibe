@@ -185,7 +185,7 @@ func wake_at(at_tick: int) -> void:
 	wake_tick = at_tick if wake_tick < 0 else mini(wake_tick, at_tick)
 
 
-## Runs tick() when a walk it started ends, arrived or given up (NavigationManager.path_ended).
+## Runs tick() when a walk it started ends, arrived or given up (PathFollower.path_ended, on the AI controller's follower).
 func wake_on_path_end() -> void:
 	wakes_on_path_end = true
 

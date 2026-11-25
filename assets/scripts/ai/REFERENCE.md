@@ -106,7 +106,7 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `add_input_slots(slots: Dictionary) -> void`: Adds the slots of every input its conditions and curves read to slots (as keys).
 - `has_own_code() -> bool`: True if its script overrides `is_available()` or `score()` with code of its own. Such a behaviour works everywhere, but the C++ decider can't read code, so it asks GDScript for that behaviour's answers. Worked out once per script ([`ScriptOverrides`](../platform/REFERENCE.md#scriptoverrides)).
 - `wake_at(at_tick: int) -> void`: Runs tick() at this tick (or the pawn's first run after it), if nothing wakes it sooner. Used up when it fires; an earlier tick than one already set wins.
-- `wake_on_path_end() -> void`: Runs tick() when a walk it started ends, arrived or given up (NavigationManager.path_ended).
+- `wake_on_path_end() -> void`: Runs tick() when a walk it started ends, arrived or given up (PathFollower.path_ended, on the AI controller's follower).
 - `wake_on_action_end(action: StringName) -> void`: Runs tick() when an ability on this action finishes or is cancelled (AbilityManager.ability_finished, ability_cancelled).
 - `clear_wake_ups() -> void`: Forgets every wake-up. The manager calls it when the behaviour starts.
 - `enter(_context: AIManager) -> void`: Once, when it starts.

@@ -19,6 +19,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-25
 
+- **No `NavigationManager` in the defaults** (pawn spec 16.10 step 5c): the defaults list is 6 parts. Paths are followed by whoever walks the pawn (`navigation/PathFollower`).
+
 - **A part's components are filled in too** (pawn spec 16.10 step 5b). `PawnInitializer` treats the children a default part's scene instances from scenes of their own as that part's components: a pawn's own part gets each one it lacks, by name (`_add_missing_components`), and a part made from its default scene loses the ones `skip_default_parts` names (`_trim_components`). The game's `ai_brain` goes in place of the part or component of its name, now the AIManager's `AIBehaviourManager`. `components_of(scene)` reads them without making the scene, once per scene. The defaults list went from 12 parts to 7: one `AIManager` holds the AI. Test: `pawn_initializer_selftest`.
 
 

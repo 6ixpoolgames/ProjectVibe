@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 191 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 194 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -52,6 +52,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [ChunkStreamer](../assets/scripts/streaming/REFERENCE.md#chunkstreamer) | [streaming](../assets/scripts/streaming/README.md) | Node | Loads terrain chunks around every streaming source, and unloads the ones nothing needs any more, without stalling the game. |
 | [ControllerBase](../assets/scripts/controllers/REFERENCE.md#controllerbase) | [controllers](../assets/scripts/controllers/README.md) | Node | The base class every controller shares: PlayerController and AIController extend it. |
 | [ControllerManager](../assets/scripts/controllers/REFERENCE.md#controllermanager) | [controllers](../assets/scripts/controllers/README.md) | Node | Picks whose input a pawn follows, and holds that input and whether a player has the pawn. |
+| [ControllerStepHost](../assets/scripts/controllers/REFERENCE.md#controllerstephost) | [controllers](../assets/scripts/controllers/README.md) | Node | Runs steps that write a controller's input, such as the player's click-to-move ([MoveToStep]): a small step host (pawn spec 16.4). |
 | [CrowdMover](../assets/scripts/movement/REFERENCE.md#crowdmover) | [movement](../assets/scripts/movement/README.md) | GameModeModule | Moves AI pawns walking on the ground all together once a tick, instead of each one calling Godot's move_and_slide. |
 | [DashAbility](../assets/scripts/abilities/REFERENCE.md#dashability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | A short, fast burst toward the movement input: an action bound to &"dash". |
 | [DashDefinition](../assets/scripts/abilities/REFERENCE.md#dashdefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | Dash's settings. |
@@ -98,9 +99,10 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [MeleeSweepStep](../assets/scripts/abilities/REFERENCE.md#meleesweepstep) | [abilities](../assets/scripts/abilities/README.md) | AbilityStep | An attack's hit window: a hit sphere moves along a path over length_ticks, and pawns it touches are hit. |
 | [ModifierTotals](../assets/scripts/effects/REFERENCE.md#modifiertotals) | [effects](../assets/scripts/effects/README.md) | RefCounted | What all the modifiers on one pawn add up to right now. |
 | [MoveSanityCheck](../assets/scripts/diagnostics/REFERENCE.md#movesanitycheck) | [diagnostics](../assets/scripts/diagnostics/README.md) | RefCounted | Warns when an entity moved further in a tick than its velocity explains: something set its position instead of moving it or calling [method Pawn.teleport]. |
+| [MoveStep](../assets/scripts/steps/REFERENCE.md#movestep) | [steps](../assets/scripts/steps/README.md) | Step | The base of steps that walk the pawn along a nav path: holds a [PathFollower] and writes its direction into the host's input. |
+| [MoveToStep](../assets/scripts/steps/REFERENCE.md#movetostep) | [steps](../assets/scripts/steps/README.md) | MoveStep | Walks the pawn to a point along a nav path: done on arriving, failed when there's no way there (pawn spec 16.7's MoveTo). |
 | [NavArea](../assets/scripts/navigation/REFERENCE.md#navarea) | [navigation](../assets/scripts/navigation/README.md) | NavMarker | A volume that changes how nav treats the ground in it (nav spec 21.3). |
 | [NavDebugView](../assets/scripts/diagnostics/REFERENCE.md#navdebugview) | [diagnostics](../assets/scripts/diagnostics/README.md) | Node3D | A debug view of navigation: the live nav mesh, the nav links and the nav markers, on F9. |
-| [NavigationManager](../assets/scripts/navigation/REFERENCE.md#navigationmanager) | [navigation](../assets/scripts/navigation/README.md) | Node | The pawn's only contact with navigation: finds paths and says which way to walk. |
 | [NavLink](../assets/scripts/navigation/REFERENCE.md#navlink) | [navigation](../assets/scripts/navigation/README.md) | NavMarker | A connection nav can't walk across: an off-mesh link (nav spec 21.3). |
 | [NavLinkModule](../assets/scripts/navigation/REFERENCE.md#navlinkmodule) | [navigation](../assets/scripts/navigation/README.md) | NavMarkerModule | Hands placed [NavLink] markers to nav, so paths can use them (nav spec 21.4 and 19, phase 3). |
 | [NavMarker](../assets/scripts/navigation/REFERENCE.md#navmarker) | [navigation](../assets/scripts/navigation/README.md) | Resource | The base data object for nav markers: "this spot means something to nav or AI" (nav spec 21.2). |
@@ -119,6 +121,7 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [ParryAbility](../assets/scripts/abilities/REFERENCE.md#parryability) | [abilities](../assets/scripts/abilities/README.md) | AbilityBase | A parry stance: while it runs, a hit from the front does nothing to this pawn, and the attacker is pushed back instead. |
 | [ParryDefinition](../assets/scripts/abilities/REFERENCE.md#parrydefinition) | [abilities](../assets/scripts/abilities/README.md) | AbilityDefinition | A parry's settings. |
 | [ParryModifier](../assets/scripts/effects/REFERENCE.md#parrymodifier) | [effects](../assets/scripts/effects/README.md) | EffectModifier | Parrying: while its effect lasts, hits from the front are blocked and the attacker gets a reply. An [EffectModifier]. |
+| [PathFollower](../assets/scripts/navigation/REFERENCE.md#pathfollower) | [navigation](../assets/scripts/navigation/README.md) | RefCounted | Follows one nav path for one pawn: finds it through NavServer, keeps its corners, and says which way to walk each tick. |
 | [Pawn](../assets/scripts/pawn/REFERENCE.md#pawn) | [pawn](../assets/scripts/pawn/README.md) | CharacterBody3D | A body something can possess, which runs its parts in a fixed order each tick. |
 | [PawnDefaultsRes](../assets/scripts/resources/REFERENCE.md#pawndefaultsres) | [resources](../assets/scripts/resources/README.md) | Resource | The parts every pawn gets unless its own scene already has one of the same name, and other game-wide pawn settings. |
 | [PawnInitializer](../assets/scripts/game_mode/REFERENCE.md#pawninitializer) | [game_mode](../assets/scripts/game_mode/README.md) | GameModeModule | Gives every pawn the parts it needs to work, from one list per game. |

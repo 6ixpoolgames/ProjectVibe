@@ -87,7 +87,7 @@ class TimedHands extends AIController:
 		_note("AIController.take_input_command (path following)", started)
 		return command
 
-class TimedNavigation extends NavigationManager:
+class TimedFollower extends PathFollower: # Claude 2026-11-25: was TimedNavigation, on the NavigationManager (pawn spec 16.10 step 5c)
 	var totals: Dictionary
 	func _note(part: String, started: int) -> void:
 		var entry: Array = totals.get(part, [0, 0])
@@ -97,7 +97,7 @@ class TimedNavigation extends NavigationManager:
 	func move_to(point: Vector3) -> bool:
 		var started := Time.get_ticks_usec()
 		var found := super(point)
-		_note("    of which: NavigationManager.move_to (path request)", started)
+		_note("    of which: PathFollower.move_to (path request)", started)
 		return found
 
 class TimedSelector extends AITargetSelector:
@@ -248,11 +248,10 @@ func _add_timed_parts(pawn: Pawn) -> void:
 	var hands: Node = load("res://assets/scenes/pawn/parts/AIController.tscn").instantiate()
 	hands.set_script(TimedHands)
 	hands.totals = _totals
+	var follower := TimedFollower.new()
+	follower.totals = _totals
+	hands.path_follower = follower
 	ai.add_child(hands)
-	var navigation: NavigationManager = load("res://assets/scenes/pawn/parts/NavigationManager.tscn").instantiate()
-	navigation.set_script(TimedNavigation)
-	navigation.totals = _totals
-	pawn.add_child(navigation)
 	var sensing: AISensingManager = load("res://assets/scenes/pawn/parts/AISensingManager.tscn").instantiate()
 	sensing.set_script(TimedSensing)
 	sensing.totals = _totals

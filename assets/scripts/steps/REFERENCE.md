@@ -6,6 +6,8 @@ Every class in `assets/scripts/steps/`, from its doc comments. The overview is i
 
 - [Step](#step)
 - [StepTimeline](#steptimeline)
+- [MoveStep](#movestep)
+- [MoveToStep](#movetostep)
 
 ## Step
 
@@ -22,6 +24,7 @@ Rollback: whether it runs and its count live in its timeline's state, which its 
 - `keeps_owner_running: bool` = `true`: On: its owner keeps running while this step does. Off for a step that only goes along (a turn through a swing): once only such steps are left, the owner's run ends and they stop with "done".
 - `running: bool`: True while it runs. Worked out from its timeline's state, which rolls back.
 - `step_ticks: int`: Ticks counted since it started (those `counts_this_tick()` allowed); in `tick()`, the ticks before this one. 0 when not running.
+- `checks_release: bool` = `false`: On: its timeline asks `released_now()` each tick. Off (the default), so steps that can't be released cost no call; a subclass that can end on release keeps it up to date.
 - `timeline: StepTimeline` = `null`: The timeline it's on, set when the timeline is built.
 - `pawn: Pawn` = `null`: The pawn its owner belongs to.
 
@@ -94,3 +97,49 @@ Conditions are asked about the host (`AbilityCondition.holds()`).
 - `get_running_step_names() -> PackedStringArray`: The names of the steps running now, in tree order. For readouts and debug tools.
 - `steps_after(step: Step) -> Step[]`: The steps whose entries start when an entry of this step ends: what comes after it, for visuals (a windup's sweep).
 - `step_before(step: Step) -> Step`: The step whose end starts this step's first entry, or null: what came before it, for visuals (a recovery's sweep).
+
+## MoveStep
+
+`res://assets/scripts/steps/movement/MoveStep.gd`, extends [`Step`](#step)
+
+The base of steps that walk the pawn along a nav path: holds a [`PathFollower`](../navigation/REFERENCE.md#pathfollower) and writes its direction into the host's input.
+
+[`MoveToStep`](#movetostep) extends it; Follow and KeepAwayFrom will (pawn spec 16.7). Its host is whatever owns its timeline and has an `input` (an [`InputCommand`](../controllers/REFERENCE.md#inputcommand)) its steps write: a [`ControllerStepHost`](../controllers/REFERENCE.md#controllerstephost) today, an AI behaviour from step 7. Each tick it writes the follower's direction into the input's move and ORs in a link's action (`steer()`). The settings below are copied into the follower when the timeline is built; in code, change `follower` itself.
+Rollback: the follower doesn't roll back yet. The player's host runs on the owner's machine only, whose input is what rolls back.
+
+### Settings and properties
+
+- `corner_reached_distance: float` = `0.5`: How close, in metres, the pawn must get to a corner of the path before it heads for the next one (measured flat).
+- `arrival_distance: float` = `0.3`: How close, in metres, it must get to the end of the path to count as arrived.
+- `nav_tier: int` = `0`: Which size of nav to use. 0 is the smallest; t0 builds only tier 0.
+- `use_links: bool` = `true`: On, paths may cross links (jumps, drops, placed links). Off for a pawn that can't jump.
+- `link_timeout_ticks: int` = `180`: How long the pawn has to cross a link, in ticks at 60 a second, before it finds a new path to the same place.
+- `straight_line_without_nav: bool` = `true`: On, with no nav at all (and none being built) it walks in a straight line. Off, that's no way there.
+- `pending_retry_ticks: int` = `10`: While waiting for nav to be built, how often it tries again, in ticks at 60 a second.
+- `pending_give_up_ticks: int` = `300`: How long it waits for nav to be built or a queued path to come, in ticks at 60 a second, before giving up.
+- `follower: PathFollower` = `<unknown>`: The path it follows. Its settings come from the ones above when the timeline is built.
+
+### Functions
+
+- `setup() -> void`
+- `enter() -> void`
+- `exit(_reason: String) -> void`
+- `steer() -> void`: Writes this tick's direction into the host's input, and presses a link's action the path just reached. Call it once per tick, from `Step.tick()`: it moves the follower on.
+- `host_input() -> InputCommand`: The input its host's steps write, or null when its host has none.
+
+## MoveToStep
+
+`res://assets/scripts/steps/movement/MoveToStep.gd`, extends [`MoveStep`](#movestep)
+
+Walks the pawn to a point along a nav path: done on arriving, failed when there's no way there (pawn spec 16.7's MoveTo).
+
+Set `goal` before it starts (a timeline entry's values, or code). With no nav at all it walks a straight line; while nav is still being built it waits, standing. The player's click-to-move runs one on its [`ControllerStepHost`](../controllers/REFERENCE.md#controllerstephost).
+
+### Settings and properties
+
+- `goal: Vector3` = `Vector3(0, 0, 0)`: Where it walks to.
+
+### Functions
+
+- `enter() -> void`
+- `tick(_dt: float) -> int`

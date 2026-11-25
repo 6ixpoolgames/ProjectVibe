@@ -22,6 +22,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-25
 
+- **The AI's walks follow its controller's own path** (pawn spec 16.10 step 5c): `wake_on_path_end` listens to `pawn.ai.controller.path_follower.path_ended`, so a player's walk on the same pawn no longer wakes a behaviour.
+
 - **The AI is one tree** (pawn spec 16.5, 16.10 step 5b). `AIContextComponent` became the `AIManager` (`pawn.ai`, was `pawn.ai_context`), and the AI's components are its children: the `AIController` (moved from the ControllerManager), `AISensingManager`, `AIMemory`, `AITargetSelector`, `AIStateManager` and `AIBehaviourManager`. Each reads the pawn from its AIManager as it enters the tree, and the AIManager finds them among its own children (it no longer watches the pawn's). The default is `parts/AIManager.tscn`; a pawn scene overrides one component by putting its own under an `AIManager` node (the sample goblins do, for their behaviour manager), and PawnInitializer fills in the rest. Nothing about how the AI decides changed. Tests that build AI pawns by hand use `AITestPawns.ai_of(pawn)` (in `tests/`); a test that drops the whole AI skips `&"AIManager"`.
 
 

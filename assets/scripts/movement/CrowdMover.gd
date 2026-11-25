@@ -530,13 +530,16 @@ func _move_batch_cpp(cpp_batch: Object, pawns: Array[Pawn], positions: PackedVec
 	var others_started := PerfScopes.begin() # the nav tiers and every other pawn, gathered in GDScript (diagnostics)
 	var tiers := PackedInt32Array()
 	for pawn in pawns:
-		var navigation := pawn.navigation_manager
+		# The path the controller in charge follows, if any.
+		# REFACTOR: the nav tier is the body's (by its radius), not the path's; a pawn with no path gets tier 0. Fine while t0 builds only
+		# tier 0; the tier moves onto the body with multi-tier nav. See movement/CHANGELOG.md.
+		var follower := pawn.controller_manager.get_path_follower() if pawn.controller_manager else null
 		# -1 while crossing a nav link (a jump, or a walk off a ledge), which leaves the nav mesh on purpose, so the batch checks it with
 		# physics instead of stopping it at the mesh's edge (crowd_batch.h).
-		if navigation and navigation.is_crossing_link():
+		if follower and follower.is_crossing_link():
 			tiers.append(-1)
 		else:
-			tiers.append(navigation.nav_tier if navigation else 0)
+			tiers.append(follower.nav_tier if follower else 0)
 	var obstacles := _obstacles(pawns, tick)
 	PerfScopes.end(&"movement.crowd_others", others_started)
 	cpp_batch.set_settings(separation_strength, separation_margin, max_push_speed, max_step, ground_layers, cell_size)

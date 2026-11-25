@@ -12,7 +12,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | What | Where | Why | Size |
 |---|---|---|---|
 | Settings for the InputMap names | `PlayerController` (`move_left`..., `scrollWheel_up`, `left_click`, `middleMouse_button`) | Written in the code, unlike `action_keys`; a designer can't remap them without code | S |
-| One shared path-following helper | `PlayerController.take_input_command`, `controllers/AIController.take_input_command` | Following a path and pressing a link's action is written out twice | S |
+
+## 2026-11-25
+
+- **Click-to-move is a step** (pawn spec 16.4, 16.10 step 5c): `move_to` starts a `MoveToStep` on the controller's `step_host` (`ControllerStepHost`), which writes the move each tick while it runs; keys or taking another pawn drop it. `get_path_follower()` and `drop_path()` come from `ControllerBase`. The refactor row for the path following written out here and in `AIController` is closed.
+
 
 ## 2026-11-23
 
