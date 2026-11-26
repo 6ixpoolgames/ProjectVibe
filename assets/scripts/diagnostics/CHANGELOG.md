@@ -19,6 +19,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | The window title in shipped games | `DiagnosticsManager._update_title` | A debugging convenience (role and process id, to tell instances apart) that also renames a release build's window, since diagnostics ship. A setting, or debug builds only, keeps a game's own title | S |
 | "Late" and "very late" as settings | `DiagnosticsManager._summary`; the F4 panel's text; `replay/ReplayViewer`'s strip colours | Fixed at 20 and 34 ms (60 and 30 fps) in three places, while spikes follow the tick rate and `spike_over_budget`. A game aiming at another frame rate can't set them | S |
 
+## 2026-11-26
+
+- **`AIDecisionChecks`** (new; pawn spec 16.5, step 6d): the AI's decision checks, moved out of the `AIDecisionModule`, which is gone: shadow mode (`set_check_against_gdscript`), the sampled fact check in debug builds, the switch that moves every pawn to GDScript (`set_all_in_gdscript`, F10 in the panels now, listed in F1 as before) and the counts (`get_counts`, `reset_counts`). All static.
+
 ## 2026-11-25
 
 - **The pawn panel lists behaviour definitions to check** (F7), as it does abilities': a behaviour with settings of its own, a definition saved inside a scene, or one of another kind (pawn spec 16.10 step 6c).

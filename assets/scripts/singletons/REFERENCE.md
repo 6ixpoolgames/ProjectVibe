@@ -70,7 +70,7 @@ GameMode.add_module(node)        # a game's own modules, which extend GameModeMo
 ### Constants
 
 - `MODULES_SETTING = "project_base/game_mode/modules"`: The project setting that lists the modules to start, as script paths.
-- `DEFAULT_MODULES = Array[String](["res://assets/scripts/game_mode/PawnInitializer.gd", "res://assets/scripts/game_mode/PossessionCoordinator.gd", "res://assets/scripts/game_mode/AIActivationManager.gd", "res://assets/scripts/game_mode/SpawnManager.gd", "res://assets/scripts/replay/ReplayRecorder.gd", "res://assets/scripts/game_mode/TeamRegistry.gd", "res://assets/scripts/movement/CrowdMover.gd", "res://assets/scripts/ai/AIDecisionModule.gd"])`: The modules started when the project setting isn't there, in this order.
+- `DEFAULT_MODULES = Array[String](["res://assets/scripts/game_mode/PawnInitializer.gd", "res://assets/scripts/game_mode/PossessionCoordinator.gd", "res://assets/scripts/game_mode/AIActivationManager.gd", "res://assets/scripts/game_mode/SpawnManager.gd", "res://assets/scripts/replay/ReplayRecorder.gd", "res://assets/scripts/game_mode/TeamRegistry.gd", "res://assets/scripts/movement/CrowdMover.gd"])`: The modules started when the project setting isn't there, in this order.
 
 ### Functions
 

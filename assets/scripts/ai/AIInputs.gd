@@ -56,6 +56,8 @@ const GROUP_LOOK_AGAIN_TICKS := 120
 
 ## The values by slot; 0 where nothing was written or worked out.
 var values := PackedFloat64Array()
+## Goes up by one whenever a kept input (a game's own) is written, so the C++ decider copies them again ([AIDeciderBridge]).
+var kept_version := 0
 
 var _context: AIManager = null
 var _decision := 0 # counts decisions; a worked-out value is fresh while its stamp matches
@@ -164,14 +166,13 @@ func set_input(input_name: StringName, amount: float) -> void:
 	set_slot(slot_of(input_name), amount)
 
 
-## Writes a value by slot. A kept input also goes to the pawn's C++ row.
+## Writes a value by slot. Writing a kept input raises [member kept_version].
 func set_slot(slot: int, amount: float) -> void:
 	if values.size() <= slot:
 		_grow(slot + 1)
 	values[slot] = amount
-	var manager := _context.behaviour_manager if _context else null
-	if manager and manager.cpp_row >= 0 and AIBehaviourManager.decision_module and _kinds[slot] == Kind.KEPT:
-		AIBehaviourManager.decision_module.input_set(manager, slot, amount)
+	if _kinds[slot] == Kind.KEPT:
+		kept_version += 1
 
 
 ## The value in a slot, working out a built-in one if it hasn't been yet this decision.

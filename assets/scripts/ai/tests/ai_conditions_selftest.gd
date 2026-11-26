@@ -1,6 +1,6 @@
 ## Written by Claude (claude-opus-5-5), 2026-11-17: headless self-test for AI conditions as data (scaling spec 6.2, step 5b): the
 ## pawn's inputs (AIInputs), the condition kinds (AICompareCondition, AIChanceCondition, AIAnyCondition), score curves (AIScoreCurve),
-## a behaviour's score with curves, has_own_code(), and the C++ decider (AIBatchDecider's "conditions" scorer) judging the same
+## a behaviour's score with curves, has_own_code(), and the C++ decider (AIDecider's "conditions" scorer) judging the same
 ## conditions and curves the same way: live shadow mode over made-up brains fed random inputs, which must agree on every decision.
 ## Claude 2026-11-18 (step 5c): and C++ driving (the main path) plays the same game as GDScript driving, persistence, a per-pawn
 ## persistence mask, jitter changes and behaviours finishing included; and where pawns decide (setting, override, special minds).
@@ -166,65 +166,65 @@ func _test_own_code() -> void:
 # Made-up brains judged by conditions and curves, fed random kept inputs. First decided by GDScript with shadow mode on: C++ must
 # agree on every decision. Then the same game with C++ driving must make the same changes of behaviour.
 func _test_cpp_agrees() -> void:
-	if not ClassDB.class_exists(&"AIBatchDecider"):
-		_check(false, "the navcore library has AIBatchDecider (rebuild native/ with the editor closed)")
+	if not ClassDB.class_exists(&"AIDecider"):
+		_check(false, "the navcore library has AIDecider (rebuild native/ with the editor closed)")
 		return
-	var module := GameMode.get_module(AIDecisionModule) as AIDecisionModule
-	var added := module == null
-	if added:
-		module = AIDecisionModule.new()
-		GameMode.add_module(module)
-	module.decider = AIDecisionModule.Decider.PAWN_SETTING
-	module.check_against_gdscript = true
-	module.reset_counts()
-	var shadow_game := _play_conditions(module)
-	var counts := module.get_counts()
+	AIDecisionChecks.set_all_in_gdscript(false)
+	AIDecisionChecks.set_check_against_gdscript(true)
+	AIDecisionChecks.reset_counts()
+	var shadow_game := _play_conditions()
+	var counts := AIDecisionChecks.get_counts()
 	print("  conditions, live shadow: %s, chosen %s" % [str(counts), str(shadow_game["chosen"].keys())])
 	_check(counts["checked"] == TICKS * 3 and counts["agreed"] == counts["checked"],
 			"C++ judges conditions and curves the same as GDScript: %d of %d decisions agree" % [counts["agreed"], counts["checked"]])
 	_check_equal(counts["stale_facts"], 0, "no written-through fact was out of date at any decision")
 	_check(shadow_game["chosen"].size() >= 5, "and the made-up brains chose most of their behaviours (%d of 6)" % shadow_game["chosen"].size())
 	# The same game with C++ driving.
-	module.check_against_gdscript = false
-	module.reset_counts()
-	var cpp_game := _play_conditions(module)
-	counts = module.get_counts()
+	AIDecisionChecks.set_check_against_gdscript(false)
+	AIDecisionChecks.reset_counts()
+	var cpp_game := _play_conditions()
+	counts = AIDecisionChecks.get_counts()
 	_check(counts["cpp"] == TICKS * 3, "C++ makes every decision when it drives (%d)" % counts["cpp"])
 	_check(cpp_game["changes"] == shadow_game["changes"] and not shadow_game["changes"].is_empty(),
 			"C++ driving plays the same game as GDScript driving: %d changes of behaviour, the same in order" % shadow_game["changes"].size())
-	# Where pawns decide.
+	# Where pawns decide, settled at the next decision.
 	var pawn := _make_pawn(_made_up_behaviours())
 	_decide(pawn, 1)
 	var manager := pawn.ai.behaviour_manager
-	_check(manager.cpp_row >= 0, "a pawn decides in C++ by default")
+	_check(manager.cpp != null, "a pawn decides in C++ by default")
 	manager.decides_in = AIBehaviourManager.DecidesIn.GDSCRIPT
-	_check(manager.cpp_row == -1, "its own setting moves it to GDScript at once")
+	_decide(pawn, 2)
+	_check(manager.cpp == null, "its own setting moves it to GDScript")
 	manager.decides_in = AIBehaviourManager.DecidesIn.CPP
-	module.decider = AIDecisionModule.Decider.ALL_GDSCRIPT
-	_check(manager.cpp_row == -1, "the game mode's override moves every pawn to GDScript")
-	module.decider = AIDecisionModule.Decider.PAWN_SETTING
-	_check(manager.cpp_row >= 0, "...and back")
+	AIDecisionChecks.set_all_in_gdscript(true)
+	_decide(pawn, 3)
+	_check(manager.cpp == null, "diagnostics' switch (F10) moves every pawn to GDScript")
+	AIDecisionChecks.set_all_in_gdscript(false)
+	_decide(pawn, 4)
+	_check(manager.cpp != null, "...and back")
+	var first := manager.cpp
+	_decide(pawn, 5)
+	_check(manager.cpp == first, "and it keeps its decider while nothing changes")
+	var brains_before: int = first.decider.get_brain_count()
+	var twin := _make_pawn(_made_up_behaviours())
+	_decide(twin, 6)
+	_check(twin.ai.behaviour_manager.cpp.decider != first.decider and first.decider.get_brain_count() == brains_before,
+			"each pawn has a decider of its own, and one built the same way shares the brain already compiled")
+	twin.free()
 	pawn.free()
 	var own := OwnCodeBehaviour.new()
 	own.name = "OwnCode"
 	var special := _make_pawn([own])
 	_decide(special, 1)
-	_check(special.ai.behaviour_manager.cpp_row == -1, "a special mind (a behaviour with code of its own) decides in GDScript")
+	_check(special.ai.behaviour_manager.cpp == null, "a special mind (a behaviour with code of its own) decides in GDScript")
 	special.free()
-	if added:
-		GameMode.remove_module(module)
 
 
 # A pawn whose behaviour needs to be more than 5 m from the nearest node in a group, with the node moving near and far every tick and
 # then freed: shadow mode must agree at every decision.
 func _test_moving_group_point() -> void:
-	var module := GameMode.get_module(AIDecisionModule) as AIDecisionModule
-	var added := module == null
-	if added:
-		module = AIDecisionModule.new()
-		GameMode.add_module(module)
-	module.check_against_gdscript = true
-	module.reset_counts()
+	AIDecisionChecks.set_check_against_gdscript(true)
+	AIDecisionChecks.reset_counts()
 	var point := Node3D.new()
 	add_child(point)
 	point.add_to_group(&"test_moving_point")
@@ -242,18 +242,16 @@ func _test_moving_group_point() -> void:
 			point.free() # freed between looks
 			point = null
 		_decide(pawn, 7000 + t)
-	var counts := module.get_counts()
+	var counts := AIDecisionChecks.get_counts()
 	_check(counts["checked"] == 60 and counts["agreed"] == 60 and changes[0] > 20,
 			"a group point that moves every tick, then is freed: C++ agrees at every decision (%d of %d, %d changes)" % [counts["agreed"], counts["checked"], changes[0]])
 	pawn.free()
-	module.check_against_gdscript = false
-	if added:
-		GameMode.remove_module(module)
+	AIDecisionChecks.set_check_against_gdscript(false)
 
 
 # One game of the made-up brains: 3 pawns, TICKS ticks of random inputs, with modifiers coming and going. Returns the
 # changes of behaviour in order and which behaviours were chosen.
-func _play_conditions(_module: AIDecisionModule) -> Dictionary:
+func _play_conditions() -> Dictionary:
 	var pawns: Array[Pawn] = []
 	var chosen := {}
 	var changes: Array[String] = []

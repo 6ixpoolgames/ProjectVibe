@@ -1,7 +1,6 @@
 // Written by Claude (claude-opus-5-5), 2026-11-18. History: native/CHANGELOG.md.
-// fade_math: FadeProfile's maths (assets/scripts/ai/FadeProfile.gd) in C++, in one place. AIMemoryStore uses it for memory's fades,
-// and AIBatchDecider for behaviours' persistence (scaling spec 6.2, step 5c). It was AIMemoryStore's own until the decider needed the
-// same maths.
+// fade_math: FadeProfile's maths (assets/scripts/ai/FadeProfile.gd) in C++, in one place. AIMemoryStore uses it for memory's fades
+// (the AI decider used it for behaviours' persistence, which is gone).
 //
 // A profile's settings are read once (read()), at the match's tick rate, and the maths is done here. A drawn curve is read with
 // Curve::sample_baked, a table Godot works out once and keeps, so a curve is "sampled once and referenced" as the owner asked. A

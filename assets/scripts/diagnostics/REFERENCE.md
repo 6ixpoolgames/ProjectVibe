@@ -4,6 +4,7 @@
 
 Every class in `assets/scripts/diagnostics/`, from its doc comments. The overview is in [README.md](README.md).
 
+- [AIDecisionChecks](#aidecisionchecks)
 - [DiagnosticsFrameHistory](#diagnosticsframehistory)
 - [DiagnosticsLogger](#diagnosticslogger)
 - [DiagnosticsManager](#diagnosticsmanager)
@@ -12,6 +13,38 @@ Every class in `assets/scripts/diagnostics/`, from its doc comments. The overvie
 - [NavDebugView](#navdebugview)
 - [PerfScopes](#perfscopes)
 - [ProjectileTraceView](#projectiletraceview)
+
+## AIDecisionChecks
+
+`res://assets/scripts/diagnostics/AIDecisionChecks.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
+
+Checks on the AI's C++ decisions, for finding faults and for tests: shadow mode, the sampled fact check, and the switch that has every pawn decide in GDScript (F10).
+
+Shadow mode (`set_check_against_gdscript()`): every pawn that decides in C++ decides in GDScript, C++ decides beside it, and the two are compared (`get_counts()`); after a disagreement C++'s copy of the state is put right. In debug builds a sampled check compares the facts written into a pawn's C++ row with the live ones, most often when the tick has time to spare; a difference means a version counter wasn't raised somewhere. All static: one set of switches and counts for every pawn. Design: pawn spec 16.5, scaling spec 6.2.
+
+### Settings and properties
+
+- `warnings_kept: int` = `5`: How many disagreements and out-of-date facts are logged as warnings. The rest are only counted.
+- `check_against_gdscript: bool` = `false`: Shadow mode is on. Set it with `set_check_against_gdscript()`.
+- `all_in_gdscript: bool` = `false`: Every pawn decides in GDScript, the backup. Set it with `set_all_in_gdscript()` (F10 in debug builds).
+- `active: bool` = `<unknown>`: True when a C++ decision runs a check first: shadow mode, or the sampled check (debug builds).
+
+### Constants
+
+- `FACT_CHECK_EVERY_IDLE = 20`: The sampled fact check's pace (debug builds), in C++ decisions between checks: with time to spare (load under half the tick's budget), normally, and near the budget (above 90%). It checks most when it costs least.
+- `FACT_CHECK_EVERY = 100`
+- `FACT_CHECK_EVERY_BUSY = 1000`
+
+### Functions
+
+- `set_check_against_gdscript(on: bool) -> void` *(static)*: Turns shadow mode on or off. Every pawn settles where it decides again at its next decision.
+- `set_all_in_gdscript(on: bool) -> void` *(static)*: Has every pawn decide in GDScript (on), or each where its settings say (off).
+- `toggle_all_in_gdscript() -> bool` *(static)*: Switches every pawn to GDScript and back (F10). Returns true if they decide in GDScript now.
+- `get_counts() -> Dictionary` *(static)*: The counts so far: cpp (decisions made in C++), checked, agreed and differs (shadow mode), stale_facts, and special_minds (pawns kept in GDScript because C++ can't read one of their behaviours).
+- `reset_counts() -> void` *(static)*: Starts the counts afresh.
+- `before_cpp_decision(bridge: AIDeciderBridge) -> void` *(static)*: Called before each C++ decision while `active`: the fact check, at every decision in shadow mode and sampled otherwise.
+- `after_cpp_decision(bridge: AIDeciderBridge) -> void` *(static)*: Called after each C++ decision in shadow mode: every input C++ just worked out against GDScript's own, slot by slot (the hit and swing facts, a game's inputs, the group points and the memory-based ones all show up here). Counted with the stale facts.
+- `compare(manager: AIBehaviourManager, cpp_choice: int, tick: int) -> void` *(static)*: Shadow mode: compares C++'s choice with GDScript's (what runs now), counts it, and puts C++'s copy of the state right after a disagreement.
 
 ## DiagnosticsFrameHistory
 
@@ -126,7 +159,7 @@ A small fixed-width font in two columns so they never overlap: F1, F2 and F4 dow
 ### Functions
 
 - `is_shown(key: int) -> bool`: True while a panel is shown.
-- `toggle(key: int) -> void`: Shows or hides a panel, as its key does.
+- `toggle(key: int) -> void`: Does what its key does: shows or hides a panel or a view, captures (F12), or moves the AI's decisions to GDScript and back (F10).
 - `inspect(pawn: Pawn) -> void`: The pawn the inspector shows.
 - `get_text(key: int) -> String`
 

@@ -12,11 +12,15 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| C++ classes with a GDScript twin | `ai_memory_store.cpp` / `AIMemoryStoreGD.gd`, `net_codec.h` / `NetPackets.gd`, `state_store.h` / `StateStoreGD.gd`, `replay_motion_packer.h` / `ReplayMotionChannel.gd`, `crowd_batch.h` / `CrowdMover._move_batch`, `visual_placement.h` / `VisualPlacementGD.gd`, `ai_batch_decider.*` / `AIBehaviourManager.decide()` | The same rules written twice, so every change is made and tested twice, and a third game system wanting the same speed-up adds a third copy. Kept on purpose while the library might be missing on a platform; once it ships everywhere, the GDScript copies could go. The owner's call | L |
+| C++ classes with a GDScript twin | `ai_memory_store.cpp` / `AIMemoryStoreGD.gd`, `net_codec.h` / `NetPackets.gd`, `state_store.h` / `StateStoreGD.gd`, `replay_motion_packer.h` / `ReplayMotionChannel.gd`, `crowd_batch.h` / `CrowdMover._move_batch`, `visual_placement.h` / `VisualPlacementGD.gd`, `ai_decider.*` / `AIBehaviourManager.decide()` | The same rules written twice, so every change is made and tested twice, and a third game system wanting the same speed-up adds a third copy. Kept on purpose while the library might be missing on a platform; once it ships everywhere, the GDScript copies could go. The owner's call | L |
 | One thread pool | `worker_pool.h` (nav's `WorkerPool`) and `JobScheduler` | Two sets of worker threads in one library compete on a 4-core server. Nav's tile builds could be a job kind on `JobScheduler` | M |
 | Rename `SightGeometry` | `sight_geometry.h`, with `ai/senses/SightGeometryFeeder.gd` | It's the library's thread-safe copy of the level's collision, and the crowd mover uses it for the ground; the name says sight. `WorldGeometry`, with its feeder outside `ai/`, says what it does | S |
 | Test hooks in `NavServer` | `debug_fail_tile_commits`, `debug_limit_path_corners`, `debug_log_path_steps` in `nav_server.h` (and `GroundDomain`, `PathQueue`) | Test code bound into the shipping class. A test-only build flag or subclass would keep them out | S |
 | `NavHooks` settings that do nothing | `send_estimates`, `send_link_hints` in `nav_hooks.h` | A designer sees two switches in the inspector that change nothing. Hide them until the coarse planner (estimates) or link hints exist | S |
+
+## 2026-11-26
+
+- **`AIBatchDecider` is now `AIDecider`** (`ai_decider.h/.cpp`; pawn spec 16.10 step 6d). Each behaviour manager owns one, holding its pawn's row, instead of one decider for every pawn in a GameMode module; it still holds many rows, for a batch runner. Brains and the input slots' kinds moved into a store every decider shares (static, made on first use, freed by `free_shared()` from the library's unload, before Godot's teardown): `add_brain(description, key)` returns the brain already compiled under a key. `get_input_kind_count()` is new. `fade_math.h` and `ai_memory_store.h` lost stale mentions of the decider (persistence is gone).
 
 ## 2026-11-25
 

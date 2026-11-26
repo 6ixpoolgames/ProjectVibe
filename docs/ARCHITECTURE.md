@@ -49,14 +49,13 @@ flowchart LR
     ACT[AIActivationManager]
     POS[PossessionCoordinator]
     CROWD[CrowdMover]
-    DEC[AIDecisionModule]
     REC[ReplayRecorder]
     DIAG[DiagnosticsManager]
   end
   subgraph native[C++ library]
     PT[PawnTable + AIPawnGrid]
     MEM[AIMemoryStore]
-    BD[AIBatchDecider]
+    BD[AIDecider, one per pawn]
     SENSE[AISensingJob]
     CB[CrowdBatch]
     TSR[StateStore]
@@ -67,7 +66,7 @@ flowchart LR
   TD -->|calls each participant| P & TSC & NE & CROWD
   P --> AICTX --> AIC --> CM --> AM
   AM --> EM --> SM
-  AICTX --> DEC --> BD
+  AICTX --> BD
   AICTX --> MEM
   SENSE --> PT
   CROWD --> CB

@@ -28,6 +28,7 @@ Measures how every frame went and what it cost, keeps session logs and captures 
 - **`DiagnosticsManager`** is a GameMode module, listed by the project setting `project_base/game_mode/modules` and its `.release` override; the base never names it. Every frame it measures physics, scripts and the rest, adds TickDriver's phases and every scope, keeps the newest frames in a ring buffer (`DiagnosticsFrameHistory`; the replay keeps the whole session) and the spikes, writes the session log, feeds the replay and the editor's monitors, and starts a replay when play starts if nothing else did.
 - **`DiagnosticsLogger`** catches the engine's warnings and errors from any thread, for the log and the replay.
 - **`MoveSanityCheck`**, in every build, runs after each tick (`check_moves`): from the state store alone (its first pass is `StateStore.find_long_moves`, 0.03 ms a tick at 300 pawns), it warns once about any entity that moved further than its velocity explains and didn't teleport (`Pawn.teleport`). It catches code that sets a position directly; it doesn't judge speeds.
+- **`AIDecisionChecks`** checks the AI's C++ decisions: shadow mode (GDScript decides, C++ beside it, compared), a sampled check in debug builds that the facts written into a pawn's C++ row are current, and the switch that moves every pawn's decisions to GDScript (F10). All static; tests and `mass_battle_measure` (`--ai-shadow`, `--ai-gdscript`) use it too.
 - **`DiagnosticsPanels`** are the on-screen panels. **`ProjectileTraceView`** (F5) draws each projectile's planned path and what it met. **`NavDebugView`** draws navigation in the world (its history is in [navigation's changelog](../navigation/CHANGELOG.md)).
 
 It works with `replay/` (channel 6, `ReplayDiagnosticsChannel`, and the viewer's strip), `TickDriver` (its profile and load ladder), `NetworkSession` (its counters and connections) and `AIActivationManager` (how many AI pawns run every tick, 2nd and 4th).
@@ -46,6 +47,7 @@ It works with `replay/` (channel 6, `ReplayDiagnosticsChannel`, and the viewer's
 | F8 | Log: warnings and errors, with how often each came |
 | F5 | Projectile trace: each projectile's planned path, where it flew, what it met (green hit, grey met but not hit, orange the world) and where it ended; kept 3 s after it's gone (debug builds only) |
 | F9 | Nav view: the nav mesh, links and markers around the camera (debug builds only) |
+| F10 | AI decisions: every pawn in GDScript, and back to C++ (`AIDecisionChecks`; debug builds only) |
 | F12 | Capture: a folder with a screenshot, the history as a table, the spikes, the log and where the replay is |
 
 **Time your own code.**

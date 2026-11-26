@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 207 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 208 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -27,7 +27,8 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [AICompareCondition](../assets/scripts/ai/REFERENCE.md#aicomparecondition) | [ai](../assets/scripts/ai/README.md) | AICondition | A condition that compares one input with a number, or with another input plus a number. |
 | [AICondition](../assets/scripts/ai/REFERENCE.md#aicondition) | [ai](../assets/scripts/ai/README.md) | Resource | The base for a condition: one check a behaviour needs to pass before it may run, made of plain data. |
 | [AIController](../assets/scripts/controllers/REFERENCE.md#aicontroller) | [controllers](../assets/scripts/controllers/README.md) | ControllerBase | The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick. |
-| [AIDecisionModule](../assets/scripts/ai/REFERENCE.md#aidecisionmodule) | [ai](../assets/scripts/ai/README.md) | GameModeModule | Makes the AI's behaviour decisions in C++ (the main path) and decides which pawns use GDScript's decider (the backup). |
+| [AIDeciderBridge](../assets/scripts/ai/REFERENCE.md#aideciderbridge) | [ai](../assets/scripts/ai/README.md) | RefCounted | Links one pawn's [AIBehaviourManager] to its C++ decider ([code]AIDecider[/code], the main path): keeps the decider's row up to date and asks it for each decision. |
+| [AIDecisionChecks](../assets/scripts/diagnostics/REFERENCE.md#aidecisionchecks) | [diagnostics](../assets/scripts/diagnostics/README.md) | RefCounted | Checks on the AI's C++ decisions, for finding faults and for tests: shadow mode, the sampled fact check, and the switch that has every pawn decide in GDScript (F10). |
 | [AIDecisionRecord](../assets/scripts/ai/REFERENCE.md#aidecisionrecord) | [ai](../assets/scripts/ai/README.md) | RefCounted | What one AI decision was made from, and what it chose: a plain record for diagnostics and for checking another decider. |
 | [AIGoToPointBehaviour](../assets/scripts/ai/REFERENCE.md#aigotopointbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Walks to a meeting point: the nearest node in a Godot group, "rally_point" by default. |
 | [AIGoToPointDefinition](../assets/scripts/ai/REFERENCE.md#aigotopointdefinition) | [ai](../assets/scripts/ai/README.md) | AIBehaviourDefinition | The settings of a Go To Point behaviour ([AIGoToPointBehaviour]), shared by every pawn whose Go To Point uses it. |

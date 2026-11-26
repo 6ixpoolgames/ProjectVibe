@@ -1,26 +1,28 @@
 // Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
-// AIBatchDecider: AI behaviour decisions for many pawns, in C++ (scaling spec 6.2), the game's main path through AIDecisionModule. It
-// makes the same decision AIBehaviourManager.decide() makes (pawn spec 10.8), from plain data, so it can later run on the worker
-// threads; ai/tests/ai_batch_decider_selftest checks it against decisions GDScript made (AIDecisionRecorder's records).
+// AIDecider: AI behaviour decisions in C++ (scaling spec 6.2, pawn spec 16.5), the main path. Each AIBehaviourManager owns one,
+// through AIDeciderBridge, holding its pawn's one row; a batch runner can hold many rows in one. It makes the same decision
+// AIBehaviourManager.decide() makes (pawn spec 10.8), from plain data, so it can later run on the worker threads;
+// ai/tests/ai_decider_selftest checks it against decisions GDScript made (AIDecisionRecorder's records).
 // REFACTOR: kept twice, here and in AIBehaviourManager.decide() (reusable, extensible); see the row in native/CHANGELOG.md.
 //
 // The data, as the owner sketched it: a small number of parallel arrays in, one row per decision, and arrays out.
 // - A brain (add_brain) is what every pawn using the same behaviour set shares: each behaviour's settings, in the manager's fixed
-//   order (by name), with its tag requirements as masks over the owned tags' category words. Brains are added once, not per decision.
+//   order (by name), with its tag requirements as masks over the owned tags' category words. Brains live in one store shared by
+//   every decider (static), compiled once per key: pawns built the same way share one however many deciders there are.
 // - A row is one pawn's decision: its brain, tick, owned tags (as words), reasons, running behaviour, and bitmasks for the hard rules
-//   (cooling down, whose action can start, blocked by a behaviour modifier) and for the availability GDScript gave. Per-behaviour numbers (modifier bonuses, given scores) are in
-//   flattened arrays, `stride` values a row (get_stride()).
+//   (cooling down, whose action can start, blocked by a behaviour modifier) and for the availability GDScript gave. Per-behaviour
+//   numbers (modifier bonuses, given scores) are in flattened arrays, `stride` values a row (get_stride()).
 // - decide() returns which behaviour each row chose, whether the interrupt rule kept the running one, and which behaviours' is_available
 //   it asked for, so a comparison can check the early stop asked exactly what GDScript asked.
 //
 // Two ways to use it:
 // - decide(columns): many decisions in one call, everything about each passed in as columns. Stateless: decision_replay.gd replays
 //   recorded decisions through it.
-// - Pawns (step 5c): each pawn's decision state lives here (add_pawn): its running behaviour and since when, and each behaviour's
-//   last end (cooldowns). decide_pawn() decides one pawn from that state and the tick's few facts (owned tags, target, reason, its
-//   inputs, and the numbers its behaviour modifiers leave: score bonus, jitter, interrupt threshold, cooldown, minimum run), and
-//   applies the switch to the state itself, as AIBehaviourManager._start does to the behaviour nodes. A behaviour stopping on its
-//   own is stop_running. This is how C++ makes the game's decisions; GDScript's decider is the dormant backup (the owner's call).
+// - Pawns: each pawn's decision state lives in its row (add_pawn): its running behaviour and since when, and each behaviour's last
+//   end (cooldowns). decide_pawn() decides one pawn from that state and its facts (owned tags, target, inputs, the numbers its
+//   behaviour modifiers leave: score bonus, jitter, interrupt threshold, cooldown, minimum run), and applies the switch to the state
+//   itself, as AIBehaviourManager._start does to the behaviour nodes. A behaviour stopping on its own is stop_running. This is how
+//   C++ makes the game's decisions; GDScript's decider is the backup (the owner's call).
 //
 // Bitmasks are one 64-bit word, so a brain holds up to 64 behaviours (add_brain refuses more). That's per brain, not per game: a
 // second word per mask is the way past it, if a brain ever needs it.
@@ -46,20 +48,22 @@
 
 namespace godot {
 
-class AIBatchDecider : public RefCounted {
-	GDCLASS(AIBatchDecider, RefCounted)
+class AIDecider : public RefCounted {
+	GDCLASS(AIDecider, RefCounted)
 
 public:
 	// The most behaviours a brain can hold: one bit each in a 64-bit mask.
 	static constexpr int MAX_BEHAVIOURS = 64;
 
-	// Adds a brain from its description (AIBehaviourManager.describe()'s shape): tie_margin, randomize_ties, tie_salt, and
+	// Adds a brain to the store every decider shares, from its description (AIBehaviourManager.describe()'s shape): tie_margin, randomize_ties, tie_salt, and
 	// "behaviours", each with name, name_hash, tag_requirements (TagQuery.describe_words(): all, any and none as one word per tag
 	// category, and impossible; null for none), enabled (false: never chosen), max_score, min_score (null: none), needs_target, presses_action,
 	// min_run_ticks_at_rate (else min_run_ticks), interrupt_threshold, cannot_be_interrupted, effective_jitter, and optionally
 	// scorer ("given", the default, or "conditions"), conditions and score_curves (AICondition.describe() and
 	// AIScoreCurve.describe()). Behaviours are put in the fixed order, by name. Returns the brain's number, or -1 with an error.
-	int add_brain(const Dictionary &description);
+	// key: what the brain is compiled from (the description as text); a brain already added under it is returned, not compiled again.
+	// Empty: always a new brain.
+	int add_brain(const Dictionary &description, const String &key = String());
 	int get_brain_count() const;
 	// The behaviours in a brain, their slots (place in the fixed order) and names.
 	int get_behaviour_count(int brain) const;
@@ -103,10 +107,14 @@ public:
 	Dictionary get_pawn_state(int row) const;
 	// The running behaviour stopped without a decision (it finished, the pawn died or left): it ends at this tick.
 	void stop_running(int row, int64_t tick);
-	// The kind of every input slot (AIInputs.Kind, by slot), so the decider can work out the built-in ones itself (step 5d).
+	// The kind of every input slot (AIInputs.Kind, by slot), so the decider can work out the built-in ones itself (step 5d). Shared
+	// by every decider, like the brains.
 	void set_input_kinds(const PackedInt32Array &kinds);
-	// --- Facts: what a decision is made from, written into the pawn's row by whatever owns each one, when it changes (write-through,
-	// the owner's call), so a decision gathers nothing. ---
+	int get_input_kind_count() const;
+	// Frees the store every decider shares; the library's unload calls it.
+	static void free_shared();
+	// --- Facts: what a decision is made from, written into the pawn's row when it changes; its owner (AIDeciderBridge) reads version
+	// counters before each decision to see which. ---
 	// The pawn's body (its instance id: its position is read from it) and its C++ memory store (AIMemoryStore).
 	void set_body(int row, int64_t body_id, Object *memory_store);
 	// Its owned tags as words (OwnedTags.get_words()), written when they change (OwnedTags.version). The AI's state is one of them.
@@ -318,14 +326,23 @@ private:
 	// Adds a list of described conditions to the brain, contiguously, and says where. False, with an error, for an unknown kind.
 	static bool add_conditions(const Array &list, Brain &brain, int &first, int &count);
 
-	std::vector<Brain> _brains;
-	int _stride = 0;
+	// What every decider shares: the brains, by number and by key, and the input slots' kinds. Made on first use; freed by
+	// free_shared() as the library unloads, before Godot's own teardown (a static Dictionary or StringName left to the C++ runtime's
+	// exit would be destroyed after Godot's memory is gone).
+	struct Shared {
+		std::vector<Brain> brains;
+		Dictionary by_key; // key -> brain number
+		int stride = 0; // the most behaviours any brain has
+		std::vector<int32_t> input_kinds; // AIInputs.Kind by slot
+	};
+	static Shared *s_shared;
+	static Shared &shared();
+
 	std::vector<Candidate> _candidates; // reused every row
 	std::vector<int> _ties;
 	std::vector<PawnRow> _pawns; // rows, some free (brain -1)
 	std::vector<int> _free_rows;
 	std::unordered_map<int64_t, int> _row_of_id;
-	std::vector<int32_t> _input_kinds; // AIInputs.Kind by slot
 	std::vector<double> _inputs_scratch; // decide_pawn's worked-out inputs, reused
 	bool _last_kept = false;
 };

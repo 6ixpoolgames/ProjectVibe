@@ -133,8 +133,14 @@ func is_shown(key: Key) -> bool:
 	return _panels.has(key) and _panels[key][0].visible
 
 
-## Shows or hides a panel, as its key does.
+## Does what its key does: shows or hides a panel or a view, captures (F12), or moves the AI's decisions to GDScript and back (F10).
 func toggle(key: Key) -> void:
+	if key == KEY_F10:
+		if OS.is_debug_build():
+			_note = "AI decisions: %s" % ("all in GDScript" if AIDecisionChecks.toggle_all_in_gdscript() else "back to C++")
+			_panels[KEY_F1][0].visible = true
+			_refresh_left = 0.0
+		return
 	if key == KEY_F12:
 		_note = "Captured to %s" % manager.capture()
 		_panels[KEY_F1][0].visible = true
@@ -179,7 +185,7 @@ func get_text(key: Key) -> String:
 
 func _unhandled_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
-	var listed := key and key.pressed and not key.echo and key.physical_keycode in [KEY_F1, KEY_F2, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F12]
+	var listed := key and key.pressed and not key.echo and key.physical_keycode in [KEY_F1, KEY_F2, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F12]
 	if listed and not (key.physical_keycode == KEY_F5 and key.shift_pressed): # Shift+F5 is the net test bench's
 		toggle(key.physical_keycode)
 		get_viewport().set_input_as_handled()

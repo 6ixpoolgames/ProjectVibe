@@ -45,7 +45,7 @@ Each system's README has the detail. Specs are in `docs/` (pawn, netcode, naviga
 | `status/` | The status manager: a pawn's stats and the effects on it in one component; thresholds and their events |
 | `effects/` | What abilities and hits do to pawns: damage, heals, pushes, boosts, resistances |
 | `stats/` | A pawn's numbers (Health, speeds) as nodes, under the status manager |
-| `ai/` | Sensing, memory, target, states, behaviours; decisions in C++ (`AIDecisionModule`) |
+| `ai/` | Sensing, memory, target, states, behaviours; decisions in C++ (`AIDecider`, one per pawn, through `AIDeciderBridge`) |
 | `movement/` | The crowd mover: AI pawns moved together once a tick |
 | `navigation/` | The pawn's nav part, nav markers and links |
 | `state_store/` | The central record of every entity's state, tick by tick (`StateStoreGD`, twin of C++ `StateStore`); `TickDriver.store` |
@@ -56,7 +56,7 @@ Each system's README has the detail. Specs are in `docs/` (pawn, netcode, naviga
 | `terrain/`, `streaming/`, `world/` | Chunked low-poly terrain, chunk streaming, putting a level together |
 | `jobs/`, `platform/`, `tags/`, `resources/`, `ui/`, `visuals/` | Worker threads, run environment, tag bits, designer resources, menus, toy visuals |
 
-Samples (`assets/scenes/samples/`, scripts in `assets/scripts/samples/`): `pawn_sample` (the main scene), `arena_sample`, `faction_arena_sample`, `mass_battle_sample`, `net_sample`, and one per system. Native classes (`native/src/`): `NavServer`, `AIMemoryStore`, `AIPawnGrid`, `AISensingJob`, `AIBatchDecider`, `SightGeometry`, `PawnTable`, `JobScheduler`, `StateStore`, `NetCodec`, `CrowdBatch`, `ReplayMotionPacker`, `VisualPlacement`.
+Samples (`assets/scenes/samples/`, scripts in `assets/scripts/samples/`): `pawn_sample` (the main scene), `arena_sample`, `faction_arena_sample`, `mass_battle_sample`, `net_sample`, and one per system. Native classes (`native/src/`): `NavServer`, `AIMemoryStore`, `AIPawnGrid`, `AISensingJob`, `AIDecider`, `SightGeometry`, `PawnTable`, `JobScheduler`, `StateStore`, `NetCodec`, `CrowdBatch`, `ReplayMotionPacker`, `VisualPlacement`.
 
 ## Legacy
 

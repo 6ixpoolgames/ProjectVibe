@@ -38,7 +38,7 @@ Registered in `src/register_types.cpp`.
 | `AISensingJob` | Sensing's search, visibility and line of sight on the workers | `AISensingManager` |
 | `AIMemoryStore` | One pawn's AI memory, sight checks and target scoring | `AIMemory`, `SightSense`, `AITargetSelector` (fallback `AIMemoryStoreGD`) |
 | `SightGeometry` | A thread-safe copy of the level's collision: rays for sight, ground for the crowd | `ai/senses/SightGeometryFeeder` (makes it), `AISensingManager`, `CrowdMover` |
-| `AIBatchDecider` | AI behaviour decisions, the same as `AIBehaviourManager.decide()` (scaling spec 6.2), the game's main path | `AIDecisionModule`; `ai/tests/decision_replay.gd` (comparing with GDScript) |
+| `AIDecider` | AI behaviour decisions, the same as `AIBehaviourManager.decide()` (scaling spec 6.2, pawn spec 16.5), the game's main path: one per pawn, the brains shared by all | `AIDeciderBridge` (each behaviour manager's); `ai/tests/decision_replay.gd` (comparing with GDScript) |
 | `CrowdBatch` | The crowd mover's batch on the workers, walking pawns along the nav mesh | `CrowdMover` (`use_cpp_batch`; fallback `_move_batch`) |
 | `NetCodec` | Snapshot encoding and delta snapshots' change check | `NetworkSession`, `NetPackets` (fallback `NetPackets`) |
 | `StateStore` | The central record of every entity's state, tick by tick: layouts, frames, the commit at the end of a tick | `TickDriver` (twin: `StateStoreGD`) |
@@ -61,7 +61,7 @@ Two sets of worker threads, and one rule: **workers only read plain data that ca
 Run with `bash tools/run_tests.sh <name>`. None needs a build step, but they all need the library built and loaded.
 
 - Nav: `nav_selftest` (tiles, paths, links, budgets, the stale-build fix), `nav_links_selftest`, `navigation_manager_selftest`, `nav_stitching_selftest`, `body_nav_feeder_selftest`.
-- AI: `ai_perception_selftest` and `ai_stealth_selftest` (C++ and GDScript stores give the same results; `-- --gdscript-store` runs GDScript), `ai_sensing_job_selftest`, `sight_geometry_selftest`, `pawn_table_selftest`, `combat_selftest` (swing hits, which go through `find_touching` when nothing is rewound), `tick_rate_selftest` (fades at 30 ticks a second), `ai_batch_decider_selftest` (every decision the same as GDScript's; `ai_batch_decider_compare -- --file=` for a recorded fight).
+- AI: `ai_perception_selftest` and `ai_stealth_selftest` (C++ and GDScript stores give the same results; `-- --gdscript-store` runs GDScript), `ai_sensing_job_selftest`, `sight_geometry_selftest`, `pawn_table_selftest`, `combat_selftest` (swing hits, which go through `find_touching` when nothing is rewound), `tick_rate_selftest` (fades at 30 ticks a second), `ai_decider_selftest` (every decision the same as GDScript's; `ai_decider_compare -- --file=` for a recorded fight).
 - Netcode and replay: `net_codec_selftest` (bytes and values match `NetPackets`), `tick_state_selftest` (matches `StateEncoding.quantize`), `replay_selftest` (packing byte for byte).
 - Crowd: `crowd_mover_selftest`. Visuals: `visual_placement_selftest`.
-- Costs, run by hand (they print numbers, not pass or fail): `godot --headless --path . res://assets/scripts/ai/tests/ai_stress.tscn`, and the same for `pawn/tests/pawn_stress.tscn` and `ai/tests/ai_batch_decider_compare.tscn`.
+- Costs, run by hand (they print numbers, not pass or fail): `godot --headless --path . res://assets/scripts/ai/tests/ai_stress.tscn`, and the same for `pawn/tests/pawn_stress.tscn` and `ai/tests/ai_decider_compare.tscn`.

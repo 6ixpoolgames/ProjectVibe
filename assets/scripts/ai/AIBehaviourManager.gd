@@ -10,8 +10,8 @@
 ## pawn.ai.behaviour_manager.add_modifier(charge_shout, self)   # raise melee until removed (AIBehaviourModifier)
 ## pawn.ai.behaviour_manager.remove_modifiers(self)
 ## [/codeblock]
-## With the [AIDecisionModule] in the game, C++ makes the decisions and this manager is the backup ([method decide]).
-## Design: pawn spec 10.7 and 10.8, scaling spec 6.2.
+## C++ makes the decisions (its own [code]AIDecider[/code], through [member cpp]) and this manager is the backup ([method decide]).
+## Design: pawn spec 10.7, 10.8 and 16.5, scaling spec 6.2.
 class_name AIBehaviourManager
 extends Node
 
@@ -21,22 +21,18 @@ signal behaviour_changed(old_behaviour: AIBehaviourBase, new_behaviour: AIBehavi
 ## Called after every decision of every pawn: [code]func(record: AIDecisionRecord, manager: AIBehaviourManager)[/code]. Static, so one
 ## listener hears every pawn. For diagnostics and checking another decider (scaling spec 6.2). Empty (default): no record is made.
 static var decision_listener := Callable()
-## The [AIDecisionModule] running decisions in C++, set by it while it's in the game; null otherwise (every pawn decides here).
-static var decision_module: AIDecisionModule = null
-
 ## Where this pawn's decisions are made.
 enum DecidesIn {
 	CPP, ## by C++, the main path (the default)
 	GDSCRIPT, ## by this manager, the backup
 }
 
-## Where this pawn's decisions are made: C++ (the default, with the [AIDecisionModule] in the game) or GDScript. The game mode can
-## override it for every pawn ([member AIDecisionModule.decider]).
+## Where this pawn's decisions are made: C++ (the default) or GDScript. The project setting
+## [constant AIDeciderBridge.ALL_IN_GDSCRIPT_SETTING] and diagnostics ([AIDecisionChecks]) can move every pawn to GDScript.
 @export var decides_in := DecidesIn.CPP:
 	set(value):
 		decides_in = value
-		if _placed_by:
-			_placed_by.place(self)
+		_placed_version = -1 # settled again at the next decision
 ## The jitter for behaviours whose own score_jitter is -1. 0: no randomness.
 @export var default_score_jitter := 0.0
 ## On: results that tie are picked between at random (replayably). Off: the fixed order decides.
@@ -46,8 +42,9 @@ enum DecidesIn {
 
 ## The pawn this is a part of, or null.
 var pawn: Pawn = null
-## Its row in the C++ decider, set by the [AIDecisionModule]; -1 while it decides in GDScript.
-var cpp_row := -1
+## Its link to its C++ decider, or null while it decides in GDScript. Made at its first decision, and again when its brain or
+## where it decides changes.
+var cpp: AIDeciderBridge = null
 
 var _behaviours: Array[AIBehaviourBase] = [] # by name
 var _running: AIBehaviourBase = null
@@ -75,7 +72,7 @@ var _checked_tags_version := -1 # check_running()'s last look
 var _checked_modifiers_version := -1
 var _input_slots := PackedInt32Array() # the worked-out inputs the behaviours' conditions read
 var _input_slots_known := false
-var _placed_by: AIDecisionModule = null # the module that settled where it decides
+var _placed_version := -1 # AIDeciderBridge.placement_version() when it last settled where it decides; -1: settle it again
 
 const TIE_SALT := 0x7135 # what the tie-breaking random number is for, so it differs from every behaviour's jitter
 const MODIFIER_TAG_SOURCE := &"behaviour_modifiers" # the owned-tags source for the modifiers' granted tags
@@ -113,9 +110,8 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if _running and pawn:
 		_stop_running("removed", pawn.ai.current_tick if pawn.ai else 0)
-	if _placed_by and is_instance_valid(_placed_by):
-		_placed_by.forget(self)
-	_placed_by = null
+	cpp = null # its C++ row goes with it
+	_placed_version = -1
 
 
 ## The behaviour running now, or null.
@@ -128,13 +124,13 @@ func get_behaviours() -> Array[AIBehaviourBase]:
 	return _behaviours.duplicate()
 
 
-## The same list without a copy, for code that reads it often (the AIDecisionModule). Don't change it.
+## The same list without a copy, for code that reads it often (the C++ decider's bridge). Don't change it.
 func get_behaviour_list() -> Array[AIBehaviourBase]:
 	return _behaviours
 
 
 ## This brain as plain data: the manager's, the AI context's and each behaviour's settings, in the fixed order. Taken by
-## [code]AIBatchDecider.add_brain()[/code] and saved by [AIDecisionRecorder]. Settings changed during play show in the next call.
+## [code]AIDecider.add_brain()[/code] and saved by [AIDecisionRecorder]. Settings changed during play show in the next call.
 func describe() -> Dictionary:
 	var context := pawn.ai if pawn else null
 	var behaviours: Array = []
@@ -173,7 +169,7 @@ func describe() -> Dictionary:
 
 
 ## Makes the waiting decision ([method AIManager.request_decision]) and starts what it chose. record: filled in while
-## [member decision_listener] is set (null: made here). Twin of C++ [code]AIBatchDecider[/code]: same steps, a change goes in both.
+## [member decision_listener] is set (null: made here). Twin of C++ [code]AIDecider[/code]: same steps, a change goes in both.
 func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	if pawn == null or pawn.ai == null:
 		return
@@ -185,27 +181,28 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		return
 	if record == null and decision_listener.is_valid():
 		record = AIDecisionRecord.new()
-	# Where it decides is settled the first time, and again only when something changes it (no per-tick check).
-	var module := decision_module
-	if module and _placed_by != module:
-		_placed_by = module
-		module.place(self)
+	# Where it decides is settled the first time, and again only when something changes it: its brain, its decides_in, a switch.
+	var placement := AIDeciderBridge.placement_version()
+	if _placed_version != placement:
+		_placed_version = placement
+		cpp = AIDeciderBridge.make_for(self)
 	# The inputs the conditions read start afresh, each worked out when first read (scaling spec 6.2). A record needs them all.
 	context.inputs.begin_decision(tick)
 	refresh_modifiers(tick)
 	# C++, the main path: it decides, from its own copy of the state and the facts written into it, and this starts what it chose.
-	if cpp_row >= 0 and not module.check_against_gdscript:
-		var slot := module.decide_in_cpp(self, tick, event_priority, event_is_normal)
+	var checking := AIDecisionChecks.check_against_gdscript
+	if cpp and not checking:
+		var slot := cpp.decide(tick, event_priority, event_is_normal)
 		var chosen: AIBehaviourBase = _behaviours[slot] if slot >= 0 and slot < _behaviours.size() else null
 		if record:
-			_fill_record(record, tick, event_priority, event_is_normal, module.was_kept(), false)
+			_fill_record(record, tick, event_priority, event_is_normal, cpp.was_kept(), false)
 			record.chosen = chosen.name if chosen else &""
 		_switch_to(chosen, event_is_normal, tick)
 		if record:
 			decision_listener.call(record, self)
 		return
 	# Shadow mode: C++ decides beside GDScript from its own copy of the state, and is checked once GDScript has decided.
-	var cpp_choice := module.decide_in_cpp(self, tick, event_priority, event_is_normal) if module and cpp_row >= 0 else -2
+	var cpp_choice := cpp.decide(tick, event_priority, event_is_normal) if cpp and checking else -2
 	if record:
 		context.inputs.fill(worked_out_inputs())
 	var owned := _owned_words()
@@ -217,7 +214,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 			record.chosen = _running.name
 			decision_listener.call(record, self)
 		if cpp_choice != -2:
-			module.compare(self, cpp_choice, tick)
+			AIDecisionChecks.compare(self, cpp_choice, tick)
 		return
 	# 1 and 2. Valid behaviours, and the hard rules.
 	var state_name := context.current_state_name()
@@ -296,7 +293,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 	if record:
 		decision_listener.call(record, self)
 	if cpp_choice != -2:
-		module.compare(self, cpp_choice, tick)
+		AIDecisionChecks.compare(self, cpp_choice, tick)
 
 
 ## [method AIManager.think] calls this every tick the AI runs, after any decision. Ticks the running behaviour.
@@ -340,8 +337,7 @@ func stop_running(reason: String) -> void:
 ## decision are listed again, and C++ gets the new brain.
 func inputs_changed() -> void:
 	_input_slots_known = false
-	if _placed_by:
-		_placed_by.place(self)
+	_placed_version = -1 # a new brain at the next decision
 
 
 ## Called when a behaviour's settings change in play ([method AIBehaviourBase.use_definition]): its inputs, the modifiers that count
@@ -566,8 +562,8 @@ func _stop_running(reason: String, tick: int, tell_cpp := true) -> void:
 	old.exit(pawn.ai, reason)
 	old.ended_tick = tick
 	_apply_own_modifier(old, false, tick)
-	if tell_cpp and cpp_row >= 0 and decision_module:
-		decision_module.stopped(self, tick)
+	if tell_cpp and cpp:
+		cpp.stopped(tick)
 	behaviour_changed.emit(old, null, reason)
 
 

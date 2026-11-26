@@ -1,6 +1,6 @@
-## Written by Claude (claude-opus-5-5), 2026-11-17: replays recorded AI decisions through the C++ AIBatchDecider and counts where it
-## agrees with what GDScript decided (scaling spec 6.2, the shadow decider). Test code: ai_batch_decider_selftest and
-## ai_batch_decider_compare use it; nothing that ships does.
+## Written by Claude (claude-opus-5-5), 2026-11-17: replays recorded AI decisions through the C++ AIDecider and counts where it
+## agrees with what GDScript decided (scaling spec 6.2, the shadow decider). Test code: ai_decider_selftest and
+## ai_decider_compare use it; nothing that ships does.
 ##
 ## The input is what AIDecisionRecorder holds: brain descriptions by pawn number, and decision records as plain dictionaries (from a
 ## live recorder, or from a saved file). Each decision becomes a row for the decider, built only from what GDScript saw: the hard rules
@@ -47,22 +47,23 @@ static func from_file(path: String) -> Dictionary:
 	return {"brains": brains, "decisions": decisions}
 
 
-## Replays every decision through a new AIBatchDecider. Returns counts: decisions, agreed, chosen_differs, kept_differs,
+## Replays every decision through a new AIDecider. Returns counts: decisions, agreed, chosen_differs, kept_differs,
 ## asked_differs, asked_unknown (it asked a behaviour GDScript never answered for), brains (distinct brains added), batches
 ## (decide() calls), decide_usec (time inside them), and examples (the first few mismatches, as text).
 static func compare(data: Dictionary) -> Dictionary:
-	var decider: Object = ClassDB.instantiate(&"AIBatchDecider")
+	var decider: Object = ClassDB.instantiate(&"AIDecider")
 	var result := {"decisions": 0, "agreed": 0, "chosen_differs": 0, "kept_differs": 0, "asked_differs": 0, "asked_unknown": 0,
 		"brains": 0, "batches": 0, "decide_usec": 0, "examples": []}
 	if decider == null:
-		result["error"] = "the navcore library has no AIBatchDecider"
+		result["error"] = "the navcore library has no AIDecider"
 		return result
 	# Pawns with identical brains share one, as live pawns using the same behaviour set will.
 	var brain_of_pawn := {} # pawn number -> brain number
 	var brain_by_text := {} # the description without the pawn's own fields -> brain number
 	var seed_of_pawn := {}
-	var slots := [] # brain number -> {behaviour name -> slot}
-	var numbers := [] # brain number -> [jitter, interrupt threshold, minimum run] by slot, the brain's own (Claude 2026-11-25, step 6a)
+	# Claude 2026-11-26 (step 6d): brains are shared by every decider and numbered across them all, so these are keyed by number.
+	var slots := {} # brain number -> {behaviour name -> slot}
+	var numbers := {} # brain number -> [jitter, interrupt threshold, minimum run] by slot, the brain's own (Claude 2026-11-25, step 6a)
 	for pawn_number: Variant in data["brains"]:
 		var description: Dictionary = data["brains"][pawn_number]
 		var shared := description.duplicate()
@@ -75,14 +76,14 @@ static func compare(data: Dictionary) -> Dictionary:
 			var names := {}
 			for slot in decider.get_behaviour_count(number):
 				names[String(decider.get_behaviour_name(number, slot))] = slot
-			slots.append(names)
+			slots[number] = names
 			# A decision the interrupt rule kept records no behaviours, so its row starts from these.
 			var own := []
 			own.resize(names.size())
 			for entry: Dictionary in description.get("behaviours", []):
 				own[names[String(entry["name"])]] = [float(entry.get("effective_jitter", 0.0)), int(entry.get("interrupt_threshold", 0)),
 					int(entry.get("min_run_ticks_at_rate", entry.get("min_run_ticks", 0)))]
-			numbers.append(own)
+			numbers[number] = own
 		brain_of_pawn[int(pawn_number)] = brain_by_text[text]
 		seed_of_pawn[int(pawn_number)] = int(description.get("random_seed", 0))
 	result["brains"] = brain_by_text.size()
@@ -111,8 +112,8 @@ static func describe(result: Dictionary) -> String:
 		result["asked_differs"], result["asked_unknown"], result["brains"], result["batches"], float(result["decide_usec"]) / maxf(decisions, 1.0)]
 
 
-static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dictionary, seed_of_pawn: Dictionary, slots: Array,
-		numbers: Array, stride: int, result: Dictionary) -> void:
+static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dictionary, seed_of_pawn: Dictionary, slots: Dictionary,
+		numbers: Dictionary, stride: int, result: Dictionary) -> void:
 	var rows := decisions.size()
 	var brain := PackedInt32Array()
 	var pawn := PackedInt64Array()

@@ -1,9 +1,9 @@
-## Written by Claude (claude-opus-5-5), 2026-11-17: replays a saved decision recording through the C++ AIBatchDecider and prints how
+## Written by Claude (claude-opus-5-5), 2026-11-17: replays a saved decision recording through the C++ AIDecider and prints how
 ## many decisions agree with GDScript's, and what decide() cost (scaling spec 6.2, the shadow decider). Not pass/fail; the self-test
-## (ai_batch_decider_selftest) is. Record a fight first:
+## (ai_decider_selftest) is. Record a fight first:
 ##   godot --headless --fixed-fps 60 --path . "res://assets/scripts/samples/tests/mass_battle_measure.tscn" -- --size=200 --spawn-distance=40 --record-decisions=<file>
 ## then compare it:
-##   godot --headless --path . "res://assets/scripts/ai/tests/ai_batch_decider_compare.tscn" -- --file=<file>
+##   godot --headless --path . "res://assets/scripts/ai/tests/ai_decider_compare.tscn" -- --file=<file>
 extends Node
 
 const DecisionReplay := preload("res://assets/scripts/ai/tests/decision_replay.gd")

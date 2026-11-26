@@ -1,18 +1,18 @@
-## Written by Claude (claude-opus-5-5), 2026-11-17: headless self-test for the C++ AIBatchDecider (scaling spec 6.2, the shadow
+## Written by Claude (claude-opus-5-5), 2026-11-17: headless self-test for the C++ AIDecider (scaling spec 6.2, the shadow
 ## decider), against GDScript's AIBehaviourManager. GDScript decides as usual while an AIDecisionRecorder records, and every recorded
 ## decision is replayed through the C++ decider (decision_replay.gd), which must choose the same behaviour, keep the running one when
 ## GDScript did, and ask is_available() of exactly the same behaviours.
 ## Covers: the random numbers bit for bit; brains (the fixed order, states, the 64-behaviour limit); made-up brains that use every rule
 ## the real ones don't (jitter, persistence that fades, floors, cooldowns, targets, actions, states, min_run_ticks, interrupt
 ## thresholds, cannot_be_interrupted, random ties, a behaviour ending); that a planted mismatch is caught; and a real fight in the
-## faction arena; and live shadow mode (AIDecisionModule.check_against_gdscript), which must agree on every decision and change none
+## faction arena; and live shadow mode (AIDecisionChecks.set_check_against_gdscript; Claude 2026-11-26: was the AIDecisionModule's), which must agree on every decision and change none
 ## of GDScript's. Claude 2026-11-18 (step 5c): the made-up brains' test behaviours have code of their own, so they're special minds
 ## that stay in GDScript; shadow mode checks the real fight, whose built-in behaviours C++ reads, from C++'s own copy of each pawn's
 ## state.
 ## Claude 2026-11-17 (step 5b): and in the real fight, that the AI's kept answer to "could this action start?" (AIInputs.action_ready,
 ## asked again only when AbilityManager.readiness_version moves on) matches asking AbilityManager.can_start at every decision.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
-##   godot --headless --path . "res://assets/scripts/ai/tests/ai_batch_decider_selftest.tscn"
+##   godot --headless --path . "res://assets/scripts/ai/tests/ai_decider_selftest.tscn"
 extends SelfTest
 
 const DecisionReplay := preload("res://assets/scripts/ai/tests/decision_replay.gd")
@@ -71,16 +71,14 @@ class ReadinessCheckingRecorder extends AIDecisionRecorder:
 
 
 var _recorder: AIDecisionRecorder = null
-var _module: AIDecisionModule = null # shadow mode, on from the made-up brains through the real fight
-var _added_module := false # whether this test added it (else the game's own, put back as it was)
 
 
 func _ready() -> void:
 	TagRegistry.declare([&"ai.state.alarm"]) # the test's own Alarm state's tag (AIStateBase.get_tag)
 	TickDriver.tick_rate = TickDriver.REFERENCE_RATE
-	print("--- AI batch decider self-test ---")
-	if not ClassDB.class_exists(&"AIBatchDecider"):
-		_check(false, "the navcore library has AIBatchDecider (rebuild native/ with the editor closed)")
+	print("--- AI decider self-test ---")
+	if not ClassDB.class_exists(&"AIDecider"):
+		_check(false, "the navcore library has AIDecider (rebuild native/ with the editor closed)")
 		_finish()
 		return
 	_recorder = ReadinessCheckingRecorder.new()
@@ -91,18 +89,14 @@ func _ready() -> void:
 	_test_gates_and_modifiers()
 	await _test_real_fight()
 	_recorder.stop()
-	if _module:
-		_module.check_against_gdscript = false
-		if _added_module:
-			GameMode.remove_module(_module)
-			_check(AIBehaviourManager.decision_module == null, "removing the module leaves every pawn to GDScript")
+	AIDecisionChecks.set_check_against_gdscript(false)
 	_finish()
 
 
 func _test_random_numbers() -> void:
 	var pawn := _make_pawn([_b("Alpha", 0.5)])
 	var context := pawn.ai
-	var decider: Object = ClassDB.instantiate(&"AIBatchDecider")
+	var decider: Object = ClassDB.instantiate(&"AIDecider")
 	var all_same := true
 	for seed: int in [0, 12345, -7]:
 		context.random_seed = seed
@@ -117,7 +111,7 @@ func _test_random_numbers() -> void:
 
 
 func _test_brains() -> void:
-	var decider: Object = ClassDB.instantiate(&"AIBatchDecider")
+	var decider: Object = ClassDB.instantiate(&"AIDecider")
 	var words := TagRegistry.get_categories().size()
 	var brain: int = decider.add_brain({"tag_words": words, "behaviours": [
 		{"name": "Zulu", "scorer": "conditions", "tag_requirements": TagQuery.make([Tags.AI.STATE_COMBAT]).describe_words()},
@@ -192,22 +186,16 @@ func _test_made_up_brains() -> void:
 	_check_equal(DecisionReplay.compare(data)["agreed"], result["decisions"] - 1, "a decision changed after recording is caught")
 	var decisions_made: int = result["decisions"]
 	_recorder.clear()
-	# Live shadow mode, with the AI decision module: the made-up brains' behaviours have code of their own, so they're special minds
-	# that stay in GDScript, and nothing changes.
-	_module = GameMode.get_module(AIDecisionModule) as AIDecisionModule
-	if _module == null:
-		_module = AIDecisionModule.new()
-		GameMode.add_module(_module)
-		_added_module = true
-	_module.check_against_gdscript = true
-	_check(AIBehaviourManager.decision_module == _module, "the module hooks into every behaviour manager")
-	_module.reset_counts()
+	# Live shadow mode (on from here through the real fight): the made-up brains' behaviours have code of their own, so they're
+	# special minds that stay in GDScript, and nothing changes.
+	AIDecisionChecks.set_check_against_gdscript(true)
+	AIDecisionChecks.reset_counts()
 	var shadow_choices := _play_made_up(true)
-	var counts := _module.get_counts()
+	var counts := AIDecisionChecks.get_counts()
 	print("  live shadow, made-up brains: %s (decisions %d)" % [str(counts), decisions_made])
 	_check(counts["checked"] == 0 and counts["cpp"] == 0, "the made-up brains are special minds: none decided in C++")
 	_check(shadow_choices == choices and not choices.is_empty(), "shadow mode changes nothing: GDScript makes the same %d changes of behaviour with it on" % choices.size())
-	_module.reset_counts()
+	AIDecisionChecks.reset_counts()
 
 
 # The made-up brains, decided 400 ticks by hand. Returns every change of behaviour, as "pawn:behaviour", in order.
@@ -316,7 +304,7 @@ func _test_gates_and_modifiers() -> void:
 	var slow := AIBehaviourModifier.new()
 	slow.number = AIBehaviourModifier.Number.COOLDOWN_TICKS
 	slow.add = 15.0
-	_module.reset_counts()
+	AIDecisionChecks.reset_counts()
 	_recorder.clear()
 	_recorder.start()
 	var chosen := {}
@@ -362,12 +350,12 @@ func _test_gates_and_modifiers() -> void:
 	for example: String in result["examples"]:
 		print("    " + example)
 	_check(result["decisions"] > 300 and result["agreed"] == result["decisions"], "C++ decide() makes every gated and modified decision the same way")
-	var counts := _module.get_counts()
+	var counts := AIDecisionChecks.get_counts()
 	print("  live shadow, gates and modifiers: %s" % str(counts))
 	_check(counts["checked"] > 300 and counts["agreed"] == counts["checked"], "live shadow: decide_pawn() agrees with every one (%d of %d)" % [counts["agreed"], counts["checked"]])
 	_check_equal(counts["stale_facts"], 0, "...and the owned tags and modifiers written into its row were never out of date")
 	_recorder.clear()
-	_module.reset_counts()
+	AIDecisionChecks.reset_counts()
 	pawn.free()
 
 
@@ -403,8 +391,8 @@ func _test_real_fight() -> void:
 	var readiness := _recorder as ReadinessCheckingRecorder
 	_check(readiness.checked > 200 and readiness.mismatches.is_empty(),
 			"the kept 'could this action start' answers match AbilityManager.can_start (%d checked; %s)" % [readiness.checked, str(readiness.mismatches)])
-	if _module:
-		var counts := _module.get_counts()
+	if AIDecisionChecks.check_against_gdscript:
+		var counts := AIDecisionChecks.get_counts()
 		print("  live shadow, faction arena: %s" % str(counts))
 		_check(counts["checked"] > 500 and counts["agreed"] == counts["checked"],
 				"live shadow in a real fight: C++ agrees with every decision, from its own copy of each pawn's state (%d of %d)" % [counts["agreed"], counts["checked"]])

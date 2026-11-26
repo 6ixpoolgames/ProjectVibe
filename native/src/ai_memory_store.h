@@ -16,7 +16,7 @@
 #pragma once
 
 #include "ai_sight_rules.h" // the visibility rule, shared with AISensingJob
-#include "fade_math.h" // FadeProfile's maths, shared with AIBatchDecider
+#include "fade_math.h" // FadeProfile's maths
 #include "sight_geometry.h" // line of sight in C++
 
 #include <godot_cpp/classes/curve.hpp>
@@ -64,7 +64,7 @@ public:
 	// Forgets entries whose fade has ended or whose entity is gone. Returns the ids of forgotten entities that still exist.
 	PackedInt64Array forget_old(int64_t tick);
 	int64_t most_aware_index(const Vector3 &from, int64_t tick) const;
-	// For C++ readers (AIBatchDecider's inputs): an entry by instance id, -1 if it isn't here. Not bound to GDScript.
+	// For C++ readers (AIDecider's inputs): an entry by instance id, -1 if it isn't here. Not bound to GDScript.
 	int64_t find_by_id(uint64_t id) const { return find_id(id); }
 	void clear();
 
