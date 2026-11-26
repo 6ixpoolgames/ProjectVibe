@@ -138,17 +138,21 @@ func _test_hard_rules() -> void:
 	pawn.free()
 
 
+# The GDScript decider's own early stop. Claude 2026-11-26 (step 6d): these pawns decide in GDScript, since behaviours with code of their
+# own (these test ones) now decide in C++, where GDScript answers for each behaviour up front and C++ does the skipping.
 func _test_ranges_and_early_stop() -> void:
 	var sure := _b("Sure", 0.85, 0.9)
 	sure.min_score = 0.8
 	var weak := _b("Weak", 0.5)
 	var pawn := _make_pawn([sure, weak])
+	pawn.ai.behaviour_manager.decides_in = AIBehaviourManager.DecidesIn.GDSCRIPT
 	_decide(pawn, 1)
 	_check(_running_name(pawn) == &"Sure" and weak.scored == 0, "a ceiling below another's floor: dropped without its score() running")
 	pawn.free()
 	var high := _b("High", 0.9)
 	var low := _b("Low", 0.4)
 	pawn = _make_pawn([high, low])
+	pawn.ai.behaviour_manager.decides_in = AIBehaviourManager.DecidesIn.GDSCRIPT
 	_decide(pawn, 1)
 	_check(_running_name(pawn) == &"High" and low.scored == 0, "early stop: once High scores 0.9, Low (max 0.4) isn't asked")
 	pawn.free()

@@ -32,7 +32,8 @@
 // - "conditions": the behaviour's conditions and score curves, plain data in the brain (AICondition, AIScoreCurve in GDScript),
 //   checked against the row's AI inputs (the "inputs" column, AIInputs in GDScript). Every built-in behaviour is judged this way.
 //   No behaviour is written in C++: only the kinds of check are (compare, chance, any), so a designer's new behaviour needs no C++.
-// - "given": GDScript's answer, passed in the row (available_known, available, score), for a behaviour with code of its own.
+// - "given": GDScript's answer, passed in the row (available_known, available, score; set_given for a pawn's row), for a behaviour
+//   with code of its own or a condition C++ doesn't read. Only that behaviour is GDScript's; C++ judges the rest of the brain.
 #pragma once
 
 #include <godot_cpp/classes/ref.hpp>
@@ -130,6 +131,10 @@ public:
 	void set_can_press(int row, int64_t mask);
 	// One input it keeps (a game's own, or action_ready), from AIInputs.set_input.
 	void set_input(int row, int slot, double value);
+	// GDScript's answers for the behaviours judged by the "given" scorer (code of their own, or a condition C++ doesn't read), for the
+	// next decision: which it answered (a mask by slot), which are available, and their scores (one per behaviour; NaN or an empty
+	// array: max_score). Written before each decision; a behaviour it didn't answer counts as not available if C++ asks.
+	void set_given(int row, int64_t known_mask, int64_t available_mask, const PackedFloat64Array &scores);
 	// The nearest node of a group the pawn's conditions read (group_distance and group_found slots, -1 if not read), from AIInputs'
 	// lookup, which looks again every 2 seconds. The distance is worked out from the body at each decision.
 	void set_group_point(int row, int distance_slot, int found_slot, bool found, const Vector3 &position);
@@ -281,6 +286,10 @@ private:
 		int64_t incoming_attacker_number = -1;
 		int64_t incoming_start_tick = -1;
 		int64_t incoming_hit_tick = -1;
+		// GDScript's answers for "given" behaviours, for the next decision (set_given).
+		uint64_t given_known = 0;
+		uint64_t given_available = 0;
+		std::vector<double> given_scores; // by slot, NaN: max_score; empty: none
 	};
 	// The numbers the modifiers leave, back to the brain's own (add_pawn, and set_modifiers before writing).
 	static void reset_numbers(PawnRow &p, const Brain &b);

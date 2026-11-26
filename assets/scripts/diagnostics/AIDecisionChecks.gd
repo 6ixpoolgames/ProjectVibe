@@ -50,12 +50,12 @@ static func toggle_all_in_gdscript() -> bool:
 	return all_in_gdscript
 
 
-## The counts so far: cpp (decisions made in C++), checked, agreed and differs (shadow mode), stale_facts, and special_minds (pawns
-## kept in GDScript because C++ can't read one of their behaviours).
+## The counts so far: cpp (decisions made in C++), checked, agreed and differs (shadow mode), stale_facts, and gdscript_answers
+## (answers GDScript gave for behaviours C++ can't judge).
 static func get_counts() -> Dictionary:
 	var counts := _counts.duplicate()
 	counts["cpp"] = AIDeciderBridge.decisions
-	counts["special_minds"] = AIDeciderBridge.special_minds
+	counts["gdscript_answers"] = AIDeciderBridge.gdscript_answers
 	return counts
 
 
@@ -64,7 +64,7 @@ static func reset_counts() -> void:
 	for key: String in _counts:
 		_counts[key] = 0
 	AIDeciderBridge.decisions = 0
-	AIDeciderBridge.special_minds = 0
+	AIDeciderBridge.gdscript_answers = 0
 
 
 ## Called before each C++ decision while [member active]: the fact check, at every decision in shadow mode and sampled otherwise.

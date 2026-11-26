@@ -155,8 +155,8 @@ func describe() -> Dictionary:
 			"script": behaviour.get_script().resource_path.get_file() if behaviour.get_script() else "",
 			# Where its settings come from: its definition's name ("" for its kind's defaults), and anything to check about it.
 			"definition": behaviour.definition.describe() if behaviour.definition else "", "definition_note": behaviour.definition_note(),
-			# How C++ judges it: from its conditions and curves, or by asking GDScript for a behaviour with its own code.
-			"scorer": "given" if behaviour.has_own_code() else "conditions",
+			# How C++ judges it: from its conditions and curves, or from GDScript's answers (code of its own, or a condition C++ doesn't read).
+			"scorer": "given" if behaviour.judged_in_gdscript() else "conditions",
 			"conditions": _describe_conditions(behaviour), "score_curves": _describe_curves(behaviour),
 		})
 	return {
@@ -269,7 +269,7 @@ func decide(tick: int, record: AIDecisionRecord = null) -> void:
 		if not _is_available(behaviour, context):
 			continue
 		var raw := behaviour.score(context)
-		_check_score_range(behaviour, raw)
+		behaviour.check_score_range(raw)
 		behaviour.decision_score = raw
 		behaviour.decision_scored = true
 		var result := raw + behaviour.decision_bonus + behaviour.decision_jitter
@@ -658,14 +658,6 @@ func _describe_curves(behaviour: AIBehaviourBase) -> Array:
 		if curve:
 			list.append(curve.describe())
 	return list
-
-
-func _check_score_range(behaviour: AIBehaviourBase, raw: float) -> void:
-	if behaviour.warned_score_range or not OS.is_debug_build():
-		return
-	if raw > behaviour.settings.max_score + 0.000001 or raw < behaviour.settings.min_score - 0.000001:
-		behaviour.warned_score_range = true
-		push_warning("AIBehaviourManager: %s's score() gave %.3f, outside its min_score %.3f to max_score %.3f. Choices may be wrong until that's fixed." % [behaviour.name, raw, behaviour.settings.min_score, behaviour.settings.max_score])
 
 
 # The tick now, from the TickDriver autoload.

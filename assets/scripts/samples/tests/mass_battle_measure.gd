@@ -223,7 +223,7 @@ func _ready() -> void:
 	if _shadow:
 		print("shadow decider: %d of %d decisions agree (%.3f%%), %d differ" % [counts["agreed"], counts["checked"],
 			100.0 * counts["agreed"] / maxf(counts["checked"], 1.0), counts["differs"]])
-	print("AI decisions made in C++: %d; special minds kept in GDScript: %d" % [counts["cpp"], counts["special_minds"]])
+	print("AI decisions made in C++: %d; answers GDScript gave for behaviours C++ can't judge: %d" % [counts["cpp"], counts["gdscript_answers"]])
 	# Claude 2026-11-17: the AI decisions, saved, with a summary
 	if _decisions:
 		_decisions.stop()

@@ -6,6 +6,9 @@
 ## persistence mask, jitter changes and behaviours finishing included; and where pawns decide (setting, override, special minds).
 ## Claude 2026-11-25 (pawn spec 16.10 step 6a): persistence is gone; the same game now has behaviours' own start and end modifiers, and
 ## modifiers changing jitter, interrupt thresholds, cooldowns and minimum runs, which C++ gets as numbers.
+## Claude 2026-11-26 (pawn spec 16.10 step 6d): where pawns decide is settled at their next decision, with diagnostics' switch (F10)
+## instead of the game mode's override, and each pawn has its own decider sharing brains; special minds are gone: a mixed brain (a
+## behaviour with code of its own beside a data one, and one with a condition C++ doesn't read) decides in C++ from GDScript's answers.
 ## Claude 2026-11-18 (a review's finding): a group point that moves, or is freed, between the lookup's 2-second looks gives C++ and
 ## GDScript the same answer.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
@@ -20,8 +23,13 @@ const Comparison := AICompareCondition.Comparison
 
 ## A behaviour with code of its own, which the C++ decider can't read.
 class OwnCodeBehaviour extends AIBehaviourBase:
+	var open := true
+
 	func is_available(_context: AIManager) -> bool:
-		return true
+		return open
+
+	func score(_context: AIManager) -> float:
+		return settings.max_score # code of its own, so C++ can't read it
 
 
 func _ready() -> void:
@@ -212,12 +220,54 @@ func _test_cpp_agrees() -> void:
 			"each pawn has a decider of its own, and one built the same way shares the brain already compiled")
 	twin.free()
 	pawn.free()
+	_test_mixed_brain()
+
+
+# Claude 2026-11-26 (pawn spec 16.10 step 6d): a behaviour with code of its own beside one judged by data. The pawn decides in C++, and
+# GDScript answers for that behaviour only; shadow mode must agree at every decision, and C++ driving must follow its answers.
+func _test_mixed_brain() -> void:
 	var own := OwnCodeBehaviour.new()
 	own.name = "OwnCode"
-	var special := _make_pawn([own])
-	_decide(special, 1)
-	_check(special.ai.behaviour_manager.cpp == null, "a special mind (a behaviour with code of its own) decides in GDScript")
-	special.free()
+	own.max_score = 0.6
+	own.min_score = 0.6
+	var plain := _behaviour("Plain", 0.3, 0.3)
+	var mixed := _make_pawn([own, plain])
+	_decide(mixed, 1)
+	var manager := mixed.ai.behaviour_manager
+	_check(manager.cpp != null and own.judged_in_gdscript() and not plain.judged_in_gdscript(),
+			"a behaviour with code of its own no longer moves its pawn to GDScript: the pawn decides in C++")
+	AIDecisionChecks.set_check_against_gdscript(true)
+	AIDecisionChecks.reset_counts()
+	var changes := [0]
+	manager.behaviour_changed.connect(func(_o: AIBehaviourBase, _n: AIBehaviourBase, _r: String) -> void: changes[0] += 1)
+	for t in 30:
+		own.open = t % 3 != 0
+		_decide(mixed, 8000 + t)
+	var counts := AIDecisionChecks.get_counts()
+	_check(counts["checked"] == 30 and counts["agreed"] == 30 and counts["gdscript_answers"] >= 30 and changes[0] > 10,
+			"shadow mode: C++, with GDScript's answers for that one behaviour, agrees at every decision (%d of %d, %d answers, %d changes)" % [counts["agreed"], counts["checked"], counts["gdscript_answers"], changes[0]])
+	AIDecisionChecks.set_check_against_gdscript(false)
+	own.open = true
+	_decide(mixed, 9000)
+	var chose_own := manager.get_running_behaviour() == own
+	own.open = false
+	_decide(mixed, 9001)
+	_check(chose_own and manager.get_running_behaviour() == plain and AIDecisionChecks.get_counts()["cpp"] >= 2,
+			"C++ driving follows GDScript's answers: the behaviour while it says available, the other once it says not")
+	var odd := _behaviour("OddCondition", 0.5, 0.5)
+	odd.conditions = [UnknownKindCondition.new()]
+	var odd_pawn := _make_pawn([odd, _behaviour("Fallback", 0.2, 0.2)])
+	_decide(odd_pawn, 1)
+	_check(odd.judged_in_gdscript() and odd_pawn.ai.behaviour_manager.cpp != null and odd_pawn.ai.behaviour_manager.get_running_behaviour() == odd,
+			"a condition of a kind C++ doesn't read: GDScript answers for that behaviour, and the pawn still decides in C++")
+	odd_pawn.free()
+	mixed.free()
+
+
+## A condition C++ has no kind for: GDScript answers for any behaviour that has one.
+class UnknownKindCondition extends AICondition:
+	func describe() -> Dictionary:
+		return {"kind": "made_up"}
 
 
 # A pawn whose behaviour needs to be more than 5 m from the nearest node in a group, with the node moving near and far every tick and

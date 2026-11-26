@@ -5,8 +5,9 @@
 ## The manager makes one ([method make_for]) when the pawn decides in C++, and drops it when it moves to GDScript. Before each decision
 ## it reads the version counters of the facts the row holds and copies only what changed: the owned tags (the AI's state among them),
 ## the behaviour modifiers' numbers, the actions that could start, the AI's facts ([member AIManager.facts_version]: target, last hit,
-## the swing coming) and a game's inputs ([member AIInputs.kept_version]). Brains are compiled once per behaviour set and shared by
-## every decider. Where pawns decide: [member AIBehaviourManager.decides_in], the project setting [constant ALL_IN_GDSCRIPT_SETTING],
+## the swing coming) and a game's inputs ([member AIInputs.kept_version]). A behaviour C++ can't judge from data
+## ([method AIBehaviourBase.judged_in_gdscript]) gets GDScript's answers, written in before each decision; C++ judges the rest. Brains
+## are compiled once per behaviour set and shared by every decider. Where pawns decide: [member AIBehaviourManager.decides_in], the project setting [constant ALL_IN_GDSCRIPT_SETTING],
 ## and diagnostics' switches ([AIDecisionChecks]). Timed as [code]ai.decide.cpp[/code]. Design: pawn spec 16.5, scaling spec 6.2.
 class_name AIDeciderBridge
 extends RefCounted
@@ -16,8 +17,8 @@ const ALL_IN_GDSCRIPT_SETTING := "project_base/ai/all_decisions_in_gdscript"
 
 ## The decisions made in C++ so far, by every pawn.
 static var decisions := 0
-## Pawns kept in GDScript because C++ can't read one of their behaviours, counted once per reason.
-static var special_minds := 0
+## The answers GDScript gave so far for behaviours C++ can't judge (code of their own, or a condition C++ doesn't read).
+static var gdscript_answers := 0
 
 ## The C++ AIDecider, holding this pawn's row. Typed Object so the game runs without the library.
 var decider: Object = null
@@ -33,6 +34,8 @@ var _kept_version := -1
 var _ready_slots := PackedInt32Array() # action_ready slots the conditions read
 var _groups: Array = [] # [group, distance slot, found slot] for each group the conditions read
 var _follows_body := false # an action it presses has readiness that follows the body (Jump), so it's asked every decision
+var _judged_in_gdscript: Array[AIBehaviourBase] = [] # the behaviours GDScript answers for
+var _given_scores := PackedFloat64Array() # by slot, NaN where nothing was given
 
 static var _library := ClassDB.class_exists(&"AIDecider")
 static var _warned := {} # a reason -> true, so each is said once
@@ -44,14 +47,9 @@ static var _tag_generation := -1
 static var _tag_count := -1
 
 
-## A bridge for this manager, or null if it decides in GDScript (the reason is warned about once if it's a behaviour C++ can't read).
+## A bridge for this manager, or null if it decides in GDScript.
 static func make_for(for_manager: AIBehaviourManager) -> AIDeciderBridge:
-	var reason := _gdscript_reason(for_manager)
-	if reason != "":
-		if reason.begins_with("special mind") and not _warned.has(reason):
-			_warned[reason] = true
-			special_minds += 1
-			push_warning("AIDeciderBridge: %s decides in GDScript: %s." % [String(for_manager.pawn.name), reason])
+	if _gdscript_reason(for_manager) != "":
 		return null
 	var made := AIDeciderBridge.new(for_manager)
 	return made if made._row >= 0 else null
@@ -105,10 +103,13 @@ func _init(for_manager: AIBehaviourManager) -> void:
 		elif kind == AIInputs.Kind.ACTION_READY:
 			_ready_slots.append(slot)
 	var abilities := pawn.ability_manager
-	if abilities:
-		for behaviour in manager.get_behaviour_list():
-			if behaviour.settings.presses_action != &"" and abilities.ready_follows_body(behaviour.settings.presses_action):
-				_follows_body = true
+	for behaviour in manager.get_behaviour_list():
+		if abilities and behaviour.settings.presses_action != &"" and abilities.ready_follows_body(behaviour.settings.presses_action):
+			_follows_body = true
+		if behaviour.judged_in_gdscript():
+			_judged_in_gdscript.append(behaviour)
+	_given_scores.resize(manager.get_behaviour_list().size())
+	_given_scores.fill(NAN)
 
 
 ## One decision in C++: copies over the facts that changed, asks the decider, and returns the chosen behaviour's slot (-1 nothing).
@@ -119,6 +120,8 @@ func decide(tick: int, event_priority: int, event_normal: bool) -> int:
 		_kinds_sent = AIInputs.input_count()
 		decider.set_input_kinds(AIInputs.kinds())
 	_write_changed(tick)
+	if not _judged_in_gdscript.is_empty():
+		_write_given(tick)
 	if AIDecisionChecks.active:
 		AIDecisionChecks.before_cpp_decision(self)
 	var chosen: int = decider.decide_pawn(_row, tick, event_priority, event_normal)
@@ -204,6 +207,40 @@ func _write_changed(tick: int) -> void:
 		decider.set_group_point(_row, group[1], group[2], point != null, point.global_position if point else Vector3.ZERO)
 
 
+# GDScript's answers for the behaviours C++ can't judge, for this decision. Only those that pass the hard rules (as the manager's own
+# decide() checks them), since C++ never asks the others; is_available() and score() run once each, as GDScript's decider runs them.
+func _write_given(tick: int) -> void:
+	var context := manager.pawn.ai
+	var owned := manager.pawn.owned_tags
+	var words := owned.get_words() if owned else PackedInt64Array()
+	var running := manager.get_running_behaviour()
+	var known := 0
+	var available := 0
+	for behaviour in _judged_in_gdscript:
+		var slot := behaviour.decision_index
+		_given_scores[slot] = NAN
+		if not behaviour.passes_requirements(words) or behaviour.decision_blocked:
+			continue
+		if behaviour != running and behaviour.is_cooling_down(tick):
+			continue
+		if behaviour.settings.needs_target and not context.has_target():
+			continue
+		var action := behaviour.settings.presses_action
+		if action != &"" and behaviour != running and not context.inputs.action_ready(action):
+			continue
+		known |= 1 << slot
+		gdscript_answers += 1
+		var started := PerfScopes.begin_detailed()
+		var answer := behaviour.is_available(context)
+		PerfScopes.end(behaviour.perf_available_name, started)
+		if answer:
+			available |= 1 << slot
+			var raw := behaviour.score(context)
+			behaviour.check_score_range(raw)
+			_given_scores[slot] = raw
+	decider.set_given(_row, known, available, _given_scores)
+
+
 # The target, the last hit and the swing coming at it: what C++ works the built-in inputs out from.
 func _write_facts(context: AIManager) -> void:
 	var target := context.current_target
@@ -256,28 +293,5 @@ static func _gdscript_reason(for_manager: AIBehaviourManager) -> String:
 		return "its own setting"
 	var memory := for_manager.pawn.ai.memory
 	if memory == null or memory.native_store() == null:
-		return "the GDScript memory store"
-	for behaviour in for_manager.get_behaviour_list():
-		if behaviour.has_own_code():
-			return "special mind: %s's behaviour %s has is_available() or score() code of its own" % [_brain_label(for_manager), behaviour.name]
-		for condition in behaviour.all_conditions():
-			if not _kind_known(condition.describe()):
-				return "special mind: %s's behaviour %s has a condition of a kind C++ doesn't know" % [_brain_label(for_manager), behaviour.name]
+		return "the GDScript memory store" # a fade with its own value_at()
 	return ""
-
-
-const _KNOWN_CONDITION_KINDS := ["always", "compare", "chance", "any"] # the kinds AIDecider reads
-
-
-static func _kind_known(described: Dictionary) -> bool:
-	if not _KNOWN_CONDITION_KINDS.has(described.get("kind", "")):
-		return false
-	for child: Dictionary in described.get("conditions", []):
-		if not _kind_known(child):
-			return false
-	return true
-
-
-static func _brain_label(for_manager: AIBehaviourManager) -> String:
-	var pawn := for_manager.pawn
-	return pawn.scene_file_path.get_file() if pawn.scene_file_path != "" else String(pawn.name)

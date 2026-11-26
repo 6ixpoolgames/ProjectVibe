@@ -43,6 +43,9 @@ func _ready() -> void:
 	TagRegistry.declare([&"ai.state.alarm"]) # the test's own Alarm state's tag (AIStateBase.get_tag)
 	TickDriver.tick_rate = TickDriver.REFERENCE_RATE # the checks count exact ticks at 60 a second
 	print("--- AI decision recorder self-test ---")
+	# Claude 2026-11-26 (pawn spec 16.10 step 6d): GDScript's decider, whose records hold every behaviour's numbers. Its test behaviours
+	# have code of their own, which no longer keeps a pawn out of C++, and a C++ decision's record leaves those numbers out.
+	AIDecisionChecks.set_all_in_gdscript(true)
 	_recorder = AIDecisionRecorder.new()
 	add_child(_recorder)
 	_test_nothing_without_listener()
@@ -54,6 +57,7 @@ func _ready() -> void:
 	_test_save()
 	_test_timings()
 	await _test_stop()
+	AIDecisionChecks.set_all_in_gdscript(false)
 	_finish()
 
 

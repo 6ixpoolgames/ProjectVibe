@@ -20,6 +20,7 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-26
 
+- **`AIDecider.set_given`** (step 6d, second part): GDScript's answers for a pawn row's "given" behaviours (which it answered, which are available, their scores), read by `decide_pawn` as `decide()` reads its columns, so one scripted behaviour no longer keeps its whole pawn out of C++. `add_brain` compiles conditions and curves only for behaviours judged by them, so a "given" behaviour may have a condition of a kind C++ doesn't know.
 - **`AIBatchDecider` is now `AIDecider`** (`ai_decider.h/.cpp`; pawn spec 16.10 step 6d). Each behaviour manager owns one, holding its pawn's row, instead of one decider for every pawn in a GameMode module; it still holds many rows, for a batch runner. Brains and the input slots' kinds moved into a store every decider shares (static, made on first use, freed by `free_shared()` from the library's unload, before Godot's teardown): `add_brain(description, key)` returns the brain already compiled under a key. `get_input_kind_count()` is new. `fade_math.h` and `ai_memory_store.h` lost stale mentions of the decider (persistence is gone).
 
 ## 2026-11-25

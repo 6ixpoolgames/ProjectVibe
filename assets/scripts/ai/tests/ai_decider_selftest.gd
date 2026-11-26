@@ -7,7 +7,7 @@
 ## thresholds, cannot_be_interrupted, random ties, a behaviour ending); that a planted mismatch is caught; and a real fight in the
 ## faction arena; and live shadow mode (AIDecisionChecks.set_check_against_gdscript; Claude 2026-11-26: was the AIDecisionModule's), which must agree on every decision and change none
 ## of GDScript's. Claude 2026-11-18 (step 5c): the made-up brains' test behaviours have code of their own, so they're special minds
-## that stay in GDScript; shadow mode checks the real fight, whose built-in behaviours C++ reads, from C++'s own copy of each pawn's
+## that stay in GDScript (Claude 2026-11-26, step 6d: now they decide in C++ from GDScript's answers, checked in shadow mode); shadow mode checks the real fight, whose built-in behaviours C++ reads, from C++'s own copy of each pawn's
 ## state.
 ## Claude 2026-11-17 (step 5b): and in the real fight, that the AI's kept answer to "could this action start?" (AIInputs.action_ready,
 ## asked again only when AbilityManager.readiness_version moves on) matches asking AbilityManager.can_start at every decision.
@@ -155,7 +155,11 @@ func _test_brains() -> void:
 func _test_made_up_brains() -> void:
 	_recorder.clear()
 	_recorder.start()
+	# Claude 2026-11-26 (step 6d): recorded with GDScript deciding, since a C++ decision's record leaves GDScript's numbers out; their
+	# behaviours have code of their own, so they'd decide in C++ from GDScript's answers otherwise (checked in shadow mode below).
+	AIDecisionChecks.set_all_in_gdscript(true)
 	var choices := _play_made_up(false)
+	AIDecisionChecks.set_all_in_gdscript(false)
 	_recorder.stop()
 	# What the run covered, so a quiet run can't pass by accident.
 	var kept := 0
@@ -187,13 +191,15 @@ func _test_made_up_brains() -> void:
 	var decisions_made: int = result["decisions"]
 	_recorder.clear()
 	# Live shadow mode (on from here through the real fight): the made-up brains' behaviours have code of their own, so they're
-	# special minds that stay in GDScript, and nothing changes.
+	# special minds that stay in GDScript, and nothing changes. Claude 2026-11-26 (step 6d): now they decide in C++ with GDScript's answers
+	# for every behaviour, and shadow mode must agree at every decision.
 	AIDecisionChecks.set_check_against_gdscript(true)
 	AIDecisionChecks.reset_counts()
 	var shadow_choices := _play_made_up(true)
 	var counts := AIDecisionChecks.get_counts()
 	print("  live shadow, made-up brains: %s (decisions %d)" % [str(counts), decisions_made])
-	_check(counts["checked"] == 0 and counts["cpp"] == 0, "the made-up brains are special minds: none decided in C++")
+	_check(counts["checked"] > 300 and counts["agreed"] == counts["checked"] and counts["gdscript_answers"] > 0,
+			"the made-up brains (code of their own) decide in C++ from GDScript's answers, and agree with GDScript at every decision (%d of %d)" % [counts["agreed"], counts["checked"]])
 	_check(shadow_choices == choices and not choices.is_empty(), "shadow mode changes nothing: GDScript makes the same %d changes of behaviour with it on" % choices.size())
 	AIDecisionChecks.reset_counts()
 

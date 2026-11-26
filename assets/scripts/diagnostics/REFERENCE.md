@@ -40,7 +40,7 @@ Shadow mode (`set_check_against_gdscript()`): every pawn that decides in C++ dec
 - `set_check_against_gdscript(on: bool) -> void` *(static)*: Turns shadow mode on or off. Every pawn settles where it decides again at its next decision.
 - `set_all_in_gdscript(on: bool) -> void` *(static)*: Has every pawn decide in GDScript (on), or each where its settings say (off).
 - `toggle_all_in_gdscript() -> bool` *(static)*: Switches every pawn to GDScript and back (F10). Returns true if they decide in GDScript now.
-- `get_counts() -> Dictionary` *(static)*: The counts so far: cpp (decisions made in C++), checked, agreed and differs (shadow mode), stale_facts, and special_minds (pawns kept in GDScript because C++ can't read one of their behaviours).
+- `get_counts() -> Dictionary` *(static)*: The counts so far: cpp (decisions made in C++), checked, agreed and differs (shadow mode), stale_facts, and gdscript_answers (answers GDScript gave for behaviours C++ can't judge).
 - `reset_counts() -> void` *(static)*: Starts the counts afresh.
 - `before_cpp_decision(bridge: AIDeciderBridge) -> void` *(static)*: Called before each C++ decision while `active`: the fact check, at every decision in shadow mode and sampled otherwise.
 - `after_cpp_decision(bridge: AIDeciderBridge) -> void` *(static)*: Called after each C++ decision in shadow mode: every input C++ just worked out against GDScript's own, slot by slot (the hit and swing facts, a game's inputs, the group points and the memory-based ones all show up here). Counted with the stale facts.

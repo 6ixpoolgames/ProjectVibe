@@ -187,6 +187,27 @@ func has_own_code() -> bool:
 	return ScriptOverrides.overrides(get_script(), &"is_available") or ScriptOverrides.overrides(get_script(), &"score")
 
 
+## True if the C++ decider can't judge it from data: it has code of its own ([method has_own_code]) or a condition of a kind C++
+## doesn't read ([method AICondition.cpp_reads]). GDScript then answers for this behaviour at each C++ decision; C++ judges the rest.
+func judged_in_gdscript() -> bool:
+	if has_own_code():
+		return true
+	for condition in all_conditions():
+		if not AICondition.cpp_reads(condition.describe()):
+			return true
+	return false
+
+
+## Warns once (debug builds) if a score its score() gave is outside min_score to max_score: the manager skips behaviours by those
+## bounds, so choices may be wrong. Both deciders call it with each score they get from GDScript.
+func check_score_range(raw: float) -> void:
+	if warned_score_range or not OS.is_debug_build():
+		return
+	if raw > settings.max_score + 0.000001 or raw < settings.min_score - 0.000001:
+		warned_score_range = true
+		push_warning("AIBehaviourBase: %s's score() gave %.3f, outside its min_score %.3f to max_score %.3f. Choices may be wrong until that's fixed." % [name, raw, settings.min_score, settings.max_score])
+
+
 ## Runs tick() at this tick (or the pawn's first run after it), if nothing wakes it sooner. Used up when it fires; an earlier tick
 ## than one already set wins.
 func wake_at(at_tick: int) -> void:

@@ -10,6 +10,8 @@
 class_name AICondition
 extends Resource
 
+## The kinds the C++ decider reads ([method describe]'s "kind"). A behaviour with a condition of another kind is judged in GDScript.
+const CPP_KINDS: Array[String] = ["always", "compare", "chance", "any"]
 ## The input names the inspector suggests. Any other name works too: it's a kept input that game code writes.
 const INPUT_SUGGESTIONS := "target_distance,most_aware_certain,most_aware_uncertain,ticks_since_unknown_hit,incoming_attack,incoming_attack_tick,incoming_attacker,group_distance/rally_point,group_found/rally_point,action_ready/primary"
 
@@ -29,6 +31,16 @@ func describe() -> Dictionary:
 ## Adds the slots of every input this condition reads to slots (as keys), so the behaviour manager works out only those.
 func add_input_slots(_slots: Dictionary) -> void:
 	pass
+
+
+## True if the C++ decider reads this described condition ([method describe]) and every condition inside it.
+static func cpp_reads(described: Dictionary) -> bool:
+	if not CPP_KINDS.has(described.get("kind", "")):
+		return false
+	for child: Dictionary in described.get("conditions", []):
+		if not cpp_reads(child):
+			return false
+	return true
 
 
 ## A value written for 60 ticks a second, at the match's rate, if the input is a time in ticks; otherwise the value as it is.

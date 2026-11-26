@@ -120,10 +120,13 @@ int AIDecider::add_brain(const Dictionary &description, const String &key) {
 		}
 		behaviour.scorer = Scorer(scorer);
 		behaviour.cooldown_ticks = int64_t(entry.get("cooldown_ticks_at_rate", entry.get("cooldown_ticks", 0)));
-		if (!add_conditions(entry.get("conditions", Array()), brain, behaviour.first_condition, behaviour.condition_count)) {
+		// Conditions and curves only for the scorer that reads them: a "given" behaviour may have a condition of a kind C++ doesn't know,
+		// which is why GDScript answers for it.
+		const bool judged_here = behaviour.scorer == Scorer::CONDITIONS;
+		if (judged_here && !add_conditions(entry.get("conditions", Array()), brain, behaviour.first_condition, behaviour.condition_count)) {
 			return -1;
 		}
-		const Array curves = entry.get("score_curves", Array());
+		const Array curves = judged_here ? Array(entry.get("score_curves", Array())) : Array();
 		behaviour.first_curve = int(brain.curves.size());
 		behaviour.curve_count = int(curves.size());
 		for (int64_t c = 0; c < curves.size(); ++c) {
@@ -910,6 +913,16 @@ void AIDecider::set_input(int row, int slot, double value) {
 	kept[slot] = value;
 }
 
+void AIDecider::set_given(int row, int64_t known_mask, int64_t available_mask, const PackedFloat64Array &scores) {
+	ERR_FAIL_COND(!row_ok(row));
+	PawnRow &p = _pawns[row];
+	p.given_known = uint64_t(known_mask);
+	p.given_available = uint64_t(available_mask);
+	const size_t count = shared().brains[p.brain].behaviours.size();
+	ERR_FAIL_COND_MSG(!scores.is_empty() && size_t(scores.size()) != count, "AIDecider.set_given: scores is empty or has one per behaviour.");
+	p.given_scores.assign(scores.ptr(), scores.ptr() + scores.size());
+}
+
 void AIDecider::set_group_point(int row, int distance_slot, int found_slot, bool found, const Vector3 &position) {
 	ERR_FAIL_COND(!row_ok(row));
 	for (PawnRow::GroupPoint &group : _pawns[row].groups) {
@@ -988,7 +1001,8 @@ int AIDecider::decide_pawn(int row, int64_t tick, int64_t event_priority, bool e
 	in.min_run = p.min_run.data();
 	int64_t input_count = 0;
 	const double *input_values = work_out_inputs(p, position, tick, input_count);
-	in.view = RowView{ 0, 0, nullptr, input_values, input_count, p.random_seed, p.pawn_number, tick };
+	in.view = RowView{ int64_t(p.given_known), int64_t(p.given_available), p.given_scores.empty() ? nullptr : p.given_scores.data(),
+		input_values, input_count, p.random_seed, p.pawn_number, tick };
 	const RowResult out = decide_row(brain, in);
 	_last_kept = out.kept;
 	// The switch, as AIBehaviourManager._start and _stop_running apply it: the old one's end, the new one's start.
@@ -1031,6 +1045,7 @@ void AIDecider::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_target", "row", "target_id"), &AIDecider::set_target);
 	ClassDB::bind_method(D_METHOD("set_can_press", "row", "mask"), &AIDecider::set_can_press);
 	ClassDB::bind_method(D_METHOD("set_input", "row", "slot", "value"), &AIDecider::set_input);
+	ClassDB::bind_method(D_METHOD("set_given", "row", "known_mask", "available_mask", "scores"), &AIDecider::set_given);
 	ClassDB::bind_method(D_METHOD("set_group_point", "row", "distance_slot", "found_slot", "found", "position"), &AIDecider::set_group_point);
 	ClassDB::bind_method(D_METHOD("get_facts", "row"), &AIDecider::get_facts);
 	ClassDB::bind_method(D_METHOD("set_input_kinds", "kinds"), &AIDecider::set_input_kinds);
