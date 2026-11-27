@@ -2,7 +2,7 @@
 ## Walks to random nearby points, pausing between them: what a pawn does when nothing more interesting can run.
 ##
 ## Allowed in Idle, with a low fixed score. It picks a random point within [member AIWanderDefinition.wander_radius] of its home (where the pawn first
-## started wandering), walks there with the AI controller's move_to, then stands for a random time between [member AIWanderDefinition.min_pause_ticks]
+## started wandering), walks there with a MoveTo step, then stands for a random time between [member AIWanderDefinition.min_pause_ticks]
 ## and [member AIWanderDefinition.max_pause_ticks]. The points and pauses come from the context's replayable random numbers, so the same seed, pawn and
 ## ticks give the same walk. A point with no way there is skipped and another tried soon. It never finishes on its own.
 ## Design: pawn spec 10.7.
@@ -29,18 +29,21 @@ func _settings_changed() -> void:
 	_kind_settings = settings as AIWanderDefinition
 
 
+func make_steps() -> Array[Step]:
+	return [made_step(MoveToStep, &"MoveTo")]
+
+
 func enter(_context: AIManager) -> void:
 	if not _has_home and pawn:
 		_home = pawn.global_position
 		_has_home = true
 	_walking = false
 	_pause_until = -1
-	wake_on_path_end()
+	wake_on_step_end()
 
 
 func tick(context: AIManager) -> Status:
-	var hands := context.controller
-	if hands == null or pawn == null:
+	if pawn == null:
 		return Status.FAILED
 	# Pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
 	if _pause_until >= 0:
@@ -48,7 +51,7 @@ func tick(context: AIManager) -> Status:
 			wake_at(_pause_until)
 			return Status.RUNNING
 		_pause_until = -1
-	if hands.is_following_order():
+	if is_step_running(&"MoveTo"):
 		return Status.RUNNING
 	if _walking:
 		# The walk ended: it arrived, or nav gave up on it. Stand for a while either way.
@@ -62,16 +65,15 @@ func tick(context: AIManager) -> Status:
 	# sqrt makes points spread evenly over the circle; without it they'd bunch up near the middle.
 	var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
 	var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * _kind_settings.wander_radius
-	var point := _home + Vector3(cos(angle), 0.0, sin(angle)) * distance
-	if hands.move_to(point):
+	var walk := start_step(&"MoveTo", {"goal": _home + Vector3(cos(angle), 0.0, sin(angle)) * distance}) as MoveToStep
+	if walk and not walk.gave_up():
 		_walking = true
 	else:
+		stop_step(&"MoveTo")
 		wake_at(context.current_tick + TickDriver.ticks_at_rate(5)) # no walk to wake it: try another point soon
 	return Status.RUNNING
 
 
-func exit(context: AIManager, _reason: String) -> void:
+func exit(_context: AIManager, _reason: String) -> void:
 	_walking = false
 	_pause_until = -1
-	if context and context.controller:
-		context.controller.stop()

@@ -26,6 +26,8 @@ const INCOMING_ATTACK := &"incoming_attack"
 const INCOMING_ATTACK_TICK := &"incoming_attack_tick"
 ## The swinging pawn's number.
 const INCOMING_ATTACKER := &"incoming_attacker"
+## Ticks since the AI last saw its target; [constant FAR] with no target. Chase runs while it's low, GoToLastKnown once it isn't.
+const TICKS_SINCE_TARGET_SEEN := &"ticks_since_target_seen"
 ## [code]group_distance/<group>[/code]: flat distance to the group's nearest node; [constant FAR] if it has none.
 const GROUP_DISTANCE := "group_distance/"
 ## [code]group_found/<group>[/code]: 1 while the group has a node. Pair it with a "further than" check on the distance.
@@ -40,7 +42,7 @@ const FAR := 1.0e12
 
 ## How a slot's value is found: KEPT is written by whoever knows it; the rest are worked out at each decision.
 enum Kind { KEPT, TARGET_DISTANCE, MOST_AWARE_CERTAIN, MOST_AWARE_UNCERTAIN, TICKS_SINCE_UNKNOWN_HIT, INCOMING_ATTACK,
-	INCOMING_ATTACK_TICK, INCOMING_ATTACKER, GROUP_DISTANCE, GROUP_FOUND, ACTION_READY }
+	INCOMING_ATTACK_TICK, INCOMING_ATTACKER, GROUP_DISTANCE, GROUP_FOUND, ACTION_READY, TICKS_SINCE_TARGET_SEEN }
 
 # The registry, shared by every pawn: name -> slot, and each slot's kind, parameter and whether it's ticks.
 static var _slot_by_name := {}
@@ -92,6 +94,7 @@ static func slot_of(input_name: StringName) -> int:
 		INCOMING_ATTACK: kind = Kind.INCOMING_ATTACK
 		INCOMING_ATTACK_TICK: kind = Kind.INCOMING_ATTACK_TICK
 		INCOMING_ATTACKER: kind = Kind.INCOMING_ATTACKER
+		TICKS_SINCE_TARGET_SEEN: kind = Kind.TICKS_SINCE_TARGET_SEEN
 		_:
 			if text.begins_with(GROUP_DISTANCE):
 				kind = Kind.GROUP_DISTANCE
@@ -237,6 +240,9 @@ func _work_out(slot: int) -> void:
 			values[slot] = 1.0 if nearest_in_group(_parameters[slot], tick) else 0.0
 		Kind.ACTION_READY:
 			values[slot] = 1.0 if action_ready(_parameters[slot]) else 0.0
+		Kind.TICKS_SINCE_TARGET_SEEN:
+			var index := context.current_target_index()
+			values[slot] = float(context.memory.ticks_since_seen_at(index, tick)) if index >= 0 else FAR
 
 
 func _grow(count: int) -> void:

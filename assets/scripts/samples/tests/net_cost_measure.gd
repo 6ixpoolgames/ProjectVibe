@@ -174,7 +174,7 @@ func _note_ai(pawn: Pawn, state: TickStateComponent, tick: int, counting: bool) 
 	var behaviours := pawn.ai.behaviour_manager
 	var running: Variant = behaviours.get_running_behaviour() if behaviours else null
 	var target := pawn.ai.current_target
-	var navigation: PathFollower = pawn.ai.controller.path_follower if pawn.ai.controller else null # Claude 2026-11-25: pawn spec 16.10 step 5c
+	var navigation: PathFollower = pawn.controller_manager.get_path_follower() if pawn.controller_manager else null # Claude 2026-11-27: the running move step's (pawn spec 16.10 step 7)
 	var goal: Variant = navigation._goal if navigation and navigation._state != PathFollower.PathState.NONE else null
 	var held := pawn.controller_manager.held_actions
 	var now := [running, target.get_instance_id() if is_instance_valid(target) else 0, goal, held]

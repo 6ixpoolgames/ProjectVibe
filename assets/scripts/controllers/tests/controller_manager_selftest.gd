@@ -169,10 +169,10 @@ func _test_look_at_point() -> void:
 	pawn.controller_manager.look_pitch = -0.2
 	var kept := ai.take_input_command(0)
 	_check(is_equal_approx(kept.look_yaw, 0.7) and is_equal_approx(kept.look_pitch, -0.2), "not told where to look: it keeps the pawn's own look")
-	ai.look_at_point(pawn.global_position + Vector3(0, ai.look_from_height, -5)) # pitch is measured from look_from_height (Claude 2026-11-18)
+	ai.look_at_point(pawn.global_position + Vector3(0, pawn.eye_height, -5)) # pitch is measured from the eyes (Claude 2026-11-27: eye_height)
 	var straight := ai.take_input_command(0)
 	_check(is_zero_approx(straight.look_yaw) and is_zero_approx(straight.look_pitch), "look_at_point: straight ahead is yaw 0")
-	ai.look_at_point(pawn.global_position + Vector3(-5, 5 + ai.look_from_height, 0))
+	ai.look_at_point(pawn.global_position + Vector3(-5, 5 + pawn.eye_height, 0))
 	var left_up := ai.take_input_command(0)
 	_check(is_equal_approx(left_up.look_yaw, PI / 2) and is_equal_approx(left_up.look_pitch, PI / 4), "and to the left and up is a quarter turn, 45 degrees up")
 	ai.stop_looking()
@@ -184,37 +184,21 @@ func _test_look_at_point() -> void:
 # --- Helpers ---
 
 
-# Claude 2026-11-23 (netcode spec 19.10): a dead pawn's AI controller takes no orders and lets go of what it was told; a persistent
-# order on a node that goes away ends.
+# Claude 2026-11-23 (netcode spec 19.10): a dead pawn's AI controller lets go of what it was told. Claude 2026-11-27 (pawn spec 16.10
+# step 7): the order API and its listener are gone (behaviours start steps), so only the letting go is left to check here.
 func _test_dead_pawn_takes_no_orders() -> void:
 	var pawn := _make_pawn(Vector3(0, 1000, 0))
-	var target := Node3D.new()
-	add_child(target)
-	target.global_position = Vector3(5, 1000, 0)
 	await _ticks(2)
 	var ai := pawn.controller_manager.ai_controller as AIController
-	var heard: Array[StringName] = []
-	AIController.order_listener = func(_controller: AIController, order: StringName, _args: Array) -> void: heard.append(order)
 	ai.hold(&"sprint", true)
-	ai.follow(target, 1.2)
-	_check(ai.get_followed_node() == target and heard == [&"hold", &"follow"], "a persistent order is one order, and is kept")
-	target.free()
-	await _ticks(2)
-	_check(ai.get_followed_node() == null, "its node gone, the persistent order ends")
+	ai.move_in_direction(Vector3(1, 0, 0))
 	# Claude 2026-11-25 (pawn spec 16.4): dies through Death (was pawn.dead set by hand), so died tells the controller to let go.
 	pawn.ability_manager.health_ran_out(null)
-	heard.clear()
-	ai.press(&"primary")
-	ai.move_in_direction(Vector3(1, 0, 0))
-	_check(pawn.is_dead() and heard.is_empty(), "a dead pawn's controller takes no orders, so none are heard")
-	_check(pawn.controller_manager.is_input_blocked(), "and its input is blocked (it owns status.dead)")
+	_check(pawn.is_dead() and pawn.controller_manager.is_input_blocked(), "dying: its input is blocked (it owns status.dead)")
 	await _ticks(3) # Health is full, so Death ends on its next tick
 	_check(not pawn.is_dead() and not pawn.controller_manager.is_input_blocked(), "(alive again; input no longer blocked)")
 	var command := ai.take_input_command(TickDriver.tick)
 	_check(command.held_actions == 0 and command.move == Vector3.ZERO, "and it comes back from death holding nothing it was told before (sprint)")
-	ai.hold(&"sprint", true)
-	_check(heard == [&"hold"], "alive again: orders are taken")
-	AIController.order_listener = Callable()
 	pawn.free()
 
 

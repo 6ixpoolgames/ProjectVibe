@@ -15,54 +15,41 @@ Every class in `assets/scripts/controllers/`, from its doc comments. The overvie
 
 `res://assets/scripts/controllers/AIController.gd`, extends [`ControllerBase`](#controllerbase)
 
-The AI's hands: turns what the AI's behaviours tell it into one InputCommand per tick.
+The AI's hands: hands over, as one InputCommand per tick, what the running AI behaviour's steps write.
 
-A component of the pawn's AIManager (`AIManager.controller`); the ControllerManager puts it in charge whenever no player has the pawn. It decides nothing: the AI's behaviours (or a script or test) tell it what to do, and it builds the same input a player's controller makes. Everything it's told stays until changed, except `press()`, which lasts one tick. Until `look_at_point()` is called it keeps the pawn's own look. Its walks follow its own `path_follower`.
+A component of the pawn's AIManager (`AIManager.controller`); the ControllerManager puts it in charge whenever no player has the pawn. It decides nothing and follows no orders of its own: each tick it's asked for input it runs the running behaviour's step timeline (`AIBehaviourBase.run_steps()`), whose move, look and button steps write the input (pawn spec 16.7). A part no step wrote falls back to a script's walk (`move_to()`, a MoveTo step on its own `step_host`, as the player's click-to-move), then its direct input: a still pawn and the pawn's own look, unless a script (a cutscene, a test) set them.
 
 ```gdscript
-ai.move_to(point)                        # walks there along a nav path; false if there's no way there
-ai.move_in_direction(Vector3(1, 0, 0))   # keeps walking that way; drops any path
+ai.move_to(point)                        # a script's walk along a nav path; false if there's no way there
+ai.move_in_direction(Vector3(1, 0, 0))   # direct input: keeps walking that way while no step moves the pawn
+ai.look_at_point(point)                  # direct input: looks there while no step looks
 ai.press(&"jump")                        # held for one tick, so the pawn sees one press
-ai.follow(target, 1.2)                   # a persistent order: closes in on target until a move order (netcode spec 19.10)
 ```
 
-A dead pawn's controller takes no orders, and lets go of everything as the pawn dies; the controllers README has the rest. Design: pawn spec 6.3, 10.3.
+A dead pawn's controller lets go of its direct input as the pawn dies, and takes none while dead; the controllers README has the rest. Design: pawn spec 6.3, 10.3, 16.7.
 
 ### Settings and properties
 
-- `order_listener: Callable` = `Callable()`: Sees every order given to any AIController, in order: `order_listener.call(controller, order, args)`, order being the method's name (&"move_to", &"press"...). Empty by default. The order stream's tap (netcode spec 19.3): the same orders, at the same point of the same ticks, give the same input.
-- `path_settings: PathFollowSettings`: How its walks follow their paths (closeness, nav tier, links, waiting for nav). Empty: the defaults.
-- `path_follower: PathFollower` = `<unknown>`: The path its walks follow (move_to, follow, keep_distance), with `path_settings`.
-- `look_from_height: float` = `1.3`: Where its look pitch is measured from: metres above the pawn's feet. Matches a ranged attack's muzzle_height (1.3), so a shot fired along the look meets the point looked at.
-
-### Constants
-
-- `_Follow.NONE = 0`
-- `_Follow.CLOSE_IN = 1`
-- `_Follow.KEEP_AWAY = 2`
+- `path_settings: PathFollowSettings`: How walks the AI's steps take follow their paths, for steps that have no settings of their own. Empty: the defaults.
+- `step_host: ControllerStepHost` = `null`: Runs a script's walks (`move_to()`): a MoveTo step, made the first time one's asked for. Null until then.
 
 ### Functions
 
-- `follow(node: Node3D, stop_distance: float, look_offset: Vector3 = Vector3(0, 1, 0), band: float = 0.3, repath_ticks: int = 20, repath_distance: float = 1.5) -> void`: Closes in on a node and stops stop_distance away (flat), looking at it offset above its origin; walks again once it's further than stop_distance plus band. Repaths every repath_ticks (at 60 a second) or when the node has moved repath_distance from where the path leads. Carried out at every input until a move order or another persistent order; a freed node ends it (standing still).
-- `keep_distance(node: Node3D, distance: float, band: float = 1.5, look_offset: Vector3 = Vector3(0, 1, 0), repath_ticks: int = 20, repath_distance: float = 1.5) -> void`: Keeps about distance (flat) from a node, closing in when further and backing away when nearer, and stands, looking at it, once within band of that distance (half of it, from walking). Otherwise as `follow()`.
-- `get_followed_node() -> Node3D`: The node a persistent order follows, or null.
-- `is_standing_by() -> bool`: True while a persistent order has it standing (near enough, or at its distance).
-- `move_to(point: Vector3) -> bool`: Walks to this point along a nav path, and stands still once there. Returns false (and stands still) if there's no way there. While not in charge it only remembers the point and returns true.
-- `is_following_order() -> bool`: True while its own last move_to is under way: following its path (or waiting for nav, PENDING) when in charge, or waiting to start it when not. False once it arrives, gives up, or is told to do something else.
+- `take_input_command(_tick: int) -> InputCommand`: This tick's input: the running behaviour's steps first, then direct input for what they left. Uses up press(), so call it once per tick: ControllerManager does.
+- `is_looking_at_something() -> bool`: True while it's told where to look: by a running step, or `look_at_point()`. AI sight faces this way then (SightSense).
+- `get_path_follower() -> PathFollower`: The path follower the running behaviour's move step walks the pawn along, else a script's walk's, or null.
+- `drop_path() -> void`: Charge changed hands: a script's walk ends, as the player's click-to-move does, so nobody walks the rest of a path once charge comes back. The running behaviour's move step only drops its path, and finds a new one the next time it runs ([`MoveStep`](../steps/REFERENCE.md#movestep)): the behaviour still wants to go there.
+- `move_to(point: Vector3) -> bool`: Walks to this point along a nav path, for a script or test (behaviours use their own MoveTo steps), and stands once there. False (and it stands) if there's no way there. Direct movement (`move_in_direction()`, `stop()`) and charge changing hands end it.
+- `is_walking() -> bool`: True while a script's walk (`move_to()`) is under way, waiting included.
+- `walk_step() -> MoveToStep`: The MoveTo step a script's walk runs on, made with its `step_host` the first time it's asked for. Its follower is the walk's path.
 - `move_in_direction(direction: Vector3) -> void`: Walks this way, in world space, up to length 1, until told otherwise. Shorter is slower.
-- `stop() -> void`: Stands still. Held actions stay held.
-- `look_at_point(point: Vector3) -> void`: Looks at a point in the world. Does nothing without a pawn, since there's nowhere to look from.
-- `look_at_node(node: Node3D, offset: Vector3 = Vector3(0, 0, 0)) -> void`: Keeps looking at a node, at offset from its origin, worked out again at every input, until `stop_looking()` or another look. For a behaviour that sleeps through a swing. A freed node ends it.
-- `look_at_node_quietly(node: Node3D, offset: Vector3 = Vector3(0, 0, 0)) -> void`: The same as `look_at_node()` without counting as an order: for a persistent order, whose own order covers its look.
+- `stop() -> void`: Stands still, as far as direct input and a script's walk go. Held actions stay held.
+- `look_at_point(point: Vector3) -> void`: Looks at a point in the world, aimed from the pawn's eyes. Does nothing without a pawn, since there's nowhere to look from.
 - `stop_looking() -> void`: Stops looking at anything in particular, and keeps whatever look the pawn already has.
-- `is_looking_at_point() -> bool`: True while it's looking at a point it was given. AI sight faces this way then (SightSense).
 - `press(action: StringName) -> void`: Holds this action for the next tick only, so the pawn sees one press.
 - `hold(action: StringName, held: bool = true) -> void`: Holds or lets go of this action, until changed.
-- `release_all() -> void`: Back to idle: standing still, nothing held. The look direction stays.
-- `take_input_command(_tick: int) -> InputCommand`: This tick's input. Uses up press(), so call it once per tick: ControllerManager does.
-- `let_go() -> void`: Forgets every order (standing, nothing held, no look, no persistent order), without counting as one. The pawn calls it through its ControllerManager on each tick it's dead, on every machine that runs it, so it comes back from a revive with no orders and gives none while dead (netcode spec 19.10).
-- `get_path_follower() -> PathFollower`: Its `path_follower` while a walk is under way, else null.
-- `drop_path() -> void`: Drops the path it's following. A walk given while it wasn't in charge is kept, and starts when it's in charge again.
+- `release_all() -> void`: Back to idle as far as direct input goes: standing still, nothing held. The look stays.
+- `let_go() -> void`: Forgets all direct input (standing, nothing held, no look). The pawn calls it through its ControllerManager on each tick it's dead, on every machine that runs it, so it comes back from a revive holding nothing (netcode spec 19.10). The running behaviour stops as the pawn dies, and its steps with it.
 
 ## ControllerBase
 
@@ -155,7 +142,7 @@ host.run(pawn.ticks_elapsed)           # once per tick, while is_running()
 
 ### Settings and properties
 
-- `input: InputCommand` = `<unknown>`: What the running steps wrote this tick: move, and actions to press. Look is left to the controller.
+- `input: StepInput` = `<unknown>`: What the running steps wrote this tick: move, and actions to press. Look is left to the controller.
 - `pawn: Pawn` = `null`: The pawn its steps move. `set_pawn()` changes it.
 - `timeline: StepTimeline` = `<unknown>`: The timeline its steps run on, built when it's ready.
 
@@ -164,7 +151,7 @@ host.run(pawn.ticks_elapsed)           # once per tick, while is_running()
 - `set_pawn(new_pawn: Pawn) -> void`: Moves its steps to this pawn (null: none), ending any run, since its steps belonged to the last one.
 - `start(step: Step) -> bool`: Ends any run, then begins one with this step, which enters at once. False if it isn't one of this host's steps or there's no pawn.
 - `run(elapsed: int = 1) -> void`: Runs the running steps for this tick, covering elapsed ticks, after clearing `input`. The run ends once no step is left.
-- `step_input() -> InputCommand`: The input its steps write (`input`): how a [`MoveStep`](../steps/REFERENCE.md#movestep) finds it when the timeline is built.
+- `step_input() -> StepInput`: The input its steps write (`input`): how an [`InputStep`](../steps/REFERENCE.md#inputstep) finds it when the timeline is built.
 - `stop() -> void`: Ends the run, stopping every running step ("cancelled").
 - `is_running() -> bool`: True while a run is going.
 

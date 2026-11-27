@@ -18,7 +18,7 @@ extends RefCounted
 ## Sent once when the end of a path is reached.
 signal arrived
 ## Sent once when a path ends: reached is true after [signal arrived], false when it gave up (no way, nav too slow, a link not
-## crossed). Not sent for [method stop]. AI behaviours wait on it (AIBehaviourBase.wake_on_path_end).
+## crossed). Not sent for [method stop]. Move steps read the path state instead, and AI behaviours wake when a step ends (AIBehaviourBase.wake_on_step_end).
 signal path_ended(reached: bool)
 
 ## Where the last move_to stands. Read it with [method get_path_state].
@@ -184,6 +184,22 @@ func get_move_direction() -> Vector3:
 	arrived.emit()
 	path_ended.emit(true)
 	return Vector3.ZERO
+
+
+## How far, flat, the pawn is from the stretch of path it's walking (from the last corner passed to the next); 0 when it isn't
+## following a path. A [MoveStep] finds a new path once this is past its off_path_metres, as after a knockback.
+func distance_off_path() -> float:
+	if pawn == null or _state != PathState.FOLLOWING or _next_corner >= _corners.size():
+		return 0.0
+	var to := _corners[_next_corner]
+	var from := _corners[_next_corner - 1] if _next_corner > 0 else to
+	var at := pawn.global_position
+	var a := Vector2(from.x, from.z)
+	var b := Vector2(to.x, to.z)
+	var p := Vector2(at.x, at.z)
+	var along := b - a
+	var t := clampf((p - a).dot(along) / along.length_squared(), 0.0, 1.0) if along.length_squared() > 0.000001 else 0.0
+	return p.distance_to(a + along * t)
 
 
 ## The named action to press this tick for a link the pawn just reached, such as &"jump", or empty. It's given once: call it after

@@ -11,10 +11,14 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| Orders that change nothing still count | `AIController._note` (and `order_listener`, a prototype tap) | Over 90% of `stop` and `stop_looking` orders repeat one already in force; an order stream should drop them before sending. The listener's shape is the order stream's to settle (netcode spec 19.3) | S |
-| The AI's hands give orders instead of handing over input | `AIController` (its order API) | Behaviours call `move_to`, `follow`, `press` and the rest; in pawn spec 16.4 the controller only hands over the input the running behaviour's steps write. Goes with the behaviour steps (16.10 step 7) | M |
 | Move the test hooks out of `InputActions` | `reset()`, `use_list()` in `InputActions.gd` | Test hooks in a shipping class; the owner's rule keeps test code in `tests/` | S |
 | Share the missing-input defaults | `_network_input_missing()` in `ControllerManager.gd` | 3 and 6 copy `NetworkSession`'s defaults by hand, so the two can drift apart | S |
+
+## 2026-11-27
+
+- **The AI controller is thin** (pawn spec 16.4, 16.10 step 7): it runs the running behaviour's step timeline each tick it's asked for input and hands over what the steps wrote, the follow logic included (now `FollowStep` and `KeepAwayFromStep`). The order API (`follow`, `keep_distance`, `look_at_node`, `look_at_node_quietly`, `get_followed_node`, `is_standing_by`, `is_following_order`), the waiting walk, its own `path_follower`, `look_from_height` and `order_listener` are gone, closing two refactor rows; the order stream's tap is `AIBehaviourManager.order_listener`. Scripts and tests keep a walk (`move_to`, a `MoveToStep` on its own `step_host`, as the player's click-to-move; `is_walking()`) and direct input (`move_in_direction`, `look_at_point`, `press`, `hold`, `stop`, `release_all`), used where no step writes; a dead pawn's controller takes none. Charge changing hands ends a script's walk and drops the behaviour's path, which its step finds again. `is_looking_at_point()` is `is_looking_at_something()`. Looks are aimed from the pawn's `eye_height`.
+
+- **`ControllerStepHost` writes a `StepInput`**, cleared before its steps run.
 
 ## 2026-11-25
 

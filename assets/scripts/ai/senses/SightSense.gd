@@ -54,11 +54,6 @@ extends AISenseBase
 	set(value):
 		max_gain_ticks = value
 		_settings_dirty = true
-## The height of the eyes above the pawn's feet, in metres.
-@export var eye_height := 1.6:
-	set(value):
-		eye_height = value
-		_settings_dirty = true
 ## The height on the target the ray aims at, in metres above its feet: about the chest.
 @export var target_height := 1.0:
 	set(value):
@@ -130,7 +125,7 @@ func visibility_of(target: Pawn) -> float:
 ## True if nothing in sight_blocking_mask is between the eyes and the target.
 func has_line_of_sight(target: Pawn) -> bool:
 	var space := pawn.get_world_3d().direct_space_state
-	_ray.from = pawn.global_position + Vector3(0.0, eye_height, 0.0)
+	_ray.from = pawn.global_position + Vector3(0.0, pawn.eye_height, 0.0) # the pawn's one eye height
 	_ray.to = target.global_position + Vector3(0.0, target_height, 0.0)
 	_ray.collision_mask = sight_blocking_mask
 	# Only when pawns can block sight: then the ray mustn't stop at either end's own body. With the default mask it can't, and
@@ -154,7 +149,7 @@ var _cos_periphery := 0.0
 
 
 func _begin_checks() -> void:
-	_eye = pawn.global_position + Vector3(0.0, eye_height, 0.0)
+	_eye = pawn.global_position + Vector3(0.0, pawn.eye_height, 0.0)
 	var yaw := _eye_yaw()
 	_facing = Vector2(-sin(yaw), -cos(yaw)) # Godot's forward is -Z, so yaw 0 faces -Z
 	_cos_central = cos(deg_to_rad(central_cone_degrees * 0.5))
@@ -226,7 +221,7 @@ func _fill_settings() -> void:
 	_settings[4] = cos(deg_to_rad(periphery_degrees * 0.5))
 	_settings[5] = periphery_multiplier
 	_settings[6] = TickDriver.ticks_at_rate(max_gain_ticks)
-	_settings[7] = eye_height
+	_settings[7] = pawn.eye_height if pawn else 1.6
 	_settings[8] = target_height
 	_settings[9] = sight_blocking_mask
 	_settings[10] = TickDriver.ticks_at_rate(manager.sense_interval_ticks if manager else 10) # the manager marks a change
@@ -239,6 +234,6 @@ func _eye_yaw() -> float:
 		return controllers.look_yaw # where the player looks
 	# The AI controller may have been freed (taken off the pawn) since the manager last looked.
 	var hands := controllers.ai_controller as AIController if controllers and is_instance_valid(controllers.ai_controller) else null
-	if hands and hands.is_looking_at_point():
-		return controllers.look_yaw if controllers else pawn.yaw # the AI looks where it was told to
+	if hands and hands.is_looking_at_something():
+		return controllers.look_yaw if controllers else pawn.yaw # the AI looks where its steps (or a script) aim
 	return pawn.yaw # otherwise, the way the body faces

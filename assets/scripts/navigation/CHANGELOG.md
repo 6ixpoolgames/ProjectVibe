@@ -16,6 +16,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move `TerrainSettings` out of navigation | `TerrainSettings.gd` | It describes a terrain (where it is, its chunk size), so it belongs in `terrain/` or `world/`; names and folders should say what things are | S |
 | Move `NavMarkerDebugModule` to `diagnostics/` | `modules/NavMarkerDebugModule.gd` | A debug tool in a production folder. `diagnostics/NavDebugView` already uses it; the two sample scenes that place it would follow | S |
 
+## 2026-11-27
+
+- **`PathFollower.distance_off_path()`**: how far the pawn is from the stretch of path it's walking, for `MoveStep`'s off-path repath (pawn spec 16.10 step 7a). Behaviours' walks are their own `MoveToStep`s now; the AI controller has no follower of its own.
+
 ## 2026-11-25
 
 - **`PathFollowSettings` and end reasons** (cleanup after pawn spec 16.10 step 5c). The follower's 8 settings moved into one resource, `PathFollowSettings`, which the follower reads as it walks (`settings`; the defaults when none is given), so nothing is copied: a `MoveStep` exports one, and the AI controller exports `path_settings`, giving its walks back the inspector settings they had on the `NavigationManager`. `get_end_reason()` says why the last path ended (`ARRIVED`, `NO_WAY`, `NAV_TOO_SLOW`, `LINK_MISSED`, `STOPPED`) and stays after `stop()` until the next `move_to`. Test: `path_follower_selftest` (each end reason; test pawns get their own settings).

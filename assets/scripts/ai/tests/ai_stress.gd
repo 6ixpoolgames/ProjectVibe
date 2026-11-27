@@ -69,6 +69,8 @@ class TimedSight extends SightSense:
 		super(job, tick)
 		_note("    of which: with the job's result (recording on the main thread)", started)
 
+# Claude 2026-11-27 (pawn spec 16.10 step 7): behaviours walk with their own MoveTo steps now, so there's no controller move_to or
+# shared follower to time; take_input_command covers running the behaviour's steps, path following included.
 class TimedHands extends AIController:
 	var totals: Dictionary
 	func _note(part: String, started: int) -> void:
@@ -76,29 +78,11 @@ class TimedHands extends AIController:
 		entry[0] += Time.get_ticks_usec() - started
 		entry[1] += 1
 		totals[part] = entry
-	func move_to(point: Vector3) -> bool:
-		var started := Time.get_ticks_usec()
-		var found := super(point)
-		_note("  AIController.move_to", started)
-		return found
 	func take_input_command(tick: int) -> InputCommand:
 		var started := Time.get_ticks_usec()
 		var command := super(tick)
-		_note("AIController.take_input_command (path following)", started)
+		_note("AIController.take_input_command (behaviour steps)", started)
 		return command
-
-class TimedFollower extends PathFollower: # Claude 2026-11-25: was TimedNavigation, on the NavigationManager (pawn spec 16.10 step 5c)
-	var totals: Dictionary
-	func _note(part: String, started: int) -> void:
-		var entry: Array = totals.get(part, [0, 0])
-		entry[0] += Time.get_ticks_usec() - started
-		entry[1] += 1
-		totals[part] = entry
-	func move_to(point: Vector3) -> bool:
-		var started := Time.get_ticks_usec()
-		var found := super(point)
-		_note("    of which: PathFollower.move_to (path request)", started)
-		return found
 
 class TimedSelector extends AITargetSelector:
 	var totals: Dictionary
@@ -248,9 +232,6 @@ func _add_timed_parts(pawn: Pawn) -> void:
 	var hands: Node = load("res://assets/scenes/pawn/parts/AIController.tscn").instantiate()
 	hands.set_script(TimedHands)
 	hands.totals = _totals
-	var follower := TimedFollower.new()
-	follower.totals = _totals
-	hands.path_follower = follower
 	ai.add_child(hands)
 	var sensing: AISensingManager = load("res://assets/scenes/pawn/parts/AISensingManager.tscn").instantiate()
 	sensing.set_script(TimedSensing)

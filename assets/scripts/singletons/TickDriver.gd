@@ -153,6 +153,9 @@ const PROFILE_COUNTS: Array[String] = ["ticks", "rollbacks", "rollback_ticks"]
 ## Each phase's time in microseconds, plus the counts in [constant PROFILE_COUNTS], while [member profile_enabled] is on. Emptied by
 ## [method reset_profile].
 var profile: Dictionary = {}
+## Goes up by one each time a rollback loads old state, before its replay. Something that keeps live-only state, such as a move step's
+## path, compares it with the count it last saw to know the pawn may have been put somewhere else.
+var rollbacks_loaded := 0
 
 var _rate: int = 60
 var _accumulator: float = 0.0
@@ -446,6 +449,7 @@ func rollback(from_tick: int) -> bool:
 	for p in loaded:
 		if is_instance_valid(p) and p.has_method(&"_rollback_after_load"):
 			p._rollback_after_load(from_tick)
+	rollbacks_loaded += 1
 	rollback_state_loaded.emit(from_tick)
 	# The re-run rewrites these entities' rows in the store, tick by tick.
 	var handles := PackedInt64Array()

@@ -778,6 +778,11 @@ func previous_held_actions() -> int:
 	return pawn.controller_manager.previous_held_actions if pawn and pawn.controller_manager else 0
 
 
+## The action its timeline's conditions mean by "its action" ([member StepCondition.action] left empty): its trigger_action.
+func default_action() -> StringName:
+	return settings.trigger_action if settings else &""
+
+
 ## A stat from the pawn's StatusManager, or fallback if there's no such stat or no StatusManager.
 func read_stat(stat_name: StringName, fallback: float) -> float:
 	if pawn and pawn.status_manager:

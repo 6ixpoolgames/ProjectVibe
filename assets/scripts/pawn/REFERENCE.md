@@ -24,6 +24,7 @@ Each tick: **input** (the AI runs, then the ControllerManager asks the controlle
 
 - `fill_in_default_parts: bool` = `true`: On, GameMode's PawnInitializer adds every default part this pawn's scene doesn't already have. Off, the pawn gets only what its scene has.
 - `gravity: float` = `-1.0`: How strongly it falls, in metres per second per second. Below 0, the project's gravity setting. The pawn adds gravity; abilities only steer.
+- `eye_height: float` = `1.6`: Where its eyes are, in metres above its feet: AI sight looks from here, the AI's look is aimed from here, and a ranged attack's muzzle sits a little below (RangedAttackDefinition.muzzle_below_eyes).
 - `skip_default_parts: StringName[]` = `[]`: Default parts to leave out, by name, such as &"AbilityManager". A part with that name in the scene is kept either way.
 - `team: int` = `0`: Which side this pawn is on. AI sensing only notices pawns of other teams (pawn spec 10.4). A player who possesses a pawn plays for its team. Recorded in the state store, pushed when it changes.
 - `sleep_when_idle: bool` = `true`: On: a pawn standing still with nothing to do sleeps, skipping its abilities, gravity and move_and_slide until something wakes it (pawn spec 15.3). Off: it simulates fully every tick.

@@ -82,7 +82,7 @@ How it follows is a shared [`PathFollowSettings`](#pathfollowsettings) (`setting
 ### Signals
 
 - `arrived()`: Sent once when the end of a path is reached.
-- `path_ended(reached: bool)`: Sent once when a path ends: reached is true after `arrived`, false when it gave up (no way, nav too slow, a link not crossed). Not sent for `stop()`. AI behaviours wait on it (AIBehaviourBase.wake_on_path_end).
+- `path_ended(reached: bool)`: Sent once when a path ends: reached is true after `arrived`, false when it gave up (no way, nav too slow, a link not crossed). Not sent for `stop()`. Move steps read the path state instead, and AI behaviours wake when a step ends (AIBehaviourBase.wake_on_step_end).
 
 ### Constants
 
@@ -103,6 +103,7 @@ How it follows is a shared [`PathFollowSettings`](#pathfollowsettings) (`setting
 - `move_to(point: Vector3) -> bool`: Finds a path from the pawn to this point and starts following it. Returns false, and stops, if there's no way there (UNREACHABLE). With no nav at all, it goes in a straight line and returns true. While nav is still being built, or the path is queued, it returns true and waits (PENDING).
 - `stop() -> void`: Stops following the path, and cancels a queued one. `has_arrived()` goes back to false, and the state to NONE; a path still under way ends with STOPPED (`get_end_reason()`).
 - `get_move_direction() -> Vector3`: Which way to walk now: flat, length 1, or zero when there's no path. Call it once per tick, because it also moves on to the next corner when the pawn is close enough, finishes the path at the end, and runs PENDING's retries.
+- `distance_off_path() -> float`: How far, flat, the pawn is from the stretch of path it's walking (from the last corner passed to the next); 0 when it isn't following a path. A [`MoveStep`](../steps/REFERENCE.md#movestep) finds a new path once this is past its off_path_metres, as after a knockback.
 - `take_link_action() -> StringName`: The named action to press this tick for a link the pawn just reached, such as &"jump", or empty. It's given once: call it after `get_move_direction()`, each tick, and press what it gives for that tick.
 - `take_link_press() -> int`: `take_link_action()` as input bits ([`InputActions`](../controllers/REFERENCE.md#inputactions)), 0 when there's nothing to press: OR it into this tick's held actions.
 - `is_crossing_link() -> bool`: True while the pawn is between a link's start and its end. CrowdMover moves such a pawn by physics, since a jump or a drop leaves the nav mesh on purpose.

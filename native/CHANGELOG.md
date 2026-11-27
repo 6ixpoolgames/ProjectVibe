@@ -20,6 +20,8 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 ## 2026-11-27
 
+- **`AIDecider` reads `ticks_since_target_seen`** (input kind `TICKS_SINCE_TARGET_SEEN`, after `ACTION_READY`, as `AIInputs.Kind`): ticks since the memory store last saw the target, `FAR` with none. Chase, Go To Last Known and Keep Distance use it (pawn spec 16.10 step 7b).
+
 - **`AIDecider`: one scoring model, asking back** (docs/pawn/AI_SCORING_PROPOSAL.md; the twin of `AIBehaviourManager.decide()`'s change, in ai/CHANGELOG.md). Changes:
   - **Scores.** A behaviour has one `base_score` (no `max_score`, `min_score` or score curves), and modifiers multiply, then add to it.
   - **The walk.** `decide_row` works out each candidate's result up front and walks them highest first. It asks whether the action could start and whether the behaviour is available only on the way, and stops once nothing after can win. Floors and ceilings are gone.

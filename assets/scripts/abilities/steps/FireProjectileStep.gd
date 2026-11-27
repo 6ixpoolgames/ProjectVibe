@@ -1,9 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-18. History: abilities/CHANGELOG.md.
-## Fires a projectile on its first tick, from the pawn's muzzle point toward where it looks.
+## Fires a projectile on its first tick, from the pawn's muzzle point toward the point its look meets.
 ##
 ## The server (or offline game) spawns it, never in a rollback replay. The shooter's own client draws a [PredictedProjectile] at once,
 ## a visual only, instead of waiting a round trip for the server's.
-## Aim is the pawn's look (yaw and pitch, so an AI looking at a target's chest aims at it). If [member warns_targets], the first enemy on
+## Aim is the pawn's look (yaw and pitch, from its eyes, so an AI looking at a target's chest aims at it): the muzzle is a little below
+## the eyes, so the shot heads for the first thing the look meets within its range ([method look_point]). If [member warns_targets], the first enemy on
 ## the straight line ahead is told a hit is coming, so its AI can parry or dodge. Design: pawn spec 8.24.
 class_name FireProjectileStep
 extends AbilityStep
@@ -13,12 +14,15 @@ extends AbilityStep
 @export var projectile_definition: ProjectileDefinition
 ## For a projectile with code of its own: its scene (see [member RangedAttackDefinition.projectile_scene]). Empty: the built-in one.
 @export var projectile_scene: PackedScene
-## Where it leaves from: metres above the pawn's feet.
-@export var muzzle_height := 1.3
+## Where it leaves from: metres below the pawn's eyes ([member Pawn.eye_height]).
+@export var muzzle_below_eyes := 0.3
 ## Where it leaves from: metres in front of the pawn.
 @export var muzzle_forward := 0.5
 ## On: the first enemy on the straight path ahead hears a hit is coming (AIManager.note_incoming_attack).
 @export var warns_targets := true
+
+## How many of its own team the look ray passes through, at most, before it takes what it hits as the look point.
+const TEAMMATES_LOOKED_THROUGH := 4
 
 ## The projectile fired on this run, on the server; null on clients.
 var fired: Projectile = null
@@ -41,14 +45,47 @@ func tick(_dt: float) -> Status:
 ## The point it fires from, in the world.
 func muzzle_point() -> Vector3:
 	var yaw := pawn.yaw
-	return pawn.global_position + Vector3(0.0, muzzle_height, 0.0) + Vector3(-sin(yaw), 0.0, -cos(yaw)) * muzzle_forward
+	return pawn.global_position + Vector3(0.0, pawn.eye_height - muzzle_below_eyes, 0.0) + Vector3(-sin(yaw), 0.0, -cos(yaw)) * muzzle_forward
 
 
-## The direction it fires in: the look yaw and pitch.
-func aim_direction() -> Vector3:
+## Which way the pawn looks: its look yaw and pitch, as a direction of length 1.
+func look_direction() -> Vector3:
 	var yaw := ability.look_yaw()
 	var pitch: float = pawn.controller_manager.look_pitch if pawn.controller_manager else 0.0
 	return Vector3(-sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch))
+
+
+## The point the look meets: the first thing a ray from the eyes along the look hits within the projectile's range, else the end of
+## that range. The ray passes through the pawn's own team, as the projectile does. Asked once per shot.
+func look_point() -> Vector3:
+	var eye := pawn.global_position + Vector3(0.0, pawn.eye_height, 0.0)
+	var end := eye + look_direction() * _range()
+	var space := pawn.get_world_3d().direct_space_state if pawn.is_inside_tree() else null
+	if space == null:
+		return end
+	var query := PhysicsRayQueryParameters3D.create(eye, end)
+	var passed: Array[RID] = [pawn.get_rid()]
+	for attempt in TEAMMATES_LOOKED_THROUGH + 1:
+		query.exclude = passed
+		var hit := space.intersect_ray(query)
+		if hit.is_empty():
+			return end
+		var body := hit["collider"] as Pawn
+		if body == null or body.team != pawn.team or attempt == TEAMMATES_LOOKED_THROUGH:
+			return hit["position"]
+		passed.append(body.get_rid())
+	return end
+
+
+## The direction it fires in: from the muzzle toward [method look_point].
+func aim_direction() -> Vector3:
+	var toward := look_point() - muzzle_point()
+	return toward.normalized() if toward.length_squared() > 0.000001 else look_direction()
+
+
+func _range() -> float:
+	# A projectile scene with code of its own has no definition to say: 50 m.
+	return maxf(projectile_definition.max_range, 1.0) if projectile_definition else 50.0
 
 
 func _fire() -> void:

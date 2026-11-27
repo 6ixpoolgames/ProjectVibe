@@ -35,14 +35,12 @@ Every class in `assets/scripts/abilities/`, from its doc comments. The overview 
 - [WalkDefinition](#walkdefinition)
 - [PredictedProjectile](#predictedprojectile)
 - [Projectile](#projectile)
-- [AbilityCondition](#abilitycondition)
 - [AbilityStep](#abilitystep)
 - [ApplyEffectStep](#applyeffectstep)
 - [FireProjectileStep](#fireprojectilestep)
 - [MeleeSweepStep](#meleesweepstep)
 - [OpenComboStep](#opencombostep)
 - [SweepKey](#sweepkey)
-- [TimelineEntry](#timelineentry)
 - [TurnToFaceStep](#turntofacestep)
 - [WaitStep](#waitstep)
 - [WindupStep](#windupstep)
@@ -172,6 +170,7 @@ It can be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a
 - `view_ticks_behind() -> float`: How many ticks behind its own the controller drew other pawns, for lag compensation.
 - `held_actions() -> int`: The held actions this tick, as InputActions bits.
 - `previous_held_actions() -> int`: The held actions last tick, as InputActions bits, so a press can be told from a hold.
+- `default_action() -> StringName`: The action its timeline's conditions mean by "its action" (`StepCondition.action` left empty): its trigger_action.
 - `read_stat(stat_name: StringName, fallback: float) -> float`: A stat from the pawn's StatusManager, or fallback if there's no such stat or no StatusManager.
 - `can_start() -> bool`: Extra conditions for starting, such as being on the ground. Cooldowns, lockouts and combos are already checked.
 - `start() -> void`: Once, when it starts.
@@ -762,14 +761,14 @@ A new one starts with the kind's defaults; see [`AbilityDefinition`](#abilitydef
 - `windup_ticks: int` = `12`: Ticks of aiming before the shot, at 60 a second.
 - `recovery_ticks: int` = `18`: Ticks after the shot before it's over, at 60 a second.
 - `attack_range: float` = `14.0`: How far away a target may be for the AI to shoot, in metres (the AI's reach; the projectile's own range can be longer).
-- `muzzle_height: float` = `1.3`: Where the projectile leaves from: metres above the feet and in front of the pawn.
+- `muzzle_below_eyes: float` = `0.3`: Where the projectile leaves from: metres below the pawn's eyes (`Pawn.eye_height`). The shot is aimed at the point the look meets, so it lands where the pawn looks.
 - `muzzle_forward: float` = `0.5`: How far in front of the pawn the projectile starts, in metres.
 - `windup_turn_degrees_per_second: float` = `-1.0`: How fast it turns toward its aim during the windup, degrees a second; -1 uses the pawn's TurnRate stat.
 - `warns_targets: bool` = `true`: On: the first enemy on the projectile's path hears it's coming, so its AI can parry.
 
 ## ReceiveHitDefinition
 
-`res://assets/scripts/abilities/definitions/ReceiveHitDefinition.gd`, extends [`AbilityDefinition`](#abilitydefinition)
+`res://assets/scripts/abilities/definitions/ReceiveHitDefinition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
 The hit ability's settings: the base ones, with its defaults.
 
@@ -890,54 +889,13 @@ Projectile.fire(ability, origin, direction, preload("res://assets/scripts/resour
 - `is_done() -> bool`: True once it has hit something or flown its course, on the machine that decides it.
 - `is_own_shot() -> bool`: True if it was fired by the pawn this machine predicts: the shooter's own client, which draws its predicted copy instead.
 
-## AbilityCondition
-
-`res://assets/scripts/abilities/steps/AbilityCondition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
-
-A condition a step timeline entry can start on: one value of the pawn compared with a number (ability spec 6.3).
-
-Data, not code, so timelines stay no-code and C++ can judge them later. It follows the AI's [`AICompareCondition`](../ai/REFERENCE.md#aicomparecondition); the two may share a base later. Values that are yes or no are 1 or 0.
-
-```gdscript
-LOOK_ANGLE    AT_MOST  15     # facing within 15 degrees of where it looks
-ACTION_HELD   EQUAL    0      # its action was let go
-STAT "Health" AT_MOST  20
-```
-
-### Settings and properties
-
-- `input: int` = `0`: What it reads.
-- `comparison: int` = `0`: How it's compared.
-- `value: float` = `0.0`: The number it's compared with.
-- `action: StringName` = `&""`: With ACTION_HELD: the action. Empty: the ability's trigger_action.
-- `stat: StringName` = `&""`: With STAT: the stat's name.
-
-### Constants
-
-- `Reads.LOOK_ANGLE = 0`: degrees between where the pawn faces and where it looks
-- `Reads.ACTION_HELD = 1`: 1 while `action` (or the ability's trigger_action) is held, else 0
-- `Reads.GROUNDED = 2`: 1 on the ground, else 0
-- `Reads.STAT = 3`: the pawn's `stat`
-- `Reads.TICKS_RUNNING = 4`: ticks since the ability started, at the match's rate
-- `Comparison.AT_MOST = 0`
-- `Comparison.LESS_THAN = 1`
-- `Comparison.AT_LEAST = 2`
-- `Comparison.MORE_THAN = 3`
-- `Comparison.EQUAL = 4`
-- `Comparison.NOT_EQUAL = 5`
-
-### Functions
-
-- `holds(ability: AbilityBase) -> bool`
-- `read(ability: AbilityBase) -> float`: The value it compares, for this ability's pawn now.
-
 ## AbilityStep
 
 `res://assets/scripts/abilities/steps/AbilityStep.gd`, extends [`Step`](../steps/REFERENCE.md#step)
 
 One step of an ability, such as a windup, a turn or a swing: a child node of the ability, run by its [`StepTimeline`](../steps/REFERENCE.md#steptimeline).
 
-A [`Step`](../steps/REFERENCE.md#step) with what abilities add: a cancel window (`interrupt_threshold`) and ending when its action is let go (`ends_when_released`). When steps start is the ability's step timeline ([`TimelineEntry`](#timelineentry)); see [`Step`](../steps/REFERENCE.md#step) for what to override and how rollback works. Design: ability spec 6, pawn spec 8.20 and 16.7.
+A [`Step`](../steps/REFERENCE.md#step) with what abilities add: a cancel window (`interrupt_threshold`) and ending when its action is let go (`ends_when_released`). When steps start is the ability's step timeline ([`TimelineEntry`](../steps/REFERENCE.md#timelineentry)); see [`Step`](../steps/REFERENCE.md#step) for what to override and how rollback works. Design: ability spec 6, pawn spec 8.20 and 16.7.
 
 ### Settings and properties
 
@@ -978,24 +936,30 @@ For effects that belong to a moment in an ability, such as after its hit, rather
 
 `res://assets/scripts/abilities/steps/FireProjectileStep.gd`, extends [`AbilityStep`](#abilitystep)
 
-Fires a projectile on its first tick, from the pawn's muzzle point toward where it looks.
+Fires a projectile on its first tick, from the pawn's muzzle point toward the point its look meets.
 
-The server (or offline game) spawns it, never in a rollback replay. The shooter's own client draws a [`PredictedProjectile`](#predictedprojectile) at once, a visual only, instead of waiting a round trip for the server's. Aim is the pawn's look (yaw and pitch, so an AI looking at a target's chest aims at it). If `warns_targets`, the first enemy on the straight line ahead is told a hit is coming, so its AI can parry or dodge. Design: pawn spec 8.24.
+The server (or offline game) spawns it, never in a rollback replay. The shooter's own client draws a [`PredictedProjectile`](#predictedprojectile) at once, a visual only, instead of waiting a round trip for the server's. Aim is the pawn's look (yaw and pitch, from its eyes, so an AI looking at a target's chest aims at it): the muzzle is a little below the eyes, so the shot heads for the first thing the look meets within its range (`look_point()`). If `warns_targets`, the first enemy on the straight line ahead is told a hit is coming, so its AI can parry or dodge. Design: pawn spec 8.24.
 
 ### Settings and properties
 
 - `projectile_definition: ProjectileDefinition`: What it fires: speed, arc, size, hits and look. The built-in projectile flies it (register it at startup on every machine, `Projectile.register()`).
 - `projectile_scene: PackedScene`: For a projectile with code of its own: its scene (see `RangedAttackDefinition.projectile_scene`). Empty: the built-in one.
-- `muzzle_height: float` = `1.3`: Where it leaves from: metres above the pawn's feet.
+- `muzzle_below_eyes: float` = `0.3`: Where it leaves from: metres below the pawn's eyes (`Pawn.eye_height`).
 - `muzzle_forward: float` = `0.5`: Where it leaves from: metres in front of the pawn.
 - `warns_targets: bool` = `true`: On: the first enemy on the straight path ahead hears a hit is coming (AIManager.note_incoming_attack).
 - `fired: Projectile` = `null`: The projectile fired on this run, on the server; null on clients.
+
+### Constants
+
+- `TEAMMATES_LOOKED_THROUGH = 4`: How many of its own team the look ray passes through, at most, before it takes what it hits as the look point.
 
 ### Functions
 
 - `tick(_dt: float) -> int`
 - `muzzle_point() -> Vector3`: The point it fires from, in the world.
-- `aim_direction() -> Vector3`: The direction it fires in: the look yaw and pitch.
+- `look_direction() -> Vector3`: Which way the pawn looks: its look yaw and pitch, as a direction of length 1.
+- `look_point() -> Vector3`: The point the look meets: the first thing a ray from the eyes along the look hits within the projectile's range, else the end of that range. The ray passes through the pawn's own team, as the projectile does. Asked once per shot.
+- `aim_direction() -> Vector3`: The direction it fires in: from the muzzle toward `look_point()`.
 
 ## MeleeSweepStep
 
@@ -1074,49 +1038,6 @@ A [`MeleeSweepStep`](#meleesweepstep) with keys moves its sphere from key to key
 ### Functions
 
 - `make(key_at: float, key_angle: float, key_height: float, key_reach: float) -> SweepKey` *(static)*: A key made in code.
-
-## TimelineEntry
-
-`res://assets/scripts/abilities/steps/TimelineEntry.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
-
-One entry of an ability's step timeline: which step runs, the values it runs with, and when it starts (ability spec 6.2).
-
-Ticks count from the ability's start. An entry starts when the first of its rules holds: `at_tick`; `after` another entry starts or ends (with the `end_reasons` that count, so a cancelled windup doesn't swing), plus `delay_ticks`; or its `condition`. With no rule set it starts with the ability. Each entry runs once per run of its ability; one step node can be in several entries (a second sweep on a backswing), one at a time.
-
-```gdscript
-Turn    at_tick 0
-Windup  at_tick 0
-Sweep   after "Windup" (ends, done)          values {"start_angle": 60.0, "end_angle": -60.0}
-```
-
-### Settings and properties
-
-- `step: StringName` = `&""`: The step node it runs: the name of a step child of the ability.
-- `label: StringName` = `&""`: What other entries call it in `after`. Empty: the step's name (give one when a step is in several entries).
-- `at_tick: int` = `-1`: Starts this many ticks after the ability, at 60 a second (converted for the match's rate). -1: not by time.
-- `after: StringName` = `&""`: Starts when this entry (its label) starts or ends. Empty: not after another.
-- `after_event: int` = `0`: Whether it follows the `after` entry's start or its end.
-- `end_reasons: int` = `3`: With ENDS, the reasons that count. Done and released by default: a released step's next steps start as if it were done.
-- `delay_ticks: int` = `0`: Ticks after the `after` entry's start or end, at 60 a second.
-- `condition: AbilityCondition` = `null`: Starts on the first tick this holds (checked every tick the ability runs). Empty: not by a condition.
-- `values: Dictionary` = `{}`: Values its step runs with in this entry, by property name, in place of the step's own: {"length_ticks": 12}.
-- `manual: bool` = `false`: On: no rule starts it; only code does (`AbilityBase.start_step()`), as a bespoke script would.
-
-### Constants
-
-- `After.ENDS = 0`
-- `After.STARTS = 1`
-- `Reason.DONE = 1`
-- `Reason.RELEASED = 2`
-- `Reason.FAILED = 4`
-- `Reason.CANCELLED = 8`
-
-### Functions
-
-- `get_label() -> StringName`: The name other entries use for it.
-- `starts_with_ability() -> bool`
-- `at(step_name: StringName, tick: int = 0, run_values: Dictionary = {}) -> TimelineEntry` *(static)*: An entry for this step that starts this many ticks after the ability (0: with it).
-- `after_end_of(step_name: StringName, other: StringName, run_values: Dictionary = {}, entry_label: StringName = &"") -> TimelineEntry` *(static)*: An entry for this step that starts when another entry ends (done or released, by default).
 
 ## TurnToFaceStep
 

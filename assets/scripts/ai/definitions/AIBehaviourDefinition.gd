@@ -95,3 +95,10 @@ extends Definition
 	set(value):
 		modifier_on_end = value
 		_changed(&"modifier_on_end", value)
+## When its steps start, as an ability's step timeline does ([TimelineEntry]; ticks count from the behaviour's start). Empty: every
+## step waits for the behaviour's code to start it ([method AIBehaviourBase.start_step]). A step none of these name gets a manual
+## entry, so code can still start it.
+@export var step_timeline: Array[TimelineEntry] = []:
+	set(value):
+		step_timeline = value
+		_changed(&"step_timeline", value)

@@ -63,6 +63,7 @@ var _running_now: Array[int] = [] # run's working list, kept between ticks so it
 var _starts_tick := -1 # the tick _starts_this_tick counts for
 var _starts_this_tick := 0
 var _warned_too_many_starts := false
+var _has_rules := false # some entry starts by a rule, not only from code; with none, no rules are checked each tick
 
 
 func _init(owner_host: Object = null, name_for_warnings := "") -> void:
@@ -134,6 +135,9 @@ func build(new_steps: Array[Step], source: Array[TimelineEntry]) -> void:
 				_value_keys[step] = []
 			if not _value_keys[step].has(key):
 				_value_keys[step].append(key)
+	_has_rules = false
+	for entry in entries:
+		_has_rules = _has_rules or not entry.manual
 	for e in count:
 		if _follows_round(e):
 			push_warning("%s: timeline entry '%s' follows entries that lead back to it, so they can't start by their \"after\" rules." % [owner_name, entries[e].get_label()])
@@ -182,7 +186,7 @@ func run(dt: float, elapsed: int) -> Result:
 			# This tick didn't count: its count starts later. A deadline, moved on only while it waits.
 			var base := e * _SLOTS
 			_write_entry(e, state[base + _STARTED], -1, 0, state[base + _ORIGIN] + elapsed)
-		var length := step.length() # asked once: it converts for the tick rate each time
+		var length := step.length() if step.length_ticks > 0 else 0 # asked once, and only with a length: it converts for the tick rate
 		if status == Step.Status.RUNNING and length > 0 and now - state[e * _SLOTS + _ORIGIN] >= length:
 			status = Step.Status.DONE
 		if status == Step.Status.DONE:
@@ -191,12 +195,13 @@ func run(dt: float, elapsed: int) -> Result:
 			stop_entry(e, "failed")
 			end("failed")
 			return Result.FAILED
-	_start_due_entries()
+	if _has_rules:
+		_start_due_entries()
 	# Running while a step that keeps the owner running does, or an entry is still due; steps that only go along stop then.
 	for e in entries.size():
 		if _entry_running(e) and _entry_steps[e].keeps_owner_running:
 			return Result.RUNNING
-		if _entry_due(e):
+		if _has_rules and _entry_due(e):
 			return Result.RUNNING
 	end("done")
 	return Result.DONE
@@ -376,7 +381,7 @@ func _rule_holds(e: int) -> bool:
 	var entry := entries[e]
 	if entry.manual:
 		return false
-	if entry.starts_with_ability():
+	if entry.starts_with_run():
 		return true
 	var now: int = TickDriver.tick
 	if _entry_at[e] >= 0 and now >= started_at + _entry_at[e]:
@@ -389,7 +394,7 @@ func _rule_holds(e: int) -> bool:
 				return true
 		elif state[base + _ENDED] >= 0 and state[base + _REASON] & entry.end_reasons != 0 and now >= state[base + _ENDED] + _entry_delay[e]:
 			return true
-	return entry.condition != null and entry.condition.holds(host)
+	return entry.condition != null and entry.condition.holds(self)
 
 
 # True if a rule will start this entry later without anything else happening first: a time not reached, an entry it follows still to

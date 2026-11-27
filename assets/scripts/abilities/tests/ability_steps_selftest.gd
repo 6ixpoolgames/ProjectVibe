@@ -362,9 +362,9 @@ func _test_start_rules() -> void:
 	on_condition.length_ticks = 1
 	var after_delay := TimelineEntry.after_end_of(&"Delayed", &"A")
 	after_delay.delay_ticks = 3
-	var running_long := AbilityCondition.new()
-	running_long.input = AbilityCondition.Reads.TICKS_RUNNING
-	running_long.comparison = AbilityCondition.Comparison.AT_LEAST
+	var running_long := StepCondition.new()
+	running_long.input = StepCondition.Reads.TICKS_RUNNING
+	running_long.comparison = StepCondition.Comparison.AT_LEAST
 	running_long.value = 4
 	var by_condition := TimelineEntry.new()
 	by_condition.step = &"OnCondition"

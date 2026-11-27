@@ -34,11 +34,12 @@ extends AbilityDefinition
 	set(value):
 		attack_range = value
 		_changed(&"attack_range", value)
-## Where the projectile leaves from: metres above the feet and in front of the pawn.
-@export var muzzle_height: float = 1.3:
+## Where the projectile leaves from: metres below the pawn's eyes ([member Pawn.eye_height]). The shot is aimed at the point the look
+## meets, so it lands where the pawn looks.
+@export var muzzle_below_eyes: float = 0.3:
 	set(value):
-		muzzle_height = value
-		_changed(&"muzzle_height", value)
+		muzzle_below_eyes = value
+		_changed(&"muzzle_below_eyes", value)
 ## How far in front of the pawn the projectile starts, in metres.
 @export var muzzle_forward: float = 0.5:
 	set(value):

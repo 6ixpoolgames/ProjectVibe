@@ -1,10 +1,10 @@
 # Written by Claude (claude-opus-5-5), 2026-11-15. History: ai/CHANGELOG.md.
 ## Walks to a meeting point: the nearest node in a Godot group, "rally_point" by default.
 ##
-## Allowed in Idle, scoring just above Wander (0.15 against 0.1), so an idle pawn marches to the point, anything it notices on the
+## Allowed in Idle, scoring just above Wander (15 against 10), so an idle pawn marches to the point, anything it notices on the
 ## way takes over, and on arrival Wander takes over. Available while a node is in [member AIGoToPointDefinition.point_group] and the pawn is further than
 ## [member AIGoToPointDefinition.arrive_radius] from it (the nearest is looked up every 2 seconds, [method AIInputs.nearest_in_group]). It walks in legs of
-## at most [member AIGoToPointDefinition.leg_metres], each a move_to, because nav is only built near streaming sources; a leg that can't be walked is retried
+## at most [member AIGoToPointDefinition.leg_metres], each a MoveTo step, because nav is only built near streaming sources; a leg that can't be walked is retried
 ## shorter. Each pawn walks a little to one side of the line (up to [member AIGoToPointDefinition.spread_metres], from its random numbers) so a crowd marches
 ## as a band. It never finishes on its own: it stops being available once the pawn has arrived.
 ## Design: scaling spec 6.2.
@@ -36,17 +36,20 @@ func own_conditions() -> Array[AICondition]:
 	return list
 
 
+func make_steps() -> Array[Step]:
+	return [made_step(MoveToStep, &"MoveTo")]
+
+
 func enter(_context: AIManager) -> void:
 	_shorten = 0.0
-	wake_on_path_end()
+	wake_on_step_end()
 
 
 func tick(context: AIManager) -> Status:
-	var hands := context.controller
 	var point := context.inputs.nearest_in_group(_kind_settings.point_group, context.current_tick) if pawn else null
-	if hands == null or point == null:
+	if point == null:
 		return Status.FAILED
-	if hands.is_following_order():
+	if is_step_running(&"MoveTo"):
 		return Status.RUNNING
 	var to := point.global_position - pawn.global_position
 	to.y = 0.0
@@ -59,15 +62,11 @@ func tick(context: AIManager) -> Status:
 	var across := Vector3(-ahead.z, 0.0, ahead.x)
 	var leg := maxf(minf(_kind_settings.leg_metres - _shorten, distance), 2.0)
 	var target := pawn.global_position + ahead * leg + across * side * minf(1.0, distance / _kind_settings.leg_metres)
-	if hands.move_to(target):
+	var walk := start_step(&"MoveTo", {"goal": target}) as MoveToStep
+	if walk and not walk.gave_up():
 		_shorten = 0.0
 	else:
+		stop_step(&"MoveTo")
 		_shorten = minf(_shorten + 5.0, _kind_settings.leg_metres - 2.0) # shorter next time, toward ground nav has built
 		wake_at(context.current_tick + TickDriver.ticks_at_rate(5)) # and soon: no walk is under way to wake it
 	return Status.RUNNING
-
-
-func exit(context: AIManager, _reason: String) -> void:
-	if context and context.controller:
-		context.controller.stop()
-

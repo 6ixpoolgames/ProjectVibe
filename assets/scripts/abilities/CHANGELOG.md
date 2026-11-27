@@ -20,6 +20,12 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, and nothing parry-specific is left in the manager or the base: `ParryAbility` is a plain timed ability that makes a default `ParryInterceptor`, and `guard()` is only read by the debug drawing and tests.
 
+## 2026-11-27
+
+- **`TimelineEntry` and `AbilityCondition` moved to `steps/`** (as `StepCondition`), for behaviours to share (pawn spec 16.10 step 7a). Abilities give their conditions their own action through `AbilityBase.default_action()`.
+
+- **One eye height** (step 7c): `RangedAttackDefinition.muzzle_height` (1.3) is `muzzle_below_eyes` (0.3 below `Pawn.eye_height`, 1.6), and `FireProjectileStep` aims from the muzzle at the point the look meets (`look_point()`: a ray from the eyes along the look, through the shooter's own team, as the bolt flies, else the projectile's range), so a shot still lands where the pawn looks.
+
 ## 2026-11-25
 
 - **The settings machinery is shared with AI behaviours** (pawn spec 16.10 step 6c). What `AbilityBase` did to work out its settings (the kind's defaults, the definition, the node's own variant, settings by name, the lock while playing) moved into `resources/DefinitionSettings`, which `AIBehaviourBase` uses too; `AbilityBase` keeps the same calls. `Definition` and `DefinitionRegistry` moved to `resources/` (their history before this is below). A resolved copy's `resolved_from` is a weak link: the definition keeps the copy, so a strong link back was a cycle, and every variant leaked at exit (`ability_definition_selftest` went from 40 resources still in use at exit to 15). The last 15 were the test's own: two ability nodes it made and never freed, now freed (0 left).

@@ -17,7 +17,7 @@ extends AIBehaviourDefinition
 	set(value):
 		repath_distance = value
 		_changed(&"repath_distance", value)
-## Ticks since the target was last seen after which it's chased to where it was last seen, not where it is (at 60 a second).
+## Ticks since the target was last seen after which Chase stops and Go To Last Known walks to where it was seen (at 60 a second).
 @export_range(0, 600, 1, "or_greater") var lost_after_ticks := 30:
 	set(value):
 		lost_after_ticks = value
@@ -63,4 +63,4 @@ func _init() -> void:
 	tags = [Tags.AI.STANCE_MELEE]
 	needs_target = true
 	base_score = 80.0
-	tick_interval_ticks = 5 # the AI controller follows the path every tick; Chase only re-aims
+	tick_interval_ticks = 5 # its Follow step follows the path every tick; Chase only checks the target

@@ -32,7 +32,7 @@ extends AIBehaviourDefinition
 	set(value):
 		sprint_to_close = value
 		_changed(&"sprint_to_close", value)
-## Ticks since the target was last seen after which it keeps its distance from where it was last seen (at 60 a second).
+## Ticks since the target was last seen after which Keep Distance stops and Go To Last Known walks there, stopping short (at 60 a second).
 @export_range(0, 600, 1, "or_greater") var lost_after_ticks := 30:
 	set(value):
 		lost_after_ticks = value
@@ -56,4 +56,4 @@ func _init() -> void:
 	tags = [Tags.AI.STANCE_RANGED]
 	needs_target = true
 	base_score = 85.0
-	tick_interval_ticks = 5 # the AI controller follows the path every tick; this only re-aims
+	tick_interval_ticks = 5 # its KeepAwayFrom step follows the path every tick; this only checks the target and sprint

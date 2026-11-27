@@ -834,6 +834,7 @@ enum InputKind : int32_t {
 	GROUP_DISTANCE,
 	GROUP_FOUND,
 	ACTION_READY,
+	TICKS_SINCE_TARGET_SEEN,
 };
 constexpr double FAR = 1.0e12; // AIInputs.FAR
 
@@ -911,6 +912,10 @@ double AIDecider::work_out_input(const PawnRow &p, LazyInputs &lazy, int slot) {
 			return double(p.incoming_start_tick);
 		case INCOMING_ATTACKER:
 			return alive(p.incoming_attacker_id) != nullptr ? double(p.incoming_attacker_number) : -1.0;
+		case TICKS_SINCE_TARGET_SEEN: {
+			const int64_t index = alive(p.target_id) != nullptr ? store->find_by_id(p.target_id) : -1;
+			return index >= 0 ? double(store->ticks_since_seen_at(index, tick)) : FAR;
+		}
 		default:
 			return kept;
 	}

@@ -53,13 +53,17 @@ class PlainBehaviour extends AIBehaviourBase:
 		return true
 
 
-## Walks to a point when it starts, through the AI controller.
+## Walks to a point when it starts, with a MoveTo step. Claude 2026-11-27: steps, not controller orders (pawn spec 16.10 step 7).
 class GoToBehaviour extends AIBehaviourBase:
 	var target := Vector3.ZERO
 	var walk_accepted := false
 
-	func enter(context: AIManager) -> void:
-		walk_accepted = context.controller.move_to(target)
+	func make_steps() -> Array[Step]:
+		return [made_step(MoveToStep, &"MoveTo")]
+
+	func enter(_context: AIManager) -> void:
+		var walk := start_step(&"MoveTo", {"goal": target}) as MoveToStep
+		walk_accepted = walk != null and not walk.gave_up()
 
 
 ## A state a test can switch on.
@@ -621,13 +625,24 @@ func _test_wake_ups() -> void:
 	_check_equal(sleeper.ticks, 2, "wake_at: the earlier of two wins, and fires at the pawn's first run at or after it")
 	manager.tick_running(111)
 	_check_equal(sleeper.ticks, 2, "...and is used up when it fires")
-	manager._on_path_ended(true)
+	# Claude 2026-11-27: a step ending, in place of a walk ending (pawn spec 16.10 step 7). The timeline's host calls, by hand.
+	var walk := Step.new()
+	walk.name = "Walk"
+	sleeper._timeline_step_started(walk)
+	sleeper._timeline_step_finished(walk, "done")
 	manager.tick_running(112)
-	_check_equal(sleeper.ticks, 2, "a walk ending doesn't wake a behaviour that didn't ask")
-	sleeper.wake_on_path_end()
-	manager._on_path_ended(false)
+	_check_equal(sleeper.ticks, 2, "a step ending doesn't wake a behaviour that didn't ask")
+	sleeper.wake_on_step_end()
+	sleeper._timeline_step_started(walk)
+	sleeper._timeline_step_finished(walk, "cancelled")
 	manager.tick_running(113)
-	_check_equal(sleeper.ticks, 3, "wake_on_path_end: a walk ending (here given up) wakes it")
+	_check_equal(sleeper.ticks, 2, "wake_on_step_end: a step its code stopped doesn't wake it")
+	sleeper._timeline_step_started(walk)
+	sleeper._timeline_step_finished(walk, "failed")
+	manager.tick_running(113)
+	_check_equal(sleeper.ticks, 3, "wake_on_step_end: a step ending on its own (here failed) wakes it")
+	_check_equal(sleeper.step_result(&"Walk"), "failed", "and step_result says how it ended")
+	walk.free()
 	var swing := AbilityBase.new()
 	swing.trigger_action = &"primary"
 	var other := AbilityBase.new()
@@ -644,7 +659,7 @@ func _test_wake_ups() -> void:
 	_decide(pawn, 116) # nothing left: it stops
 	sleeper.available = true
 	_decide(pawn, 117) # and starts again
-	_check(sleeper.wake_tick == -1 and not sleeper.wakes_on_path_end and sleeper.wakes_on_action == &"",
+	_check(sleeper.wake_tick == -1 and not sleeper.wakes_on_step_end and sleeper.wakes_on_action == &"",
 			"starting again clears every wake-up")
 	swing.free()
 	other.free()
@@ -724,8 +739,9 @@ func _test_while_possessed() -> void:
 	_check(counter.ticks > before, "FULL: behaviours keep running")
 	pawn.controller_manager.set_has_player(false)
 	pawn.free()
-	# FULL: the hands keep the order, and carry it out once in charge again. Claude 2026-11-25 (pawn spec 16.10 step 5c): each controller
-	# follows its own path now, so the player's path can't be touched; the hands' own follower stays idle while not in charge.
+	# FULL: the behaviour's walk waits, and goes on once the AI is in charge again. Claude 2026-11-25 (pawn spec 16.10 step 5c): each
+	# controller follows its own path, so the player's path can't be touched. Claude 2026-11-27 (step 7): the walk is a MoveTo step, run
+	# only while the AI controller is asked for input; charge changing hands drops its path, and it finds a new one when it runs.
 	var go := GoToBehaviour.new()
 	go.name = "GoTo"
 	go.target = Vector3(10, 0, 0)
@@ -735,16 +751,16 @@ func _test_while_possessed() -> void:
 	await _ticks(5)
 	pawn.controller_manager.set_has_player(true)
 	_decide(pawn, TickDriver.tick) # GoTo starts while the AI isn't in charge
-	var hands: AIController = pawn.controller_manager.ai_controller
-	_check(go.walk_accepted and hands.is_following_order(), "FULL, not in charge: move_to is accepted and kept")
-	_check(not hands.path_follower.is_under_way() and pawn.controller_manager.get_path_follower() == null, "and no path is followed while it isn't in charge")
-	hands.stop()
-	_check(not hands.is_following_order(), "stop() while not in charge drops the kept walk")
-	hands.move_to(Vector3(10, 0, 0))
+	var walk := go.get_step(&"MoveTo") as MoveToStep
+	var standing_at := pawn.global_position
+	_check(go.walk_accepted and go.is_step_running(&"MoveTo"), "FULL, not in charge: the behaviour's MoveTo starts, and waits")
+	_check(pawn.controller_manager.get_path_follower() == null, "and the pawn follows no AI path while it isn't in charge")
+	await _ticks(3)
+	_check(Vector2(pawn.global_position.x - standing_at.x, pawn.global_position.z - standing_at.z).length() < 0.05, "and doesn't walk it")
 	pawn.controller_manager.set_has_player(false)
 	await _ticks(3)
-	var corners := hands.path_follower.get_path_corners()
-	_check(hands.path_follower.is_following_path() and corners[corners.size() - 1].x > 9.0, "in charge again: the kept walk starts")
+	var corners := walk.follower.get_path_corners()
+	_check(walk.follower.is_following_path() and corners[corners.size() - 1].x > 9.0, "in charge again: the waiting walk goes on")
 	pawn.free()
 	floor_body.free()
 

@@ -23,6 +23,13 @@ signal behaviour_changed(old_behaviour: AIBehaviourBase, new_behaviour: AIBehavi
 ## Called after every decision of every pawn: [code]func(record: AIDecisionRecord, manager: AIBehaviourManager)[/code]. Static, so one
 ## listener hears every pawn. For diagnostics and checking another decider (scaling spec 6.2). Empty (default): no record is made.
 static var decision_listener := Callable()
+## Hears every order every pawn's behaviours give, in order: [code]func(manager, event, args)[/code], event being
+## [code]&"behaviour_started"[/code] [name], [code]&"behaviour_stopped"[/code] [name, reason], [code]&"step_started"[/code]
+## [behaviour, step, values] or [code]&"step_stopped"[/code] [behaviour, step, reason]. A step ending on its own isn't an order: it does
+## the same again from the same orders. The order stream's tap (netcode spec 19.3); the determinism check records and replays it.
+# REFACTOR: a prototype tap, one static listener for every pawn, made for the order replay test; the order stream (netcode spec 19.3)
+# settles its real shape. See CHANGELOG.md.
+static var order_listener := Callable()
 ## Where this pawn's decisions are made.
 enum DecidesIn {
 	CPP, ## by C++, the main path (the default)
@@ -123,10 +130,6 @@ func _ready() -> void:
 		# Wake-ups: the running behaviour's tick() runs at its next AI step after an event it waits for.
 		abilities.ability_finished.connect(_on_ability_ended)
 		abilities.ability_cancelled.connect(func(ability: AbilityBase, _by: AbilityBase) -> void: _on_ability_ended(ability))
-	# A walk the AI's own controller follows ends (a player's walk is on the player's controller).
-	var hands := pawn.ai.controller as AIController if pawn and pawn.ai else null
-	if hands:
-		hands.path_follower.path_ended.connect(_on_path_ended)
 
 
 func _exit_tree() -> void:
@@ -608,10 +611,7 @@ func _switch_to(best: AIBehaviourBase, event_is_normal: bool, tick: int) -> void
 	var switch_started := PerfScopes.begin()
 	var reason := "decision" if event_is_normal else "interrupted"
 	if best == null:
-		_stop_running(reason, tick, false)
-		var hands := pawn.ai.controller if pawn and pawn.ai else null
-		if hands:
-			hands.release_all() # nothing can run: stand still
+		_stop_running(reason, tick, false) # nothing can run: with no steps writing its input, the pawn stands
 	else:
 		_start(best, reason, tick)
 	PerfScopes.end(&"ai.decide.switch", switch_started)
@@ -621,12 +621,16 @@ func _start(behaviour: AIBehaviourBase, reason: String, tick: int) -> void:
 	var old := _running
 	if old:
 		old.exit(pawn.ai, reason)
+		old.end_steps()
 		old.ended_tick = tick
 		_apply_own_modifier(old, false, tick)
+		_tell_order(&"behaviour_stopped", [old.name, reason])
 	_running = behaviour
 	behaviour.started_tick = tick
 	behaviour.clear_wake_ups()
 	_apply_own_modifier(behaviour, true, tick)
+	_tell_order(&"behaviour_started", [behaviour.name])
+	behaviour.begin_steps(tick)
 	behaviour.enter(pawn.ai)
 	behaviour_changed.emit(old, behaviour, reason)
 
@@ -639,8 +643,10 @@ func _stop_running(reason: String, tick: int, tell_cpp := true) -> void:
 	var old := _running
 	_running = null
 	old.exit(pawn.ai, reason)
+	old.end_steps()
 	old.ended_tick = tick
 	_apply_own_modifier(old, false, tick)
+	_tell_order(&"behaviour_stopped", [old.name, reason])
 	if tell_cpp and cpp_decider:
 		cpp_decider.stopped(tick)
 	behaviour_changed.emit(old, null, reason)
@@ -759,12 +765,34 @@ func _collect_behaviours() -> void:
 	for i in _behaviours.size():
 		_behaviours[i].decision_index = i
 
-# The wake-ups' events: a walk ending, and an ability ending. Only the running behaviour, and only if it asked.
-func _on_path_ended(_reached: bool) -> void:
-	if _running and _running.wakes_on_path_end:
-		_running.woken = true
+func _tell_order(event: StringName, args: Array) -> void:
+	if order_listener.is_valid():
+		order_listener.call(self, event, args)
 
 
+## For playing back an order stream with the AI off: starts this behaviour as an order did, without its own code (no
+## [method AIBehaviourBase.enter]): its steps come from the stream too. Stops the one running first, likewise.
+func play_behaviour_started(behaviour_name: StringName, tick: int) -> void:
+	play_behaviour_stopped("decision", tick)
+	var behaviour := get_node_or_null(NodePath(String(behaviour_name))) as AIBehaviourBase
+	if behaviour == null:
+		push_warning("AIBehaviourManager: an order names behaviour '%s', which this pawn doesn't have." % behaviour_name)
+		return
+	_running = behaviour
+	behaviour.started_tick = tick
+	behaviour.begin_steps(tick)
+
+
+## For playing back an order stream: stops the running behaviour's steps without its own code.
+func play_behaviour_stopped(_reason: String, tick: int) -> void:
+	if _running == null:
+		return
+	_running.end_steps()
+	_running.ended_tick = tick
+	_running = null
+
+
+# The wake-up for an ability ending. Only the running behaviour, and only if it asked.
 func _on_ability_ended(ability: AbilityBase) -> void:
 	if _running and _running.wakes_on_action != &"" and ability.trigger_action == _running.wakes_on_action:
 		_running.woken = true

@@ -25,6 +25,9 @@ signal gameplay_event_received(event: GameplayEventData)
 ## How strongly it falls, in metres per second per second. Below 0, the project's gravity setting. The pawn adds gravity; abilities
 ## only steer.
 @export var gravity := -1.0
+## Where its eyes are, in metres above its feet: AI sight looks from here, the AI's look is aimed from here, and a ranged attack's
+## muzzle sits a little below (RangedAttackDefinition.muzzle_below_eyes).
+@export_range(0.0, 10.0, 0.05, "or_greater") var eye_height := 1.6
 ## Default parts to leave out, by name, such as &"AbilityManager". A part with that name in the scene is kept either way.
 @export var skip_default_parts: Array[StringName] = []
 ## Which side this pawn is on. AI sensing only notices pawns of other teams (pawn spec 10.4). A player who possesses a pawn plays for

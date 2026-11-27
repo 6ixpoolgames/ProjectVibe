@@ -2,9 +2,10 @@
 ## Hunts around where an enemy it became certain of was last seen: "I know you were here".
 ##
 ## Allowed in Alert. Available only when the most aware memory entry is certain but not fresh enough for Combat (Look Toward and
-## Investigate handle half-noticed things). It goes to the last known position (holding sprint if [member AISearchDefinition.sprint_to_last_known] is on),
-## then walks to [member AISearchDefinition.search_points] random points within [member AISearchDefinition.search_radius] of it, standing [member AISearchDefinition.pause_ticks] at each, and
-## succeeds. While still Alert it's usually picked again, so it keeps searching until the entry fades (Idle) or the enemy is seen (Combat).
+## Investigate handle half-noticed things). It goes to the last known position (a MoveTo step, with its Sprint step held if
+## [member AISearchDefinition.sprint_to_last_known] is on), then walks to [member AISearchDefinition.search_points] random points within
+## [member AISearchDefinition.search_radius] of it, standing [member AISearchDefinition.pause_ticks] at each, and succeeds. While still
+## Alert it's usually picked again, so it keeps searching until the entry fades (Idle) or the enemy is seen (Combat).
 ## Design: pawn spec 10.7.
 class_name AISearchBehaviour
 extends AIBehaviourBase
@@ -34,20 +35,23 @@ func own_conditions() -> Array[AICondition]:
 	return list
 
 
+func make_steps() -> Array[Step]:
+	return [made_step(MoveToStep, &"MoveTo"), made_sprint_step()]
+
+
 func enter(context: AIManager) -> void:
 	var index := context.most_aware_index()
 	_centre = context.memory.last_known_position_at(index) if index >= 0 else pawn.global_position
 	_going_to_centre = true
 	_points_left = _kind_settings.search_points
 	_pause_until = -1
-	context.controller.hold(&"sprint", _kind_settings.sprint_to_last_known)
-	wake_on_path_end()
-	if not context.controller.move_to(_centre):
-		wake_at(context.current_tick + 1) # no walk to wake it: on to the next step
+	if _kind_settings.sprint_to_last_known:
+		start_step(SPRINT_STEP)
+	wake_on_step_end()
+	_walk(context, _centre)
 
 
 func tick(context: AIManager) -> Status:
-	var hands := context.controller
 	# Pauses end at a tick, not after a count of tick() calls, so they last the same at any tick_interval_ticks.
 	if _pause_until >= 0:
 		if context.current_tick < _pause_until:
@@ -60,21 +64,22 @@ func tick(context: AIManager) -> Status:
 		# sqrt spreads the points evenly over the circle rather than bunching them in the middle.
 		var angle := context.random_unit(POINT_ANGLE_SALT) * TAU
 		var distance := sqrt(context.random_unit(POINT_DISTANCE_SALT)) * _kind_settings.search_radius
-		if not hands.move_to(_centre + Vector3(cos(angle), 0.0, sin(angle)) * distance):
-			wake_at(context.current_tick + 1) # no walk to wake it: pause here and go on
+		_walk(context, _centre + Vector3(cos(angle), 0.0, sin(angle)) * distance)
 		return Status.RUNNING
-	if hands.is_following_order():
+	if is_step_running(&"MoveTo"):
 		return Status.RUNNING
 	# A walk ended: it arrived, or there was no way there. Stand and look around before the next one.
 	if _going_to_centre:
 		_going_to_centre = false
-		hands.hold(&"sprint", false)
+		stop_step(SPRINT_STEP)
 	_pause_until = context.current_tick + maxi(TickDriver.ticks_at_rate(_kind_settings.pause_ticks), 1) # pause_ticks are at 60 a second
 	wake_at(_pause_until)
 	return Status.RUNNING
 
 
-func exit(context: AIManager, _reason: String) -> void:
-	if context.controller:
-		context.controller.hold(&"sprint", false)
-		context.controller.stop()
+# One walk; with no way there, it pauses where it is and goes on at the next tick.
+func _walk(context: AIManager, point: Vector3) -> void:
+	var walk := start_step(&"MoveTo", {"goal": point}) as MoveToStep
+	if walk == null or walk.gave_up():
+		stop_step(&"MoveTo")
+		wake_at(context.current_tick + 1)

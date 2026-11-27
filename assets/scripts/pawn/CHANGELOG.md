@@ -15,6 +15,10 @@ The owner wants the pawn to keep only the body, its tick order, its part referen
 |---|---|---|---|
 | A test-only read | `VisualSmoother.get_correction_offset` | Only `netcode/tests/net_test_node` calls it; the test can read `VisualPlacer.current.placement.get_correction(slot)` itself | S |
 
+## 2026-11-27
+
+- **`Pawn.eye_height`** (1.6): one height for the eyes (pawn spec 16.10 step 7c), in place of three in play: AI sight's own `eye_height` (1.6, now gone), the AI controller's `look_from_height` (1.3) and a ranged attack's `muzzle_height` (1.3, now `muzzle_below_eyes`).
+
 ## 2026-11-25
 
 - **`pawn.navigation_manager` is gone** (pawn spec 16.10 step 5c): each controller follows its own path (`navigation/PathFollower`).

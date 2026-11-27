@@ -13,7 +13,7 @@ class_name ControllerStepHost
 extends Node
 
 ## What the running steps wrote this tick: move, and actions to press. Look is left to the controller.
-var input := InputCommand.new()
+var input := StepInput.new()
 ## The pawn its steps move. [method set_pawn] changes it.
 var pawn: Pawn = null
 ## The timeline its steps run on, built when it's ready.
@@ -64,16 +64,15 @@ func start(step: Step) -> bool:
 
 ## Runs the running steps for this tick, covering elapsed ticks, after clearing [member input]. The run ends once no step is left.
 func run(elapsed := 1) -> void:
-	input.move = Vector3.ZERO
-	input.held_actions = 0
+	input.clear()
 	if not _running:
 		return
 	if timeline.run(TickDriver.get_tick_dt() * elapsed, elapsed) != StepTimeline.Result.RUNNING:
 		_running = false
 
 
-## The input its steps write ([member input]): how a [MoveStep] finds it when the timeline is built.
-func step_input() -> InputCommand:
+## The input its steps write ([member input]): how an [InputStep] finds it when the timeline is built.
+func step_input() -> StepInput:
 	return input
 
 

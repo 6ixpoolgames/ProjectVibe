@@ -29,4 +29,4 @@ func _init() -> void:
 	tag_requirements = TagQuery.shared([Tags.AI.STATE_IDLE])
 	# A low, fixed score: Wander is what a pawn does when nothing more interesting can run.
 	base_score = 10.0
-	tick_interval_ticks = 60 # the safety net: it wakes when a walk ends (wake_on_path_end) and when a pause ends (wake_at)
+	tick_interval_ticks = 60 # the safety net: it wakes when a walk ends (wake_on_step_end) and when a pause ends (wake_at)

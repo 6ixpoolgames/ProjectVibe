@@ -374,6 +374,7 @@ One tick: the `scheduler`'s actions due before it, `before_tick`, input, capture
 - `load_average: float` = `0.0`: How much of its budget a tick has used lately, smoothed over about ten ticks: 1.0 is the whole tick's length.
 - `profile_enabled: bool` = `false`: On, each tick phase adds up its time in microseconds into `profile`, for finding what's slow. Off, it costs a few flag checks per tick.
 - `profile: Dictionary` = `{}`: Each phase's time in microseconds, plus the counts in `PROFILE_COUNTS`, while `profile_enabled` is on. Emptied by `reset_profile()`.
+- `rollbacks_loaded: int` = `0`: Goes up by one each time a rollback loads old state, before its replay. Something that keeps live-only state, such as a move step's path, compares it with the count it last saw to know the pawn may have been put somewhere else.
 
 ### Signals
 

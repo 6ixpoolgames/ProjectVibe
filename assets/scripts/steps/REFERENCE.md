@@ -4,10 +4,44 @@
 
 Every class in `assets/scripts/steps/`, from its doc comments. The overview is in [README.md](README.md).
 
+- [InputStep](#inputstep)
 - [Step](#step)
+- [StepCondition](#stepcondition)
+- [StepInput](#stepinput)
 - [StepTimeline](#steptimeline)
+- [TimelineEntry](#timelineentry)
+- [HoldStep](#holdstep)
+- [PressStep](#pressstep)
+- [ReleaseStep](#releasestep)
+- [DelayStep](#delaystep)
+- [RepeatStep](#repeatstep)
+- [WaitUntilStep](#waituntilstep)
+- [LookAtStep](#lookatstep)
+- [LookInDirectionStep](#lookindirectionstep)
+- [StopLookingStep](#stoplookingstep)
+- [FollowStep](#followstep)
+- [KeepAwayFromStep](#keepawayfromstep)
 - [MoveStep](#movestep)
 - [MoveToStep](#movetostep)
+- [StopMovingStep](#stopmovingstep)
+
+## InputStep
+
+`res://assets/scripts/steps/InputStep.gd`, extends [`Step`](#step)
+
+The base of steps that write a pawn's input: moving, looking and buttons (pawn spec 16.7).
+
+Its host is whatever owns its timeline and has a `step_input()` method giving the [`StepInput`](#stepinput) its steps write: an AI behaviour, or a [`ControllerStepHost`](../controllers/REFERENCE.md#controllerstephost). The host clears that input before its steps run each tick; a step writes its part in `Step.tick()`. Steps that stop others (StopMoving, Release) look through `Step.timeline` for them.
+
+### Settings and properties
+
+- `input: StepInput` = `null`: The input it writes: its host's (`step_input()`), found when the timeline is built. Null: its host gives none, and it writes nothing (warned once).
+
+### Functions
+
+- `setup() -> void`
+- `eye_position() -> Vector3`: Where the pawn's eyes are, for looks: `Pawn.eye_height` above its feet.
+- `stop_running_steps_of(kind: Script, reason: String = "cancelled") -> void`: Stops every running step on its timeline that is one of this script class (StopMoving stops MoveSteps), except itself.
 
 ## Step
 
@@ -46,11 +80,78 @@ Rollback: whether it runs and its count live in its timeline's state, which its 
 - `counts_this_tick() -> bool`: Whether this tick counts toward length_ticks. Always by default; a windup waiting for a turn says no.
 - `setup() -> void`: Once, when its timeline is built: for working out settings (an input bit, say), not for state.
 
+## StepCondition
+
+`res://assets/scripts/steps/StepCondition.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
+
+A condition a step timeline entry can start on: one value of the owner's pawn compared with a number (ability spec 6.3).
+
+Data, not code, so timelines stay no-code and C++ can judge them later. Any timeline owner can use it: an ability, an AI behaviour, a controller's step host. It follows the AI's [`AICompareCondition`](../ai/REFERENCE.md#aicomparecondition); the two may share a base later. Values that are yes or no are 1 or 0. BETWEEN holds from `value` to `upper`, so a distance band ("dash when 4 to 8 m away") is one condition.
+
+```gdscript
+LOOK_ANGLE       AT_MOST  15        # facing within 15 degrees of where it looks
+ACTION_HELD      EQUAL    0         # its action was let go
+STAT "Health"    AT_MOST  20
+TARGET_DISTANCE  BETWEEN  4 .. 8    # the AI's target, at its real position
+```
+
+### Settings and properties
+
+- `input: int` = `0`: What it reads.
+- `comparison: int` = `0`: How it's compared.
+- `value: float` = `0.0`: The number it's compared with; with BETWEEN, the lowest that holds.
+- `upper: float` = `0.0`: With BETWEEN: the highest that holds.
+- `action: StringName` = `&""`: With ACTION_HELD: the action. Empty: the owner's own (`default_action()` on the timeline's host).
+- `stat: StringName` = `&""`: With STAT: the stat's name.
+
+### Constants
+
+- `Reads.LOOK_ANGLE = 0`: degrees between where the pawn faces and where it looks
+- `Reads.ACTION_HELD = 1`: 1 while `action` (or the owner's own action: an ability's trigger, a behaviour's presses_action) is held, else 0
+- `Reads.GROUNDED = 2`: 1 on the ground, else 0
+- `Reads.STAT = 3`: the pawn's `stat`
+- `Reads.TICKS_RUNNING = 4`: ticks since the owner's run began, at the match's rate
+- `Reads.TARGET_DISTANCE = 5`: flat metres to the AI's current target where it really is; `AIInputs.FAR` with none
+- `Comparison.AT_MOST = 0`
+- `Comparison.LESS_THAN = 1`
+- `Comparison.AT_LEAST = 2`
+- `Comparison.MORE_THAN = 3`
+- `Comparison.EQUAL = 4`
+- `Comparison.NOT_EQUAL = 5`
+- `Comparison.BETWEEN = 6`: from `value` to `upper`, both included
+
+### Functions
+
+- `make(reads: int, compare: int, number: float, high: float = 0.0) -> StepCondition` *(static)*: A condition in one line: `StepCondition.make(StepCondition.Reads.TARGET_DISTANCE, StepCondition.Comparison.BETWEEN, 4, 8)`.
+- `holds(timeline: StepTimeline) -> bool`: True if it holds now for the pawn of this timeline's owner.
+- `read(timeline: StepTimeline) -> float`: The value it compares, for the pawn of this timeline's owner now. The owner (the timeline's host) has a `pawn`.
+
+## StepInput
+
+`res://assets/scripts/steps/StepInput.gd`, extends [`InputCommand`](../controllers/REFERENCE.md#inputcommand)
+
+The input a host's steps write in one tick: an [`InputCommand`](../controllers/REFERENCE.md#inputcommand) that also knows which parts were written (pawn spec 16.7).
+
+Its host ([`ControllerStepHost`](../controllers/REFERENCE.md#controllerstephost), an AI behaviour) clears it before its steps run, and the controller uses what they wrote. One writer per input: move and look take the last write, held actions OR together. A part nothing wrote is left to the controller (a still pawn, the pawn's own look).
+
+### Settings and properties
+
+- `move_set: bool` = `false`: True once a step wrote `InputCommand.move` this tick.
+- `look_set: bool` = `false`: True once a step wrote the look this tick.
+
+### Functions
+
+- `clear() -> void`: Before the steps run: nothing written.
+- `write_move(direction: Vector3) -> void`: Writes the move: which way to go, in world space, up to length 1.
+- `write_look(yaw: float, pitch: float) -> void`: Writes the look as a yaw and pitch, in radians.
+- `look_at(eye: Vector3, point: Vector3) -> void`: Writes the look toward a point, measured from `eye` (the pawn's eyes). Writes nothing for a point at the eyes.
+- `write_held(bits: int) -> void`: Holds these actions this tick ([`InputActions`](../controllers/REFERENCE.md#inputactions) bits), along with any others written.
+
 ## StepTimeline
 
 `res://assets/scripts/steps/StepTimeline.gd`, extends [`RefCounted`](https://docs.godotengine.org/en/stable/classes/class_refcounted.html)
 
-Runs an owner's [`Step`](#step) children on a timeline of [`TimelineEntry`](../abilities/REFERENCE.md#timelineentry) rules (pawn spec 16.7, ability spec 6.2).
+Runs an owner's [`Step`](#step) children on a timeline of [`TimelineEntry`](#timelineentry) rules (pawn spec 16.7, ability spec 6.2).
 
 Each ability owns one (and each AI behaviour will). Entries start at a tick, when another entry starts or ends (with a delay), or on a condition; steps end on their length or when they say done; several run at once, and one step can run in several entries. The timeline's state is four numbers per entry (`state`), which its owner rolls back as one value.
 The owner (the host) is told what happens through these methods, which it must have:
@@ -98,27 +199,260 @@ Conditions are asked about the host. A host whose steps write a pawn's input als
 - `steps_after(step: Step) -> Step[]`: The steps whose entries start when an entry of this step ends: what comes after it, for visuals (a windup's sweep).
 - `step_before(step: Step) -> Step`: The step whose end starts this step's first entry, or null: what came before it, for visuals (a recovery's sweep).
 
-## MoveStep
+## TimelineEntry
 
-`res://assets/scripts/steps/movement/MoveStep.gd`, extends [`Step`](#step)
+`res://assets/scripts/steps/TimelineEntry.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
 
-The base of steps that walk the pawn along a nav path: holds a [`PathFollower`](../navigation/REFERENCE.md#pathfollower) and writes its direction into the host's input.
+One entry of a step timeline: which step runs, the values it runs with, and when it starts (ability spec 6.2, pawn spec 16.7).
 
-[`MoveToStep`](#movetostep) extends it; Follow and KeepAwayFrom will (pawn spec 16.7). Its host is whatever owns its timeline and has an `step_input()` method giving the [`InputCommand`](../controllers/REFERENCE.md#inputcommand) its steps write: a [`ControllerStepHost`](../controllers/REFERENCE.md#controllerstephost) today, an AI behaviour from step 7. Each tick it writes the follower's direction into that input's move and ORs in a link's action (`steer()`). Why a walk failed is `follower.get_end_reason()`.
-Rollback: the follower doesn't roll back yet. The player's host runs on the owner's machine only, whose input is what rolls back.
+Ticks count from the start of the owner's run (an ability, an AI behaviour). An entry starts when the first of its rules holds: `at_tick`; `after` another entry starts or ends (with the `end_reasons` that count, so a cancelled windup doesn't swing), plus `delay_ticks`; or its `condition`. With no rule set it starts with the run. Each entry runs once per run; one step node can be in several entries (a second sweep on a backswing), one at a time.
+
+```gdscript
+Turn    at_tick 0
+Windup  at_tick 0
+Sweep   after "Windup" (ends, done)          values {"start_angle": 60.0, "end_angle": -60.0}
+```
 
 ### Settings and properties
 
-- `settings: PathFollowSettings`: How it follows its path (closeness, nav tier, links, waiting for nav). Empty: the defaults. Shared, so steps can use one.
-- `follower: PathFollower` = `<unknown>`: The path it follows, with `settings`.
-- `input: InputCommand` = `null`: The input it writes: its host's (`step_input()`), found when the timeline is built. Null: its host gives none, and it moves nothing (warned once).
+- `step: StringName` = `&""`: The step node it runs: the name of one of the owner's steps.
+- `label: StringName` = `&""`: What other entries call it in `after`. Empty: the step's name (give one when a step is in several entries).
+- `at_tick: int` = `-1`: Starts this many ticks after the run begins, at 60 a second (converted for the match's rate). -1: not by time.
+- `after: StringName` = `&""`: Starts when this entry (its label) starts or ends. Empty: not after another.
+- `after_event: int` = `0`: Whether it follows the `after` entry's start or its end.
+- `end_reasons: int` = `3`: With ENDS, the reasons that count. Done and released by default: a released step's next steps start as if it were done.
+- `delay_ticks: int` = `0`: Ticks after the `after` entry's start or end, at 60 a second.
+- `condition: StepCondition` = `null`: Starts on the first tick this holds (checked every tick the owner runs). Empty: not by a condition.
+- `values: Dictionary` = `{}`: Values its step runs with in this entry, by property name, in place of the step's own: {"length_ticks": 12}.
+- `manual: bool` = `false`: On: no rule starts it; only code does (`StepTimeline.start_step()`), as a bespoke script or an AI behaviour would.
+
+### Constants
+
+- `After.ENDS = 0`
+- `After.STARTS = 1`
+- `Reason.DONE = 1`
+- `Reason.RELEASED = 2`
+- `Reason.FAILED = 4`
+- `Reason.CANCELLED = 8`
+
+### Functions
+
+- `get_label() -> StringName`: The name other entries use for it.
+- `starts_with_run() -> bool`: True if no rule is set, so it starts as the run begins.
+- `at(step_name: StringName, tick: int = 0, run_values: Dictionary = {}) -> TimelineEntry` *(static)*: An entry for this step that starts this many ticks after the run begins (0: with it).
+- `after_end_of(step_name: StringName, other: StringName, run_values: Dictionary = {}, entry_label: StringName = &"") -> TimelineEntry` *(static)*: An entry for this step that starts when another entry ends (done or released, by default).
+
+## HoldStep
+
+`res://assets/scripts/steps/buttons/HoldStep.gd`, extends [`InputStep`](#inputstep)
+
+Holds an action while it runs: until stopped ([`ReleaseStep`](#releasestep)), or for its length (pawn spec 16.7's Hold).
+
+With `fresh_press` on, an action the pawn's last input already held is let go for its first tick, so holding it starts with a press: an attack held through one swing would otherwise start the next with no press at all.
+
+### Settings and properties
+
+- `action: StringName` = `&""`: The action it holds, such as &"sprint" or an attack's.
+- `fresh_press: bool` = `false`: On: if the last input held the action, it's let go for one tick first, so the hold begins with a press.
+
+### Functions
+
+- `enter() -> void`
+- `hold_from_tick() -> int`: The tick its hold begins: a tick after it started when it had to let go first.
+- `tick(_dt: float) -> int`
+
+## PressStep
+
+`res://assets/scripts/steps/buttons/PressStep.gd`, extends [`InputStep`](#inputstep)
+
+Holds an action for one tick, so the pawn sees one press, and is done (pawn spec 16.7's Press).
+
+### Settings and properties
+
+- `action: StringName` = `&""`: The action it presses, such as &"dash".
+
+### Functions
+
+- `tick(_dt: float) -> int`
+
+## ReleaseStep
+
+`res://assets/scripts/steps/buttons/ReleaseStep.gd`, extends [`InputStep`](#inputstep)
+
+Stops the [`HoldStep`](#holdstep)s running on its timeline that hold `action` (every one with it empty) as it starts, and is done on its first tick (pawn spec 16.7's Release).
+
+### Settings and properties
+
+- `action: StringName` = `&""`: The action to let go of. Empty: every held action.
+
+### Functions
+
+- `enter() -> void`
+- `tick(_dt: float) -> int`
+
+## DelayStep
+
+`res://assets/scripts/steps/flow/DelayStep.gd`, extends [`Step`](#step)
+
+Does nothing for a while, then is done: for `Step.length_ticks`, or until `until_tick` (pawn spec 16.7's Wait, named after Unreal's Delay, since abilities already have a [`WaitStep`](../abilities/REFERENCE.md#waitstep)).
+
+A pause between walks, a beat before a swing. A deadline set from code (a random pause) goes in `until_tick`, the tick it ends on.
+
+### Settings and properties
+
+- `until_tick: int` = `-1`: The tick it's done on. -1: by its length alone (0 length and no tick: it waits until stopped).
+
+### Functions
+
+- `tick(_dt: float) -> int`
+
+## RepeatStep
+
+`res://assets/scripts/steps/flow/RepeatStep.gd`, extends [`Step`](#step)
+
+Runs another step of its timeline again each time it ends, `times` times in all (0: until stopped), then is done (pawn spec 16.7's Repeat). Stopping it stops the step it repeats.
+
+### Settings and properties
+
+- `step: StringName` = `&""`: The step it repeats, by node name.
+- `times: int` = `0`: How many runs in all. 0: until stopped.
 
 ### Functions
 
 - `setup() -> void`
 - `enter() -> void`
+- `tick(_dt: float) -> int`
 - `exit(_reason: String) -> void`
-- `steer() -> void`: Writes this tick's direction into `input`, and presses a link's action the path just reached. Call it once per tick, from `Step.tick()`: it moves the follower on.
+
+## WaitUntilStep
+
+`res://assets/scripts/steps/flow/WaitUntilStep.gd`, extends [`Step`](#step)
+
+Waits until its `condition` holds, then is done; with a length, it gives up (fails) once that runs out (pawn spec 16.7's WaitUntil). With no condition it's done at once.
+
+### Settings and properties
+
+- `condition: StepCondition` = `null`: What it waits for, asked every tick it runs.
+- `fails_on_timeout: bool` = `true`: On: running out of length counts as failing, which ends the owner's run. Off: as done.
+
+### Functions
+
+- `tick(_dt: float) -> int`
+
+## LookAtStep
+
+`res://assets/scripts/steps/looking/LookAtStep.gd`, extends [`InputStep`](#inputstep)
+
+Looks at a point, or keeps looking at a target, aimed from the pawn's eyes (pawn spec 16.7's LookAt).
+
+With `target` set it looks at the target's position plus `offset`, worked out again every tick; once the target is gone it keeps its last aim. Otherwise it looks at `point`. It runs until stopped, or for its length. AI sight faces where it looks ([`SightSense`](../ai/REFERENCE.md#sightsense)).
+
+### Settings and properties
+
+- `point: Vector3` = `Vector3(0, 0, 0)`: The point it looks at when it has no `target`.
+- `target: Node3D` = `null`: What it keeps looking at. Empty: `point`.
+- `offset: Vector3` = `Vector3(0, 1, 0)`: Added to the target's position: 1 m up looks at a body, not its feet.
+
+### Functions
+
+- `enter() -> void`
+- `tick(_dt: float) -> int`
+
+## LookInDirectionStep
+
+`res://assets/scripts/steps/looking/LookInDirectionStep.gd`, extends [`InputStep`](#inputstep)
+
+Looks one way, as a yaw and pitch in degrees, until stopped or for its length (pawn spec 16.7's LookInDirection).
+
+Yaw 0 looks along -Z, Godot's forward; positive turns left. Pitch is up from level.
+
+### Settings and properties
+
+- `yaw_degrees: float` = `0.0`: Which way round, in degrees.
+- `pitch_degrees: float` = `0.0`: How far up (below 0: down), in degrees.
+
+### Functions
+
+- `tick(_dt: float) -> int`
+
+## StopLookingStep
+
+`res://assets/scripts/steps/looking/StopLookingStep.gd`, extends [`InputStep`](#inputstep)
+
+Stops every look step running on its timeline (LookAt, LookInDirection) as it starts, and is done on its first tick (pawn spec 16.7's StopLooking). With no look step running, the pawn keeps the look it has.
+
+### Functions
+
+- `enter() -> void`
+- `tick(_dt: float) -> int`
+
+## FollowStep
+
+`res://assets/scripts/steps/movement/FollowStep.gd`, extends [`MoveStep`](#movestep)
+
+Closes in on a target along nav paths and stands `stop_distance` from it (flat), walking again once it's further than that plus `band` (pawn spec 16.7's Follow).
+
+Set `target` before it starts. It runs until stopped; once the target is gone (freed) it stands and is done. It finds a new path when the target has moved `repath_distance` from where its path leads, every `MoveStep.repath_ticks` (20 by default), and by [`MoveStep`](#movestep)'s other rules. It reads only the target's real position, so every machine does the same. Looking at the target is a separate step ([`LookAtStep`](#lookatstep)).
+
+### Settings and properties
+
+- `target: Node3D` = `null`: What it closes in on.
+- `stop_distance: float` = `1.2`: How near, in metres, flat, it stands.
+- `band: float` = `0.3`: How much further it may drift before walking again, so it doesn't twitch at the edge. It stands once within half of it.
+- `repath_distance: float` = `1.5`: Finds a new path once the target has moved this far from where the path leads, in metres.
+
+### Functions
+
+- `enter() -> void`
+- `current_goal() -> Vector3`
+- `is_standing() -> bool`: True while it stands, near enough (or, keeping away, at its distance).
+- `goal_for(there: Vector3, _away: Vector3, _distance: float) -> Vector3`: Where it walks to for a target at `there`, `distance` away from the pawn now (flat).
+- `off_by(distance: float) -> float`: How far off its distance the pawn is: only too far matters when closing in.
+- `tick(_dt: float) -> int`
+
+## KeepAwayFromStep
+
+`res://assets/scripts/steps/movement/KeepAwayFromStep.gd`, extends [`FollowStep`](#followstep)
+
+Keeps about `FollowStep.stop_distance` from a target (flat), closing in when further and backing away when nearer, and stands once within `FollowStep.band` of that distance (half of it, from walking) (pawn spec 16.7's KeepAwayFrom).
+
+Otherwise as [`FollowStep`](#followstep): a ranged pawn hanging back at shooting distance runs one ([`AIKeepDistanceBehaviour`](../ai/REFERENCE.md#aikeepdistancebehaviour)).
+
+### Functions
+
+- `goal_for(there: Vector3, away: Vector3, distance: float) -> Vector3`
+- `off_by(distance: float) -> float`
+
+## MoveStep
+
+`res://assets/scripts/steps/movement/MoveStep.gd`, extends [`InputStep`](#inputstep)
+
+The base of steps that walk the pawn along a nav path: holds a [`PathFollower`](../navigation/REFERENCE.md#pathfollower) and writes its direction into the host's input.
+
+[`MoveToStep`](#movetostep), [`FollowStep`](#followstep) and [`KeepAwayFromStep`](#keepawayfromstep) extend it (pawn spec 16.7). Each tick `steer()` writes the follower's direction into the host's [`StepInput`](#stepinput) and ORs in a link's action. It finds a new path to `current_goal()`:
+- when the walk was dropped (charge changed hands) or a rollback loaded old state: a path isn't state, so after a rollback, or on a client, it's found afresh;
+- every `repath_ticks`, if set;
+- once the pawn is more than `off_path_metres` from its path (knocked off it), if set;
+- after a link isn't crossed in time (the follower itself, `PathFollowSettings.link_timeout_ticks`).
+
+Why a walk failed is `follower.get_end_reason()`.
+
+### Settings and properties
+
+- `settings: PathFollowSettings`: How it follows its path (closeness, nav tier, links, waiting for nav). Shared, so steps can use one. Empty: the AI controller's `AIController.path_settings` on an AI pawn, else the defaults.
+- `repath_ticks: int` = `0`: Finds a new path this often, in ticks at 60 a second. 0: only when the rules above call for one.
+- `off_path_metres: float` = `0.0`: Finds a new path once the pawn is this far, flat, from the path (knocked off it). 0: never for that.
+- `follower: PathFollower` = `<unknown>`: The path it follows, with `settings`.
+
+### Functions
+
+- `enter() -> void`
+- `exit(_reason: String) -> void`
+- `current_goal() -> Vector3`: Where it's walking to now. MoveTo's goal; Follow's, worked out from its target.
+- `walk_to(point: Vector3) -> bool`: Finds a path to this point now. False if there's no way there (the follower is UNREACHABLE).
+- `gave_up() -> bool`: True once its path ended without arriving and no new one is coming: no way there, nav too slow, a link missed twice.
+- `steer() -> void`: Writes this tick's direction into the input, and presses a link's action the path just reached. Finds a new path first if a rule above calls for one. Call it once per tick, from `Step.tick()`: it moves the follower on.
+- `repath_due() -> bool`: True once `repath_ticks` have passed since its path was asked for (never with 0).
 
 ## MoveToStep
 
@@ -126,11 +460,23 @@ Rollback: the follower doesn't roll back yet. The player's host runs on the owne
 
 Walks the pawn to a point along a nav path: done on arriving, failed when there's no way there (pawn spec 16.7's MoveTo).
 
-Set `goal` before it starts (a timeline entry's values, or code). With no nav at all it walks a straight line; while nav is still being built it waits, standing. The player's click-to-move runs one on its [`ControllerStepHost`](../controllers/REFERENCE.md#controllerstephost).
+Set `goal` before it starts (a timeline entry's values, or code). With no nav at all it walks a straight line; while nav is still being built it waits, standing. The player's click-to-move runs one on its [`ControllerStepHost`](../controllers/REFERENCE.md#controllerstephost); AI behaviours walk with one. Right after starting it, `MoveStep.gave_up()` says whether there was no way there at all.
 
 ### Settings and properties
 
 - `goal: Vector3` = `Vector3(0, 0, 0)`: Where it walks to.
+
+### Functions
+
+- `enter() -> void`
+- `current_goal() -> Vector3`
+- `tick(_dt: float) -> int`
+
+## StopMovingStep
+
+`res://assets/scripts/steps/movement/StopMovingStep.gd`, extends [`InputStep`](#inputstep)
+
+Stops every move step running on its timeline (MoveTo, Follow, KeepAwayFrom) as it starts, and is done on its first tick (pawn spec 16.7's StopMoving). With no move step running, the pawn stands: nothing writes a move.
 
 ### Functions
 

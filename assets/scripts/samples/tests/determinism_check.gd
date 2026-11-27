@@ -22,8 +22,9 @@
 ##   --paths-to=T             up to tick T, every pawn's path state with goals and corners as exact bits (PATH.paths), and the nav
 ##                            server's log of every queued path search (PATH.pathlog, NavServer.debug_log_path_steps)
 ## Playing from orders (Claude 2026-11-23, the owner's request: can clients run the crowds from orders alone? netcode spec 19.3):
-##   --record-orders=FILE     every order the AI gives a pawn's controller (AIController.order_listener): its tick, the pawn, the order
-##                            and its exact arguments, and whether it came during that pawn's own AI step
+##   --record-orders=FILE     every order the AI's behaviours give (AIBehaviourManager.order_listener: behaviours and the steps their
+##                            code starts or stops, with their values): its tick, the pawn, the order and its exact arguments, and
+##                            whether it came during that pawn's own AI step
 ##   --replay-orders=FILE     the AI doesn't think: each pawn's AI step plays its recorded orders for that tick instead
 ##                            (AIManager.order_source). Compare the two runs' fingerprints with run_determinism_check.py
 ##                            --compare: the same means orders alone rebuild the game
@@ -54,13 +55,13 @@ var _paths_to := -1
 var _record_orders_path := ""
 var _replay_orders_path := ""
 var _orders_out: FileAccess = null
-var _orders: Dictionary = {} # replaying: tick -> {pawn name -> [[order, args], ...]}
+var _orders: Dictionary = {} # replaying: tick -> {pawn name -> [[order, args, inside], ...]}
 var _thinking: Node = null # recording: the pawn whose AI step is running, so an order from elsewhere is noticed
 var _orders_recorded := 0
 var _orders_outside := 0 # recorded orders given outside their pawn's own AI step
 var _orders_played := 0
 var _orders_skipped := 0 # replaying: orders given outside their pawn's AI step, which aren't played
-var _pawn_names := {} # replaying: pawn name -> pawn, refreshed each tick, for orders that name a pawn (look_at_node)
+var _pawn_names := {} # replaying: pawn name -> pawn, refreshed each tick, for step values that name a pawn (a Follow's target)
 var _pawn_names_tick := -1
 var _out: FileAccess = null
 var _names: FileAccess = null
@@ -153,30 +154,58 @@ func _ready() -> void:
 # These are static, so left on they'd outlive this scene: a listener that outlives it crashes Godot as it quits.
 func _exit_tree() -> void:
 	AIBehaviourManager.decision_listener = Callable()
-	AIController.order_listener = Callable()
+	AIBehaviourManager.order_listener = Callable()
 	AIManager.order_source = Callable()
 	if _path_log:
 		Engine.get_singleton(&"NavServer").debug_log_path_steps(false)
 
 
-# Recording: the AI thinks as usual, through an order source that notes whose step it is, and every order goes to the file. A pawn
-# named in an order (look_at_node) is written as {"pawn": its name}, which is the same in every run.
+# Recording: the AI thinks as usual, through an order source that notes whose step it is, and every order its behaviours give goes
+# to the file (AIBehaviourManager.order_listener): behaviours starting and stopping, and steps started or stopped by their code, with
+# their values. A step ending on its own isn't an order. A pawn in a step's values (a Follow's target) is written as {"pawn": its
+# name}, which is the same in every run. Claude 2026-11-27: orders are behaviour and step orders now (pawn spec 16.10 step 7c).
 func _start_recording_orders() -> void:
 	_orders_out = FileAccess.open(_record_orders_path, FileAccess.WRITE)
 	AIManager.order_source = func(context: AIManager, tick: int) -> void:
 		_thinking = context.pawn
 		context.think(tick)
 		_thinking = null
-	AIController.order_listener = func(controller: AIController, order: StringName, args: Array) -> void:
-		var inside := controller.pawn == _thinking
+	AIBehaviourManager.order_listener = func(manager: AIBehaviourManager, event: StringName, args: Array) -> void:
+		var inside := manager.pawn == _thinking
 		if not inside:
 			_orders_outside += 1
-		var plain: Array = args.map(func(arg: Variant) -> Variant: return {"pawn": String(arg.name)} if arg is Node else arg)
-		_orders_out.store_var([TickDriver.tick, String(controller.pawn.name) if controller.pawn else "", order, plain, inside])
+		var plain: Array = args.map(_plain_value)
+		_orders_out.store_var([TickDriver.tick, String(manager.pawn.name) if manager.pawn else "", event, plain, inside])
 		_orders_recorded += 1
 
 
-# Replaying: every recorded order, by tick and pawn, played in each pawn's AI step instead of its AI.
+# A value as the file holds it: a node as {"pawn": its name}, a dictionary of step values with its nodes likewise.
+func _plain_value(value: Variant) -> Variant:
+	if value is Node:
+		return {"pawn": String(value.name)}
+	if value is Dictionary:
+		var plain := {}
+		for key in value:
+			plain[key] = _plain_value(value[key])
+		return plain
+	return value
+
+
+# Back from the file: {"pawn": name} as that pawn now.
+func _live_value(value: Variant, tick: int) -> Variant:
+	if value is Dictionary:
+		if value.size() == 1 and value.has("pawn"):
+			return _pawn_named(value["pawn"], tick)
+		var live := {}
+		for key in value:
+			live[key] = _live_value(value[key], tick)
+		return live
+	return value
+
+
+# Replaying: every recorded order, by tick and pawn, played in each pawn's AI step instead of its AI. Behaviours start and stop
+# without their own code (AIBehaviourManager.play_behaviour_started), and their steps start and stop as recorded; the steps then
+# write the input as they did.
 func _start_replaying_orders() -> void:
 	var file := FileAccess.open(_replay_orders_path, FileAccess.READ)
 	while file.get_position() < file.get_length():
@@ -184,15 +213,28 @@ func _start_replaying_orders() -> void:
 		var by_pawn: Dictionary = _orders.get_or_add(int(entry[0]), {})
 		(by_pawn.get_or_add(String(entry[1]), []) as Array).append([entry[2], entry[3], entry[4]])
 	AIManager.order_source = func(context: AIManager, tick: int) -> void:
+		var behaviours := context.behaviour_manager
 		for order: Array in _orders.get(tick, {}).get(String(context.pawn.name), []):
-			# Claude 2026-11-23: none are expected since a dead pawn's controller takes no orders (it was the AI tidying up mid-tick when
-			# its pawn died). One given outside its pawn's AI step belongs to another moment of the tick, so it's left out and counted,
-			# and the summary line says so.
+			# One given outside its pawn's AI step (a behaviour stopping as its pawn died) happens again by itself, so it's left out
+			# and counted, and the summary line says so.
 			if not order[2]:
 				_orders_skipped += 1
 				continue
-			var args: Array = (order[1] as Array).map(func(arg: Variant) -> Variant: return _pawn_named(arg["pawn"], tick) if arg is Dictionary else arg)
-			context.controller.callv(order[0], args)
+			var args: Array = (order[1] as Array).map(func(arg: Variant) -> Variant: return _live_value(arg, tick))
+			match StringName(order[0]):
+				&"behaviour_started":
+					behaviours.play_behaviour_started(args[0], tick)
+				&"behaviour_stopped":
+					behaviours.play_behaviour_stopped(args[1], tick)
+				&"step_started", &"step_stopped":
+					var behaviour := behaviours.get_running_behaviour()
+					if behaviour == null or behaviour.name != StringName(args[0]):
+						_orders_skipped += 1
+						continue
+					if StringName(order[0]) == &"step_started":
+						behaviour.start_step(args[1], args[2])
+					else:
+						behaviour.stop_step(args[1], args[2])
 			_orders_played += 1
 
 
@@ -233,7 +275,7 @@ func _trace_pawn(tick: int, stage: String) -> void:
 		line += "\tmove %.9f %.9f %.9f actions %d" % [m.x, m.y, m.z, controllers.held_actions]
 	# Claude 2026-11-25: the AI controller's own follower (pawn spec 16.10 step 5c); the give-up deadline in place of the ticks waited.
 	var ai: AIManager = pawn.get(&"ai")
-	var navigation: PathFollower = ai.controller.path_follower if ai and ai.controller else null
+	var navigation: PathFollower = controllers.get_path_follower() if controllers else null # Claude 2026-11-27: the running move step's (step 7)
 	if stage == "after_simulate" and navigation:
 		line += "\tpath state %d request %d give up %d corners %d" % [navigation._state, navigation._path_request,
 			navigation._give_up_tick, navigation._corners.size()]
@@ -267,7 +309,7 @@ func _write_paths(tick: int) -> void:
 		if tick == _paths_to:
 			nav.debug_log_path_steps(false)
 	for pawn in get_tree().get_nodes_in_group(Pawn.GROUP):
-		var navigation: PathFollower = pawn.ai.controller.path_follower if pawn.ai and pawn.ai.controller else null # Claude 2026-11-25
+		var navigation: PathFollower = pawn.controller_manager.get_path_follower() if pawn.controller_manager else null # Claude 2026-11-27: the running move step's
 		if navigation == null or navigation._state == PathFollower.PathState.NONE:
 			continue
 		_paths.store_line("%d\t%s\tstate %d request %d give up %d\tgoal %s\tcorners %s" % [tick, pawn.name, navigation._state,

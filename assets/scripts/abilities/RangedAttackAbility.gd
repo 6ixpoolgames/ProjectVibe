@@ -88,7 +88,7 @@ func _sync_default_steps() -> void:
 	var fire := get_node(^"Fire") as FireProjectileStep
 	fire.projectile_scene = _ranged.projectile_scene
 	fire.projectile_definition = _ranged.projectile_definition
-	fire.muzzle_height = _ranged.muzzle_height
+	fire.muzzle_below_eyes = _ranged.muzzle_below_eyes
 	fire.muzzle_forward = _ranged.muzzle_forward
 	fire.warns_targets = _ranged.warns_targets
 	(get_node(^"Recovery") as WaitStep).length_ticks = _ranged.recovery_ticks

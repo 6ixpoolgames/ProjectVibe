@@ -2,10 +2,12 @@
 ## The base for one AI behaviour, such as Wander or Chase: one concrete thing to do.
 ##
 ## A child of the pawn's [AIBehaviourManager], which only judges between behaviours. Its settings come from its [member definition],
-## shared by every pawn using it ([AIBehaviourDefinition]); empty, it runs with its kind's defaults. It acts only through the AI
-## controller ([code]context.controller.move_to()[/code], [code]press()[/code]), never on abilities or the body. Extend it:
-## [method make_default_definition] for settings of its own, then [method own_conditions], [method enter], [method tick] (return
-## SUCCEEDED or FAILED to finish) and [method exit]. Its node name is its name: the fixed order and the random numbers read it.
+## shared by every pawn using it ([AIBehaviourDefinition]); empty, it runs with its kind's defaults. It acts only by starting steps
+## with values ([method start_step]): moving, looking and buttons ([Step], pawn spec 16.7), which write the pawn's input on its own
+## [member timeline] each tick the AI controller is asked for input. It never acts on abilities or the body. That one link, a behaviour
+## starting steps, is what an order stream carries. Extend it: [method make_default_definition] for settings of its own,
+## [method make_steps] for the steps it uses, then [method own_conditions], [method enter], [method tick] (return SUCCEEDED or FAILED
+## to finish) and [method exit]. Its node name is its name: the fixed order and the random numbers read it.
 ## Settings in ticks are written for 60 a second. Design: pawn spec 10.7 and 16.3, scaling spec 6.2.
 class_name AIBehaviourBase
 extends Node
@@ -71,9 +73,15 @@ var decision_index := 0 # place in the fixed order
 
 ## Wake-ups, read by the manager (see the class description). Cleared when it starts.
 var wake_tick := -1 # wake_at's tick; -1: none
-var wakes_on_path_end := false
+var wakes_on_step_end := false
 var wakes_on_action: StringName = &""
 var woken := false # an event it waits for happened since its last tick()
+
+## The timeline its steps run on: its [Step] children and those it makes ([method make_steps]), built the first time it starts. Its
+## entries come from [member AIBehaviourDefinition.step_timeline]; with none, code starts every step.
+var timeline := StepTimeline.new()
+## What its running steps wrote this tick ([method step_input]); the AI controller hands it over.
+var steps_input := StepInput.new()
 
 # Works out settings from the definition, the kind's defaults and what's written on the node (shared with abilities).
 var _definition_settings := DefinitionSettings.new(self)
@@ -81,6 +89,11 @@ var _tag_words := PackedInt64Array()
 var _tag_words_generation := -1
 var _all_conditions: Array[AICondition] = []
 var _conditions_built := false
+var _steps_built := false
+var _step_by_name := {} # name -> step
+var _steps_running := 0
+var _moving: MoveStep = null # the move step running now, for its path follower
+var _step_results := {} # step name -> how it last ended ("done", "failed", "released", "cancelled")
 
 
 func _init() -> void:
@@ -208,9 +221,10 @@ func wake_at(at_tick: int) -> void:
 	wake_tick = at_tick if wake_tick < 0 else mini(wake_tick, at_tick)
 
 
-## Runs tick() when a walk it started ends, arrived or given up (PathFollower.path_ended, on the AI controller's follower).
-func wake_on_path_end() -> void:
-	wakes_on_path_end = true
+## Runs tick() when one of its steps ends on its own: done, released or failed (a walk arriving or giving up, a wait running out).
+## Not when code stops it.
+func wake_on_step_end() -> void:
+	wakes_on_step_end = true
 
 
 ## Runs tick() when an ability on this action finishes or is cancelled (AbilityManager.ability_finished, ability_cancelled).
@@ -221,9 +235,187 @@ func wake_on_action_end(action: StringName) -> void:
 ## Forgets every wake-up. The manager calls it when the behaviour starts.
 func clear_wake_ups() -> void:
 	wake_tick = -1
-	wakes_on_path_end = false
+	wakes_on_step_end = false
 	wakes_on_action = &""
 	woken = false
+
+
+# --- Steps ---
+
+
+## The steps it makes for itself if it has no child of that name: each kind overrides it (Chase makes a Follow, a LookAt, a Sprint
+## hold and a Dash press). A [Step] child with the same name is used instead, so a scene can swap one ("Sprint" holding another action).
+func make_steps() -> Array[Step]:
+	return []
+
+
+## The action its steps' conditions mean by "its action" ([member StepCondition.action] empty): [member AIBehaviourDefinition.presses_action].
+func default_action() -> StringName:
+	return settings.presses_action if settings else &""
+
+
+## The input its steps write ([member steps_input]): how an [InputStep] finds it when the timeline is built.
+func step_input() -> StepInput:
+	return steps_input
+
+
+## One of its steps by name, or null. Builds its timeline if it hasn't been yet.
+func get_step(step_name: StringName) -> Step:
+	_build_steps()
+	return _step_by_name.get(step_name)
+
+
+## Starts one of its steps with these values (property names to values, written onto the step first). A step already running is
+## stopped ("cancelled") and started again with them. Returns the step, or null if it has none by that name. The order stream's hook,
+## [member AIBehaviourManager.order_listener], hears it.
+func start_step(step_name: StringName, values := {}) -> Step:
+	var step := get_step(step_name)
+	if step == null:
+		push_warning("%s: it has no step called '%s'." % [name, step_name])
+		return null
+	if step.running:
+		timeline.stop_step(step, "cancelled")
+	for key in values:
+		step.set(key, values[key])
+	timeline.start_step(step)
+	if AIBehaviourManager.order_listener.is_valid() and manager:
+		AIBehaviourManager.order_listener.call(manager, &"step_started", [name, step_name, values])
+	return step
+
+
+## Stops one of its steps if it runs, with this reason. The order stream's hook hears it.
+func stop_step(step_name: StringName, reason := "cancelled") -> void:
+	var step := get_step(step_name)
+	if step == null or not step.running:
+		return
+	timeline.stop_step(step, reason)
+	if AIBehaviourManager.order_listener.is_valid() and manager:
+		AIBehaviourManager.order_listener.call(manager, &"step_stopped", [name, step_name, reason])
+
+
+## True while the step with this name runs.
+func is_step_running(step_name: StringName) -> bool:
+	var step := get_step(step_name)
+	return step != null and step.running
+
+
+## How the step with this name last ended: "done", "released", "failed" or "cancelled"; "" if it hasn't ended since the behaviour
+## started.
+func step_result(step_name: StringName) -> String:
+	return _step_results.get(step_name, "")
+
+
+## The path follower of the move step running now, or null: what the AI controller walks the pawn along.
+func moving_follower() -> PathFollower:
+	return _moving.follower if _moving and _moving.follower.is_under_way() else null
+
+
+## True while any of its steps runs.
+func has_running_steps() -> bool:
+	return _steps_running > 0
+
+
+## The manager calls this as it starts, before [method enter]: begins a run of its timeline (entries due at once start).
+func begin_steps(tick: int) -> void:
+	_build_steps()
+	_step_results.clear()
+	steps_input.clear()
+	if timeline.has_steps():
+		timeline.begin(tick)
+
+
+## The manager calls this after [method exit]: every step still running stops ("cancelled").
+func end_steps() -> void:
+	if _steps_running > 0:
+		timeline.end("cancelled")
+	_steps_running = 0
+	_moving = null
+	steps_input.clear()
+
+
+## The AI controller calls this once per tick it's asked for input, while this behaviour runs: clears [member steps_input] and lets
+## the running steps write it, covering elapsed ticks.
+func run_steps(elapsed: int) -> void:
+	steps_input.clear()
+	if _steps_running > 0:
+		timeline.run(TickDriver.get_tick_dt() * elapsed, elapsed)
+
+
+func _build_steps() -> void:
+	if _steps_built:
+		return
+	_steps_built = true
+	var steps: Array[Step] = []
+	for child in get_children():
+		if child is Step:
+			steps.append(child)
+			_step_by_name[child.name] = child
+	for made in make_steps():
+		if _step_by_name.has(made.name):
+			made.free() # a child of that name is used instead
+			continue
+		add_child(made, false, Node.INTERNAL_MODE_BACK) # made by code: not saved with the scene
+		steps.append(made)
+		_step_by_name[made.name] = made
+	for step in steps:
+		step.pawn = pawn
+	timeline.host = self
+	timeline.owner_name = "%s's behaviour %s" % [pawn.name if pawn else "?", name]
+	var entries: Array[TimelineEntry] = []
+	if settings:
+		entries.assign(settings.step_timeline)
+	if entries.is_empty():
+		for step in steps:
+			var entry := TimelineEntry.new() # manual: started from code only
+			entry.step = step.name
+			entry.manual = true
+			entries.append(entry)
+	timeline.build(steps, entries)
+
+
+## The name of the Hold step behaviours that sprint use ([method made_sprint_step]).
+const SPRINT_STEP := &"Sprint"
+## The action that step holds by default. A game whose sprint is another action gives the behaviour a [HoldStep] child named "Sprint"
+## holding it, which is used instead.
+const SPRINT_ACTION := &"sprint"
+
+
+## The Sprint step: a [HoldStep] of [constant SPRINT_ACTION], named [constant SPRINT_STEP].
+static func made_sprint_step() -> Step:
+	return made_step(HoldStep, SPRINT_STEP, {"action": SPRINT_ACTION})
+
+
+## A step of this kind with this name and settings: for [method make_steps].
+static func made_step(kind: Script, step_name: StringName, values := {}) -> Step:
+	var step: Step = kind.new()
+	step.name = step_name
+	for key in values:
+		step.set(key, values[key])
+	return step
+
+
+# What its timeline tells it (StepTimeline's host methods). The AI never rolls back, so state changes need no pushing.
+func _timeline_state_written() -> void:
+	pass
+
+
+func _timeline_step_started(step: Step) -> void:
+	_steps_running += 1
+	if step is MoveStep:
+		_moving = step
+
+
+func _timeline_step_finished(step: Step, reason: String) -> void:
+	_steps_running = maxi(_steps_running - 1, 0)
+	_step_results[step.name] = reason
+	if step == _moving:
+		_moving = null
+	if wakes_on_step_end and reason != "cancelled":
+		woken = true
+
+
+func _timeline_runaway() -> void:
+	timeline.end("cancelled")
 
 
 ## Once, when it starts.

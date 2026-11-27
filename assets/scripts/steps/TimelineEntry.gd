@@ -1,9 +1,9 @@
-# Written by Claude (claude-opus-5-5), 2026-11-22. History: abilities/CHANGELOG.md.
-## One entry of an ability's step timeline: which step runs, the values it runs with, and when it starts (ability spec 6.2).
+# Written by Claude (claude-opus-5-5), 2026-11-22. History: steps/CHANGELOG.md.
+## One entry of a step timeline: which step runs, the values it runs with, and when it starts (ability spec 6.2, pawn spec 16.7).
 ##
-## Ticks count from the ability's start. An entry starts when the first of its rules holds: [member at_tick]; [member after] another
+## Ticks count from the start of the owner's run (an ability, an AI behaviour). An entry starts when the first of its rules holds: [member at_tick]; [member after] another
 ## entry starts or ends (with the [member end_reasons] that count, so a cancelled windup doesn't swing), plus [member delay_ticks]; or
-## its [member condition]. With no rule set it starts with the ability. Each entry runs once per run of its ability; one step node can be
+## its [member condition]. With no rule set it starts with the run. Each entry runs once per run; one step node can be
 ## in several entries (a second sweep on a backswing), one at a time.
 ## [codeblock]
 ## Turn    at_tick 0
@@ -18,11 +18,11 @@ enum After { ENDS, STARTS }
 ## Why an entry ended, as flags for [member end_reasons].
 enum Reason { DONE = 1, RELEASED = 2, FAILED = 4, CANCELLED = 8 }
 
-## The step node it runs: the name of a step child of the ability.
+## The step node it runs: the name of one of the owner's steps.
 @export var step: StringName = &""
 ## What other entries call it in [member after]. Empty: the step's name (give one when a step is in several entries).
 @export var label: StringName = &""
-## Starts this many ticks after the ability, at 60 a second (converted for the match's rate). -1: not by time.
+## Starts this many ticks after the run begins, at 60 a second (converted for the match's rate). -1: not by time.
 @export_range(-1, 6000, 1, "or_greater") var at_tick := -1
 ## Starts when this entry (its label) starts or ends. Empty: not after another.
 @export var after: StringName = &""
@@ -32,11 +32,11 @@ enum Reason { DONE = 1, RELEASED = 2, FAILED = 4, CANCELLED = 8 }
 @export_flags("Done:1", "Released:2", "Failed:4", "Cancelled:8") var end_reasons := Reason.DONE | Reason.RELEASED
 ## Ticks after the [member after] entry's start or end, at 60 a second.
 @export_range(0, 6000, 1, "or_greater") var delay_ticks := 0
-## Starts on the first tick this holds (checked every tick the ability runs). Empty: not by a condition.
-@export var condition: AbilityCondition = null
+## Starts on the first tick this holds (checked every tick the owner runs). Empty: not by a condition.
+@export var condition: StepCondition = null
 ## Values its step runs with in this entry, by property name, in place of the step's own: {"length_ticks": 12}.
 @export var values: Dictionary = {}
-## On: no rule starts it; only code does ([method AbilityBase.start_step]), as a bespoke script would.
+## On: no rule starts it; only code does ([method StepTimeline.start_step]), as a bespoke script or an AI behaviour would.
 @export var manual := false
 
 
@@ -45,13 +45,12 @@ func get_label() -> StringName:
 	return label if label != &"" else step
 
 
-## True if no rule is set, so it starts with the ability.
-# REFACTOR: named for abilities, though behaviour steps will share the timeline (pawn spec 16.10 step 7). See steps/CHANGELOG.md.
-func starts_with_ability() -> bool:
+## True if no rule is set, so it starts as the run begins.
+func starts_with_run() -> bool:
 	return not manual and at_tick < 0 and after == &"" and condition == null
 
 
-## An entry for this step that starts this many ticks after the ability (0: with it).
+## An entry for this step that starts this many ticks after the run begins (0: with it).
 static func at(step_name: StringName, tick := 0, run_values := {}) -> TimelineEntry:
 	var entry := TimelineEntry.new()
 	entry.step = step_name

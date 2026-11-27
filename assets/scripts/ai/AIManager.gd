@@ -17,7 +17,7 @@ extends Node
 enum WhilePossessed {
 	OFF, ## nothing runs
 	MEMORY_ONLY, ## sensing and memory run; states and behaviours pause. The default
-	FULL, ## everything runs. The AI controller keeps its last order without acting on it until it's in charge again
+	FULL, ## everything runs. The running behaviour's steps wait, and run once the AI controller is in charge again
 }
 
 ## What the AI does while a player has the pawn. MEMORY_ONLY suits possessing an NPC and letting go: the AI already knows what's around.
@@ -29,8 +29,9 @@ enum WhilePossessed {
 @export var random_seed := 0
 
 ## Where every AI pawn's orders come from, if not from its own AI: called instead of [method think] in each pawn's AI step, as
-## [code]order_source.call(context, tick)[/code], to tell [code]context.controller[/code] what to do. Empty (the default): the AI thinks.
-## For playing back an order stream (netcode spec 19.3), recorded through [member AIController.order_listener].
+## [code]order_source.call(context, tick)[/code], to start and stop its behaviours and their steps
+## ([method AIBehaviourManager.play_behaviour_started], [method AIBehaviourBase.start_step]). Empty (the default): the AI thinks. For
+## playing back an order stream (netcode spec 19.3), recorded through [member AIBehaviourManager.order_listener].
 static var order_source := Callable()
 
 ## The pawn this AI belongs to, or null if its parent isn't one.

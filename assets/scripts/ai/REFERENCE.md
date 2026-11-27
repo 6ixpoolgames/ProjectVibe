@@ -21,6 +21,7 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 - [FadeProfile](#fadeprofile)
 - [AIAttackBehaviour](#aiattackbehaviour)
 - [AIChaseBehaviour](#aichasebehaviour)
+- [AIGoToLastKnownBehaviour](#aigotolastknownbehaviour)
 - [AIGoToPointBehaviour](#aigotopointbehaviour)
 - [AIInvestigateBehaviour](#aiinvestigatebehaviour)
 - [AIKeepDistanceBehaviour](#aikeepdistancebehaviour)
@@ -35,6 +36,7 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 - [AIAttackDefinition](#aiattackdefinition)
 - [AIBehaviourDefinition](#aibehaviourdefinition)
 - [AIChaseDefinition](#aichasedefinition)
+- [AIGoToLastKnownDefinition](#aigotolastknowndefinition)
 - [AIGoToPointDefinition](#aigotopointdefinition)
 - [AIInvestigateDefinition](#aiinvestigatedefinition)
 - [AIKeepDistanceDefinition](#aikeepdistancedefinition)
@@ -53,7 +55,7 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 
 The base for one AI behaviour, such as Wander or Chase: one concrete thing to do.
 
-A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only judges between behaviours. Its settings come from its `definition`, shared by every pawn using it ([`AIBehaviourDefinition`](#aibehaviourdefinition)); empty, it runs with its kind's defaults. It acts only through the AI controller (`context.controller.move_to()`, `press()`), never on abilities or the body. Extend it: `make_default_definition()` for settings of its own, then `own_conditions()`, `enter()`, `tick()` (return SUCCEEDED or FAILED to finish) and `exit()`. Its node name is its name: the fixed order and the random numbers read it. Settings in ticks are written for 60 a second. Design: pawn spec 10.7 and 16.3, scaling spec 6.2.
+A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only judges between behaviours. Its settings come from its `definition`, shared by every pawn using it ([`AIBehaviourDefinition`](#aibehaviourdefinition)); empty, it runs with its kind's defaults. It acts only by starting steps with values (`start_step()`): moving, looking and buttons ([`Step`](../steps/REFERENCE.md#step), pawn spec 16.7), which write the pawn's input on its own `timeline` each tick the AI controller is asked for input. It never acts on abilities or the body. That one link, a behaviour starting steps, is what an order stream carries. Extend it: `make_default_definition()` for settings of its own, `make_steps()` for the steps it uses, then `own_conditions()`, `enter()`, `tick()` (return SUCCEEDED or FAILED to finish) and `exit()`. Its node name is its name: the fixed order and the random numbers read it. Settings in ticks are written for 60 a second. Design: pawn spec 10.7 and 16.3, scaling spec 6.2.
 
 ### Settings and properties
 
@@ -81,15 +83,19 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `decision_scored: bool` = `false`
 - `decision_index: int` = `0`
 - `wake_tick: int` = `-1`: Wake-ups, read by the manager (see the class description). Cleared when it starts.
-- `wakes_on_path_end: bool` = `false`
+- `wakes_on_step_end: bool` = `false`
 - `wakes_on_action: StringName` = `&""`
 - `woken: bool` = `false`
+- `timeline: StepTimeline` = `<unknown>`: The timeline its steps run on: its [`Step`](../steps/REFERENCE.md#step) children and those it makes (`make_steps()`), built the first time it starts. Its entries come from `AIBehaviourDefinition.step_timeline`; with none, code starts every step.
+- `steps_input: StepInput` = `<unknown>`: What its running steps wrote this tick (`step_input()`); the AI controller hands it over.
 
 ### Constants
 
 - `Status.RUNNING = 0`
 - `Status.SUCCEEDED = 1`
 - `Status.FAILED = 2`
+- `SPRINT_STEP = &"Sprint"`: The name of the Hold step behaviours that sprint use (`made_sprint_step()`).
+- `SPRINT_ACTION = &"sprint"`: The action that step holds by default. A game whose sprint is another action gives the behaviour a [`HoldStep`](../steps/REFERENCE.md#holdstep) child named "Sprint" holding it, which is used instead.
 
 ### Functions
 
@@ -109,9 +115,24 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `has_own_score() -> bool`: True if its script overrides `score()`: its score is known only once asked, so it's asked whenever it passes the rest.
 - `judged_in_gdscript() -> bool`: True if the C++ decider can't judge whether it's available from data: it overrides `is_available()`, or has a condition of a kind C++ doesn't read (`AICondition.cpp_reads()`). C++ then asks GDScript for that behaviour; it judges the rest itself.
 - `wake_at(at_tick: int) -> void`: Runs tick() at this tick (or the pawn's first run after it), if nothing wakes it sooner. Used up when it fires; an earlier tick than one already set wins.
-- `wake_on_path_end() -> void`: Runs tick() when a walk it started ends, arrived or given up (PathFollower.path_ended, on the AI controller's follower).
+- `wake_on_step_end() -> void`: Runs tick() when one of its steps ends on its own: done, released or failed (a walk arriving or giving up, a wait running out). Not when code stops it.
 - `wake_on_action_end(action: StringName) -> void`: Runs tick() when an ability on this action finishes or is cancelled (AbilityManager.ability_finished, ability_cancelled).
 - `clear_wake_ups() -> void`: Forgets every wake-up. The manager calls it when the behaviour starts.
+- `make_steps() -> Step[]`: The steps it makes for itself if it has no child of that name: each kind overrides it (Chase makes a Follow, a LookAt, a Sprint hold and a Dash press). A [`Step`](../steps/REFERENCE.md#step) child with the same name is used instead, so a scene can swap one ("Sprint" holding another action).
+- `default_action() -> StringName`: The action its steps' conditions mean by "its action" (`StepCondition.action` empty): `AIBehaviourDefinition.presses_action`.
+- `step_input() -> StepInput`: The input its steps write (`steps_input`): how an [`InputStep`](../steps/REFERENCE.md#inputstep) finds it when the timeline is built.
+- `get_step(step_name: StringName) -> Step`: One of its steps by name, or null. Builds its timeline if it hasn't been yet.
+- `start_step(step_name: StringName, values: Dictionary = {}) -> Step`: Starts one of its steps with these values (property names to values, written onto the step first). A step already running is stopped ("cancelled") and started again with them. Returns the step, or null if it has none by that name. The order stream's hook, `AIBehaviourManager.order_listener`, hears it.
+- `stop_step(step_name: StringName, reason: String = "cancelled") -> void`: Stops one of its steps if it runs, with this reason. The order stream's hook hears it.
+- `is_step_running(step_name: StringName) -> bool`: True while the step with this name runs.
+- `step_result(step_name: StringName) -> String`: How the step with this name last ended: "done", "released", "failed" or "cancelled"; "" if it hasn't ended since the behaviour started.
+- `moving_follower() -> PathFollower`: The path follower of the move step running now, or null: what the AI controller walks the pawn along.
+- `has_running_steps() -> bool`: True while any of its steps runs.
+- `begin_steps(tick: int) -> void`: The manager calls this as it starts, before `enter()`: begins a run of its timeline (entries due at once start).
+- `end_steps() -> void`: The manager calls this after `exit()`: every step still running stops ("cancelled").
+- `run_steps(elapsed: int) -> void`: The AI controller calls this once per tick it's asked for input, while this behaviour runs: clears `steps_input` and lets the running steps write it, covering elapsed ticks.
+- `made_sprint_step() -> Step` *(static)*: The Sprint step: a [`HoldStep`](../steps/REFERENCE.md#holdstep) of `SPRINT_ACTION`, named `SPRINT_STEP`.
+- `made_step(kind: Script, step_name: StringName, values: Dictionary = {}) -> Step` *(static)*: A step of this kind with this name and settings: for `make_steps()`.
 - `enter(_context: AIManager) -> void`: Once, when it starts.
 - `tick(_context: AIManager) -> int`: Every tick while it runs. The default runs forever.
 - `exit(_context: AIManager, _reason: String) -> void`: Once, when it stops. reason says why, such as "decision", "interrupted", "succeeded", "failed" or "removed".
@@ -147,6 +168,7 @@ C++ makes the decisions (its own `AIDecider`, through `cpp_decider`) and this ma
 ### Settings and properties
 
 - `decision_listener: Callable` = `Callable()`: Called after every decision of every pawn: `func(record: AIDecisionRecord, manager: AIBehaviourManager)`. Static, so one listener hears every pawn. For diagnostics and checking another decider (scaling spec 6.2). Empty (default): no record is made.
+- `order_listener: Callable` = `Callable()`
 - `decides_in: int` = `0`: Where this pawn's decisions are made: C++ (the default) or GDScript. The project setting `AIDeciderBridge.ALL_IN_GDSCRIPT_SETTING` and diagnostics ([`AIDecisionChecks`](../diagnostics/REFERENCE.md#aidecisionchecks)) can move every pawn to GDScript.
 - `default_score_jitter: float` = `0.0`: The jitter for behaviours whose own score_jitter is -1, in score units. 0: no randomness.
 - `jitter_draw: int` = `0`: When jitter is drawn: at every decision, or once per pawn (a fixed personality). Replayable either way.
@@ -191,6 +213,8 @@ C++ makes the decisions (its own `AIDecider`, through `cpp_decider`) and this ma
 - `refresh_modifiers(tick: int) -> void`: Works out again what the modifiers do to each behaviour's numbers and which they block, if anything they depend on changed: the list, a deadline passing (one ending, a time curve settling), or the pawn's owned tags (their ongoing requirements). Every decision calls it first; cheap when nothing changed. A curve still live is worked out at each read, not here.
 - `check_running(tick: int) -> void`: The AI step calls this every run, before deciding: if the owned tags, the modifiers or the behaviours switched on changed and the running behaviour may no longer run (its tag requirements fail, a modifier blocks it, it was switched off), it asks for a decision that its min_run_ticks don't hold off (its interrupt_threshold still does). A pawn out of shots leaves Keep Distance at once instead of at its next decision tick.
 - `worked_out_inputs() -> PackedInt32Array`: The slots of the worked-out inputs any behaviour's conditions or any modifier's curve reads, listed again after `inputs_changed()` and after the modifiers change.
+- `play_behaviour_started(behaviour_name: StringName, tick: int) -> void`: For playing back an order stream with the AI off: starts this behaviour as an order did, without its own code (no `AIBehaviourBase.enter()`): its steps come from the stream too. Stops the one running first, likewise.
+- `play_behaviour_stopped(_reason: String, tick: int) -> void`: For playing back an order stream: stops the running behaviour's steps without its own code.
 
 ## AIBehaviourModifier
 
@@ -376,6 +400,7 @@ pawn.ai.inputs.value_of(AIInputs.TARGET_DISTANCE)
 - `INCOMING_ATTACK = &"incoming_attack"`: 1 while a swing it was warned of hasn't hit yet.
 - `INCOMING_ATTACK_TICK = &"incoming_attack_tick"`: The tick that swing started.
 - `INCOMING_ATTACKER = &"incoming_attacker"`: The swinging pawn's number.
+- `TICKS_SINCE_TARGET_SEEN = &"ticks_since_target_seen"`: Ticks since the AI last saw its target; `FAR` with no target. Chase runs while it's low, GoToLastKnown once it isn't.
 - `GROUP_DISTANCE = "group_distance/"`: `group_distance/<group>`: flat distance to the group's nearest node; `FAR` if it has none.
 - `GROUP_FOUND = "group_found/"`: `group_found/<group>`: 1 while the group has a node. Pair it with a "further than" check on the distance.
 - `ACTION_READY = "action_ready/"`: `action_ready/<action>`: 1 while pressing the action could start an ability.
@@ -392,6 +417,7 @@ pawn.ai.inputs.value_of(AIInputs.TARGET_DISTANCE)
 - `Kind.GROUP_DISTANCE = 8`
 - `Kind.GROUP_FOUND = 9`
 - `Kind.ACTION_READY = 10`
+- `Kind.TICKS_SINCE_TARGET_SEEN = 11`
 - `GROUP_LOOK_AGAIN_TICKS = 120`: How often a group's nearest node is looked for again, in ticks at 60 a second.
 
 ### Functions
@@ -427,7 +453,7 @@ A component on the pawn (`Pawn.ai`), added by PawnInitializer from parts/AIManag
 - `while_possessed: int` = `1`: What the AI does while a player has the pawn. MEMORY_ONLY suits possessing an NPC and letting go: the AI already knows what's around.
 - `decision_interval_ticks: int` = `15`: How often the AI decides, in ticks at 60 a second (15: four times a second). Each pawn is offset by its own number, so a crowd doesn't all decide on one tick. Some events wake a decision early (pawn spec 10.9).
 - `random_seed: int` = `0`: Part of every random number this AI uses, with the match seed; entity numbers still make two pawns differ.
-- `order_source: Callable` = `Callable()`: Where every AI pawn's orders come from, if not from its own AI: called instead of `think()` in each pawn's AI step, as `order_source.call(context, tick)`, to tell `context.controller` what to do. Empty (the default): the AI thinks. For playing back an order stream (netcode spec 19.3), recorded through `AIController.order_listener`.
+- `order_source: Callable` = `Callable()`: Where every AI pawn's orders come from, if not from its own AI: called instead of `think()` in each pawn's AI step, as `order_source.call(context, tick)`, to start and stop its behaviours and their steps (`AIBehaviourManager.play_behaviour_started()`, `AIBehaviourBase.start_step()`). Empty (the default): the AI thinks. For playing back an order stream (netcode spec 19.3), recorded through `AIBehaviourManager.order_listener`.
 - `pawn: Pawn` = `null`: The pawn this AI belongs to, or null if its parent isn't one.
 - `current_tick: int` = `0`: The tick the AI is running now. Set by `run_ai()` at the start of each AI step.
 - `current_target: Node3D` = `null`: What the AI is focused on, picked by the target selector. Null when there's none.
@@ -450,7 +476,7 @@ A component on the pawn (`Pawn.ai`), added by PawnInitializer from parts/AIManag
 
 - `WhilePossessed.OFF = 0`: nothing runs
 - `WhilePossessed.MEMORY_ONLY = 1`: sensing and memory run; states and behaviours pause. The default
-- `WhilePossessed.FULL = 2`: everything runs. The AI controller keeps its last order without acting on it until it's in charge again
+- `WhilePossessed.FULL = 2`: everything runs. The running behaviour's steps wait, and run once the AI controller is in charge again
 
 ### Functions
 
@@ -745,30 +771,48 @@ Design: pawn spec 10.2.
 
 Attacks the current target once it's close enough: a swing, a shot, any attack on its action.
 
-Allowed in Combat. Available when the target's last known position is within the attack's reach (`AbilityBase.attack_reach()` of the ability on `AIBehaviourDefinition.presses_action`) minus `AIAttackDefinition.approach_margin`: the AI steps a little closer than the real reach so the attack lands. Chase brings the pawn in (score 0.8); this scores 0.9 and takes over at that distance. It faces the target, holds the attack's action through the attack, sleeps until it ends, then finishes. Its interrupt_threshold (15) stops an ordinary decision cutting an attack off. A second Attack with another action and a higher score gives a special or ranged attack (the sample goblins' HeavyAttack and Shoot). A `AIAttackDefinition.min_distance` keeps a ranged one from firing at point blank, so the melee attacks take over there ([`AIKeepDistanceBehaviour`](#aikeepdistancebehaviour) hangs back between shots). Design: pawn spec 10.7 (step 9), 8.6, 8.20 and 8.24; scaling spec 6.2.
+Allowed in Combat. Available when the target's last known position is within the attack's reach (`AbilityBase.attack_reach()` of the ability on `AIBehaviourDefinition.presses_action`) minus `AIAttackDefinition.approach_margin`: the AI steps a little closer than the real reach so the attack lands. Chase brings the pawn in (score 80); this scores 90 and takes over at that distance. Its steps: LookAt the target, and a Hold of the attack's action through the attack (with a fresh press, so a swing held through the one before still starts with a press); it sleeps until the attack ends, then finishes. Its interrupt_threshold (15) stops an ordinary decision cutting an attack off. A second Attack with another action and a higher score gives a special or ranged attack (the sample goblins' HeavyAttack and Shoot). A `AIAttackDefinition.min_distance` keeps a ranged one from firing at point blank, so the melee attacks take over there ([`AIKeepDistanceBehaviour`](#aikeepdistancebehaviour) hangs back between shots). Design: pawn spec 10.7 (step 9), 8.6, 8.20 and 8.24; scaling spec 6.2.
 
 ### Functions
 
 - `make_default_definition() -> AIBehaviourDefinition`
 - `own_conditions() -> AICondition[]`: Close enough: the target is within the attack's reach - `AIAttackDefinition.approach_margin`, and no nearer than `AIAttackDefinition.min_distance` if that's set. With no attack on presses_action nothing is close enough, so it never runs. If the attack's range changes during play, call `AIBehaviourBase.rebuild_conditions()`.
+- `make_steps() -> Step[]`
 - `enter(context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
 
 ## AIChaseBehaviour
 
 `res://assets/scripts/ai/behaviours/AIChaseBehaviour.gd`, extends [`AIBehaviourBase`](#aibehaviourbase)
 
-Runs after the current target, and stops within reach for Attack to take over.
+Runs after a target it can see, and stops within reach for Attack to take over.
 
-Allowed in Combat. While the target is seen it gives one persistent order, `AIController.follow()`: the controller closes in on the target, repathing every `AIChaseDefinition.repath_ticks` or when the target moves `AIChaseDefinition.repath_distance`, stops within `AIChaseDefinition.stop_distance` and faces it for Attack. Once the target hasn't been seen for `AIChaseDefinition.lost_after_ticks` it walks to where it was last seen instead. It holds sprint throughout; with `AIChaseDefinition.dash_to_close` on it also dashes to close the last few metres. It never finishes on its own: when the target is out of sight long enough, Combat's prerequisites fail and the state change replaces it. Orders only when one of those changes, so an order stream carries a few per chase, not one a tick (netcode spec 19.10). Design: pawn spec 10.7.
+Allowed in Combat, while the target was seen within `AIChaseDefinition.lost_after_ticks`; after that [`AIGoToLastKnownBehaviour`](#aigotolastknownbehaviour) walks to where it was last seen. Its steps: a Follow that closes in on the target, finding a new path every `AIChaseDefinition.repath_ticks` or when the target moves `AIChaseDefinition.repath_distance`, and stopping within `AIChaseDefinition.stop_distance`; a LookAt on the target, for Attack; the Sprint hold throughout; and with `AIChaseDefinition.dash_to_close` on, a Dash press to close the last few metres. Its steps are started again only when the target changes, so an order stream carries a few orders per chase, not one a tick (netcode spec 19.10). Design: pawn spec 10.7.
 
 ### Functions
 
 - `make_default_definition() -> AIBehaviourDefinition`
+- `own_conditions() -> AICondition[]`: Only while the target was seen recently: within `AIChaseDefinition.lost_after_ticks`.
+- `make_steps() -> Step[]`
 - `enter(context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
+
+## AIGoToLastKnownBehaviour
+
+`res://assets/scripts/ai/behaviours/AIGoToLastKnownBehaviour.gd`, extends [`AIBehaviourBase`](#aibehaviourbase)
+
+Walks to where the target was last seen, once it's out of sight: what Chase and Keep Distance did when they lost it.
+
+Allowed in Combat, while there's a target that hasn't been seen for `AIGoToLastKnownDefinition.lost_after_ticks`. Its steps: a MoveTo to the last known position (stopping `AIGoToLastKnownDefinition.stop_short_metres` short, and a share of a ranged attack's reach short, so a ranged pawn hangs back), a LookAt on that spot, and the Sprint hold. It walks again if the spot moves more than `AIGoToLastKnownDefinition.repath_distance` (memory heard of it again), and once there it stands, looking. It succeeds as soon as the target is seen again, so Chase or Keep Distance take over at once; once the target is out of sight long enough, Combat's prerequisites fail and the state change replaces it. Design: pawn spec 10.7.
+
+### Functions
+
+- `make_default_definition() -> AIBehaviourDefinition`
+- `own_conditions() -> AICondition[]`: Only for a target it has lost sight of: one it knows of (a distance), not seen for lost_after_ticks.
+- `make_steps() -> Step[]`
+- `stop_short() -> float`: How far short of the spot it stops: `AIGoToLastKnownDefinition.stop_short_metres`, plus the ranged share of its reach.
+- `enter(_context: AIManager) -> void`
+- `tick(context: AIManager) -> int`
 
 ## AIGoToPointBehaviour
 
@@ -776,7 +820,7 @@ Allowed in Combat. While the target is seen it gives one persistent order, `AICo
 
 Walks to a meeting point: the nearest node in a Godot group, "rally_point" by default.
 
-Allowed in Idle, scoring just above Wander (0.15 against 0.1), so an idle pawn marches to the point, anything it notices on the way takes over, and on arrival Wander takes over. Available while a node is in `AIGoToPointDefinition.point_group` and the pawn is further than `AIGoToPointDefinition.arrive_radius` from it (the nearest is looked up every 2 seconds, `AIInputs.nearest_in_group()`). It walks in legs of at most `AIGoToPointDefinition.leg_metres`, each a move_to, because nav is only built near streaming sources; a leg that can't be walked is retried shorter. Each pawn walks a little to one side of the line (up to `AIGoToPointDefinition.spread_metres`, from its random numbers) so a crowd marches as a band. It never finishes on its own: it stops being available once the pawn has arrived. Design: scaling spec 6.2.
+Allowed in Idle, scoring just above Wander (15 against 10), so an idle pawn marches to the point, anything it notices on the way takes over, and on arrival Wander takes over. Available while a node is in `AIGoToPointDefinition.point_group` and the pawn is further than `AIGoToPointDefinition.arrive_radius` from it (the nearest is looked up every 2 seconds, `AIInputs.nearest_in_group()`). It walks in legs of at most `AIGoToPointDefinition.leg_metres`, each a MoveTo step, because nav is only built near streaming sources; a leg that can't be walked is retried shorter. Each pawn walks a little to one side of the line (up to `AIGoToPointDefinition.spread_metres`, from its random numbers) so a crowd marches as a band. It never finishes on its own: it stops being available once the pawn has arrived. Design: scaling spec 6.2.
 
 ### Constants
 
@@ -786,9 +830,9 @@ Allowed in Idle, scoring just above Wander (0.15 against 0.1), so an idle pawn m
 
 - `make_default_definition() -> AIBehaviourDefinition`
 - `own_conditions() -> AICondition[]`: A node is in point_group, and the pawn is further than arrive_radius from the nearest one: two conditions.
+- `make_steps() -> Step[]`
 - `enter(_context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
 
 ## AIInvestigateBehaviour
 
@@ -796,33 +840,33 @@ Allowed in Idle, scoring just above Wander (0.15 against 0.1), so an idle pawn m
 
 Walks over to see what something half-noticed was.
 
-Allowed in Alert. Available while the most aware memory entry isn't certain yet (Search handles certain ones), or while an unknown attacker hit the pawn within `AIInvestigateDefinition.hit_memory_ticks`, when it walks to where the hit came from. It walks, without sprinting, to the entry's last known position and heads for a new one if that moves more than `AIInvestigateDefinition.repath_distance`. It succeeds on arriving and fails if there's no way there; its cooldown stops it walking to the same spot over and over. Design: pawn spec 10.7.
+Allowed in Alert. Available while the most aware memory entry isn't certain yet (Search handles certain ones), or while an unknown attacker hit the pawn within `AIInvestigateDefinition.hit_memory_ticks`, when it walks to where the hit came from. It walks (a MoveTo step, without sprinting) to the entry's last known position and heads for a new one if that moves more than `AIInvestigateDefinition.repath_distance`. It succeeds on arriving and fails if there's no way there; its cooldown stops it walking to the same spot over and over. Design: pawn spec 10.7.
 
 ### Functions
 
 - `make_default_definition() -> AIBehaviourDefinition`
 - `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a recent hit from an attacker it doesn't remember. Either will do.
+- `make_steps() -> Step[]`
 - `enter(context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
 
 ## AIKeepDistanceBehaviour
 
 `res://assets/scripts/ai/behaviours/AIKeepDistanceBehaviour.gd`, extends [`AIBehaviourBase`](#aibehaviourbase)
 
-Hangs back at shooting distance from the current target: a ranged pawn's way of moving in a fight, in place of Chase.
+Hangs back at shooting distance from a target it can see: a ranged pawn's way of moving in a fight, in place of Chase.
 
-Allowed in Combat while a ranged attack has shots left (the status.has_ammo.ranged tag). Available only to a pawn with a ranged attack (an ability in `AIKeepDistanceDefinition.ranged_tag`'s group with a reach, `AbilityBase.attack_reach()`), and only while the target is at least `AIKeepDistanceDefinition.melee_distance` away. While the target is seen it gives one persistent order, `AIController.keep_distance()`: the controller keeps `AIKeepDistanceDefinition.reach_fraction` of that attack's reach from it, closing in or backing away, and stands facing it. Once the target hasn't been seen for `AIKeepDistanceDefinition.lost_after_ticks` it walks to that distance from where it was last seen. Scored 0.85, above Chase (0.8), so a ranged pawn hangs back instead of running in; the Shoot behaviour (an [`AIAttackBehaviour`](#aiattackbehaviour) on the ranged attack's action, scored higher) fires whenever the shot is ready. Once the target closes within melee_distance it isn't available, so Chase and the melee attacks take over; give Shoot the same distance as its `AIAttackDefinition.min_distance` so the pawn melees rather than shooting at point blank. Design: pawn spec 8.24.
+Allowed in Combat while a ranged attack has shots left (the status.has_ammo.ranged tag). Available only to a pawn with a ranged attack (an ability in `AIKeepDistanceDefinition.ranged_tag`'s group with a reach, `AbilityBase.attack_reach()`), only while the target is at least `AIKeepDistanceDefinition.melee_distance` away, and only while it was seen within `AIKeepDistanceDefinition.lost_after_ticks`; after that [`AIGoToLastKnownBehaviour`](#aigotolastknownbehaviour) walks to that distance from where it was last seen. Its steps: a KeepAwayFrom that keeps `AIKeepDistanceDefinition.reach_fraction` of that attack's reach from the target, closing in or backing away, and stands facing it; a LookAt on the target; and the Sprint hold while it's beyond the attack's reach. Scored 85, above Chase (80), so a ranged pawn hangs back instead of running in; the Shoot behaviour (an [`AIAttackBehaviour`](#aiattackbehaviour) on the ranged attack's action, scored higher) fires whenever the shot is ready. Once the target closes within melee_distance it isn't available, so Chase and the melee attacks take over; give Shoot the same distance as its `AIAttackDefinition.min_distance` so the pawn melees rather than shooting at point blank. Design: pawn spec 8.24.
 
 ### Functions
 
 - `make_default_definition() -> AIBehaviourDefinition`
-- `own_conditions() -> AICondition[]`: Has a ranged attack, and the target is at least `AIKeepDistanceDefinition.melee_distance` away: one condition. With no ranged attack the condition can never pass. If its abilities change during play, call `AIBehaviourBase.rebuild_conditions()`.
+- `own_conditions() -> AICondition[]`: Has a ranged attack, the target is at least `AIKeepDistanceDefinition.melee_distance` away, and it was seen within `AIKeepDistanceDefinition.lost_after_ticks`. With no ranged attack the first can never pass. If its abilities change during play, call `AIBehaviourBase.rebuild_conditions()`.
 - `preferred_distance() -> float`: The metres from the target it stands at: `AIKeepDistanceDefinition.reach_fraction` of its ranged attack's reach; 0 without one.
 - `find_ranged_attack() -> AbilityBase`: The pawn's ranged attack: the first ability in `AIKeepDistanceDefinition.ranged_tag`'s group with a reach, found once. Null if it has none.
+- `make_steps() -> Step[]`
 - `enter(context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
 
 ## AILookTowardBehaviour
 
@@ -830,15 +874,15 @@ Allowed in Combat while a ranged attack has shots left (the status.has_ammo.rang
 
 Stops and looks toward something half-noticed: the first reaction to a glimpse.
 
-Allowed in Alert. Available while the most aware memory entry isn't certain yet, or an unknown attacker hit the pawn within `AILookTowardDefinition.hit_memory_ticks` (then it looks where the hit came from). It stops the pawn and looks at that position for `AILookTowardDefinition.look_ticks`; looking turns the AI's eyes, so a target still in view keeps filling awareness. It scores 0.6, above Investigate (0.5), because turning to look is the cheaper way to become certain; as it starts it gives itself -0.3 for 15 s (`AIBehaviourDefinition.modifier_on_start`), dropping it to 0.3, so Investigate wins and Look Toward doesn't catch again while it walks over. It runs again only when Investigate is cooling down. Design: pawn spec 10.7.
+Allowed in Alert. Available while the most aware memory entry isn't certain yet, or an unknown attacker hit the pawn within `AILookTowardDefinition.hit_memory_ticks` (then it looks where the hit came from). It stands and looks at that position for `AILookTowardDefinition.look_ticks` (a LookAt step, aimed again when the position moves); looking turns the AI's eyes, so a target still in view keeps filling awareness. It scores 60, above Investigate (50), because turning to look is the cheaper way to become certain; as it starts it gives itself -30 for 15 s (`AIBehaviourDefinition.modifier_on_start`), dropping it to 30, so Investigate wins and Look Toward doesn't catch again while it walks over. It runs again only when Investigate is cooling down. Design: pawn spec 10.7.
 
 ### Functions
 
 - `make_default_definition() -> AIBehaviourDefinition`
 - `own_conditions() -> AICondition[]`: Only for something half-noticed: an uncertain most aware entry, or a recent hit from an attacker it doesn't remember. Either will do.
+- `make_steps() -> Step[]`
 - `enter(context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
 
 ## AIParryBehaviour
 
@@ -846,7 +890,7 @@ Allowed in Alert. Available while the most aware memory entry isn't certain yet,
 
 Parries a swing coming at the pawn, some of the time (`AIParryDefinition.parry_chance`).
 
-Available when a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up (two conditions). An enemy's A MeleeAttackAbility (or a fired projectile, FireProjectileStep) tells the AI of an attack when it starts, on the server (`AIManager.note_incoming_attack()`), which asks for a decision at once: ordinary decisions come every 15 ticks, longer than a swing's windup. The roll comes from the swing's start tick and the attacker's pawn number, so each swing is rolled once and a replay rolls the same. It looks at the attacker and presses parry (`AIBehaviourDefinition.presses_action`, so it's skipped while the parry is cooling down or locked out), finishes two ticks later and forgets the swing; ParryAbility does the rest. Design: scaling spec 6.2.
+Available when a noted swing hasn't hit yet, its attacker is alive, and this swing's roll came up (two conditions). An enemy's A MeleeAttackAbility (or a fired projectile, FireProjectileStep) tells the AI of an attack when it starts, on the server (`AIManager.note_incoming_attack()`), which asks for a decision at once: ordinary decisions come every 15 ticks, longer than a swing's windup. The roll comes from the swing's start tick and the attacker's pawn number, so each swing is rolled once and a replay rolls the same. Its steps look at the attacker and press parry (`AIBehaviourDefinition.presses_action`, so it's skipped while the parry is cooling down or locked out); it finishes two ticks later and forgets the swing; ParryAbility does the rest. Design: scaling spec 6.2.
 
 ### Constants
 
@@ -856,9 +900,9 @@ Available when a noted swing hasn't hit yet, its attacker is alive, and this swi
 
 - `make_default_definition() -> AIBehaviourDefinition`
 - `own_conditions() -> AICondition[]`: A swing is coming, and its roll came up: once per swing, from its start tick and its attacker's number.
+- `make_steps() -> Step[]`
 - `enter(context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
 
 ## AISearchBehaviour
 
@@ -866,7 +910,7 @@ Available when a noted swing hasn't hit yet, its attacker is alive, and this swi
 
 Hunts around where an enemy it became certain of was last seen: "I know you were here".
 
-Allowed in Alert. Available only when the most aware memory entry is certain but not fresh enough for Combat (Look Toward and Investigate handle half-noticed things). It goes to the last known position (holding sprint if `AISearchDefinition.sprint_to_last_known` is on), then walks to `AISearchDefinition.search_points` random points within `AISearchDefinition.search_radius` of it, standing `AISearchDefinition.pause_ticks` at each, and succeeds. While still Alert it's usually picked again, so it keeps searching until the entry fades (Idle) or the enemy is seen (Combat). Design: pawn spec 10.7.
+Allowed in Alert. Available only when the most aware memory entry is certain but not fresh enough for Combat (Look Toward and Investigate handle half-noticed things). It goes to the last known position (a MoveTo step, with its Sprint step held if `AISearchDefinition.sprint_to_last_known` is on), then walks to `AISearchDefinition.search_points` random points within `AISearchDefinition.search_radius` of it, standing `AISearchDefinition.pause_ticks` at each, and succeeds. While still Alert it's usually picked again, so it keeps searching until the entry fades (Idle) or the enemy is seen (Combat). Design: pawn spec 10.7.
 
 ### Constants
 
@@ -877,9 +921,9 @@ Allowed in Alert. Available only when the most aware memory entry is certain but
 
 - `make_default_definition() -> AIBehaviourDefinition`
 - `own_conditions() -> AICondition[]`: Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is its base_score.
+- `make_steps() -> Step[]`
 - `enter(context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
 
 ## AIWanderBehaviour
 
@@ -887,7 +931,7 @@ Allowed in Alert. Available only when the most aware memory entry is certain but
 
 Walks to random nearby points, pausing between them: what a pawn does when nothing more interesting can run.
 
-Allowed in Idle, with a low fixed score. It picks a random point within `AIWanderDefinition.wander_radius` of its home (where the pawn first started wandering), walks there with the AI controller's move_to, then stands for a random time between `AIWanderDefinition.min_pause_ticks` and `AIWanderDefinition.max_pause_ticks`. The points and pauses come from the context's replayable random numbers, so the same seed, pawn and ticks give the same walk. A point with no way there is skipped and another tried soon. It never finishes on its own. Design: pawn spec 10.7.
+Allowed in Idle, with a low fixed score. It picks a random point within `AIWanderDefinition.wander_radius` of its home (where the pawn first started wandering), walks there with a MoveTo step, then stands for a random time between `AIWanderDefinition.min_pause_ticks` and `AIWanderDefinition.max_pause_ticks`. The points and pauses come from the context's replayable random numbers, so the same seed, pawn and ticks give the same walk. A point with no way there is skipped and another tried soon. It never finishes on its own. Design: pawn spec 10.7.
 
 ### Constants
 
@@ -898,9 +942,10 @@ Allowed in Idle, with a low fixed score. It picks a random point within `AIWande
 ### Functions
 
 - `make_default_definition() -> AIBehaviourDefinition`
+- `make_steps() -> Step[]`
 - `enter(_context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
-- `exit(context: AIManager, _reason: String) -> void`
+- `exit(_context: AIManager, _reason: String) -> void`
 
 ## AIAnyCondition
 
@@ -1048,6 +1093,7 @@ Each kind of behaviour has its own class with its settings added ([`AIChaseDefin
 - `modifier_always: AIBehaviourModifier`: A modifier it always has, such as a score that eases with the target's distance (a curve over target_distance). Empty applies_to: only this behaviour.
 - `modifier_on_start: AIBehaviourModifier`: A modifier it gives itself as it starts, such as an interrupt threshold that eases off (a curve over time). Empty applies_to: only this behaviour. With no duration it lasts while the behaviour runs; with one, its duration from the start. Starting again replaces it.
 - `modifier_on_end: AIBehaviourModifier`: A modifier it gives itself as it ends, such as -30 to its score for 15 s so something else gets a turn. Empty applies_to: only this behaviour. With no duration it lasts until the behaviour starts again; with one, its duration. Ending again replaces it.
+- `step_timeline: TimelineEntry[]` = `[]`: When its steps start, as an ability's step timeline does ([`TimelineEntry`](../steps/REFERENCE.md#timelineentry); ticks count from the behaviour's start). Empty: every step waits for the behaviour's code to start it (`AIBehaviourBase.start_step()`). A step none of these name gets a manual entry, so code can still start it.
 
 ## AIChaseDefinition
 
@@ -1061,13 +1107,30 @@ Its kind's own settings below; the ones every behaviour has come from [`AIBehavi
 
 - `repath_ticks: int` = `20`: Ticks between new paths.
 - `repath_distance: float` = `1.5`: How far, in metres, the target must move from where the path leads before a new path is found early.
-- `lost_after_ticks: int` = `30`: Ticks since the target was last seen after which it's chased to where it was last seen, not where it is (at 60 a second).
+- `lost_after_ticks: int` = `30`: Ticks since the target was last seen after which Chase stops and Go To Last Known walks to where it was seen (at 60 a second).
 - `stop_distance: float` = `1.2`: How close, in metres, it gets before stopping.
 - `sprint: bool` = `true`: On: it holds sprint while chasing. Sprint's own cooldown decides when it actually sprints.
 - `dash_to_close: bool` = `false`: On: it presses dash to close in, when the target is between `dash_to_distance` and `dash_from_distance` away and the ability can start (in the air too, Dash's usable_in_air). Off by default. A dash goes the way the pawn is moving, along its path.
 - `close_in_tag: StringName` = `&"ability.movement.advanced"`: The group of ability it uses to close in, not one ability by name: any ability tagged with it that can start (`AbilityManager.action_for_tag()`). Advanced movement by default.
 - `dash_from_distance: float` = `7.5`: The farthest the target can be for a dash, in metres.
 - `dash_to_distance: float` = `5.5`: The nearest the target can be for a dash, in metres. A dash from a sprint (9 m/s) covers about 4.2 m, so 5.5 lands it a little outside stop_distance.
+
+## AIGoToLastKnownDefinition
+
+`res://assets/scripts/ai/definitions/AIGoToLastKnownDefinition.gd`, extends [`AIBehaviourDefinition`](#aibehaviourdefinition)
+
+The settings of a Go To Last Known behaviour ([`AIGoToLastKnownBehaviour`](#aigotolastknownbehaviour)), shared by every pawn whose Go To Last Known uses it.
+
+Its kind's own settings below; the ones every behaviour has come from [`AIBehaviourDefinition`](#aibehaviourdefinition). A new one starts with the defaults Go To Last Known runs with when it has no definition.
+
+### Settings and properties
+
+- `lost_after_ticks: int` = `30`: Ticks since the target was last seen after which it walks to where it was last seen (at 60 a second). Match Chase's and Keep Distance's lost_after_ticks, so one takes over as the other stops.
+- `repath_distance: float` = `1.5`: How far, in metres, the last known position must move (memory heard of it again) before it walks to the new one.
+- `sprint: bool` = `true`: On: it holds its Sprint step while it walks.
+- `stop_short_metres: float` = `0.0`: Stops this many metres short of the spot, on the line from the pawn.
+- `ranged_reach_fraction: float` = `0.7`: With a ranged attack (an ability in `ranged_tag`'s group with a reach) it also stops this fraction of that reach short, as Keep Distance hangs back. 0: not for a ranged attack.
+- `ranged_tag: StringName` = `&"ability.combat.ranged"`: The group of ability `ranged_reach_fraction` looks for. Ranged combat by default.
 
 ## AIGoToPointDefinition
 
@@ -1113,7 +1176,7 @@ Its kind's own settings below; the ones every behaviour has come from [`AIBehavi
 - `band: float` = `1.5`: How far, in metres, from that distance it may drift before it walks again. It walks until within half of this.
 - `melee_distance: float` = `4.0`: Closer than this, in metres, it gives up keeping distance and the melee behaviours take over.
 - `sprint_to_close: bool` = `true`: On: it sprints while the target is beyond the ranged attack's reach. Sprint's own cooldown decides when it actually sprints.
-- `lost_after_ticks: int` = `30`: Ticks since the target was last seen after which it keeps its distance from where it was last seen (at 60 a second).
+- `lost_after_ticks: int` = `30`: Ticks since the target was last seen after which Keep Distance stops and Go To Last Known walks there, stopping short (at 60 a second).
 - `repath_ticks: int` = `20`: Ticks between new paths while it walks.
 - `repath_distance: float` = `1.5`: How far, in metres, the spot it walks to must move before a new path is found early.
 
@@ -1211,7 +1274,6 @@ Ticks since the last check (capped at `max_gain_ticks`) make the checking rate n
 - `periphery_degrees: float` = `160.0`: The width of everything it can see, in degrees, the central cone included. The part outside the central cone is the periphery.
 - `periphery_multiplier: float` = `0.3`: How strongly the periphery sees, compared with the central cone.
 - `max_gain_ticks: int` = `30`: The most ticks one check can count, so a long gap doesn't give a huge gain at once.
-- `eye_height: float` = `1.6`: The height of the eyes above the pawn's feet, in metres.
 - `target_height: float` = `1.0`: The height on the target the ray aims at, in metres above its feet: about the chest.
 - `sight_blocking_mask: int` = `1`: Physics layers that block sight. The world, layer 1, by default.
 

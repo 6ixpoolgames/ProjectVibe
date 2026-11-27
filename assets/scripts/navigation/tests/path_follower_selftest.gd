@@ -63,7 +63,7 @@ func _test_straight_line_with_no_nav() -> void:
 	var pawn := _make_pawn(Vector3(0, 0.1, 0))
 	await _ticks(20)
 	var ai: AIController = pawn.controller_manager.ai_controller
-	var navigation := ai.path_follower
+	var navigation := ai.walk_step().follower # Claude 2026-11-27: a script's walk is a MoveTo step (step 7)
 	_check(navigation != null and navigation.pawn == pawn, "the AI controller has its own follower, which knows its pawn")
 	_check(navigation.get_move_direction() == Vector3.ZERO and not navigation.is_following_path() and not navigation.has_arrived(),
 			"with no path: no direction, not following, not arrived")
@@ -186,7 +186,7 @@ func _test_corner_by_corner() -> void:
 	var own := GivenCornersFollower.new(pawn)
 	own.given = PackedVector3Array([Vector3(4, 0, 0), Vector3(4, 0, 4)])
 	own.settings = ai.path_settings
-	ai.path_follower = own
+	ai.walk_step().follower = own # Claude 2026-11-27: the script walk's MoveTo step (pawn spec 16.10 step 7)
 	var target := Vector3(0, 0, 4)
 	ai.move_to(target)
 	_check(own.get_path_corners().size() == 3, "a square path: three corners ahead")
@@ -229,7 +229,7 @@ func _test_waiting_for_nav() -> void:
 	var pawn := _make_pawn(start)
 	await _ticks(10)
 	var ai: AIController = pawn.controller_manager.ai_controller
-	var navigation := ai.path_follower
+	var navigation := ai.walk_step().follower # Claude 2026-11-27: a script's walk is a MoveTo step (step 7)
 	var target := Vector3(-20.0, 0.0, 15.0)
 	target.y = terrain.height_at(target.x, target.z)
 	_check(not NavServer.is_idle(), "(nav isn't built yet)")
@@ -239,11 +239,11 @@ func _test_waiting_for_nav() -> void:
 	_check(ai.move_to(target), "nav still being built: move_to says yes")
 	_check(navigation.get_path_state() == PathFollower.PathState.PENDING and navigation.is_under_way() and not navigation.is_following_path(),
 			"it's PENDING: under way, but no path yet")
-	_check(ai.is_following_order(), "AIController counts the wait as its order under way")
+	_check(ai.is_walking(), "AIController counts the wait as its walk under way")
 	await _ticks(10)
 	_check(pawn.controller_manager.move_input.length() < 0.01, "the pawn stands while it waits, rather than walking a straight line")
 	await _ticks(20)
-	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE and not ai.is_following_order(),
+	_check(navigation.get_path_state() == PathFollower.PathState.UNREACHABLE and not ai.is_walking(),
 			"past pending_give_up_ticks it gives up: UNREACHABLE")
 	_check(navigation.get_end_reason() == PathFollower.EndReason.NAV_TOO_SLOW, "end reason NAV_TOO_SLOW") # Claude 2026-11-25
 
@@ -286,7 +286,7 @@ func _test_following_a_nav_path() -> void:
 	var pawn := _make_pawn(start)
 	await _ticks(10)
 	var ai: AIController = pawn.controller_manager.ai_controller
-	var navigation := ai.path_follower
+	var navigation := ai.walk_step().follower # Claude 2026-11-27: a script's walk is a MoveTo step (step 7)
 	var target := Vector3(-40.0, 0.0, 30.0) # across a chunk border, over hills
 	target.y = terrain.height_at(target.x, target.z)
 	_check(ai.move_to(target), "with nav, move_to finds a path")
@@ -332,7 +332,7 @@ func _test_crossing_links() -> void:
 	var pawn := _make_pawn(Vector3(-10, 0.1, 0))
 	await _ticks(10)
 	var ai: AIController = pawn.controller_manager.ai_controller
-	var navigation := ai.path_follower
+	var navigation := ai.walk_step().follower # Claude 2026-11-27: a script's walk is a MoveTo step (step 7)
 
 	var across := await _walk_course_leg(pawn, ai, Vector3(6, 0, 0))
 	_check(across.crossed_link and across.fastest_up > 3.0 and across.highest > 0.3, "A to B: it reaches the gap and jumps (up to %.2f m)" % across.highest)
@@ -404,7 +404,7 @@ func _test_crossing_links() -> void:
 
 ## Walks the pawn to the goal with AIController.move_to, ticking nav as it goes, and reports what happened.
 func _walk_course_leg(pawn: Pawn, ai: AIController, goal: Vector3, limit := 600) -> Dictionary:
-	var navigation := ai.path_follower
+	var navigation := ai.walk_step().follower # Claude 2026-11-27: a script's walk is a MoveTo step (step 7)
 	var report := {"crossed_link": false, "highest": pawn.position.y, "fastest_up": 0.0, "ticks": 0, "distance": INF}
 	if not ai.move_to(goal):
 		return report

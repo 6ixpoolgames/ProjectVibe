@@ -160,7 +160,7 @@ The alternate path: an ability's script sequences its step nodes itself (`run_st
 
 ### 6.5 As built (part 3, Claude, 2026-11-22)
 
-- **Classes:** `TimelineEntry` and `AbilityCondition` (`abilities/steps/`); the runner is in `AbilityBase`. The definition's `step_timeline` is a setting like any other, so a variant can have its own.
+- **Classes:** `TimelineEntry` and `AbilityCondition` (`abilities/steps/`); the runner is in `AbilityBase`. *(2026-11-27, pawn spec 16.10 step 7: both moved to `steps/` for any owner, the condition as `StepCondition`; the runner is `StepTimeline`.)* The definition's `step_timeline` is a setting like any other, so a variant can have its own.
 - **Which timeline:** the definition's; else the kind's default for the steps it made (`default_timeline()`: MeleeAttack's and RangedAttack's standard sequences); else the steps one after another in tree order. A step no entry names gets a manual entry, so code can still start it (`start_step`, the bespoke path of 6.4).
 - **Labels:** an entry is found by its label, its step's name unless given one; one step in two entries needs a label on one.
 - **No rule set** means it starts with the ability.

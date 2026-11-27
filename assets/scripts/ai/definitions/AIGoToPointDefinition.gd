@@ -33,4 +33,4 @@ func _init() -> void:
 	super()
 	tag_requirements = TagQuery.shared([Tags.AI.STATE_IDLE])
 	base_score = 15.0
-	tick_interval_ticks = 60 # the safety net: it wakes when a leg ends (wake_on_path_end)
+	tick_interval_ticks = 60 # the safety net: it wakes when a leg ends (wake_on_step_end)

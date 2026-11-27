@@ -9,7 +9,16 @@ This folder holds the step core (pawn spec 16.7). Overview: [README.md](README.m
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| Entries and conditions still ability-flavoured | `TimelineEntry.starts_with_ability()`, `AbilityCondition.holds(ability)` in `abilities/steps/` | Behaviours will share them; move them here and name them for any owner when behaviour steps arrive (step 7) | S |
+
+## 2026-11-27
+
+- **The step library, and timelines for any owner** (pawn spec 16.7, 16.10 step 7a). Steps that write a pawn's input extend `InputStep` and write into their host's `StepInput` (an `InputCommand` that knows which parts were written: one writer per input, held actions ORed): moving (`FollowStep`, `KeepAwayFromStep`, `StopMovingStep` beside `MoveToStep`), looking (`LookAtStep`, `LookInDirectionStep`, `StopLookingStep`), buttons (`PressStep`, `HoldStep` with `fresh_press`, `ReleaseStep`) and flow (`DelayStep`, `WaitUntilStep`, `RepeatStep`). The proposal's Wait is `DelayStep`, Unreal's name, because abilities already have a `WaitStep`. `RunQuery` and `GrantTag` wait for step 8. Test: `steps/tests/step_library_selftest`.
+
+- **`TimelineEntry` and `StepCondition` moved here** from `abilities/steps/`, named for any owner (closes the refactor row): `starts_with_ability()` is `starts_with_run()`, and `AbilityCondition` is `StepCondition`, which reads the pawn of the timeline's host (`holds(timeline)`), takes "its action" from the host's `default_action()`, and gains `TARGET_DISTANCE` (the AI target's real position) and a `BETWEEN` comparison, so "dash when 4 to 8 m away" is one condition.
+
+- **What it costs** (size 25, about 95 pawns at load step 1, this machine, the last commit measured beside it): the input phase is 4.8 to 5.4 ms a tick against 3.6 to 4.4, almost all in `pawn.input`, where the running behaviour's timeline now runs (0.97 to 1.12 ms a frame against 0.52 to 0.56), about 10 us a pawn a tick; the whole tick 10.1 to 11.2 ms against 9.3 to 9.7. Timelines whose entries are all started by code skip the rule checks each tick (`StepTimeline` notes whether any entry has a rule), a small saving. The rest goes with the per-pawn GDScript costs (the next measurement and proposal).
+
+- **`MoveStep` repath rules** (left over from 5c): a new path when its walk was dropped, after a rollback loaded old state (`TickDriver.rollbacks_loaded`; a path isn't state), every `repath_ticks` if set, and once more than `off_path_metres` from the path if set (`PathFollower.distance_off_path()`). Settings fall back to the AI controller's `path_settings`. A finished step keeps its follower's arrival or give-up (it stops only a walk still under way).
 
 ## 2026-11-25
 

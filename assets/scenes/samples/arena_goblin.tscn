@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3]
+[gd_scene load_steps=13 format=3]
 
 [ext_resource type="PackedScene" path="res://assets/scenes/pawn/pawn.tscn" id="1_pawn"]
 [ext_resource type="Script" path="res://assets/scripts/ai/AIBehaviourManager.gd" id="2_manager"]
@@ -8,6 +8,7 @@
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIInvestigateBehaviour.gd" id="5_investigate"]
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AISearchBehaviour.gd" id="6_search"]
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIChaseBehaviour.gd" id="7_chase"]
+[ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIGoToLastKnownBehaviour.gd" id="g_last_known"]
 [ext_resource type="Script" path="res://assets/scripts/ai/behaviours/AIAttackBehaviour.gd" id="8_attack"]
 [ext_resource type="Resource" uid="uid://buxy3mxk0nffy" path="res://assets/scripts/resources/ai_behaviours/goblin_chase.tres" id="b_goblin_chase"]
 
@@ -41,6 +42,9 @@ script = ExtResource("6_search")
 [node name="Chase" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("7_chase")
 definition = ExtResource("b_goblin_chase")
+
+[node name="GoToLastKnown" type="Node" parent="AIManager/AIBehaviourManager"]
+script = ExtResource("g_last_known")
 
 [node name="Attack" type="Node" parent="AIManager/AIBehaviourManager"]
 script = ExtResource("8_attack")
