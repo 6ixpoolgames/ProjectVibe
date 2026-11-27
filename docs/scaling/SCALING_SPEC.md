@@ -370,11 +370,11 @@ inputs, and C++ knows only the kinds of check, never the behaviours.
 - **Conditions** (`ai/conditions/`, Resources made in the inspector): `AICompareCondition` (an input against a number or another
   input), `AIChanceCondition` (a replayable roll, optionally once per event, such as once per swing), `AIAnyCondition` (any one of
   a list). All of a behaviour's conditions must pass.
-- **Score curves** (`AIScoreCurve`): an input mapped onto 0 to 1, which scales the score between `min_score` (or 0) and
-  `max_score`. None of the built-in behaviours needs one yet; they're there for designers.
+- **Score curves** *(replaced 2026-11-27 by modifier curves: pawn spec 10.13, AI_SCORING_PROPOSAL.md)*: a behaviour modifier can follow a drawn
+  curve over an input or over time, from -1 to 1, scaling its multiply and add; both deciders read the same baked table.
 - **Each built-in behaviour builds its own conditions from its settings** (Attack: target within its swing's reach minus
   `approach_margin`; Parry: a swing coming and a roll under `parry_chance`), and a designer adds more in the inspector
-  (`conditions`, `score_curves`) without code. Nothing about a particular behaviour is in C++.
+  (`conditions`, curved modifiers) without code. Nothing about a particular behaviour is in C++.
 - **Behaviours with their own code** (a game's behaviour that overrides `is_available` or `score`) still work everywhere. The
   batch asks GDScript for their answers, as shadow mode does today. A mixed brain costs a little more; that's for a later pass.
 - **"Could this action start?"** is the input `action_ready/<action>`, kept up to date by events *(the owner: "event based seems to

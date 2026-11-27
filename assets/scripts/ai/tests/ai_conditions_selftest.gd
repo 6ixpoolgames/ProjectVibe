@@ -11,6 +11,8 @@
 ## behaviour with code of its own beside a data one, and one with a condition C++ doesn't read) decides in C++ from GDScript's answers.
 ## Claude 2026-11-18 (a review's finding): a group point that moves, or is freed, between the lookup's 2-second looks gives C++ and
 ## GDScript the same answer.
+## Claude 2026-11-27 (AI scoring proposal): score curves are gone; the made-up brains' scores follow modifier curves over inputs and
+## time instead (the same scores as before for Ant and Cat), which both deciders must work out alike; a baked curve's strengths.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_conditions_selftest.tscn"
 extends SelfTest
@@ -29,7 +31,7 @@ class OwnCodeBehaviour extends AIBehaviourBase:
 		return open
 
 	func score(_context: AIManager) -> float:
-		return settings.max_score # code of its own, so C++ can't read it
+		return settings.base_score # code of its own, so C++ can't read it
 
 
 func _ready() -> void:
@@ -132,30 +134,24 @@ func _test_any_and_curves() -> void:
 	_check(not AIAnyCondition.make(none).passes(inputs, null, 0), "any of nothing never passes")
 	_check(AIAnyCondition.make(no_yes).passes(inputs, null, 0) and not AIAnyCondition.make(no_no).passes(inputs, null, 0),
 			"any passes when one of its conditions does")
-	var rising := AIScoreCurve.make(&"test_c", 0.0, 10.0)
-	var falling := AIScoreCurve.make(&"test_c", 10.0, 0.0)
-	var step := AIScoreCurve.make(&"test_c", 5.0, 5.0)
-	_check_near(rising.amount(inputs), 0.5, 0.000001, "a curve from 0 to 10 gives 0.5 at 5")
-	inputs.set_input(&"test_c", 2.0)
-	_check_near(falling.amount(inputs), 0.8, 0.000001, "turned round (10 to 0), it gives 0.8 at 2")
-	_check_equal(step.amount(inputs), 0.0, "from and to equal: 0 below")
-	inputs.set_input(&"test_c", 20.0)
-	_check(rising.amount(inputs) == 1.0 and step.amount(inputs) == 1.0, "1 above the top, and at or above a step")
-	inputs.set_input(&"test_c", -3.0)
-	_check_equal(rising.amount(inputs), 0.0, "0 below the bottom")
-	# A behaviour's score with a curve: between min_score (or 0) and max_score.
-	var context := AIManager.new()
-	context.inputs.set_input(&"test_c", 5.0)
-	var behaviour := AIBehaviourBase.new()
-	behaviour.max_score = 0.8
-	behaviour.score_curves = [AIScoreCurve.make(&"test_c", 0.0, 10.0)]
-	_check_near(behaviour.score(context), 0.4, 0.000001, "with no min_score, a curve scales from 0 to max_score")
-	behaviour.min_score = 0.2
-	_check_near(behaviour.score(context), 0.5, 0.000001, "with a min_score, from min_score to max_score")
-	behaviour.score_curves = []
-	_check_equal(behaviour.score(context), 0.8, "with no curves, the score is max_score")
-	behaviour.free()
-	context.free()
+	# Claude 2026-11-27: a modifier's curve, baked into strengths over its domain, read as a straight line between them.
+	var curve := Curve.new()
+	curve.min_domain = 0.0
+	curve.max_domain = 10.0
+	curve.min_value = -1.0
+	curve.max_value = 1.0
+	curve.add_point(Vector2(0.0, -1.0), 0.0, 0.0, Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+	curve.add_point(Vector2(10.0, 1.0), 0.0, 0.0, Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+	var modifier := AIBehaviourModifier.new()
+	modifier.curve = curve
+	var table := modifier.strength_table()
+	_check(table.size() == AIBehaviourModifier.CURVE_POINTS and table[0] == -1.0 and table[table.size() - 1] == 1.0,
+			"a curve is baked into %d strengths over its domain, -1 to 1 here" % AIBehaviourModifier.CURVE_POINTS)
+	_check_near(AIBehaviourModifier.strength_in(table, 0.0, 10.0, 7.5), 0.5, 0.000001, "read between the points: 0.5 at 7.5")
+	_check(AIBehaviourModifier.strength_in(table, 0.0, 10.0, -4.0) == -1.0 and AIBehaviourModifier.strength_in(table, 0.0, 10.0, 99.0) == 1.0,
+			"beyond the domain, the end values hold")
+	curve.set_point_value(1, 5.0)
+	_check(modifier.strength_table()[table.size() - 1] <= 1.0, "strengths stay within -1 to 1")
 
 
 func _test_own_code() -> void:
@@ -199,24 +195,24 @@ func _test_cpp_agrees() -> void:
 	var pawn := _make_pawn(_made_up_behaviours())
 	_decide(pawn, 1)
 	var manager := pawn.ai.behaviour_manager
-	_check(manager.cpp != null, "a pawn decides in C++ by default")
+	_check(manager.cpp_decider != null, "a pawn decides in C++ by default")
 	manager.decides_in = AIBehaviourManager.DecidesIn.GDSCRIPT
 	_decide(pawn, 2)
-	_check(manager.cpp == null, "its own setting moves it to GDScript")
+	_check(manager.cpp_decider == null, "its own setting moves it to GDScript")
 	manager.decides_in = AIBehaviourManager.DecidesIn.CPP
 	AIDecisionChecks.set_all_in_gdscript(true)
 	_decide(pawn, 3)
-	_check(manager.cpp == null, "diagnostics' switch (F10) moves every pawn to GDScript")
+	_check(manager.cpp_decider == null, "diagnostics' switch (F10) moves every pawn to GDScript")
 	AIDecisionChecks.set_all_in_gdscript(false)
 	_decide(pawn, 4)
-	_check(manager.cpp != null, "...and back")
-	var first := manager.cpp
+	_check(manager.cpp_decider != null, "...and back")
+	var first := manager.cpp_decider
 	_decide(pawn, 5)
-	_check(manager.cpp == first, "and it keeps its decider while nothing changes")
+	_check(manager.cpp_decider == first, "and it keeps its decider while nothing changes")
 	var brains_before: int = first.decider.get_brain_count()
 	var twin := _make_pawn(_made_up_behaviours())
 	_decide(twin, 6)
-	_check(twin.ai.behaviour_manager.cpp.decider != first.decider and first.decider.get_brain_count() == brains_before,
+	_check(twin.ai.behaviour_manager.cpp_decider.decider != first.decider and first.decider.get_brain_count() == brains_before,
 			"each pawn has a decider of its own, and one built the same way shares the brain already compiled")
 	twin.free()
 	pawn.free()
@@ -228,13 +224,12 @@ func _test_cpp_agrees() -> void:
 func _test_mixed_brain() -> void:
 	var own := OwnCodeBehaviour.new()
 	own.name = "OwnCode"
-	own.max_score = 0.6
-	own.min_score = 0.6
-	var plain := _behaviour("Plain", 0.3, 0.3)
+	own.base_score = 0.6
+	var plain := _behaviour("Plain", 0.3)
 	var mixed := _make_pawn([own, plain])
 	_decide(mixed, 1)
 	var manager := mixed.ai.behaviour_manager
-	_check(manager.cpp != null and own.judged_in_gdscript() and not plain.judged_in_gdscript(),
+	_check(manager.cpp_decider != null and own.judged_in_gdscript() and not plain.judged_in_gdscript(),
 			"a behaviour with code of its own no longer moves its pawn to GDScript: the pawn decides in C++")
 	AIDecisionChecks.set_check_against_gdscript(true)
 	AIDecisionChecks.reset_counts()
@@ -254,11 +249,11 @@ func _test_mixed_brain() -> void:
 	_decide(mixed, 9001)
 	_check(chose_own and manager.get_running_behaviour() == plain and AIDecisionChecks.get_counts()["cpp"] >= 2,
 			"C++ driving follows GDScript's answers: the behaviour while it says available, the other once it says not")
-	var odd := _behaviour("OddCondition", 0.5, 0.5)
+	var odd := _behaviour("OddCondition", 0.5)
 	odd.conditions = [UnknownKindCondition.new()]
-	var odd_pawn := _make_pawn([odd, _behaviour("Fallback", 0.2, 0.2)])
+	var odd_pawn := _make_pawn([odd, _behaviour("Fallback", 0.2)])
 	_decide(odd_pawn, 1)
-	_check(odd.judged_in_gdscript() and odd_pawn.ai.behaviour_manager.cpp != null and odd_pawn.ai.behaviour_manager.get_running_behaviour() == odd,
+	_check(odd.judged_in_gdscript() and odd_pawn.ai.behaviour_manager.cpp_decider != null and odd_pawn.ai.behaviour_manager.get_running_behaviour() == odd,
 			"a condition of a kind C++ doesn't read: GDScript answers for that behaviour, and the pawn still decides in C++")
 	odd_pawn.free()
 	mixed.free()
@@ -278,10 +273,10 @@ func _test_moving_group_point() -> void:
 	var point := Node3D.new()
 	add_child(point)
 	point.add_to_group(&"test_moving_point")
-	var away := _behaviour("Away", 0.6, 0.6)
+	var away := _behaviour("Away", 0.6)
 	away.conditions = [AICompareCondition.make(&"group_found/test_moving_point", Comparison.EQUAL, 1.0),
 		AICompareCondition.make(&"group_distance/test_moving_point", Comparison.MORE_THAN, 5.0)]
-	var stay := _behaviour("Stay", 0.3, 0.3)
+	var stay := _behaviour("Stay", 0.3)
 	var pawn := _make_pawn([away, stay])
 	var changes := [0] # GDScript note: a lambda captures plain locals by value, so the count lives in an array it can change
 	pawn.ai.behaviour_manager.behaviour_changed.connect(func(_o: AIBehaviourBase, _n: AIBehaviourBase, _r: String) -> void: changes[0] += 1)
@@ -354,26 +349,45 @@ func _play_conditions() -> Dictionary:
 
 
 func _made_up_behaviours() -> Array:
-	var ant := _behaviour("Ant", 0.6, 0.1)
+	# Claude 2026-11-27: Ant scores 0.1 to 0.6 with test_y, as its score curve gave, and Cat 0.7 x (1 - test_x), times test_y while it runs;
+	# now through modifier curves over the inputs. Elk steps aside after it ends, easing back over 40 ticks; Fox's x1.5 reverses to x0.5 over 30.
+	var ant := _behaviour("Ant", 0.1)
 	ant.tags = [Tags.AI.STANCE_MELEE]
-	ant.modifier_on_start = _modifier(AIBehaviourModifier.Number.SCORE_BONUS, 1.0, 0.2, [], 30) # Claude 2026-11-25: was persistence
+	ant.modifier_on_start = _modifier(AIBehaviourModifier.Number.SCORE, 1.0, 0.2, [], 30) # Claude 2026-11-25: was persistence
+	ant.modifier_always = _curved(_modifier(AIBehaviourModifier.Number.SCORE, 1.0, 0.5, []), "test_y", 0.0, 0.0, 1.0, 1.0)
 	ant.conditions = [AICompareCondition.make(&"test_x", Comparison.AT_MOST, 0.5)]
-	ant.score_curves = [AIScoreCurve.make(&"test_y", 0.0, 1.0)]
-	var bee := _behaviour("Bee", 0.55, 0.55)
+	var bee := _behaviour("Bee", 0.55)
 	var either: Array[AICondition] = [AICompareCondition.make(&"test_x", Comparison.MORE_THAN, 0.7), AIChanceCondition.make(0.4, 3)]
 	bee.conditions = [AIAnyCondition.make(either)]
-	var cat := _behaviour("Cat", 0.7, 0.0)
+	var cat := _behaviour("Cat", 0.7)
 	cat.tags = [Tags.AI.STANCE_RANGED]
-	cat.modifier_on_end = _modifier(AIBehaviourModifier.Number.SCORE_BONUS, 1.0, -0.15, [], 20) # Claude 2026-11-25: was persistence
+	cat.modifier_on_end = _modifier(AIBehaviourModifier.Number.SCORE, 1.0, -0.15, [], 20) # Claude 2026-11-25: was persistence
+	cat.modifier_always = _curved(_modifier(AIBehaviourModifier.Number.SCORE, 0.0, 0.0, []), "test_x", 0.0, 0.0, 1.0, 1.0) # x (1 - x)
+	cat.modifier_on_start = _curved(_modifier(AIBehaviourModifier.Number.SCORE, 0.0, 0.0, []), "test_y", 0.0, 1.0, 1.0, 0.0) # x y
 	cat.cooldown_ticks = 9
 	cat.conditions = [AICompareCondition.make(&"test_y", Comparison.AT_LEAST, 0.0, &"test_x")] # y >= x
-	cat.score_curves = [AIScoreCurve.make(&"test_x", 1.0, 0.0), AIScoreCurve.make(&"test_y", 0.0, 1.0)]
-	var dog := _behaviour("Dog", 0.5, 0.5)
+	var dog := _behaviour("Dog", 0.5)
 	dog.conditions = [AIChanceCondition.make(0.5, 9, &"test_key", &"test_key")]
-	var elk := _behaviour("Elk", 0.3, 0.3) # no conditions: always there
-	var fox := _behaviour("Fox", 0.65, 0.65)
+	var elk := _behaviour("Elk", 0.3) # no conditions: always there
+	elk.modifier_on_end = _curved(_modifier(AIBehaviourModifier.Number.SCORE, 1.0, -0.4, [], 60), "", 0.0, 1.0, 40.0, 0.0)
+	var fox := _behaviour("Fox", 0.65)
 	fox.conditions = [AICompareCondition.make(&"ticks_test_since", Comparison.AT_MOST, 20.0), AICompareCondition.make(&"test_x", Comparison.NOT_EQUAL, 0.25)]
+	fox.modifier_on_start = _curved(_modifier(AIBehaviourModifier.Number.SCORE, 1.5, 0.0, []), "", 0.0, 1.0, 30.0, -1.0)
 	return [ant, bee, cat, dog, elk, fox]
+
+
+# Claude 2026-11-27: gives a modifier a straight-line curve from (x0, y0) to (x1, y1) over an input ("" for the ticks since added).
+func _curved(modifier: AIBehaviourModifier, input: String, x0: float, y0: float, x1: float, y1: float) -> AIBehaviourModifier:
+	var curve := Curve.new()
+	curve.min_domain = x0
+	curve.max_domain = x1
+	curve.min_value = -1.0
+	curve.max_value = 1.0
+	curve.add_point(Vector2(x0, y0), 0.0, 0.0, Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+	curve.add_point(Vector2(x1, y1), 0.0, 0.0, Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+	modifier.curve = curve
+	modifier.curve_input = input
+	return modifier
 
 
 # Claude 2026-11-25 (pawn spec 16.10 step 6a): a behaviour modifier on one number, for the behaviours with any of these tags (none:
@@ -401,11 +415,10 @@ func _fade(mode: FadeProfile.Mode, hold: int, fade: int, half_life := 30) -> Fad
 	return profile
 
 
-func _behaviour(behaviour_name: String, max_score: float, min_score: float) -> AIBehaviourBase:
+func _behaviour(behaviour_name: String, base_score: float) -> AIBehaviourBase:
 	var behaviour := AIBehaviourBase.new()
 	behaviour.name = behaviour_name
-	behaviour.max_score = max_score
-	behaviour.min_score = min_score
+	behaviour.base_score = base_score
 	return behaviour
 
 

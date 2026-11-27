@@ -33,7 +33,7 @@ const RULE_BLOCKED := &"blocked"
 const RULE_COOLDOWN := &"cooldown"
 ## Needs a target, and there's none.
 const RULE_NO_TARGET := &"no_target"
-## Its action couldn't start (AbilityManager.can_start).
+## Its action couldn't start (AbilityManager.can_start). Asked on the walk, after its availability, so it's still a candidate.
 const RULE_ACTION := &"action"
 ## Passed the hard rules, but C++ made the decision, so GDScript's range, availability and score weren't worked out.
 const RULE_NOT_WORKED_OUT := &"cpp"
@@ -103,17 +103,18 @@ func changed() -> bool:
 
 
 ## One behaviour's entry, from the manager's scratch values; rule: what ruled it out, or [constant RULE_NONE]. Keys: name, rule, and its
-## numbers with modifiers (modifier: the score bonus, jitter_amount, interrupt_threshold, min_run at the match's rate); a candidate's
-## also jitter (this decision's offset), ceiling, floor (null: none), available (1, 0, -1 never asked) and score (null: not scored).
+## numbers with modifiers (score_multiply and score_add: what its score gets; jitter_amount, interrupt_threshold, min_run at the
+## match's rate); a candidate's also jitter (this decision's offset), key (its result, null for a score() of its own), available
+## (1, 0, -1 never asked) and score (before modifiers; null: not reached). A behaviour whose action couldn't start
+## ([constant RULE_ACTION]) was still a candidate, asked on the walk, so its entry has them too.
 func add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void:
-	var entry := {"name": behaviour.name, "rule": rule, "modifier": behaviour.score_bonus(), "jitter_amount": behaviour.current_jitter(),
-		"interrupt_threshold": behaviour.current_interrupt_threshold(), "min_run": behaviour.current_min_run_ticks()}
-	if rule == RULE_NONE:
+	behaviour.work_out_change(AIBehaviourModifier.Number.SCORE)
+	var entry := {"name": behaviour.name, "rule": rule, "score_multiply": behaviour.change_multiply, "score_add": behaviour.change_add,
+		"jitter_amount": behaviour.current_jitter(), "interrupt_threshold": behaviour.current_interrupt_threshold(),
+		"min_run": behaviour.current_min_run_ticks()}
+	if rule == RULE_NONE or rule == RULE_ACTION:
 		entry["jitter"] = behaviour.decision_jitter
-		entry["ceiling"] = behaviour.decision_ceiling
-		entry["floor"] = null # JSON has no infinity
-		if behaviour.decision_floor > -INF:
-			entry["floor"] = behaviour.decision_floor
+		entry["key"] = null if behaviour.decision_key == INF else behaviour.decision_key # JSON has no infinity
 		entry["available"] = (1 if behaviour.decision_available else 0) if behaviour.availability_checked else -1
 		entry["score"] = null
 		if behaviour.decision_scored:

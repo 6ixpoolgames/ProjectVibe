@@ -55,6 +55,5 @@ func _init() -> void:
 	tag_requirements = TagQuery.shared([Tags.AI.STATE_COMBAT, Tags.STATUS.HAS_AMMO_RANGED])
 	tags = [Tags.AI.STANCE_RANGED]
 	needs_target = true
-	max_score = 0.85
-	min_score = 0.85
+	base_score = 85.0
 	tick_interval_ticks = 5 # the AI controller follows the path every tick; this only re-aims

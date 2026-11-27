@@ -6,6 +6,5 @@
 resource_name = "Shoot"
 script = ExtResource("1_attack")
 presses_action = &"ability_3"
-max_score = 0.97
-min_score = 0.97
+base_score = 97.0
 min_distance = 4.0

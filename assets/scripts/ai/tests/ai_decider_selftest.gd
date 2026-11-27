@@ -11,6 +11,8 @@
 ## state.
 ## Claude 2026-11-17 (step 5b): and in the real fight, that the AI's kept answer to "could this action start?" (AIInputs.action_ready,
 ## asked again only when AbilityManager.readiness_version moves on) matches asking AbilityManager.can_start at every decision.
+## Claude 2026-11-27 (AI scoring proposal): floors and ceilings are gone (one open score); a score's modifiers replay as its multiply
+## and add.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_decider_selftest.tscn"
 extends SelfTest
@@ -115,7 +117,7 @@ func _test_brains() -> void:
 	var words := TagRegistry.get_categories().size()
 	var brain: int = decider.add_brain({"tag_words": words, "behaviours": [
 		{"name": "Zulu", "scorer": "conditions", "tag_requirements": TagQuery.make([Tags.AI.STATE_COMBAT]).describe_words()},
-		{"name": "Alpha", "scorer": "conditions", "max_score": 0.1},
+		{"name": "Alpha", "scorer": "conditions", "base_score": 0.1},
 		{"name": "Mike", "scorer": "conditions", "tag_requirements": TagQuery.make([], [Tags.AI.STATE_ALERT, Tags.AI.STATE_COMBAT]).describe_words()},
 	]})
 	_check_equal(brain, 0, "a brain is added")
@@ -140,7 +142,7 @@ func _test_brains() -> void:
 		"event_priority": PackedInt32Array([0, 0, 0, 0, 0]), "running": PackedInt32Array([-1, -1, -1, -1, -1]),
 		"running_started": PackedInt64Array([-1, -1, -1, -1, -1]), "cooling": PackedInt64Array([0, 0, 0, 0, 0]),
 		"can_press": PackedInt64Array([-1, -1, -1, -1, -1]), "available_known": PackedInt64Array([0, 0, 0, 0, 0]),
-		"available": PackedInt64Array([0, 0, 0, 0, 0]), "modifier": modifier, # Claude 2026-11-25: no persistence column (step 6a)
+		"available": PackedInt64Array([0, 0, 0, 0, 0]), "score_add": modifier, # Claude 2026-11-27: was the score bonus column
 		"blocked": PackedInt64Array([0, 0, 0, 1 << 1, 0])}
 	var answer: Dictionary = decider.decide(columns)
 	_check_equal(answer.get("chosen", PackedInt32Array()), PackedInt32Array([0, 1, 1, 2, 2]),
@@ -174,7 +176,7 @@ func _test_made_up_brains() -> void:
 			tie_picks[record.chosen] = true
 		for entry in record.behaviours:
 			jitter += 1 if entry.get("jitter", 0.0) != 0.0 else 0
-			boosted += 1 if entry.get("modifier", 0.0) != 0.0 else 0
+			boosted += 1 if entry.get("score_add", 0.0) != 0.0 else 0
 	_check(kept > 20 and ended > 20 and jitter > 100 and boosted > 20 and tie_picks.size() == 3,
 			"the made-up brains used every rule (kept %d, ended %d, jittered %d, boosted %d, tie picks %d)" % [kept, ended, jitter, boosted, tie_picks.size()])
 	var data := DecisionReplay.from_recorder(_recorder)
@@ -220,8 +222,7 @@ func _play_made_up(_shadow: bool) -> Array[String]:
 	boost.duration_ticks = 15
 	alpha.modifier_on_start = boost
 	var bravo := _b("Bravo", 0.45)
-	bravo.min_score = 0.4
-	var charlie := _b("Charlie", 0.6, 0.9) # scores below its max
+	var charlie := _b("Charlie", 0.6)
 	var delta := _b("Delta", 0.55)
 	delta.cooldown_ticks = 10
 	delta.finish_with = AIBehaviourBase.Status.SUCCEEDED
@@ -231,7 +232,6 @@ func _play_made_up(_shadow: bool) -> Array[String]:
 	foxtrot.presses_action = &"no_such_action"
 	var golf := _b("Golf", 0.65)
 	golf.tag_requirements = TagQuery.make([&"ai.state.alarm"])
-	golf.min_score = 0.6
 	var one := _make_pawn([alpha, bravo, charlie, delta, echo, foxtrot, golf], [alarm])
 	one.name = "One"
 	one.ai.behaviour_manager.default_score_jitter = 0.2
@@ -347,7 +347,7 @@ func _test_gates_and_modifiers() -> void:
 	for record in _recorder.get_records():
 		for entry in record.behaviours:
 			rules[entry["rule"]] = true
-			summed += 1 if entry.get("modifier", 0.0) != 0.0 else 0
+			summed += 1 if entry.get("score_add", 0.0) != 0.0 else 0
 	_check(chosen.has(&"Melee") and chosen.has(&"Ranged") and chosen.has(&"Hold") and rules.has(AIDecisionRecord.RULE_TAGS)
 			and rules.has(AIDecisionRecord.RULE_OFF) and rules.has(AIDecisionRecord.RULE_BLOCKED) and summed > 20,
 			"the run used gates, switching off, blocks and sums (chosen %s, rules %s, summed %d)" % [chosen.keys(), rules.keys(), summed])
@@ -368,8 +368,7 @@ func _test_gates_and_modifiers() -> void:
 func _plain(behaviour_name: String, score: float) -> AIBehaviourBase:
 	var behaviour := AIBehaviourBase.new()
 	behaviour.name = behaviour_name
-	behaviour.max_score = score
-	behaviour.min_score = score
+	behaviour.base_score = score
 	return behaviour
 
 
@@ -411,11 +410,10 @@ func _test_real_fight() -> void:
 # --- Helpers ---
 
 
-func _b(behaviour_name: String, value: float, max := -1.0) -> TestBehaviour:
+func _b(behaviour_name: String, value: float) -> TestBehaviour:
 	var behaviour := TestBehaviour.new()
 	behaviour.name = behaviour_name
 	behaviour.value = value
-	behaviour.max_score = value if max < 0.0 else max
 	return behaviour
 
 

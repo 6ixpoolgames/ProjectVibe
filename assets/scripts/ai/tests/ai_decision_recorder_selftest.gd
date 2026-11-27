@@ -3,6 +3,8 @@
 ## that a record holds the hard rule, range, availability and score of every behaviour and the choice, the three causes (the AI step
 ## with its target and state updates, a behaviour ending, a direct call), the interrupt rule keeping a behaviour, jitter values that
 ## a second decider can work out again, the early stop's "never asked", saving to a file, and the timing scope names.
+## Claude 2026-11-27 (AI scoring proposal): ceilings and floors are gone; an entry has its result known up front (key, null for a
+## score() of its own) and the multiply and add its score got.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_decision_recorder_selftest.tscn"
 extends SelfTest
@@ -103,8 +105,8 @@ func _test_record_of_a_decision() -> void:
 	var bravo := record.entry_for(&"Bravo")
 	_check(bravo["rule"] == AIDecisionRecord.RULE_NONE and bravo["available"] == 1, "the winner: a candidate, asked, available")
 	_check_near(bravo["score"], 0.7, 0.000001, "...with its score")
-	_check_near(bravo["ceiling"], 0.7, 0.000001, "...and its ceiling")
-	_check(bravo["floor"] == null, "...and no floor, with no min_score")
+	_check(bravo["key"] == null and bravo["score_multiply"] == 1.0 and bravo["score_add"] == 0.0,
+			"...no result known up front (its score() is its own), and no modifiers on its score")
 	var brain := _recorder.get_brain(record.pawn_number)
 	_check_equal(brain.get("behaviours", []).size(), 5, "the pawn's brain is described once, with every behaviour")
 	_check_equal(brain["behaviours"][1]["name"], "Bravo", "...in the same order")
@@ -140,7 +142,7 @@ func _test_behaviour_ended() -> void:
 func _test_kept_by_interrupt() -> void:
 	var stubborn := _b("Stubborn", 0.5)
 	stubborn.cannot_be_interrupted = true
-	var stronger := _b("Stronger", 0.9, 0.9)
+	var stronger := _b("Stronger", 0.9)
 	stronger.available = false
 	var pawn := _make_pawn([stubborn, stronger])
 	_decide(pawn, 1)
@@ -157,18 +159,18 @@ func _test_kept_by_interrupt() -> void:
 
 
 func _test_jitter_and_early_stop() -> void:
-	var high := _b("High", 0.9)
-	var low := _b("Low", 0.4)
+	var high := _plain("High", 0.9) # scores from settings, so the walk knows each result up front
+	var low := _plain("Low", 0.4)
 	low.score_jitter = 0.1
 	var pawn := _make_pawn([high, low])
 	_decide(pawn, 500)
 	var record := _recorder.get_records()[0]
 	var low_entry := record.entry_for(&"Low")
-	_check_equal(low_entry["available"], -1, "the early stop: Low (ceiling 0.5) is never asked once High scores 0.9")
+	_check_equal(low_entry["available"], -1, "the early stop: Low (at most 0.5) is never asked once High is available at 0.9")
 	_check(low_entry["score"] == null, "...and never scored")
 	var expected := 0.1 * pawn.ai.random_signed(low.name_hash) # the context's tick is still 500
 	_check_near(low_entry["jitter"], expected, 0.0000001, "its jitter can be worked out again from the tick, pawn and name hash")
-	_check_near(low_entry["ceiling"], 0.5, 0.0000001, "...and its ceiling is max_score plus the full jitter")
+	_check_near(low_entry["key"], 0.4 + expected, 0.0000001, "...and its result is its score plus that jitter")
 	pawn.free()
 	_recorder.clear()
 
@@ -233,7 +235,7 @@ func _test_timings() -> void:
 	alarm.name = "Alarm"
 	var quick := _b("Quick", 0.9)
 	quick.finish_with = AIBehaviourBase.Status.SUCCEEDED
-	var pawn := _make_pawn([quick, _b("Slow", 0.5)], [alarm])
+	var pawn := _make_pawn([quick, _plain("Slow", 0.5)], [alarm]) # Claude 2026-11-27: a score from settings, so the walk can skip it
 	pawn.ai.decision_interval_ticks = 1
 	# Claude 2026-11-17: without detail, only the coarse scopes; the fine ones (one per state, behaviour and sense) cost too much to
 	# run always.
@@ -276,11 +278,18 @@ func _test_stop() -> void:
 # --- Helpers ---
 
 
-func _b(behaviour_name: String, value: float, max := -1.0) -> TestBehaviour:
+func _b(behaviour_name: String, value: float) -> TestBehaviour:
 	var behaviour := TestBehaviour.new()
 	behaviour.name = behaviour_name
 	behaviour.value = value
-	behaviour.max_score = value if max < 0.0 else max
+	return behaviour
+
+
+## A behaviour scored from its settings, always available.
+func _plain(behaviour_name: String, score: float) -> AIBehaviourBase:
+	var behaviour := AIBehaviourBase.new()
+	behaviour.name = behaviour_name
+	behaviour.base_score = score
 	return behaviour
 
 

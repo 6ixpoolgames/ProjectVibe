@@ -4,6 +4,8 @@
 ## never runs the AI, that a rollback doesn't run it again, and the odd cases at the top of AIBehaviourManager.gd.
 ## Claude 2026-11-17 (scaling spec 6.2): and wake-ups: wake_at, a walk ending and an ability on the action ending wake a sleeping
 ## behaviour, used up when they fire, cleared when it starts again.
+## Claude 2026-11-27 (AI scoring proposal): one open score; the walk asks behaviours highest result first, so a data score is skipped
+## unasked and a score() of its own is always asked; modifier curves; jitter drawn once per pawn.
 ## Exits 0 on success, 1 on failure. Run from the project folder:
 ##   godot --headless --path . "res://assets/scripts/ai/tests/ai_behaviour_manager_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
@@ -42,6 +44,15 @@ class TestBehaviour extends AIBehaviourBase:
 		last_exit_reason = reason
 
 
+## A behaviour scored from its settings (no score() of its own), counting how often it's asked whether it's available.
+class PlainBehaviour extends AIBehaviourBase:
+	var asked := 0
+
+	func is_available(_context: AIManager) -> bool:
+		asked += 1
+		return true
+
+
 ## Walks to a point when it starts, through the AI controller.
 class GoToBehaviour extends AIBehaviourBase:
 	var target := Vector3.ZERO
@@ -74,6 +85,7 @@ func _ready() -> void:
 	_test_interrupts()
 	_test_tag_gates()
 	_test_score_modifiers()
+	_test_curved_modifiers() # Claude 2026-11-27 (AI scoring proposal)
 	await _test_finishing()
 	_test_tick_interval()
 	_test_wake_ups()
@@ -138,31 +150,26 @@ func _test_hard_rules() -> void:
 	pawn.free()
 
 
-# The GDScript decider's own early stop. Claude 2026-11-26 (step 6d): these pawns decide in GDScript, since behaviours with code of their
-# own (these test ones) now decide in C++, where GDScript answers for each behaviour up front and C++ does the skipping.
+# Claude 2026-11-27 (AI scoring proposal): the walk, highest result first, in both deciders. A score from settings is known up front, so
+# a behaviour that can't win isn't asked; a score() of its own is known only once asked, so it always is.
 func _test_ranges_and_early_stop() -> void:
-	var sure := _b("Sure", 0.85, 0.9)
-	sure.min_score = 0.8
-	var weak := _b("Weak", 0.5)
-	var pawn := _make_pawn([sure, weak])
-	pawn.ai.behaviour_manager.decides_in = AIBehaviourManager.DecidesIn.GDSCRIPT
-	_decide(pawn, 1)
-	_check(_running_name(pawn) == &"Sure" and weak.scored == 0, "a ceiling below another's floor: dropped without its score() running")
-	pawn.free()
-	var high := _b("High", 0.9)
-	var low := _b("Low", 0.4)
-	pawn = _make_pawn([high, low])
-	pawn.ai.behaviour_manager.decides_in = AIBehaviourManager.DecidesIn.GDSCRIPT
-	_decide(pawn, 1)
-	_check(_running_name(pawn) == &"High" and low.scored == 0, "early stop: once High scores 0.9, Low (max 0.4) isn't asked")
-	pawn.free()
-	var overrated := _b("Overrated", 0.2, 0.9) # can reach 0.9, but scores 0.2 now; no min_score
-	var steady := _b("Steady", 0.5)
-	pawn = _make_pawn([overrated, steady])
-	_decide(pawn, 1)
-	_check(_running_name(pawn) == &"Steady", "a behaviour scoring below its max never shuts out one that would win")
-	_check(overrated.scored == 1 and steady.scored == 1, "...because both had to be scored")
-	pawn.free()
+	for decides_in in [AIBehaviourManager.DecidesIn.GDSCRIPT, AIBehaviourManager.DecidesIn.CPP]:
+		var where := "GDScript" if decides_in == AIBehaviourManager.DecidesIn.GDSCRIPT else "C++"
+		var high := _plain("High", 90.0)
+		var low := _plain("Low", 40.0)
+		var pawn := _make_pawn([high, low])
+		pawn.ai.behaviour_manager.decides_in = decides_in
+		_decide(pawn, 1)
+		_check(_running_name(pawn) == &"High" and high.asked == 1 and low.asked == 0, "%s: High (90) is available, so Low (40) isn't asked" % where)
+		pawn.free()
+		var unavailable := _b("Overrated", 20.0) # its own score(), so it goes first and is asked
+		var steady := _plain("Steady", 50.0)
+		pawn = _make_pawn([unavailable, steady])
+		pawn.ai.behaviour_manager.decides_in = decides_in
+		_decide(pawn, 1)
+		_check(_running_name(pawn) == &"Steady" and unavailable.scored == 1 and steady.asked == 1,
+				"%s: a score() of its own is asked (20), and loses to Steady (50)" % where)
+		pawn.free()
 
 
 func _test_random_numbers_and_jitter() -> void:
@@ -212,6 +219,16 @@ func _test_random_numbers_and_jitter() -> void:
 		a_seen = a_seen or _running_name(pawn) == &"A"
 		b_seen = b_seen or _running_name(pawn) == &"B"
 	_check(a_seen and b_seen, "-1 uses the manager's default_score_jitter")
+	# Claude 2026-11-27: drawn once per pawn, the same pawn chooses the same way at every decision.
+	pawn.ai.behaviour_manager.jitter_draw = AIBehaviourManager.JitterDraw.ONCE_PER_PAWN
+	var once: Array[StringName] = []
+	for t in 30:
+		_decide(pawn, 5000 + t)
+		once.append(_running_name(pawn))
+	var all_same := true
+	for name_now in once:
+		all_same = all_same and name_now == once[0]
+	_check(all_same, "jitter drawn once per pawn: the same choice at every decision (%s)" % once[0])
 	pawn.free()
 
 
@@ -248,17 +265,17 @@ func _test_own_modifiers() -> void:
 	var hold := AIBehaviourModifier.new()
 	hold.add = 0.1 # no duration: while it runs
 	keeper.modifier_on_start = hold
-	var rival := _b("Rival", 0.4, 1.0) # max 1.0, because the test raises its score
+	var rival := _b("Rival", 0.4) # max 1.0, because the test raises its score
 	var pawn := _make_pawn([keeper, rival])
 	_decide(pawn, 100)
 	_check(_running_name(pawn) == &"Keeper", "Keeper wins first")
-	_check(is_equal_approx(keeper.score_bonus(), 0.1) and rival.score_bonus() == 0.0, "as it starts it gives itself +0.1, and only itself")
+	_check(is_equal_approx(_score_add(keeper), 0.1) and _score_add(rival) == 0.0, "as it starts it gives itself +0.1, and only itself")
 	rival.value = 0.55
 	_decide(pawn, 105)
 	_check(_running_name(pawn) == &"Keeper", "+0.1 keeps it ahead of a rival at 0.55")
 	rival.value = 0.7
 	_decide(pawn, 106)
-	_check(_running_name(pawn) == &"Rival" and keeper.score_bonus() == 0.0, "a rival at 0.7 wins, and with no duration the +0.1 went as Keeper ended")
+	_check(_running_name(pawn) == &"Rival" and _score_add(keeper) == 0.0, "a rival at 0.7 wins, and with no duration the +0.1 went as Keeper ended")
 	pawn.free()
 	# On end, with a duration: it steps aside for a while, as Look Toward does.
 	var restless := _b("Restless", 0.5)
@@ -266,25 +283,25 @@ func _test_own_modifiers() -> void:
 	aside.add = -0.2
 	aside.duration_ticks = 30
 	restless.modifier_on_end = aside
-	var other := _b("Other", 0.4, 1.0)
+	var other := _b("Other", 0.4)
 	pawn = _make_pawn([restless, other])
 	_decide(pawn, 1)
 	_check(_running_name(pawn) == &"Restless", "Restless wins first")
 	other.value = 0.6
 	_decide(pawn, 2)
-	_check(_running_name(pawn) == &"Other" and is_equal_approx(restless.score_bonus(), -0.2), "Other wins; Restless gives itself -0.2 as it ends")
+	_check(_running_name(pawn) == &"Other" and is_equal_approx(_score_add(restless), -0.2), "Other wins; Restless gives itself -0.2 as it ends")
 	other.value = 0.4
 	_decide(pawn, 31)
 	_check(_running_name(pawn) == &"Other", "for 30 ticks, -0.2 keeps it behind Other at 0.4")
 	_decide(pawn, 32)
-	_check(_running_name(pawn) == &"Restless" and restless.score_bonus() == 0.0, "at its deadline it's gone, and Restless wins again")
+	_check(_running_name(pawn) == &"Restless" and _score_add(restless) == 0.0, "at its deadline it's gone, and Restless wins again")
 	pawn.free()
 
 
 func _test_interrupts() -> void:
 	var heavy := _b("Heavy", 0.6)
 	heavy.interrupt_threshold = 15
-	var better := _b("Better", 0.4, 1.0)
+	var better := _b("Better", 0.4)
 	var pawn := _make_pawn([heavy, better])
 	_decide(pawn, 1)
 	better.value = 0.9
@@ -298,7 +315,7 @@ func _test_interrupts() -> void:
 
 	var stubborn := _b("Stubborn", 0.6)
 	stubborn.cannot_be_interrupted = true
-	var keen := _b("Keen", 0.4, 1.0)
+	var keen := _b("Keen", 0.4)
 	pawn = _make_pawn([stubborn, keen])
 	_decide(pawn, 1)
 	keen.value = 0.9
@@ -311,7 +328,7 @@ func _test_interrupts() -> void:
 
 	var settled := _b("Settled", 0.6)
 	settled.min_run_ticks = 30
-	var eager := _b("Eager", 0.4, 1.0)
+	var eager := _b("Eager", 0.4)
 	pawn = _make_pawn([settled, eager])
 	_decide(pawn, 100)
 	eager.value = 0.9
@@ -323,7 +340,7 @@ func _test_interrupts() -> void:
 
 	settled = _b("Settled", 0.6)
 	settled.min_run_ticks = 30
-	eager = _b("Eager", 0.4, 1.0)
+	eager = _b("Eager", 0.4)
 	pawn = _make_pawn([settled, eager])
 	_decide(pawn, 100)
 	eager.value = 0.9
@@ -400,7 +417,7 @@ func _test_tag_gates() -> void:
 
 # Claude 2026-11-23 (pawn spec 10.13): score modifiers, keyed by source, with deadlines, requirements, blocks and granted tags.
 # Claude 2026-11-25 (pawn spec 16.10 step 6a): AIScoreModifier is AIBehaviourModifier (amount is add), the calls are add_modifier and
-# remove_modifiers, and the sum is score_bonus(); its other numbers are checked at the end.
+# remove_modifiers, and the sum is score_bonus(); its other numbers are checked at the end. Claude 2026-11-27: the sum is the score's add.
 func _test_score_modifiers() -> void:
 	var melee := _b("Melee", 0.8)
 	melee.tags = [Tags.AI.STANCE_MELEE]
@@ -417,16 +434,16 @@ func _test_score_modifiers() -> void:
 	var shout_a := Node.new()
 	var shout_b := Node.new()
 	manager.add_modifier(charge, shout_a)
-	_check(is_equal_approx(melee.score_bonus(), 0.1) and ranged.score_bonus() == 0.0, "a modifier adds to the behaviours it applies to (by their tags) only")
+	_check(is_equal_approx(_score_add(melee), 0.1) and _score_add(ranged) == 0.0, "a modifier adds to the behaviours it applies to (by their tags) only")
 	_check(pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "its granted tags are owned while it's added")
 	_decide(pawn, 2)
 	_check(_running_name(pawn) == &"Melee", "Melee 0.8 + 0.1 beats Ranged 0.85")
 	manager.add_modifier(charge, shout_b)
-	_check(is_equal_approx(melee.score_bonus(), 0.2), "two sources stack")
+	_check(is_equal_approx(_score_add(melee), 0.2), "two sources stack")
 	manager.remove_modifiers(shout_a)
-	_check(is_equal_approx(melee.score_bonus(), 0.1) and pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing one source leaves the other's")
+	_check(is_equal_approx(_score_add(melee), 0.1) and pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing one source leaves the other's")
 	manager.remove_modifiers(shout_b)
-	_check(melee.score_bonus() == 0.0 and not pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing the last: no sum, no granted tag")
+	_check(_score_add(melee) == 0.0 and not pawn.owned_tags.has(Tags.AI.STANCE_MELEE), "removing the last: no sum, no granted tag")
 	# A deadline.
 	var brief := AIBehaviourModifier.new()
 	brief.applies_to = charge.applies_to
@@ -435,19 +452,19 @@ func _test_score_modifiers() -> void:
 	TickDriver.tick = 100
 	manager.add_modifier(brief, shout_a)
 	manager.refresh_modifiers(109)
-	_check(is_equal_approx(melee.score_bonus(), 0.1), "a 10-tick modifier counts at tick 109")
+	_check(is_equal_approx(_score_add(melee), 0.1), "a 10-tick modifier counts at tick 109")
 	manager.refresh_modifiers(110)
-	_check(melee.score_bonus() == 0.0 and manager.get_modifiers().is_empty(), "...and is gone at its deadline, tick 110")
+	_check(_score_add(melee) == 0.0 and manager.get_modifiers().is_empty(), "...and is gone at its deadline, tick 110")
 	# Ongoing requirements.
 	var with_ammo := AIBehaviourModifier.new()
 	with_ammo.applies_to = TagQuery.make([], [Tags.AI.STANCE_RANGED])
 	with_ammo.add = -0.2
 	with_ammo.ongoing_requirements = TagQuery.make([], [], [Tags.STATUS.HAS_AMMO])
 	manager.add_modifier(with_ammo, shout_a)
-	_check(is_equal_approx(ranged.score_bonus(), -0.2), "ongoing requirements pass (no ammo tag): it counts")
+	_check(is_equal_approx(_score_add(ranged), -0.2), "ongoing requirements pass (no ammo tag): it counts")
 	pawn.owned_tags.add(Tags.STATUS.HAS_AMMO_RANGED)
 	manager.refresh_modifiers(111)
-	_check(ranged.score_bonus() == 0.0, "the pawn now owns a tag under status.has_ammo: it stops counting")
+	_check(_score_add(ranged) == 0.0, "the pawn now owns a tag under status.has_ammo: it stops counting")
 	pawn.owned_tags.remove(Tags.STATUS.HAS_AMMO_RANGED)
 	manager.remove_modifiers(shout_a)
 	# A block, on the running behaviour.
@@ -499,6 +516,61 @@ func _test_score_modifiers() -> void:
 	shout_a.free()
 	shout_b.free()
 	pawn.free()
+
+
+# Claude 2026-11-27 (AI scoring proposal): a modifier's curve eases it in or out, over time or an input; a time curve settles into the
+# fixed numbers once past its domain; a reversed multiply stops at x0. The input curve is checked in both deciders.
+func _test_curved_modifiers() -> void:
+	# Over time: an interrupt threshold of +40 that eases to 0 over 120 ticks from when the behaviour starts.
+	var chaser := _b("Chaser", 0.5)
+	var ease := AIBehaviourModifier.new()
+	ease.number = AIBehaviourModifier.Number.INTERRUPT_THRESHOLD
+	ease.add = 40.0
+	ease.curve = _line(0.0, 1.0, 120.0, 0.0)
+	chaser.modifier_on_start = ease
+	var pawn := _make_pawn([chaser])
+	var manager := pawn.ai.behaviour_manager
+	_decide(pawn, 100)
+	_check(_running_name(pawn) == &"Chaser" and chaser.current_interrupt_threshold() == 40, "a time curve at its start: the full +40")
+	manager.refresh_modifiers(160)
+	_check(chaser.current_interrupt_threshold() == 20 and chaser.curved_modifiers.size() == 1, "halfway: +20, worked out at each read")
+	manager.refresh_modifiers(220)
+	_check(chaser.current_interrupt_threshold() == 0 and chaser.curved_modifiers.is_empty(), "past its domain: settled at 0, in the fixed numbers")
+	pawn.free()
+	# A reversed multiply stops at x0.
+	_check(AIBehaviourModifier.multiply_at(3.0, -1.0) == 0.0 and is_equal_approx(AIBehaviourModifier.multiply_at(1.3, -1.0), 0.7),
+			"strength -1 reverses a multiply (x1.3 to x0.7), and stops at x0 (x3 would be x-1)")
+	# Over an input: Keen's score gets up to +40 as test_curve_x goes from 0 to 10; Rival scores 60.
+	for decides_in in [AIBehaviourManager.DecidesIn.GDSCRIPT, AIBehaviourManager.DecidesIn.CPP]:
+		var where := "GDScript" if decides_in == AIBehaviourManager.DecidesIn.GDSCRIPT else "C++"
+		var keen := _plain("Keen", 50.0)
+		var keener := AIBehaviourModifier.new()
+		keener.add = 40.0
+		keener.curve = _line(0.0, 0.0, 10.0, 1.0)
+		keener.curve_input = "test_curve_x"
+		keen.modifier_always = keener
+		var rival := _plain("Rival", 60.0)
+		pawn = _make_pawn([keen, rival])
+		pawn.ai.behaviour_manager.decides_in = decides_in
+		pawn.ai.inputs.set_input(&"test_curve_x", 0.0)
+		_decide(pawn, 1)
+		_check(_running_name(pawn) == &"Rival", "%s: an input curve at 0: Keen 50, Rival 60 wins" % where)
+		pawn.ai.inputs.set_input(&"test_curve_x", 10.0)
+		_decide(pawn, 2)
+		_check(_running_name(pawn) == &"Keen", "%s: at 10, Keen gets the full +40 (90) and wins" % where)
+		pawn.free()
+
+
+## A straight line from (x0, y0) to (x1, y1), with its domain from x0 to x1 and its values from -1 to 1.
+func _line(x0: float, y0: float, x1: float, y1: float) -> Curve:
+	var curve := Curve.new()
+	curve.min_domain = x0
+	curve.max_domain = x1
+	curve.min_value = -1.0
+	curve.max_value = 1.0
+	curve.add_point(Vector2(x0, y0), 0.0, 0.0, Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+	curve.add_point(Vector2(x1, y1), 0.0, 0.0, Curve.TANGENT_LINEAR, Curve.TANGENT_LINEAR)
+	return curve
 
 
 func _test_finishing() -> void:
@@ -593,13 +665,6 @@ func _test_odd_cases() -> void:
 	_decide(pawn, 1)
 	_decide(pawn, 2)
 	_check(pawn.ai.behaviour_manager.get_running_behaviour() == null, "a state that allows none of its behaviours: nothing runs")
-	pawn.free()
-	var liar := _b("Liar", 0.9, 0.5) # scores 0.9 but says its max is 0.5
-	pawn = _make_pawn([liar])
-	print("  (a warning about a score above max_score is expected next, once)")
-	_decide(pawn, 1)
-	_decide(pawn, 2)
-	_check(liar.warned_score_range, "a score above max_score: a warning naming it")
 	pawn.free()
 
 
@@ -710,13 +775,27 @@ func _test_client_and_rollback() -> void:
 # --- Helpers ---
 
 
-## A test behaviour scoring value, with max_score max (value when left out).
-func _b(behaviour_name: String, value: float, max := -1.0) -> TestBehaviour:
+## A test behaviour whose own score() gives value, with settings of its own, so a test can write them while it plays.
+func _b(behaviour_name: String, value: float) -> TestBehaviour:
 	var behaviour := TestBehaviour.new()
 	behaviour.name = behaviour_name
 	behaviour.value = value
-	behaviour.max_score = value if max < 0.0 else max
+	behaviour.make_definition_unique() # Claude 2026-11-27: writing max_score here used to do this
 	return behaviour
+
+
+## A behaviour scored from its settings: score.
+func _plain(behaviour_name: String, score: float) -> PlainBehaviour:
+	var behaviour := PlainBehaviour.new()
+	behaviour.name = behaviour_name
+	behaviour.base_score = score
+	return behaviour
+
+
+## What its modifiers add to its score now.
+func _score_add(behaviour: AIBehaviourBase) -> float:
+	behaviour.work_out_change(AIBehaviourModifier.Number.SCORE)
+	return behaviour.change_add
 
 
 func _linear(hold: int, fade: int) -> FadeProfile:

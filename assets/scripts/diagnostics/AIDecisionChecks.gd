@@ -112,8 +112,8 @@ static func compare(manager: AIBehaviourManager, cpp_choice: int, tick: int) -> 
 		var names := manager.get_behaviour_list()
 		push_warning("AIDecisionChecks: C++ disagreed at tick %d on %s: GDScript chose %s, C++ chose %s." % [tick, manager.pawn.name,
 			String(running.name) if running else "nothing", String(names[cpp_choice].name) if cpp_choice >= 0 else "nothing"])
-	if manager.cpp:
-		manager.cpp.copy_state()
+	if manager.cpp_decider:
+		manager.cpp_decider.copy_state()
 
 
 # The facts written into the row against the live ones; a difference means a write was missed somewhere.
@@ -126,9 +126,11 @@ static func _check_facts(bridge: AIDeciderBridge) -> void:
 	var written_target := target_id if target_id != 0 and is_instance_valid(instance_from_id(target_id)) else 0
 	var owned := manager.pawn.owned_tags
 	var live_words := owned.get_words() if owned else PackedInt64Array()
-	var stale: bool = facts["owned"] != live_words or written_target != live_target
-	if not stale:
-		stale = AIDeciderBridge.can_press_mask(manager) != facts["can_press"]
+	var disabled := 0
+	for behaviour in manager.get_behaviour_list():
+		if not behaviour.enabled:
+			disabled |= 1 << behaviour.decision_index
+	var stale: bool = facts["owned"] != live_words or written_target != live_target or facts["disabled"] != disabled
 	if stale:
 		_counts["stale_facts"] += 1
 		if _counts["stale_facts"] <= warnings_kept:

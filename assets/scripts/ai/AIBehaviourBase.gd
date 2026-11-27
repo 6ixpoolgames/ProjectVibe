@@ -19,7 +19,7 @@ enum Status { RUNNING, SUCCEEDED, FAILED }
 	set(value):
 		enabled = value
 		if manager:
-			manager.inputs_changed() # C++ gets the brain again
+			manager.enabled_changed()
 ## The settings it runs with: a file shared by every pawn that uses it, or one embedded in this node while prototyping. Empty: its
 ## kind's defaults. One of another kind falls back to the defaults, with a warning.
 @export var definition: AIBehaviourDefinition:
@@ -46,23 +46,28 @@ var perf_available_name: StringName = &""
 ## The timing scope name for its tick(), such as &"ai.behaviour.Chase". Made once by the manager.
 var perf_tick_name: StringName = &""
 
-## What the behaviour modifiers that count for it do to each of its numbers ([enum AIBehaviourModifier.Number]): one
-## [code][multiply, add, overrides, override value][/code] per number. Worked out by the manager when they or the owned tags change.
+## What the behaviour modifiers without a live curve that count for it do to each of its numbers ([enum AIBehaviourModifier.Number]):
+## one [code][multiply, add, overrides, override value][/code] per number. Worked out by the manager when they or the owned tags change.
 var modifier_changes: Array[PackedFloat64Array] = []
+## The modifiers with a live curve that count for it, in the order added, worked out at each read ([method modified]): each
+## [code]{number, multiply, add, table, low, high, slot, added, scale}[/code] (slot -1: x is the ticks since added). Set by the manager.
+var curved_modifiers: Array[Dictionary] = []
 ## A blocking behaviour modifier counts for it. Set by the manager with [member modifier_changes].
 var decision_blocked := false
+## What [method work_out_change] worked out last: the multiply and the add one of its numbers gets.
+var change_multiply := 1.0
+var change_add := 0.0
+## Its script overrides [method score] ([method has_own_score]), noted once by the manager.
+var scripted_score := false
 
 # Scratch values for one decision, kept here so a decision creates no arrays or objects. Only the manager reads them.
-var decision_bonus := 0.0 # score_bonus() for this decision
 var decision_jitter := 0.0 # this decision's random offset
-var decision_ceiling := 0.0
-var decision_floor := 0.0 # -INF when min_score isn't set
+var decision_key := 0.0 # its result, known before any of its code runs; INF with a score() of its own (asked when reached)
 var decision_available := false # is_available()'s answer this decision, once availability_checked is true
 var availability_checked := false
-var decision_score := 0.0 # score()'s answer this decision, once decision_scored is true
+var decision_score := 0.0 # its score before modifiers (settings.base_score, or score()'s answer), once decision_scored is true
 var decision_scored := false
 var decision_index := 0 # place in the fixed order
-var warned_score_range := false
 
 ## Wake-ups, read by the manager (see the class description). Cleared when it starts.
 var wake_tick := -1 # wake_at's tick; -1: none
@@ -135,16 +140,12 @@ func is_available(context: AIManager) -> bool:
 	return true
 
 
-## How much it wants to run now, between min_score and max_score: max_score, scaled by [member score_curves] if it has any.
-func score(context: AIManager) -> float:
-	if settings.score_curves.is_empty():
-		return settings.max_score
-	var amount := 1.0
-	for curve in settings.score_curves:
-		if curve:
-			amount *= curve.amount(context.inputs)
-	var low := settings.min_score if settings.min_score > -INF else 0.0
-	return low + (settings.max_score - low) * amount
+## How much it wants to run now, before behaviour modifiers and jitter: [member AIBehaviourDefinition.base_score]. Override it to
+## work the score out in code, an open number like the setting. Behaviour modifiers and jitter still apply on top, but neither decider can
+## skip a behaviour with its own score() unasked, so it's called whenever it passes the hard rules and its conditions (see
+## [method has_own_code]).
+func score(_context: AIManager) -> float:
+	return settings.base_score
 
 
 ## The conditions it builds from its own settings, such as Attack's reach. Override in a behaviour script; the default: none. Called
@@ -171,41 +172,34 @@ func rebuild_conditions() -> void:
 		manager.inputs_changed()
 
 
-## Adds the slots of every input its conditions and curves read to slots (as keys).
+## Adds the slots of every input its conditions read to slots (as keys).
 func add_input_slots(slots: Dictionary) -> void:
 	for condition in all_conditions():
 		condition.add_input_slots(slots)
-	for curve in settings.score_curves:
-		if curve:
-			curve.add_input_slots(slots)
 
 
-## True if its script overrides [method is_available] or [method score] with code of its own. Such a behaviour works everywhere,
-## but the C++ decider can't read code, so it asks GDScript for that behaviour's answers. Worked out once per script
+## True if its script overrides [method is_available] or [method score] with code of its own. Such a behaviour works everywhere;
+## the C++ decider can't read code, so it asks GDScript for those answers when it reaches the behaviour, as GDScript's decider asks
+## them. Keep that code cheap and free of side effects (ai/README.md, "Scripted behaviours under C++"). Worked out once per script
 ## ([ScriptOverrides]).
 func has_own_code() -> bool:
-	return ScriptOverrides.overrides(get_script(), &"is_available") or ScriptOverrides.overrides(get_script(), &"score")
+	return has_own_score() or ScriptOverrides.overrides(get_script(), &"is_available")
 
 
-## True if the C++ decider can't judge it from data: it has code of its own ([method has_own_code]) or a condition of a kind C++
-## doesn't read ([method AICondition.cpp_reads]). GDScript then answers for this behaviour at each C++ decision; C++ judges the rest.
+## True if its script overrides [method score]: its score is known only once asked, so it's asked whenever it passes the rest.
+func has_own_score() -> bool:
+	return ScriptOverrides.overrides(get_script(), &"score")
+
+
+## True if the C++ decider can't judge whether it's available from data: it overrides [method is_available], or has a condition of a
+## kind C++ doesn't read ([method AICondition.cpp_reads]). C++ then asks GDScript for that behaviour; it judges the rest itself.
 func judged_in_gdscript() -> bool:
-	if has_own_code():
+	if ScriptOverrides.overrides(get_script(), &"is_available"):
 		return true
 	for condition in all_conditions():
 		if not AICondition.cpp_reads(condition.describe()):
 			return true
 	return false
-
-
-## Warns once (debug builds) if a score its score() gave is outside min_score to max_score: the manager skips behaviours by those
-## bounds, so choices may be wrong. Both deciders call it with each score they get from GDScript.
-func check_score_range(raw: float) -> void:
-	if warned_score_range or not OS.is_debug_build():
-		return
-	if raw > settings.max_score + 0.000001 or raw < settings.min_score - 0.000001:
-		warned_score_range = true
-		push_warning("AIBehaviourBase: %s's score() gave %.3f, outside its min_score %.3f to max_score %.3f. Choices may be wrong until that's fixed." % [name, raw, settings.min_score, settings.max_score])
 
 
 ## Runs tick() at this tick (or the pawn's first run after it), if nothing wakes it sooner. Used up when it fires; an earlier tick
@@ -252,7 +246,7 @@ func _settings_changed() -> void:
 	pass
 
 
-# Settings by name on the node (pawn spec 16.3): any setting of its definition's class, such as behaviour.max_score, reads from its
+# Settings by name on the node (pawn spec 16.3): any setting of its definition's class, such as behaviour.base_score, reads from its
 # settings and writes into its own variant, for code outside the behaviour and values a scene sets. Code inside a behaviour reads
 # settings.<name> (or its kind's typed reference). A write is free before the manager sets it up, and after that only once it has its
 # own variant (make_definition_unique).
@@ -306,17 +300,47 @@ func effective_jitter() -> float:
 	return manager.default_score_jitter if manager else 0.0
 
 
-## One of its numbers as its modifiers leave it: base times their multiplies plus their adds, or the last override.
+## One of its numbers as its modifiers leave it now: base times their multiplies plus their adds, or the last override. A modifier with
+## a live curve is worked out at the manager's tick and this decision's inputs. Twin of the C++ decider's: the same arithmetic.
 func modified(number: AIBehaviourModifier.Number, base: float) -> float:
-	if modifier_changes.is_empty():
+	if modifier_changes.is_empty() and curved_modifiers.is_empty():
 		return base
-	var change := modifier_changes[number]
-	return change[3] if change[2] != 0.0 else base * change[0] + change[1]
+	work_out_change(number)
+	return base * change_multiply + change_add
 
 
-## What its modifiers add to its score (0 with none).
-func score_bonus() -> float:
-	return modified(AIBehaviourModifier.Number.SCORE_BONUS, 0.0)
+## Works out [member change_multiply] and [member change_add] for one of its numbers now: what [method modified] applies (an override
+## is a multiply of 0 and an add of its value). For decision records; 1 and 0 with no modifiers.
+func work_out_change(number: AIBehaviourModifier.Number) -> void:
+	change_multiply = 1.0
+	change_add = 0.0
+	if not modifier_changes.is_empty():
+		var change := modifier_changes[number]
+		if change[2] != 0.0:
+			change_multiply = 0.0 # an override: curves don't change it
+			change_add = change[3]
+			return
+		change_multiply = change[0]
+		change_add = change[1]
+	for entry in curved_modifiers:
+		if entry["number"] != number:
+			continue
+		var strength := curve_strength(entry)
+		change_multiply *= AIBehaviourModifier.multiply_at(entry["multiply"], strength)
+		change_add += float(entry["add"]) * strength
+
+
+## A live curve's strength now: x is the ticks since its modifier was added, or its input, either times its scale (an input in ticks,
+## and time, at 60 a second).
+func curve_strength(entry: Dictionary) -> float:
+	var slot: int = entry["slot"]
+	var raw := float(manager.modifier_tick - int(entry["added"])) if slot < 0 else pawn.ai.inputs.value(slot)
+	return AIBehaviourModifier.strength_in(entry["table"], entry["low"], entry["high"], raw * float(entry["scale"]))
+
+
+## Its score with modifiers, from a base: its settings' score, or what its own score() gave.
+func current_score(base: float) -> float:
+	return modified(AIBehaviourModifier.Number.SCORE, base)
 
 
 ## Its jitter amount with modifiers, never below 0.

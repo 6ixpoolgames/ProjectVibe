@@ -4,20 +4,28 @@
 ##
 ## The manager makes one ([method make_for]) when the pawn decides in C++, and drops it when it moves to GDScript. Before each decision
 ## it reads the version counters of the facts the row holds and copies only what changed: the owned tags (the AI's state among them),
-## the behaviour modifiers' numbers, the actions that could start, the AI's facts ([member AIManager.facts_version]: target, last hit,
-## the swing coming) and a game's inputs ([member AIInputs.kept_version]). A behaviour C++ can't judge from data
-## ([method AIBehaviourBase.judged_in_gdscript]) gets GDScript's answers, written in before each decision; C++ judges the rest. Brains
-## are compiled once per behaviour set and shared by every decider. Where pawns decide: [member AIBehaviourManager.decides_in], the project setting [constant ALL_IN_GDSCRIPT_SETTING],
+## the behaviour modifiers, which behaviours are switched on, the AI's facts ([member AIManager.facts_version]: target, last hit, the
+## swing coming) and a game's inputs ([member AIInputs.kept_version]). What only GDScript can answer, C++ asks as it reaches it,
+## through one callback ([method answer]): whether a behaviour's action could start, a scripted behaviour's is_available() and score(),
+## and the inputs GDScript works out (action_ready, a group's nearest point). Brains are compiled once per behaviour set and shared by
+## every decider. Where pawns decide: [member AIBehaviourManager.decides_in], the project setting [constant ALL_IN_GDSCRIPT_SETTING],
 ## and diagnostics' switches ([AIDecisionChecks]). Timed as [code]ai.decide.cpp[/code]. Design: pawn spec 16.5, scaling spec 6.2.
 class_name AIDeciderBridge
 extends RefCounted
 
 ## The project setting that has every pawn decide in GDScript, the backup (false: each pawn's own decides_in).
 const ALL_IN_GDSCRIPT_SETTING := "project_base/ai/all_decisions_in_gdscript"
+## What C++ asks through [method answer]. The same numbers in ai_decider.h.
+enum Ask {
+	COULD_PRESS, ## could the behaviour's action start (1 or 0)
+	AVAILABLE, ## its is_available() (1 or 0)
+	SCORE, ## its score() (before modifiers)
+	INPUT, ## an input GDScript works out, by slot
+}
 
 ## The decisions made in C++ so far, by every pawn.
 static var decisions := 0
-## The answers GDScript gave so far for behaviours C++ can't judge (code of their own, or a condition C++ doesn't read).
+## The answers GDScript gave so far to C++'s questions about behaviours (could its action start, is it available, its score).
 static var gdscript_answers := 0
 
 ## The C++ AIDecider, holding this pawn's row. Typed Object so the game runs without the library.
@@ -28,14 +36,9 @@ var manager: AIBehaviourManager = null
 var _row := -1
 var _tags_version := -1
 var _modifiers_version := -1
-var _ready_version := -1
+var _enabled_version := -1
 var _facts_version := -1
 var _kept_version := -1
-var _ready_slots := PackedInt32Array() # action_ready slots the conditions read
-var _groups: Array = [] # [group, distance slot, found slot] for each group the conditions read
-var _follows_body := false # an action it presses has readiness that follows the body (Jump), so it's asked every decision
-var _judged_in_gdscript: Array[AIBehaviourBase] = [] # the behaviours GDScript answers for
-var _given_scores := PackedFloat64Array() # by slot, NaN where nothing was given
 
 static var _library := ClassDB.class_exists(&"AIDecider")
 static var _warned := {} # a reason -> true, so each is said once
@@ -72,16 +75,27 @@ static func placement_changed() -> void:
 	_placement_version += 1
 
 
+## The brain's key: its description without what's the pawn's own (its name, number, seed, decision rate, which behaviours are
+## switched on), as text. Not the definitions' ids alone: a behaviour's own conditions can come from the pawn's abilities (Attack's
+## reach), so two pawns with the same definitions can need different brains.
+static func brain_key(description: Dictionary) -> String:
+	var shared := description.duplicate()
+	for own: String in ["pawn", "pawn_number", "random_seed", "decision_interval_ticks"]:
+		shared.erase(own)
+	var behaviours: Array = []
+	for entry: Dictionary in description.get("behaviours", []):
+		var plain := entry.duplicate()
+		plain.erase("enabled")
+		behaviours.append(plain)
+	shared["behaviours"] = behaviours
+	return JSON.stringify(shared, "", true, true)
+
+
 func _init(for_manager: AIBehaviourManager) -> void:
 	manager = for_manager
 	decider = ClassDB.instantiate(&"AIDecider")
 	var description := manager.describe()
-	var shared := description.duplicate()
-	for own: String in ["pawn", "pawn_number", "random_seed", "decision_interval_ticks"]:
-		shared.erase(own)
-	# The key is everything the brain is compiled from. Not the definitions' ids alone: a behaviour's own conditions can come from the
-	# pawn's abilities (Attack's reach), so two pawns with the same definitions can need different brains.
-	var brain: int = decider.add_brain(description, JSON.stringify(shared, "", true, true)) # -1, with an error, past 64 behaviours
+	var brain: int = decider.add_brain(description, brain_key(description)) # -1, with an error, past 64 behaviours
 	if brain < 0:
 		return
 	var pawn := manager.pawn
@@ -91,25 +105,7 @@ func _init(for_manager: AIBehaviourManager) -> void:
 		return
 	copy_state()
 	decider.set_body(_row, pawn.get_instance_id(), context.memory.native_store())
-	var by_group := {}
-	for slot in manager.worked_out_inputs():
-		var kind := AIInputs.kind_of(slot)
-		if kind == AIInputs.Kind.GROUP_DISTANCE or kind == AIInputs.Kind.GROUP_FOUND:
-			var group := AIInputs.parameter_of(slot)
-			if not by_group.has(group):
-				by_group[group] = [group, -1, -1]
-				_groups.append(by_group[group])
-			by_group[group][1 if kind == AIInputs.Kind.GROUP_DISTANCE else 2] = slot
-		elif kind == AIInputs.Kind.ACTION_READY:
-			_ready_slots.append(slot)
-	var abilities := pawn.ability_manager
-	for behaviour in manager.get_behaviour_list():
-		if abilities and behaviour.settings.presses_action != &"" and abilities.ready_follows_body(behaviour.settings.presses_action):
-			_follows_body = true
-		if behaviour.judged_in_gdscript():
-			_judged_in_gdscript.append(behaviour)
-	_given_scores.resize(manager.get_behaviour_list().size())
-	_given_scores.fill(NAN)
+	decider.set_asker(_row, answer)
 
 
 ## One decision in C++: copies over the facts that changed, asks the decider, and returns the chosen behaviour's slot (-1 nothing).
@@ -119,17 +115,40 @@ func decide(tick: int, event_priority: int, event_normal: bool) -> int:
 	if AIInputs.input_count() != _kinds_sent:
 		_kinds_sent = AIInputs.input_count()
 		decider.set_input_kinds(AIInputs.kinds())
-	_write_changed(tick)
-	if not _judged_in_gdscript.is_empty():
-		_write_given(tick)
+	var writing := PerfScopes.begin_detailed() # the parts timed on their own, in detail: copying facts, and C++ deciding
+	_write_changed()
+	PerfScopes.end(&"ai.decide.cpp.write", writing)
 	if AIDecisionChecks.active:
 		AIDecisionChecks.before_cpp_decision(self)
+	var deciding := PerfScopes.begin_detailed() # includes the answers GDScript gives on the way
 	var chosen: int = decider.decide_pawn(_row, tick, event_priority, event_normal)
+	PerfScopes.end(&"ai.decide.cpp.native", deciding)
 	if AIDecisionChecks.check_against_gdscript:
 		AIDecisionChecks.after_cpp_decision(self)
 	decisions += 1
 	PerfScopes.end(&"ai.decide.cpp", started)
 	return chosen
+
+
+## C++'s questions during a decision, by [enum Ask] and the behaviour's slot (or, for an input, its slot). Only for behaviours still
+## in the running, so a behaviour's code runs only when GDScript's own decider would run it.
+func answer(what: int, slot: int) -> float:
+	var context := manager.pawn.ai
+	if what == Ask.INPUT:
+		return context.inputs.value(slot)
+	gdscript_answers += 1
+	var behaviour: AIBehaviourBase = manager.get_behaviour_list()[slot]
+	match what:
+		Ask.COULD_PRESS:
+			return 1.0 if context.inputs.action_ready(behaviour.settings.presses_action) else 0.0
+		Ask.AVAILABLE:
+			var started := PerfScopes.begin_detailed()
+			var available := behaviour.is_available(context)
+			PerfScopes.end(behaviour.perf_available_name, started)
+			return 1.0 if available else 0.0
+		Ask.SCORE:
+			return behaviour.score(context)
+	return 0.0
 
 
 ## Whether the interrupt rule kept the running behaviour at the last decision.
@@ -152,32 +171,21 @@ func stopped(tick: int) -> void:
 	decider.stop_running(_row, tick)
 
 
-## The facts as written into the row (owned, target_id, can_press and the modifiers' numbers), for the checks.
+## The facts as written into the row (owned, target_id, blocked, disabled), for the checks.
 func written_facts() -> Dictionary:
 	return decider.get_facts(_row)
 
 
-## The inputs the last decision used, as C++ worked them out, for the checks.
+## The inputs the last decision read, as C++ worked them out, with the rest worked out now, for the checks.
 func last_inputs() -> PackedFloat64Array:
 	return decider.get_last_inputs()
-
-
-## The behaviours whose action could start now, as a mask by behaviour slot.
-static func can_press_mask(for_manager: AIBehaviourManager) -> int:
-	var inputs := for_manager.pawn.ai.inputs
-	var mask := 0
-	for behaviour in for_manager.get_behaviour_list():
-		if behaviour.settings.presses_action != &"" and inputs.action_ready(behaviour.settings.presses_action):
-			mask |= 1 << behaviour.decision_index
-	return mask
 
 
 # --- Internals ---
 
 
-# Copies what changed since the last decision, read through each fact's version counter. A group's nearest point goes every time:
-# the lookup is kept 2 seconds but checked at every call (as GDScript's reading does), and a point can move (one carried by a hero).
-func _write_changed(tick: int) -> void:
+# Copies what changed since the last decision, read through each fact's version counter.
+func _write_changed() -> void:
 	var pawn := manager.pawn
 	var context := pawn.ai
 	var owned := pawn.owned_tags
@@ -187,6 +195,13 @@ func _write_changed(tick: int) -> void:
 		decider.set_owned_tags(_row, owned.get_words() if owned else PackedInt64Array())
 	if manager.modifiers_version != _modifiers_version:
 		_write_modifiers()
+	if manager.enabled_version != _enabled_version:
+		_enabled_version = manager.enabled_version
+		var disabled := 0
+		for behaviour in manager.get_behaviour_list():
+			if not behaviour.enabled:
+				disabled |= 1 << behaviour.decision_index
+		decider.set_disabled(_row, disabled)
 	if context.facts_version != _facts_version:
 		_facts_version = context.facts_version
 		_write_facts(context)
@@ -196,49 +211,6 @@ func _write_changed(tick: int) -> void:
 		for slot in mini(AIInputs.input_count(), inputs.values.size()):
 			if AIInputs.kind_of(slot) == AIInputs.Kind.KEPT:
 				decider.set_input(_row, slot, inputs.values[slot])
-	var abilities := pawn.ability_manager
-	if abilities and (abilities.readiness_version != _ready_version or _follows_body):
-		_ready_version = abilities.readiness_version
-		decider.set_can_press(_row, can_press_mask(manager))
-		for slot: int in _ready_slots:
-			decider.set_input(_row, slot, inputs.value(slot))
-	for group: Array in _groups:
-		var point := inputs.nearest_in_group(group[0], tick)
-		decider.set_group_point(_row, group[1], group[2], point != null, point.global_position if point else Vector3.ZERO)
-
-
-# GDScript's answers for the behaviours C++ can't judge, for this decision. Only those that pass the hard rules (as the manager's own
-# decide() checks them), since C++ never asks the others; is_available() and score() run once each, as GDScript's decider runs them.
-func _write_given(tick: int) -> void:
-	var context := manager.pawn.ai
-	var owned := manager.pawn.owned_tags
-	var words := owned.get_words() if owned else PackedInt64Array()
-	var running := manager.get_running_behaviour()
-	var known := 0
-	var available := 0
-	for behaviour in _judged_in_gdscript:
-		var slot := behaviour.decision_index
-		_given_scores[slot] = NAN
-		if not behaviour.passes_requirements(words) or behaviour.decision_blocked:
-			continue
-		if behaviour != running and behaviour.is_cooling_down(tick):
-			continue
-		if behaviour.settings.needs_target and not context.has_target():
-			continue
-		var action := behaviour.settings.presses_action
-		if action != &"" and behaviour != running and not context.inputs.action_ready(action):
-			continue
-		known |= 1 << slot
-		gdscript_answers += 1
-		var started := PerfScopes.begin_detailed()
-		var answer := behaviour.is_available(context)
-		PerfScopes.end(behaviour.perf_available_name, started)
-		if answer:
-			available |= 1 << slot
-			var raw := behaviour.score(context)
-			behaviour.check_score_range(raw)
-			_given_scores[slot] = raw
-	decider.set_given(_row, known, available, _given_scores)
 
 
 # The target, the last hit and the swing coming at it: what C++ works the built-in inputs out from.
@@ -253,24 +225,45 @@ func _write_facts(context: AIManager) -> void:
 		context.incoming_start_tick, context.incoming_hit_tick)
 
 
-# What the behaviour modifiers leave, as the numbers the decider uses (the ticks at the match's rate).
+# What the behaviour modifiers do, as the decider reads it: each behaviour's fixed changes (multiply, add, override value or NaN, for
+# each number), the live curves in the order added (each with a mask of the behaviours it counts for), and the blocks.
 func _write_modifiers() -> void:
 	_modifiers_version = manager.modifiers_version
-	var bonus := PackedFloat64Array()
-	var jitter := PackedFloat64Array()
-	var threshold := PackedInt64Array()
-	var cooldown := PackedInt64Array()
-	var min_run := PackedInt64Array()
+	var behaviours := manager.get_behaviour_list()
+	var changes := PackedFloat64Array()
 	var blocked := 0
-	for behaviour in manager.get_behaviour_list():
-		bonus.append(behaviour.score_bonus())
-		jitter.append(behaviour.current_jitter())
-		threshold.append(behaviour.current_interrupt_threshold())
-		cooldown.append(behaviour.current_cooldown_ticks())
-		min_run.append(behaviour.current_min_run_ticks())
+	var any_change := false
+	for behaviour in behaviours:
+		if not behaviour.modifier_changes.is_empty():
+			any_change = true
 		if behaviour.decision_blocked:
 			blocked |= 1 << behaviour.decision_index
-	decider.set_modifiers(_row, bonus, jitter, threshold, cooldown, min_run, blocked)
+	# The live curves in the order added (each behaviour's own list keeps that order, so C++ multiplies in the same order), each with
+	# the behaviours it counts for. By identity: two modifiers alike are still two.
+	var described: Array = []
+	for modifier_entry in manager.get_modifiers():
+		var curved: Variant = modifier_entry["curved"]
+		if curved == null:
+			continue
+		var mask := 0
+		for behaviour in behaviours:
+			for entry in behaviour.curved_modifiers:
+				if is_same(entry, curved):
+					mask |= 1 << behaviour.decision_index
+					break
+		if mask != 0:
+			var entry: Dictionary = curved.duplicate()
+			entry["mask"] = mask
+			described.append(entry)
+	if any_change:
+		for behaviour in behaviours:
+			for number in AIBehaviourModifier.Number.size():
+				if behaviour.modifier_changes.is_empty():
+					changes.append_array([1.0, 0.0, NAN])
+				else:
+					var change := behaviour.modifier_changes[number]
+					changes.append_array([change[0], change[1], change[3] if change[2] != 0.0 else NAN])
+	decider.set_modifiers(_row, changes, described, blocked)
 
 
 # Why this pawn decides in GDScript, or "" if it can decide in C++.

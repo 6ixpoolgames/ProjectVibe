@@ -2,7 +2,7 @@
 
 # Class index
 
-Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 208 classes.
+Every class in the production code, A to Z. Each name links to its entry in its system's reference; the system links to its overview. 207 classes.
 
 | Class | System | Extends | What it is |
 |---|---|---|---|
@@ -45,7 +45,6 @@ Every class in the production code, A to Z. Each name links to its entry in its 
 | [AIMemoryStoreGD](../assets/scripts/ai/REFERENCE.md#aimemorystoregd) | [ai](../assets/scripts/ai/README.md) | RefCounted | One pawn's AI memory in GDScript, plus the loops that read and write it: the sight check, the most aware entry, target scoring. |
 | [AIParryBehaviour](../assets/scripts/ai/REFERENCE.md#aiparrybehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Parries a swing coming at the pawn, some of the time ([member AIParryDefinition.parry_chance]). |
 | [AIParryDefinition](../assets/scripts/ai/REFERENCE.md#aiparrydefinition) | [ai](../assets/scripts/ai/README.md) | AIBehaviourDefinition | The settings of a Parry behaviour ([AIParryBehaviour]), shared by every pawn whose Parry uses it. |
-| [AIScoreCurve](../assets/scripts/ai/REFERENCE.md#aiscorecurve) | [ai](../assets/scripts/ai/README.md) | Resource | Turns one input into an amount from 0 to 1 that scales a behaviour's score: the "how much" to a condition's "whether". |
 | [AISearchBehaviour](../assets/scripts/ai/REFERENCE.md#aisearchbehaviour) | [ai](../assets/scripts/ai/README.md) | AIBehaviourBase | Hunts around where an enemy it became certain of was last seen: "I know you were here". |
 | [AISearchDefinition](../assets/scripts/ai/REFERENCE.md#aisearchdefinition) | [ai](../assets/scripts/ai/README.md) | AIBehaviourDefinition | The settings of a Search behaviour ([AISearchBehaviour]), shared by every pawn whose Search uses it. |
 | [AISenseBase](../assets/scripts/ai/REFERENCE.md#aisensebase) | [ai](../assets/scripts/ai/README.md) | Node | The base for one AI sense, such as sight: notices other pawns and writes what it found into memory. |

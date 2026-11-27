@@ -28,14 +28,14 @@ func _ready() -> void:
 func _test_kind_defaults() -> void:
 	var one := AIChaseBehaviour.new()
 	var two := AIChaseBehaviour.new()
-	_check(one.settings is AIChaseDefinition and one.settings.max_score == 0.8 and one.settings.needs_target, "with no definition it runs with its kind's defaults (an AIChaseDefinition: 0.8, needs a target)")
+	_check(one.settings is AIChaseDefinition and one.settings.base_score == 80.0 and one.settings.needs_target, "with no definition it runs with its kind's defaults (an AIChaseDefinition: 80, needs a target)")
 	_check(two.settings == one.settings and one.definition_note() == "" and not one.has_own_settings(), "and every node of the kind shares them")
-	_check(one.max_score == 0.8 and one.repath_ticks == 20 and one.tags == [Tags.AI.STANCE_MELEE], "the node reads each setting by name from them")
+	_check(one.base_score == 80.0 and one.repath_ticks == 20 and one.tags == [Tags.AI.STANCE_MELEE], "the node reads each setting by name from them")
 	var wander := AIWanderBehaviour.new()
 	var attack := AIAttackBehaviour.new()
-	_check(wander.settings.max_score == 0.1 and attack.settings.presses_action == &"primary", "each kind has its own defaults (Wander 0.1; Attack presses primary)")
+	_check(wander.settings.base_score == 10.0 and attack.settings.presses_action == &"primary", "each kind has its own defaults (Wander 10; Attack presses primary)")
 	var look := AILookTowardBehaviour.new()
-	_check(look.settings.modifier_on_start != null and look.settings.modifier_on_start.add == -0.3, "a kind's default modifier_on_start comes with it (Look Toward steps aside)")
+	_check(look.settings.modifier_on_start != null and look.settings.modifier_on_start.add == -30.0, "a kind's default modifier_on_start comes with it (Look Toward steps aside)")
 	for node in [one, two, wander, attack, look]:
 		node.free()
 
@@ -43,14 +43,14 @@ func _test_kind_defaults() -> void:
 func _test_definition_files() -> void:
 	var chase := AIChaseBehaviour.new()
 	chase.definition = load(GOBLIN_CHASE)
-	_check(chase.settings.dash_to_close and chase.settings.max_score == 0.8 and chase.settings.repath_ticks == 20, "a definition file changes what it sets (dash_to_close); the rest are the kind's defaults")
+	_check(chase.settings.dash_to_close and chase.settings.base_score == 80.0 and chase.settings.repath_ticks == 20, "a definition file changes what it sets (dash_to_close); the rest are the kind's defaults")
 	_check(chase.definition_note() == "" and chase.definition.describe() == "Goblin Chase", "a file is the normal case: nothing for diagnostics to flag")
 	var variant := AIAttackDefinition.new()
 	variant.based_on = load(HEAVY_ATTACK)
 	variant.min_distance = 2.0
 	var attack := AIAttackBehaviour.new()
 	attack.definition = variant
-	_check(attack.settings.presses_action == &"secondary" and attack.settings.max_score == 0.95 and attack.settings.min_distance == 2.0, "a variant follows its base (secondary, 0.95) and keeps its own change (min_distance 2)")
+	_check(attack.settings.presses_action == &"secondary" and attack.settings.base_score == 95.0 and attack.settings.min_distance == 2.0, "a variant follows its base (secondary, 95) and keeps its own change (min_distance 2)")
 	chase.free()
 	attack.free()
 
@@ -58,11 +58,11 @@ func _test_definition_files() -> void:
 func _test_written_on_the_node() -> void:
 	var quick := AIWanderBehaviour.new()
 	var other := AIWanderBehaviour.new()
-	quick.max_score = 0.3
+	quick.base_score = 30.0
 	quick.wander_radius = 4.0
-	_check(quick.settings.max_score == 0.3 and quick.settings.wander_radius == 4.0 and quick.settings.min_score == 0.1, "a setting written on a node before it plays goes on top of its kind's defaults")
+	_check(quick.settings.base_score == 30.0 and quick.settings.wander_radius == 4.0 and quick.settings.tick_interval_ticks == 60, "a setting written on a node before it plays goes on top of its kind's defaults")
 	_check(quick.has_own_settings() and quick.definition_note() == "own settings", "and diagnostics says it has settings of its own")
-	_check(other.settings.max_score == 0.1 and not other.has_own_settings(), "another node of the kind is unchanged")
+	_check(other.settings.base_score == 10.0 and not other.has_own_settings(), "another node of the kind is unchanged")
 	quick.tags = [&"ai.stance.melee"]
 	_check(quick.settings.tags is Array and (quick.settings.tags as Array).is_typed(), "a plain list written on the node takes the setting's typed list")
 	quick.free()
@@ -72,7 +72,7 @@ func _test_written_on_the_node() -> void:
 func _test_another_kind() -> void:
 	var chase := AIChaseBehaviour.new()
 	chase.definition = AIAttackDefinition.new()
-	_check(chase.settings is AIChaseDefinition and chase.settings.max_score == 0.8 and chase.definition_note() == "fell back", "a definition of another kind: it runs with its kind's defaults, and diagnostics says so")
+	_check(chase.settings is AIChaseDefinition and chase.settings.base_score == 80.0 and chase.definition_note() == "fell back", "a definition of another kind: it runs with its kind's defaults, and diagnostics says so")
 	chase.free()
 
 
@@ -92,7 +92,7 @@ func _test_while_playing() -> void:
 	attack.use_definition(load(SHOOT))
 	var described: Dictionary = first.ai.behaviour_manager.describe()["behaviours"][0]
 	_check(attack.settings.presses_action == &"ability_3" and attack.settings.approach_margin == 1.0, "use_definition swaps its definition in play; its own changes stay on top")
-	_check(described["presses_action"] == "ability_3" and described["max_score"] == 0.97 and described["definition"] == "Shoot", "and the brain C++ gets has the new settings and names the definition")
+	_check(described["presses_action"] == "ability_3" and described["base_score"] == 97.0 and described["definition"] == "Shoot", "and the brain C++ gets has the new settings and names the definition")
 	first.queue_free()
 	second.queue_free()
 	await get_tree().physics_frame
@@ -107,7 +107,7 @@ func _test_sample_scenes() -> void:
 	var heavy: AIAttackBehaviour = behaviours.get_node("HeavyAttack")
 	var shoot: AIAttackBehaviour = behaviours.get_node("Shoot")
 	var chase: AIChaseBehaviour = behaviours.get_node("Chase")
-	_check(heavy.settings.presses_action == &"secondary" and heavy.settings.max_score == 0.95 and heavy.definition_note() == "", "the faction goblin's Heavy Attack runs with heavy_attack.tres")
+	_check(heavy.settings.presses_action == &"secondary" and heavy.settings.base_score == 95.0 and heavy.definition_note() == "", "the faction goblin's Heavy Attack runs with heavy_attack.tres")
 	_check(shoot.settings.presses_action == &"ability_3" and shoot.settings.min_distance == 4.0 and shoot.definition_note() == "", "its Shoot with shoot.tres")
 	_check(chase.settings.dash_to_close and chase.definition_note() == "", "its Chase with goblin_chase.tres (inherited from the arena goblin)")
 	goblin.queue_free()

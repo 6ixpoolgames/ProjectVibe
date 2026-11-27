@@ -18,6 +18,17 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Test hooks in `NavServer` | `debug_fail_tile_commits`, `debug_limit_path_corners`, `debug_log_path_steps` in `nav_server.h` (and `GroundDomain`, `PathQueue`) | Test code bound into the shipping class. A test-only build flag or subclass would keep them out | S |
 | `NavHooks` settings that do nothing | `send_estimates`, `send_link_hints` in `nav_hooks.h` | A designer sees two switches in the inspector that change nothing. Hide them until the coarse planner (estimates) or link hints exist | S |
 
+## 2026-11-27
+
+- **`AIDecider`: one scoring model, asking back** (docs/pawn/AI_SCORING_PROPOSAL.md; the twin of `AIBehaviourManager.decide()`'s change, in ai/CHANGELOG.md). Changes:
+  - **Scores.** A behaviour has one `base_score` (no `max_score`, `min_score` or score curves), and modifiers multiply, then add to it.
+  - **The walk.** `decide_row` works out each candidate's result up front and walks them highest first. It asks whether the action could start and whether the behaviour is available only on the way, and stops once nothing after can win. Floors and ceilings are gone.
+  - **Modifier curves.** `set_modifiers(row, changes, curves, blocked)` takes the modifiers' fixed part (multiply, add, override per number) and their live curves: baked strength tables over an input or the ticks since added. `decide_pawn` works the numbers out at each decision while a curve is live (`work_out_numbers`), with the same arithmetic as GDScript, `ticks_at_rate` included. The brain takes `tick_rate` and the base numbers at 60 a second.
+  - **Asking back.** New `set_asker(row, callable)`: GDScript's answers as C++ reaches them (`Ask`: could press, available, score, input). This replaces `set_can_press`, `set_given` and `set_group_point`. Inputs are worked out lazily (`LazyInputs`), and `get_last_inputs()` fills the rest for checks.
+  - **Switched off.** New `set_disabled(row, mask)`: switched-off behaviours count as blocked, and `add_brain` ignores `enabled`.
+  - **Jitter drawn once per pawn:** `jitter_once` in the brain.
+  - **Stateless `decide()`.** Its columns take `score_multiply` and `score_add` in place of `modifier`.
+
 ## 2026-11-26
 
 - **`AIDecider.set_given`** (step 6d, second part): GDScript's answers for a pawn row's "given" behaviours (which it answered, which are available, their scores), read by `decide_pawn` as `decide()` reads its columns, so one scripted behaviour no longer keeps its whole pawn out of C++. `add_brain` compiles conditions and curves only for behaviours judged by them, so a "given" behaviour may have a condition of a kind C++ doesn't know.

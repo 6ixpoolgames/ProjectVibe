@@ -32,7 +32,6 @@ Every class in `assets/scripts/ai/`, from its doc comments. The overview is in [
 - [AIChanceCondition](#aichancecondition)
 - [AICompareCondition](#aicomparecondition)
 - [AICondition](#aicondition)
-- [AIScoreCurve](#aiscorecurve)
 - [AIAttackDefinition](#aiattackdefinition)
 - [AIBehaviourDefinition](#aibehaviourdefinition)
 - [AIChaseDefinition](#aichasedefinition)
@@ -68,18 +67,19 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `ended_tick: int` = `-1`: The tick it last ended (-1: never).
 - `perf_available_name: StringName` = `&""`: The timing scope names for its is_available() and its tick(), such as &"ai.available.Chase" and &"ai.behaviour.Chase" (see [`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)). Made once by the manager, so timing makes no new names.
 - `perf_tick_name: StringName` = `&""`: The timing scope name for its tick(), such as &"ai.behaviour.Chase". Made once by the manager.
-- `modifier_changes: PackedFloat64Array[]` = `[]`: What the behaviour modifiers that count for it do to each of its numbers (`AIBehaviourModifier.Number`): one `[multiply, add, overrides, override value]` per number. Worked out by the manager when they or the owned tags change.
+- `modifier_changes: PackedFloat64Array[]` = `[]`: What the behaviour modifiers without a live curve that count for it do to each of its numbers (`AIBehaviourModifier.Number`): one `[multiply, add, overrides, override value]` per number. Worked out by the manager when they or the owned tags change.
+- `curved_modifiers: Dictionary[]` = `[]`: The modifiers with a live curve that count for it, in the order added, worked out at each read (`modified()`): each `{number, multiply, add, table, low, high, slot, added, scale}` (slot -1: x is the ticks since added). Set by the manager.
 - `decision_blocked: bool` = `false`: A blocking behaviour modifier counts for it. Set by the manager with `modifier_changes`.
-- `decision_bonus: float` = `0.0`
+- `change_multiply: float` = `1.0`: What `work_out_change()` worked out last: the multiply and the add one of its numbers gets.
+- `change_add: float` = `0.0`
+- `scripted_score: bool` = `false`: Its script overrides `score()` (`has_own_score()`), noted once by the manager.
 - `decision_jitter: float` = `0.0`
-- `decision_ceiling: float` = `0.0`
-- `decision_floor: float` = `0.0`
+- `decision_key: float` = `0.0`
 - `decision_available: bool` = `false`
 - `availability_checked: bool` = `false`
 - `decision_score: float` = `0.0`
 - `decision_scored: bool` = `false`
 - `decision_index: int` = `0`
-- `warned_score_range: bool` = `false`
 - `wake_tick: int` = `-1`: Wake-ups, read by the manager (see the class description). Cleared when it starts.
 - `wakes_on_path_end: bool` = `false`
 - `wakes_on_action: StringName` = `&""`
@@ -100,14 +100,14 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `has_own_settings() -> bool`: True if it has settings of its own on top of its definition (`make_definition_unique()`, or values a scene sets on the node).
 - `definition_note() -> String`: Where its settings come from, for diagnostics: "fell back", "embedded", "own settings" or "" (`DefinitionSettings.note()`).
 - `is_available(context: AIManager) -> bool`: Its own yes or no, after the manager's checks: every condition passes (`all_conditions()`). The inputs they read were worked out for this decision by the behaviour manager. Overriding this with code works, but see `has_own_code()`.
-- `score(context: AIManager) -> float`: How much it wants to run now, between min_score and max_score: max_score, scaled by `score_curves` if it has any.
+- `score(_context: AIManager) -> float`: How much it wants to run now, before behaviour modifiers and jitter: `AIBehaviourDefinition.base_score`. Override it to work the score out in code, an open number like the setting. Behaviour modifiers and jitter still apply on top, but neither decider can skip a behaviour with its own score() unasked, so it's called whenever it passes the hard rules and its conditions (see `has_own_code()`).
 - `own_conditions() -> AICondition[]`: The conditions it builds from its own settings, such as Attack's reach. Override in a behaviour script; the default: none. Called once, the first time they're needed, and again after `rebuild_conditions()`.
 - `all_conditions() -> AICondition[]`: Its own conditions, then the ones in `conditions`: everything `is_available()` checks by default.
 - `rebuild_conditions() -> void`: Builds the conditions again at the next decision, after a setting they come from changed (such as a swing's reach).
-- `add_input_slots(slots: Dictionary) -> void`: Adds the slots of every input its conditions and curves read to slots (as keys).
-- `has_own_code() -> bool`: True if its script overrides `is_available()` or `score()` with code of its own. Such a behaviour works everywhere, but the C++ decider can't read code, so it asks GDScript for that behaviour's answers. Worked out once per script ([`ScriptOverrides`](../platform/REFERENCE.md#scriptoverrides)).
-- `judged_in_gdscript() -> bool`: True if the C++ decider can't judge it from data: it has code of its own (`has_own_code()`) or a condition of a kind C++ doesn't read (`AICondition.cpp_reads()`). GDScript then answers for this behaviour at each C++ decision; C++ judges the rest.
-- `check_score_range(raw: float) -> void`: Warns once (debug builds) if a score its score() gave is outside min_score to max_score: the manager skips behaviours by those bounds, so choices may be wrong. Both deciders call it with each score they get from GDScript.
+- `add_input_slots(slots: Dictionary) -> void`: Adds the slots of every input its conditions read to slots (as keys).
+- `has_own_code() -> bool`: True if its script overrides `is_available()` or `score()` with code of its own. Such a behaviour works everywhere; the C++ decider can't read code, so it asks GDScript for those answers when it reaches the behaviour, as GDScript's decider asks them. Keep that code cheap and free of side effects (ai/README.md, "Scripted behaviours under C++"). Worked out once per script ([`ScriptOverrides`](../platform/REFERENCE.md#scriptoverrides)).
+- `has_own_score() -> bool`: True if its script overrides `score()`: its score is known only once asked, so it's asked whenever it passes the rest.
+- `judged_in_gdscript() -> bool`: True if the C++ decider can't judge whether it's available from data: it overrides `is_available()`, or has a condition of a kind C++ doesn't read (`AICondition.cpp_reads()`). C++ then asks GDScript for that behaviour; it judges the rest itself.
 - `wake_at(at_tick: int) -> void`: Runs tick() at this tick (or the pawn's first run after it), if nothing wakes it sooner. Used up when it fires; an earlier tick than one already set wins.
 - `wake_on_path_end() -> void`: Runs tick() when a walk it started ends, arrived or given up (PathFollower.path_ended, on the AI controller's follower).
 - `wake_on_action_end(action: StringName) -> void`: Runs tick() when an ability on this action finishes or is cancelled (AbilityManager.ability_finished, ability_cancelled).
@@ -119,8 +119,10 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `tag_words() -> PackedInt64Array`: Its own `tags` as words, parents included, for score modifiers' applies_to.
 - `is_cooling_down(at_tick: int) -> bool`: True while its cooldown (as its modifiers leave it) hasn't finished.
 - `effective_jitter() -> float`: This behaviour's jitter amount before modifiers: its own, or the manager's default when it's -1.
-- `modified(number: int, base: float) -> float`: One of its numbers as its modifiers leave it: base times their multiplies plus their adds, or the last override.
-- `score_bonus() -> float`: What its modifiers add to its score (0 with none).
+- `modified(number: int, base: float) -> float`: One of its numbers as its modifiers leave it now: base times their multiplies plus their adds, or the last override. A modifier with a live curve is worked out at the manager's tick and this decision's inputs. Twin of the C++ decider's: the same arithmetic.
+- `work_out_change(number: int) -> void`: Works out `change_multiply` and `change_add` for one of its numbers now: what `modified()` applies (an override is a multiply of 0 and an add of its value). For decision records; 1 and 0 with no modifiers.
+- `curve_strength(entry: Dictionary) -> float`: A live curve's strength now: x is the ticks since its modifier was added, or its input, either times its scale (an input in ticks, and time, at 60 a second).
+- `current_score(base: float) -> float`: Its score with modifiers, from a base: its settings' score, or what its own score() gave.
 - `current_jitter() -> float`: Its jitter amount with modifiers, never below 0.
 - `current_interrupt_threshold() -> int`: Its interrupt threshold with modifiers.
 - `current_cooldown_ticks() -> int`: Its cooldown with modifiers, in this match's ticks; 0: none.
@@ -132,7 +134,7 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 
 Picks and runs the pawn's AI behaviour, judging between its behaviours by score.
 
-A component of the pawn's AIManager (added by PawnInitializer, or the game's AI brain) with its [`AIBehaviourBase`](#aibehaviourbase) nodes as children. At each decision it checks whether the running behaviour may be replaced, drops behaviours that fail a hard rule, scores the rest and starts the winner; between decisions only the running behaviour's tick runs. Behaviours are kept sorted by name (the fixed order), never by the order added. Outside code only talks to the manager:
+A component of the pawn's AIManager (added by PawnInitializer, or the game's AI brain) with its [`AIBehaviourBase`](#aibehaviourbase) nodes as children. At each decision it checks whether the running behaviour may be replaced, drops behaviours that fail a hard rule, works out each one's result (its score with behaviour modifiers, plus jitter), and walks them highest first until one is available; between decisions only the running behaviour's tick runs. Behaviours are kept sorted by name (the fixed order), never by the order added. Outside code only talks to the manager:
 
 ```gdscript
 pawn.ai.behaviour_manager.get_running_behaviour()
@@ -140,18 +142,21 @@ pawn.ai.behaviour_manager.add_modifier(charge_shout, self)   # raise melee until
 pawn.ai.behaviour_manager.remove_modifiers(self)
 ```
 
-C++ makes the decisions (its own `AIDecider`, through `cpp`) and this manager is the backup (`decide()`). Design: pawn spec 10.7, 10.8 and 16.5, scaling spec 6.2.
+C++ makes the decisions (its own `AIDecider`, through `cpp_decider`) and this manager is the backup (`decide()`). A game sets its defaults (jitter, ties) on the AI brain it gives every pawn (PawnDefaultsRes.ai_brain). Design: pawn spec 10.7, 10.8 and 16.5, scaling spec 6.2.
 
 ### Settings and properties
 
 - `decision_listener: Callable` = `Callable()`: Called after every decision of every pawn: `func(record: AIDecisionRecord, manager: AIBehaviourManager)`. Static, so one listener hears every pawn. For diagnostics and checking another decider (scaling spec 6.2). Empty (default): no record is made.
 - `decides_in: int` = `0`: Where this pawn's decisions are made: C++ (the default) or GDScript. The project setting `AIDeciderBridge.ALL_IN_GDSCRIPT_SETTING` and diagnostics ([`AIDecisionChecks`](../diagnostics/REFERENCE.md#aidecisionchecks)) can move every pawn to GDScript.
-- `default_score_jitter: float` = `0.0`: The jitter for behaviours whose own score_jitter is -1. 0: no randomness.
+- `default_score_jitter: float` = `0.0`: The jitter for behaviours whose own score_jitter is -1, in score units. 0: no randomness.
+- `jitter_draw: int` = `0`: When jitter is drawn: at every decision, or once per pawn (a fixed personality). Replayable either way.
 - `randomize_ties: bool` = `false`: On: results that tie are picked between at random (replayably). Off: the fixed order decides.
 - `tie_margin: float` = `0.0001`: Results closer than this count as a tie.
 - `pawn: Pawn` = `null`: The pawn this is a part of, or null.
-- `cpp: AIDeciderBridge` = `null`: Its link to its C++ decider, or null while it decides in GDScript. Made at its first decision, and again when its brain or where it decides changes.
+- `cpp_decider: AIDeciderBridge` = `null`: Its link to its C++ decider, or null while it decides in GDScript. Made at its first decision, and again when its brain or where it decides changes.
+- `modifier_tick: int` = `0`: The tick the behaviour modifiers were last worked out for (`refresh_modifiers()`): what their time curves read.
 - `modifiers_version: int` = `0`: Goes up by one whenever what the behaviour modifiers do to any behaviour changes, so the C++ decider's copy is written again.
+- `enabled_version: int` = `0`: Goes up by one whenever a behaviour is switched on or off (`AIBehaviourBase.enabled`).
 
 ### Signals
 
@@ -161,7 +166,11 @@ C++ makes the decisions (its own `AIDecider`, through `cpp`) and this manager is
 
 - `DecidesIn.CPP = 0`: by C++, the main path (the default)
 - `DecidesIn.GDSCRIPT = 1`: by this manager, the backup
+- `JitterDraw.EACH_DECISION = 0`: afresh at every decision: variety from moment to moment
+- `JitterDraw.ONCE_PER_PAWN = 1`: once for each pawn and behaviour, kept for its life: a fixed personality
 - `TIE_SALT = 28981`
+- `JITTER_ONCE_SALT = 27159`: What a once-per-pawn jitter draw is for (with the behaviour's name hash), and the tick it's drawn at: the same every decision.
+- `JITTER_ONCE_TICK = 0`
 - `MODIFIER_TAG_SOURCE = &"behaviour_modifiers"`
 
 ### Functions
@@ -174,13 +183,14 @@ C++ makes the decisions (its own `AIDecider`, through `cpp`) and this manager is
 - `tick_running(tick: int) -> void`: `AIManager.think()` calls this every tick the AI runs, after any decision. Ticks the running behaviour.
 - `stop_running(reason: String) -> void`: Stops the running behaviour, if any; its exit() gets this reason. Called with "died" when the pawn dies.
 - `inputs_changed() -> void`: Called when a behaviour's conditions change (`AIBehaviourBase.rebuild_conditions()`), so the inputs worked out at each decision are listed again, and C++ gets the new brain.
-- `settings_changed() -> void`: Called when a behaviour's settings change in play (`AIBehaviourBase.use_definition()`): its inputs, the modifiers that count for it (its tags may have changed) and C++'s brain are worked out again.
+- `settings_changed() -> void`: Called when a behaviour's settings change in play (`AIBehaviourBase.use_definition()`): its inputs, the modifiers that count for it (its tags may have changed), its own always-on modifier and C++'s brain are worked out again.
+- `enabled_changed() -> void`: Called when a behaviour is switched on or off (`AIBehaviourBase.enabled`): C++ is told at the next decision, and a running behaviour switched off is replaced at the next AI step (`check_running()`). The brain stays the same.
 - `add_modifier(modifier: AIBehaviourModifier, source: Variant) -> void`: Adds a behaviour modifier (pawn spec 16.5), kept under this source: anything that names it, usually the node or effect that adds it. A source may add several; `remove_modifiers()` takes all of its own away.
 - `remove_modifiers(source: Variant) -> void`: Takes away every behaviour modifier this source added.
-- `get_modifiers() -> Dictionary[]`: The behaviour modifiers now, in the order added: {modifier, source, ends, only} each (ends is the tick it goes, -1 until removed; only is the behaviour that gave it to itself, or null).
-- `refresh_modifiers(tick: int) -> void`: Works out again what the modifiers do to each behaviour's numbers and which they block, if anything they depend on changed: the list, a deadline passing, or the pawn's owned tags (their ongoing requirements). Every decision calls it first; cheap when nothing changed.
-- `check_running(tick: int) -> void`: The AI step calls this every run, before deciding: if the owned tags or the modifiers changed and the running behaviour's tag requirements now fail (or a modifier blocks it), it asks for a decision that its min_run_ticks don't hold off (its interrupt_threshold still does). A pawn out of shots leaves Keep Distance at once instead of at its next decision tick.
-- `worked_out_inputs() -> PackedInt32Array`: The slots of the worked-out inputs any behaviour's conditions or curves read, listed once (and again after inputs_changed()).
+- `get_modifiers() -> Dictionary[]`: The behaviour modifiers now, in the order added: {modifier, source, ends, only, curved} each (ends is the tick it goes, -1 until removed; only is the behaviour that gave it to itself, or null; curved is its live-curve entry, or null).
+- `refresh_modifiers(tick: int) -> void`: Works out again what the modifiers do to each behaviour's numbers and which they block, if anything they depend on changed: the list, a deadline passing (one ending, a time curve settling), or the pawn's owned tags (their ongoing requirements). Every decision calls it first; cheap when nothing changed. A curve still live is worked out at each read, not here.
+- `check_running(tick: int) -> void`: The AI step calls this every run, before deciding: if the owned tags, the modifiers or the behaviours switched on changed and the running behaviour may no longer run (its tag requirements fail, a modifier blocks it, it was switched off), it asks for a decision that its min_run_ticks don't hold off (its interrupt_threshold still does). A pawn out of shots leaves Keep Distance at once instead of at its next decision tick.
+- `worked_out_inputs() -> PackedInt32Array`: The slots of the worked-out inputs any behaviour's conditions or any modifier's curve reads, listed again after `inputs_changed()` and after the modifiers change.
 
 ## AIBehaviourModifier
 
@@ -195,17 +205,26 @@ pawn.ai.behaviour_manager.add_modifier(charge_shout, self)
 pawn.ai.behaviour_manager.remove_modifiers(self)
 ```
 
-A behaviour can also apply one to itself as it starts or ends (`AIBehaviourDefinition.modifier_on_start`). The C++ decider gets the numbers they leave, not the modifiers. Only on the server, where the AI runs.
+A behaviour can also apply one to itself always, as it starts or as it ends (`AIBehaviourDefinition.modifier_on_start`).
+An optional `curve` eases it in or out: how strongly it applies, from -1 to 1, over the time since it was added or over an input. Strength s scales the change: a multiply m becomes `1 + (m - 1) × s` (stopping at ×0 when reversed) and an add a becomes `a × s`; at -1 the change is reversed. A Chase that's hard to interrupt at first, then easier:
+
+```gdscript
+number INTERRUPT_THRESHOLD, add 40, curve from 1 at x 0 down to 0 at x 120 (ticks since it was added, at 60 a second)
+```
+
+Only on the server, where the AI runs. Both deciders work it out the same way (the C++ decider gets the baked curve).
 
 ### Settings and properties
 
-- `applies_to: TagQuery`: Which behaviours it changes: a query over each behaviour's own tags (`AIBehaviourDefinition.tags`), such as any of ai.stance.melee. Empty: every behaviour, or, given by a behaviour to itself as it starts or ends, only that behaviour.
+- `applies_to: TagQuery`: Which behaviours it changes: a query over each behaviour's own tags (`AIBehaviourDefinition.tags`), such as any of ai.stance.melee. Empty: every behaviour, or, given by a behaviour to itself, only that behaviour.
 - `number: int` = `0`: Which number it changes.
 - `multiply: float` = `1.0`: The number is multiplied by this, before the adds. 1: nothing. Multiplies from several modifiers combine.
-- `add: float` = `0.0`: Added after the multiplies. Negative takes away. A score bonus of -0.3 drops a behaviour that scores 0.6 to 0.3.
-- `overrides: bool` = `false`: On: the number takes `override_value`, whatever the others do (the last one added wins). A berserk state's threshold.
+- `add: float` = `0.0`: Added after the multiplies. Negative takes away: -30 drops a behaviour that scores 60 to 30.
+- `overrides: bool` = `false`: On: the number takes `override_value`, whatever the others do (the last one added wins). A berserk state's threshold. A curve doesn't scale it.
 - `override_value: float` = `0.0`: With `overrides`, the number's value.
-- `blocks: bool` = `false`: On: the behaviours it applies to can't be chosen while it counts, and a running one is replaced; its number change is ignored.
+- `blocks: bool` = `false`: On: the behaviours it applies to can't be chosen while it counts, and a running one is replaced; its number change is ignored. A curve doesn't scale it.
+- `curve: Curve`: Optional: how strongly it applies (y, from -1 to 1) over x, which is `curve_input` or, with none, the ticks since it was added (at 60 a second). Set the curve's domain (min_domain, max_domain) to the x range it spans; beyond it the end values hold. A time curve settles once past its domain, and then costs nothing. Empty: full strength (1) always.
+- `curve_input: String` = `""`: The input the curve's x reads, such as target_distance (see [`AIInputs`](#aiinputs)); an input in ticks is read at 60 a second. Empty: the ticks since the modifier was added.
 - `duration_ticks: int` = `0`: How long it lasts once added, in ticks at 60 a second; the manager keeps the tick it ends. 0: until its source removes it.
 - `ongoing_requirements: TagQuery`: It counts only while the pawn's owned tags pass this, such as none of status.has_ammo. Empty: always.
 - `granted_tags: StringName[]` = `[]`: Tags the pawn owns while it's added, so other queries can see it (an "ai.stance.melee" order, say).
@@ -213,16 +232,21 @@ A behaviour can also apply one to itself as it starts or ends (`AIBehaviourDefin
 
 ### Constants
 
-- `Number.SCORE_BONUS = 0`: added to its score, in the units of max_score (0 with no modifier)
+- `Number.SCORE = 0`: its score (`AIBehaviourDefinition.base_score`, or what its score() gives)
 - `Number.SCORE_JITTER = 1`: the ± random offset on its score (AIBehaviourDefinition.score_jitter, or the manager's default)
 - `Number.INTERRUPT_THRESHOLD = 2`: how strong an event must be to replace it while it runs
 - `Number.COOLDOWN_TICKS = 3`: ticks after it ends before it can be chosen again, at 60 a second
 - `Number.MIN_RUN_TICKS = 4`: ticks an ordinary decision can't replace it once chosen, at 60 a second
+- `CURVE_POINTS = 65`: How many points a baked curve has, over its domain (`strength_table()`). The C++ decider reads the same table.
 
 ### Functions
 
 - `applies_to_behaviour(behaviour: AIBehaviourBase, only: AIBehaviourBase = null) -> bool`: True if it applies to this behaviour. only: the behaviour that gave it to itself (null: none), which an empty applies_to means.
 - `counts_for(owned_words: PackedInt64Array) -> bool`: True if it counts for owned tags given as words (its ongoing requirements pass).
+- `is_curved() -> bool`: True if a curve scales it: it has one, and it's a multiply or an add (not an override or a block).
+- `strength_table() -> PackedFloat64Array`: Its curve baked into `CURVE_POINTS` strengths, evenly over the curve's domain, each kept within -1 to 1. Worked out once: a curve edited during play isn't seen. Empty with no curve.
+- `strength_in(table: PackedFloat64Array, low: float, high: float, x: float) -> float` *(static)*: The strength at x, from the baked table (`strength_table()`): a straight line between its points, the end values beyond the domain. Twin of the C++ decider's: the same arithmetic.
+- `multiply_at(m: float, s: float) -> float` *(static)*: A multiply with strength s: `1 + (m - 1) × s`, never below 0 while reversed (s below 0). Twin of the C++ decider's.
 
 ## AIDeciderBridge
 
@@ -230,31 +254,36 @@ A behaviour can also apply one to itself as it starts or ends (`AIBehaviourDefin
 
 Links one pawn's [`AIBehaviourManager`](#aibehaviourmanager) to its C++ decider (`AIDecider`, the main path): keeps the decider's row up to date and asks it for each decision.
 
-The manager makes one (`make_for()`) when the pawn decides in C++, and drops it when it moves to GDScript. Before each decision it reads the version counters of the facts the row holds and copies only what changed: the owned tags (the AI's state among them), the behaviour modifiers' numbers, the actions that could start, the AI's facts (`AIManager.facts_version`: target, last hit, the swing coming) and a game's inputs (`AIInputs.kept_version`). A behaviour C++ can't judge from data (`AIBehaviourBase.judged_in_gdscript()`) gets GDScript's answers, written in before each decision; C++ judges the rest. Brains are compiled once per behaviour set and shared by every decider. Where pawns decide: `AIBehaviourManager.decides_in`, the project setting `ALL_IN_GDSCRIPT_SETTING`, and diagnostics' switches ([`AIDecisionChecks`](../diagnostics/REFERENCE.md#aidecisionchecks)). Timed as `ai.decide.cpp`. Design: pawn spec 16.5, scaling spec 6.2.
+The manager makes one (`make_for()`) when the pawn decides in C++, and drops it when it moves to GDScript. Before each decision it reads the version counters of the facts the row holds and copies only what changed: the owned tags (the AI's state among them), the behaviour modifiers, which behaviours are switched on, the AI's facts (`AIManager.facts_version`: target, last hit, the swing coming) and a game's inputs (`AIInputs.kept_version`). What only GDScript can answer, C++ asks as it reaches it, through one callback (`answer()`): whether a behaviour's action could start, a scripted behaviour's is_available() and score(), and the inputs GDScript works out (action_ready, a group's nearest point). Brains are compiled once per behaviour set and shared by every decider. Where pawns decide: `AIBehaviourManager.decides_in`, the project setting `ALL_IN_GDSCRIPT_SETTING`, and diagnostics' switches ([`AIDecisionChecks`](../diagnostics/REFERENCE.md#aidecisionchecks)). Timed as `ai.decide.cpp`. Design: pawn spec 16.5, scaling spec 6.2.
 
 ### Settings and properties
 
 - `decisions: int` = `0`: The decisions made in C++ so far, by every pawn.
-- `gdscript_answers: int` = `0`: The answers GDScript gave so far for behaviours C++ can't judge (code of their own, or a condition C++ doesn't read).
+- `gdscript_answers: int` = `0`: The answers GDScript gave so far to C++'s questions about behaviours (could its action start, is it available, its score).
 - `decider: Object` = `null`: The C++ AIDecider, holding this pawn's row. Typed Object so the game runs without the library.
 - `manager: AIBehaviourManager` = `null`: The behaviour manager it decides for.
 
 ### Constants
 
 - `ALL_IN_GDSCRIPT_SETTING = "project_base/ai/all_decisions_in_gdscript"`: The project setting that has every pawn decide in GDScript, the backup (false: each pawn's own decides_in).
+- `Ask.COULD_PRESS = 0`: could the behaviour's action start (1 or 0)
+- `Ask.AVAILABLE = 1`: its is_available() (1 or 0)
+- `Ask.SCORE = 2`: its score() (before modifiers)
+- `Ask.INPUT = 3`: an input GDScript works out, by slot
 
 ### Functions
 
 - `make_for(for_manager: AIBehaviourManager) -> AIDeciderBridge` *(static)*: A bridge for this manager, or null if it decides in GDScript.
 - `placement_version() -> int` *(static)*: Where pawns decide changes when this does: diagnostics' switches, the tags the brains' masks were made with. A manager places itself again when it differs from what it last saw.
 - `placement_changed() -> void` *(static)*: Every pawn settles where it decides again at its next decision.
+- `brain_key(description: Dictionary) -> String` *(static)*: The brain's key: its description without what's the pawn's own (its name, number, seed, decision rate, which behaviours are switched on), as text. Not the definitions' ids alone: a behaviour's own conditions can come from the pawn's abilities (Attack's reach), so two pawns with the same definitions can need different brains.
 - `decide(tick: int, event_priority: int, event_normal: bool) -> int`: One decision in C++: copies over the facts that changed, asks the decider, and returns the chosen behaviour's slot (-1 nothing). C++ applies the switch to its own copy of the state; the manager starts the behaviour.
+- `answer(what: int, slot: int) -> float`: C++'s questions during a decision, by `Ask` and the behaviour's slot (or, for an input, its slot). Only for behaviours still in the running, so a behaviour's code runs only when GDScript's own decider would run it.
 - `was_kept() -> bool`: Whether the interrupt rule kept the running behaviour at the last decision.
 - `copy_state() -> void`: Copies the decision state from the behaviour nodes (running behaviour, its start, each one's last end) over C++'s: as it starts, and after shadow mode finds a disagreement.
 - `stopped(tick: int) -> void`: The running behaviour stopped without a decision (finished, died, removed): C++'s copy of the state follows.
-- `written_facts() -> Dictionary`: The facts as written into the row (owned, target_id, can_press and the modifiers' numbers), for the checks.
-- `last_inputs() -> PackedFloat64Array`: The inputs the last decision used, as C++ worked them out, for the checks.
-- `can_press_mask(for_manager: AIBehaviourManager) -> int` *(static)*: The behaviours whose action could start now, as a mask by behaviour slot.
+- `written_facts() -> Dictionary`: The facts as written into the row (owned, target_id, blocked, disabled), for the checks.
+- `last_inputs() -> PackedFloat64Array`: The inputs the last decision read, as C++ worked them out, with the rest worked out now, for the checks.
 
 ## AIDecisionRecord
 
@@ -307,7 +336,7 @@ Design: scaling spec 6.2.
 - `RULE_BLOCKED = &"blocked"`: A behaviour modifier blocks it.
 - `RULE_COOLDOWN = &"cooldown"`: Cooling down.
 - `RULE_NO_TARGET = &"no_target"`: Needs a target, and there's none.
-- `RULE_ACTION = &"action"`: Its action couldn't start (AbilityManager.can_start).
+- `RULE_ACTION = &"action"`: Its action couldn't start (AbilityManager.can_start). Asked on the walk, after its availability, so it's still a candidate.
 - `RULE_NOT_WORKED_OUT = &"cpp"`: Passed the hard rules, but C++ made the decision, so GDScript's range, availability and score weren't worked out.
 - `RULE_KEPT = &"kept"`: The running behaviour the interrupt rule kept: only its numbers, which the rule read (its threshold and minimum run).
 
@@ -316,7 +345,7 @@ Design: scaling spec 6.2.
 - `note_target_before(target: Node3D) -> void`: Notes the target before the selector's update.
 - `note_target_after(target: Node3D) -> void`: Notes the target after the selector's update.
 - `changed() -> bool`: True when the running behaviour changed.
-- `add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void`: One behaviour's entry, from the manager's scratch values; rule: what ruled it out, or `RULE_NONE`. Keys: name, rule, and its numbers with modifiers (modifier: the score bonus, jitter_amount, interrupt_threshold, min_run at the match's rate); a candidate's also jitter (this decision's offset), ceiling, floor (null: none), available (1, 0, -1 never asked) and score (null: not scored).
+- `add_behaviour(behaviour: AIBehaviourBase, rule: StringName) -> void`: One behaviour's entry, from the manager's scratch values; rule: what ruled it out, or `RULE_NONE`. Keys: name, rule, and its numbers with modifiers (score_multiply and score_add: what its score gets; jitter_amount, interrupt_threshold, min_run at the match's rate); a candidate's also jitter (this decision's offset), key (its result, null for a score() of its own), available (1, 0, -1 never asked) and score (before modifiers; null: not reached). A behaviour whose action couldn't start (`RULE_ACTION`) was still a candidate, asked on the walk, so its entry has them too.
 - `entry_for(behaviour_name: StringName) -> Dictionary`: The entry for this behaviour, or an empty Dictionary.
 - `to_dict() -> Dictionary`: Everything as plain values (text, numbers, arrays, dictionaries), ready for JSON.
 
@@ -847,7 +876,7 @@ Allowed in Alert. Available only when the most aware memory entry is certain but
 ### Functions
 
 - `make_default_definition() -> AIBehaviourDefinition`
-- `own_conditions() -> AICondition[]`: Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is always max_score.
+- `own_conditions() -> AICondition[]`: Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is its base_score.
 - `enter(context: AIManager) -> void`
 - `tick(context: AIManager) -> int`
 - `exit(context: AIManager, _reason: String) -> void`
@@ -981,31 +1010,6 @@ A behaviour runs only while all its conditions pass (`AIBehaviourBase.all_condit
 - `cpp_reads(described: Dictionary) -> bool` *(static)*: True if the C++ decider reads this described condition (`describe()`) and every condition inside it.
 - `at_rate_for(slot: int, number: float) -> float` *(static)*: A value written for 60 ticks a second, at the match's rate, if the input is a time in ticks; otherwise the value as it is.
 
-## AIScoreCurve
-
-`res://assets/scripts/ai/conditions/AIScoreCurve.gd`, extends [`Resource`](https://docs.godotengine.org/en/stable/classes/class_resource.html)
-
-Turns one input into an amount from 0 to 1 that scales a behaviour's score: the "how much" to a condition's "whether".
-
-Scaling spec 6.2. A straight line: `from_value` gives 0, `to_value` gives 1, with 0 below and 1 above. Set to_value below from_value to turn it round (more input, less score). A behaviour's score is `low + (max_score - low) × every curve's amount multiplied together`, where low is min_score, or 0 when min_score isn't set (`AIBehaviourBase.score()`). With no curves the score is max_score.
-
-```gdscript
-target_distance, from 20 to 2     # 0 at 20 m or further, 1 at 2 m or closer: the nearer, the keener
-```
-
-### Settings and properties
-
-- `input: String` = `""`: The input it reads, such as target_distance. See [`AIInputs`](#aiinputs).
-- `from_value: float` = `0.0`: The input value that gives 0. For a time in ticks, written for 60 ticks a second.
-- `to_value: float` = `1.0`: The input value that gives 1.
-
-### Functions
-
-- `make(input_name: StringName, zero_at: float, one_at: float) -> AIScoreCurve` *(static)*: Makes a curve in code.
-- `amount(inputs: AIInputs) -> float`: The amount from 0 to 1 for this pawn's inputs now.
-- `describe() -> Dictionary`: The curve as plain data, for the C++ decider, with times converted to the match's rate.
-- `add_input_slots(slots: Dictionary) -> void`: Adds the slot of the input it reads to slots (as a key).
-
 ## AIAttackDefinition
 
 `res://assets/scripts/ai/definitions/AIAttackDefinition.gd`, extends [`AIBehaviourDefinition`](#aibehaviourdefinition)
@@ -1031,20 +1035,19 @@ Each kind of behaviour has its own class with its settings added ([`AIChaseDefin
 
 - `tags: StringName[]` = `[]`: What it is, as tags such as &"ai.stance.melee": what behaviour modifiers pick behaviours by (`AIBehaviourModifier.applies_to`).
 - `tag_requirements: TagQuery`: When it may run: a query over the pawn's owned tags, such as any of ai.state.combat (the AI's state is a tag), or none of status.has_ammo. While it fails, the behaviour can't be chosen, and a running one is replaced at the next AI step. Empty: always.
-- `max_score: float` = `0.5`: The highest its score can be. Lets the manager skip it without running its code when it can't win.
-- `min_score: float` = `inf_neg`: Optional: the lowest its score can be. Left at -inf it can't help skip others, but it's never wrong.
+- `base_score: float` = `50.0`: How much it wants to run, before behaviour modifiers and jitter: an open number, like an ability's priority; the highest result wins. Modifiers multiply, then add to it, and its jitter adds ± on top. A behaviour script can work it out in code instead (`AIBehaviourBase.score()`).
 - `needs_target: bool` = `false`: Skipped while the AI has no current target.
 - `presses_action: StringName` = `&""`: A named action it presses, such as &"primary". Skipped while that action couldn't start.
 - `conditions: AICondition[]` = `[]`: More conditions it needs, on top of its kind's own (`AIBehaviourBase.own_conditions()`). All must pass. Made in the inspector: compare an input with a number, a random chance, or "any of".
-- `score_curves: AIScoreCurve[]` = `[]`: Optional: inputs that scale its score between min_score (or 0) and max_score, multiplied together. Empty: always max_score.
 - `cooldown_ticks: int` = `0`: Ticks after it ends before it can be chosen again. A hard rule, checked before any scoring.
 - `min_run_ticks: int` = `0`: Once chosen, ordinary decisions can't replace it for this many ticks. State changes still can, if strong enough. Behaviour modifiers can change it, as they can cooldown_ticks, interrupt_threshold and score_jitter.
 - `interrupt_threshold: int` = `0`: While it runs, only events of this priority or higher can replace it: 0 for an ordinary decision, a state's priority for a state change. 0: anything can.
 - `cannot_be_interrupted: bool` = `false`: Runs until it returns SUCCEEDED or FAILED, whatever happens, even if its state no longer allows it. Use sparingly.
-- `score_jitter: float` = `-1.0`: ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
+- `score_jitter: float` = `-1.0`: The most its score is moved, up or down at random, for variety, in score units: drawn each decision or once per pawn (`AIBehaviourManager.jitter_draw`). -1: the manager's default_score_jitter.
 - `tick_interval_ticks: int` = `1`: While it runs, its tick() is called every this many ticks, and sooner when a wake-up it asked for happens (the longest it sleeps). 1: every tick.
-- `modifier_on_start: AIBehaviourModifier`: A modifier it gives itself as it starts, such as a score bonus that keeps it chosen a while. Empty applies_to: only this behaviour. With no duration it lasts while the behaviour runs; with one, its duration from the start. Starting again replaces it.
-- `modifier_on_end: AIBehaviourModifier`: A modifier it gives itself as it ends, such as -0.3 to its score for 15 s so something else gets a turn. Empty applies_to: only this behaviour. With no duration it lasts until the behaviour starts again; with one, its duration. Ending again replaces it.
+- `modifier_always: AIBehaviourModifier`: A modifier it always has, such as a score that eases with the target's distance (a curve over target_distance). Empty applies_to: only this behaviour.
+- `modifier_on_start: AIBehaviourModifier`: A modifier it gives itself as it starts, such as an interrupt threshold that eases off (a curve over time). Empty applies_to: only this behaviour. With no duration it lasts while the behaviour runs; with one, its duration from the start. Starting again replaces it.
+- `modifier_on_end: AIBehaviourModifier`: A modifier it gives itself as it ends, such as -30 to its score for 15 s so something else gets a turn. Empty applies_to: only this behaviour. With no duration it lasts until the behaviour starts again; with one, its duration. Ending again replaces it.
 
 ## AIChaseDefinition
 

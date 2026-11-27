@@ -28,7 +28,7 @@ func _settings_changed() -> void:
 	_kind_settings = settings as AISearchDefinition
 
 
-## Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is always max_score.
+## Only for an enemy it became certain of: the most aware entry in memory exists and is certain. Its score is its base_score.
 func own_conditions() -> Array[AICondition]:
 	var list: Array[AICondition] = [AICompareCondition.make(AIInputs.MOST_AWARE_CERTAIN, AICompareCondition.Comparison.EQUAL, 1.0)]
 	return list

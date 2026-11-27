@@ -9,6 +9,8 @@
 ## same behaviour, kept the running one when GDScript did, and asked is_available() of exactly the same behaviours.
 ##
 ## Rows are grouped by tick, one decide() call a tick, as a live batch would be, and the time spent in decide() is measured.
+## Claude 2026-11-27 (AI scoring proposal): a score's modifiers go over as the multiply and add each behaviour's score got (curves
+## already worked out by the recording), instead of a bonus.
 extends RefCounted
 
 ## The most mismatches described in a result's "examples".
@@ -121,7 +123,8 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 	var tick := PackedInt64Array()
 	var tag_words := TagRegistry.get_categories().size()
 	var owned := PackedInt64Array() # each row's owned tags, tag_words words a row, from the names it recorded
-	var modifier := PackedFloat64Array()
+	var score_multiply := PackedFloat64Array()
+	var score_add := PackedFloat64Array()
 	var blocked := PackedInt64Array()
 	var has_target := PackedByteArray()
 	var normal := PackedByteArray()
@@ -141,8 +144,10 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 	var has_numbers := false
 	score.resize(rows * stride)
 	score.fill(NAN)
-	modifier.resize(rows * stride)
-	modifier.fill(0.0)
+	score_multiply.resize(rows * stride)
+	score_multiply.fill(1.0)
+	score_add.resize(rows * stride)
+	score_add.fill(0.0)
 	jitter.resize(rows * stride)
 	jitter.fill(0.0)
 	threshold.resize(rows * stride)
@@ -195,7 +200,8 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 			if slot < 0:
 				continue
 			var bit := 1 << slot
-			modifier[r * stride + slot] = float(entry.get("modifier", 0.0))
+			score_multiply[r * stride + slot] = float(entry.get("score_multiply", 1.0))
+			score_add[r * stride + slot] = float(entry.get("score_add", 0.0))
 			if entry.has("jitter_amount"):
 				has_numbers = true
 				jitter[r * stride + slot] = float(entry["jitter_amount"])
@@ -206,12 +212,14 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 					blocked_mask |= bit
 				"cooldown":
 					cooling_mask |= bit
-				"action":
-					press_mask &= ~bit
-				"":
-					if entry["score"] != null:
+				"action", "":
+					# Claude 2026-11-27: the walk asks availability before the action, so a behaviour whose action couldn't start may
+					# still have been asked; its entry says (older records: never asked).
+					if entry["rule"] == "action":
+						press_mask &= ~bit
+					if entry.get("score") != null:
 						score[r * stride + slot] = float(entry["score"])
-					var answer := int(entry["available"])
+					var answer := int(entry.get("available", -1))
 					if answer >= 0:
 						known_mask |= bit
 						asked_mask |= bit
@@ -225,7 +233,7 @@ static func _compare_batch(decider: Object, decisions: Array, brain_of_pawn: Dic
 		expected_chosen.append(names.get(d["chosen"], -1))
 		expected_asked.append(asked_mask)
 	var columns := {"brain": brain, "pawn_number": pawn, "random_seed": random_seed, "tick": tick, "owned": owned, "tag_words": tag_words,
-		"modifier": modifier, "blocked": blocked,
+		"score_multiply": score_multiply, "score_add": score_add, "blocked": blocked,
 		"has_target": has_target, "event_normal": normal, "event_priority": priority, "running": running, "running_started": started,
 		"cooling": cooling, "can_press": can_press, "available_known": known, "available": available,
 		"score": score, "inputs": inputs, "input_stride": input_stride}

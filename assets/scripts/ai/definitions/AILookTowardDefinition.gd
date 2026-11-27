@@ -22,13 +22,12 @@ extends AIBehaviourDefinition
 func _init() -> void:
 	super()
 	tag_requirements = TagQuery.shared([Tags.AI.STATE_ALERT])
-	max_score = 0.6
-	min_score = max_score # a fixed score, so it can help skip others
+	base_score = 60.0
 	tick_interval_ticks = 5 # re-aiming 12 times a second is plenty, and each tick searches memory
 	min_run_ticks = look_ticks # an ordinary decision doesn't cut its look short, whatever its score
-	# Once it has looked, Investigate goes first: -0.3 takes it from 0.6 to 0.3, below Investigate's 0.5, for 15 s from when it starts
+	# Once it has looked, Investigate goes first: -30 takes it from 60 to 30, below Investigate's 50, for 15 s from when it starts
 	# (written for 60 ticks a second).
 	var step_aside := AIBehaviourModifier.new()
-	step_aside.add = -0.3
+	step_aside.add = -30.0
 	step_aside.duration_ticks = 900
 	modifier_on_start = step_aside

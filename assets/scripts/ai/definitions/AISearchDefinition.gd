@@ -32,6 +32,5 @@ extends AIBehaviourDefinition
 func _init() -> void:
 	super()
 	tag_requirements = TagQuery.shared([Tags.AI.STATE_ALERT])
-	max_score = 0.7
-	min_score = max_score # a fixed score, so it can help skip others
+	base_score = 70.0
 	tick_interval_ticks = 60 # the safety net: it wakes when a walk ends (wake_on_path_end) and when a pause ends (wake_at)

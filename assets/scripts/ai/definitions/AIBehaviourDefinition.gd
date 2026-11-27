@@ -20,16 +20,13 @@ extends Definition
 	set(value):
 		tag_requirements = value
 		_changed(&"tag_requirements", value)
-## The highest its score can be. Lets the manager skip it without running its code when it can't win.
-@export var max_score := 0.5:
+## How much it wants to run, before behaviour modifiers and jitter: an open number, like an ability's priority; the highest result
+## wins. Modifiers multiply, then add to it, and its jitter adds ± on top. A behaviour script can work it out in code instead
+## ([method AIBehaviourBase.score]).
+@export var base_score := 50.0:
 	set(value):
-		max_score = value
-		_changed(&"max_score", value)
-## Optional: the lowest its score can be. Left at -inf it can't help skip others, but it's never wrong.
-@export var min_score := -INF:
-	set(value):
-		min_score = value
-		_changed(&"min_score", value)
+		base_score = value
+		_changed(&"base_score", value)
 ## Skipped while the AI has no current target.
 @export var needs_target := false:
 	set(value):
@@ -46,11 +43,6 @@ extends Definition
 	set(value):
 		conditions = value
 		_changed(&"conditions", value)
-## Optional: inputs that scale its score between min_score (or 0) and max_score, multiplied together. Empty: always max_score.
-@export var score_curves: Array[AIScoreCurve] = []:
-	set(value):
-		score_curves = value
-		_changed(&"score_curves", value)
 ## Ticks after it ends before it can be chosen again. A hard rule, checked before any scoring.
 @export_range(0, 36000, 1, "or_greater") var cooldown_ticks := 0:
 	set(value):
@@ -73,7 +65,8 @@ extends Definition
 	set(value):
 		cannot_be_interrupted = value
 		_changed(&"cannot_be_interrupted", value)
-## ± random offset on its score at each decision, for variety. -1: the manager's default_score_jitter.
+## The most its score is moved, up or down at random, for variety, in score units: drawn each decision or once per pawn
+## ([member AIBehaviourManager.jitter_draw]). -1: the manager's default_score_jitter.
 @export var score_jitter := -1.0:
 	set(value):
 		score_jitter = value
@@ -84,13 +77,19 @@ extends Definition
 	set(value):
 		tick_interval_ticks = value
 		_changed(&"tick_interval_ticks", value)
-## A modifier it gives itself as it starts, such as a score bonus that keeps it chosen a while. Empty applies_to: only this behaviour.
-## With no duration it lasts while the behaviour runs; with one, its duration from the start. Starting again replaces it.
+## A modifier it always has, such as a score that eases with the target's distance (a curve over target_distance). Empty applies_to:
+## only this behaviour.
+@export var modifier_always: AIBehaviourModifier:
+	set(value):
+		modifier_always = value
+		_changed(&"modifier_always", value)
+## A modifier it gives itself as it starts, such as an interrupt threshold that eases off (a curve over time). Empty applies_to: only
+## this behaviour. With no duration it lasts while the behaviour runs; with one, its duration from the start. Starting again replaces it.
 @export var modifier_on_start: AIBehaviourModifier:
 	set(value):
 		modifier_on_start = value
 		_changed(&"modifier_on_start", value)
-## A modifier it gives itself as it ends, such as -0.3 to its score for 15 s so something else gets a turn. Empty applies_to: only this
+## A modifier it gives itself as it ends, such as -30 to its score for 15 s so something else gets a turn. Empty applies_to: only this
 ## behaviour. With no duration it lasts until the behaviour starts again; with one, its duration. Ending again replaces it.
 @export var modifier_on_end: AIBehaviourModifier:
 	set(value):

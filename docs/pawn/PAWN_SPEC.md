@@ -1194,7 +1194,6 @@ The sweep and ray together are about 2.5 microseconds in any of these; the rest 
   - A decision creates no arrays or dictionaries; it reuses ones it keeps.
   - A C++ port can then use small types (16-bit awareness, for example) behind the same functions.
 - **Mistakes are made obvious.** In debug builds, a warning names the node when:
-  - a behaviour's `score()` is above its `max_score` or below its `min_score`;
   - a state has no behaviour that could run in it;
   - no state's prerequisites hold (Idle always should);
   - `force_state` is called on a client.
@@ -1344,39 +1343,37 @@ A state with rules no settings cover is a script that extends `AIStateBase` and 
 
 ### 10.7 Behaviours
 
-```gdscript
-class_name AIBehaviourBase extends Node
-enum Status { RUNNING, SUCCEEDED, FAILED }
+*(Rewritten 2026-11-27 for one scoring model, the owner's intent: docs/pawn/AI_SCORING_PROPOSAL.md. Persistence went in 16.10 step 6a; its easing came back as modifier curves.)*
 
-@export var tag_requirements: TagQuery          # when it may run (owned tags; the state is ai.state.*). 2026-11-23: was allowed_states (10.13)
-@export var max_score := 0.5           # the highest score() can return
-@export var min_score := -INF          # optional: the lowest score() can return. Unset, it can't help pruning (10.8)
+A behaviour's settings are in its definition (16.3); the node keeps its state.
+
+```gdscript
+class_name AIBehaviourDefinition extends Definition
+@export var tag_requirements: TagQuery   # when it may run (owned tags; the state is ai.state.*)
+@export var base_score := 50.0           # how much it wants to run: an open number, like an ability's priority
 @export var needs_target := false
 @export var presses_action: StringName = &""   # if set, skipped while that action can't start
-@export var cooldown_ticks := 0        # hard gate: can't be chosen this long after it ends
-@export var min_run_ticks := 0         # once chosen, normal decisions can't replace it for this long
-@export var interrupt_threshold := 0   # while it runs, only events of this priority or higher can replace it (below)
+@export var cooldown_ticks := 0          # hard gate: can't be chosen this long after it ends
+@export var min_run_ticks := 0           # once chosen, normal decisions can't replace it for this long
+@export var interrupt_threshold := 0     # while it runs, only events of this priority or higher can replace it (below)
 @export var cannot_be_interrupted := false   # runs until it finishes, whatever happens
-@export var score_jitter := -1.0       # ± random offset on its score; -1 = the manager's default_score_jitter
-@export var tick_interval_ticks := 1   # Claude 2026-11-09: while running, tick() is called every this many ticks
-@export var persistence := 0.0         # signed, added to the score. + tends to keep it chosen, - prefers others
-@export var persistence_fade: FadeProfile   # how persistence fades (10.2); empty = no persistence
+@export var score_jitter := -1.0         # ± random offset on its score, in score units; -1 = the manager's default_score_jitter
+@export var tick_interval_ticks := 1     # while running, tick() is called every this many ticks
+@export var modifier_always: AIBehaviourModifier    # behaviour modifiers it gives itself (10.13): always,
+@export var modifier_on_start: AIBehaviourModifier  # as it starts,
+@export var modifier_on_end: AIBehaviourModifier    # and as it ends
 
-func is_available(context) -> bool
-func score(context) -> float
+class_name AIBehaviourBase extends Node
+func is_available(context) -> bool    # its conditions; override for code of its own
+func score(context) -> float          # base_score; override to work it out in code (modifiers and jitter still apply)
 func enter(context) -> void
 func tick(context) -> Status          # calls context.controller.move_to / press / hold / look_at_point
 func exit(context, reason) -> void
 ```
 
-**Persistence.**
-- When a behaviour is chosen, its persistence starts: the score gets `persistence × persistence_fade.value_at(ticks along)`. The profile (10.2) sets the shape. The default suggestion is `HALF_LIFE` with a hold, but a straight line or a drawn curve works just as well. Once the profile's `ends_after()` has passed it adds nothing, so its range (10.8) has an end.
-- Positive `persistence` makes the AI tend to stick with a choice. Negative makes it prefer something else for a while, which gives variety.
-- **Only three numbers are stored:** how far along the profile it was at the last change, the tick of that change, and a speed (1.0 normally). The amount is worked out at decision time, so nothing runs every tick and replays are exact.
-- **Modifiers** change those numbers, through the behaviour manager (section 3, rule 2):
-  - `add_persistence_ticks(&"Chase", 60)`, say after landing a hit, moves it back along the profile.
-  - `set_persistence_speed(&"Chase", 0.5)` makes it fade at half speed from where it is now.
-- Persistence flags are tabled.
+**The score.** One open number. A behaviour's result at a decision is its score with behaviour modifiers (multiplied, then added to, or overridden: 10.13), plus its jitter. "Highest" and "lowest" are only the result plus and minus the jitter, not settings.
+
+**Easing.** A modifier can follow a drawn curve (10.13): a Chase given threshold +40 as it starts, easing to 0 over 2 s, is hard to interrupt at first and then gives way; a score ×1.3 easing to ×0.8 by 10 s lets other behaviours have a turn after a long chase. That's what persistence was for.
 
 **Interrupts.** *(Claude 2026-11-09, from the owner's review: a behaviour must be able to lock out others, except high-priority forces, or everything.)* Each event that could replace the running behaviour has a priority:
 
@@ -1384,23 +1381,22 @@ func exit(context, reason) -> void
 |---|---|
 | A normal decision | 0 |
 | A state change | the new state's priority |
-| A forced state | the force's priority (10.6) |
 
 While a behaviour runs, an event replaces it only if all three hold:
 - it isn't `cannot_be_interrupted`;
-- the event's priority is `interrupt_threshold` or higher;
-- for a normal decision, `min_run_ticks` has passed.
+- the event's priority is its interrupt threshold or higher (with modifiers);
+- for a normal decision, its minimum run (with modifiers) has passed.
 
 So, with the t0 states:
 - The default (threshold 0, no minimum run time) can be replaced by anything.
-- **Threshold 15** ignores normal decisions and a drop back to Alert (10), but gives way to Combat (20) and to strong forces. Good for a heavy attack that shouldn't be cancelled by a passing thought.
-- **`cannot_be_interrupted`** runs until it returns SUCCEEDED or FAILED, even if its state no longer allows it. Use it sparingly. Only the pawn being removed still ends it, and `exit` gets the reason "removed". While the AI is paused (10.3), it pauses with it and carries on afterwards. *(Claude 2026-11-09, as built: pausing doesn't end behaviours, so nothing needs to start again after a player lets go.)*
+- **Threshold 15** ignores normal decisions and a drop back to Alert (10), but gives way to Combat (20). Good for a heavy attack that shouldn't be cancelled by a passing thought.
+- **`cannot_be_interrupted`** runs until it returns SUCCEEDED or FAILED, even if its state no longer allows it. Use it sparingly. Only the pawn being removed still ends it, and `exit` gets the reason "removed". While the AI is paused (10.3), it pauses with it and carries on afterwards.
 
-Code can change a behaviour's threshold while it's running, through `behaviour_manager.set_interrupt_threshold(&"Chase", 25)`, such as a berserk effect.
+A berserk effect raises a threshold with a modifier.
 
-**Hard gates stay separate.** `cooldown_ticks` and `min_run_ticks` are promises a designer can rely on, not tendencies. They're checked before any scoring, and they read the same start and end ticks as persistence. The minimum run time also stops a behaviour with negative persistence from swapping back and forth every decision.
+**Hard gates stay separate.** `cooldown_ticks` and `min_run_ticks` are promises a designer can rely on, not tendencies. They're checked before any scoring. The minimum run time also stops a behaviour that steps itself aside from swapping back and forth every decision.
 
-**Jitter per behaviour.** *(Claude 2026-11-09, from the owner's review.)* Each behaviour has its own `score_jitter`. -1, the default, uses the manager's `default_score_jitter`, which is 0. Code can change it while running, with `behaviour_manager.set_score_jitter(&"Wander", 0.2)`, for a confused or drunk effect, say.
+**Jitter.** Each behaviour has its own `score_jitter`; -1, the default, uses the manager's `default_score_jitter` (0). A game sets the default on the AI brain it gives every pawn. The manager's `jitter_draw` draws it at every decision, or once per pawn and behaviour for its life (a fixed personality). Modifiers change it in play (a confused or drunk effect).
 
 **t0 behaviours:**
 
@@ -1417,21 +1413,15 @@ Because they all move with `move_to`, they cross nav links (jumps and drops) for
 
 ### 10.8 How the behaviour manager picks
 
-At each decision:
+*(Rewritten 2026-11-27: one open score, so ranges, floors and ceilings are gone; AI_SCORING_PROPOSAL.md.)* At each decision:
 0. **Interrupts:** if the running behaviour can't be replaced by this decision's event (10.7: its interrupt threshold, `cannot_be_interrupted`, or its minimum run time), it keeps running and the decision stops here.
-1. **Valid behaviours:** the ones the current state allows.
-2. **Hard gates,** with no behaviour code run: drop any on cooldown, needing a target when there's none, or whose `presses_action` can't start.
-3. **Ranges.** Each remaining behaviour's result can only land in a range:
-   - ceiling: `max_score + persistence now + its score_jitter`
-   - floor: `min_score + persistence now − its score_jitter`, when `min_score` is set
-
-   A behaviour whose ceiling is below the highest floor can't win, so it's dropped. That's 2n comparisons, still with no behaviour code run.
-
-   *(Claude 2026-11-09, found in step 8b:* a floor is only certain if its behaviour is available. Search has a fixed score, 0.7, but only applies once it became certain of an enemy, and its floor would otherwise shut out Look Toward, at 0.6, even when Search didn't apply. So the highest floor comes from the first available behaviour, checking from the highest floor down. That's usually one `is_available()` call, and the answer is kept for step 4.*)*
-4. **Scoring,** highest ceiling first. Each survivor's `is_available` and `score` run, and its persistence and jitter are added. As soon as the next ceiling can't beat the best result so far, the rest are skipped. A behaviour that doesn't set `min_score` gets its floor from this step, from real scores, so a behaviour scoring below its max never prunes one that would have won.
-5. **Jitter:** each behaviour gets its own offset at each decision, within ± its own `score_jitter` (10.7). The offset is a hash of (seed, pawn id, tick, behaviour name), so it doesn't depend on order or on which behaviours were skipped. The seed comes from the world seed, so a replay makes the same choices.
+1. **Valid behaviours:** the ones whose tag requirements pass (the state is one of the owned tags) and that are switched on.
+2. **Hard gates that cost nothing,** with no behaviour code run: drop any a modifier blocks, on cooldown, or needing a target when there's none.
+3. **Results.** Each remaining behaviour's result is known before any of its code runs: its `base_score` with modifiers, plus its jitter. A behaviour with a `score()` of its own is known only once asked, so it goes first.
+4. **The walk,** highest result first. For each: is it available (its conditions, or its own code), and could its action start, asked only on the way, availability first since it's usually judged from data and usually fails. As soon as the best so far is ahead of the next by more than the tie margin, the rest are skipped. Exact: nothing skipped could have won. A scripted score is asked once the behaviour is available, and its modifiers and jitter added.
+5. **Jitter:** each behaviour's offset is within ± its jitter (10.7), a hash of (seed, pawn id, tick, behaviour name), or with the tick left out when drawn once per pawn. It doesn't depend on order or on which behaviours were skipped. The seed comes from the world seed, so a replay makes the same choices.
 6. **Ties:** results within a small margin are a tie. With `randomize_ties` (default off) one is picked by the same hash. Otherwise the fixed order decides.
-7. **Switching:** if the winner isn't the running behaviour, the old one's `exit` runs, then the new one's `enter`, and its persistence countdown starts.
+7. **Switching:** if the winner isn't the running behaviour, the old one's `exit` and its end modifier, then the new one's start modifier and `enter`.
 
 Between decisions, only the running behaviour's `tick` runs, once per tick. When it returns SUCCEEDED or FAILED, the manager decides at once.
 
@@ -1637,11 +1627,13 @@ behaviour_manager.remove_score_modifier(source: Object)
 
 **Keyed by source.** Each source's modifiers are kept apart: two sources stack, and each removes only its own.
 
-**In the pick (10.8).** Before each decision the manager drops modifiers past their deadline and works out, for each behaviour, the sum of the modifiers that apply to it and count now, and whether a blocking modifier closes it. The sum is added wherever persistence is added (the ceiling in step 3, the floor, the result in step 4), so pruning stays exact and it reads in the same units as `max_score` (Chase 0.8 + 0.1 beats KeepDistance 0.85). A blocked behaviour is dropped with the hard gates in step 2. The C++ decider (`AIBatchDecider`) gets the sum and the block per behaviour slot when they change, and the GDScript twin does the same; the parity test covers both (rule 8).
+**In the pick (10.8).** *(Claude 2026-11-27: superseded by one scoring model. Modifiers multiply, then add to the score itself, and can follow a curve; see the modifier below and 10.8.)* Before each decision the manager drops modifiers past their deadline and works out, for each behaviour, the sum of the modifiers that apply to it and count now, and whether a blocking modifier closes it. The sum is added wherever persistence is added (the ceiling in step 3, the floor, the result in step 4), so pruning stays exact and it reads in the same units as `max_score` (Chase 0.8 + 0.1 beats KeepDistance 0.85). A blocked behaviour is dropped with the hard gates in step 2. The C++ decider (`AIBatchDecider`) gets the sum and the block per behaviour slot when they change, and the GDScript twin does the same; the parity test covers both (rule 8).
 
 **Behaviour tags and tag requirements.** Behaviours get `tags`, from the one tag registry (tag spec 2). Built-in defaults: Chase `ai.stance.melee`, KeepDistance `ai.stance.ranged`; others as they're needed. A behaviour may also carry `tag_requirements`, a tag query over the pawn's owned tags; while it fails, the behaviour is unavailable (step 2).
 
 **Determinism and replay.** The AI runs only on the server and isn't rolled back (10.2); modifiers come from server-side code and effects, so replaying those replays the decisions. The decision recorder logs each behaviour's modifier sum and blocks beside its score, so the readout shows why a behaviour won.
+
+**Curves** *(2026-11-27, AI_SCORING_PROPOSAL.md)*. An `AIBehaviourModifier` can follow a drawn `curve`: how strongly it applies, from -1 to 1, over `curve_input` or over the ticks since it was added (60 a second). At strength s a multiply m becomes `1 + (m - 1) × s`, stopping at ×0 when reversed, and an add a becomes `a × s`; overrides and blocks ignore curves. Both deciders read the same baked table (`AIBehaviourModifier.CURVE_POINTS` strengths over the curve's domain), so they agree to the bit. A time curve settles into the fixed numbers once past its domain (a tick deadline), then costs nothing.
 
 **Charges (limited uses), and the stances.**
 - `AbilityDefinition.max_charges` (0: no limit) and `AbilityBase.charges_spent`, pushed so it rolls back. A start spends one; an ability with none left isn't ready.
@@ -2132,7 +2124,7 @@ Each step keeps behaviour the same where it isn't meant to change, passes the af
 3. **The status manager:** the merge; deadlines; modifiers and effectors; one modifier rule (multiply, then add, for everything: the owner's call on 2026-11-24; a designer-chosen order may be a feature later); `change_current` thresholds and events; effects lists into definitions. *Built 2026-11-24: 3a the merge (`status/StatusManager`), deadlines, thresholds and events through `Pawn.send_event` (Death and AI threat started by events); 3b modifiers and effectors (`effects/modifiers/`, `effects/effectors/`), multiply then add with overrides. Moved to step 4: effect lists into definitions, with `EffectApplier`.*
 4. **Hits and reactions:** the hit ability through the scheduler; blocked versus ignored; parry and invulnerability as tag-granting effects; abilities started by events with payloads; charges on abilities. `HitInterceptor`, `EffectApplier` and the static hit queue go. *Built 2026-11-24: 4a effect lists into definitions (`AbilityDefinition.start_effects`, the hit definition's `target_effects` and `attacker_effects`; the samples' hits in `resources/hits/`); 4b the hit ability (`ReceiveHitAbility` on `event.hit.taken`: ignored, blocked, landed), abilities started by events (`trigger_event`, Death and Knockback included), parry and invulnerability as running effects granting tags (`ParryModifier`; a reply lands a tick later and can be parried), charges refilled on `event.revived` with a version counter. Interceptors and `EffectApplier` are gone.*
 5. **Input and controllers:** `input_blocked_by`; input cleared with no controller; the AI tree (`AIManager` root, thin `AIController`); the player controller's step host; `NavServer` plus the path follower in `MoveStep`; `NavigationManager` goes. *5a built 2026-11-25: `input_blocked_by` (any of `status.dead` by default) replaces the three death paths; input cleared with nobody in charge. 5b built 2026-11-25: the AI tree, `AIManager` (`pawn.ai`) holding the `AIController` and the five AI components, which PawnInitializer fills in like parts (a pawn's own AIManager keeps what it has); the ControllerManager reads the AI controller from `pawn.ai.controller` rather than taking a registration; `ai_brain` stays, in place of the AIManager's behaviour manager; the controller's order API stays until step 7. 5c built 2026-11-25: `NavigationManager` became `PathFollower`, held by whatever walks the pawn: a `MoveStep` (`MoveToStep` so far, `steps/movement/`) and the AI controller until step 7; the player controller's step host (`ControllerStepHost`) runs click-to-move as a `MoveToStep`; each controller follows its own path, dropped when charge changes hands; waits are tick deadlines. Left: repathing on a deadline and when off the path, the goal moving or a link timing out is as before (a link timeout only); the follower's state isn't rolled back yet. Cleanup after 5c, 2026-11-25: one `PathFollowSettings` resource (the AI controller's `path_settings` puts its walks' settings back in the inspector), `MoveStep` takes its input through the host's `step_input()`, and the follower says why a path ended (`get_end_reason()`).*
-6. **AI decisions:** the decision module parted out (`AIDecider` per behaviour manager, the brain cache, version counters, scripted behaviours mixed with data ones); behaviour definitions; generic behaviour modifiers with on start and on end; persistence and forcing go; states as conditions; the request inbox. *Split in four: 6a persistence goes and behaviour modifiers become generic; 6b forcing goes, the request inbox, states as conditions; 6c behaviour definitions; 6d the decision module parted out. 6a built 2026-11-25: `AIBehaviourModifier` (was `AIScoreModifier`) changes a behaviour's score bonus, jitter, interrupt threshold, cooldown or minimum run by multiply, add or override, and C++ gets the numbers; `modifier_on_start` and `modifier_on_end` on behaviours (on the behaviour until 6c moves them to definitions); persistence, its masks and the jitter and threshold setters are gone; Look Toward steps aside with a start modifier. 6b, first part, built 2026-11-25: forcing goes (states and targets); the AIManager's request inbox (`add_modifier`, `remove_modifiers`, `set_input`), applied at the start of the pawn's AI step in the order asked. States as conditions moved to step 8 (the owner's call, 2026-11-25): they need inputs that step 8 rewrites as selectors, so they're built once, there; `AIAwarenessState` stands in meanwhile. 6c built 2026-11-25: `AIBehaviourDefinition` and a class per kind hold every behaviour setting (`modifier_on_start` and `modifier_on_end` among them); the node keeps its state and `enabled` (a per-pawn switch); the ability machinery is shared (`resources/DefinitionSettings`), so settings read and write by name, are locked while playing, and swap with `use_definition()` (in play, C++ gets the new brain); the samples' values are files in `resources/ai_behaviours/`, numbered by the registry. 6d, first part, built 2026-11-26: `AIDecider` per behaviour manager through `AIDeciderBridge`, brains in a shared C++ store keyed by their description (keying by definition ids alone would be wrong: Attack's reach and Keep Distance's minimum come from the pawn's abilities), facts through version counters (`AIManager.facts_version`, `AIInputs.kept_version`), the `AIDecisionModule` gone (its switches and checks to `diagnostics/AIDecisionChecks`, a project setting for every pawn). Second part, built 2026-11-26: scripted behaviours mixed with data ones (`judged_in_gdscript()`: own code, or a condition C++ doesn't read); GDScript answers for those behaviours before each C++ decision (`AIDecider.set_given`), asked up front rather than lazily, and C++ judges the rest; "special minds" are gone.*
+6. **AI decisions:** the decision module parted out (`AIDecider` per behaviour manager, the brain cache, version counters, scripted behaviours mixed with data ones); behaviour definitions; generic behaviour modifiers with on start and on end; persistence and forcing go; states as conditions; the request inbox. *Split in four: 6a persistence goes and behaviour modifiers become generic; 6b forcing goes, the request inbox, states as conditions; 6c behaviour definitions; 6d the decision module parted out. 6a built 2026-11-25: `AIBehaviourModifier` (was `AIScoreModifier`) changes a behaviour's score bonus, jitter, interrupt threshold, cooldown or minimum run by multiply, add or override, and C++ gets the numbers; `modifier_on_start` and `modifier_on_end` on behaviours (on the behaviour until 6c moves them to definitions); persistence, its masks and the jitter and threshold setters are gone; Look Toward steps aside with a start modifier. 6b, first part, built 2026-11-25: forcing goes (states and targets); the AIManager's request inbox (`add_modifier`, `remove_modifiers`, `set_input`), applied at the start of the pawn's AI step in the order asked. States as conditions moved to step 8 (the owner's call, 2026-11-25): they need inputs that step 8 rewrites as selectors, so they're built once, there; `AIAwarenessState` stands in meanwhile. 6c built 2026-11-25: `AIBehaviourDefinition` and a class per kind hold every behaviour setting (`modifier_on_start` and `modifier_on_end` among them); the node keeps its state and `enabled` (a per-pawn switch); the ability machinery is shared (`resources/DefinitionSettings`), so settings read and write by name, are locked while playing, and swap with `use_definition()` (in play, C++ gets the new brain); the samples' values are files in `resources/ai_behaviours/`, numbered by the registry. 6d, first part, built 2026-11-26: `AIDecider` per behaviour manager through `AIDeciderBridge`, brains in a shared C++ store keyed by their description (keying by definition ids alone would be wrong: Attack's reach and Keep Distance's minimum come from the pawn's abilities), facts through version counters (`AIManager.facts_version`, `AIInputs.kept_version`), the `AIDecisionModule` gone (its switches and checks to `diagnostics/AIDecisionChecks`, a project setting for every pawn). Second part, built 2026-11-26: scripted behaviours mixed with data ones (`judged_in_gdscript()`: own code, or a condition C++ doesn't read); GDScript answers for those behaviours before each C++ decision (`AIDecider.set_given`), asked up front rather than lazily, and C++ judges the rest; "special minds" are gone. AI scoring, built 2026-11-27 (AI_SCORING_PROPOSAL.md): one open `base_score`, modifiers multiply then add to it and can follow curves, a walk highest result first in both deciders, C++ asking GDScript through one callback as it reaches a behaviour (the up-front answers and the readiness copy go), lazy inputs in C++, `enabled` as a per-pawn mask, jitter drawn once per pawn as an option, `manager.cpp` renamed `cpp_decider`.*
 7. **Behaviour steps:** the step library; today's behaviours rebuilt from steps; the order stream's hooks on the behaviour timeline.
 8. **Memory and senses:** fact tables and sources; selectors (`AIInputs` goes); states as conditions, on the selectors (from step 6b); stimuli; the sight sense out of memory; the damage sense; hearing with footsteps; `AIStimulusSource`; the target as a query (`AITargetSelector` goes).
 9. **Entities:** `EntityTable` and the shared column architecture; the entity registry; owned tags on any entity; `team` and `dead` columns; `facing`; general linger; sleeping until the next deadline; the significance manager.

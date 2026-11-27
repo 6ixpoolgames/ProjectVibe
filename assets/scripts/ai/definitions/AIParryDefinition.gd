@@ -16,9 +16,8 @@ extends AIBehaviourDefinition
 
 func _init() -> void:
 	super()
-	# Above the samples' attacks (the heavy attack is 0.95), because a parry has to happen now or never. Shoot scores the same, 0.97, so
+	# Above the samples' attacks (the heavy attack is 95), because a parry has to happen now or never. Shoot scores the same, 97, so
 	# a pawn with both breaks the tie by name order.
-	max_score = 0.97
-	min_score = 0.97
+	base_score = 97.0
 	presses_action = &"parry"
 	tick_interval_ticks = 60 # the safety net: it wakes two ticks after the press (wake_at)

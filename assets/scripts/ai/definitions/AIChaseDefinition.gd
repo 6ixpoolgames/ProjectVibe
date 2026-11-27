@@ -62,6 +62,5 @@ func _init() -> void:
 	tag_requirements = TagQuery.shared([Tags.AI.STATE_COMBAT])
 	tags = [Tags.AI.STANCE_MELEE]
 	needs_target = true
-	max_score = 0.8
-	min_score = 0.8
+	base_score = 80.0
 	tick_interval_ticks = 5 # the AI controller follows the path every tick; Chase only re-aims

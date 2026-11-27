@@ -25,7 +25,6 @@ func _init() -> void:
 	tag_requirements = TagQuery.shared([Tags.AI.STATE_COMBAT])
 	needs_target = true
 	presses_action = &"primary"
-	max_score = 0.9
-	min_score = 0.9
+	base_score = 90.0
 	interrupt_threshold = 15
 	tick_interval_ticks = 60 # the safety net: it wakes for the press and when the swing ends

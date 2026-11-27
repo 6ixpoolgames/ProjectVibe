@@ -1,7 +1,7 @@
 // Written by Claude (claude-opus-5-5), 2026-11-17. History: native/CHANGELOG.md.
 // AIDecider: AI behaviour decisions in C++. Described in ai_decider.h. Every step follows
 // AIBehaviourManager.decide() (assets/scripts/ai/AIBehaviourManager.gd) exactly, in the same order with the same arithmetic, so the
-// two agree to the bit: a change to one goes in both, and ai_batch_decider_selftest compares them.
+// two agree to the bit: a change to one goes in both, and ai_decider_selftest compares them.
 #include "ai_decider.h"
 #include "deterministic_random.h"
 #include "ai_memory_store.h"
@@ -23,6 +23,7 @@ using namespace godot;
 
 namespace {
 constexpr double NEG_INF = -std::numeric_limits<double>::infinity();
+constexpr double POS_INF = std::numeric_limits<double>::infinity();
 
 // A column from decide()'s Dictionary, checked for its type and length. Null, with an error, if it's missing or wrong.
 template <typename T>
@@ -60,6 +61,35 @@ bool scorer_by_name(const String &name, uint8_t &scorer) {
 inline double input_at(const double *inputs, int64_t count, int slot) {
 	return (inputs && slot >= 0 && slot < count) ? inputs[slot] : 0.0;
 }
+
+// AIBehaviourModifier.strength_in: the baked curve's strength at x, a straight line between its points, the end values beyond.
+double strength_in(const std::vector<double> &table, double low, double high, double x) {
+	const int64_t last = int64_t(table.size()) - 1;
+	if (last < 0) {
+		return 1.0;
+	}
+	if (x <= low || high <= low) {
+		return table[0];
+	}
+	if (x >= high) {
+		return table[last];
+	}
+	const double place = (x - low) / (high - low) * double(last);
+	const int64_t i = std::min<int64_t>(int64_t(place), last - 1);
+	const double part = place - double(i);
+	return table[i] + (table[i + 1] - table[i]) * part;
+}
+
+// AIBehaviourModifier.multiply_at: a multiply with strength s, never below 0 while reversed.
+inline double multiply_at(double m, double s) {
+	const double factor = 1.0 + (m - 1.0) * s;
+	return (s < 0.0 && factor < 0.0) ? 0.0 : factor;
+}
+
+// GDScript's roundi(): half away from zero.
+inline int64_t round_to_int(double value) {
+	return int64_t(std::llround(value));
+}
 } // namespace
 
 double AIDecider::random_unit_at(int64_t seed, int64_t pawn_number, int64_t tick, int64_t salt) {
@@ -84,6 +114,13 @@ void AIDecider::free_shared() {
 	s_shared = nullptr;
 }
 
+int64_t AIDecider::ticks_at_rate(int64_t reference_ticks, int64_t rate) {
+	if (reference_ticks <= 0 || rate == 60) {
+		return reference_ticks;
+	}
+	return std::max<int64_t>(1, round_to_int(double(reference_ticks) * double(rate) / 60.0));
+}
+
 int AIDecider::add_brain(const Dictionary &description, const String &key) {
 	Shared &store = shared();
 	if (!key.is_empty() && store.by_key.has(key)) {
@@ -98,49 +135,41 @@ int AIDecider::add_brain(const Dictionary &description, const String &key) {
 	brain.tie_margin = double(description.get("tie_margin", 0.0001));
 	brain.randomize_ties = bool(description.get("randomize_ties", false));
 	brain.tie_salt = int64_t(description.get("tie_salt", 0x7135));
+	brain.tick_rate = int64_t(description.get("tick_rate", 60));
+	brain.jitter_once = bool(description.get("jitter_once", false));
+	brain.jitter_once_salt = int64_t(description.get("jitter_once_salt", 0x6A17));
+	brain.jitter_once_tick = int64_t(description.get("jitter_once_tick", 0));
 	for (int64_t i = 0; i < list.size(); ++i) {
 		const Dictionary entry = list[i];
 		Behaviour behaviour;
 		behaviour.name = StringName(String(entry.get("name", "")));
 		behaviour.name_hash = int64_t(entry.get("name_hash", 0));
-		behaviour.max_score = double(entry.get("max_score", 0.5));
-		const Variant min_score = entry.get("min_score", Variant());
-		behaviour.has_min_score = min_score.get_type() != Variant::NIL && double(min_score) > NEG_INF;
-		behaviour.min_score = behaviour.has_min_score ? double(min_score) : NEG_INF;
+		behaviour.scripted_score = bool(entry.get("scripted_score", false));
 		behaviour.needs_target = bool(entry.get("needs_target", false));
 		behaviour.presses_action = !String(entry.get("presses_action", "")).is_empty();
-		behaviour.min_run_ticks = int64_t(entry.get("min_run_ticks_at_rate", entry.get("min_run_ticks", 0)));
 		behaviour.interrupt_threshold = int64_t(entry.get("interrupt_threshold", 0));
 		behaviour.cannot_be_interrupted = bool(entry.get("cannot_be_interrupted", false));
 		behaviour.jitter = double(entry.get("effective_jitter", 0.0));
+		const int64_t cooldown = int64_t(entry.get("cooldown_ticks", 0));
+		const int64_t min_run = int64_t(entry.get("min_run_ticks", 0));
+		behaviour.cooldown_ticks = ticks_at_rate(cooldown, brain.tick_rate);
+		behaviour.min_run_ticks = ticks_at_rate(min_run, brain.tick_rate);
+		behaviour.base[SCORE] = double(entry.get("base_score", 50.0));
+		behaviour.base[SCORE_JITTER] = behaviour.jitter;
+		behaviour.base[INTERRUPT_THRESHOLD] = double(behaviour.interrupt_threshold);
+		behaviour.base[COOLDOWN_TICKS] = double(cooldown);
+		behaviour.base[MIN_RUN_TICKS] = double(min_run);
 		uint8_t scorer = 0;
 		if (!scorer_by_name(String(entry.get("scorer", "")), scorer)) {
 			UtilityFunctions::push_error("AIDecider.add_brain: no scorer called \"" + String(entry.get("scorer", "")) + "\".");
 			return -1;
 		}
 		behaviour.scorer = Scorer(scorer);
-		behaviour.cooldown_ticks = int64_t(entry.get("cooldown_ticks_at_rate", entry.get("cooldown_ticks", 0)));
-		// Conditions and curves only for the scorer that reads them: a "given" behaviour may have a condition of a kind C++ doesn't know,
-		// which is why GDScript answers for it.
+		// Conditions only for the scorer that reads them: a "given" behaviour may have a condition of a kind C++ doesn't know, which is
+		// why GDScript answers for it.
 		const bool judged_here = behaviour.scorer == Scorer::CONDITIONS;
 		if (judged_here && !add_conditions(entry.get("conditions", Array()), brain, behaviour.first_condition, behaviour.condition_count)) {
 			return -1;
-		}
-		const Array curves = judged_here ? Array(entry.get("score_curves", Array())) : Array();
-		behaviour.first_curve = int(brain.curves.size());
-		behaviour.curve_count = int(curves.size());
-		for (int64_t c = 0; c < curves.size(); ++c) {
-			const Dictionary described = curves[c];
-			Curve curve;
-			curve.input_slot = int(described.get("input_slot", -1));
-			curve.from = double(described.get("from", 0.0));
-			curve.to = double(described.get("to", 1.0));
-			brain.curves.push_back(curve);
-		}
-		// Switched off (enabled false): a gate nothing passes.
-		if (!bool(entry.get("enabled", true))) {
-			behaviour.has_gate = true;
-			behaviour.gate_impossible = true;
 		}
 		const Variant gate = entry.get("tag_requirements", Variant());
 		if (gate.get_type() == Variant::DICTIONARY) {
@@ -149,7 +178,7 @@ int AIDecider::add_brain(const Dictionary &description, const String &key) {
 			const PackedInt64Array any = g.get("any", PackedInt64Array());
 			const PackedInt64Array none = g.get("none", PackedInt64Array());
 			behaviour.has_gate = true;
-			behaviour.gate_impossible = behaviour.gate_impossible || bool(g.get("impossible", false)); // switched off stays off
+			behaviour.gate_impossible = bool(g.get("impossible", false));
 			for (int64_t w = 0; w < all.size(); ++w) {
 				behaviour.gate_all.push_back(uint64_t(all[w]));
 				behaviour.gate_any.push_back(w < any.size() ? uint64_t(any[w]) : 0);
@@ -182,6 +211,9 @@ int AIDecider::add_brain(const Dictionary &description, const String &key) {
 		}
 		if (brain.behaviours[slot].has_gate) {
 			brain.gated_mask |= bit;
+		}
+		if (brain.behaviours[slot].scripted_score) {
+			brain.scripted_score_mask |= bit;
 		}
 	}
 	store.brains.push_back(brain);
@@ -231,16 +263,23 @@ bool AIDecider::add_conditions(const Array &list, Brain &brain, int &first, int 
 	return true;
 }
 
+double AIDecider::RowView::input(int slot) const {
+	if (lazy) {
+		return lazy->get(slot);
+	}
+	return input_at(inputs, input_count, slot);
+}
+
 bool AIDecider::passes(const Brain &brain, const Condition &condition, const RowView &row, int64_t behaviour_salt) const {
 	switch (condition.kind) {
 		case ConditionKind::ALWAYS:
 			return true;
 		case ConditionKind::COMPARE: {
 			// AICompareCondition.passes, the same arithmetic.
-			const double left = input_at(row.inputs, row.input_count, condition.input_slot);
+			const double left = row.input(condition.input_slot);
 			double right = condition.value;
 			if (condition.other_slot >= 0) {
-				right += input_at(row.inputs, row.input_count, condition.other_slot);
+				right += row.input(condition.other_slot);
 			}
 			switch (condition.comparison) {
 				case 0:
@@ -260,10 +299,10 @@ bool AIDecider::passes(const Brain &brain, const Condition &condition, const Row
 		case ConditionKind::CHANCE: {
 			// AIChanceCondition: roll_tick and roll_salt, then the context's random_unit_at. A double to int64 truncates toward 0,
 			// as GDScript's int() does.
-			const int64_t roll_tick = condition.key_slot >= 0 ? int64_t(input_at(row.inputs, row.input_count, condition.key_slot)) : row.tick;
+			const int64_t roll_tick = condition.key_slot >= 0 ? int64_t(row.input(condition.key_slot)) : row.tick;
 			int64_t salt = condition.salt ^ behaviour_salt;
 			if (condition.salt_slot >= 0) {
-				salt ^= int64_t(input_at(row.inputs, row.input_count, condition.salt_slot)) & 0xFFFF;
+				salt ^= int64_t(row.input(condition.salt_slot)) & 0xFFFF;
 			}
 			return random_unit_at(row.random_seed, row.pawn_number, roll_tick, salt) < condition.chance;
 		}
@@ -337,7 +376,9 @@ bool AIDecider::is_available(const Brain &brain, int slot, const RowView &row, u
 	bool available = false;
 	switch (brain.behaviours[slot].scorer) {
 		case Scorer::GIVEN:
-			if (uint64_t(row.available_known) & bit) {
+			if (row.asker) {
+				available = double(row.asker->call(int64_t(ASK_AVAILABLE), int64_t(slot))) > 0.5;
+			} else if (uint64_t(row.available_known) & bit) {
 				available = (uint64_t(row.available) & bit) != 0;
 			} else {
 				unknown |= bit; // GDScript never answered for this one: counted as not available, and reported
@@ -362,36 +403,14 @@ bool AIDecider::is_available(const Brain &brain, int slot, const RowView &row, u
 	return available;
 }
 
-double AIDecider::score(const Brain &brain, int slot, const RowView &row) const {
-	switch (brain.behaviours[slot].scorer) {
-		case Scorer::GIVEN:
-			if (row.scores && !std::isnan(row.scores[slot])) {
-				return row.scores[slot];
-			}
-			break;
-		case Scorer::CONDITIONS: {
-			// AIBehaviourBase.score(): max_score, scaled by the curves, in the same order with the same arithmetic.
-			const Behaviour &behaviour = brain.behaviours[slot];
-			if (behaviour.curve_count == 0) {
-				break;
-			}
-			double amount = 1.0;
-			for (int i = 0; i < behaviour.curve_count; ++i) {
-				const Curve &curve = brain.curves[behaviour.first_curve + i];
-				const double value = input_at(row.inputs, row.input_count, curve.input_slot);
-				double part;
-				if (curve.to == curve.from) {
-					part = value >= curve.to ? 1.0 : 0.0;
-				} else {
-					part = std::clamp((value - curve.from) / (curve.to - curve.from), 0.0, 1.0);
-				}
-				amount *= part;
-			}
-			const double low = behaviour.has_min_score ? behaviour.min_score : 0.0;
-			return low + (behaviour.max_score - low) * amount;
-		}
+double AIDecider::asked_score(const Brain &brain, int slot, const RowView &row) const {
+	if (row.asker) {
+		return double(row.asker->call(int64_t(ASK_SCORE), int64_t(slot)));
 	}
-	return brain.behaviours[slot].max_score; // AIBehaviourBase.score()'s default
+	if (row.scores && !std::isnan(row.scores[slot])) {
+		return row.scores[slot];
+	}
+	return brain.behaviours[slot].base[SCORE]; // AIBehaviourBase.score()'s default
 }
 
 Dictionary AIDecider::decide(const Dictionary &columns) {
@@ -433,15 +452,17 @@ Dictionary AIDecider::decide(const Dictionary &columns) {
 	// The owned tags (rows * tag_words), the numbers the modifiers leave (rows * stride each) and the blocks: all optional.
 	const int64_t tag_words = int64_t(columns.get("tag_words", 0));
 	PackedInt64Array owned_h, blocked_h, threshold_h, min_run_h;
-	PackedFloat64Array modifier_h, jitter_h;
+	PackedFloat64Array multiply_h, add_h, jitter_h;
 	const auto *owned = tag_words > 0 ? column(columns, "owned", Variant::PACKED_INT64_ARRAY, rows * tag_words, owned_h) : nullptr;
-	const auto *modifiers = columns.has("modifier") ? column(columns, "modifier", Variant::PACKED_FLOAT64_ARRAY, flat, modifier_h) : nullptr;
+	const auto *multiplies = columns.has("score_multiply") ? column(columns, "score_multiply", Variant::PACKED_FLOAT64_ARRAY, flat, multiply_h) : nullptr;
+	const auto *adds = columns.has("score_add") ? column(columns, "score_add", Variant::PACKED_FLOAT64_ARRAY, flat, add_h) : nullptr;
 	const auto *jitters = columns.has("jitter") ? column(columns, "jitter", Variant::PACKED_FLOAT64_ARRAY, flat, jitter_h) : nullptr;
 	const auto *thresholds = columns.has("interrupt_threshold") ? column(columns, "interrupt_threshold", Variant::PACKED_INT64_ARRAY, flat, threshold_h) : nullptr;
 	const auto *min_runs = columns.has("min_run") ? column(columns, "min_run", Variant::PACKED_INT64_ARRAY, flat, min_run_h) : nullptr;
 	const auto *blocked = columns.has("blocked") ? column(columns, "blocked", Variant::PACKED_INT64_ARRAY, rows, blocked_h) : nullptr;
-	if ((tag_words > 0 && !owned) || (columns.has("modifier") && !modifiers) || (columns.has("jitter") && !jitters) ||
-			(columns.has("interrupt_threshold") && !thresholds) || (columns.has("min_run") && !min_runs) || (columns.has("blocked") && !blocked)) {
+	if ((tag_words > 0 && !owned) || (columns.has("score_multiply") && !multiplies) || (columns.has("score_add") && !adds) ||
+			(columns.has("jitter") && !jitters) || (columns.has("interrupt_threshold") && !thresholds) ||
+			(columns.has("min_run") && !min_runs) || (columns.has("blocked") && !blocked)) {
 		return result; // column() said why
 	}
 	if (!pawn || !seed || !tick || !has_target || !normal || !priority || !running || !started || !cooling || !can_press ||
@@ -463,7 +484,8 @@ Dictionary AIDecider::decide(const Dictionary &columns) {
 	const double *score_of = scores ? scores->ptr() : nullptr;
 	const double *inputs_of = inputs ? inputs->ptr() : nullptr;
 	const uint64_t *owned_of = owned ? reinterpret_cast<const uint64_t *>(owned->ptr()) : nullptr;
-	const double *modifier_of = modifiers ? modifiers->ptr() : nullptr;
+	const double *multiply_of = multiplies ? multiplies->ptr() : nullptr;
+	const double *add_of = adds ? adds->ptr() : nullptr;
 	const double *jitter_of = jitters ? jitters->ptr() : nullptr;
 	const int64_t *threshold_of = thresholds ? thresholds->ptr() : nullptr;
 	const int64_t *min_run_of = min_runs ? min_runs->ptr() : nullptr;
@@ -486,7 +508,8 @@ Dictionary AIDecider::decide(const Dictionary &columns) {
 		in.event_normal = (*normal)[r] != 0;
 		in.owned = owned_of ? owned_of + r * tag_words : nullptr;
 		in.owned_count = owned_of ? tag_words : 0;
-		in.bonus = modifier_of ? modifier_of + r * stride : nullptr;
+		in.score_multiply = multiply_of ? multiply_of + r * stride : nullptr;
+		in.score_add = add_of ? add_of + r * stride : nullptr;
 		in.jitter = jitter_of ? jitter_of + r * stride : nullptr;
 		in.interrupt_threshold = threshold_of ? threshold_of + r * stride : nullptr;
 		in.min_run = min_run_of ? min_run_of + r * stride : nullptr;
@@ -494,8 +517,14 @@ Dictionary AIDecider::decide(const Dictionary &columns) {
 		in.has_target = (*has_target)[r] != 0;
 		in.cooling = uint64_t((*cooling)[r]);
 		in.can_press = uint64_t((*can_press)[r]);
-		in.view = RowView{ (*known)[r], (*available)[r], score_of ? score_of + r * stride : nullptr,
-			inputs_of ? inputs_of + r * input_stride : nullptr, input_stride, (*seed)[r], (*pawn)[r], in.now };
+		in.view.available_known = (*known)[r];
+		in.view.available = (*available)[r];
+		in.view.scores = score_of ? score_of + r * stride : nullptr;
+		in.view.inputs = inputs_of ? inputs_of + r * input_stride : nullptr;
+		in.view.input_count = input_stride;
+		in.view.random_seed = (*seed)[r];
+		in.view.pawn_number = (*pawn)[r];
+		in.view.tick = in.now;
 		const RowResult out = decide_row(shared().brains[b], in);
 		chosen_out.set(r, out.chosen);
 		kept_out.set(r, out.kept ? 1 : 0);
@@ -535,8 +564,8 @@ AIDecider::RowResult AIDecider::decide_row(const Brain &brain, const RowInput &i
 			return out;
 		}
 	}
-	// 1 and 2. Valid behaviours and the hard rules, as masks: tag requirements pass; not blocked; not cooling down (the running one
-	// excepted); a target if it needs one; its action can start (the running one excepted, having pressed it already).
+	// 1 and 2. Valid behaviours and the hard rules that cost nothing, as masks: tag requirements pass; not blocked or switched off;
+	// not cooling down (the running one excepted); a target if it needs one.
 	uint64_t candidates = count >= 64 ? ~uint64_t(0) : (uint64_t(1) << count) - 1;
 	for (int slot = 0; slot < count; ++slot) {
 		if (((brain.gated_mask >> slot) & 1) && !passes_gate(brain.behaviours[slot], in.owned, in.owned_count)) {
@@ -548,8 +577,8 @@ AIDecider::RowResult AIDecider::decide_row(const Brain &brain, const RowInput &i
 	if (!in.has_target) {
 		candidates &= ~brain.needs_target_mask;
 	}
-	candidates &= ~(brain.presses_action_mask & ~in.can_press & ~run_bit);
-	// 3. Each candidate's range, in the fixed order.
+	// 3. Each candidate's result, known before any of its code runs: its score with modifiers, plus jitter, in the fixed order. A
+	// score of its own code goes first (infinity) and is asked when reached.
 	const RowView &view = in.view;
 	_candidates.clear();
 	for (int slot = 0; slot < count; ++slot) {
@@ -560,47 +589,48 @@ AIDecider::RowResult AIDecider::decide_row(const Brain &brain, const RowInput &i
 		const double jitter = in.jitter ? in.jitter[slot] : behaviour.jitter;
 		Candidate c;
 		c.slot = slot;
-		// The modifiers' score bonus, added as GDScript adds it, so the two agree to the bit.
-		c.bonus = in.bonus ? in.bonus[slot] : 0.0;
-		c.jitter = jitter > 0.0 ? jitter * (random_unit_at(view.random_seed, view.pawn_number, now, behaviour.name_hash) * 2.0 - 1.0) : 0.0;
-		c.ceiling = behaviour.max_score + c.bonus + jitter;
-		c.has_floor = behaviour.has_min_score;
-		c.floor = c.has_floor ? behaviour.min_score + c.bonus - jitter : NEG_INF;
+		if (jitter > 0.0) {
+			const double roll = brain.jitter_once
+					? random_unit_at(view.random_seed, view.pawn_number, brain.jitter_once_tick, behaviour.name_hash ^ brain.jitter_once_salt)
+					: random_unit_at(view.random_seed, view.pawn_number, now, behaviour.name_hash);
+			c.jitter = jitter * (roll * 2.0 - 1.0);
+		}
+		const double multiply = in.score_multiply ? in.score_multiply[slot] : 1.0;
+		const double add = in.score_add ? in.score_add[slot] : 0.0;
+		c.key = behaviour.scripted_score ? POS_INF : behaviour.base[SCORE] * multiply + add + c.jitter;
 		_candidates.push_back(c);
 	}
+	// 4. The walk, highest result first. Whether its action could start and whether it's available are asked only on the way.
+	std::sort(_candidates.begin(), _candidates.end(), [](const Candidate &a, const Candidate &b) {
+		return a.key > b.key || (a.key == b.key && a.slot < b.slot);
+	});
 	uint64_t answers = 0;
-	// 3, continued. The highest floor, from the first available behaviour, highest floor first.
-	double highest_floor = NEG_INF;
-	std::sort(_candidates.begin(), _candidates.end(), [](const Candidate &a, const Candidate &b) {
-		return a.floor > b.floor || (a.floor == b.floor && a.slot < b.slot);
-	});
-	for (const Candidate &c : _candidates) {
-		if (c.floor == NEG_INF) {
-			break;
-		}
-		if (is_available(brain, c.slot, view, out.asked, answers, out.unknown)) {
-			highest_floor = c.floor;
-			break;
-		}
-	}
-	// 4. Scoring, highest ceiling first, with the early stop.
-	std::sort(_candidates.begin(), _candidates.end(), [](const Candidate &a, const Candidate &b) {
-		return a.ceiling > b.ceiling || (a.ceiling == b.ceiling && a.slot < b.slot);
-	});
 	int best = -1;
 	double best_result = NEG_INF;
 	_ties.clear();
 	for (const Candidate &c : _candidates) {
-		if (c.ceiling < highest_floor) {
-			continue;
-		}
-		if (best >= 0 && c.ceiling < best_result - brain.tie_margin) {
+		if (best >= 0 && c.key < best_result - brain.tie_margin) {
 			break;
 		}
+		const uint64_t bit = uint64_t(1) << c.slot;
+		// Availability first: usually judged here from data, for nothing, and it usually fails; asking an ability costs a call.
 		if (!is_available(brain, c.slot, view, out.asked, answers, out.unknown)) {
 			continue;
 		}
-		const double result_now = score(brain, c.slot, view) + c.bonus + c.jitter;
+		// The running one has already pressed its action, so "could it start" doesn't apply to it.
+		if ((brain.presses_action_mask & bit) && c.slot != run) {
+			const bool could = view.asker ? double(view.asker->call(int64_t(ASK_COULD_PRESS), int64_t(c.slot))) > 0.5
+										  : (in.can_press & bit) != 0;
+			if (!could) {
+				continue;
+			}
+		}
+		double result_now = c.key;
+		if (brain.behaviours[c.slot].scripted_score) {
+			const double multiply = in.score_multiply ? in.score_multiply[c.slot] : 1.0;
+			const double add = in.score_add ? in.score_add[c.slot] : 0.0;
+			result_now = asked_score(brain, c.slot, view) * multiply + add + c.jitter;
+		}
 		if (best < 0 || result_now > best_result + brain.tie_margin) {
 			best = c.slot;
 			best_result = result_now;
@@ -652,7 +682,7 @@ int AIDecider::add_pawn(int64_t id, int brain, int64_t pawn_number, int64_t rand
 	p.pawn_number = pawn_number;
 	p.random_seed = random_seed;
 	p.ended.assign(count, -1);
-	reset_numbers(p, b);
+	work_out_numbers(b, p, 0, nullptr, p.score_multiply, p.score_add, p.jitter, p.interrupt_threshold, p.cooldown, p.min_run);
 	return row;
 }
 
@@ -714,19 +744,56 @@ void AIDecider::stop_running(int row, int64_t tick) {
 	}
 }
 
-// The numbers the modifiers leave, back to the brain's own: no bonus, its jitter, threshold, cooldown and minimum run.
-void AIDecider::reset_numbers(PawnRow &p, const Brain &b) {
+// AIBehaviourBase.work_out_change and the current_ numbers, for every behaviour: the fixed part (an override is a multiply of 0 and
+// an add of its value, which no curve changes), then each live curve in the order added, then the number's own rounding.
+void AIDecider::work_out_numbers(const Brain &b, const PawnRow &p, int64_t tick, const RowView *view, std::vector<double> &score_multiply,
+		std::vector<double> &score_add, std::vector<double> &jitter, std::vector<int64_t> &interrupt_threshold, std::vector<int64_t> &cooldown,
+		std::vector<int64_t> &min_run) {
 	const size_t count = b.behaviours.size();
-	p.bonus.clear();
-	p.jitter.resize(count);
-	p.interrupt_threshold.resize(count);
-	p.cooldown.resize(count);
-	p.min_run.resize(count);
-	for (size_t i = 0; i < count; ++i) {
-		p.jitter[i] = b.behaviours[i].jitter;
-		p.interrupt_threshold[i] = b.behaviours[i].interrupt_threshold;
-		p.cooldown[i] = b.behaviours[i].cooldown_ticks;
-		p.min_run[i] = b.behaviours[i].min_run_ticks;
+	score_multiply.resize(count);
+	score_add.resize(count);
+	jitter.resize(count);
+	interrupt_threshold.resize(count);
+	cooldown.resize(count);
+	min_run.resize(count);
+	const bool has_changes = p.changes.size() == count * NUMBERS * 3;
+	for (size_t slot = 0; slot < count; ++slot) {
+		const Behaviour &behaviour = b.behaviours[slot];
+		double multiply[NUMBERS];
+		double add[NUMBERS];
+		bool overridden[NUMBERS];
+		for (int n = 0; n < NUMBERS; ++n) {
+			multiply[n] = 1.0;
+			add[n] = 0.0;
+			overridden[n] = false;
+			if (has_changes) {
+				const size_t at = (slot * NUMBERS + n) * 3;
+				multiply[n] = p.changes[at];
+				add[n] = p.changes[at + 1];
+				if (!std::isnan(p.changes[at + 2])) {
+					multiply[n] = 0.0;
+					add[n] = p.changes[at + 2];
+					overridden[n] = true;
+				}
+			}
+		}
+		const uint64_t bit = uint64_t(1) << slot;
+		for (const CurvedModifier &curve : p.curves) {
+			if (!(curve.mask & bit) || curve.number < 0 || curve.number >= NUMBERS || overridden[curve.number]) {
+				continue;
+			}
+			// AIBehaviourBase.curve_strength: x is the ticks since added, or its input, times its scale.
+			const double raw = curve.slot < 0 ? double(tick - curve.added) : (view ? view->input(curve.slot) : 0.0);
+			const double strength = strength_in(curve.table, curve.low, curve.high, raw * curve.scale);
+			multiply[curve.number] *= multiply_at(curve.multiply, strength);
+			add[curve.number] += curve.add * strength;
+		}
+		score_multiply[slot] = multiply[SCORE];
+		score_add[slot] = add[SCORE];
+		jitter[slot] = std::max(0.0, behaviour.base[SCORE_JITTER] * multiply[SCORE_JITTER] + add[SCORE_JITTER]);
+		interrupt_threshold[slot] = round_to_int(behaviour.base[INTERRUPT_THRESHOLD] * multiply[INTERRUPT_THRESHOLD] + add[INTERRUPT_THRESHOLD]);
+		cooldown[slot] = ticks_at_rate(std::max<int64_t>(0, round_to_int(behaviour.base[COOLDOWN_TICKS] * multiply[COOLDOWN_TICKS] + add[COOLDOWN_TICKS])), b.tick_rate);
+		min_run[slot] = ticks_at_rate(std::max<int64_t>(0, round_to_int(behaviour.base[MIN_RUN_TICKS] * multiply[MIN_RUN_TICKS] + add[MIN_RUN_TICKS])), b.tick_rate);
 	}
 }
 
@@ -783,69 +850,79 @@ Object *alive(uint64_t id) {
 }
 } // namespace
 
-const double *AIDecider::work_out_inputs(const PawnRow &p, const Vector3 &position, int64_t tick, int64_t &count) {
-	const std::vector<int32_t> &kinds = shared().input_kinds;
-	count = std::max<int64_t>(int64_t(p.kept_inputs.size()), int64_t(kinds.size()));
-	_inputs_scratch.assign(size_t(count), 0.0);
-	std::copy(p.kept_inputs.begin(), p.kept_inputs.end(), _inputs_scratch.begin());
-	AIMemoryStore *store = Object::cast_to<AIMemoryStore>(p.memory_store.ptr());
-	int64_t most_aware = -2; // not looked for yet
-	for (size_t slot = 0; store != nullptr && slot < kinds.size(); ++slot) {
-		double &value = _inputs_scratch[slot];
-		switch (kinds[slot]) {
-			case TARGET_DISTANCE: {
-				const int64_t index = alive(p.target_id) != nullptr ? store->find_by_id(p.target_id) : -1;
-				value = index >= 0 ? flat_distance(store->last_known_position_at(index), position) : FAR;
-				break;
-			}
-			case MOST_AWARE_CERTAIN:
-			case MOST_AWARE_UNCERTAIN: {
-				if (most_aware == -2) {
-					most_aware = store->most_aware_index(position, tick);
-				}
-				const bool certain = most_aware >= 0 && store->is_certain_at(most_aware);
-				const bool wanted = kinds[slot] == MOST_AWARE_CERTAIN ? certain : (most_aware >= 0 && !certain);
-				value = wanted ? 1.0 : 0.0;
-				break;
-			}
-			case TICKS_SINCE_UNKNOWN_HIT: {
-				// An attacker it remembers is known; one that's gone, or never noticed, isn't.
-				const bool known = alive(p.last_attacker_id) != nullptr && store->find_by_id(p.last_attacker_id) >= 0;
-				value = (p.last_hit_tick >= 0 && !known) ? double(tick - p.last_hit_tick) : FAR;
-				break;
-			}
-			case INCOMING_ATTACK: {
-				// AIManager.has_incoming_attack: not hit yet, and the attacker still there and alive.
-				Object *attacker = alive(p.incoming_attacker_id);
-				value = (p.incoming_hit_tick >= tick && attacker != nullptr && !bool(attacker->get("dead"))) ? 1.0 : 0.0;
-				break;
-			}
-			case INCOMING_ATTACK_TICK:
-				value = double(p.incoming_start_tick);
-				break;
-			case INCOMING_ATTACKER:
-				value = alive(p.incoming_attacker_id) != nullptr ? double(p.incoming_attacker_number) : -1.0;
-				break;
-			default:
-				break; // kept: a game's own, action_ready
-		}
+double AIDecider::LazyInputs::get(int slot) {
+	if (slot < 0 || slot >= count) {
+		return 0.0;
 	}
-	// The group distances, from where the pawn is now.
-	for (const PawnRow::GroupPoint &group : p.groups) {
-		if (group.distance_slot >= 0 && group.distance_slot < count) {
-			_inputs_scratch[group.distance_slot] = group.found ? flat_distance(group.position, position) : FAR;
-		}
-		if (group.found_slot >= 0 && group.found_slot < count) {
-			_inputs_scratch[group.found_slot] = group.found ? 1.0 : 0.0;
-		}
+	if (!known[slot]) {
+		known[slot] = 1;
+		values[slot] = owner->work_out_input(owner->_pawns[row], *this, slot);
 	}
-	return _inputs_scratch.data();
+	return values[slot];
 }
 
-PackedFloat64Array AIDecider::get_last_inputs() const {
+double AIDecider::work_out_input(const PawnRow &p, LazyInputs &lazy, int slot) {
+	const std::vector<int32_t> &kinds = shared().input_kinds;
+	const double kept = size_t(slot) < p.kept_inputs.size() ? p.kept_inputs[slot] : 0.0;
+	const int32_t kind = size_t(slot) < kinds.size() ? kinds[slot] : KEPT;
+	switch (kind) {
+		case GROUP_DISTANCE:
+		case GROUP_FOUND:
+		case ACTION_READY:
+			// Only GDScript works these out (a group's nearest node, an ability's readiness): asked.
+			return p.asker.is_valid() ? double(p.asker.call(int64_t(ASK_INPUT), int64_t(slot))) : 0.0;
+		case KEPT:
+			return kept;
+		default:
+			break;
+	}
+	AIMemoryStore *store = Object::cast_to<AIMemoryStore>(p.memory_store.ptr());
+	if (store == nullptr) {
+		return kept;
+	}
+	const Vector3 &position = lazy.position;
+	const int64_t tick = lazy.tick;
+	switch (kind) {
+		case TARGET_DISTANCE: {
+			const int64_t index = alive(p.target_id) != nullptr ? store->find_by_id(p.target_id) : -1;
+			return index >= 0 ? flat_distance(store->last_known_position_at(index), position) : FAR;
+		}
+		case MOST_AWARE_CERTAIN:
+		case MOST_AWARE_UNCERTAIN: {
+			if (lazy.most_aware == -2) {
+				lazy.most_aware = store->most_aware_index(position, tick);
+			}
+			const int64_t most_aware = lazy.most_aware;
+			const bool certain = most_aware >= 0 && store->is_certain_at(most_aware);
+			const bool wanted = kind == MOST_AWARE_CERTAIN ? certain : (most_aware >= 0 && !certain);
+			return wanted ? 1.0 : 0.0;
+		}
+		case TICKS_SINCE_UNKNOWN_HIT: {
+			// An attacker it remembers is known; one that's gone, or never noticed, isn't.
+			const bool known = alive(p.last_attacker_id) != nullptr && store->find_by_id(p.last_attacker_id) >= 0;
+			return (p.last_hit_tick >= 0 && !known) ? double(tick - p.last_hit_tick) : FAR;
+		}
+		case INCOMING_ATTACK: {
+			// AIManager.has_incoming_attack: not hit yet, and the attacker still there and alive.
+			Object *attacker = alive(p.incoming_attacker_id);
+			return (p.incoming_hit_tick >= tick && attacker != nullptr && !bool(attacker->get("dead"))) ? 1.0 : 0.0;
+		}
+		case INCOMING_ATTACK_TICK:
+			return double(p.incoming_start_tick);
+		case INCOMING_ATTACKER:
+			return alive(p.incoming_attacker_id) != nullptr ? double(p.incoming_attacker_number) : -1.0;
+		default:
+			return kept;
+	}
+}
+
+PackedFloat64Array AIDecider::get_last_inputs() {
 	PackedFloat64Array out;
-	for (double value : _inputs_scratch) {
-		out.push_back(value);
+	if (!row_ok(_lazy.row)) {
+		return out;
+	}
+	for (int64_t slot = 0; slot < _lazy.count; ++slot) {
+		out.push_back(_lazy.get(int(slot)));
 	}
 	return out;
 }
@@ -854,6 +931,11 @@ void AIDecider::set_body(int row, int64_t body_id, Object *memory_store) {
 	ERR_FAIL_COND(!row_ok(row));
 	_pawns[row].body_id = uint64_t(body_id);
 	_pawns[row].memory_store = Ref<RefCounted>(Object::cast_to<RefCounted>(memory_store));
+}
+
+void AIDecider::set_asker(int row, const Callable &asker) {
+	ERR_FAIL_COND(!row_ok(row));
+	_pawns[row].asker = asker;
 }
 
 void AIDecider::set_owned_tags(int row, const PackedInt64Array &words) {
@@ -865,42 +947,44 @@ void AIDecider::set_owned_tags(int row, const PackedInt64Array &words) {
 	}
 }
 
-void AIDecider::set_modifiers(int row, const PackedFloat64Array &bonus, const PackedFloat64Array &jitter,
-		const PackedInt64Array &interrupt_threshold, const PackedInt64Array &cooldown, const PackedInt64Array &min_run, int64_t blocked_mask) {
+void AIDecider::set_modifiers(int row, const PackedFloat64Array &changes, const Array &curves, int64_t blocked_mask) {
 	ERR_FAIL_COND(!row_ok(row));
 	PawnRow &p = _pawns[row];
 	const Brain &b = shared().brains[p.brain];
 	const int64_t count = int64_t(b.behaviours.size());
-	for (int64_t size : { bonus.size(), jitter.size(), interrupt_threshold.size(), cooldown.size(), min_run.size() }) {
-		ERR_FAIL_COND_MSG(size != 0 && size != count, "AIDecider.set_modifiers: each array is empty or has one number per behaviour.");
-	}
-	reset_numbers(p, b);
-	if (!bonus.is_empty()) {
-		p.bonus.assign(bonus.ptr(), bonus.ptr() + count);
-	}
-	if (!jitter.is_empty()) {
-		p.jitter.assign(jitter.ptr(), jitter.ptr() + count);
-	}
-	if (!interrupt_threshold.is_empty()) {
-		p.interrupt_threshold.assign(interrupt_threshold.ptr(), interrupt_threshold.ptr() + count);
-	}
-	if (!cooldown.is_empty()) {
-		p.cooldown.assign(cooldown.ptr(), cooldown.ptr() + count);
-	}
-	if (!min_run.is_empty()) {
-		p.min_run.assign(min_run.ptr(), min_run.ptr() + count);
+	ERR_FAIL_COND_MSG(!changes.is_empty() && changes.size() != count * NUMBERS * 3,
+			"AIDecider.set_modifiers: changes is empty or has three values for each number of each behaviour.");
+	p.changes.assign(changes.ptr(), changes.ptr() + changes.size());
+	p.curves.clear();
+	for (int64_t i = 0; i < curves.size(); ++i) {
+		const Dictionary described = curves[i];
+		CurvedModifier curve;
+		curve.mask = uint64_t(int64_t(described.get("mask", 0)));
+		curve.number = int(described.get("number", 0));
+		curve.multiply = double(described.get("multiply", 1.0));
+		curve.add = double(described.get("add", 0.0));
+		const PackedFloat64Array table = described.get("table", PackedFloat64Array());
+		curve.table.assign(table.ptr(), table.ptr() + table.size());
+		curve.low = double(described.get("low", 0.0));
+		curve.high = double(described.get("high", 1.0));
+		curve.slot = int(described.get("slot", -1));
+		curve.added = int64_t(described.get("added", 0));
+		curve.scale = double(described.get("scale", 1.0));
+		p.curves.push_back(curve);
 	}
 	p.blocked = uint64_t(blocked_mask);
+	// What they leave while no curve is live; with one, decide_pawn works them out at each decision.
+	work_out_numbers(b, p, 0, nullptr, p.score_multiply, p.score_add, p.jitter, p.interrupt_threshold, p.cooldown, p.min_run);
+}
+
+void AIDecider::set_disabled(int row, int64_t mask) {
+	ERR_FAIL_COND(!row_ok(row));
+	_pawns[row].disabled = uint64_t(mask);
 }
 
 void AIDecider::set_target(int row, int64_t target_id) {
 	ERR_FAIL_COND(!row_ok(row));
 	_pawns[row].target_id = uint64_t(target_id);
-}
-
-void AIDecider::set_can_press(int row, int64_t mask) {
-	ERR_FAIL_COND(!row_ok(row));
-	_pawns[row].can_press = uint64_t(mask);
 }
 
 void AIDecider::set_input(int row, int slot, double value) {
@@ -913,28 +997,6 @@ void AIDecider::set_input(int row, int slot, double value) {
 	kept[slot] = value;
 }
 
-void AIDecider::set_given(int row, int64_t known_mask, int64_t available_mask, const PackedFloat64Array &scores) {
-	ERR_FAIL_COND(!row_ok(row));
-	PawnRow &p = _pawns[row];
-	p.given_known = uint64_t(known_mask);
-	p.given_available = uint64_t(available_mask);
-	const size_t count = shared().brains[p.brain].behaviours.size();
-	ERR_FAIL_COND_MSG(!scores.is_empty() && size_t(scores.size()) != count, "AIDecider.set_given: scores is empty or has one per behaviour.");
-	p.given_scores.assign(scores.ptr(), scores.ptr() + scores.size());
-}
-
-void AIDecider::set_group_point(int row, int distance_slot, int found_slot, bool found, const Vector3 &position) {
-	ERR_FAIL_COND(!row_ok(row));
-	for (PawnRow::GroupPoint &group : _pawns[row].groups) {
-		if (group.distance_slot == distance_slot && group.found_slot == found_slot) {
-			group.found = found;
-			group.position = position;
-			return;
-		}
-	}
-	_pawns[row].groups.push_back(PawnRow::GroupPoint{ distance_slot, found_slot, found, position });
-}
-
 Dictionary AIDecider::get_facts(int row) const {
 	Dictionary facts;
 	ERR_FAIL_COND_V(!row_ok(row), facts);
@@ -944,46 +1006,50 @@ Dictionary AIDecider::get_facts(int row) const {
 		owned.append(int64_t(word));
 	}
 	facts["owned"] = owned;
-	PackedFloat64Array bonus, jitter;
-	PackedInt64Array threshold, cooldown, min_run;
-	for (double value : p.bonus) {
-		bonus.append(value);
-	}
-	for (size_t i = 0; i < p.jitter.size(); ++i) {
-		jitter.append(p.jitter[i]);
-		threshold.append(p.interrupt_threshold[i]);
-		cooldown.append(p.cooldown[i]);
-		min_run.append(p.min_run[i]);
-	}
-	facts["bonus"] = bonus;
-	facts["jitter"] = jitter;
-	facts["interrupt_threshold"] = threshold;
-	facts["cooldown"] = cooldown;
-	facts["min_run"] = min_run;
 	facts["blocked"] = int64_t(p.blocked);
+	facts["disabled"] = int64_t(p.disabled);
 	facts["target_id"] = int64_t(p.target_id);
-	facts["can_press"] = int64_t(p.can_press);
 	return facts;
 }
 
 int AIDecider::decide_pawn(int row, int64_t tick, int64_t event_priority, bool event_normal) {
 	_last_kept = false;
 	ERR_FAIL_COND_V_MSG(!row_ok(row), -1, "AIDecider.decide_pawn: no pawn in that row.");
-	PawnRow &p = _pawns[row];
-	const Brain &brain = shared().brains[p.brain];
+	const Brain &brain = shared().brains[_pawns[row].brain];
 	const int count = int(brain.behaviours.size());
+	// Its inputs, each worked out when first read, from where the pawn is now.
+	{
+		const PawnRow &p = _pawns[row];
+		Node3D *body = Object::cast_to<Node3D>(alive(p.body_id));
+		_lazy.owner = this;
+		_lazy.row = row;
+		_lazy.position = body ? body->get_global_position() : Vector3();
+		_lazy.tick = tick;
+		_lazy.count = std::max<int64_t>(int64_t(p.kept_inputs.size()), int64_t(shared().input_kinds.size()));
+		_lazy.most_aware = -2;
+		_lazy.values.assign(size_t(_lazy.count), 0.0);
+		_lazy.known.assign(size_t(_lazy.count), 0);
+	}
+	PawnRow &p = _pawns[row];
+	RowInput in;
+	in.view.random_seed = p.random_seed;
+	in.view.pawn_number = p.pawn_number;
+	in.view.tick = tick;
+	in.view.lazy = &_lazy;
+	in.view.asker = p.asker.is_valid() ? &p.asker : nullptr;
+	// The numbers the modifiers leave: worked out as they were written, or now, while a curve is live.
+	const bool live = !p.curves.empty();
+	if (live) {
+		work_out_numbers(brain, p, tick, &in.view, _score_multiply, _score_add, _jitter, _interrupt_threshold, _cooldown, _min_run);
+	}
+	const std::vector<int64_t> &cooldown = live ? _cooldown : p.cooldown;
 	// The hard rule's cooldowns (AIBehaviourBase.is_cooling_down), with the modifiers' numbers.
 	uint64_t cooling = 0;
 	for (int slot = 0; slot < count; ++slot) {
-		const int64_t cooldown = p.cooldown[slot];
-		if (cooldown > 0 && p.ended[slot] >= 0 && tick - p.ended[slot] < cooldown) {
+		if (cooldown[slot] > 0 && p.ended[slot] >= 0 && tick - p.ended[slot] < cooldown[slot]) {
 			cooling |= uint64_t(1) << slot;
 		}
 	}
-	// Where the pawn is now, from its body.
-	Node3D *body = Object::cast_to<Node3D>(alive(p.body_id));
-	const Vector3 position = body ? body->get_global_position() : Vector3();
-	RowInput in;
 	in.running = p.running;
 	in.running_started = p.running_started;
 	in.now = tick;
@@ -991,18 +1057,14 @@ int AIDecider::decide_pawn(int row, int64_t tick, int64_t event_priority, bool e
 	in.event_normal = event_normal;
 	in.owned = p.owned.data();
 	in.owned_count = int64_t(p.owned.size());
-	in.bonus = p.bonus.empty() ? nullptr : p.bonus.data();
-	in.blocked = p.blocked;
+	in.blocked = p.blocked | p.disabled;
 	in.has_target = alive(p.target_id) != nullptr;
 	in.cooling = cooling;
-	in.can_press = p.can_press;
-	in.jitter = p.jitter.data();
-	in.interrupt_threshold = p.interrupt_threshold.data();
-	in.min_run = p.min_run.data();
-	int64_t input_count = 0;
-	const double *input_values = work_out_inputs(p, position, tick, input_count);
-	in.view = RowView{ int64_t(p.given_known), int64_t(p.given_available), p.given_scores.empty() ? nullptr : p.given_scores.data(),
-		input_values, input_count, p.random_seed, p.pawn_number, tick };
+	in.score_multiply = live ? _score_multiply.data() : p.score_multiply.data();
+	in.score_add = live ? _score_add.data() : p.score_add.data();
+	in.jitter = live ? _jitter.data() : p.jitter.data();
+	in.interrupt_threshold = live ? _interrupt_threshold.data() : p.interrupt_threshold.data();
+	in.min_run = live ? _min_run.data() : p.min_run.data();
 	const RowResult out = decide_row(brain, in);
 	_last_kept = out.kept;
 	// The switch, as AIBehaviourManager._start and _stop_running apply it: the old one's end, the new one's start.
@@ -1040,13 +1102,12 @@ void AIDecider::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop_running", "row", "tick"), &AIDecider::stop_running);
 	ClassDB::bind_method(D_METHOD("decide_pawn", "row", "tick", "event_priority", "event_normal"), &AIDecider::decide_pawn);
 	ClassDB::bind_method(D_METHOD("set_body", "row", "body_id", "memory_store"), &AIDecider::set_body);
+	ClassDB::bind_method(D_METHOD("set_asker", "row", "asker"), &AIDecider::set_asker);
 	ClassDB::bind_method(D_METHOD("set_owned_tags", "row", "words"), &AIDecider::set_owned_tags);
-	ClassDB::bind_method(D_METHOD("set_modifiers", "row", "bonus", "jitter", "interrupt_threshold", "cooldown", "min_run", "blocked_mask"), &AIDecider::set_modifiers);
+	ClassDB::bind_method(D_METHOD("set_modifiers", "row", "changes", "curves", "blocked_mask"), &AIDecider::set_modifiers);
+	ClassDB::bind_method(D_METHOD("set_disabled", "row", "mask"), &AIDecider::set_disabled);
 	ClassDB::bind_method(D_METHOD("set_target", "row", "target_id"), &AIDecider::set_target);
-	ClassDB::bind_method(D_METHOD("set_can_press", "row", "mask"), &AIDecider::set_can_press);
 	ClassDB::bind_method(D_METHOD("set_input", "row", "slot", "value"), &AIDecider::set_input);
-	ClassDB::bind_method(D_METHOD("set_given", "row", "known_mask", "available_mask", "scores"), &AIDecider::set_given);
-	ClassDB::bind_method(D_METHOD("set_group_point", "row", "distance_slot", "found_slot", "found", "position"), &AIDecider::set_group_point);
 	ClassDB::bind_method(D_METHOD("get_facts", "row"), &AIDecider::get_facts);
 	ClassDB::bind_method(D_METHOD("set_input_kinds", "kinds"), &AIDecider::set_input_kinds);
 	ClassDB::bind_method(D_METHOD("get_input_kind_count"), &AIDecider::get_input_kind_count);
