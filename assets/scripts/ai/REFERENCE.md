@@ -67,6 +67,8 @@ A child of the pawn's [`AIBehaviourManager`](#aibehaviourmanager), which only ju
 - `name_hash: int` = `0`: Worked out once by the manager: a hash of the name, for random numbers.
 - `started_tick: int` = `-1`: The tick it last started (-1: never).
 - `ended_tick: int` = `-1`: The tick it last ended (-1: never).
+- `next_tick_due: int` = `-1`: The next tick its `AIBehaviourDefinition.tick_interval_ticks` brings its tick() round, counted from when it started. Set by the manager.
+- `next_tick_interval: int` = `-1`: The tick_interval_ticks `next_tick_due` was worked out for (-1: not yet), so a changed setting counts at once.
 - `perf_available_name: StringName` = `&""`: The timing scope names for its is_available() and its tick(), such as &"ai.available.Chase" and &"ai.behaviour.Chase" (see [`PerfScopes`](../diagnostics/REFERENCE.md#perfscopes)). Made once by the manager, so timing makes no new names.
 - `perf_tick_name: StringName` = `&""`: The timing scope name for its tick(), such as &"ai.behaviour.Chase". Made once by the manager.
 - `modifier_changes: PackedFloat64Array[]` = `[]`: What the behaviour modifiers without a live curve that count for it do to each of its numbers (`AIBehaviourModifier.Number`): one `[multiply, add, overrides, override value]` per number. Worked out by the manager when they or the owned tags change.

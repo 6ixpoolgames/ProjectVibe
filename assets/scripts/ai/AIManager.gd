@@ -349,7 +349,10 @@ func think(tick: int) -> void:
 		request_decision()
 	# A running behaviour whose tag requirements stopped passing (out of shots, say) is replaced now, not at the next decision tick.
 	if ai_behaviour_manager:
+		var check_started := PerfScopes.begin_detailed() if PerfScopes.detailed else 0
 		ai_behaviour_manager.check_running(tick)
+		if check_started != 0:
+			PerfScopes.end(&"ai.check_running", check_started)
 	var decide_started := PerfScopes.begin()
 	if has_decision_waiting():
 		# A record of this decision, only while something listens (AIBehaviourManager.decision_listener): what the target and the

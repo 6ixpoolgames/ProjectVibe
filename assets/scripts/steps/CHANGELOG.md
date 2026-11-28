@@ -10,8 +10,13 @@ This folder holds the step core (pawn spec 16.7). Overview: [README.md](README.m
 | What | Where | Why | Size |
 |---|---|---|---|
 
+## 2026-11-28
+
+- **The timeline keeps a list of its running entries** (per-pawn cost proposal, cut A1; measured with the profiling suite (size 25, 3 runs each, against a baseline taken just before)). `_write_entry`, the one place entries start and stop, keeps it; `begin`, `build`, `loaded` and the new `set_state` (which `AbilityBase.timeline_state` uses for a rollback's state) work it out again. `run()` ticks a copy of it instead of scanning every entry twice: an AI behaviour's steps went from 16.8 to 14.4 us a tick (-0.15 ms a tick in all). Found on the way: packed arrays are shared by reference when assigned, so the copy is `duplicate()`; a plain assignment let a step started during a tick be ticked in the same one (ability_steps_selftest caught it).
+
 ## 2026-11-27
 
+- **Each step's tick is timed** as `step.<its class>` while detailed timing is on (the profiling suite; [diagnostics changelog](../diagnostics/CHANGELOG.md)). `StepTimeline` names each entry's scope once when it's built, and checks `PerfScopes.detailed` itself, so with timing off a step's tick costs about 0.07 µs more.
 - **The step library, and timelines for any owner** (pawn spec 16.7, 16.10 step 7a). Steps that write a pawn's input extend `InputStep` and write into their host's `StepInput` (an `InputCommand` that knows which parts were written: one writer per input, held actions ORed): moving (`FollowStep`, `KeepAwayFromStep`, `StopMovingStep` beside `MoveToStep`), looking (`LookAtStep`, `LookInDirectionStep`, `StopLookingStep`), buttons (`PressStep`, `HoldStep` with `fresh_press`, `ReleaseStep`) and flow (`DelayStep`, `WaitUntilStep`, `RepeatStep`). The proposal's Wait is `DelayStep`, Unreal's name, because abilities already have a `WaitStep`. `RunQuery` and `GrantTag` wait for step 8. Test: `steps/tests/step_library_selftest`.
 
 - **`TimelineEntry` and `StepCondition` moved here** from `abilities/steps/`, named for any owner (closes the refactor row): `starts_with_ability()` is `starts_with_run()`, and `AbilityCondition` is `StepCondition`, which reads the pawn of the timeline's host (`holds(timeline)`), takes "its action" from the host's `default_action()`, and gains `TARGET_DISTANCE` (the AI target's real position) and a `BETWEEN` comparison, so "dash when 4 to 8 m away" is one condition.

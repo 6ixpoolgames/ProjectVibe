@@ -32,7 +32,7 @@ var steps: Array[Step] = []
 var entries: Array[TimelineEntry] = []
 ## Four numbers per entry: the tick it started, the tick it ended (-1: not yet), why it ended ([enum TimelineEntry.Reason], 0 none) and
 ## where its step's count starts (the start, moved on by ticks that didn't count). A step that only waits out its length changes
-## nothing while it runs. Set it only to load a saved state, then call [method loaded].
+## nothing while it runs. Load a saved state with [method set_state], then call [method loaded].
 var state := PackedInt32Array()
 ## The tick the current run began, for entries that start at a tick.
 var started_at := -1
@@ -59,11 +59,12 @@ var _value_keys := {} # step -> the properties any entry changes on it
 var _base_values := {} # step -> {property: its own value}, captured as a run begins
 var _step_before_count: Step = null # the step whose tick is in progress, so its step_ticks leave this tick out
 var _elapsed := 1 # the ticks the current run() covers
-var _running_now: Array[int] = [] # run's working list, kept between ticks so it isn't made anew every tick
+var _running := PackedInt32Array() # the entries running now, in entry order: kept by _write_entry, so run() needn't scan them all
 var _starts_tick := -1 # the tick _starts_this_tick counts for
 var _starts_this_tick := 0
 var _warned_too_many_starts := false
 var _has_rules := false # some entry starts by a rule, not only from code; with none, no rules are checked each tick
+var _entry_scope_names: Array[StringName] = [] # each entry's step's timing scope, "step.<its class>" (PerfScopes, detailed)
 
 
 func _init(owner_host: Object = null, name_for_warnings := "") -> void:
@@ -111,6 +112,9 @@ func build(new_steps: Array[Step], source: Array[TimelineEntry]) -> void:
 		else:
 			by_label[label] = e
 	var count := entries.size()
+	_entry_scope_names.clear()
+	for step in _entry_steps:
+		_entry_scope_names.append(_scope_name_of(step))
 	_entry_after.resize(count)
 	_entry_at.resize(count)
 	_entry_delay.resize(count)
@@ -142,6 +146,7 @@ func build(new_steps: Array[Step], source: Array[TimelineEntry]) -> void:
 		if _follows_round(e):
 			push_warning("%s: timeline entry '%s' follows entries that lead back to it, so they can't start by their \"after\" rules." % [owner_name, entries[e].get_label()])
 	state = _cleared()
+	_running.clear()
 	for step in steps:
 		step.setup()
 
@@ -155,6 +160,7 @@ func has_steps() -> bool:
 func begin(start_tick: int) -> void:
 	started_at = start_tick
 	state = _cleared()
+	_running.clear()
 	_state_written()
 	_capture_base_values()
 	_start_due_entries()
@@ -164,14 +170,14 @@ func begin(start_tick: int) -> void:
 ## then starts the entries whose rules now hold. A step done or released starts what follows it; one that fails stops them all.
 func run(dt: float, elapsed: int) -> Result:
 	_elapsed = elapsed
-	# The entries running as this tick began. Those started during it get their first tick on the next one.
-	_running_now.clear()
-	for e in entries.size():
-		if _entry_running(e):
-			_running_now.append(e)
+	# The entries running as this tick began. Those started during it get their first tick on the next one. A copy: starts and stops
+	# during the tick change _running, and packed arrays are shared by reference, not copied, when assigned.
+	var running_now := _running.duplicate()
 	var now: int = TickDriver.tick
-	for e in _running_now:
-		if not _entry_running(e):
+	var timed := PerfScopes.detailed # checked here, not by calling PerfScopes, since this runs for every step every tick
+	for e in running_now:
+		var base := e * _SLOTS
+		if state[base + _STARTED] < 0 or state[base + _ENDED] >= 0:
 			continue # an earlier step stopped it this tick
 		var step: Step = _entry_steps[e]
 		_step_before_count = step # its step_ticks don't include this tick yet
@@ -179,15 +185,17 @@ func run(dt: float, elapsed: int) -> Result:
 			_step_before_count = null
 			stop_entry(e, "released")
 			continue
+		var tick_started := PerfScopes.begin_detailed() if timed else 0
 		var status := step.tick(dt)
+		if tick_started != 0:
+			PerfScopes.end(_entry_scope_names[e], tick_started)
 		var counts := step.counts_this_tick()
 		_step_before_count = null
 		if not counts:
 			# This tick didn't count: its count starts later. A deadline, moved on only while it waits.
-			var base := e * _SLOTS
 			_write_entry(e, state[base + _STARTED], -1, 0, state[base + _ORIGIN] + elapsed)
 		var length := step.length() if step.length_ticks > 0 else 0 # asked once, and only with a length: it converts for the tick rate
-		if status == Step.Status.RUNNING and length > 0 and now - state[e * _SLOTS + _ORIGIN] >= length:
+		if status == Step.Status.RUNNING and length > 0 and now - state[base + _ORIGIN] >= length:
 			status = Step.Status.DONE
 		if status == Step.Status.DONE:
 			stop_entry(e, "done")
@@ -198,11 +206,13 @@ func run(dt: float, elapsed: int) -> Result:
 	if _has_rules:
 		_start_due_entries()
 	# Running while a step that keeps the owner running does, or an entry is still due; steps that only go along stop then.
-	for e in entries.size():
-		if _entry_running(e) and _entry_steps[e].keeps_owner_running:
+	for e in _running:
+		if _entry_steps[e].keeps_owner_running:
 			return Result.RUNNING
-		if _has_rules and _entry_due(e):
-			return Result.RUNNING
+	if _has_rules:
+		for e in entries.size():
+			if _entry_due(e):
+				return Result.RUNNING
 	end("done")
 	return Result.DONE
 
@@ -219,9 +229,18 @@ func end(reason := "cancelled") -> void:
 func loaded() -> void:
 	if state.size() != entries.size() * _SLOTS:
 		return
+	_rebuild_running()
 	for e in entries.size():
 		if _entry_running(e):
 			_apply_values(e)
+
+
+## Sets [member state] to a saved one (a rollback's) and works out which entries run; [method loaded] then puts their values back on
+## their steps.
+func set_state(value: PackedInt32Array) -> void:
+	state = value
+	if state.size() == entries.size() * _SLOTS:
+		_rebuild_running()
 
 
 ## Starts a step from code, as a bespoke script does (ability spec 6.4): its first entry not running, started again if it already ran.
@@ -347,6 +366,23 @@ func _state_written() -> void:
 		host._timeline_state_written()
 
 
+# "step." and the step's class_name, else its script's file name, for its timing scope.
+static func _scope_name_of(step: Step) -> StringName:
+	var script: Script = step.get_script()
+	var kind := String(script.get_global_name()) if script else ""
+	if kind == "" and script:
+		kind = script.resource_path.get_file().get_basename()
+	return StringName("step." + (kind if kind != "" else "Step"))
+
+
+# The running list worked out from the state again, after a state was loaded.
+func _rebuild_running() -> void:
+	_running.clear()
+	for e in entries.size():
+		if _entry_running(e):
+			_running.append(e)
+
+
 func _entry_running(e: int) -> bool:
 	var base := e * _SLOTS
 	return state[base + _STARTED] >= 0 and state[base + _ENDED] < 0
@@ -357,6 +393,14 @@ func _write_entry(e: int, started: int, ended: int, reason: int, origin: int) ->
 	var base := e * _SLOTS
 	if state[base + _STARTED] == started and state[base + _ENDED] == ended and state[base + _REASON] == reason and state[base + _ORIGIN] == origin:
 		return
+	var was_running := state[base + _STARTED] >= 0 and state[base + _ENDED] < 0
+	var now_running := started >= 0 and ended < 0
+	if now_running != was_running:
+		if now_running:
+			var at := _running.bsearch(e)
+			_running.insert(at, e)
+		else:
+			_running.remove_at(_running.find(e))
 	state[base + _STARTED] = started
 	state[base + _ENDED] = ended
 	state[base + _REASON] = reason

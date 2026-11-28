@@ -320,11 +320,20 @@ func tick_running(tick: int) -> void:
 		return
 	# Only when woken by an event it waits for, at the tick it asked for, or every tick_interval_ticks counted from when it started:
 	# ticking every tick costs a crowd far more (ai_stress).
+	# The interval's next tick is a deadline, so one skipped since its pawn's last run (a pawn running every Nth tick, pawn spec 8.21)
+	# still counts. Worked out as it starts, after each tick, and again when the setting changes: the first one at or after the oldest
+	# tick this run covers.
+	var setting := _running.settings.tick_interval_ticks
+	if setting != _running.next_tick_interval:
+		_running.next_tick_interval = setting
+		var every := maxi(TickDriver.ticks_at_rate(setting), 1)
+		var from := tick - pawn.ticks_elapsed + 1
+		_running.next_tick_due = from + posmod(_running.started_tick - from, every)
 	var woken := _running.woken or (_running.wake_tick >= 0 and tick >= _running.wake_tick)
-	var interval := TickDriver.ticks_at_rate(_running.settings.tick_interval_ticks)
-	# Or one skipped since its pawn's last run, for a pawn running every Nth tick (pawn spec 8.21).
-	if not woken and interval > 1 and not pawn.fired_since_last_run(tick, -_running.started_tick, interval):
+	if not woken and tick < _running.next_tick_due:
 		return
+	var interval := maxi(TickDriver.ticks_at_rate(setting), 1)
+	_running.next_tick_due = tick + interval - posmod(tick - _running.started_tick, interval)
 	# Used up before tick(), so tick() can ask again.
 	_running.woken = false
 	if _running.wake_tick >= 0 and tick >= _running.wake_tick:
@@ -627,6 +636,7 @@ func _start(behaviour: AIBehaviourBase, reason: String, tick: int) -> void:
 		_tell_order(&"behaviour_stopped", [old.name, reason])
 	_running = behaviour
 	behaviour.started_tick = tick
+	behaviour.next_tick_interval = -1 # its schedule is worked out at its first tick_running: due on the tick it starts
 	behaviour.clear_wake_ups()
 	_apply_own_modifier(behaviour, true, tick)
 	_tell_order(&"behaviour_started", [behaviour.name])

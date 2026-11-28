@@ -20,8 +20,14 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, and nothing parry-specific is left in the manager or the base: `ParryAbility` is a plain timed ability that makes a default `ParryInterceptor`, and `guard()` is only read by the debug drawing and tests.
 
+## 2026-11-28
+
+- **The locomotion pass reads the held input once** and skips the steps-and-end checks for an untimed locomotion, the walk (per-pawn cost proposal, cut A4): 6.5 to 6.0 us a pawn, -0.03 ms a tick.
+- **`timeline_state`'s setter uses `StepTimeline.set_state`**, so the timeline's running list follows a rollback's state (cut A1, steps changelog).
+
 ## 2026-11-27
 
+- **`pawn.abilities.locomotion` and `pawn.abilities.actions` are timed** while detailed timing is on (the profiling suite; [diagnostics changelog](../diagnostics/CHANGELOG.md)).
 - **`TimelineEntry` and `AbilityCondition` moved to `steps/`** (as `StepCondition`), for behaviours to share (pawn spec 16.10 step 7a). Abilities give their conditions their own action through `AbilityBase.default_action()`.
 
 - **One eye height** (step 7c): `RangedAttackDefinition.muzzle_height` (1.3) is `muzzle_below_eyes` (0.3 below `Pawn.eye_height`, 1.6), and `FireProjectileStep` aims from the muzzle at the point the look meets (`look_point()`: a ray from the eyes along the look, through the shooter's own team, as the bolt flies, else the projectile's range), so a shot still lands where the pawn looks.

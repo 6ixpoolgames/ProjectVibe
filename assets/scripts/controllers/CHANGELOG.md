@@ -14,8 +14,13 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | Move the test hooks out of `InputActions` | `reset()`, `use_list()` in `InputActions.gd` | Test hooks in a shipping class; the owner's rule keeps test code in `tests/` | S |
 | Share the missing-input defaults | `_network_input_missing()` in `ControllerManager.gd` | 3 and 6 copy `NetworkSession`'s defaults by hand, so the two can drift apart | S |
 
+## 2026-11-28
+
+- **The input-block check keeps its answer** (per-pawn cost proposal, cut A2; measured with the profiling suite (size 25, 3 runs each, against a baseline taken just before)) until the owned tags' version, the query (or its new `version`) or the tag registry's generation changes: 4.7 to 1.5 us a pawn a tick, -0.29 ms a tick, the biggest of the five cuts.
+
 ## 2026-11-27
 
+- **`pawn.input.blocked_check` and `pawn.input.behaviour_steps` are timed** while detailed timing is on (the profiling suite; [diagnostics changelog](../diagnostics/CHANGELOG.md)).
 - **The AI controller is thin** (pawn spec 16.4, 16.10 step 7): it runs the running behaviour's step timeline each tick it's asked for input and hands over what the steps wrote, the follow logic included (now `FollowStep` and `KeepAwayFromStep`). The order API (`follow`, `keep_distance`, `look_at_node`, `look_at_node_quietly`, `get_followed_node`, `is_standing_by`, `is_following_order`), the waiting walk, its own `path_follower`, `look_from_height` and `order_listener` are gone, closing two refactor rows; the order stream's tap is `AIBehaviourManager.order_listener`. Scripts and tests keep a walk (`move_to`, a `MoveToStep` on its own `step_host`, as the player's click-to-move; `is_walking()`) and direct input (`move_in_direction`, `look_at_point`, `press`, `hold`, `stop`, `release_all`), used where no step writes; a dead pawn's controller takes none. Charge changing hands ends a script's walk and drops the behaviour's path, which its step finds again. `is_looking_at_point()` is `is_looking_at_something()`. Looks are aimed from the pawn's `eye_height`.
 
 - **`ControllerStepHost` writes a `StepInput`**, cleared before its steps run.

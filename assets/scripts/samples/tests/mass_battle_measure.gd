@@ -22,6 +22,8 @@
 ## what deciding less often saves and how the fight goes (the dead column).
 ## Claude 2026-11-18 (ranged attack, pawn spec 8.24): every pawn has a RangedAttack and a Shoot behaviour now, and each row has a bolts
 ## line. --no-ranged switches the AI's shooting off and --melee-off its melee, to compare; projectiles suit smaller sizes (25 to 100).
+## Claude 2026-11-27: --json=<file> writes each row as a line of JSON with every scope (detailed ones on), for
+## tools/profiling/profile_mass_battle.py, which runs it several times and averages.
 extends Node
 
 var _size := 50
@@ -44,6 +46,8 @@ var _melee_off := false # Claude 2026-11-18: --melee-off: the AI only shoots (th
 var _bolts_fired := 0 # Claude 2026-11-18: projectiles spawned since the last row
 var _bolts_in_flight := {}
 var _bolts_most := 0
+var _json_path := "" # Claude 2026-11-27: --json=<file>: each row's numbers and scopes as a line of JSON, for tools/profiling
+var _json: FileAccess = null
 
 
 func _ready() -> void:
@@ -81,6 +85,15 @@ func _ready() -> void:
 			_no_ranged = true
 		elif argument == "--melee-off":
 			_melee_off = true
+		elif argument.begins_with("--json="): # Claude 2026-11-27: also switches the scopes on, detailed ones included
+			_json_path = argument.trim_prefix("--json=")
+			PerfScopes.detailed = true
+	if _json_path != "":
+		_json = FileAccess.open(_json_path, FileAccess.WRITE)
+		if _json == null:
+			print("--- can't write %s (error %d) ---" % [_json_path, FileAccess.get_open_error()])
+			get_tree().quit(1)
+			return
 	if not _visuals:
 		get_tree().node_added.connect(_on_node_added)
 	# Claude 2026-11-16 (movement experiments): each pawn's movement settings, set as it enters the tree.
@@ -211,6 +224,20 @@ func _ready() -> void:
 				var st: Dictionary = store.get_stats()
 				print("        store: last commit %.2f ms, %d rows read, %d carried, %d entities, %d bound" % [st["commit_usec"] / 1000.0,
 						st["rows_read"], st["rows_carried"], st["entities"], st["bound"]])
+		# Claude 2026-11-27: --json: the row as one line, every scope as [ms a frame, calls a frame], for tools/profiling.
+		if _json:
+			var row := n.duplicate()
+			@warning_ignore("integer_division")
+			row["second"] = i / TickDriver.get_tick_rate()
+			row["load_step"] = s.get("load_step", 1)
+			row["steps_per_frame"] = s.steps_per_frame
+			row["tick_parts"] = s.tick_parts
+			var scopes := {}
+			for scope: StringName in s.scopes:
+				scopes[String(scope)] = s.scopes[scope]
+			row["scopes"] = scopes
+			_json.store_line(JSON.stringify(row))
+			_json.flush()
 	# Claude 2026-11-15: the replay's size, before stopping it
 	var recorder: ReplayRecorder = GameMode.replay_recorder
 	if recorder and recorder.is_recording():
@@ -229,6 +256,8 @@ func _ready() -> void:
 		_decisions.stop()
 		var error := _decisions.save(_decisions_path)
 		print("decisions: %s, saved to %s (%s)" % [JSON.stringify(_decisions.summary()), _decisions_path, "ok" if error == OK else "error %d" % error])
+	if _json:
+		_json.close()
 	print("--- done in %.0f s ---" % ((Time.get_ticks_msec() - started) / 1000.0))
 	get_tree().quit(0)
 

@@ -58,6 +58,12 @@ var player_controller: ControllerBase = null
 var _last_in_charge: ControllerBase = null
 var _check_queued := false
 var _has_player := false
+# is_input_blocked's answer, kept until the owned tags, the query or the tag registry change: it's asked every tick.
+var _blocked := false
+var _blocked_tags_version := -1
+var _blocked_query: TagQuery = null
+var _blocked_query_version := -1
+var _blocked_generation := -1
 var _missing_input_ticks := 0 # on the server: how many ticks in a row a client's input has been missing
 var _input_missing_this_tick := false
 
@@ -118,7 +124,11 @@ func take_input_command(tick: int) -> InputCommand:
 ## cleared instead while blocked ([member input_blocked_by]), on every machine, and with nobody in charge (no controller here, no player
 ## elsewhere). A script that writes input later in the same phase wins.
 func tick_input(tick: int) -> void:
-	if is_input_blocked():
+	var check_started := PerfScopes.begin_detailed() if PerfScopes.detailed else 0 # timed for diagnostics (PerfScopes)
+	var blocked := is_input_blocked()
+	if check_started != 0:
+		PerfScopes.end(&"pawn.input.blocked_check", check_started)
+	if blocked:
 		clear_input()
 		return
 	if not decides_own_input():
@@ -132,8 +142,18 @@ func tick_input(tick: int) -> void:
 
 ## True while the pawn owns a tag [member input_blocked_by] matches, such as status.dead.
 func is_input_blocked() -> bool:
-	return input_blocked_by != null and not input_blocked_by.is_empty() and pawn != null and pawn.owned_tags != null \
-		and input_blocked_by.matches(pawn.owned_tags)
+	var query := input_blocked_by
+	var owned: OwnedTags = pawn.owned_tags if pawn else null
+	if query == null or owned == null:
+		return false
+	if owned.version != _blocked_tags_version or query != _blocked_query or query.version != _blocked_query_version \
+			or TagRegistry.generation != _blocked_generation:
+		_blocked_tags_version = owned.version
+		_blocked_query = query
+		_blocked_query_version = query.version
+		_blocked_generation = TagRegistry.generation
+		_blocked = not query.is_empty() and query.matches(owned)
+	return _blocked
 
 
 ## Writes a command into this tick's input.

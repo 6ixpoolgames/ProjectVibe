@@ -228,7 +228,16 @@ var started := PerfScopes.begin()       # 0 when nothing is listening, else the 
 PerfScopes.end(&"ai.sensing", started)  # adds the time since begin() to this frame's "ai.sensing"
 ```
 
-A scope that runs very often (one per behaviour per pawn per tick) uses `begin_detailed()`: a scope costs about a microsecond, so these only time while `detailed` is on (F4 switches it on while open; so does `mass_battle_measure --scopes`). Design: diagnostics spec.
+A scope that runs very often (one per behaviour per pawn per tick) uses `begin_detailed()`: a scope costs about a microsecond, so these only time while `detailed` is on (F4 switches it on while open; so does `mass_battle_measure --scopes`). Off, the two calls still cost about 0.25 microseconds; in the hottest paths (every pawn or step every tick) check `detailed` first, which costs about 0.07:
+
+```gdscript
+var started := PerfScopes.begin_detailed() if PerfScopes.detailed else 0
+step.tick(dt)
+if started != 0:
+    PerfScopes.end(&"step.FollowStep", started)
+```
+
+Design: diagnostics spec.
 
 ### Settings and properties
 

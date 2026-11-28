@@ -14,6 +14,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 |---|---|---|---|
 | More than 64 levels in a category | `TagRegistry` | The tag spec gives a category that outgrows its word a second one. Every caller's mask is one int today, so that waits until a category nears 64 levels; past it, tags get no bit with a warning | M |
 
+## 2026-11-28
+
+- **`TagQuery.version`** goes up each time a list is assigned, so code that keeps a query's answer (the controller manager's input-block check, per-pawn cost proposal cut A2) knows when to ask again.
+
 ## 2026-11-24
 
 - **Hit tags** (pawn spec 16.7): `ability.receive_hit`; `event.hit`, `event.hit.taken`, `event.reaction`, `event.reaction.knockback`, `event.revived`; `status.parrying`, `status.invulnerable`, `status.hit_immune`. Declared in `resources/tag_declarations.tres`, with constants in `Tags`.

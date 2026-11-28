@@ -51,7 +51,10 @@ func take_input_command(_tick: int) -> InputCommand:
 	var elapsed := pawn.ticks_elapsed if pawn else 1
 	var steps: StepInput = null
 	if behaviour:
+		var steps_started := PerfScopes.begin_detailed() if PerfScopes.detailed else 0 # timed for diagnostics (PerfScopes)
 		behaviour.run_steps(elapsed)
+		if steps_started != 0:
+			PerfScopes.end(&"pawn.input.behaviour_steps", steps_started)
 		steps = behaviour.steps_input
 	var walk: StepInput = null
 	if step_host and step_host.is_running():

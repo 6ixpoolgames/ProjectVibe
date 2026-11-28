@@ -18,16 +18,22 @@ extends Resource
 	set(value):
 		all_of = value
 		_compiled_generation = -1
+		version += 1
 ## At least one of these must be owned (or a tag under it): "when this or that". Empty passes.
 @export var any_of: Array[StringName] = []:
 	set(value):
 		any_of = value
 		_compiled_generation = -1
+		version += 1
 ## None of these may be owned (nor a tag under them): "not when".
 @export var none_of: Array[StringName] = []:
 	set(value):
 		none_of = value
 		_compiled_generation = -1
+		version += 1
+## Goes up each time a list is assigned, for code that keeps an answer (with [member OwnedTags.version] and
+## [member TagRegistry.generation]).
+var version := 0
 
 # The lists as one mask per category word, worked out on first use and again when the registry changes (a reset, or a tag added late).
 var _all := PackedInt64Array()

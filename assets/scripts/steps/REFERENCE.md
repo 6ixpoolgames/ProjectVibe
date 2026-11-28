@@ -169,7 +169,7 @@ Conditions are asked about the host. A host whose steps write a pawn's input als
 
 - `steps: Step[]` = `[]`: Its steps in tree order.
 - `entries: TimelineEntry[]` = `[]`: The entries it runs: the source given to `build()`, plus a manual entry for each step none names.
-- `state: PackedInt32Array` = `PackedInt32Array()`: Four numbers per entry: the tick it started, the tick it ended (-1: not yet), why it ended (`TimelineEntry.Reason`, 0 none) and where its step's count starts (the start, moved on by ticks that didn't count). A step that only waits out its length changes nothing while it runs. Set it only to load a saved state, then call `loaded()`.
+- `state: PackedInt32Array` = `PackedInt32Array()`: Four numbers per entry: the tick it started, the tick it ended (-1: not yet), why it ended (`TimelineEntry.Reason`, 0 none) and where its step's count starts (the start, moved on by ticks that didn't count). A step that only waits out its length changes nothing while it runs. Load a saved state with `set_state()`, then call `loaded()`.
 - `started_at: int` = `-1`: The tick the current run began, for entries that start at a tick.
 - `host: Object` = `null`: The owner it reports to; see the class description.
 - `owner_name: String` = `""`: For warnings: the owner's name.
@@ -189,6 +189,7 @@ Conditions are asked about the host. A host whose steps write a pawn's input als
 - `run(dt: float, elapsed: int) -> int`: Every tick of a run, covering `elapsed` ticks (more than 1 for a pawn on a load step): ticks each running step in entry order, then starts the entries whose rules now hold. A step done or released starts what follows it; one that fails stops them all.
 - `end(reason: String = "cancelled") -> void`: Stops every running step with this reason, and puts back the step values its entries changed.
 - `loaded() -> void`: After a rollback set `state`: the running entries' values go back onto their steps.
+- `set_state(value: PackedInt32Array) -> void`: Sets `state` to a saved one (a rollback's) and works out which entries run; `loaded()` then puts their values back on their steps.
 - `start_step(step: Step) -> void`: Starts a step from code, as a bespoke script does (ability spec 6.4): its first entry not running, started again if it already ran. Steps no entry names have a manual entry for this.
 - `stop_step(step: Step, reason: String = "cancelled") -> void`: Stops a running step, passing the reason ("done", "released", "failed", "cancelled") to its `Step.exit()`.
 - `running_entry_of(step: Step) -> int`: The entry this step runs in now, or -1.

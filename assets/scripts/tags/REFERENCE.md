@@ -66,6 +66,7 @@ if calm.matches(pawn.owned_tags): ...
 - `all_of: StringName[]` = `[]`: Every one of these must be owned (or a tag under it): "only when".
 - `any_of: StringName[]` = `[]`: At least one of these must be owned (or a tag under it): "when this or that". Empty passes.
 - `none_of: StringName[]` = `[]`: None of these may be owned (nor a tag under them): "not when".
+- `version: int` = `0`: Goes up each time a list is assigned, for code that keeps an answer (with `OwnedTags.version` and `TagRegistry.generation`).
 
 ### Functions
 

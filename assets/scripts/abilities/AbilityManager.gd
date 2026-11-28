@@ -144,9 +144,17 @@ func tick_abilities(dt: float) -> void:
 		_rebuild_timed()
 	for ability in _every_tick_abilities:
 		ability.every_tick(dt)
+	# Timed for diagnostics (PerfScopes), checked here since this runs for every pawn every tick.
+	var timed := PerfScopes.detailed
+	var part_started := PerfScopes.begin_detailed() if timed else 0
 	_run_locomotion(dt)
+	if part_started != 0:
+		PerfScopes.end(&"pawn.abilities.locomotion", part_started)
+	part_started = PerfScopes.begin_detailed() if timed else 0
 	if _actions_have_work():
 		_run_actions(dt)
+	if part_started != 0:
+		PerfScopes.end(&"pawn.abilities.actions", part_started)
 
 
 ## The abilities' timers call this when one is set (pawn spec 15.2).
@@ -352,11 +360,12 @@ func is_action_running(action: StringName) -> bool:
 
 
 func _run_locomotion(dt: float) -> void:
+	var held := _held() # read once: this runs for every pawn every tick
 	var chosen: AbilityBase = null
 	for ability in _locomotions:
 		if ability.trigger_bit == 0: # no action of its own (reads the bit, not the setting: this runs every tick)
 			continue
-		var wanted := _held() & ability.trigger_bit != 0
+		var wanted := held & ability.trigger_bit != 0
 		if ability.is_running_timed():
 			if wanted and not is_locked(ability):
 				chosen = ability
@@ -385,10 +394,11 @@ func _run_locomotion(dt: float) -> void:
 			chosen.delay_run(pawn.ticks_elapsed)
 			return
 	chosen.tick(dt)
-	if chosen.is_stepped() and chosen.is_running_timed():
-		chosen.run_steps(dt)
-	if chosen.is_run_over():
-		_finish(chosen) # its time is up, or its last step ended: stopped, with its cooldown
+	if chosen.is_running_timed(): # the default locomotion (the walk) isn't: no steps, no end
+		if chosen.is_stepped():
+			chosen.run_steps(dt)
+		if chosen.is_run_over():
+			_finish(chosen) # its time is up, or its last step ended: stopped, with its cooldown
 
 
 func _run_actions(dt: float) -> void:

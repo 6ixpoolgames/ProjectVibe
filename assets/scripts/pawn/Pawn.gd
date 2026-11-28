@@ -379,7 +379,10 @@ func _tick_simulate(dt: float, tick: int) -> void:
 	# Over-time effects come first, so this tick's abilities see this tick's slows and boosts (pawn spec 8.11).
 	var abilities_started := PerfScopes.begin()
 	if status_manager:
+		var effects_started := PerfScopes.begin_detailed() if PerfScopes.detailed else 0
 		status_manager.tick_effects()
+		if effects_started != 0:
+			PerfScopes.end(&"pawn.abilities.effects", effects_started)
 	if ability_manager:
 		ability_manager.tick_abilities(dt)
 	PerfScopes.end(&"pawn.abilities", abilities_started)

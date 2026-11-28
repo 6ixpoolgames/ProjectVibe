@@ -42,6 +42,11 @@ var name_hash := 0
 var started_tick := -1
 ## The tick it last ended (-1: never).
 var ended_tick := -1
+## The next tick its [member AIBehaviourDefinition.tick_interval_ticks] brings its tick() round, counted from when it started. Set by
+## the manager.
+var next_tick_due := -1
+## The tick_interval_ticks [member next_tick_due] was worked out for (-1: not yet), so a changed setting counts at once.
+var next_tick_interval := -1
 ## The timing scope names for its is_available() and its tick(), such as &"ai.available.Chase" and &"ai.behaviour.Chase" (see
 ## [PerfScopes]). Made once by the manager, so timing makes no new names.
 var perf_available_name: StringName = &""

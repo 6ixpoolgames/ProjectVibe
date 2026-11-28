@@ -159,7 +159,7 @@ var timeline_state: PackedInt32Array:
 	set(value):
 		if value == step_runner.state:
 			return
-		step_runner.state = value
+		step_runner.set_state(value)
 		push_state(&"timeline_state", value)
 ## [member ends_at] for a run with no end of its own yet (Death, while Health is 0).
 const NEVER := 1 << 62

@@ -11,6 +11,14 @@
 ## [/codeblock]
 ## A scope that runs very often (one per behaviour per pawn per tick) uses [method begin_detailed]: a scope costs about a microsecond,
 ## so these only time while [member detailed] is on (F4 switches it on while open; so does [code]mass_battle_measure --scopes[/code]).
+## Off, the two calls still cost about 0.25 microseconds; in the hottest paths (every pawn or step every tick) check [member detailed]
+## first, which costs about 0.07:
+## [codeblock]
+## var started := PerfScopes.begin_detailed() if PerfScopes.detailed else 0
+## step.tick(dt)
+## if started != 0:
+##     PerfScopes.end(&"step.FollowStep", started)
+## [/codeblock]
 ## Design: diagnostics spec.
 class_name PerfScopes
 extends RefCounted

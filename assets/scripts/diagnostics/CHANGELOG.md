@@ -19,6 +19,11 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | The window title in shipped games | `DiagnosticsManager._update_title` | A debugging convenience (role and process id, to tell instances apart) that also renames a release build's window, since diagnostics ship. A setting, or debug builds only, keeps a game's own title | S |
 | "Late" and "very late" as settings | `DiagnosticsManager._summary`; the F4 panel's text; `replay/ReplayViewer`'s strip colours | Fixed at 20 and 34 ms (60 and 30 fps) in three places, while spikes follow the tick rate and `spike_over_budget`. A game aiming at another frame rate can't set them | S |
 
+## 2026-11-27
+
+- **The profiling suite** (the owner's request: where the time goes, averaged over a few runs against noise). `tools/profiling/profile_mass_battle.py` runs `mass_battle_measure` several times with the new `--json=<file>` (each row as a line of JSON, every scope, detailed ones on), drops the march, averages rows then runs, and prints a tree of scopes with their spread; summaries saved in `build/profiles/` compare with `--compare`. First profile, size 25, 3 runs: tick 10.94 ms ±0.25.
+- **Detailed scopes per pawn**, for that profile: `ai.check_running`, `pawn.input.blocked_check`, `pawn.input.behaviour_steps`, `pawn.abilities.effects`, `pawn.abilities.locomotion`, `pawn.abilities.actions`, and `step.<class>` for each step's tick (named once per entry when a `StepTimeline` is built). Measured: a detailed scope with timing off costs 0.25 µs (two static calls), or 0.07 µs when the caller checks `PerfScopes.detailed` first, so these do; `PerfScopes`' doc gives the pattern.
+
 ## 2026-11-26
 
 - **`AIDecisionChecks`** (new; pawn spec 16.5, step 6d): the AI's decision checks, moved out of the `AIDecisionModule`, which is gone: shadow mode (`set_check_against_gdscript`), the sampled fact check in debug builds, the switch that moves every pawn to GDScript (`set_all_in_gdscript`, F10 in the panels now, listed in F1 as before) and the counts (`get_counts`, `reset_counts`). All static.
