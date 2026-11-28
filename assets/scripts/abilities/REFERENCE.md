@@ -157,6 +157,8 @@ It can be built from [`AbilityStep`](#abilitystep) children (a windup, a turn, a
 - `running_effects_now() -> Effect[]`: The effects on its own pawn while it runs (`AbilityDefinition.running_effects`), or its kind's default with none.
 - `default_running_effects_now() -> Effect[]`: Its kind's running effects when its definition names none (Dash, Parry). None by default.
 - `collect_steps() -> void`: Called once by the manager: finds the [`AbilityStep`](#abilitystep) children and builds its timeline from its definition's entries, else its kind's default (`default_timeline()`), else its steps one after another.
+- `prepare_start() -> void`: Called by the manager as the ability starts, just before `start()`: the steps it made take its settings again, in case they changed in play.
+- `made_default_steps() -> bool`: True when it had no [`AbilityStep`](#abilitystep) children of its own and made its kind's default steps (`_make_default_steps()`).
 - `begin_steps() -> void`: Called by the manager when the ability starts: clears the timeline's state and starts the entries due at its start.
 - `run_steps(dt: float) -> void`: Called by the manager every tick the ability runs, after `tick()`: runs its timeline (`StepTimeline.run()`). The ability ends when no step that keeps it running runs and no entry is due, or when a step fails.
 - `end_steps(reason: String = "cancelled") -> void`: Stops every running step with this reason, and puts back the step values its entries changed. The manager calls it when the ability finishes or is cancelled.
@@ -236,7 +238,7 @@ Design: pawn spec 8, 8.6, 8.11, 8.16, 8.20, 15.2, 16.7.
 - `is_locked(ability: AbilityBase) -> bool`: True if this ability's category is locked out right now.
 - `needs_full_movement() -> bool`: True while an ability with needs_full_movement runs (Dash, Knockback), so the pawn moves by physics, not the CrowdMover (pawn spec 8.22).
 - `get_abilities() -> AbilityBase[]`: Every ability, in run order.
-- `get_knockback() -> KnockbackAbility`: This pawn's Knockback ability, or null. For code that pushes it directly (`KnockbackAbility.push()`).
+- `get_knockback() -> AbilityBase`: This pawn's knockback: the first ability whose category answers to `ability.combat.knockback` (a [`KnockbackAbility`](#knockbackability) by default), or null. Death is found the same way, by `ability.death`.
 - `is_action_running(action: StringName) -> bool`: True while any ability on this action runs. Cheap, for asking every tick: looks only at abilities with a timer going.
 - `press_priority_now(ability: AbilityBase) -> int`: An ability's priority now: its own plus what effects add (AbilityModifier, pawn spec 8.11), without the jitter offset.
 - `interrupt_priority_now(ability: AbilityBase) -> int`: Its interrupt_priority right now, with what effects add.
@@ -452,14 +454,10 @@ A swing is a [`WindupStep`](#windupstep) with a [`TurnToFaceStep`](#turntofacest
 
 - `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`MeleeAttackDefinition`](#meleeattackdefinition).
 - `attack_reach() -> float`: Its attack_range: the AI swings from within it.
-- `collect_steps() -> void`
 - `start() -> void`
 - `default_timeline() -> TimelineEntry[]`: The timeline for the steps it made: Windup and TurnToFace together, Sweep when the windup is done, then OpenCombo and Recovery. With steps of its own and no timeline in its definition, they run one after another.
 - `swing_phase() -> Dictionary`: Where the swing is, for visuals: "windup", "hit" or "recovery" with progress 0 to 1 (smooth between ticks), or "none".
-- `hit_centre() -> Vector3`: Where the hit sphere is straight ahead: the middle of the sweep. With a sweep, see `hit_centre_at()`.
-- `hit_centre_at(progress: float) -> Vector3`: Where the hit sphere is at this point of the sweep, 0 (start) to 1 (end), for the pawn's facing now. Answered by its first sweep step.
-- `hit_offset_at(progress: float, facing: float) -> Vector3`: Like `hit_centre_at()`, as an offset from the pawn's feet for a facing in radians, so visuals draw the spots the hit checks. From `MeleeSweepStep.offset_at()`; straight ahead at chest height with no sweep.
-- `planned_ticks() -> int`
+- `hit_offset_at(progress: float, facing: float) -> Vector3`: Where the hit sphere is at this point of the sweep, 0 (start) to 1 (end), as an offset from the pawn's feet for a facing in radians, so visuals draw the spots the hit checks. From `MeleeSweepStep.offset_at()`; straight ahead at chest height with no sweep.
 - `windup_length() -> int`: Ticks the first windup lasts. It can take longer while it waits for the turn; `swing_phase()` says where it really is.
 - `hit_length() -> int`: Ticks the first sweep can hit for.
 
@@ -495,8 +493,6 @@ pawn.ability_manager.can_start(&"primary")
 
 - `make_default_definition() -> AbilityDefinition`: Its kind's defaults: a new [`RangedAttackDefinition`](#rangedattackdefinition).
 - `attack_reach() -> float`: Its attack_range: the AI shoots from within it.
-- `collect_steps() -> void`
-- `start() -> void`
 - `default_timeline() -> TimelineEntry[]`: The timeline for the steps it made: Windup and TurnToFace together, Fire when the windup is done, then Recovery. With steps of its own and no timeline in its definition, they run one after another.
 
 ## ReceiveHitAbility

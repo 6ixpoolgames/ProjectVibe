@@ -190,8 +190,7 @@ func _test_special() -> void:
 			"the special request starts the heavy attack: 22, 5 and 18 ticks, 2.7 m reach")
 	await _until(func() -> bool: return not heavy.is_running_timed(), 80)
 	_check(heavy.cooldown_ticks_left() > 100 and heavy.cooldown_ticks_left() <= 114, "then its cooldown, 1.9 s (%d ticks left)" % heavy.cooldown_ticks_left())
-	var feet := pawn.global_position
-	_check(smash.attack_range > heavy.attack_range and smash.hit_centre_at(0.0).y - feet.y > smash.hit_centre_at(1.0).y - feet.y + 1.5,
+	_check(smash.attack_range > heavy.attack_range and smash.hit_offset_at(0.0, pawn.yaw).y > smash.hit_offset_at(1.0, pawn.yaw).y + 1.5,
 			"the smash reaches further (%.1f m) and comes down from high to low" % smash.attack_range)
 	pawn.free()
 

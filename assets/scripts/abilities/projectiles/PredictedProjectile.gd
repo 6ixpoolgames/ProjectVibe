@@ -26,7 +26,6 @@ var _stopped := false
 var _hitscan_end := Vector3.ZERO # hitscan: where its tracer ends, traced here at once
 var _last := Vector3.ZERO
 var _ray := PhysicsRayQueryParameters3D.new()
-var _sphere_query := PhysicsShapeQueryParameters3D.new()
 
 
 ## Fires the shooter's copy of a shot: its definition's visual (or a scene of its own's Visual), flown from origin along direction.
@@ -138,16 +137,10 @@ func _trace_hitscan(origin: Vector3, direction: Vector3, from_pawn: Pawn) -> Vec
 
 
 # It meets another pawn here: shown stopping, as the server's will.
-# REFACTOR: a new sphere every frame and a copy of HitQuery's physics query (with its collision mask); HitQuery.touching, as
-# _trace_hitscan uses (abilities/CHANGELOG.md).
+# Whether its flight since the last frame, to at, touches a pawn other than the shooter: the same question as the server's hits.
 func _touches_pawn(at: Vector3) -> bool:
-	var sphere := SphereShape3D.new()
-	sphere.radius = flight.radius
-	_sphere_query.shape = sphere
-	_sphere_query.collision_mask = 2 # pawns are on layer 2 (pawn.tscn)
-	_sphere_query.exclude = [shooter.get_rid()] if is_instance_valid(shooter) else []
-	_sphere_query.transform = Transform3D(Basis.IDENTITY, at)
-	return not get_world_3d().direct_space_state.intersect_shape(_sphere_query, 1).is_empty()
+	var from_pawn: Pawn = shooter if is_instance_valid(shooter) else null
+	return not HitQuery.touching(HitQuery.line_centres(_last, at, flight.radius), flight.radius, TickDriver.tick, from_pawn).is_empty()
 
 
 # Stopped: hidden, with its impact shown if it met something.

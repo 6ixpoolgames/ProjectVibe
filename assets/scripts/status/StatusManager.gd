@@ -82,15 +82,6 @@ static func detectability_of(of_pawn: Node) -> float:
 	return stat.value if stat else 1.0
 
 
-## Sets this pawn's Detectability stat's base value (what effects build on). Does nothing for a pawn without the stat.
-# REFACTOR: only tests call it; a test helper in tests/ would keep it out of the shipping class (status/CHANGELOG.md).
-static func set_detectability(of_pawn: Node, value: float) -> void:
-	var manager: StatusManager = of_pawn.get(&"status_manager") if of_pawn else null
-	var stat: Stat = manager.get_stat(DETECTABILITY) if manager else null
-	if stat:
-		stat.base_value = value
-
-
 func _init() -> void:
 	set_process(false)
 	set_physics_process(false)

@@ -65,24 +65,6 @@ static func get_actions() -> Array[StringName]:
 	return _actions.duplicate()
 
 
-# REFACTOR: reset() and use_list() are test hooks in a shipping class; they could live in a tests/ helper (production code kept
-# apart from test code). See CHANGELOG.md.
-## Forgets everything, so the next use reads the list again. For tests.
-static func reset() -> void:
-	_index_of.clear()
-	_actions.clear()
-	_warned.clear()
-	_loaded = false
-
-
-## Uses this list instead of the file. For tests.
-static func use_list(actions: Array) -> void:
-	reset()
-	_loaded = true
-	for action in actions:
-		_add(_clean(action), false)
-
-
 # --- Internals ---
 
 

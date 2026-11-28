@@ -50,8 +50,8 @@ var _locomotion_pausers: Array[AbilityBase] = [] # those with pauses_locomotion,
 
 var pawn: Pawn = null
 var _driver: Node = null # the TickDriver, for hits during simulate
-var _death: DeathAbility = null # found with the abilities
-var _knockback: KnockbackAbility = null # likewise, for get_knockback()
+var _death: AbilityBase = null # the first ability answering to ability.death, found with the abilities
+var _knockback: AbilityBase = null # the first answering to ability.combat.knockback, for get_knockback()
 
 var _abilities: Array[AbilityBase] = [] # every ability, in run order: by priority, then tree order
 var _locomotions: Array[AbilityBase] = []
@@ -341,8 +341,9 @@ func get_abilities() -> Array[AbilityBase]:
 	return _abilities.duplicate()
 
 
-## This pawn's Knockback ability, or null. For code that pushes it directly ([method KnockbackAbility.push]).
-func get_knockback() -> KnockbackAbility:
+## This pawn's knockback: the first ability whose category answers to [code]ability.combat.knockback[/code] (a [KnockbackAbility] by
+## default), or null. Death is found the same way, by [code]ability.death[/code].
+func get_knockback() -> AbilityBase:
 	return _knockback
 
 
@@ -684,6 +685,7 @@ func _start(ability: AbilityBase) -> void:
 		ability.ends_at = TickDriver.tick + length
 	if ability.kind == AbilityBase.Kind.ACTION and ability.is_running_timed():
 		_locked_mask |= ability.locks_out_mask # later abilities this tick respect it at once
+	ability.prepare_start()
 	ability.start()
 	# Start effects go on its own pawn on every machine that runs it, replays too, so an over-time one (a combo boost) is predicted;
 	# their effectors fire only on the authority (StatusManager). Pawn spec 16.7.
@@ -805,11 +807,10 @@ func _collect_abilities() -> void:
 		ability.jitter_salt = hash(String(ability.name))
 		if ability.settings.needs_full_movement:
 			_full_movement_abilities.append(ability)
-		# REFACTOR: Death and Knockback are found by class, so a game changes dying or staggering only by extending them. A tag
-		# (ability.death, ability.combat.knockback) would let any ability fill the role; extensible.
-		if ability is DeathAbility and _death == null:
+		# By category, not class, so any ability a game writes can be the pawn's death or its stagger.
+		if _death == null and TagRegistry.matches(ability.category_mask, Tags.ABILITY.DEATH):
 			_death = ability
-		if ability is KnockbackAbility and _knockback == null:
+		if _knockback == null and TagRegistry.matches(ability.category_mask, Tags.ABILITY.COMBAT_KNOCKBACK):
 			_knockback = ability
 		if ability.settings.pauses_locomotion and ability.kind != AbilityBase.Kind.LOCOMOTION:
 			_locomotion_pausers.append(ability)

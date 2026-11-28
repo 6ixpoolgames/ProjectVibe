@@ -4,7 +4,7 @@
 
 A pawn's status in one component (pawn spec 16.8): its stats and the effects on it. `StatusManager` merges the old `StatManager` and `EffectManager`; the `Stat` and `Effect` classes still live in `stats/` and `effects/`, whose READMEs describe them.
 
-**Status:** built, tier 0 (pawn redesign step 3): the merge, effects on deadlines, stat thresholds and their events, modifiers and effectors, one modifier rule (multiply, then add). Next: effect lists into definitions, with the hit ability (step 4).
+**Status:** built, tier 0 (pawn redesign step 3): the merge, effects on deadlines, stat thresholds and their events, modifiers and effectors, one modifier rule (multiply, then add). Effect lists moved into definitions with the hit ability in step 4. Later: offline effect sources by entity number (step 9), and the stats pass.
 
 ```
  Pawn

@@ -828,5 +828,8 @@ func _box(size: Vector3, at: Vector3) -> StaticBody3D:
 # Claude 2026-11-19: what's left of a correction on the drawn model: a Pawn's VisualSmoother, or the sample pawn's own.
 func _correction_offset_of(body: Node) -> float:
 	if body is Pawn: # Claude 2026-11-21: the offset is kept in the VisualPlacer now
-		return body._smoother.get_correction_offset().length() if body._smoother else 0.0
+		var smoother: VisualSmoother = body._smoother
+		if smoother == null or smoother.slot < 0 or smoother._placer == null:
+			return 0.0
+		return smoother._placer.placement.get_correction(smoother.slot).length()
 	return body._correction_offset.length() if "_correction_offset" in body else 0.0

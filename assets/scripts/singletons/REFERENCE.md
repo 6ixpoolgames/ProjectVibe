@@ -198,8 +198,8 @@ Design: netcode spec 4, 6, 10, 11. Tick order, packet formats, time dilation and
 - `lag_compensation_enabled: bool` = `true`: Turns lag compensation off, to compare.
 - `default_predicted: bool` = `false`: Project default for is_predicted on every entity. Entities can also turn it on for themselves.
 - `input_redundancy: int` = `3`: How many inputs each input packet carries, the newest and some past ones, in case some are lost. Each extra one adds about 1.7 KB/s of upload. At 3, three packets in a row must be lost for an input to go missing.
-- `missing_input_hold_ticks: int` = `3`: On the server, when a client's input goes missing, the last one repeats in full for this many ticks. Most losses are a tick or two. An entity can use its own number instead; Pawn has missing_input_hold_ticks for that.
-- `missing_input_fade_ticks: int` = `6`: Then its direction fades to nothing over this many ticks, so a pawn whose player lost connection doesn't walk on forever. Pawn can override it with missing_input_fade_ticks.
+- `missing_input_hold_ticks: int` = `3`: On the server, when a client's input goes missing, the last one repeats in full for this many ticks. Most losses are a tick or two. An entity can use its own number instead (ControllerManager.missing_input_hold_ticks).
+- `missing_input_fade_ticks: int` = `6`: Then its direction fades to nothing over this many ticks, so a pawn whose player lost connection doesn't walk on forever. A pawn's ControllerManager can override it with missing_input_fade_ticks.
 - `use_native_encoding: bool` = `true`: Snapshots go through NetCodec in C++ when that library is here. Off, or with no library for this platform, they go through NetPackets instead. The bytes are the same, so machines of either kind can play together. Takes effect at host or join.
 - `world_root: Node` = `null`: Where spawned entities go. Defaults to the current scene.
 - `bind_address: String` = `"*"`: Which address the server listens on. "*" is all of them.

@@ -147,6 +147,7 @@ var charges_version := 0
 var steps: Array[AbilityStep] = []
 ## The [StepTimeline] that runs its steps (pawn spec 16.7), built by [method collect_steps].
 var step_runner := StepTimeline.new()
+var _made_default_steps := false # true when it had no steps of its own and made its kind's defaults (collect_steps)
 ## The entries its timeline runs (ability spec 6.2): its definition's [member AbilityDefinition.step_timeline], else its kind's default
 ## ([method default_timeline]), else its steps one after another in tree order; plus a manual entry for each step none names.
 var timeline: Array[TimelineEntry]:
@@ -654,6 +655,9 @@ func default_running_effects_now() -> Array[Effect]:
 func collect_steps() -> void:
 	if settings == null:
 		prepare_settings() # its steps read them (which action they watch, its timeline)
+	if not _has_step_children():
+		_make_default_steps()
+		_made_default_steps = _has_step_children()
 	steps.clear()
 	for child in get_children():
 		if child is AbilityStep:
@@ -667,6 +671,38 @@ func collect_steps() -> void:
 	step_runner.host = self
 	step_runner.owner_name = name
 	step_runner.build(as_steps, settings.step_timeline if not settings.step_timeline.is_empty() else default_timeline())
+	if _made_default_steps:
+		_sync_default_steps()
+
+
+## Called by the manager as the ability starts, just before [method start]: the steps it made take its settings again, in case they
+## changed in play.
+func prepare_start() -> void:
+	if _made_default_steps:
+		_sync_default_steps()
+
+
+## True when it had no [AbilityStep] children of its own and made its kind's default steps ([method _make_default_steps]).
+func made_default_steps() -> bool:
+	return _made_default_steps
+
+
+# Makes its kind's default steps as children, when it has none of its own. None by default; MeleeAttack and RangedAttack make theirs,
+# named the same everywhere so a definition's own timeline can name them.
+func _make_default_steps() -> void:
+	pass
+
+
+# Copies its settings onto the steps it made: as its steps are collected, and again as it starts. Only called when it made them.
+func _sync_default_steps() -> void:
+	pass
+
+
+func _has_step_children() -> bool:
+	for child in get_children():
+		if child is AbilityStep:
+			return true
+	return false
 
 
 ## Called by the manager when the ability starts: clears the timeline's state and starts the entries due at its start.

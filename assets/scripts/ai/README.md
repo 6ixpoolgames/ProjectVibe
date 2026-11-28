@@ -4,7 +4,7 @@
 
 The brain on each computer-run pawn: it notices enemies by sight, remembers them with awareness that fades (basic stealth), picks a target and a situation (Idle, Alert, Combat), and chooses what to do by score, acting through the same inputs a player would press.
 
-**Status:** built, tier 0. Not yet (pawn spec section 14): hearing, and rolling back the AI's decisions for games where clients predict it.
+**Status:** built, tier 0, through pawn redesign step 7. Next, step 8 (pawn spec 16.6) rewrites memory as a fact table fed by stimuli, adds hearing and a damage sense, replaces `AIInputs` with selectors and `AITargetSelector` with a query, and makes states conditions. Not planned for tier 0: rolling back the AI's decisions for games where clients predict it.
 
 | File | What it's for |
 |---|---|

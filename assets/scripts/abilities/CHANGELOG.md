@@ -12,16 +12,15 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| A copy of the hit query | `PredictedProjectile._touches_pawn` | Makes a new `SphereShape3D` every frame and repeats `HitQuery`'s physics query and collision mask; `HitQuery.touching`, as `_trace_hitscan` in the same file uses | S |
-| Default steps made twice the same way | `MeleeAttackAbility.collect_steps`, `RangedAttackAbility.collect_steps` (`_made_default_steps`, the re-sync in `start()`) | Copied word for word; one pattern in `AbilityBase` with `_make_default_steps()` and `_sync_default_steps()` hooks | S |
-| Death and Knockback found by tag | `AbilityManager._collect_abilities` (`_death`, `_knockback`) | Found by class, so a game changes dying or staggering only by extending `DeathAbility` or `KnockbackAbility`. A tag (`ability.death`, `ability.combat.knockback`) would let any ability fill the role | S |
-| An unused list | `AbilityManager._stepped` | Filled when abilities are collected, never read | S |
-| A test-only helper | `MeleeAttackAbility._sweep_centres`, and `planned_ticks`, `hit_centre_at` (and `hit_centre`, which only `_sweep_centres` uses) | Only `visuals/tests/visuals_selftest` calls it; the test can ask the sweep step (`centres_for_tick`) itself, keeping test helpers out of production code | S |
 
-The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, and nothing parry-specific is left in the manager or the base: `ParryAbility` is a plain timed ability that makes a default `ParryInterceptor`, and `guard()` is only read by the debug drawing and tests.
+The parry the owner flagged as hacky (pawn spec 14, "Shortcuts to redo") was redone as hit interceptors on 2026-11-17, then in pawn redesign step 4b as a running effect: `ParryAbility` is a plain timed stance whose running effect grants `status.parrying` and holds a `ParryModifier`; the hit ability blocks a parried hit. Nothing parry-specific is left in the manager or the base, and `guard()` is only read by the debug drawing and tests.
 
 ## 2026-11-28
 
+- **Death and Knockback are found by category, not class** (cleanup pass after the pawn checkpoint, docs/pawn/PAWN_CHECKPOINT.md): the manager's death is the first ability answering to `ability.death`, its knockback the first answering to `ability.combat.knockback`, so a game's own ability can fill either role without extending `DeathAbility` or `KnockbackAbility`. `get_knockback()` returns an `AbilityBase`.
+- **One default-steps pattern in `AbilityBase`:** an ability with no `AbilityStep` children makes its kind's own (`_make_default_steps`), and its settings are copied onto them as its steps are collected and again just before it starts (`_sync_default_steps`, through the new `prepare_start`, which the manager calls before `start`). MeleeAttack and RangedAttack keep only the two hooks; their copied `collect_steps` and flags are gone. `made_default_steps()` says whether it made them.
+- **Test-only helpers left `MeleeAttackAbility`:** `hit_centre`, `hit_centre_at`, `planned_ticks` and `_sweep_centres`. The tests work them out from `hit_offset_at`, `windup_length`, `hit_length` and the sweep step's `centres_for_tick`.
+- **The shooter's predicted projectile asks `HitQuery.touching`** along its flight since the last frame, instead of a physics query with a new sphere every frame: the same question as the server's hits, through the C++ pawn grid where it's loaded.
 - **The locomotion pass reads the held input once** and skips the steps-and-end checks for an untimed locomotion, the walk (per-pawn cost proposal, cut A4): 6.5 to 6.0 us a pawn, -0.03 ms a tick.
 - **`timeline_state`'s setter uses `StepTimeline.set_state`**, so the timeline's running list follows a rollback's state (cut A1, steps changelog).
 

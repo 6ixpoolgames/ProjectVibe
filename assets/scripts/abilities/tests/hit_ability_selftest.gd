@@ -117,7 +117,7 @@ func _test_parry() -> void:
 	parry.use_definition(_parry_definition(running))
 	_check(defender.ability_manager.start_ability(parry) and defender.owned_tags.has(Tags.STATUS.PARRYING), "while it runs, the pawn owns status.parrying")
 	var log := _listen(defender)
-	var knockback: KnockbackAbility = front.ability_manager.get_knockback()
+	var knockback := front.ability_manager.get_knockback() as KnockbackAbility
 	defender.ability_manager.receive_hit(_hit(front, defender, 20))
 	_check(log["blocked"] == [ReceiveHitAbility.BLOCKED_PARRIED] and defender.status_manager.get_health() == 100.0 and log["arrived"] == 1,
 		"a hit from the front arrives and is parried: no damage (%s, Health %d)" % [log["blocked"], defender.status_manager.get_health()])

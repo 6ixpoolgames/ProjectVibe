@@ -4,6 +4,8 @@
 ##   godot --headless --path . "res://assets/scripts/controllers/tests/input_actions_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
+const TestActions := preload("res://assets/scripts/controllers/tests/input_actions_for_tests.gd")
+
 
 ## A controller with scripted keys, as a test needs. GDScript note: an inner class is a class declared inside this file.
 class ScriptedController extends PlayerController:
@@ -29,20 +31,20 @@ func _ready() -> void:
 	_test_commands()
 	_test_controller_base()
 	await _test_player_controller_actions()
-	InputActions.reset() # leave it as the game would find it
+	TestActions.reset() # leave it as the game would find it
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)
 
 
 func _test_the_list_file() -> void:
-	InputActions.reset()
+	TestActions.reset()
 	var res: InputActionsRes = load(InputActions.LIST_PATH)
 	_check(res != null and InputActions.get_actions() == res.actions, "the list file is read, in its own order")
 	_check(InputActions.get_actions().has(&"jump") and InputActions.get_actions().has(&"sprint"), "and has jump and sprint")
 
 
 func _test_bits() -> void:
-	InputActions.use_list([&"jump", &"sprint", &"primary"])
+	TestActions.use_list([&"jump", &"sprint", &"primary"])
 	_check(InputActions.mask_of(&"jump") == 1 and InputActions.mask_of(&"sprint") == 2 and InputActions.mask_of(&"primary") == 4,
 			"each action gets the bit of its place in the list")
 	_check(InputActions.mask_of_list([&"jump", &"primary"]) == 5, "a list gives all its bits")
@@ -52,12 +54,12 @@ func _test_bits() -> void:
 	_check(InputActions.mask_of(&" jump ") == 1, "spaces around a name are ignored")
 	# Two machines reading the same list give the same bits.
 	var first := InputActions.mask_of(&"primary")
-	InputActions.use_list([&"jump", &"sprint", &"primary"])
+	TestActions.use_list([&"jump", &"sprint", &"primary"])
 	_check(InputActions.mask_of(&"primary") == first, "the same list always gives the same bits")
 
 
 func _test_late_and_blank() -> void:
-	InputActions.use_list([&"jump"])
+	TestActions.use_list([&"jump"])
 	_check(InputActions.mask_of(&"") == 0 and InputActions.mask_of(&"   ") == 0, "a blank name has no bit")
 	print("  (a warning about 'dodge' is expected next)")
 	_check(InputActions.mask_of(&"dodge") == 2, "an unlisted action is added at the end, with a warning")
@@ -69,16 +71,16 @@ func _test_limit() -> void:
 	var many: Array[StringName] = []
 	for i in InputActions.MAX_ACTIONS:
 		many.append(StringName("action_%d" % i))
-	InputActions.use_list(many)
+	TestActions.use_list(many)
 	_check(InputActions.mask_of(&"action_63") == 1 << 63, "the 64th action gets the last bit")
 	_check(InputActions.all_listed_mask() == -1, "and with 64, every bit is listed")
 	print("  (a warning about more than 64 actions is expected next)")
 	_check(InputActions.mask_of(&"one_too_many") == 0, "a 65th action gets no bit")
-	InputActions.reset()
+	TestActions.reset()
 
 
 func _test_commands() -> void:
-	InputActions.use_list([&"jump", &"sprint"])
+	TestActions.use_list([&"jump", &"sprint"])
 	var command := InputCommand.make(Vector3(1, 0, 0), [&"sprint"], 0.5, -0.2)
 	_check(command.move == Vector3(1, 0, 0) and command.look_yaw == 0.5 and command.look_pitch == -0.2, "make() fills in every field")
 	_check(command.is_held(&"sprint") and not command.is_held(&"jump"), "and only the actions it was given are held")
@@ -87,7 +89,7 @@ func _test_commands() -> void:
 	_check(command.held_actions == InputActions.mask_of(&"jump"), "set_held() turns actions on and off")
 	var idle := InputCommand.new()
 	_check(idle.move == Vector3.ZERO and idle.held_actions == 0, "a new command is idle")
-	InputActions.reset()
+	TestActions.reset()
 
 
 func _test_controller_base() -> void:
@@ -104,7 +106,7 @@ func _test_controller_base() -> void:
 
 
 func _test_player_controller_actions() -> void:
-	InputActions.reset()
+	TestActions.reset()
 	var controller := ScriptedController.new()
 	add_child(controller)
 	var pawn: Pawn = load("res://assets/scenes/pawn/pawn.tscn").instantiate()

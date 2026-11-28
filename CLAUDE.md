@@ -38,16 +38,16 @@ Each system's README has the detail. Specs are in `docs/` (pawn, netcode, naviga
 |---|---|
 | `singletons/` | The autoloads: `TickDriver` (the tick everything runs on, the load ladder, rollback), `NetworkSession`, `GameMode`, `NavMarkerManager` |
 | `pawn/` | The body every character is; runs its parts in a fixed order each tick |
-| `controllers/` | Who drives a pawn: input commands, the controller manager, the AI's hands |
+| `controllers/` | Who drives a pawn: input commands, the controller manager, the player's step host, the thin AI controller |
 | `player/`, `camera/` | The player's side: input, the world cursor, one camera per player, the spectator |
-| `steps/` | The step core: `Step` and `StepTimeline`, which abilities (and later AI behaviours) run their steps on |
-| `abilities/` | Everything a pawn does, started by named actions: definitions (shared settings with variants), steps on timelines, combos, hits, interceptors, projectiles |
+| `steps/` | The step core (`Step`, `StepTimeline`) and the step library (move, look, buttons, flow), which abilities and AI behaviours run their steps on |
+| `abilities/` | Everything a pawn does, started by named actions: definitions (shared settings with variants), steps on timelines, combos, hits and the hit ability, projectiles |
 | `status/` | The status manager: a pawn's stats and the effects on it in one component; thresholds and their events |
 | `effects/` | What abilities and hits do to pawns: damage, heals, pushes, boosts, resistances |
 | `stats/` | A pawn's numbers (Health, speeds) as nodes, under the status manager |
 | `ai/` | Sensing, memory, target, states, behaviours; decisions in C++ (`AIDecider`, one per pawn, through `AIDeciderBridge`) |
 | `movement/` | The crowd mover: AI pawns moved together once a tick |
-| `navigation/` | The pawn's nav part, nav markers and links |
+| `navigation/` | The path follower, nav markers and links |
 | `state_store/` | The central record of every entity's state, tick by tick (`StateStoreGD`, twin of C++ `StateStore`); `TickDriver.store` |
 | `netcode/` | Rollback state, entities, packets, prediction, lag compensation |
 | `replay/` | Records every pawn every tick; the viewer |

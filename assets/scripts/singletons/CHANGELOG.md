@@ -17,6 +17,10 @@ Code that works but doesn't yet fit the project's goals (reusable, extensible, e
 | One timing tool | `profile_enabled`, `profile`, `_profile_phase()` in `TickDriver.gd` | A second way of timing work beside diagnostics' `PerfScopes`, with its own names and its own switch | S |
 | The match seed reaches clients | `GameMode.match_seed` | Nothing sends it to clients yet, so a networked game that changes it must set the same value on every machine itself (pawn spec 16.10 step 1 left it for later) | S |
 
+## 2026-11-28
+
+- **`NetworkSession`'s missing-input settings start from `ControllerManager`'s constants** (controllers changelog), and their docs name the ControllerManager, not the pawn, as where a pawn sets its own.
+
 ## 2026-11-27
 
 - **`TickDriver.rollbacks_loaded`**: a count of rollbacks that loaded old state, so live-only state such as a move step's path can tell the pawn may have been put somewhere else (pawn spec 16.10 step 7c).

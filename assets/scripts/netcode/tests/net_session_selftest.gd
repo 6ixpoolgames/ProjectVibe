@@ -5,6 +5,8 @@
 ##   godot --headless --path . "res://assets/scripts/netcode/tests/net_session_selftest.tscn"
 extends SelfTest # Claude 2026-11-16 (wider audit): _check and _failures come from tests/SelfTest.gd now
 
+const TestActions := preload("res://assets/scripts/controllers/tests/input_actions_for_tests.gd")
+
 
 ## An entity whose only rollback state is what save_state returns: no state list at all.
 class CustomOnly extends Node:
@@ -390,20 +392,20 @@ func _test_snapshot_lists_must_fit() -> void:
 
 func _test_actions_in_the_content_hash() -> void:
 	var session: NetworkSessionSingleton = NetworkSession
-	InputActions.use_list([&"jump", &"sprint"])
+	TestActions.use_list([&"jump", &"sprint"])
 	session._hash_is_cached = false
 	var first := session.content_hash()
-	InputActions.use_list([&"sprint", &"jump"])
+	TestActions.use_list([&"sprint", &"jump"])
 	session._hash_is_cached = false
 	var swapped := session.content_hash()
 	_check(first != swapped, "the named actions, in bit order, are part of the content hash")
-	InputActions.reset()
+	TestActions.reset()
 	session._hash_is_cached = false
 
 
 func _test_actions_frozen_online() -> void:
 	var session: NetworkSessionSingleton = NetworkSession
-	InputActions.use_list([&"jump"])
+	TestActions.use_list([&"jump"])
 	print("  (a warning about 'made_up_online' is expected next)")
 	session._mode = NetworkSessionSingleton.Mode.SERVER # pretend to be online
 	_check(InputActions.mask_of(&"made_up_online") == 0, "online, an action that isn't listed gets no bit")
@@ -411,4 +413,4 @@ func _test_actions_frozen_online() -> void:
 	session._mode = NetworkSessionSingleton.Mode.OFFLINE
 	print("  (and one about 'made_up_offline')")
 	_check(InputActions.mask_of(&"made_up_offline") == 2, "offline, it's still added at the end, with a warning")
-	InputActions.reset()
+	TestActions.reset()

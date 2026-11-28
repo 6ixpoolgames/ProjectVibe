@@ -114,11 +114,11 @@ const MARGIN_LONG_WINDOW := 300
 ## 1.7 KB/s of upload. At 3, three packets in a row must be lost for an input to go missing.
 @export var input_redundancy: int = 3
 ## On the server, when a client's input goes missing, the last one repeats in full for this many ticks. Most losses are a tick or
-## two. An entity can use its own number instead; Pawn has missing_input_hold_ticks for that.
-@export var missing_input_hold_ticks: int = 3
-## Then its direction fades to nothing over this many ticks, so a pawn whose player lost connection doesn't walk on forever. Pawn
-## can override it with missing_input_fade_ticks.
-@export var missing_input_fade_ticks: int = 6
+## two. An entity can use its own number instead (ControllerManager.missing_input_hold_ticks).
+@export var missing_input_hold_ticks: int = ControllerManager.MISSING_INPUT_HOLD_TICKS
+## Then its direction fades to nothing over this many ticks, so a pawn whose player lost connection doesn't walk on forever. A
+## pawn's ControllerManager can override it with missing_input_fade_ticks.
+@export var missing_input_fade_ticks: int = ControllerManager.MISSING_INPUT_FADE_TICKS
 ## Snapshots go through NetCodec in C++ when that library is here. Off, or with no library for this platform, they go through
 ## NetPackets instead. The bytes are the same, so machines of either kind can play together. Takes effect at host or join.
 @export var use_native_encoding: bool = true

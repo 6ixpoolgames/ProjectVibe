@@ -49,6 +49,14 @@ func _check_near(got: float, wanted: float, tolerance: float, what: String) -> v
 
 
 ## Prints the last line every test ends with, and quits: exit code 0 if every check passed, 1 if any failed.
+## Sets a pawn's Detectability stat's base value (what effects build on), as stealth tests need. Nothing for a pawn without the stat.
+static func set_detectability(of_pawn: Node, value: float) -> void:
+	var manager: StatusManager = of_pawn.get(&"status_manager") if of_pawn else null
+	var stat: Stat = manager.get_stat(StatusManager.DETECTABILITY) if manager else null
+	if stat:
+		stat.base_value = value
+
+
 func _finish() -> void:
 	print("--- ALL PASSED ---" if _failures == 0 else "--- %d FAILED ---" % _failures)
 	get_tree().quit(0 if _failures == 0 else 1)

@@ -113,11 +113,10 @@ func _test_heights() -> void:
 	var pawn := _pawn(PLAYER_SCENE, Vector3(0, 0.1, 0))
 	await _frames(3)
 	var finisher: MeleeAttackAbility = pawn.ability_manager.get_node("FinisherSwing")
-	var feet := pawn.global_position
-	_check(is_equal_approx(finisher.hit_centre_at(0.0).y - feet.y, finisher.hit_height + 1.3) and is_equal_approx(finisher.hit_centre_at(1.0).y - feet.y, finisher.hit_height - 0.8), "the hit area starts height_at_sweep_start above hit_height and ends height_at_sweep_end from it")
+	_check(is_equal_approx(finisher.hit_offset_at(0.0, pawn.yaw).y, finisher.hit_height + 1.3) and is_equal_approx(finisher.hit_offset_at(1.0, pawn.yaw).y, finisher.hit_height - 0.8), "the hit area starts height_at_sweep_start above hit_height and ends height_at_sweep_end from it")
 	var heavy: MeleeAttackAbility = pawn.ability_manager.get_node("HeavyAttack")
-	_check(heavy.height_at_sweep_start == 0.0 and heavy.height_at_sweep_end == 0.0 and is_equal_approx(heavy.hit_centre_at(0.3).y - feet.y, heavy.hit_height), "by default it stays level at hit_height, as before")
-	var centres := finisher._sweep_centres(0)
+	_check(heavy.height_at_sweep_start == 0.0 and heavy.height_at_sweep_end == 0.0 and is_equal_approx(heavy.hit_offset_at(0.3, pawn.yaw).y, heavy.hit_height), "by default it stays level at hit_height, as before")
+	var centres := _first_sweep(finisher).centres_for_tick(0)
 	var gap := 0.0
 	for i in range(1, centres.size()):
 		gap = maxf(gap, centres[i].distance_to(centres[i - 1]))
@@ -210,3 +209,11 @@ func _ai(pawn: Pawn) -> AIController:
 func _frames(count: int) -> void:
 	for i in count:
 		await get_tree().physics_frame
+
+
+# The swing's first sweep step, whose centres the hit checks.
+func _first_sweep(ability: MeleeAttackAbility) -> MeleeSweepStep:
+	for step in ability.steps:
+		if step is MeleeSweepStep:
+			return step
+	return null

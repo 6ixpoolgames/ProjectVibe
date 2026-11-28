@@ -103,34 +103,32 @@ How to read this:
 
 ## 2. The node tree
 
-```
-Pawn (CharacterBody3D)                    (built, tier -1; gets reworked)
-├─ CollisionShape3D
-├─ Visual (Node3D)                         follows the body smoothly; models hang from it
-├─ TickStateComponent, NetworkEntity       (built) rollback state and networking
-├─ ControllerManager                       picks which controller's input counts
-├─ AbilityManager                          starts, runs and stops abilities
-│  ├─ Walk                                 locomotion
-│  └─ Jump                                 action
-├─ StatManager                             holds stat nodes
-│  └─ stat nodes (Health, MoveSpeed, ...)
-└─ AIManager                               shared data and settings for the AI, and its step; makes no decisions
-   ├─ AIController                         turns behaviour calls into input
-   ├─ AISensingManager                     runs its senses; writes what they find to memory
-   │  └─ SightSense
-   ├─ AIMemory                             one entry per sensed entity; awareness that fades
-   ├─ AITargetSelector                     picks the current target from memory, by priority
-   ├─ AIStateManager                       picks the current state by priority
-   │  └─ state nodes (Idle, Alert, Combat)
-   └─ AIBehaviourManager                   picks and runs a behaviour the state allows
-      └─ behaviour nodes (Wander, Look Toward, Investigate, Search, Chase)
+*The tree as built through step 7 of the redesign (16.10). Section 16.2 is the design; this is what the code has today.*
 
-PlayerController (outside the pawn)        (built) reads devices; joins a pawn through PossessionCoordinator
+```
+Pawn (CharacterBody3D)                    the body, its tick order, general flags, references to its components
+├─ CollisionShape3D, Visual               Visual follows the body smoothly; models hang from it
+├─ TickStateComponent, NetworkEntity      rollback state and networking (in the scene)
+├─ ControllerManager                      who's in charge and this tick's input; input blocked by tags
+├─ StatusManager                          stats (Health, speeds) and the effects on them; thresholds send events
+├─ OwnedTags                              the tags the pawn owns now
+├─ AbilityManager                         starts, runs and cancels abilities, from input actions and events
+│  └─ Walk, Jump, Sprint, ReceiveHit, Death, Knockback, ...
+├─ AIManager (pawn.ai)                    the AI step, shared AI state, the request inbox
+│  ├─ AIController                        hands over the input the running behaviour's steps write
+│  ├─ AISensingManager └─ SightSense
+│  ├─ AIMemory                            one entry per sensed pawn; awareness that fades (a fact table in step 8)
+│  ├─ AITargetSelector                    picks the target (a query in step 8)
+│  ├─ AIStateManager   └─ Idle, Alert, Combat
+│  └─ AIBehaviourManager                  owns its AIDecider; scores and runs one behaviour
+│     └─ behaviours, each with its own step timeline
+└─ PawnStreamingSource                    keeps the world loaded around the pawn while a player has it
+
+PlayerController (outside the pawn)       reads devices; joins a pawn through PossessionCoordinator
 ```
 
-- The parts are kept flat on the pawn, except the AI's, which sit under its AIManager *(2026-11-25, step 5b of 16.10)*.
-- The AI parts exist on every peer, but only tick on the server, because AI only runs there.
-- **Today (2026-11-09, after step 8b):** `pawn.tscn` holds `CollisionShape3D`, `Visual`, `TickState` and `NetworkEntity`. `PawnInitializer` adds `ControllerManager` (with `AIController`), `NavigationManager`, `StatManager` (with the movement stats), `AbilityManager` (with Walk, Sprint and Jump), `AIContextComponent`, `AISensingManager` (with Sight), `AIMemory`, `AITargetSelector`, `AIStateManager` (with Idle, Alert and Combat) and an empty `AIBehaviourManager`.
+- `PawnInitializer` adds every default component the scene doesn't have (`resources/pawn_defaults.tres`); a component the scene already has under the same name wins, and inside the AIManager, each AI component the same way.
+- The AI components exist on every peer but decide only on the server (or offline).
 
 ---
 
@@ -1684,6 +1682,8 @@ behaviour_manager.remove_score_modifier(source: Object)
 
 ## 12. t0 build order
 
+*The first tier 0 build, before the redesign; kept as the record of how it was built. The current build order is 16.10.*
+
 1. **This spec agreed.**
 2. **Inputs and controllers:** `ControllerBase`, `PlayerController` moved onto it, the input command with named actions, and the fading missing input. **(Built 2026-11-07.)**
 3. **`ControllerManager`.** **(Built 2026-11-07, with an `AIController` placeholder.)**
@@ -1810,7 +1810,7 @@ Measured with `pawn_stress -- --sizes=100,400` and its new `--history=` and `--g
 | 6 | Death | **Settled 2026-11-09:** an ability, `DeathAbility`, started when the Health stat reaches 0 (8.7). The owner's call |
 | 7 | Animation: which part plays the Kenney Mini Characters' built-in animations (walk, sprint, jump, die, melee) | Probably a part that listens to the ability manager and `state_changed`. Not decided |
 | 8 | Whether `AIMemoryFact` is reused as is, or copied | **Settled 2026-11-09:** neither. Tier 0 uses no legacy code, and memory is packed arrays rather than an object per fact (10.5) |
-| 9 | Forced states: does a new force always replace the old one, or does each force carry a priority, so a weaker one can't override a stronger one? | **Settled 2026-11-09:** forces carry a priority, because behaviour interrupts need one (10.6, 10.7). Forced targets use the same rule (10.5) |
+| 9 | Forced states: does a new force always replace the old one, or does each force carry a priority, so a weaker one can't override a stronger one? | **Settled 2026-11-09:** forces carry a priority, because behaviour interrupts need one (10.6, 10.7). Forced targets use the same rule (10.5). *Since 16.10 step 6b there's no forcing: a taunt is threat in memory, a scripted state a tag a state's conditions accept (16.5).* |
 | 10 | A debug readout above each AI pawn: state, awareness bars, the top three scores | Claude suggests it early in step 8a, as a debug module outside shipping code: utility AI is hard to tune blind. Not agreed yet |
 | 11 | Spreading AI work: each pawn offset by its id, or a central queue that runs at most N decisions and sensing passes per tick (an `AIUpdateScheduler` `GameMode` module), so a struggling host reacts later instead of dropping frames | t0 starts with offsets. Claude suggests the queue, with a count budget rather than milliseconds, so results match across machines. Not agreed yet |
 | 12 | A cap on sensing: at most N rays per pass, nearest first | Claude suggests it with the 8b stress test. Not agreed yet |
@@ -1824,24 +1824,24 @@ Measured with `pawn_stress -- --sizes=100,400` and its new `--history=` and `--g
 ## 14. Deferred, not t0
 
 - Other pawn body types, such as rigid bodies, as separate classes.
-- Response-curve scoring for behaviours.
+- Response-curve scoring for behaviours. *(Built: AI scoring, [AI_SCORING_PROPOSAL.md](AI_SCORING_PROPOSAL.md).)*
 - Deciding less often for AI far from players.
-- Stat modifiers.
+- Stat modifiers. *(Built: 16.10 step 3b.)*
 - Anti-cheat.
 - `TerrainBodyLifter` folding into the terrain edit manager (t1).
 - **AI, from the 2026-11-09 decisions:**
-  - Hearing and sounds. Sounds with unknown sources would set AIs investigating friendly or neutral AIs once factions exist, and need too many safeguards for t0. Noted for deeper simulation later.
-  - Persistence flags (such as counting from when a behaviour ends, clearing on a state change, flipping on failure).
+  - Hearing and sounds. Sounds with unknown sources would set AIs investigating friendly or neutral AIs once factions exist, and need too many safeguards for t0. Noted for deeper simulation later. *(Superseded 2026-11-24: hearing with footsteps is in tier 0, 16.6, built in 16.10 step 8.)*
+  - Persistence flags (such as counting from when a behaviour ends, clearing on a state change, flipping on failure). *(Moot: persistence went in 16.10 step 6a; behaviours give themselves modifiers instead.)*
   - A state's priority fading down to a minimum while it's active.
   - Running sensing, pathfinding and other heavy work on background cores.
   - Partial cover (several rays per target) and a ramp that speeds up awareness under a steady gaze.
   - The AI behaving differently because a player has the pawn, built only if a game needs it.
   - Rolling back the AI's decisions, for games where clients predict the AI or use lockstep networking (10.2). The pawns it drives already roll back.
 - **Abilities, from step 9 (2026-11-09):**
-  - Cancel windows: an action cancellable only during some of its phases, such as recovery. Noted by the owner.
-  - Invulnerability during a dash, combos, and hit effects shown on clients.
+  - Cancel windows: an action cancellable only during some of its phases, such as recovery. Noted by the owner. *(Built: per-step interrupt thresholds, 16.7.)*
+  - Invulnerability during a dash, combos, and hit effects shown on clients. *(Dash invulnerability and combos built: 16.10 step 4 and abilities. Hit effects on clients still open.)*
 - **Shortcuts to redo** *(Claude 2026-11-15)*. These work and are tested, but were built as special cases, and need a proper implementation pass later:
-  - **Parry** *(flagged by the owner 2026-11-15: hacky; Claude 2026-11-17: redone as hit interceptors, section 8.23)*. `AbilityManager` keeps a list of `ParryAbility` nodes by type and asks them in `parry_hit()`; `AbilityBase` carries `on_parry_effects` and `on_parry_self_effects`, which every ability has; `EffectApplier` has an `ON_PARRY` trigger; `Pawn._take_hit` asks for parries by name. The proper version: hit interceptors, abilities that can inspect an incoming hit and change or stop it, switched on by state tags.
+  - **Parry** *(flagged by the owner 2026-11-15: hacky; Claude 2026-11-17: redone as hit interceptors, section 8.23; redone again in 16.10 step 4b as a running effect granting `status.parrying`, and interceptors are gone)*. `AbilityManager` keeps a list of `ParryAbility` nodes by type and asks them in `parry_hit()`; `AbilityBase` carries `on_parry_effects` and `on_parry_self_effects`, which every ability has; `EffectApplier` has an `ON_PARRY` trigger; `Pawn._take_hit` asks for parries by name. The proper version: hit interceptors, abilities that can inspect an incoming hit and change or stop it, switched on by state tags.
 
 ---
 
@@ -1968,9 +1968,9 @@ The recorder already reads every pawn's hot values once a tick, in C++. In tier 
 
 ---
 
-## 16. The pawn redesign *(agreed with the owner 2026-11-23 and 2026-11-24, component by component; the decisions and how they were reached are in [REDESIGN_LOG.md](REDESIGN_LOG.md). Nothing built yet)*
+## 16. The pawn redesign *(agreed with the owner 2026-11-23 and 2026-11-24, component by component; the decisions and how they were reached are in [REDESIGN_LOG.md](REDESIGN_LOG.md). Steps 1 to 7 of 16.10 built; 8 to 11 to come)*
 
-The pawn, its components and the AI, abilities and effects that run on them, rebuilt around data definitions, one shared step system, one modifier rule and a handful of shared services. This section is the design as decided; where it says **Today**, that's the code as it stands before the refactor.
+The pawn, its components and the AI, abilities and effects that run on them, rebuilt around data definitions, one shared step system, one modifier rule and a handful of shared services. This section is the design as decided; where it says **Today**, that's the code as it stood before the refactor. What's built is noted step by step in 16.10; [PAWN_CHECKPOINT.md](PAWN_CHECKPOINT.md) is a short refresher.
 
 ### 16.1 Principles
 

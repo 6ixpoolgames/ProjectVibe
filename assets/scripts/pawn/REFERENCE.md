@@ -174,4 +174,3 @@ The pawn makes one when it has a child called Visual, and tells it after every r
 - `snap() -> void`: The body was put somewhere without moving there (a rollback, a spawn, a teleport): the Visual goes straight there.
 - `note_moved() -> void`: On a client, for a pawn someone else controls: it was just moved between snapshots, so the Visual glides after it.
 - `add_correction(jump: Vector3) -> void`: On a client: a correction moved the body by this much. The Visual keeps where it was and catches up over about 100 ms.
-- `get_correction_offset() -> Vector3`

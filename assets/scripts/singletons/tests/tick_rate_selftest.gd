@@ -49,7 +49,7 @@ func _test_same_time() -> void:
 		TickDriver.tick_rate = rate
 		var dt := TickDriver.get_tick_dt()
 		seconds[rate] = {
-			"swing": swing.planned_ticks() * dt, # Claude 2026-11-16: was duration_ticks(), now a stepped swing's safety limit
+			"swing": _planned_ticks(swing) * dt, # Claude 2026-11-16: was duration_ticks(), now a stepped swing's safety limit
 			"fade": fade.ends_after() * dt,
 			"half way": fade.value_at(60.0 * rate / 60.0),
 			"sensing interval": TickDriver.ticks_at_rate(10) * dt,
@@ -124,3 +124,13 @@ func _test_noticing() -> void:
 		await get_tree().physics_frame
 	print("        certain after %.3f s at 60, %.3f s at 30" % [took[60], took[30]])
 	_check(took[60] > 0.0 and took[30] > 0.0 and absf(took[60] - took[30]) <= 0.2, "a goblin becomes certain of someone in front of it about as fast at 30 as at 60 (within 0.2 s: a sensing pass is 1/6 s)")
+
+
+# Ticks a swing takes if its windup doesn't wait for the turn: first windup, sweep and recovery.
+func _planned_ticks(swing: MeleeAttackAbility) -> int:
+	var total := swing.windup_length() + swing.hit_length()
+	for step in swing.steps:
+		if step is WaitStep:
+			total += step.length()
+			break
+	return total

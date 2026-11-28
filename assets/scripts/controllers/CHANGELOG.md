@@ -9,13 +9,12 @@ Controllers are this folder: `ControllerBase`, `InputCommand`, `InputActions` (w
 
 Code that works but doesn't yet fit the project's goals (reusable, extensible, efficient, designer friendly). Each is marked `REFACTOR:` in the code. Sizes are rough: S an hour or two, M a day, L more.
 
-| What | Where | Why | Size |
-|---|---|---|---|
-| Move the test hooks out of `InputActions` | `reset()`, `use_list()` in `InputActions.gd` | Test hooks in a shipping class; the owner's rule keeps test code in `tests/` | S |
-| Share the missing-input defaults | `_network_input_missing()` in `ControllerManager.gd` | 3 and 6 copy `NetworkSession`'s defaults by hand, so the two can drift apart | S |
+None at the moment.
 
 ## 2026-11-28
 
+- **`InputActions.reset()` and `use_list()` moved to a test extension** (cleanup pass after the pawn checkpoint, docs/pawn/PAWN_CHECKPOINT.md), `controllers/tests/input_actions_for_tests.gd`, which tests preload; the shipping class has no test hooks.
+- **The missing-input defaults are constants,** `ControllerManager.MISSING_INPUT_HOLD_TICKS` (3) and `MISSING_INPUT_FADE_TICKS` (6), which `NetworkSession`'s settings start from, so the two can't drift apart.
 - **The input-block check keeps its answer** (per-pawn cost proposal, cut A2; measured with the profiling suite (size 25, 3 runs each, against a baseline taken just before)) until the owned tags' version, the query (or its new `version`) or the tag registry's generation changes: 4.7 to 1.5 us a pawn a tick, -0.29 ms a tick, the biggest of the five cuts.
 
 ## 2026-11-27

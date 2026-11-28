@@ -106,6 +106,11 @@ The input rolls back (the pawn's TickStateComponent lists it, with `previous_hel
 - `controller_changed(controller: ControllerBase)`: Sent when a different controller is in charge, or none. The controller is null when nobody here is. It's sent at the end of the frame, once, with the final answer: possessing takes two steps (a player has it, then their controller attaches), and listeners shouldn't see "nobody" in between.
 - `possession_changed(pawn: Pawn, has_player: bool)`: Sent when a player takes this pawn, or lets it go.
 
+### Constants
+
+- `MISSING_INPUT_HOLD_TICKS = 3`: The missing-input rule's defaults, at 60 ticks a second: the last input repeats in full for this many ticks...
+- `MISSING_INPUT_FADE_TICKS = 6`: ...then its direction fades out over this many. NetworkSession's settings start from these too.
+
 ### Functions
 
 - `get_controller_in_charge() -> ControllerBase`: Who the pawn follows right now, or null. See the rule in the class description.
@@ -177,8 +182,6 @@ A static class, not an autoload, so it works in headless tests. Design: pawn spe
 - `all_listed_mask() -> int` *(static)*: Every listed action's bit. The server uses it to throw away bits a client made up.
 - `names_in(mask: int) -> StringName[]` *(static)*: The names of the actions in a mask, for debug readouts.
 - `get_actions() -> StringName[]` *(static)*: Every action, in bit order.
-- `reset() -> void` *(static)*: Forgets everything, so the next use reads the list again. For tests.
-- `use_list(actions: Array) -> void` *(static)*: Uses this list instead of the file. For tests.
 - `_is_online() -> bool` *(static)*: True while this machine is a server or a client. A static class has no node of its own, so it asks the tree.
 
 ## InputCommand

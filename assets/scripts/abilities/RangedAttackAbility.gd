@@ -17,8 +17,6 @@ var _ranged: RangedAttackDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._set.
 
-var _made_default_steps := false
-
 
 ## Its kind's defaults: a new [RangedAttackDefinition].
 func make_default_definition() -> AbilityDefinition:
@@ -33,27 +31,6 @@ func _settings_changed() -> void:
 ## Its attack_range: the AI shoots from within it.
 func attack_reach() -> float:
 	return _ranged.attack_range
-
-
-## Finds its steps, after making the default ones from its settings if it has none of its own.
-# REFACTOR: the same pattern as the other attack's collect_steps (default steps made once, then kept in step with the settings);
-# one in AbilityBase with hooks (abilities/CHANGELOG.md).
-func collect_steps() -> void:
-	var has_own := false
-	for child in get_children():
-		if child is AbilityStep:
-			has_own = true
-			break
-	if not has_own:
-		_make_default_steps()
-	super()
-	if _made_default_steps:
-		_sync_default_steps()
-
-
-func start() -> void:
-	if _made_default_steps:
-		_sync_default_steps()
 
 
 ## The timeline for the steps it made: Windup and TurnToFace together, Fire when the windup is done, then Recovery. With steps of its
@@ -79,7 +56,6 @@ func _make_default_steps() -> void:
 	var recovery := WaitStep.new()
 	recovery.name = "Recovery"
 	add_child(recovery)
-	_made_default_steps = true
 
 
 func _sync_default_steps() -> void:

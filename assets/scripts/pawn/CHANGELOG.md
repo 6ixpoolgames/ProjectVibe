@@ -9,11 +9,14 @@ The pawn is this folder (`Pawn.gd`), with its scene `assets/scenes/pawn/pawn.tsc
 
 Code that works but doesn't yet fit the project's goals (reusable, extensible, efficient, designer friendly). Each is marked `REFACTOR:` in the code. Sizes are rough: S an hour or two, M a day, L more.
 
-The owner wants the pawn to keep only the body, its tick order, its part references and general flags (pawn slimming). Input, possession, hits, death, camera and team counts have moved out (M1 to M5). Nothing found still sits on Pawn that belongs elsewhere. Other rows:
+The owner wants the pawn to keep only the body, its tick order, its part references and general flags (pawn slimming). Input, possession, hits, death, camera and team counts have moved out (M1 to M5). Nothing found still sits on Pawn that belongs elsewhere.
 
-| What | Where | Why | Size |
-|---|---|---|---|
-| A test-only read | `VisualSmoother.get_correction_offset` | Only `netcode/tests/net_test_node` calls it; the test can read `VisualPlacer.current.placement.get_correction(slot)` itself | S |
+None at the moment.
+
+## 2026-11-28
+
+- **`VisualSmoother.get_correction_offset` is gone** (cleanup pass after the pawn checkpoint, docs/pawn/PAWN_CHECKPOINT.md): its one reader, a netcode test, asks the smoother's placer itself.
+- README: the status says the redesign's six components are in, and what steps 8 to 11 still bring.
 
 ## 2026-11-27
 

@@ -9,9 +9,12 @@ This folder holds the status manager (pawn spec 16.8). Overview: [README.md](REA
 
 | What | Where | Why | Size |
 |---|---|---|---|
-| A test-only helper | `StatusManager.set_detectability` | Only tests call it; a helper in tests/ keeps it out of the shipping class | S |
 | Effect sources by instance id offline | `StatusManager._source_key` | Nothing finds an entity by its number until the entity registry (step 9) | S |
 | Stat, effect and part classes in three folders | `stats/`, `effects/`, `status/` *(no tag: a folder layout)* | One system now; the classes can move here once step 3b settles their names (saved resources name their scripts by path) | M |
+
+## 2026-11-28
+
+- **`set_detectability` moved to the tests** (cleanup pass after the pawn checkpoint, docs/pawn/PAWN_CHECKPOINT.md), as `SelfTest.set_detectability`; the shipping class keeps `detectability_of`.
 
 ## 2026-11-24
 

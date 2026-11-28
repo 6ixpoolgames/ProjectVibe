@@ -70,7 +70,6 @@ pawn.status_manager.remove_with_tag(Tags.EFFECT.DEBUFF)  # a cleanse
 ### Functions
 
 - `detectability_of(of_pawn: Node) -> float` *(static)*: How easy this pawn is for AI to see: its Detectability stat's value, 1 without one (pawn spec 10.4). Effects change it through the stat; game rules for stealth belong in a GameMode module.
-- `set_detectability(of_pawn: Node, value: float) -> void` *(static)*
 - `get_health() -> float`: How much Health the pawn has now, or 0 without a Health stat.
 - `get_current(stat_name: StringName, fallback: float = 0.0) -> float`: How much a stat that changes during play has now, or the fallback if there's no such stat.
 - `change_current(stat_name: StringName, amount: float, source: Node = null, cause: Object = null) -> float`: Adds to a stat that changes during play (negative takes away), kept between 0 and its value; returns the new amount (0: no such stat). Crossing one of its `Stat.thresholds` sends that event at once, from `source` about `cause`. Server only: clients get it in snapshots, and a value a snapshot or rollback restores sends nothing.

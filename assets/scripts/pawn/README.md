@@ -4,7 +4,7 @@
 
 The body every character is: something a player or the AI can drive. It runs its parts (input, AI, abilities, effects) in a fixed order each tick, then moves.
 
-**Status:** built, tier 0; being slimmed down for the state store refactor (state store spec 12.8). Smoothing is in `VisualSmoother`, the shared table in `SharedPawnTable`, the streaming source in its own part (`PawnStreamingSource`), and the parts set their own references on the pawn. The crowd mover reads and writes the store and calls no pawn back; every Visual is placed in one pass a frame (`VisualPlacer`).
+**Status:** built, tier 0, with the six components of the pawn redesign (pawn spec 16.2); the redesign's steps 8 to 11 (memory and senses, entities, units, content) are still to come, and step 9 brings `facing`, linger and sleeping until the next deadline to the body. Smoothing is in `VisualSmoother`, the shared table in `SharedPawnTable`, the streaming source in its own part (`PawnStreamingSource`), and the parts set their own references on the pawn. The crowd mover reads and writes the store and calls no pawn back; every Visual is placed in one pass a frame (`VisualPlacer`).
 
 | File | What it's for |
 |---|---|

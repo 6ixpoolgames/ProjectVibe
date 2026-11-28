@@ -28,6 +28,11 @@ signal possession_changed(pawn: Pawn, has_player: bool)
 ## pattern of Unreal GAS's blocking tags. By default any of status.dead; add status.stunned or a cutscene's tag. Empty: never blocked.
 @export var input_blocked_by: TagQuery = TagQuery.make([], [Tags.STATUS.DEAD], [])
 
+## The missing-input rule's defaults, at 60 ticks a second: the last input repeats in full for this many ticks...
+const MISSING_INPUT_HOLD_TICKS := 3
+## ...then its direction fades out over this many. NetworkSession's settings start from these too.
+const MISSING_INPUT_FADE_TICKS := 6
+
 ## On the server: when a client's input goes missing, the last one repeats in full for this many ticks. -1 uses NetworkSession's
 ## setting of the same name, which is the game-wide rule. Set a number only for a pawn that needs its own.
 @export_range(-1, 60, 1, "or_greater") var missing_input_hold_ticks := -1
@@ -248,12 +253,10 @@ func sanitize_network_input(values: Dictionary) -> Dictionary:
 func _network_input_missing() -> void:
 	_input_missing_this_tick = true
 	_missing_input_ticks += 1
-	# -1 means NetworkSession's rule. With no session at all, 3 and 6, the same as its defaults.
-	# REFACTOR: 3 and 6 copy NetworkSession's defaults by hand; shared constants would keep them from drifting apart (one place to
-	# change). See CHANGELOG.md.
+	# -1 means NetworkSession's rule; with no session at all, the defaults it starts from.
 	var session: Node = get_node_or_null("/root/NetworkSession")
-	var hold: int = missing_input_hold_ticks if missing_input_hold_ticks >= 0 else (session.missing_input_hold_ticks if session else 3)
-	var fade: int = missing_input_fade_ticks if missing_input_fade_ticks >= 0 else (session.missing_input_fade_ticks if session else 6)
+	var hold: int = missing_input_hold_ticks if missing_input_hold_ticks >= 0 else (session.missing_input_hold_ticks if session else MISSING_INPUT_HOLD_TICKS)
+	var fade: int = missing_input_fade_ticks if missing_input_fade_ticks >= 0 else (session.missing_input_fade_ticks if session else MISSING_INPUT_FADE_TICKS)
 	# Written for 60 ticks a second (scaling spec step 6).
 	hold = TickDriver.ticks_at_rate(hold)
 	fade = TickDriver.ticks_at_rate(fade)

@@ -59,7 +59,7 @@ func _test_same_answers() -> void:
 		pawn.team = i % 3
 		pawn.position = Vector3(pick.randf_range(-22, 22), 0.1, pick.randf_range(-22, 22))
 		add_child(pawn)
-		StatusManager.set_detectability(pawn, [1.0, 0.5, 0.0, 1.0][i % 4]) # Claude 2026-11-19: through the stat, once the pawn has its parts
+		SelfTest.set_detectability(pawn, [1.0, 0.5, 0.0, 1.0][i % 4]) # Claude 2026-11-19: through the stat, once the pawn has its parts
 		pawns.append(pawn)
 	for i in 3:
 		await get_tree().physics_frame # the walls and pawns join the physics world

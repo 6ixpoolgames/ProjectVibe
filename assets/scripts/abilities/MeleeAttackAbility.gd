@@ -15,8 +15,6 @@ var _melee: MeleeAttackDefinition = null
 
 # Its settings, read from its definition (ability spec 3). Writing one is for a script's _init(); see AbilityBase._set.
 
-var _made_default_steps := false # true when it made its own steps from its settings
-
 
 # Its steps time and run the swing and the base handles the timer and rollback, so it has no duration_ticks, get_rollback_properties
 # or tick of its own.
@@ -37,26 +35,8 @@ func attack_reach() -> float:
 	return _melee.attack_range
 
 
-## Finds its steps, after making the default ones from its settings if it has none of its own.
-# REFACTOR: the same pattern as the other attack's collect_steps (default steps made once, then kept in step with the settings);
-# one in AbilityBase with hooks (abilities/CHANGELOG.md).
-func collect_steps() -> void:
-	var has_own := false
-	for child in get_children():
-		if child is AbilityStep:
-			has_own = true
-			break
-	if not has_own:
-		_make_default_steps()
-	super()
-	if _made_default_steps:
-		_sync_default_steps()
-
-
 func start() -> void:
-	# No snap to the look: its TurnToFace step turns the pawn. The made steps take the settings again, in case they changed in play.
-	if _made_default_steps:
-		_sync_default_steps()
+	# No snap to the look: its TurnToFace step turns the pawn. The steps it made have its settings again (AbilityBase.prepare_start).
 	if _melee.warns_targets and pawn.is_authority() and not TickDriver.is_resimulating():
 		_warn_targets()
 
@@ -78,7 +58,6 @@ func _make_default_steps() -> void:
 	var recovery := WaitStep.new()
 	recovery.name = "Recovery"
 	add_child(recovery)
-	_made_default_steps = true
 
 
 ## The timeline for the steps it made: Windup and TurnToFace together, Sweep when the windup is done, then OpenCombo and Recovery.
@@ -180,34 +159,13 @@ func _warn_targets() -> void:
 
 
 
-## Where the hit sphere is straight ahead: the middle of the sweep. With a sweep, see [method hit_centre_at].
-func hit_centre() -> Vector3:
-	return hit_centre_at(0.5)
-
-
-## Where the hit sphere is at this point of the sweep, 0 (start) to 1 (end), for the pawn's facing now. Answered by its first sweep step.
-func hit_centre_at(progress: float) -> Vector3:
-	return pawn.global_position + hit_offset_at(progress, pawn.yaw)
-
-
-## Like [method hit_centre_at], as an offset from the pawn's feet for a facing in radians, so visuals draw the spots the hit checks.
-## From [method MeleeSweepStep.offset_at]; straight ahead at chest height with no sweep.
+## Where the hit sphere is at this point of the sweep, 0 (start) to 1 (end), as an offset from the pawn's feet for a facing in
+## radians, so visuals draw the spots the hit checks. From [method MeleeSweepStep.offset_at]; straight ahead at chest height with no sweep.
 func hit_offset_at(progress: float, facing: float) -> Vector3:
 	var sweep := _first_sweep()
 	if sweep == null:
 		return Vector3(-sin(facing), 0.0, -cos(facing)) * maxf(_melee.attack_range - _melee.hit_radius, 0.0) + Vector3(0.0, _melee.hit_height, 0.0)
 	return sweep.offset_at(progress, facing)
-
-
-## Ticks a swing takes if its windup doesn't wait for the turn: first windup, sweep and recovery. 0 with none. For tests and tools.
-# REFACTOR: only tests call it (with hit_centre_at, and hit_centre through _sweep_centres): the test-only helper row in CHANGELOG.md.
-func planned_ticks() -> int:
-	var total := windup_length() + hit_length()
-	for step in steps:
-		if step is WaitStep:
-			total += step.length()
-			break
-	return total
 
 
 ## Ticks the first windup lasts. It can take longer while it waits for the turn; [method swing_phase] says where it really is.
@@ -221,10 +179,3 @@ func hit_length() -> int:
 	var sweep := _first_sweep()
 	return sweep.length() if sweep else 0
 
-
-# The spots the sphere passes through on this hit tick (0 for the first): its first sweep's.
-# REFACTOR: only visuals/tests/visuals_selftest calls this; the test could ask the sweep step (centres_for_tick) itself. Test
-# helpers stay out of production code.
-func _sweep_centres(hit_tick: int) -> Array[Vector3]:
-	var sweep := _first_sweep()
-	return sweep.centres_for_tick(hit_tick) if sweep else [hit_centre()] as Array[Vector3]
